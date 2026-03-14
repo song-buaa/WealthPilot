@@ -11,7 +11,7 @@ import streamlit as st
 from app.state import portfolio_id, get_position_count
 
 # 页面模块
-from pages import overview, import_data, strategy, ai_analysis
+from app_pages import overview, import_data, strategy, ai_analysis
 
 # ──────────────────────────────────────────────
 # 页面配置
