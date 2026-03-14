@@ -2,6 +2,22 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.4.0] - 2026-03-14 - Bug 修复与部署优化
+
+### Fixed
+- **修复 Streamlit 多页面导航冲突** - 将 `pages/` 目录重命名为 `app_pages/`，解决自定义导航与 Streamlit 自动多页面导航的冲突
+- **修复页面空白问题** - 修复点击导航后页面内容不显示的问题
+
+### Changed
+- `M1_v1.3/pages/` → `M1_v1.3/app_pages/` - 目录结构变更
+- `streamlit_app.py` - 更新导入路径 `from pages import` → `from app_pages import`
+
+### Added
+- 新增示例数据文件 - `positions_sample.csv`, `liabilities_sample.csv`, `positions_real.csv`, `liabilities_real.csv`
+- 本地部署配置 - 支持 Mac Mini 本地运行
+
+---
+
 ## [1.3.0] - 2026-03-14 - P2 质量提升
 
 ### Added
