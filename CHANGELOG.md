@@ -2,6 +2,17 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.4.1] - 2026-03-15 - 目录整理与工作流规范化
+
+### Changed
+- 将 `M1_v1.4/` 内容提升至仓库根目录，消除嵌套版本目录结构
+- 历史版本（M1_v1.0 ~ M1_v1.3）移入 `archive/` 目录归档
+- 更新 `README.md`，反映新目录结构和开发工作流
+- 新增 `.env.example`，明确 API Key 配置方式
+- 清理 git 中误追踪的 `__pycache__` 文件
+
+---
+
 ## [1.4.0] - 2026-03-14 - Bug 修复与部署优化
 
 ### Fixed
