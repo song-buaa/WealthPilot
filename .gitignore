@@ -1,0 +1,38 @@
+# 运行时数据（不提交数据库文件）
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# 环境变量（包含 API Key，绝不提交）
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+.env/
+
+# macOS
+.DS_Store
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
