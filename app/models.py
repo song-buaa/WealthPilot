@@ -126,10 +126,7 @@ class Liability(Base):
 
 
 class DecisionLog(Base):
-    """投资决策日志
-
-    NOTE: M2 feature — UI 入口尚未实现，表结构已就绪供后续迭代使用。
-    """
+    """投资决策日志"""
     __tablename__ = "decision_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
