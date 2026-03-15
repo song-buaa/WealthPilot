@@ -117,53 +117,44 @@ def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[Dev
         if not portfolio or balance_sheet.total_assets == 0:
             return alerts
 
-        # ── 1. 策略偏离检测 ──
-        deviation_threshold = DEVIATION_THRESHOLD
+        # ── 1. 策略偏离检测（区间模式）──
+        # min=0 且 max=100 视为"不设约束"，跳过检测
+        def _check_range(label, current_pct, min_pct, max_pct):
+            if min_pct == 0.0 and max_pct == 100.0:
+                return  # 不设约束
+            if current_pct < min_pct:
+                dev = current_pct - min_pct  # 负值
+                severity = "高" if abs(dev) > HIGH_SEVERITY_THRESHOLD else "中"
+                alerts.append(DeviationAlert(
+                    alert_type="策略偏离",
+                    severity=severity,
+                    title=f"{label}欠配",
+                    description=f"当前{label}占比 {current_pct}%，低于目标下限 {min_pct}%，偏离 {dev:.1f} 个百分点。",
+                    current_value=current_pct,
+                    target_value=min_pct,
+                    deviation=dev,
+                ))
+            elif current_pct > max_pct:
+                dev = current_pct - max_pct  # 正值
+                severity = "高" if dev > HIGH_SEVERITY_THRESHOLD else "中"
+                alerts.append(DeviationAlert(
+                    alert_type="策略偏离",
+                    severity=severity,
+                    title=f"{label}超配",
+                    description=f"当前{label}占比 {current_pct}%，高于目标上限 {max_pct}%，偏离 {dev:+.1f} 个百分点。",
+                    current_value=current_pct,
+                    target_value=max_pct,
+                    deviation=dev,
+                ))
 
-        # 权益偏离
-        equity_dev = balance_sheet.equity_pct - portfolio.target_equity_pct
-        if abs(equity_dev) > deviation_threshold:
-            severity = "高" if abs(equity_dev) > HIGH_SEVERITY_THRESHOLD else "中"
-            direction = "超配" if equity_dev > 0 else "低配"
-            alerts.append(DeviationAlert(
-                alert_type="策略偏离",
-                severity=severity,
-                title=f"权益资产{direction}",
-                description=f"当前权益占比 {balance_sheet.equity_pct}%，目标 {portfolio.target_equity_pct}%，偏离 {equity_dev:+.1f} 个百分点。",
-                current_value=balance_sheet.equity_pct,
-                target_value=portfolio.target_equity_pct,
-                deviation=equity_dev,
-            ))
-
-        # 固收偏离
-        fi_dev = balance_sheet.fixed_income_pct - portfolio.target_fixed_income_pct
-        if abs(fi_dev) > deviation_threshold:
-            severity = "高" if abs(fi_dev) > HIGH_SEVERITY_THRESHOLD else "中"
-            direction = "超配" if fi_dev > 0 else "低配"
-            alerts.append(DeviationAlert(
-                alert_type="策略偏离",
-                severity=severity,
-                title=f"固收资产{direction}",
-                description=f"当前固收占比 {balance_sheet.fixed_income_pct}%，目标 {portfolio.target_fixed_income_pct}%，偏离 {fi_dev:+.1f} 个百分点。",
-                current_value=balance_sheet.fixed_income_pct,
-                target_value=portfolio.target_fixed_income_pct,
-                deviation=fi_dev,
-            ))
-
-        # 现金偏离
-        cash_dev = balance_sheet.cash_pct - portfolio.target_cash_pct
-        if abs(cash_dev) > deviation_threshold:
-            severity = "中" if abs(cash_dev) > 10 else "低"
-            direction = "超配" if cash_dev > 0 else "低配"
-            alerts.append(DeviationAlert(
-                alert_type="策略偏离",
-                severity=severity,
-                title=f"现金资产{direction}",
-                description=f"当前现金占比 {balance_sheet.cash_pct}%，目标 {portfolio.target_cash_pct}%，偏离 {cash_dev:+.1f} 个百分点。",
-                current_value=balance_sheet.cash_pct,
-                target_value=portfolio.target_cash_pct,
-                deviation=cash_dev,
-            ))
+        _check_range("权益资产", balance_sheet.equity_pct,
+                     portfolio.min_equity_pct, portfolio.max_equity_pct)
+        _check_range("固收资产", balance_sheet.fixed_income_pct,
+                     portfolio.min_fixed_income_pct, portfolio.max_fixed_income_pct)
+        _check_range("现金资产", balance_sheet.cash_pct,
+                     portfolio.min_cash_pct, portfolio.max_cash_pct)
+        _check_range("另类资产", balance_sheet.alternative_pct,
+                     portfolio.min_alternative_pct, portfolio.max_alternative_pct)
 
         # ── 2. 纪律触发检测 ──
         for key, pct in balance_sheet.concentration.items():

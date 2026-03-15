@@ -33,7 +33,7 @@ def render():
         session.close()
 
     # ── 第一行: 核心指标 ──
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("总资产", f"¥{bs.total_assets:,.0f}")
     with col2:
@@ -45,6 +45,16 @@ def render():
         if portfolio and bs.leverage_ratio > portfolio.max_leverage_ratio:
             leverage_delta = f"超限 {bs.leverage_ratio - portfolio.max_leverage_ratio:.1f}%"
         st.metric("杠杆率", f"{bs.leverage_ratio}%", delta=leverage_delta, delta_color="inverse")
+    with col5:
+        # 浮动盈亏（有成本价的持仓）
+        session2 = get_session()
+        try:
+            all_pos = session2.query(Position).filter_by(portfolio_id=portfolio_id).all()
+            total_pnl = sum(p.profit_loss for p in all_pos)
+        finally:
+            session2.close()
+        pnl_sign = "+" if total_pnl >= 0 else ""
+        st.metric("浮动盈亏", f"{pnl_sign}¥{total_pnl:,.0f}")
 
     st.divider()
 
@@ -55,33 +65,43 @@ def render():
         st.subheader("大类资产配置")
         categories = ["权益", "固收", "现金", "另类"]
         current_values = [bs.equity_pct, bs.fixed_income_pct, bs.cash_pct, bs.alternative_pct]
-        target_values = [
-            portfolio.target_equity_pct,
-            portfolio.target_fixed_income_pct,
-            portfolio.target_cash_pct,
-            portfolio.target_alternative_pct,
+        bar_colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
+
+        # 区间边界
+        min_values = [
+            portfolio.min_equity_pct, portfolio.min_fixed_income_pct,
+            portfolio.min_cash_pct, portfolio.min_alternative_pct,
+        ]
+        max_values = [
+            portfolio.max_equity_pct, portfolio.max_fixed_income_pct,
+            portfolio.max_cash_pct, portfolio.max_alternative_pct,
         ]
 
         fig = go.Figure()
+        # 当前配置柱状图
         fig.add_trace(go.Bar(
             name="当前配置",
             x=categories,
             y=current_values,
-            marker_color=["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"],
+            marker_color=bar_colors,
             text=[f"{v}%" for v in current_values],
             textposition="outside",
         ))
+        # 目标区间上限（透明柱）
         fig.add_trace(go.Bar(
-            name="目标配置",
+            name="目标上限",
             x=categories,
-            y=target_values,
-            marker_color=["rgba(255,107,107,0.3)", "rgba(78,205,196,0.3)",
-                          "rgba(69,183,209,0.3)", "rgba(150,206,180,0.3)"],
-            text=[f"{v}%" for v in target_values],
+            y=max_values,
+            marker_color=["rgba(200,200,200,0.25)"] * 4,
+            marker_line_color=["rgba(150,150,150,0.6)"] * 4,
+            marker_line_width=1,
+            text=[f"{mn}%~{mx}%" if not (mn == 0 and mx == 100) else "不设约束"
+                  for mn, mx in zip(min_values, max_values)],
             textposition="outside",
+            textfont=dict(size=10, color="gray"),
         ))
         fig.update_layout(
-            barmode="group",
+            barmode="overlay",
             yaxis_title="占比 (%)",
             height=400,
             margin=dict(t=20, b=20),
@@ -118,16 +138,24 @@ def render():
             pnl = p.market_value_cny - (p.cost_price * p.quantity) if p.cost_price > 0 and p.quantity > 0 else 0
             pnl_pct = ((p.current_price - p.cost_price) / p.cost_price * 100) if p.cost_price > 0 else 0
             pos_data.append({
+                "平台": p.platform,
                 "资产名称": p.name,
                 "代码": p.ticker or "-",
-                "平台": p.platform,
                 "大类": p.asset_class,
-                "市值(元)": f"{p.market_value_cny:,.0f}",
-                "占比": f"{bs.concentration.get(f'{p.id}:{p.name}', 0):.1f}%",
-                "盈亏": f"{pnl:+,.0f}",
-                "盈亏%": f"{pnl_pct:+.1f}%",
+                "市值(元)": p.market_value_cny,
+                "占比%": bs.concentration.get(f"{p.id}:{p.name}", 0),
+                "盈亏(元)": pnl,
+                "盈亏%": pnl_pct,
             })
-        st.dataframe(pd.DataFrame(pos_data), use_container_width=True, hide_index=True)
+        pos_df = pd.DataFrame(pos_data).sort_values(["平台", "市值(元)"], ascending=[True, False])
+
+        # 格式化显示列
+        display_df = pos_df.copy()
+        display_df["市值(元)"] = pos_df["市值(元)"].apply(lambda v: f"{v:,.0f}")
+        display_df["占比%"] = pos_df["占比%"].apply(lambda v: f"{v:.1f}%")
+        display_df["盈亏(元)"] = pos_df["盈亏(元)"].apply(lambda v: f"{v:+,.0f}" if v != 0 else "-")
+        display_df["盈亏%"] = pos_df["盈亏%"].apply(lambda v: f"{v:+.1f}%" if v != 0 else "-")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # ── 第四行: 负债明细 ──
     session = get_session()

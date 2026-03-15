@@ -44,11 +44,15 @@ def render():
             session = get_session()
             try:
                 p = session.query(Portfolio).filter_by(id=portfolio_id).first()
+                def _fmt_range(mn, mx):
+                    if mn == 0.0 and mx == 100.0:
+                        return "不设约束"
+                    return f"{mn}%~{mx}%"
                 target_allocation = {
-                    "权益": f"{p.target_equity_pct}%",
-                    "固收": f"{p.target_fixed_income_pct}%",
-                    "现金": f"{p.target_cash_pct}%",
-                    "另类": f"{p.target_alternative_pct}%",
+                    "权益": _fmt_range(p.min_equity_pct, p.max_equity_pct),
+                    "固收": _fmt_range(p.min_fixed_income_pct, p.max_fixed_income_pct),
+                    "现金": _fmt_range(p.min_cash_pct, p.max_cash_pct),
+                    "另类": _fmt_range(p.min_alternative_pct, p.max_alternative_pct),
                 }
             finally:
                 session.close()

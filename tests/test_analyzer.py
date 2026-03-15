@@ -20,20 +20,30 @@ from app.analyzer import analyze_portfolio, check_deviations, BalanceSheet, Devi
 # ──────────────────────────────────────────────
 
 def _make_portfolio(**kwargs):
-    """构造带默认值的假 Portfolio 对象"""
+    """构造带默认值的假 Portfolio 对象（区间策略模式）"""
     p = MagicMock()
-    p.target_equity_pct = kwargs.get("target_equity_pct", 60.0)
-    p.target_fixed_income_pct = kwargs.get("target_fixed_income_pct", 30.0)
-    p.target_cash_pct = kwargs.get("target_cash_pct", 10.0)
-    p.target_alternative_pct = kwargs.get("target_alternative_pct", 0.0)
+    # 权益默认约束: 40%~80%；其余不设约束 (0~100)
+    p.min_equity_pct = kwargs.get("min_equity_pct", 40.0)
+    p.max_equity_pct = kwargs.get("max_equity_pct", 80.0)
+    p.min_fixed_income_pct = kwargs.get("min_fixed_income_pct", 0.0)
+    p.max_fixed_income_pct = kwargs.get("max_fixed_income_pct", 100.0)
+    p.min_cash_pct = kwargs.get("min_cash_pct", 0.0)
+    p.max_cash_pct = kwargs.get("max_cash_pct", 100.0)
+    p.min_alternative_pct = kwargs.get("min_alternative_pct", 0.0)
+    p.max_alternative_pct = kwargs.get("max_alternative_pct", 100.0)
     p.max_single_stock_pct = kwargs.get("max_single_stock_pct", 15.0)
     p.max_leverage_ratio = kwargs.get("max_leverage_ratio", 20.0)
     return p
 
 
+_pos_id_counter = 0
+
 def _make_position(name, asset_class, platform, market_value_cny,
                    ticker="", cost_price=0.0, current_price=0.0, quantity=0.0):
+    global _pos_id_counter
+    _pos_id_counter += 1
     pos = MagicMock()
+    pos.id = _pos_id_counter
     pos.name = name
     pos.ticker = ticker
     pos.asset_class = asset_class
@@ -122,15 +132,13 @@ class TestAnalyzePortfolio:
         assert bs.platform_distribution["银行"] == 40_000
 
     def test_concentration_as_percentage(self):
-        """集中度以百分比表示（非绝对金额）"""
-        positions = [
-            _make_position("股票A", "权益", "港美股券商", 80_000),
-            _make_position("债券B", "固收", "银行", 20_000),
-        ]
-        bs = self._run(positions, [])
+        """集中度以百分比表示（非绝对金额），key 格式为 id:name"""
+        p1 = _make_position("股票A", "权益", "港美股券商", 80_000)
+        p2 = _make_position("债券B", "固收", "银行", 20_000)
+        bs = self._run([p1, p2], [])
 
-        assert bs.concentration["股票A"] == 80.0
-        assert bs.concentration["债券B"] == 20.0
+        assert bs.concentration[f"{p1.id}:股票A"] == 80.0
+        assert bs.concentration[f"{p2.id}:债券B"] == 20.0
 
     def test_empty_portfolio(self):
         """空持仓不崩溃，返回全零 BalanceSheet"""
@@ -189,46 +197,53 @@ class TestCheckDeviations:
         bs.concentration = concentration or {}
         return bs
 
-    def test_no_alerts_when_on_target(self):
-        """配置与目标完全一致时无告警"""
+    def test_no_alerts_when_in_range(self):
+        """配置在目标区间内时无策略偏离告警（权益 [40,80]，其余不设约束）"""
         bs = self._bs_with_alloc(equity=60, fi=30, cash=10)
         alerts = self._run(bs)
-        assert alerts == []
+        assert not any(a.alert_type == "策略偏离" for a in alerts)
 
-    def test_equity_over_threshold_triggers_alert(self):
-        """权益超配超过阈值产生告警"""
-        bs = self._bs_with_alloc(equity=72)  # 目标 60，偏离 +12 > 5
+    def test_equity_over_max_triggers_alert(self):
+        """权益超过上限产生超配告警"""
+        bs = self._bs_with_alloc(equity=90)  # max=80，偏离 +10
         alerts = self._run(bs)
         types = [a.alert_type for a in alerts]
         titles = [a.title for a in alerts]
         assert "策略偏离" in types
-        assert any("权益" in t for t in titles)
+        assert any("权益" in t and "超配" in t for t in titles)
 
-    def test_equity_underweight_triggers_alert(self):
-        """权益低配也产生告警"""
-        bs = self._bs_with_alloc(equity=50)  # 偏离 -10
+    def test_equity_under_min_triggers_alert(self):
+        """权益低于下限产生欠配告警"""
+        bs = self._bs_with_alloc(equity=30)  # min=40，偏离 -10
         alerts = self._run(bs)
-        assert any("低配" in a.title for a in alerts)
+        assert any("欠配" in a.title for a in alerts)
 
-    def test_small_deviation_no_alert(self):
-        """偏离在阈值内（≤5pp）不产生告警"""
-        bs = self._bs_with_alloc(equity=63)  # 偏离 +3，低于阈值
+    def test_equity_at_boundary_no_alert(self):
+        """权益恰好在边界上不产生告警"""
+        bs = self._bs_with_alloc(equity=40)  # 等于 min
         alerts = self._run(bs)
         assert not any(a.alert_type == "策略偏离" and "权益" in a.title for a in alerts)
 
     def test_high_severity_over_15pp(self):
-        """偏离超过 15pp 标记为高严重度"""
-        bs = self._bs_with_alloc(equity=80)  # 偏离 +20
+        """偏离上限超过 15pp 标记为高严重度"""
+        bs = self._bs_with_alloc(equity=97)  # max=80，偏离 +17 > 15
         alerts = self._run(bs)
         equity_alert = next(a for a in alerts if "权益" in a.title)
         assert equity_alert.severity == "高"
 
     def test_medium_severity_between_5_and_15pp(self):
-        """偏离 5~15pp 标记为中严重度"""
-        bs = self._bs_with_alloc(equity=70)  # 偏离 +10
+        """偏离上限 5~15pp 标记为中严重度"""
+        bs = self._bs_with_alloc(equity=90)  # max=80，偏离 +10
         alerts = self._run(bs)
         equity_alert = next(a for a in alerts if "权益" in a.title)
         assert equity_alert.severity == "中"
+
+    def test_unconstrained_class_no_alert(self):
+        """固收/现金/另类不设约束时（0~100），任何值都不产生策略偏离"""
+        bs = self._bs_with_alloc(equity=60, fi=60, cash=35, alt=50)
+        alerts = self._run(bs)
+        assert not any(a.alert_type == "策略偏离" and "固收" in a.title for a in alerts)
+        assert not any(a.alert_type == "策略偏离" and "现金" in a.title for a in alerts)
 
     def test_single_position_over_limit(self):
         """单一持仓超过上限产生纪律触发告警"""
@@ -251,8 +266,7 @@ class TestCheckDeviations:
     def test_alerts_sorted_by_severity(self):
         """告警按严重程度排序：高 > 中 > 低"""
         bs = self._bs_with_alloc(
-            equity=80,                            # 高：偏离 +20pp
-            fi=19,                                # 中：偏离 -11pp
+            equity=93,                            # 中：超过 max=80，偏离 +13pp
             concentration={"1:股票A": 20.0},      # 高：纪律触发
             leverage=25.0,                         # 高：风险暴露
         )
@@ -268,8 +282,8 @@ class TestCheckDeviations:
         assert alerts == []
 
     def test_deviation_value_correct(self):
-        """告警中的 deviation 数值计算正确"""
-        bs = self._bs_with_alloc(equity=72)  # 目标 60，偏离 +12
+        """告警中的 deviation 数值计算正确（相对于区间边界）"""
+        bs = self._bs_with_alloc(equity=92)  # max=80，偏离 +12
         alerts = self._run(bs)
         equity_alert = next(a for a in alerts if "权益" in a.title)
         assert abs(equity_alert.deviation - 12.0) < 0.01

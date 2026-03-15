@@ -17,41 +17,67 @@ def render():
 
         with st.form("strategy_form"):
             st.subheader("资产配置框架")
-            st.caption("各类资产的目标占比之和应为 100%")
+            st.caption("设置每类资产的占比区间（下限 ~ 上限）。填写 0 ~ 100 表示不设约束。")
 
-            col1, col2, col3, col4 = st.columns(4)
+            st.markdown("**权益**")
+            col1, col2 = st.columns(2)
             with col1:
-                target_equity = st.number_input("权益 (%)", 0.0, 100.0, float(p.target_equity_pct), 5.0)
+                min_equity = st.number_input("权益下限 (%)", 0.0, 100.0, float(p.min_equity_pct), 5.0)
             with col2:
-                target_fi = st.number_input("固收 (%)", 0.0, 100.0, float(p.target_fixed_income_pct), 5.0)
-            with col3:
-                target_cash = st.number_input("现金 (%)", 0.0, 100.0, float(p.target_cash_pct), 5.0)
-            with col4:
-                target_alt = st.number_input("另类 (%)", 0.0, 100.0, float(p.target_alternative_pct), 5.0)
+                max_equity = st.number_input("权益上限 (%)", 0.0, 100.0, float(p.max_equity_pct), 5.0)
 
-            total = target_equity + target_fi + target_cash + target_alt
-            if abs(total - 100) > 0.1:
-                st.warning(f"当前合计 {total:.1f}%，请调整至 100%")
+            st.markdown("**固收**")
+            col3, col4 = st.columns(2)
+            with col3:
+                min_fi = st.number_input("固收下限 (%)", 0.0, 100.0, float(p.min_fixed_income_pct), 5.0)
+            with col4:
+                max_fi = st.number_input("固收上限 (%)", 0.0, 100.0, float(p.max_fixed_income_pct), 5.0)
+
+            st.markdown("**现金**")
+            col5, col6 = st.columns(2)
+            with col5:
+                min_cash = st.number_input("现金下限 (%)", 0.0, 100.0, float(p.min_cash_pct), 5.0)
+            with col6:
+                max_cash = st.number_input("现金上限 (%)", 0.0, 100.0, float(p.max_cash_pct), 5.0)
+
+            st.markdown("**另类**")
+            col7, col8 = st.columns(2)
+            with col7:
+                min_alt = st.number_input("另类下限 (%)", 0.0, 100.0, float(p.min_alternative_pct), 5.0)
+            with col8:
+                max_alt = st.number_input("另类上限 (%)", 0.0, 100.0, float(p.max_alternative_pct), 5.0)
 
             st.divider()
             st.subheader("投资纪律约束")
 
-            col5, col6 = st.columns(2)
-            with col5:
+            col9, col10 = st.columns(2)
+            with col9:
                 max_single = st.number_input("单一持仓上限 (%)", 5.0, 50.0, float(p.max_single_stock_pct), 5.0)
-            with col6:
+            with col10:
                 max_leverage = st.number_input("最大杠杆率 (%)", 0.0, 100.0, float(p.max_leverage_ratio), 5.0)
 
             submitted = st.form_submit_button("保存策略", type="primary")
 
             if submitted:
-                if abs(total - 100) > 0.1:
-                    st.error("目标配置合计必须为 100%，请调整后重新提交。")
+                errors = []
+                for label, mn, mx in [("权益", min_equity, max_equity),
+                                       ("固收", min_fi, max_fi),
+                                       ("现金", min_cash, max_cash),
+                                       ("另类", min_alt, max_alt)]:
+                    if mn > mx:
+                        errors.append(f"{label}：下限 ({mn}%) 不能大于上限 ({mx}%)")
+                if errors:
+                    for e in errors:
+                        st.error(e)
                 else:
-                    p.target_equity_pct = target_equity
-                    p.target_fixed_income_pct = target_fi
-                    p.target_cash_pct = target_cash
-                    p.target_alternative_pct = target_alt
+                    p.min_equity_pct = min_equity
+                    p.max_equity_pct = max_equity
+                    p.min_fixed_income_pct = min_fi
+                    p.max_fixed_income_pct = max_fi
+                    p.min_cash_pct = min_cash
+                    p.max_cash_pct = max_cash
+                    p.min_alternative_pct = min_alt
+                    p.max_alternative_pct = max_alt
                     p.max_single_stock_pct = max_single
                     p.max_leverage_ratio = max_leverage
                     session.commit()

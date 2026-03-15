@@ -58,11 +58,16 @@ class Portfolio(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # 目标资产配置 (百分比)
-    target_equity_pct = Column(Float, default=60.0)
-    target_fixed_income_pct = Column(Float, default=30.0)
-    target_cash_pct = Column(Float, default=10.0)
-    target_alternative_pct = Column(Float, default=0.0)
+    # 目标资产配置区间 (百分比)
+    # min=0 且 max=100 表示"不设约束"
+    min_equity_pct = Column(Float, default=40.0)
+    max_equity_pct = Column(Float, default=80.0)
+    min_fixed_income_pct = Column(Float, default=0.0)
+    max_fixed_income_pct = Column(Float, default=100.0)
+    min_cash_pct = Column(Float, default=0.0)
+    max_cash_pct = Column(Float, default=100.0)
+    min_alternative_pct = Column(Float, default=0.0)
+    max_alternative_pct = Column(Float, default=100.0)
 
     # 投资纪律约束
     max_single_stock_pct = Column(Float, default=15.0)  # 单一股票仓位上限
