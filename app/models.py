@@ -24,18 +24,9 @@ class AssetClass(str, enum.Enum):
     """大类资产分类"""
     EQUITY = "权益"
     FIXED_INCOME = "固收"
-    CASH = "现金"
+    MONETARY = "货币"
     ALTERNATIVE = "另类"
-
-
-class Platform(str, enum.Enum):
-    """资产所在平台"""
-    HK_US_BROKER = "港美股券商"
-    CN_BROKER = "境内券商"
-    BANK = "银行"
-    ALIPAY = "支付宝"
-    FUND_PLATFORM = "基金平台"
-    OTHER = "其他"
+    DERIVATIVE = "衍生"
 
 
 class DecisionStatus(str, enum.Enum):
@@ -97,6 +88,18 @@ class Position(Base):
     market_value_cny = Column(Float, default=0)          # 市值 (人民币)
     created_at = Column(DateTime, default=datetime.now)
 
+    # 多货币支持
+    original_currency = Column(String(10), default="CNY")   # USD/HKD/CNY
+    original_value    = Column(Float, default=0)             # 原始货币金额
+    fx_rate_to_cny    = Column(Float, default=1.0)           # 汇率
+    fx_rate_date      = Column(String(20), nullable=True)    # "latest" or "YYYY-MM-DD"
+    segment           = Column(String(20), default="投资")   # 投资/养老/公积金
+
+    # 盈亏（直接存储，不依赖成本价计算）
+    profit_loss_value = Column(Float, default=0)             # 盈亏金额(元)
+    profit_loss_rate  = Column(Float, default=0)             # 盈亏百分比
+    profit_loss_original_value = Column(Float, default=0)   # 盈亏金额（原始货币，USD/HKD/CNY）
+
     portfolio = relationship("Portfolio", back_populates="positions")
 
     @property
@@ -125,6 +128,7 @@ class Liability(Base):
     category = Column(String(50), nullable=False)        # 类型 (信用卡/信用贷/房贷/其他)
     amount = Column(Float, default=0)                    # 负债金额 (人民币)
     interest_rate = Column(Float, default=0)             # 年利率 (%)
+    purpose = Column(String(20), default="日常消费")     # 投资杠杆/购房/日常消费
     created_at = Column(DateTime, default=datetime.now)
 
     portfolio = relationship("Portfolio", back_populates="liabilities")

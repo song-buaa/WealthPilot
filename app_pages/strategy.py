@@ -33,12 +33,12 @@ def render():
             with col4:
                 max_fi = st.number_input("固收上限 (%)", 0.0, 100.0, float(p.max_fixed_income_pct), 5.0)
 
-            st.markdown("**现金**")
+            st.markdown("**货币**")
             col5, col6 = st.columns(2)
             with col5:
-                min_cash = st.number_input("现金下限 (%)", 0.0, 100.0, float(p.min_cash_pct), 5.0)
+                min_cash = st.number_input("货币下限 (%)", 0.0, 100.0, float(p.min_cash_pct), 5.0)
             with col6:
-                max_cash = st.number_input("现金上限 (%)", 0.0, 100.0, float(p.max_cash_pct), 5.0)
+                max_cash = st.number_input("货币上限 (%)", 0.0, 100.0, float(p.max_cash_pct), 5.0)
 
             st.markdown("**另类**")
             col7, col8 = st.columns(2)
@@ -62,7 +62,7 @@ def render():
                 errors = []
                 for label, mn, mx in [("权益", min_equity, max_equity),
                                        ("固收", min_fi, max_fi),
-                                       ("现金", min_cash, max_cash),
+                                       ("货币", min_cash, max_cash),
                                        ("另类", min_alt, max_alt)]:
                     if mn > mx:
                         errors.append(f"{label}：下限 ({mn}%) 不能大于上限 ({mx}%)")

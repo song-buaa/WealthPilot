@@ -14,7 +14,7 @@ def render():
 
     position_count = get_position_count(portfolio_id)
     if position_count == 0:
-        st.info("暂无持仓数据，请先在「数据导入」页面上传CSV文件。")
+        st.info("暂无持仓数据，请先在「投资账户总览」页面上传CSV文件。")
         return
 
     bs = analyze_portfolio(portfolio_id)

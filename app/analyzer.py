@@ -1,6 +1,7 @@
 """
 WealthPilot - 分析引擎
 负责资产配置分析、偏离度计算、风险检测
+只统计 segment=="投资" 的持仓，只统计 purpose=="投资杠杆" 的负债用于杠杆率计算。
 """
 
 from dataclasses import dataclass, field
@@ -11,29 +12,34 @@ from app.config import DEVIATION_THRESHOLD, HIGH_SEVERITY_THRESHOLD
 
 @dataclass
 class BalanceSheet:
-    """个人资产负债表"""
+    """个人资产负债表（仅投资账户口径）"""
     total_assets: float = 0.0
-    total_liabilities: float = 0.0
+    total_liabilities: float = 0.0   # 仅投资杠杆类负债
     net_worth: float = 0.0
-    leverage_ratio: float = 0.0  # 负债 / 总资产 (%)
+    leverage_ratio: float = 0.0      # 负债 / 总资产 (%)
 
-    # 大类资产分布
+    # 大类资产分布（五大类）
     equity_value: float = 0.0
     fixed_income_value: float = 0.0
-    cash_value: float = 0.0
+    monetary_value: float = 0.0
     alternative_value: float = 0.0
+    derivative_value: float = 0.0
 
     # 大类资产占比 (%)
     equity_pct: float = 0.0
     fixed_income_pct: float = 0.0
-    cash_pct: float = 0.0
+    monetary_pct: float = 0.0
     alternative_pct: float = 0.0
+    derivative_pct: float = 0.0
 
     # 平台分布
     platform_distribution: Dict[str, float] = field(default_factory=dict)
 
     # 持仓集中度 (单一资产占比)
     concentration: Dict[str, float] = field(default_factory=dict)
+
+    # 浮动盈亏
+    total_profit_loss: float = 0.0
 
 
 @dataclass
@@ -49,15 +55,22 @@ class DeviationAlert:
 
 
 def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
-    """对指定投资组合进行全面分析，生成资产负债表"""
+    """对指定投资组合进行全面分析，只统计 segment=='投资' 的持仓"""
     session = get_session()
     try:
         portfolio = session.query(Portfolio).filter_by(id=portfolio_id).first()
         if not portfolio:
             return None
 
-        positions = portfolio.positions
-        liabilities = portfolio.liabilities
+        # 只统计投资持仓
+        positions = session.query(Position).filter_by(
+            portfolio_id=portfolio_id, segment="投资"
+        ).all()
+
+        # 只统计投资杠杆类负债
+        invest_liabilities = session.query(Liability).filter_by(
+            portfolio_id=portfolio_id, purpose="投资杠杆"
+        ).all()
 
         bs = BalanceSheet()
 
@@ -65,15 +78,19 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
         for pos in positions:
             value = pos.market_value_cny
             bs.total_assets += value
+            bs.total_profit_loss += (pos.profit_loss_value or 0)
 
-            if pos.asset_class == "权益":
+            ac = pos.asset_class
+            if ac == "权益":
                 bs.equity_value += value
-            elif pos.asset_class == "固收":
+            elif ac == "固收":
                 bs.fixed_income_value += value
-            elif pos.asset_class == "现金":
-                bs.cash_value += value
-            elif pos.asset_class == "另类":
+            elif ac == "货币":
+                bs.monetary_value += value
+            elif ac == "另类":
                 bs.alternative_value += value
+            elif ac == "衍生":
+                bs.derivative_value += value
 
             # 平台分布
             platform = pos.platform
@@ -83,8 +100,8 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
             # 格式："{id}:{name}"，UI 层用 split(":")[1] 取显示名
             bs.concentration[f"{pos.id}:{pos.name}"] = value
 
-        # 计算负债
-        for liab in liabilities:
+        # 计算投资杠杆负债
+        for liab in invest_liabilities:
             bs.total_liabilities += liab.amount
 
         # 计算净资产
@@ -94,8 +111,9 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
         if bs.total_assets > 0:
             bs.equity_pct = round(bs.equity_value / bs.total_assets * 100, 1)
             bs.fixed_income_pct = round(bs.fixed_income_value / bs.total_assets * 100, 1)
-            bs.cash_pct = round(bs.cash_value / bs.total_assets * 100, 1)
+            bs.monetary_pct = round(bs.monetary_value / bs.total_assets * 100, 1)
             bs.alternative_pct = round(bs.alternative_value / bs.total_assets * 100, 1)
+            bs.derivative_pct = round(bs.derivative_value / bs.total_assets * 100, 1)
             bs.leverage_ratio = round(bs.total_liabilities / bs.total_assets * 100, 1)
 
             # 集中度转为百分比
@@ -151,7 +169,7 @@ def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[Dev
                      portfolio.min_equity_pct, portfolio.max_equity_pct)
         _check_range("固收资产", balance_sheet.fixed_income_pct,
                      portfolio.min_fixed_income_pct, portfolio.max_fixed_income_pct)
-        _check_range("现金资产", balance_sheet.cash_pct,
+        _check_range("货币资产", balance_sheet.monetary_pct,
                      portfolio.min_cash_pct, portfolio.max_cash_pct)
         _check_range("另类资产", balance_sheet.alternative_pct,
                      portfolio.min_alternative_pct, portfolio.max_alternative_pct)
