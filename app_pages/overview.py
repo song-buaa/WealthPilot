@@ -354,11 +354,10 @@ def _render_asset_section(pid: int, bs):
                 bank = st.radio("选择银行", ["招商银行", "支付宝", "建设银行"],
                                 horizontal=True, key="bank_select")
 
-                # 显示各银行的分类说明
                 bank_categories = {
                     "招商银行": "活钱管理（朝朝宝）、稳健投资（招行理财）、进取投资（招行基金）",
-                    "支付宝":   "活钱管理（余额宝）、稳健投资（稳健理财）、进取投资（进阶理财）",
-                    "建设银行": "活钱（建行活期）、理财（建行理财）、债券（建行债券）、基金（建行基金）",
+                    "支付宝":   "活期资产（余额宝）、稳健理财、进阶理财",
+                    "建设银行": "活钱（建行活期）、理财产品（建行理财）、债券（建行债券）、基金（建行基金）",
                 }
                 st.info(f"将识别：{bank_categories[bank]}")
 
@@ -369,11 +368,19 @@ def _render_asset_section(pid: int, bs):
                     img_bytes = img_file.read()
                     st.image(img_bytes, caption="已上传截图", width=300)
 
-                    with st.spinner("AI 识别中..."):
-                        result, error = parse_bank_screenshot(img_bytes, bank)
+                    # ── 用 session_state 缓存 AI 结果，避免点击按钮时重复调用 ──
+                    cache_key = f"bank_result_{bank}_{len(img_bytes)}"
+                    if cache_key not in st.session_state:
+                        with st.spinner("AI 识别中..."):
+                            result, error = parse_bank_screenshot(img_bytes, bank)
+                        st.session_state[cache_key] = (result, error)
+                    else:
+                        result, error = st.session_state[cache_key]
 
                     if error:
                         st.error(f"识别失败：{error}")
+                        if cache_key in st.session_state:
+                            del st.session_state[cache_key]
                     else:
                         st.success("识别成功，请确认以下数据：")
                         preview = [{"分类": k, "识别金额(元)": f"{v:,.2f}"} for k, v in result.items()]
@@ -381,9 +388,13 @@ def _render_asset_section(pid: int, bs):
 
                         if st.button(f"确认导入 {bank} 数据", key="confirm_bank_import", type="primary"):
                             positions_to_update = bank_positions_to_db(result, bank)
-                            _update_bank_positions(pid, positions_to_update, bank)
-                            st.success(f"{bank} 数据已更新！")
-                            st.rerun()
+                            updated_count = _update_bank_positions(pid, positions_to_update, bank)
+                            if updated_count > 0:
+                                st.success(f"✅ {bank} 已更新 {updated_count} 条持仓数据！")
+                                del st.session_state[cache_key]
+                                st.rerun()
+                            else:
+                                st.error("⚠️ 未找到匹配的持仓记录，数据未更新。请检查识别结果是否正确。")
 
 
 def _render_liability_section(pid: int):
@@ -574,9 +585,10 @@ def _import_liabilities_by_purpose(pid: int, new_liabilities: list, purposes: li
         session.close()
 
 
-def _update_bank_positions(pid: int, updates: list, platform: str):
-    """按名称更新指定银行的持仓金额（不删除，只更新已有记录）"""
+def _update_bank_positions(pid: int, updates: list, platform: str) -> int:
+    """按名称更新指定银行的持仓金额，返回成功更新的条数"""
     session = get_session()
+    count = 0
     try:
         for item in updates:
             p = session.query(Position).filter_by(
@@ -587,10 +599,12 @@ def _update_bank_positions(pid: int, updates: list, platform: str):
             ).first()
             if p:
                 p.market_value_cny = item["market_value_cny"]
-                p.original_value = item["market_value_cny"]  # CNY资产 original=cny
+                p.original_value = item["market_value_cny"]
+                count += 1
         session.commit()
     except Exception as e:
         session.rollback()
         st.error(f"更新失败: {e}")
     finally:
         session.close()
+    return count
