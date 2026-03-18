@@ -765,6 +765,524 @@ def _render_checklist(raw: list[dict], portfolio_drawdown_pct: float) -> None:
 
 
 # ─────────────────────────────────────────────────────────
+# Tab 2（新）：交易前评估 — 自然语言解析 + 自动清单检查
+# ─────────────────────────────────────────────────────────
+
+_PRE_EVAL_FORM_KEYS = [
+    "pre_eval_mode", "pre_eval_symbol", "pre_eval_custom_name",
+    "pre_eval_action", "pre_eval_amount", "pre_eval_emotion",
+    "pre_eval_logic", "pre_eval_margin", "pre_eval_options",
+    "pre_eval_credit", "pre_eval_etf",
+    "pre_eval_confirm_8", "pre_eval_confirm_9",
+]
+
+
+def _parse_trade_intent(text: str, raw: list[dict], total_assets: float) -> dict:
+    """
+    从自然语言描述中提取交易意图的结构化字段。
+    MVP：关键词规则实现。返回结构固定，后续可直接替换为 LLM 调用。
+
+    输入：(自然语言文本, 当前持仓列表, 总资产)
+    输出：dict，字段见下方注释
+    """
+    result: dict = {
+        "name":            None,     # str | None  标的名称
+        "action_type":     None,     # BUY | ADD | SELL | REDUCE | None
+        "amount_cny":      None,     # float | None  操作金额（元）
+        "amount_pct":      None,     # float | None  占总资产比例
+        "is_leverage_etf": False,
+        "is_margin":       False,
+        "is_options":      False,
+        "is_credit":       False,
+        "emotion":         "normal", # normal | regret | greed | panic | lucky
+        "logic_based":     None,     # True | False | None（无法判断）
+        "major_neg_event": False,
+        "trend":           "sideways",  # up | sideways | down
+        "raw_text":        text,
+        "unresolved":      [],
+    }
+
+    # 操作类型
+    if any(k in text for k in ["加仓", "补仓", "补一点", "分批补", "继续买"]):
+        result["action_type"] = "ADD"
+    elif any(k in text for k in ["清仓", "全部卖", "全卖", "清掉"]):
+        result["action_type"] = "SELL"
+    elif any(k in text for k in ["减仓", "减一点", "卖一点", "先减", "部分卖"]):
+        result["action_type"] = "REDUCE"
+    elif any(k in text for k in ["买入", "新建仓", "建仓", "首次买", "第一次买"]):
+        result["action_type"] = "BUY"
+
+    # 标的名称——从当前持仓中匹配（长名优先）
+    position_names = [r["name"] for r in raw]
+    for name in sorted(position_names, key=len, reverse=True):
+        if name in text or name.lower() in text.lower():
+            result["name"] = name
+            break
+
+    # 金额提取
+    for pat, mult in [
+        (r"(\d+(?:\.\d+)?)\s*万元?", 10_000),
+        (r"(\d+(?:\.\d+)?)\s*千元?",  1_000),
+        (r"(\d+(?:\.\d+)?)\s*百元?",    100),
+        (r"(\d+(?:\.\d+)?)\s*元",          1),
+    ]:
+        m = re.search(pat, text)
+        if m:
+            result["amount_cny"] = float(m.group(1)) * mult
+            if total_assets > 0:
+                result["amount_pct"] = result["amount_cny"] / total_assets
+            break
+    if result["amount_pct"] is None:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*%", text)
+        if m:
+            result["amount_pct"] = float(m.group(1)) / 100
+            result["amount_cny"] = result["amount_pct"] * total_assets
+
+    # 情绪
+    if any(k in text for k in ["不甘心", "翻本", "回血", "亏了想", "亏损中"]):
+        result["emotion"] = "regret"
+    elif any(k in text for k in ["恐慌", "吓到了", "割肉冲动", "怕了", "慌了"]):
+        result["emotion"] = "panic"
+    elif any(k in text for k in ["连续涨", "涨不停", "没有上限", "飘了"]):
+        result["emotion"] = "greed"
+    elif any(k in text for k in ["赌一把", "这次不一样", "押注", "碰运气"]):
+        result["emotion"] = "lucky"
+
+    # 长期逻辑
+    if any(k in text for k in ["长期", "基本面", "看好", "长逻辑", "赛道", "成长", "价值"]):
+        result["logic_based"] = True
+    elif any(k in text for k in ["短线", "短期", "博反弹", "追涨", "跟风", "消息面"]):
+        result["logic_based"] = False
+
+    # 市场环境
+    if any(k in text for k in ["下跌", "跌了", "回调", "低位", "底部", "跌幅"]):
+        result["trend"] = "down"
+    elif any(k in text for k in ["上涨", "涨了", "高位", "新高", "大涨"]):
+        result["trend"] = "up"
+
+    # 重大利空
+    if any(k in text for k in ["财报暴雷", "产品失败", "利空", "暴雷", "丑闻", "造假"]):
+        result["major_neg_event"] = True
+
+    # 杠杆工具
+    if any(k.upper() in text.upper() for k in
+           ["TQQQ", "SOXL", "UPRO", "TECL", "LABU", "FNGU", "杠杆ETF"]):
+        result["is_leverage_etf"] = True
+    if any(k in text for k in ["融资", "融券"]):
+        result["is_margin"] = True
+    if any(k in text for k in ["期权", "认购", "认沽"]):
+        result["is_options"] = True
+    if any(k in text for k in ["借贷", "信用贷", "消费贷", "贷款买"]):
+        result["is_credit"] = True
+
+    # 标注无法提取的字段
+    if result["name"] is None:
+        result["unresolved"].append("标的名称")
+    if result["action_type"] is None:
+        result["unresolved"].append("操作类型")
+    if result["amount_pct"] is None:
+        result["unresolved"].append("操作金额")
+
+    return result
+
+
+def _render_eval_result_section(result) -> None:
+    """引擎评估结果展示（从 _render_evaluator 提取，供新 Tab 复用）"""
+    label, kind = _VERDICT_LABELS[result.final_verdict]
+    if kind == "error":
+        st.error(f"**{label}**")
+    elif kind == "warning":
+        st.warning(f"**{label}**")
+    else:
+        st.success(f"**{label}**")
+
+    risk_icon = {"ALLOW": "🟢", "WARNING": "🟡", "BLOCK": "🔴"}[result.risk.status]
+    st.markdown(f"**{risk_icon} Risk Engine：{result.risk.status}**")
+    if result.risk.messages:
+        _render_block_reasons(result.risk.messages)
+    if result.risk.warnings:
+        _render_warnings(result.risk.warnings)
+    if not result.risk.messages and not result.risk.warnings:
+        st.caption("全部硬性约束通过")
+
+    st.markdown("---")
+    psy_icon = "❄️" if result.psychology.status == "COOLDOWN" else "🟢"
+    st.markdown(f"**{psy_icon} Psychology Engine：{result.psychology.status}**")
+    if result.psychology.triggered_reasons:
+        for r in result.psychology.triggered_reasons:
+            st.warning(r)
+    else:
+        st.caption("情绪状态正常")
+
+    if result.allowed:
+        st.markdown("---")
+        rec = result.decision.recommendation
+        rec_label, _ = _REC_LABELS.get(rec, (rec, "normal"))
+        st.markdown(f"**Decision Engine：{rec_label}**")
+        if result.decision.reasons:
+            _render_reasons(result.decision.reasons)
+        if result.decision.warnings:
+            _render_warnings(result.decision.warnings)
+
+
+def _render_checklist_auto(
+    raw: list[dict], portfolio_drawdown_pct: float, ctx: dict
+) -> None:
+    """
+    交易前检查清单（规则11）——自动判断版。
+    能从账户数据 / 交易参数自动判断的直接给结论；
+    无法自动判断的仅要求一次性确认，不再逐项手动勾选。
+    """
+    total = sum(r["market_value_cny"] for r in raw) or 1.0
+    liquidity_cl = sum(
+        r["market_value_cny"] for r in raw if r["asset_class"] in ("货币", "固收")
+    ) / total
+
+    action_type = ctx.get("action_type", "BUY")
+    amount_pct  = ctx.get("amount_pct", 0.05)
+    is_margin   = ctx.get("is_margin", False)
+    is_opts     = ctx.get("is_options", False)
+    is_credit   = ctx.get("is_credit", False)
+    is_etf      = ctx.get("is_etf", False)
+    emotion     = ctx.get("emotion", "normal")
+    logic_based = ctx.get("logic_based", True)
+    pos_data    = ctx.get("pos_data", {})
+
+    cfg_pos   = RULES["single_asset_limits"]
+    cfg_cb    = RULES["portfolio_circuit_breaker"]
+    cfg_liq   = RULES["liquidity_limits"]
+    etf_limit = RULES["leverage_limits"]["level_1_max_pct"]
+
+    is_buy = action_type in ("BUY", "ADD")
+    current_weight   = (pos_data.get("market_value_cny", 0) / total) if total > 0 else 0.0
+    projected_weight = current_weight + amount_pct if is_buy else current_weight - amount_pct
+    existing_etf     = sum(r["market_value_cny"] for r in raw if r["is_leverage_etf"]) / total
+    projected_etf    = (existing_etf + amount_pct) if (is_etf and is_buy) else existing_etf
+    projected_liq    = (liquidity_cl - amount_pct) if is_buy else liquidity_cl
+    circuit_ok       = abs(portfolio_drawdown_pct) < cfg_cb["drawdown_trigger_pct"]
+
+    no_lv0     = not (is_margin or is_opts or is_credit)
+    lv0_detail = ("已自动判断" if no_lv0
+                  else f"检测到：{'融资 ' if is_margin else ''}{'期权 ' if is_opts else ''}{'借贷' if is_credit else ''}")
+
+    # (num, 描述, 提示, auto_result)  auto_result: True=通过 / False=失败 / None=需确认
+    items = [
+        (1, "买入后该标的仓位不超过 40%",
+         f"操作后预计 {projected_weight*100:.1f}%（上限 40%）",
+         projected_weight <= cfg_pos["max_position_pct"]),
+
+        (2, "不涉及 Level0 杠杆（无融资、无期权、无借贷）",
+         lv0_detail, no_lv0),
+
+        (3, "杠杆 ETF 总持仓 ≤ 5%",
+         f"操作后预计 {projected_etf*100:.1f}%（上限 5%）",
+         projected_etf <= etf_limit),
+
+        (4, "单次加仓 ≤ 总资产 10%",
+         f"本次 {amount_pct*100:.1f}%（上限 10%）；分批执行请自行保证",
+         (amount_pct <= RULES["position_sizing"]["max_single_add_pct"]) if is_buy else True),
+
+        (5, "操作后流动性资金（货币+固收）比例仍 ≥ 20%",
+         f"操作后预计 {projected_liq*100:.1f}%（要求 ≥ 20%）",
+         (projected_liq >= cfg_liq["min_cash_pct"]) if is_buy else True),
+
+        (6, "未处于情绪冷却状态",
+         f"当前情绪：{_EMOTION_OPTIONS.get(emotion, emotion)}",
+         emotion == "normal"),
+
+        (7, "基于长期逻辑，非短期追涨杀跌",
+         "已从描述中推断" if logic_based is not None else "无法从描述中判断，请自行确认",
+         logic_based),
+
+        (8, "若再跌 10%，心理和仓位上都可以承受",
+         "需主观确认", None),
+
+        (9, "符合整体资产配置策略，不违反偏离度约束",
+         "请对照仪表盘「资产配置」表自行确认", None),
+    ]
+
+    st.markdown("#### ✅ 交易前检查清单（规则11）")
+    st.caption("可自动判断的项已标注结果；⚠️ 项请在下方确认。")
+    st.markdown("---")
+
+    hard_fail    = False
+    need_confirm = []
+
+    for num, desc, hint, auto_val in items:
+        c_num, c_check, c_hint = st.columns([0.3, 3, 2])
+        with c_num:
+            st.markdown(f"**#{num}**")
+        with c_check:
+            if auto_val is True:
+                st.markdown(f"✅ {desc}")
+            elif auto_val is False:
+                st.markdown(f"❌ {desc}")
+                hard_fail = True
+            else:
+                st.markdown(f"⚠️ {desc}")
+                need_confirm.append(num)
+        with c_hint:
+            st.caption(hint)
+
+    c_num, c_check, c_hint = st.columns([0.3, 3, 2])
+    with c_num:
+        st.markdown("**+**")
+    with c_check:
+        cb_icon = "✅" if circuit_ok else "❌"
+        st.markdown(f"{cb_icon} 账户总回撤 < 25%（加仓专用）")
+        if not circuit_ok:
+            hard_fail = True
+    with c_hint:
+        st.caption(f"当前回撤 {abs(portfolio_drawdown_pct)*100:.1f}%（阈值 25%）")
+
+    st.markdown("---")
+
+    if hard_fail:
+        st.error("❌ 存在检查项未通过，**禁止本次交易**。")
+        return
+
+    if not need_confirm:
+        st.success("✅ 全部 9 项 + 熔断检查通过，纪律允许本次操作。")
+        return
+
+    nums_str = "、".join(f"#{n}" for n in need_confirm)
+    st.warning(f"⚠️ 自动检查已通过。以下项需主观确认：{nums_str}")
+    confirm_all = True
+    if 8 in need_confirm:
+        confirm_all = st.checkbox(
+            "我确认：若该标的再跌 10%，我的心理和仓位都能承受",
+            key="pre_eval_confirm_8",
+        ) and confirm_all
+    if 9 in need_confirm:
+        confirm_all = st.checkbox(
+            "我确认：本次操作符合整体资产配置策略（已对照仪表盘确认）",
+            key="pre_eval_confirm_9",
+        ) and confirm_all
+    if confirm_all:
+        st.success("✅ 全部确认通过，纪律允许本次操作。")
+
+
+def _render_pre_trade_eval(raw: list[dict], portfolio_drawdown_pct: float) -> None:
+    """
+    Tab 2（新）：交易前评估
+    流程：自然语言描述 → 关键词解析 → 参数确认 → 纪律评估 + 自动清单检查
+    """
+    total = sum(r["market_value_cny"] for r in raw) or 1.0
+    position_names = [r["name"] for r in raw]
+
+    # ── 自然语言输入 ──────────────────────────────────────
+    st.markdown("#### 描述你想做的交易")
+    st.caption("用自己的话描述，系统自动提取关键信息，并逐项对照投资纪律检查。")
+
+    nl_text = st.text_area(
+        "交易描述",
+        placeholder="例如：我想加仓理想汽车，大概买10万元，最近跌了不少，长期逻辑没变，想分批补仓",
+        height=90,
+        label_visibility="collapsed",
+        key="pre_eval_nl_text",
+    )
+
+    col_parse, col_clear = st.columns([4, 1])
+    with col_parse:
+        parse_btn = st.button(
+            "🔍 解析交易意图", type="primary",
+            use_container_width=True, key="pre_eval_parse",
+            disabled=not (nl_text or "").strip(),
+        )
+    with col_clear:
+        if st.button("重置", use_container_width=True, key="pre_eval_clear"):
+            for k in _PRE_EVAL_FORM_KEYS + [
+                "pre_eval_parsed", "pre_eval_result",
+                "pre_eval_context", "pre_eval_nl_text",
+            ]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    if parse_btn and (nl_text or "").strip():
+        parsed = _parse_trade_intent(nl_text, raw, total)
+        st.session_state["pre_eval_parsed"] = parsed
+        # 清除旧表单 widget 状态，让下次渲染使用新的解析默认值
+        for k in _PRE_EVAL_FORM_KEYS + ["pre_eval_result", "pre_eval_context"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    parsed: dict = st.session_state.get("pre_eval_parsed", {})
+
+    if not parsed:
+        st.info("💡 在上方输入你的交易计划，点击「解析」后系统自动填充参数，并对照投资纪律逐项检查。")
+        return
+
+    st.divider()
+
+    # ── 解析警告 ──────────────────────────────────────────
+    if parsed.get("unresolved"):
+        st.warning(
+            "⚠️ 以下信息未能从描述中提取，请在下方手动补充：**"
+            + "、".join(parsed["unresolved"]) + "**"
+        )
+
+    # ── 参数确认 / 调整表单 ───────────────────────────────
+    st.markdown("#### 📋 确认 / 调整参数")
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        default_mode = (
+            "从持仓中选择"
+            if parsed.get("name") and parsed["name"] in position_names
+            else "输入新标的"
+        )
+        mode_sel = st.radio(
+            "标的来源", ["从持仓中选择", "输入新标的"],
+            index=0 if default_mode == "从持仓中选择" else 1,
+            horizontal=True, key="pre_eval_mode",
+        )
+
+        if mode_sel == "从持仓中选择" and position_names:
+            default_idx = (
+                position_names.index(parsed["name"])
+                if parsed.get("name") in position_names else 0
+            )
+            selected_name = st.selectbox(
+                "选择持仓", position_names,
+                index=default_idx, key="pre_eval_symbol",
+            )
+            pos_data = next(r for r in raw if r["name"] == selected_name)
+        else:
+            custom_name = st.text_input(
+                "标的名称", value=parsed.get("name") or "",
+                placeholder="如：苹果 / Apple Inc.", key="pre_eval_custom_name",
+            )
+            pos_data = {
+                "name": custom_name or "新标的",
+                "ticker": "",
+                "asset_class": "权益",
+                "market_value_cny": 0.0,
+                "profit_loss_rate": 0.0,
+                "is_leverage_etf": parsed.get("is_leverage_etf", False),
+            }
+
+        _action_opts = ["BUY", "ADD", "SELL", "REDUCE"]
+        _action_labels = {
+            "BUY":    "BUY 买入（新建仓）",
+            "ADD":    "ADD 加仓",
+            "SELL":   "SELL 卖出（清仓）",
+            "REDUCE": "REDUCE 减仓",
+        }
+        default_action_idx = (
+            _action_opts.index(parsed["action_type"])
+            if parsed.get("action_type") in _action_opts else 1
+        )
+        action_type = st.selectbox(
+            "操作类型", _action_opts,
+            format_func=lambda x: _action_labels[x],
+            index=default_action_idx, key="pre_eval_action",
+        )
+
+    with col_b:
+        default_pct_int = max(1, min(30, int(round((parsed.get("amount_pct") or 0.05) * 100))))
+        amount_pct = st.slider(
+            "操作金额（占总资产 %）", 1, 30, default_pct_int,
+            key="pre_eval_amount",
+        ) / 100.0
+        st.caption(f"≈ 人民币 {total * amount_pct:,.0f} 元")
+
+        _emotion_opts = list(_EMOTION_OPTIONS.keys())
+        default_emotion_idx = (
+            _emotion_opts.index(parsed.get("emotion", "normal"))
+            if parsed.get("emotion") in _emotion_opts else 0
+        )
+        emotion = st.selectbox(
+            "当前情绪状态", _emotion_opts,
+            format_func=lambda x: _EMOTION_OPTIONS[x],
+            index=default_emotion_idx, key="pre_eval_emotion",
+        )
+
+        logic_ok = st.checkbox(
+            "长期逻辑完好（未发生逻辑破坏）",
+            value=parsed.get("logic_based") if parsed.get("logic_based") is not None else True,
+            key="pre_eval_logic",
+            help="规则5/7：逻辑破坏 = 核心产品竞争力消失/商业模式根本变化/管理层诚信问题",
+        )
+
+    with st.expander("🔧 工具类型（默认：普通股/ETF）"):
+        is_margin = st.checkbox("涉及融资融券",      value=parsed.get("is_margin", False),   key="pre_eval_margin")
+        is_opts   = st.checkbox("涉及期权",           value=parsed.get("is_options", False),  key="pre_eval_options")
+        is_credit = st.checkbox("使用信用贷/借贷资金", value=parsed.get("is_credit", False),   key="pre_eval_credit")
+        is_etf    = st.checkbox(
+            "为杠杆ETF（如 TQQQ）",
+            value=parsed.get("is_leverage_etf", False) or pos_data.get("is_leverage_etf", False),
+            key="pre_eval_etf",
+        )
+
+    run_btn = st.button(
+        "⚡ 运行纪律评估", type="primary",
+        use_container_width=True, key="pre_eval_run",
+    )
+
+    if run_btn:
+        current_weight = (pos_data["market_value_cny"] / total) if total > 0 else 0.0
+        pos_state = PositionState(
+            symbol=pos_data.get("ticker") or pos_data["name"],
+            name=pos_data["name"],
+            weight=current_weight,
+            drawdown_pct=(pos_data.get("profit_loss_rate", 0) / 100.0)
+                         if pos_data.get("profit_loss_rate", 0) < 0 else 0.0,
+            asset_class=(
+                "leverage_etf" if is_etf
+                else _ASSET_CLASS_MAP.get(pos_data.get("asset_class", "权益"), "equity")
+            ),
+            logic_intact=logic_ok,
+        )
+        portfolio_state = _build_portfolio_state(raw, portfolio_drawdown_pct)
+        portfolio_state.positions = [
+            p if p.symbol != pos_state.symbol else pos_state
+            for p in portfolio_state.positions
+        ]
+        if pos_state.symbol not in {p.symbol for p in portfolio_state.positions}:
+            portfolio_state.positions.append(pos_state)
+
+        market_ctx = MarketContext(
+            trend=parsed.get("trend", "sideways"),
+            major_negative_event=bool(parsed.get("major_neg_event")),
+        )
+        user_st = UserState(emotional_state=emotion, daily_nav_drop_pct=0.0)
+        action = TradeAction(
+            action_type=action_type,
+            symbol=pos_state.symbol,
+            amount_pct=amount_pct,
+            is_margin_trading=is_margin,
+            is_options=is_opts,
+            is_credit_loan=is_credit,
+            is_leverage_etf=is_etf,
+        )
+        eval_result = evaluate_action(
+            portfolio_state, pos_state, market_ctx, user_st, action,
+        )
+        st.session_state["pre_eval_result"] = eval_result
+        st.session_state["pre_eval_context"] = {
+            "pos_data":    pos_data,
+            "action_type": action_type,
+            "amount_pct":  amount_pct,
+            "is_margin":   is_margin,
+            "is_options":  is_opts,
+            "is_credit":   is_credit,
+            "is_etf":      is_etf,
+            "emotion":     emotion,
+            "logic_based": logic_ok,
+        }
+
+    eval_result = st.session_state.get("pre_eval_result")
+    ctx         = st.session_state.get("pre_eval_context", {})
+
+    if eval_result and ctx:
+        st.divider()
+        st.markdown("#### 🧪 引擎评估结果")
+        _render_eval_result_section(eval_result)
+        st.divider()
+        _render_checklist_auto(raw, portfolio_drawdown_pct, ctx)
+
+
+# ─────────────────────────────────────────────────────────
 # Tab 4：纪律手册速查
 # ─────────────────────────────────────────────────────────
 
@@ -1064,10 +1582,9 @@ def render() -> None:
     # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
     has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📊  账户风险仪表盘",
-        "🧪  操作评估器",
-        "✅  交易前检查清单",
+        "🔍  交易前评估",
         "📖  纪律手册速查",
     ])
 
@@ -1075,10 +1592,7 @@ def render() -> None:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
 
     with tab2:
-        _render_evaluator(raw, portfolio_drawdown)
+        _render_pre_trade_eval(raw, portfolio_drawdown)
 
     with tab3:
-        _render_checklist(raw, portfolio_drawdown)
-
-    with tab4:
         _render_handbook()
