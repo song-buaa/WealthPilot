@@ -8,6 +8,7 @@ WealthPilot - 数据库基础设施
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
 
 # ── 路径配置 ──────────────────────────────────
 # __file__ = app/database.py，上两级是项目根目录
@@ -26,7 +27,9 @@ def get_engine():
     global _engine
     if _engine is None:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        _engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+        # NullPool：不缓存连接，每次 get_session() 都打开全新连接。
+        # 这解决了 Streamlit 多次 rerun 时 SQLite 读到旧快照的问题。
+        _engine = create_engine(f"sqlite:///{DB_PATH}", echo=False, poolclass=NullPool)
     return _engine
 
 

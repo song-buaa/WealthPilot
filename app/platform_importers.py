@@ -119,10 +119,10 @@ def parse_tiger_csv(content: str) -> Tuple[List[dict], float]:
             "original_currency": "USD",
             "original_value": round(market_value_usd, 2),
             "fx_rate_to_cny": usd_to_cny,
-            "market_value_cny": round(market_value_usd * usd_to_cny),
+            "market_value_cny": round(market_value_usd * usd_to_cny, 2),
             "quantity": quantity,
             "profit_loss_original_value": round(pnl_usd, 2),
-            "profit_loss_value": round(pnl_usd * usd_to_cny),
+            "profit_loss_value": round(pnl_usd * usd_to_cny, 2),
             "profit_loss_rate": round(pnl_rate, 2),
         })
 
@@ -188,10 +188,10 @@ def parse_futu_csv(content: str) -> Tuple[List[dict], float]:
             "original_currency": "USD",
             "original_value": round(market_value_usd, 2),
             "fx_rate_to_cny": usd_to_cny,
-            "market_value_cny": round(market_value_usd * usd_to_cny),
+            "market_value_cny": round(market_value_usd * usd_to_cny, 2),
             "quantity": quantity,
             "profit_loss_original_value": round(pnl_usd, 2),
-            "profit_loss_value": round(pnl_usd * usd_to_cny),
+            "profit_loss_value": round(pnl_usd * usd_to_cny, 2),
             "profit_loss_rate": round(pnl_rate, 2),
         })
 

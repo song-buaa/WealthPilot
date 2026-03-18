@@ -200,16 +200,16 @@ def _render_asset_section(pid: int, bs):
 
     def _fmt_hkd(v):
         if v is None or v == 0: return "-"
-        return f"{v:,.0f}"
+        return f"{v:,.2f}"
 
     def _fmt_cny(v):
         if v is None: return "-"
-        return f"{v:,.0f}"
+        return f"{v:,.2f}"
 
     def _fmt_pnl_cny(v):
         if not v: return "-"
         sign = "+" if v > 0 else ""
-        return f"{sign}{v:,.0f}"
+        return f"{sign}{v:,.2f}"
 
     def _fmt_pnl_usd(v):
         if not v: return "-"
@@ -242,6 +242,7 @@ def _render_asset_section(pid: int, bs):
         "thirdparty": "#F5EEF8",  # 浅紫 - 第三方
     }
     PNL_COLS = ["盈亏(美元)", "盈亏(港币)", "盈亏(人民币)", "盈亏%"]
+    MV_COLS  = ["市值(美元)", "市值(港币)", "市值(人民币)", "占比%"]
 
     pos_rows = []
     for p in positions:
@@ -257,7 +258,7 @@ def _render_asset_section(pid: int, bs):
             "市值(美元)": _fmt_usd(p.original_value if p.original_currency == "USD" else None),
             "市值(港币)": _fmt_hkd(p.original_value if p.original_currency == "HKD" else None),
             "市值(人民币)": _fmt_cny(p.market_value_cny),
-            "占比%": f"{bs.concentration.get(f'{p.id}:{p.name}', 0):.1f}%",
+            "占比%": f"{bs.concentration.get(f'{p.id}:{p.name}', 0):.2f}%",
             "盈亏(美元)": _fmt_pnl_usd(pnl_orig if p.original_currency == "USD" and pnl_orig != 0 else None),
             "盈亏(港币)": _fmt_pnl_usd(pnl_orig if p.original_currency == "HKD" and pnl_orig != 0 else None),
             "盈亏(人民币)": _fmt_pnl_cny(pnl_cny),
@@ -278,6 +279,9 @@ def _render_asset_section(pid: int, bs):
             bg = PLATFORM_BG_COLORS.get(ptype, "")
             if bg:
                 styles.loc[i, :] = f"background-color: {bg}"
+            for col in MV_COLS:
+                if col in df.columns and str(row.get(col, "")) not in ("-", ""):
+                    styles.loc[i, col] = f"background-color: {bg}; font-weight: 700"
             for col in PNL_COLS:
                 if col in df.columns:
                     val = str(row.get(col, ""))
@@ -350,51 +354,108 @@ def _render_asset_section(pid: int, bs):
                         st.error("未能解析到持仓数据，请检查文件格式。")
 
             with tab_bank:
-                st.caption("上传银行APP截图，AI自动识别各类资产金额，只替换该银行数据。")
-                bank = st.radio("选择银行", ["招商银行", "支付宝", "建设银行"],
-                                horizontal=True, key="bank_select")
+                st.caption("上传APP截图，AI自动识别持仓数据，只替换该平台数据。")
 
-                bank_categories = {
-                    "招商银行": "活钱管理（朝朝宝）、稳健投资（招行理财）、进取投资（招行基金）",
-                    "支付宝":   "活期资产（余额宝）、稳健理财、进阶理财",
-                    "建设银行": "活钱（建行活期）、理财产品（建行理财）、债券（建行债券）、基金（建行基金）",
+                _BANK_LIST   = ["招商银行", "支付宝", "建设银行"]
+                _BROKER_LIST = ["国金证券", "雪盈证券"]
+                platform = st.radio(
+                    "选择平台", _BANK_LIST + _BROKER_LIST,
+                    horizontal=True, key="bank_select",
+                )
+
+                _platform_hint = {
+                    "招商银行": "将识别：活钱管理、稳健投资、进取投资",
+                    "支付宝":   "将识别：活钱管理、稳健投资、进取投资",
+                    "建设银行": "将识别：活钱、理财产品、债券、基金",
+                    "国金证券": "将识别：所有港股持仓（名称、头寸、市值人民币、盈亏人民币、盈亏%）",
+                    "雪盈证券": "将识别：所有美股持仓（名称、代码、头寸、市值美元、盈亏美元、盈亏%）",
                 }
-                st.info(f"将识别：{bank_categories[bank]}")
+                st.info(_platform_hint[platform])
 
+                # counter 变化时 file_uploader key 随之改变，触发自动清空（导入成功后重置）
+                upload_counter = st.session_state.get("bank_upload_counter", 0)
                 img_file = st.file_uploader("上传截图（JPG/PNG）", type=["jpg", "jpeg", "png"],
-                                            key=f"bank_img_{bank}")
+                                            key=f"bank_img_{platform}_{upload_counter}")
                 if img_file:
-                    from app.bank_screenshot import parse_bank_screenshot, bank_positions_to_db
                     img_bytes = img_file.read()
                     st.image(img_bytes, caption="已上传截图", width=300)
+                    cache_key = f"bank_result_{platform}_{len(img_bytes)}"
 
-                    # ── 用 session_state 缓存 AI 结果，避免点击按钮时重复调用 ──
-                    cache_key = f"bank_result_{bank}_{len(img_bytes)}"
-                    if cache_key not in st.session_state:
-                        with st.spinner("AI 识别中..."):
-                            result, error = parse_bank_screenshot(img_bytes, bank)
-                        st.session_state[cache_key] = (result, error)
-                    else:
-                        result, error = st.session_state[cache_key]
+                    if platform in _BANK_LIST:
+                        # ── 银行固定分类识别 ──────────────────────────────
+                        from app.bank_screenshot import parse_bank_screenshot, bank_positions_to_db
+                        if cache_key not in st.session_state:
+                            with st.spinner("AI 识别中..."):
+                                result, error = parse_bank_screenshot(img_bytes, platform)
+                            st.session_state[cache_key] = (result, error)
+                        else:
+                            result, error = st.session_state[cache_key]
 
-                    if error:
-                        st.error(f"识别失败：{error}")
-                        if cache_key in st.session_state:
-                            del st.session_state[cache_key]
-                    else:
-                        st.success("识别成功，请确认以下数据：")
-                        preview = [{"分类": k, "识别金额(元)": f"{v:,.2f}"} for k, v in result.items()]
-                        st.dataframe(pd.DataFrame(preview), use_container_width=True, hide_index=True)
-
-                        if st.button(f"确认导入 {bank} 数据", key="confirm_bank_import", type="primary"):
-                            positions_to_update = bank_positions_to_db(result, bank)
-                            updated_count = _update_bank_positions(pid, positions_to_update, bank)
-                            if updated_count > 0:
-                                st.success(f"✅ {bank} 已更新 {updated_count} 条持仓数据！")
+                        if error:
+                            st.error(f"识别失败：{error}")
+                            if cache_key in st.session_state:
                                 del st.session_state[cache_key]
+                        else:
+                            st.success("识别成功，请确认以下数据：")
+                            preview = [{"分类": k, "识别金额(元)": f"{v:,.2f}"} for k, v in result.items()]
+                            st.dataframe(pd.DataFrame(preview), use_container_width=True, hide_index=True)
+
+                            if st.button(f"确认导入 {platform} 数据", key="confirm_bank_import", type="primary"):
+                                positions_to_update = bank_positions_to_db(result, platform)
+                                updated_count = _update_bank_positions(pid, positions_to_update, platform)
+                                if updated_count > 0:
+                                    del st.session_state[cache_key]
+                                    st.session_state["bank_upload_counter"] = upload_counter + 1
+                                    st.success(f"✅ {platform} 已更新 {updated_count} 条持仓数据！")
+                                    st.rerun()
+                                else:
+                                    st.error("⚠️ 未找到匹配的持仓记录，数据未更新。请检查识别结果是否正确。")
+
+                    else:
+                        # ── 券商逐笔持仓识别（国金/雪盈）──────────────────
+                        from app.bank_screenshot import parse_broker_screenshot, broker_positions_to_db
+                        if cache_key not in st.session_state:
+                            with st.spinner("AI 识别持仓中..."):
+                                broker_positions, error = parse_broker_screenshot(img_bytes, platform)
+                            st.session_state[cache_key] = (broker_positions, error)
+                        else:
+                            broker_positions, error = st.session_state[cache_key]
+
+                        if error:
+                            st.error(f"识别失败：{error}")
+                            if cache_key in st.session_state:
+                                del st.session_state[cache_key]
+                        else:
+                            st.success(f"识别成功，共 {len(broker_positions)} 条持仓，请确认：")
+
+                            if platform == "雪盈证券":
+                                preview_rows = [{
+                                    "名称":      p.get("name", ""),
+                                    "代码":      p.get("ticker", ""),
+                                    "头寸":      int(p.get("quantity", 0)),
+                                    "市值(美元)": f"{p.get('market_value_usd', 0):,.2f}",
+                                    "盈亏(美元)": f"{'+' if p.get('pnl_usd', 0) >= 0 else ''}{p.get('pnl_usd', 0):,.2f}",
+                                    "盈亏%":     f"{'+' if p.get('pnl_pct', 0) >= 0 else ''}{p.get('pnl_pct', 0):.2f}%",
+                                } for p in broker_positions]
+                            else:  # 国金证券（截图中市值/盈亏均为人民币）
+                                preview_rows = [{
+                                    "名称":       p.get("name", ""),
+                                    "代码":       p.get("ticker", ""),
+                                    "头寸":       int(p.get("quantity", 0)),
+                                    "市值(人民币)": f"{p.get('market_value_cny', 0):,.2f}",
+                                    "盈亏(人民币)": f"{'+' if p.get('pnl_cny', 0) >= 0 else ''}{p.get('pnl_cny', 0):,.2f}",
+                                    "盈亏%":      f"{'+' if p.get('pnl_pct', 0) >= 0 else ''}{p.get('pnl_pct', 0):.2f}%",
+                                } for p in broker_positions]
+
+                            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+
+                            if st.button(f"确认导入 {platform} 数据", key="confirm_bank_import", type="primary"):
+                                db_positions = broker_positions_to_db(broker_positions, platform)
+                                _import_positions_by_platform(pid, db_positions, platform)
+                                del st.session_state[cache_key]
+                                st.session_state["bank_upload_counter"] = upload_counter + 1
+                                st.success(f"✅ {platform} 已导入 {len(db_positions)} 条持仓数据！")
                                 st.rerun()
-                            else:
-                                st.error("⚠️ 未找到匹配的持仓记录，数据未更新。请检查识别结果是否正确。")
 
 
 def _render_liability_section(pid: int):
@@ -482,13 +543,13 @@ def _save_asset_edits(edited_df: pd.DataFrame, pid: int):
                 p.original_value = float(usd_val)
                 fx, _ = fx_service._get_rate_with_date("USD", "CNY", "latest")
                 p.fx_rate_to_cny = fx
-                p.market_value_cny = round(float(usd_val) * fx)
+                p.market_value_cny = round(float(usd_val) * fx, 2)
             elif pd.notna(hkd_val) and float(hkd_val) > 0:
                 p.original_currency = "HKD"
                 p.original_value = float(hkd_val)
                 fx, _ = fx_service._get_rate_with_date("HKD", "CNY", "latest")
                 p.fx_rate_to_cny = fx
-                p.market_value_cny = round(float(hkd_val) * fx)
+                p.market_value_cny = round(float(hkd_val) * fx, 2)
             elif pd.notna(cny_val):
                 p.market_value_cny = float(cny_val)
 
@@ -500,10 +561,10 @@ def _save_asset_edits(edited_df: pd.DataFrame, pid: int):
 
             if pd.notna(pnl_usd) and float(pnl_usd) != 0:
                 p.profit_loss_original_value = float(pnl_usd)
-                p.profit_loss_value = round(float(pnl_usd) * p.fx_rate_to_cny)
+                p.profit_loss_value = round(float(pnl_usd) * p.fx_rate_to_cny, 2)
             elif pd.notna(pnl_hkd) and float(pnl_hkd) != 0:
                 p.profit_loss_original_value = float(pnl_hkd)
-                p.profit_loss_value = round(float(pnl_hkd) * p.fx_rate_to_cny)
+                p.profit_loss_value = round(float(pnl_hkd) * p.fx_rate_to_cny, 2)
             elif pd.notna(pnl_cny):
                 p.profit_loss_value = float(pnl_cny)
 

@@ -2,6 +2,30 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.6.0] - 2026-03-18 - 数字格式规整 + 截图识别扩展（国金/雪盈）
+
+### Fixed - 数字格式统一
+- 所有市值/盈亏列统一保留 2 位小数：市值(美元/港币/人民币)、占比%、盈亏(美元/港币/人民币)、盈亏%
+- 修复 `platform_importers.py` 中 `round(x * rate)` 不带精度参数导致 CNY 市值取整为整数的问题（老虎/富途两处）
+- 修复 `overview.py` 手动编辑保存时汇率换算同样未保留小数的问题
+- 将 `_fmt_hkd` / `_fmt_cny` / `_fmt_pnl_cny` 格式函数从 `,.0f` 改为 `,.2f`，占比% 从 `:.1f%` 改为 `:.2f%`
+
+### Added - 截图识别扩展：国金证券 & 雪盈证券
+- `app/bank_screenshot.py` 新增 `BROKER_PROMPTS`（国金/雪盈专用提示词）
+- 新增 `parse_broker_screenshot()` 函数：解析券商持仓列表（返回 list 而非固定分类 dict）
+- 新增 `broker_positions_to_db()` 函数：调用 fx_service 换算汇率，生成可写入 DB 的持仓格式
+  - 雪盈证券：提取 USD 市值/盈亏，换算 CNY 存储
+  - 国金证券：截图已为 CNY（"普通交易-持仓"页顶部标注"人民币 CNY"），直接使用；反推 HKD 供港币列展示
+- 抽取 `_call_vision_api()` 公共函数，银行/券商识别共用，消除重复代码
+- `overview.py` 截图识别 Tab 扩展：平台从 3 家银行增至 5 个平台（+ 国金证券、雪盈证券）
+  - 银行走固定分类更新流程（按名称 patch）；券商走整平台替换流程（`_import_positions_by_platform`）
+  - 券商识别预览：雪盈显示市值(美元)/盈亏(美元)，国金显示市值(人民币)/盈亏(人民币)
+
+### Changed - 代码清理
+- 移除 `_render_asset_section` 和 `_update_bank_positions` 中的临时调试日志（`/tmp/wealthpilot_debug.log`）
+
+---
+
 ## [1.5.0] - 2026-03-18 - 产品重构 + 数据更新 + 券商直连导入
 
 ### Changed - 导航与模块拆分
