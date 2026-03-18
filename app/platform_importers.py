@@ -7,38 +7,7 @@ import re
 import io
 from typing import Tuple, List
 
-# ── 老虎证券名称映射 ──────────────────────────────────────────────
-TIGER_NAME_MAP = {
-    "AAPL": "苹果 AAPL",
-    "BRK.B": "伯克希尔B BRK.B",
-    "COIN": "Coinbase COIN",
-    "GOOG": "谷歌 GOOG",
-    "HIMS": "Hims HIMS",
-    "LI": "理想汽车 LI",
-    "META": "Meta META",
-    "MSFT": "微软 MSFT",
-    "PDD": "拼多多 PDD",
-    "QQQ": "QQQ",
-    "SHY": "SHY",
-    "TSLA": "特斯拉 TSLA",
-    "HK0000720752.USD": "平安货币基金",
-    "LU1725895616.USD": "安本标准债券基金",
-    "LU2416422678.USD": "VONTOBEL债券基金",
-}
-
-# ── 富途证券名称映射 ──────────────────────────────────────────────
-FUTU_NAME_MAP = {
-    "MSFT": "微软 MSFT",
-    "PDD": "拼多多 PDD",
-    "QQQ": "QQQ",
-    "AAPL": "苹果 AAPL",
-    "TSLA": "特斯拉 TSLA",
-    "LI": "理想汽车 LI",
-    "META": "Meta META",
-    "GOOG": "谷歌 GOOG",
-    "HIMS": "Hims HIMS",
-    "COIN": "Coinbase COIN",
-}
+# 固收 ticker 白名单（无需名称映射，名称直接取 CSV 原始值）
 
 # 固收 ticker 白名单
 FIXED_INCOME_TICKERS = {"SHY", "BND", "AGG", "TLT", "IEF"}
@@ -131,7 +100,7 @@ def parse_tiger_csv(content: str) -> Tuple[List[dict], float]:
             continue
 
         asset_class = _classify_tiger(subsection, ticker, raw_name)
-        name = TIGER_NAME_MAP.get(ticker, raw_name)
+        name = raw_name  # 老虎 CSV 原始名称即为标准格式，如"纳指100ETF (QQQ)"
 
         # P&L% 计算：pnl / cost_basis * 100
         cost_basis = market_value_usd - pnl_usd
@@ -177,8 +146,8 @@ def parse_futu_csv(content: str) -> Tuple[List[dict], float]:
             continue
 
         raw_name = row.get("名称", "").strip()
-        cn_name = raw_name
-        name = FUTU_NAME_MAP.get(ticker) or (f"{cn_name} ({ticker})" if cn_name and cn_name != ticker else ticker)
+        # 富途：中文名+代码 → "微软 (MSFT)"，纯英文代码或与 ticker 相同则直接用 ticker
+        name = f"{raw_name} ({ticker})" if raw_name and raw_name != ticker else ticker
 
         quantity_str = row.get("持有数量", "0").strip().replace(",", "")
         try:

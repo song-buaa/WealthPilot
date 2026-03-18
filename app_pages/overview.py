@@ -135,19 +135,28 @@ def render():
                 {"平台": k, "市值": v}
                 for k, v in bs.platform_distribution.items()
             ])
+            total_mv = platform_df["市值"].sum()
             platform_df = platform_df.sort_values("市值", ascending=False)
-            fig2 = px.pie(
-                platform_df, values="市值", names="平台",
-                color_discrete_sequence=px.colors.qualitative.Set2,
-                # 不设 hole，去掉环状
-            )
-            fig2.update_traces(
+            fig2 = go.Figure(go.Pie(
+                labels=platform_df["平台"],
+                values=platform_df["市值"],
                 sort=True,
                 direction="clockwise",
+                textinfo="percent",
                 textposition="inside",
-                textinfo="percent+label",
+                hovertemplate=(
+                    "<b>%{label}</b><br>"
+                    "市值: ¥%{value:,.0f}<br>"
+                    "占比: %{percent}<br>"
+                    "<extra></extra>"
+                ),
+                marker=dict(colors=px.colors.qualitative.Set2),
+            ))
+            fig2.update_layout(
+                height=400,
+                margin=dict(t=20, b=20),
+                legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
             )
-            fig2.update_layout(height=400, margin=dict(t=20, b=20), showlegend=False)
             st.plotly_chart(fig2, use_container_width=True)
 
     st.divider()
