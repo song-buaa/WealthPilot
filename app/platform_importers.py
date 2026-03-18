@@ -177,7 +177,8 @@ def parse_futu_csv(content: str) -> Tuple[List[dict], float]:
             continue
 
         raw_name = row.get("名称", "").strip()
-        name = FUTU_NAME_MAP.get(ticker, raw_name)
+        cn_name = raw_name
+        name = FUTU_NAME_MAP.get(ticker) or (f"{cn_name} ({ticker})" if cn_name and cn_name != ticker else ticker)
 
         quantity_str = row.get("持有数量", "0").strip().replace(",", "")
         try:

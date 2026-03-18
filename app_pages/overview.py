@@ -135,12 +135,19 @@ def render():
                 {"平台": k, "市值": v}
                 for k, v in bs.platform_distribution.items()
             ])
+            platform_df = platform_df.sort_values("市值", ascending=False)
             fig2 = px.pie(
                 platform_df, values="市值", names="平台",
                 color_discrete_sequence=px.colors.qualitative.Set2,
-                hole=0.4,
+                # 不设 hole，去掉环状
             )
-            fig2.update_layout(height=400, margin=dict(t=20, b=20))
+            fig2.update_traces(
+                sort=True,
+                direction="clockwise",
+                textposition="inside",
+                textinfo="percent+label",
+            )
+            fig2.update_layout(height=400, margin=dict(t=20, b=20), showlegend=False)
             st.plotly_chart(fig2, use_container_width=True)
 
     st.divider()
@@ -178,43 +185,64 @@ def _render_asset_section(pid: int, bs):
         st.info("暂无投资持仓数据。")
         return
 
+    def _fmt_usd(v):
+        if v is None or v == 0: return "-"
+        return f"{v:,.2f}"
+
+    def _fmt_hkd(v):
+        if v is None or v == 0: return "-"
+        return f"{v:,.0f}"
+
+    def _fmt_cny(v):
+        if v is None: return "-"
+        return f"{v:,.0f}"
+
+    def _fmt_pnl_cny(v):
+        if not v: return "-"
+        sign = "+" if v > 0 else ""
+        return f"{sign}{v:,.0f}"
+
+    def _fmt_pnl_usd(v):
+        if not v: return "-"
+        sign = "+" if v > 0 else ""
+        return f"{sign}{v:,.2f}"
+
+    def _fmt_pct(v):
+        if v is None: return "-"
+        sign = "+" if v > 0 else ""
+        return f"{sign}{v:.2f}%"
+
+    # 计算每个平台的总市值（用于排序）
+    platform_totals = {}
+    for p in positions:
+        platform_totals[p.platform] = platform_totals.get(p.platform, 0) + p.market_value_cny
+
+    PLATFORM_TYPE_MAP = {
+        "老虎证券": "overseas",
+        "富途证券": "overseas",
+        "雪盈证券": "overseas",
+        "国金证券": "domestic",
+        "建设银行": "bank",
+        "招商银行": "bank",
+        "支付宝": "thirdparty",
+    }
+    PLATFORM_BG_COLORS = {
+        "overseas":   "#EBF5FB",  # 浅蓝 - 境外券商
+        "domestic":   "#FEF9E7",  # 浅黄 - 境内券商
+        "bank":       "#EAFAF1",  # 浅绿 - 银行
+        "thirdparty": "#F5EEF8",  # 浅紫 - 第三方
+    }
+    PNL_COLS = ["盈亏(美元)", "盈亏(港币)", "盈亏(人民币)", "盈亏%"]
+
     pos_rows = []
     for p in positions:
         pnl_orig = p.profit_loss_original_value or 0
         pnl_rate = p.profit_loss_rate
         pnl_cny = p.profit_loss_value
 
-        def _fmt_usd(v):
-            if v is None: return "-"
-            return f"${v:,.2f}" if v != 0 else "-"
-
-        def _fmt_hkd(v):
-            if v is None: return "-"
-            return f"HK${v:,.0f}" if v != 0 else "-"
-
-        def _fmt_cny(v):
-            if v is None: return "-"
-            return f"¥{v:,.0f}"
-
-        def _fmt_pnl_cny(v):
-            if not v: return "-"
-            sign = "+" if v > 0 else ""
-            return f"{sign}¥{v:,.0f}"
-
-        def _fmt_pnl_usd(v):
-            if not v: return "-"
-            sign = "+" if v > 0 else ""
-            return f"{sign}${v:,.2f}"
-
-        def _fmt_pct(v):
-            if v is None: return "-"
-            sign = "+" if v > 0 else ""
-            return f"{sign}{v:.2f}%"
-
         pos_rows.append({
             "平台": p.platform,
             "资产名称": p.name,
-            "代码": p.ticker or "-",
             "大类": p.asset_class,
             "头寸": int(p.quantity) if p.quantity else "-",
             "市值(美元)": _fmt_usd(p.original_value if p.original_currency == "USD" else None),
@@ -227,11 +255,31 @@ def _render_asset_section(pid: int, bs):
             "盈亏%": _fmt_pct(pnl_rate),
         })
 
-    # 按平台升序、市值降序排列
-    combined = sorted(zip(positions, pos_rows), key=lambda x: (x[0].platform, -x[0].market_value_cny))
+    # 排序：平台总资产降序 → 持仓市值降序
+    combined = sorted(
+        zip(positions, pos_rows),
+        key=lambda x: (-platform_totals.get(x[0].platform, 0), -x[0].market_value_cny)
+    )
     pos_df = pd.DataFrame([r for _, r in combined])
 
-    st.dataframe(pos_df, use_container_width=True, hide_index=True)
+    def style_table(df: pd.DataFrame) -> pd.DataFrame:
+        styles = pd.DataFrame("", index=df.index, columns=df.columns)
+        for i, row in df.iterrows():
+            ptype = PLATFORM_TYPE_MAP.get(row["平台"], "")
+            bg = PLATFORM_BG_COLORS.get(ptype, "")
+            if bg:
+                styles.loc[i, :] = f"background-color: {bg}"
+            for col in PNL_COLS:
+                if col in df.columns:
+                    val = str(row.get(col, ""))
+                    if val.startswith("+"):
+                        styles.loc[i, col] = f"background-color: {bg}; color: #E74C3C; font-weight: 600"
+                    elif val.startswith("-"):
+                        styles.loc[i, col] = f"background-color: {bg}; color: #27AE60; font-weight: 600"
+        return styles
+
+    styled = pos_df.style.apply(style_table, axis=None)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # ── 操作栏：下载 + 导入 ──────────────────────────────────────────
     csv_str = positions_to_csv(session_positions_reload(pid, segment="投资"))
@@ -246,7 +294,11 @@ def _render_asset_section(pid: int, bs):
         )
     with col_imp:
         with st.expander("📥 导入资产数据"):
-            tab_generic, tab_broker = st.tabs(["通用 CSV（全量覆盖）", "券商官方 CSV（按平台替换）"])
+            tab_generic, tab_broker, tab_bank = st.tabs([
+                "通用 CSV（全量覆盖）",
+                "券商官方 CSV（按平台替换）",
+                "银行截图（AI识别）",
+            ])
 
             with tab_generic:
                 st.caption("上传后将全量覆盖全部投资持仓，养老/公积金数据不受影响。")
@@ -288,6 +340,42 @@ def _render_asset_section(pid: int, bs):
                     else:
                         st.error("未能解析到持仓数据，请检查文件格式。")
 
+            with tab_bank:
+                st.caption("上传银行APP截图，AI自动识别各类资产金额，只替换该银行数据。")
+                bank = st.radio("选择银行", ["招商银行", "支付宝", "建设银行"],
+                                horizontal=True, key="bank_select")
+
+                # 显示各银行的分类说明
+                bank_categories = {
+                    "招商银行": "活钱管理（朝朝宝）、稳健投资（招行理财）、进取投资（招行基金）",
+                    "支付宝":   "活钱管理（余额宝）、稳健投资（稳健理财）、进取投资（进阶理财）",
+                    "建设银行": "活钱（建行活期）、理财（建行理财）、债券（建行债券）、基金（建行基金）",
+                }
+                st.info(f"将识别：{bank_categories[bank]}")
+
+                img_file = st.file_uploader("上传截图（JPG/PNG）", type=["jpg", "jpeg", "png"],
+                                            key=f"bank_img_{bank}")
+                if img_file:
+                    from app.bank_screenshot import parse_bank_screenshot, bank_positions_to_db
+                    img_bytes = img_file.read()
+                    st.image(img_bytes, caption="已上传截图", width=300)
+
+                    with st.spinner("AI 识别中..."):
+                        result, error = parse_bank_screenshot(img_bytes, bank)
+
+                    if error:
+                        st.error(f"识别失败：{error}")
+                    else:
+                        st.success("识别成功，请确认以下数据：")
+                        preview = [{"分类": k, "识别金额(元)": f"{v:,.2f}"} for k, v in result.items()]
+                        st.dataframe(pd.DataFrame(preview), use_container_width=True, hide_index=True)
+
+                        if st.button(f"确认导入 {bank} 数据", key="confirm_bank_import", type="primary"):
+                            positions_to_update = bank_positions_to_db(result, bank)
+                            _update_bank_positions(pid, positions_to_update, bank)
+                            st.success(f"{bank} 数据已更新！")
+                            st.rerun()
+
 
 def _render_liability_section(pid: int):
     """负债明细区块（只展示 purpose==投资杠杆）"""
@@ -302,13 +390,14 @@ def _render_liability_section(pid: int):
     if not liabilities:
         st.info("暂无投资杠杆类负债数据。")
     else:
+        liabilities_sorted = sorted(liabilities, key=lambda l: (-l.amount, -(l.interest_rate or 0)))
         liab_data = [{
             "负债名称": l.name,
             "类型": l.category,
             "用途": l.purpose,
             "金额(元)": f"¥{l.amount:,.0f}",
             "年利率": f"{l.interest_rate}%",
-        } for l in liabilities]
+        } for l in liabilities_sorted]
         st.dataframe(pd.DataFrame(liab_data), use_container_width=True, hide_index=True)
 
     # ── 操作栏：下载 + 导入 ──────────────────────────────────────────
@@ -472,5 +561,27 @@ def _import_liabilities_by_purpose(pid: int, new_liabilities: list, purposes: li
     except Exception as e:
         session.rollback()
         st.error(f"导入失败: {e}")
+    finally:
+        session.close()
+
+
+def _update_bank_positions(pid: int, updates: list, platform: str):
+    """按名称更新指定银行的持仓金额（不删除，只更新已有记录）"""
+    session = get_session()
+    try:
+        for item in updates:
+            p = session.query(Position).filter_by(
+                portfolio_id=pid,
+                platform=platform,
+                name=item["name"],
+                segment="投资",
+            ).first()
+            if p:
+                p.market_value_cny = item["market_value_cny"]
+                p.original_value = item["market_value_cny"]  # CNY资产 original=cny
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        st.error(f"更新失败: {e}")
     finally:
         session.close()
