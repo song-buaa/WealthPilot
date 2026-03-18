@@ -1548,25 +1548,37 @@ def _render_handbook() -> None:
 # 主渲染函数
 # ─────────────────────────────────────────────────────────
 
+_NAV_ITEMS = ["📊  账户风险仪表盘", "🔍  交易前评估", "📖  纪律手册速查"]
+
+
 def render() -> None:
     st.title("投资纪律执行引擎")
 
-    # Tab 样式：等宽、居中、字号调大
+    # 导航栏样式：用 radio horizontal 替代 st.tabs()
+    # 原因：Streamlit 1.32.x 中 st.tabs() 的选中状态在内部 button 点击后会丢失（已知行为），
+    # 而 st.radio(key=...) 的选中值存储在 session_state 中，任何 rerun 都不会重置。
     st.markdown("""
     <style>
-    .stTabs [data-baseweb="tab-list"] {
+    /* 隐藏 radio 圆形按钮，保留可点击的 label 区域，模拟 tab 外观 */
+    div[data-testid="stRadio"] > label { display: none; }
+    div[data-testid="stRadio"] > div[role="radiogroup"] {
         gap: 0;
+        border-bottom: 2px solid rgba(49,51,63,0.15);
+        margin-bottom: 1rem;
     }
-    .stTabs [data-baseweb="tab"] {
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label {
         flex: 1;
         justify-content: center;
         font-size: 1.05rem;
         font-weight: 500;
-        padding: 0.6rem 0;
+        padding: 0.55rem 0.5rem;
         border-radius: 6px 6px 0 0;
+        cursor: pointer;
     }
-    .stTabs [aria-selected="true"] {
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {
         font-weight: 700;
+        border-bottom: 2px solid #ff4b4b;
+        margin-bottom: -2px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1586,17 +1598,18 @@ def render() -> None:
     # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
     has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
 
-    tab1, tab2, tab3 = st.tabs([
-        "📊  账户风险仪表盘",
-        "🔍  交易前评估",
-        "📖  纪律手册速查",
-    ])
+    # 导航 radio：state 存于 session_state，button 点击后不会丢失
+    active_nav = st.radio(
+        "页面导航",
+        _NAV_ITEMS,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="discipline_nav",
+    )
 
-    with tab1:
+    if active_nav == _NAV_ITEMS[0]:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
-
-    with tab2:
+    elif active_nav == _NAV_ITEMS[1]:
         _render_pre_trade_eval(raw, portfolio_drawdown)
-
-    with tab3:
+    else:
         _render_handbook()
