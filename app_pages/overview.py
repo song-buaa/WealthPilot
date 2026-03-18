@@ -305,8 +305,8 @@ def _render_asset_section(pid: int, bs):
         with st.expander("📥 导入资产数据"):
             tab_generic, tab_broker, tab_bank = st.tabs([
                 "通用 CSV（全量覆盖）",
-                "券商官方 CSV（按平台替换）",
-                "银行截图（AI识别）",
+                "CSV导入（按平台替换）",
+                "截图识别（按平台替换）",
             ])
 
             with tab_generic:
