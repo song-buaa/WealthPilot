@@ -2,6 +2,39 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.7.1] - 2026-03-19 - 投资纪律导航修复 + 资产配置图标准化
+
+### Fixed - 投资纪律页面导航彻底重建
+
+**根本原因：** Streamlit 1.32.x 中 `st.tabs()` 与 `st.radio` + 手写 CSS 均存在缺陷：
+- `st.tabs()`：tab 选中状态存储在浏览器前端，任何 Python button 点击触发 rerun 后 tab 重置为第一页
+- `st.radio` + CSS：CSS 选择器无法匹配 Streamlit 1.32.x 实际 DOM 结构，radio 圆圈仍然显示，标签换行，视觉损坏
+
+**修复方案：** 新增 `_discipline_nav()` 函数，三档兼容自动降级：
+1. `st.segmented_control(use_container_width=True)` — Streamlit ≥ 1.40，原生 tab 样式 + 全宽（`TypeError` 捕获，自动降级）
+2. `st.segmented_control` — Streamlit 1.36~1.39，原生 tab 样式（`AttributeError` 捕获，自动降级）
+3. **全宽等宽按钮组（当前环境 1.32.x 实际生效）**：`st.columns(3)` + `st.button(use_container_width=True)`，active 页 `type="primary"`，inactive `type="secondary"`
+
+**选中状态持久化：** 导航选中值写入 `st.session_state["discipline_nav"]`，任何内容区 button 点击触发 rerun 均不会重置导航位置。
+
+- 恢复完整导航标签名：`"📊  账户风险仪表盘"` / `"🔍  交易前评估"` / `"📖  纪律手册速查"`
+- 删除所有手写 CSS（破损的 radio 圆圈隐藏逻辑）
+- `render()` 中移除 `st.radio()` 调用，统一走 `_discipline_nav()`
+
+### Changed - 资产配置图目标区间读取纪律配置
+
+**`app_pages/overview.py`**：资产配置柱状图的目标区间从 `portfolio` 表的自定义字段改为读取 `app/discipline/config.py` 中的 `RULES["asset_allocation_ranges"]`，确保总览图与纪律仪表盘数据来源一致：
+- 货币：按绝对金额（`monetary_min/max_amount`）换算为当前总资产占比，图注显示「X万~Y万元」
+- 固收 / 权益 / 另类 / 衍生：直接读取规则百分比，图注格式与纪律手册一致
+
+### Changed - 侧边栏导航调整
+
+**`streamlit_app.py`**：
+- 新增「**投资纪律**」导航入口（对应 `app_pages/discipline`），位于「养老&生活规划」之后
+- 「投资策略」更名为「**投资决策**」，与纪律模块形成区分
+
+---
+
 ## [1.7.0] - 2026-03-18 - 投资纪律模块：规则重组 + 仪表盘重排
 
 ### Changed - 投资纪律手册规则重组（12条 → 11条）

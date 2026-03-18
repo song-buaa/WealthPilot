@@ -1551,37 +1551,51 @@ def _render_handbook() -> None:
 _NAV_ITEMS = ["📊  账户风险仪表盘", "🔍  交易前评估", "📖  纪律手册速查"]
 
 
+def _discipline_nav() -> str:
+    """返回当前选中的导航项，状态持久化到 session_state["discipline_nav"]。
+
+    优先级：
+    1. st.segmented_control + use_container_width=True  (Streamlit ≥ 1.40)
+    2. st.segmented_control（无 use_container_width）   (Streamlit 1.36~1.39)
+    3. 全宽按钮组 fallback                              (Streamlit < 1.36)
+
+    任何 button 点击触发的 rerun 都不会重置导航位置。
+    """
+    if "discipline_nav" not in st.session_state:
+        st.session_state["discipline_nav"] = _NAV_ITEMS[0]
+
+    _sc = getattr(st, "segmented_control", None)
+    if _sc is not None:
+        # 尝试带 use_container_width（≥1.40），不支持时降级
+        try:
+            result = _sc(
+                "导航", options=_NAV_ITEMS, key="discipline_nav",
+                label_visibility="collapsed", use_container_width=True,
+            )
+        except TypeError:
+            result = _sc(
+                "导航", options=_NAV_ITEMS, key="discipline_nav",
+                label_visibility="collapsed",
+            )
+        return result if result is not None else _NAV_ITEMS[0]
+
+    # Fallback：全宽按钮组，active = primary，inactive = secondary
+    cols = st.columns(len(_NAV_ITEMS))
+    for col, item in zip(cols, _NAV_ITEMS):
+        with col:
+            if st.button(
+                item,
+                use_container_width=True,
+                type="primary" if st.session_state.get("discipline_nav") == item else "secondary",
+                key=f"_nav_{item}",
+            ):
+                st.session_state["discipline_nav"] = item
+
+    return st.session_state.get("discipline_nav", _NAV_ITEMS[0])
+
+
 def render() -> None:
     st.title("投资纪律执行引擎")
-
-    # 导航栏样式：用 radio horizontal 替代 st.tabs()
-    # 原因：Streamlit 1.32.x 中 st.tabs() 的选中状态在内部 button 点击后会丢失（已知行为），
-    # 而 st.radio(key=...) 的选中值存储在 session_state 中，任何 rerun 都不会重置。
-    st.markdown("""
-    <style>
-    /* 隐藏 radio 圆形按钮，保留可点击的 label 区域，模拟 tab 外观 */
-    div[data-testid="stRadio"] > label { display: none; }
-    div[data-testid="stRadio"] > div[role="radiogroup"] {
-        gap: 0;
-        border-bottom: 2px solid rgba(49,51,63,0.15);
-        margin-bottom: 1rem;
-    }
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label {
-        flex: 1;
-        justify-content: center;
-        font-size: 1.05rem;
-        font-weight: 500;
-        padding: 0.55rem 0.5rem;
-        border-radius: 6px 6px 0 0;
-        cursor: pointer;
-    }
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {
-        font-weight: 700;
-        border-bottom: 2px solid #ff4b4b;
-        margin-bottom: -2px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
     # 加载数据
     raw = _load_positions(portfolio_id)
@@ -1598,14 +1612,8 @@ def render() -> None:
     # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
     has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
 
-    # 导航 radio：state 存于 session_state，button 点击后不会丢失
-    active_nav = st.radio(
-        "页面导航",
-        _NAV_ITEMS,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="discipline_nav",
-    )
+    # 导航：state 存于 session_state，button 点击后不会丢失
+    active_nav = _discipline_nav()
 
     if active_nav == _NAV_ITEMS[0]:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)

@@ -12,6 +12,7 @@ from app.models import Portfolio, Position, Liability, get_session
 from app.analyzer import analyze_portfolio, check_deviations
 from app.state import portfolio_id, get_position_count
 from app.config import SEVERITY_ICONS, ASSET_CLASS_EXAMPLES
+from app.discipline.config import RULES as DISCIPLINE_RULES
 from app.csv_importer import parse_positions_csv, parse_liabilities_csv, import_to_db, positions_to_csv, liabilities_to_csv
 
 
@@ -67,13 +68,32 @@ def render():
         ]
         bar_colors = ["#45B7D1", "#4ECDC4", "#FF6B6B", "#96CEB4", "#F7DC6F"]
 
+        # 目标区间：优先使用投资纪律规则9（discipline/config.py），货币按绝对金额换算%
+        _r9 = DISCIPLINE_RULES["asset_allocation_ranges"]
+        _total = bs.total_assets or 1.0
+        _cash_min_pct = _r9["monetary_min_amount"] / _total * 100
+        _cash_max_pct = _r9["monetary_max_amount"] / _total * 100
         min_values = [
-            portfolio.min_cash_pct, portfolio.min_fixed_income_pct,
-            portfolio.min_equity_pct, portfolio.min_alternative_pct, 0.0,
+            _cash_min_pct,
+            _r9["fixed_income_min"] * 100,
+            _r9["equity_min"] * 100,
+            0.0,
+            0.0,
         ]
         max_values = [
-            portfolio.max_cash_pct, portfolio.max_fixed_income_pct,
-            portfolio.max_equity_pct, portfolio.max_alternative_pct, 100.0,
+            _cash_max_pct,
+            _r9["fixed_income_max"] * 100,
+            _r9["equity_max"] * 100,
+            _r9["alternatives_max"] * 100,
+            _r9["derivatives_max"] * 100,
+        ]
+        # 目标区间文字标注（货币用绝对金额表示）
+        _r9_labels = [
+            f"{int(_r9['monetary_min_amount']//10000)}万~{int(_r9['monetary_max_amount']//10000)}万元",
+            f"{_r9['fixed_income_min']*100:.0f}%~{_r9['fixed_income_max']*100:.0f}%",
+            f"{_r9['equity_min']*100:.0f}%~{_r9['equity_max']*100:.0f}%",
+            f"≤{_r9['alternatives_max']*100:.0f}%",
+            f"≤{_r9['derivatives_max']*100:.0f}%",
         ]
 
         examples = [ASSET_CLASS_EXAMPLES.get(c, "") for c in categories]
@@ -95,8 +115,7 @@ def render():
             marker_color=["rgba(200,200,200,0.25)"] * 5,
             marker_line_color=["rgba(150,150,150,0.6)"] * 5,
             marker_line_width=1,
-            text=[f"{mn}%~{mx}%" if not (mn == 0 and mx == 100) else "不设约束"
-                  for mn, mx in zip(min_values, max_values)],
+            text=_r9_labels,
             textposition="outside",
             textfont=dict(size=10, color="gray"),
             hoverinfo="skip",

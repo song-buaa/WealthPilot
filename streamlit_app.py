@@ -12,7 +12,7 @@ from app.models import Position, get_session
 from app.state import portfolio_id, get_position_count
 
 # 页面模块
-from app_pages import overview, retirement_life, strategy, ai_analysis
+from app_pages import overview, retirement_life, discipline, strategy, ai_analysis
 
 # ──────────────────────────────────────────────
 # 页面配置
@@ -32,7 +32,7 @@ st.sidebar.caption("个人资产配置与智能投顾系统")
 
 page = st.sidebar.radio(
     "导航",
-    ["投资账户总览", "养老&生活规划", "投资策略", "AI 分析报告"],
+    ["投资账户总览", "养老&生活规划", "投资纪律", "投资决策", "AI 分析报告"],
     index=0,
 )
 
@@ -54,7 +54,8 @@ st.sidebar.metric("投资持仓数量", _get_invest_position_count(portfolio_id)
 _PAGES = {
     "投资账户总览": overview,
     "养老&生活规划": retirement_life,
-    "投资策略":      strategy,
+    "投资纪律":      discipline,
+    "投资决策":      strategy,
     "AI 分析报告":   ai_analysis,
 }
 _PAGES[page].render()
