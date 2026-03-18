@@ -1087,24 +1087,28 @@ def _render_pre_trade_eval(raw: list[dict], portfolio_drawdown_pct: float) -> No
         parse_btn = st.button(
             "🔍 解析交易意图", type="primary",
             use_container_width=True, key="pre_eval_parse",
-            disabled=not (nl_text or "").strip(),
+            # 不用 disabled 控制：text_area 只在失去焦点后才更新 nl_text，
+            # 导致用户输入中按钮仍呈灰色。空输入由下方 if 条件拦截。
         )
     with col_clear:
         if st.button("重置", use_container_width=True, key="pre_eval_clear"):
-            for k in _PRE_EVAL_FORM_KEYS + [
-                "pre_eval_parsed", "pre_eval_result",
-                "pre_eval_context", "pre_eval_nl_text",
-            ]:
+            # 将文本框置空（比 pop 更可靠：同一轮渲染中文本框已渲染完毕，
+            # 设置 session_state 会在下一次用户交互时生效）
+            st.session_state["pre_eval_nl_text"] = ""
+            for k in _PRE_EVAL_FORM_KEYS + ["pre_eval_parsed", "pre_eval_result", "pre_eval_context"]:
                 st.session_state.pop(k, None)
-            st.rerun()
+            # 不调用 st.rerun()，让后续渲染继续（parsed 已清空，下方会显示 info 提示）
+
+    if parse_btn and not (nl_text or "").strip():
+        st.warning("请先在上方输入交易描述，再点击解析。")
 
     if parse_btn and (nl_text or "").strip():
         parsed = _parse_trade_intent(nl_text, raw, total)
         st.session_state["pre_eval_parsed"] = parsed
-        # 清除旧表单 widget 状态，让下次渲染使用新的解析默认值
+        # 在渲染表单 widget 之前清除旧 key，使它们在本轮渲染中使用 value 参数作为默认值
+        # 无需 st.rerun()，Streamlit 同一轮渲染中 key 缺失时会自动使用 value 默认值
         for k in _PRE_EVAL_FORM_KEYS + ["pre_eval_result", "pre_eval_context"]:
             st.session_state.pop(k, None)
-        st.rerun()
 
     parsed: dict = st.session_state.get("pre_eval_parsed", {})
 
