@@ -2,6 +2,50 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.5.0] - 2026-03-18 - 产品重构 + 数据更新 + 券商直连导入
+
+### Changed - 导航与模块拆分
+- 「资产全景」→「投资账户总览」，「持仓明细」→「资产明细」
+- 新增「养老&生活规划」独立导航模块，公积金/年金/日常消费类负债归入此处，与投资资金完全隔离
+- 数据导入融合进各明细区块，删除独立的「数据导入」导航栏
+
+### Changed - 投资账户总览
+- 资产明细与负债明细改为平铺两楼层，去掉 Tab 切换
+- 新增盈亏原始货币列（美元/港币），与市值保持一致的多币种展示
+- 大类资产命名统一：「现金」→「货币」，固定货币/固收/权益/另类/衍生五类
+- 大类资产配置图：鼠标悬停柱子显示该类资产示例，替换原来的 expander 说明
+- 负债明细只展示 `purpose=投资杠杆` 的条目，养老/生活类不纳入杠杆率计算
+- 下载+导入操作区重新设计：下载按钮 + 单个「导入」expander（内含「通用CSV」和「券商官方CSV」两个 Tab）
+
+### Added - FX Rate Service
+- 新增 `app/fx_service.py`，对接 Frankfurter API
+- 支持 `latest` / `historical` 两种模式，月末复盘可指定历史汇率
+- 汇率换算由确定性代码完成，不让 LLM 参与计算
+- 保留未来替换 provider（ECB/HKMA）的扩展能力
+
+### Added - 券商直连导入
+- 新增 `app/platform_importers.py`，专门解析券商官方 CSV
+- 支持**老虎证券**对账单 CSV（多 section 格式，自动提取 USD/CNY 汇率）
+- 支持**富途证券**持仓 CSV（标准表格格式，调用 fx_service 获取汇率）
+- 按平台替换持仓，其他平台数据不受影响
+- 导入前显示解析预览，确认后生效
+
+### Added - 养老&生活规划模块
+- 新增 `app_pages/retirement_life.py`
+- 公积金、年金、购房类资产独立展示，不纳入投资账户总览
+- 日常消费类负债（信用卡/闪电贷/e招贷）归入此模块
+
+### Changed - 数据更新（2026-03-16/17）
+- 老虎证券：15 条持仓全量更新（LI/META/PDD/AAPL/TSLA/TSLA/BRK.B 等）
+- 富途证券：MSFT/QQQ/PDD 更新为最新市值
+- 雪盈证券 LI 盈亏修正为 -44.50%（-$4,175.35 USD）
+- `Position` 模型新增 `profit_loss_original_value` 字段（原始货币盈亏）
+
+### Fixed - SSH 推送配置
+- 配置 `~/.ssh/config` 让 GitHub SSH 走 port 443（`ssh.github.com`），解决 port 22 被拦问题
+
+---
+
 ## [1.4.0] - 2026-03-15 - 目录整理与工作流规范化
 
 ### Changed
