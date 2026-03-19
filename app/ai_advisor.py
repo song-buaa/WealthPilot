@@ -11,6 +11,7 @@ from app.analyzer import BalanceSheet, DeviationAlert
 from app.config import (
     AI_REPORT_MODEL, AI_ALERT_MODEL,
     AI_REPORT_MAX_TOKENS, AI_ALERT_MAX_TOKENS,
+    AI_RESEARCH_MODEL, AI_RESEARCH_MAX_TOKENS,
     AI_TEMPERATURE,
 )
 
@@ -105,6 +106,90 @@ def generate_portfolio_analysis(
         return f"⚠️ 配置错误：{str(e)}"
     except Exception as e:
         return f"AI 分析生成失败: {str(e)}\n\n请检查网络连接和 API 配置。"
+
+
+def generate_research_card(
+    raw_content: str,
+    title: str,
+    object_name: str = "",
+    market_name: str = "",
+) -> dict:
+    """
+    将研究资料原文提炼为结构化候选观点卡。
+
+    返回 dict，字段与 ResearchCard 一一对应。
+    若 LLM 调用失败，返回 {"error": "<msg>"}。
+
+    Prompt 设计原则：
+    - 要求输出纯 JSON，不加任何 Markdown 包裹
+    - 要求偏"研究判断"而非泛泛摘要
+    - horizon / stance 枚举值固定，便于后续筛选
+    """
+    system_prompt = """你是一名专业的卖方研究分析师助理，专门负责把研究资料提炼成结构化的投研观点卡。
+
+你的任务：
+1. 仔细阅读用户提供的研究资料（可能是研报摘要、新闻分析、博主观点、会议纪要等）
+2. 提炼出核心投研判断，而不是泛泛摘要
+3. 尽量区分"看多逻辑"和"看空逻辑/风险"，即使原文只有一个立场
+4. 对缺失信息，填 null，不要编造
+
+输出要求：
+- 输出纯 JSON 对象，不加 ```json 包裹，不加注释
+- 所有字段必须存在，可以为 null
+- horizon 只能是 "short" / "medium" / "long" / null
+- stance 只能是 "bullish" / "bearish" / "neutral" / "watch" / null
+- key_drivers、risks、key_metrics、suggested_tags 输出为 JSON 数组（字符串列表）
+- bull_case、bear_case、thesis 用中文，简明扼要，避免废话"""
+
+    context = ""
+    if object_name:
+        context += f"标的：{object_name}\n"
+    if market_name:
+        context += f"市场：{market_name}\n"
+
+    user_prompt = f"""请提炼以下研究资料：
+
+标题：{title}
+{context}
+===资料正文===
+{raw_content[:4000]}
+===END===
+
+请输出如下 JSON 结构：
+{{
+  "summary": "这份资料主要讲什么（1-2句）",
+  "thesis": "核心投研结论（1-3句，直接说判断，不要模糊）",
+  "bull_case": "看多逻辑（如果资料无看多逻辑则为 null）",
+  "bear_case": "看空/风险逻辑（如果资料无看空逻辑则为 null）",
+  "key_drivers": ["驱动因素1", "驱动因素2"],
+  "risks": ["风险1", "风险2"],
+  "key_metrics": ["后续观察指标1", "指标2"],
+  "horizon": "short|medium|long|null",
+  "stance": "bullish|bearish|neutral|watch|null",
+  "action_suggestion": "基于此资料，对应操作建议：加仓 / 减仓 / 持有观察 / 避开等（可为 null）",
+  "invalidation_conditions": "什么情况下该观点失效（可为 null）",
+  "suggested_tags": ["标签1", "标签2"]
+}}"""
+
+    try:
+        response = _get_client().chat.completions.create(
+            model=AI_RESEARCH_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=AI_TEMPERATURE,
+            max_tokens=AI_RESEARCH_MAX_TOKENS,
+            response_format={"type": "json_object"},
+        )
+        raw_json = response.choices[0].message.content
+        return json.loads(raw_json)
+    except EnvironmentError as e:
+        return {"error": f"配置错误：{str(e)}"}
+    except json.JSONDecodeError as e:
+        return {"error": f"AI 返回结果无法解析为 JSON：{str(e)}"}
+    except Exception as e:
+        return {"error": f"AI 解析失败：{str(e)}"}
 
 
 def generate_alert_explanation(alert: DeviationAlert) -> str:

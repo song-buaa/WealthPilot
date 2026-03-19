@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import streamlit as st
 
 # 已实现的页面模块
-from app_pages import overview, retirement_life, discipline, strategy
+from app_pages import overview, retirement_life, discipline, strategy, research
 from app_pages import placeholder
 
 # ──────────────────────────────────────────────
@@ -55,6 +55,7 @@ _IMPLEMENTED = {
     "投资纪律":     discipline,
     "投资决策":     strategy,
     "养老规划":     retirement_life,
+    "投研观点":     research,
 }
 
 # 首页策略：有持仓数据时直接进投资账户总览，否则引导至用户画像

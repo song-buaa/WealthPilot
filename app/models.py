@@ -154,3 +154,95 @@ class DecisionLog(Base):
     executed_at = Column(DateTime, nullable=True)
 
     portfolio = relationship("Portfolio", back_populates="decision_logs")
+
+
+# ──────────────────────────────────────────────
+# 投研观点模块（三表：原始资料 → 候选卡 → 正式观点）
+# ──────────────────────────────────────────────
+
+class ResearchDocument(Base):
+    """投研原始资料
+    parse_status 流转：pending → parsed | saved_only | discarded
+    """
+    __tablename__ = "research_documents"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    title        = Column(String(300), nullable=False)
+    # markdown / text / pdf / link / manual
+    source_type  = Column(String(20), nullable=False, default="text")
+    source_url   = Column(Text, nullable=True)
+    raw_content  = Column(Text, nullable=True)
+    uploaded_at  = Column(DateTime, default=datetime.now)
+    publish_time = Column(String(50), nullable=True)    # 允许字符串，如"2025-Q1"
+    author       = Column(String(100), nullable=True)
+    object_name  = Column(String(100), nullable=True)   # 美团/理想/拼多多
+    market_name  = Column(String(50), nullable=True)    # 港股/美股/A股/宏观
+    tags         = Column(Text, nullable=True)           # JSON 字符串列表
+    parse_status = Column(String(20), default="pending")
+    notes        = Column(Text, nullable=True)
+
+    cards = relationship(
+        "ResearchCard", back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class ResearchCard(Base):
+    """AI 提炼的候选观点卡（一份资料对应一张卡）"""
+    __tablename__ = "research_cards"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, ForeignKey("research_documents.id"), nullable=False)
+
+    summary               = Column(Text, nullable=True)   # 资料主要讲什么
+    thesis                = Column(Text, nullable=True)   # 核心投研结论
+    bull_case             = Column(Text, nullable=True)   # 看多逻辑
+    bear_case             = Column(Text, nullable=True)   # 看空/反对逻辑
+    key_drivers           = Column(Text, nullable=True)   # JSON 列表：关键驱动因素
+    risks                 = Column(Text, nullable=True)   # JSON 列表：主要风险
+    key_metrics           = Column(Text, nullable=True)   # JSON 列表：待观察指标
+    horizon               = Column(String(20), nullable=True)  # short/medium/long
+    stance                = Column(String(20), nullable=True)  # bullish/bearish/neutral/watch
+    action_suggestion     = Column(Text, nullable=True)
+    invalidation_conditions = Column(Text, nullable=True)
+    suggested_tags        = Column(Text, nullable=True)   # JSON 列表
+    created_at            = Column(DateTime, default=datetime.now)
+
+    document  = relationship("ResearchDocument", back_populates="cards")
+    viewpoint = relationship(
+        "ResearchViewpoint", back_populates="source_card", uselist=False
+    )
+
+
+class ResearchViewpoint(Base):
+    """正式入库的投研观点（用户认可后从候选卡录入，或手动创建）"""
+    __tablename__ = "research_viewpoints"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    title        = Column(String(300), nullable=False)
+    # asset / sector / market / macro / strategy
+    object_type  = Column(String(20), nullable=False, default="asset")
+    object_name  = Column(String(100), nullable=True)
+    market_name  = Column(String(50), nullable=True)
+    topic_tags   = Column(Text, nullable=True)           # JSON 列表
+
+    thesis              = Column(Text, nullable=True)
+    supporting_points   = Column(Text, nullable=True)   # JSON 列表
+    opposing_points     = Column(Text, nullable=True)   # JSON 列表
+    key_metrics         = Column(Text, nullable=True)   # JSON 列表
+    risks               = Column(Text, nullable=True)   # JSON 列表
+    action_suggestion   = Column(Text, nullable=True)
+    invalidation_conditions = Column(Text, nullable=True)
+
+    horizon              = Column(String(20), nullable=True)  # short/medium/long
+    stance               = Column(String(20), nullable=True)  # bullish/bearish/neutral/watch
+    # strong / partial / reference
+    user_approval_level  = Column(String(20), default="reference")
+    # active / watch / outdated / invalid
+    validity_status      = Column(String(20), default="active")
+
+    source_card_id     = Column(Integer, ForeignKey("research_cards.id"), nullable=True)
+    source_document_id = Column(Integer, ForeignKey("research_documents.id"), nullable=True)
+    created_at         = Column(DateTime, default=datetime.now)
+    updated_at         = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    source_card = relationship("ResearchCard", back_populates="viewpoint")

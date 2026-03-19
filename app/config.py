@@ -25,6 +25,10 @@ AI_ALERT_MAX_TOKENS: int = 500
 # AI 温度（越低越确定性，金融分析建议保持低温度）
 AI_TEMPERATURE: float = 0.3
 
+# 投研观点模块：AI 解析研报用较强模型，保证结构化质量
+AI_RESEARCH_MODEL: str = "gpt-4.1-mini"
+AI_RESEARCH_MAX_TOKENS: int = 2000
+
 # ── UI 展示 ──────────────────────────────────
 # 告警严重程度对应的图标
 SEVERITY_ICONS: dict = {
