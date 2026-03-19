@@ -190,15 +190,42 @@ def render():
     st.subheader("负债明细（投资杠杆）")
     _render_liability_section(portfolio_id)
 
-    # ── 风险告警（最下方）──────────────────────────────────
+    # ── AI 综合分析报告入口（最下方）────────────────────────
+    st.divider()
     alerts = check_deviations(portfolio_id, bs)
+
+    col_report_title, col_report_btn = st.columns([3, 1])
+    with col_report_title:
+        st.subheader("AI 综合分析报告")
+        if alerts:
+            high = [a for a in alerts if a.severity == "高"]
+            mid  = [a for a in alerts if a.severity == "中"]
+            parts = []
+            if high: parts.append(f"🔴 {len(high)} 项高风险告警")
+            if mid:  parts.append(f"🟡 {len(mid)} 项中风险告警")
+            st.caption("报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · " + "、".join(parts))
+        else:
+            st.caption("报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · 当前无风险告警 ✅")
+    with col_report_btn:
+        st.write("")  # 垂直对齐占位
+        gen_btn = st.button(
+            "✨ 生成报告", type="primary",
+            use_container_width=True, key="overview_gen_report",
+        )
+
+    if gen_btn:
+        st.info("🚧 AI 报告生成功能正在建设中，将结合投资账户总览、投资纪律引擎、市场环境等数据自动生成综合分析。")
+
+    # 风险告警明细（折叠展示，作为报告素材）
     if alerts:
-        st.divider()
-        st.subheader("风险告警")
-        for alert in alerts:
-            icon = SEVERITY_ICONS.get(alert.severity, "⚪")
-            with st.expander(f"{icon} [{alert.alert_type}] {alert.title}", expanded=(alert.severity == "高")):
-                st.write(alert.description)
+        with st.expander(f"查看风险告警明细（共 {len(alerts)} 项）", expanded=False):
+            for alert in alerts:
+                icon = SEVERITY_ICONS.get(alert.severity, "⚪")
+                with st.expander(
+                    f"{icon} [{alert.alert_type}] {alert.title}",
+                    expanded=(alert.severity == "高"),
+                ):
+                    st.write(alert.description)
 
 
 def _render_asset_section(pid: int, bs):
