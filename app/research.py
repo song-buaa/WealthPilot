@@ -44,44 +44,57 @@ def _keyword_score(query: str, *text_fields: Optional[str]) -> int:
     return sum(1 for w in words if w.lower() in combined)
 
 
-_APPROVAL_WEIGHT = {"strong": 3, "partial": 2, "reference": 1}
-_VALIDITY_WEIGHT = {"active": 10, "watch": 5, "outdated": 1, "invalid": 0}
+# 基础分权重已降低，避免淹没关键词相关性得分：
+#   validity：active=5, watch=3, outdated=1, invalid=0（原 10/5/1/0）
+#   approval：strong=2, partial=1, reference=0（原 3/2/1）
+#   freshness：最多 +2（原 +5）
+# 这样：最强基础分 = 5+2+2=9，而标的精确匹配 = +20，差距清晰
+_APPROVAL_WEIGHT = {"strong": 2, "partial": 1, "reference": 0}
+_VALIDITY_WEIGHT = {"active": 5, "watch": 3, "outdated": 1, "invalid": 0}
 
 
 def _score_viewpoint(vp: ResearchViewpoint, query: str,
                      object_name: Optional[str], market_name: Optional[str]) -> float:
     """
     综合评分（越高越相关）：
-      - object_name 精确匹配：+20 / 模糊包含：+10
+      - object_name 参数精确匹配：+20 / 模糊包含：+10
+      - 查询文本中包含 vp.object_name（子串匹配，弥补中文无分词的问题）：+15
       - market_name 匹配：+8
       - topic_tags 关键词匹配：+5 per hit
       - thesis / supporting_points / risks 关键词匹配：+1 per hit
-      - validity_status 权重：active=10, watch=5, outdated=1, invalid=0
-      - user_approval_level 权重：strong=3, partial=2, reference=1
-      - 新鲜度：updated_at 越新越高（天数换算，最多 +5）
+      - validity_status 权重：active=5, watch=3, outdated=1, invalid=0
+      - user_approval_level 权重：strong=2, partial=1, reference=0
+      - 新鲜度：updated_at 越新越高（天数换算，最多 +2）
     """
+    import re
     score = 0.0
 
-    # object_name 匹配
+    # object_name 参数匹配（显式传入的精确标的）
     if object_name and vp.object_name:
         if vp.object_name.lower() == object_name.lower():
             score += 20
         elif object_name.lower() in vp.object_name.lower() or vp.object_name.lower() in object_name.lower():
             score += 10
 
+    # 查询文本中提取标的名（中文子串匹配，无需分词）：
+    # 如 query="拼多多现在适合加仓吗"，vp.object_name="拼多多" → 命中 +15
+    # 这解决了「不填精确标的时仍能按标的区分排序」的问题
+    if query and vp.object_name and not object_name:
+        if vp.object_name.lower() in query.lower():
+            score += 15
+
     # market_name 匹配
     if market_name and vp.market_name:
         if market_name.lower() in vp.market_name.lower():
             score += 8
 
-    # topic_tags 匹配
+    # topic_tags 匹配（按关键词分词后检查是否命中标签）
     tags = _parse_json_list(vp.topic_tags)
     if query:
-        import re
         words = [w for w in re.split(r'[\s，。、？！,.!?]+', query) if len(w) >= 2]
         score += sum(5 for tag in tags for w in words if w.lower() in tag.lower())
 
-    # 全文关键词匹配
+    # 全文关键词匹配（thesis / supporting_points / risks / action）
     score += _keyword_score(
         query,
         vp.thesis,
@@ -91,16 +104,16 @@ def _score_viewpoint(vp: ResearchViewpoint, query: str,
         vp.action_suggestion,
     )
 
-    # validity_status 权重
+    # validity_status 权重（降低绝对值，避免淹没相关性得分）
     score += _VALIDITY_WEIGHT.get(vp.validity_status or "invalid", 0)
 
     # user_approval_level 权重
-    score += _APPROVAL_WEIGHT.get(vp.user_approval_level or "reference", 1)
+    score += _APPROVAL_WEIGHT.get(vp.user_approval_level or "reference", 0)
 
-    # 新鲜度（最多 +5，180天内线性衰减）
+    # 新鲜度（最多 +2，180天内线性衰减）
     if vp.updated_at:
         days_old = max(0, (datetime.now() - vp.updated_at).days)
-        freshness = max(0.0, 5.0 * (1 - days_old / 180))
+        freshness = max(0.0, 2.0 * (1 - days_old / 180))
         score += freshness
 
     return score

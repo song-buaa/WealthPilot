@@ -2,6 +2,108 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+## [1.9.1] - 2026-03-20 - 投研观点模块稳定性修复（两轮精修）
+
+### Fixed - P0：候选观点卡页面崩溃（DetachedInstanceError）
+
+**`app_pages/research.py`**：`_render_cards()` 在关闭 SQLAlchemy Session 后访问 `card.viewpoint`、`card.document` 懒加载关系，导致崩溃。修复：查询时加 `joinedload()` 预加载所有关联对象，确保 Session 关闭前数据已完整读入内存。
+
+### Fixed - P1：Markdown 文件上传后内容不显示 / 抛 StreamlitAPIException
+
+**`app_pages/research.py`**：Streamlit 规则要求 widget 的 `session_state` 值必须在 widget 渲染之前设置，上一轮修复的注入时序仍然错误（先渲染 `st.text_area`，再写 `session_state`，触发 API 异常）。修复：将 `session_state["ri_md_content"] = content` 移到 `st.text_area(key="ri_md_content")` 渲染之前执行，删除不必要的末尾 `st.rerun()`。
+
+### Fixed - P1：Tab 导航跳转有底层警告（widget 后修改绑定 state）
+
+**`app_pages/research.py`**：解析完成后直接修改 `session_state["research_nav"]`，违反 Streamlit"widget 渲染后不可修改其绑定 state"规则，导致日志告警。修复：引入独立中转变量 `_research_nav_target`，在 `render()` 顶部所有 widget 实例化之前统一应用跳转意图，彻底消除警告。
+
+### Fixed - P1：`saved_only` 状态资料无法触发 AI 解析
+
+**`app_pages/research.py`**：「待解析资料」下拉框过滤条件硬编码为 `status == "pending"`，`saved_only` 资料被排除。修复：改为 `status in ("pending", "saved_only")`。
+
+### Fixed - P1：重复解析同一资料生成多张候选卡
+
+**`app_pages/research.py`**：解析前检查 `document_id` 是否已有对应卡片，若存在则更新字段并提示用户，避免重复写入。
+
+### Fixed - P1：重复导入同名资料无警告
+
+**`app_pages/research.py`**：保存前按 `title` 查重，存在同名记录时展示 `st.warning`（含已有资料上传时间）并中止提交。
+
+### Fixed - P2：决策检索排序区分度极低（同分并列）
+
+**`app/research.py`**：基础分（validity + freshness + approval）权重过高，掩盖关键词相关性得分；且自然语言中的标的名未参与匹配。修复：
+- 降低基础分权重（最高从 18 降至 9），还原关键词得分的区分作用
+- 新增「查询文本子串包含标的名」匹配 +15 分，无需分词即可处理「拼多多现在适不适合加仓」类查询
+
+### Fixed - P2：超长文本截断无提示
+
+**`app_pages/research.py`**：正文超过 4000 字时展示 `st.warning`，告知用户截断范围。
+
+### Fixed - P2：AI 生成标签数量过多
+
+**`app/ai_advisor.py`**：Prompt 末尾追加约束「suggested_tags 最多 5 个」，减少标签库噪音。
+
+### Fixed - P2：Tab 名称与面包屑文案不一致
+
+**`app_pages/research.py`**：第四个导航项统一改为「🔍  决策检索」。
+
+### Added - 文档
+
+- `docs/research_opinions_module_design.md`：投研观点模块设计说明（供外部 AI 测试评估使用）
+- `docs/research_module_update_log.md`：第一轮修复日志
+- `docs/research_module_regression_fix_log.md`：第二轮精修日志（本次）
+
+---
+
+## [1.9.0] - 2026-03-19 - 投研观点模块 MVP 上线
+
+### Added - 投研观点（`投研观点`）全新模块
+
+**数据层**（`app/models.py`）：新增三张数据库表：
+- `ResearchDocument`：原始研究资料（标题、来源类型、正文、解析状态等）
+- `ResearchCard`：AI 提炼的候选观点卡（thesis、bull/bear case、驱动因素、风险、建议等）
+- `ResearchViewpoint`：用户审核入库的正式观点（有效性、认可程度、标签、来源追溯等）
+
+**AI 层**（`app/ai_advisor.py`、`app/config.py`）：
+- 新增 `generate_research_card()` 函数，调用 `gpt-4.1-mini` 将研报原文提炼为结构化 JSON 观点卡
+- 新增配置常量 `AI_RESEARCH_MODEL`、`AI_RESEARCH_MAX_TOKENS`
+
+**检索层**（`app/research.py`）：
+- 新增 `retrieve_research_context()` 多因子评分检索函数，支持自然语言 + 标的 + 市场过滤
+- 评分维度：标的名精确/模糊匹配、市场匹配、标签命中、全文关键词、有效性权重、认可度权重、时效性衰减
+
+**UI 层**（`app_pages/research.py`）：完整四 Tab 页面：
+- **资料导入**：支持纯文本/Markdown/链接/PDF 四种类型，保存后可选立即 AI 解析
+- **候选观点卡**：审阅 AI 提炼结果，逐卡操作（认可/编辑修改/仅保留/丢弃）
+- **观点库**：5 维度筛选 + 关键词搜索，支持内联修改有效性状态
+- **决策检索**：自然语言查询，展示带评分的召回结果
+
+**路由**（`streamlit_app.py`）：「投研观点」从 placeholder 切换到正式 `research.render()`
+
+---
+
+## [1.8.0] - 2026-03-19 - 全局导航重构 + 产品框架扩展
+
+### Changed - 侧边栏导航重构：平铺列表 → 三分组按钮导航
+
+**`streamlit_app.py`** 全面重写：
+- 导航从单级平铺改为三组分层结构：**📈 投资规划**（8项）/ **🏠 财务规划**（4项）/ **📊 资产负债总览**（2项）
+- 删除「投资持仓数量」侧边栏指标
+- 删除「AI 分析报告」独立页面入口，功能入口移入「投资账户总览」
+- 「AI 综合分析报告」入口整合进投资账户总览页底部
+
+### Added - 未实现页面占位模块
+
+**`app_pages/placeholder.py`**：新增通用占位渲染器，覆盖 11 个规划中但尚未实现的功能页（用户画像、新增资产配置、收益分析、生活账户总览、购房/养老/消费规划、个人/家族资产负债总览等）。
+
+### Changed - 投资账户总览页：整合 AI 报告入口
+
+**`app_pages/overview.py`**：
+- 删除「风险告警」独立区块
+- 新增页面底部「AI 综合分析报告」区块，包含风险告警摘要 + 「✨ 生成报告」按钮（功能建设中）
+- 告警明细移入可折叠 `expander`
+
+---
+
 ## [1.7.1] - 2026-03-19 - 投资纪律导航修复 + 资产配置图标准化
 
 ### Fixed - 投资纪律页面导航彻底重建

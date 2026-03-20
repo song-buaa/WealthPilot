@@ -13,6 +13,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy.orm import joinedload
 
 from app.models import (
     ResearchDocument, ResearchCard, ResearchViewpoint,
@@ -26,7 +27,7 @@ from app.research import retrieve_research_context, _parse_json_list
 # 常量
 # ──────────────────────────────────────────────────────────
 
-_NAV_ITEMS = ["📥  资料导入", "🃏  候选观点卡", "📚  观点库", "🔍  检索测试"]
+_NAV_ITEMS = ["📥  资料导入", "🃏  候选观点卡", "📚  观点库", "🔍  决策检索"]
 
 _STANCE_LABELS = {
     "bullish":  "🟢 看多",
@@ -170,7 +171,7 @@ def _render_import() -> None:
         raw_content = ""
         source_url = ""
 
-        if source_type in ("text", "markdown"):
+        if source_type == "text":
             raw_content = st.text_area(
                 "粘贴资料正文",
                 height=300,
@@ -180,6 +181,28 @@ def _render_import() -> None:
                     "无需全文，关键论据 + 结论段落即可（建议 300-2000 字）。"
                 ),
                 label_visibility="collapsed",
+            )
+        elif source_type == "markdown":
+            uploaded_md = st.file_uploader(
+                "上传 Markdown 文件", type=["md", "markdown", "txt"],
+                key="ri_md",
+            )
+            # 关键：必须在 st.text_area(key="ri_md_content") 实例化【之前】写入 session_state。
+            # Streamlit 规则：widget 创建后不允许再修改其绑定的 session_state key，
+            # 否则抛出 StreamlitAPIException。
+            if uploaded_md is not None:
+                # 仅在新文件上传时（文件名变化）才更新，避免重复 read()
+                if st.session_state.get("_ri_md_cache_name") != uploaded_md.name:
+                    content = uploaded_md.read().decode("utf-8", errors="replace")
+                    st.session_state["_ri_md_cache"] = content
+                    st.session_state["_ri_md_cache_name"] = uploaded_md.name
+                    # 在 widget 实例化前写入，text_area 渲染时会直接使用此值
+                    st.session_state["ri_md_content"] = content
+            raw_content = st.text_area(
+                "文件内容（可编辑）" if st.session_state.get("ri_md_content") else "或直接粘贴 Markdown 正文",
+                height=300,
+                key="ri_md_content",
+                placeholder="也可以不上传文件，直接把 Markdown 内容粘贴到这里。",
             )
         elif source_type == "link":
             source_url = st.text_input(
@@ -232,8 +255,25 @@ def _render_import() -> None:
             st.error("请粘贴资料正文（AI 解析需要内容）")
             return
 
+        # P2：超长文本提前提示（截断发生在 ai_advisor.py[:4000]）
+        if len(raw_content.strip()) > 4000:
+            st.warning(
+                f"⚠️ 资料正文共 {len(raw_content.strip())} 字，超过 4000 字上限，"
+                "AI 解析将仅处理前 4000 字，后半部分信息不会被提炼。"
+            )
+
         session = get_session()
         try:
+            # P1：标题查重，存在同名资料时给出警告并中止，避免产生冗余数据
+            dup = session.query(ResearchDocument).filter_by(title=title.strip()).first()
+            if dup:
+                st.warning(
+                    f"⚠️ 已存在同名资料「{title.strip()}」（上传于 {dup.uploaded_at.strftime('%m-%d %H:%M') if dup.uploaded_at else '未知时间'}），"
+                    "请确认是否重复导入。如需重新解析，请在下方「已导入资料」中选择该资料触发解析。"
+                )
+                session.close()
+                return
+
             doc = ResearchDocument(
                 title=title.strip(),
                 source_type=source_type,
@@ -287,8 +327,11 @@ def _render_import() -> None:
                     session.add(card)
                     doc.parse_status = "parsed"
                     session.commit()
-                    st.success("✅ 资料已保存，AI 解析完成！请前往「候选观点卡」查看。")
-                    st.session_state["research_nav"] = _NAV_ITEMS[1]
+                    # 用独立中转变量传递跳转意图，render() 顶部在 widget 实例化前统一应用，
+                    # 避免在 segmented_control(key="research_nav") 创建后修改其绑定的 state
+                    st.toast("✅ 资料已保存，AI 解析完成！", icon="✅")
+                    st.session_state["_research_nav_target"] = _NAV_ITEMS[1]
+                    st.rerun()
             else:
                 session.commit()
                 st.success("✅ 资料已保存。可前往「候选观点卡」手动触发 AI 解析。")
@@ -341,8 +384,8 @@ def _render_document_list() -> None:
     display_df = df.drop(columns=["_id"])
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # 待解析的文档可直接在这里触发解析
-    pending = [d for d in docs if d.parse_status == "pending"]
+    # P1：待解析列表同时包含 pending 和 saved_only，两者都应允许触发解析
+    pending = [d for d in docs if d.parse_status in ("pending", "saved_only")]
     if pending:
         st.write("")
         st.markdown(f"**{len(pending)} 份资料待解析**")
@@ -376,26 +419,45 @@ def _run_parse_for_doc(doc: ResearchDocument) -> None:
             v = card_data.get(key)
             return json.dumps(v, ensure_ascii=False) if isinstance(v, list) else None
 
-        card = ResearchCard(
-            document_id=doc.id,
-            summary=card_data.get("summary"),
-            thesis=card_data.get("thesis"),
-            bull_case=card_data.get("bull_case"),
-            bear_case=card_data.get("bear_case"),
-            key_drivers=_jl("key_drivers"),
-            risks=_jl("risks"),
-            key_metrics=_jl("key_metrics"),
-            horizon=card_data.get("horizon"),
-            stance=card_data.get("stance"),
-            action_suggestion=card_data.get("action_suggestion"),
-            invalidation_conditions=card_data.get("invalidation_conditions"),
-            suggested_tags=_jl("suggested_tags"),
-        )
-        session.add(card)
+        # P1：防重复解析 —— 若该 document 已有 Card，则更新字段而非新增
+        existing_card = session.query(ResearchCard).filter_by(document_id=doc.id).first()
+        if existing_card:
+            existing_card.summary               = card_data.get("summary")
+            existing_card.thesis                = card_data.get("thesis")
+            existing_card.bull_case             = card_data.get("bull_case")
+            existing_card.bear_case             = card_data.get("bear_case")
+            existing_card.key_drivers           = _jl("key_drivers")
+            existing_card.risks                 = _jl("risks")
+            existing_card.key_metrics           = _jl("key_metrics")
+            existing_card.horizon               = card_data.get("horizon")
+            existing_card.stance                = card_data.get("stance")
+            existing_card.action_suggestion     = card_data.get("action_suggestion")
+            existing_card.invalidation_conditions = card_data.get("invalidation_conditions")
+            existing_card.suggested_tags        = _jl("suggested_tags")
+            st.info("ℹ️ 该资料已有解析结果，已更新为最新内容。")
+        else:
+            card = ResearchCard(
+                document_id=doc.id,
+                summary=card_data.get("summary"),
+                thesis=card_data.get("thesis"),
+                bull_case=card_data.get("bull_case"),
+                bear_case=card_data.get("bear_case"),
+                key_drivers=_jl("key_drivers"),
+                risks=_jl("risks"),
+                key_metrics=_jl("key_metrics"),
+                horizon=card_data.get("horizon"),
+                stance=card_data.get("stance"),
+                action_suggestion=card_data.get("action_suggestion"),
+                invalidation_conditions=card_data.get("invalidation_conditions"),
+                suggested_tags=_jl("suggested_tags"),
+            )
+            session.add(card)
+
         doc_db.parse_status = "parsed"
         session.commit()
         st.success("✅ 解析完成！请前往「候选观点卡」查看。")
-        st.session_state["research_nav"] = _NAV_ITEMS[1]
+        st.session_state["_research_nav_target"] = _NAV_ITEMS[1]
+        st.rerun()
     except Exception as e:
         session.rollback()
         st.error(f"保存解析结果失败：{str(e)}")
@@ -410,15 +472,18 @@ def _run_parse_for_doc(doc: ResearchDocument) -> None:
 def _render_cards() -> None:
     session = get_session()
     try:
-        # 已解析但尚未录入正式观点（或被丢弃）的资料的卡片
+        # 使用 joinedload 预加载关联对象，避免 session 关闭后 lazy-load 触发 DetachedInstanceError
         cards = (
             session.query(ResearchCard)
+            .options(
+                joinedload(ResearchCard.viewpoint),
+                joinedload(ResearchCard.document),
+            )
             .join(ResearchDocument, ResearchCard.document_id == ResearchDocument.id)
             .filter(ResearchDocument.parse_status == "parsed")
             .order_by(ResearchCard.created_at.desc())
             .all()
         )
-        # 同时取出对应文档信息
         card_docs = {c.id: c.document for c in cards}
     finally:
         session.close()
@@ -876,15 +941,25 @@ def render() -> None:
     init_db()
 
     st.title("投研观点")
-    st.caption("资料导入 → AI 提炼 → 候选卡审核 → 正式观点库 → 决策检索")
+    st.caption("资料导入 → AI 提炼 → 候选卡审核 → 观点库 → 决策检索")
+
+    # 处理程序触发的 Tab 跳转：必须在 _research_nav() 实例化 segmented_control 前应用，
+    # 避免在 widget 创建后修改其绑定的 session_state key（会触发 Streamlit 警告/异常）。
+    if "_research_nav_target" in st.session_state:
+        st.session_state["research_nav"] = st.session_state.pop("_research_nav_target")
 
     active_nav = _research_nav()
 
+    # 全量 elif 路由，避免 else 兜底导致任意非法值都渲染检索页
     if active_nav == _NAV_ITEMS[0]:
         _render_import()
     elif active_nav == _NAV_ITEMS[1]:
         _render_cards()
     elif active_nav == _NAV_ITEMS[2]:
         _render_viewpoints()
-    else:
+    elif active_nav == _NAV_ITEMS[3]:
         _render_retrieval()
+    else:
+        # 兜底：session_state 被外部写入了非法值时，重置到首页
+        st.session_state["research_nav"] = _NAV_ITEMS[0]
+        st.rerun()

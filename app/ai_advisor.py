@@ -169,7 +169,9 @@ def generate_research_card(
   "action_suggestion": "基于此资料，对应操作建议：加仓 / 减仓 / 持有观察 / 避开等（可为 null）",
   "invalidation_conditions": "什么情况下该观点失效（可为 null）",
   "suggested_tags": ["标签1", "标签2"]
-}}"""
+}}
+
+注意：suggested_tags 最多输出 5 个最核心的标签，不要超过 5 个。"""
 
     try:
         response = _get_client().chat.completions.create(
