@@ -436,7 +436,7 @@ body {{
 .alert-body  {{ font-size: 12px; color: #B91C1C; margin-top: 3px; line-height: 1.5; }}
 
 /* AI 报告 — 原样 */
-.ai-section {{ background: linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%); border: 1px solid var(--blue-200); border-radius: var(--radius); padding: 20px; margin-top: 16px; }}
+.ai-section {{ background: linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%); border: 1px solid var(--blue-200); border-radius: var(--radius); padding: 20px; margin-top: 0; }}
 .ai-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
 .ai-title  {{ font-size: 14px; font-weight: 700; color: var(--ocean-800); }}
 .ai-badge  {{ background: var(--red-100); color: var(--red-600); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
@@ -644,145 +644,10 @@ window.addEventListener('resize', () => chart.resize());
     if (window.frameElement) window.frameElement.style.height = h + 'px';
   }}
   function injectExpStyle() {{
-    try {{
-      const pd = window.parent.document;
-      const old = pd.getElementById('wp-exp-style');
-      if (old) old.remove();
-      const s = pd.createElement('style');
-      s.id = 'wp-exp-style';
-      s.textContent = `
-/* ── Expander 卡片外框 ── */
-.stExpander {{
-  background:#fff!important;
-  border:1px solid #E5E7EB!important;
-  border-radius:12px!important;
-  box-shadow:0 1px 3px rgba(0,0,0,.06)!important;
-  overflow:hidden!important;
-  margin-top:8px!important;
-}}
-.stExpander details {{ background:#fff!important; }}
-.stExpander details summary {{
-  padding:14px 20px!important;
-  font-size:13px!important; font-weight:600!important;
-  color:#374151!important; background:#fff!important;
-}}
-.stExpander details summary:hover {{ background:#F9FAFB!important; cursor:pointer!important; }}
-.stExpander details > div {{
-  border-top:1px solid #F3F4F6!important;
-  padding:4px 24px 24px!important;
-  background:#fff!important;
-}}
-/* ── Tabs 标签栏 ── */
-.stExpander .stTabs [data-testid="stHorizontalBlock"] {{
-  gap:0!important; border-bottom:2px solid #F3F4F6!important;
-  margin-bottom:16px!important; padding-bottom:0!important;
-}}
-.stExpander .stTabs button[data-baseweb="tab"] {{
-  background:transparent!important;
-  border:none!important; border-bottom:2px solid transparent!important;
-  margin-bottom:-2px!important;
-  border-radius:0!important;
-  color:#6B7280!important;
-  font-size:13px!important; font-weight:500!important;
-  padding:10px 16px!important;
-  transition:all .15s!important;
-}}
-.stExpander .stTabs button[data-baseweb="tab"]:hover {{
-  color:#1E3A5F!important; background:#F9FAFB!important;
-}}
-.stExpander .stTabs button[aria-selected="true"][data-baseweb="tab"] {{
-  color:#1E3A5F!important; font-weight:600!important;
-  border-bottom:2px solid #1E3A5F!important;
-  background:transparent!important;
-}}
-.stExpander .stTabs [data-testid="stVerticalBlock"] {{ padding-top:0!important; }}
-/* ── 下载按钮 ── */
-.stExpander .stDownloadButton > button {{
-  background:#fff!important;
-  border:1px solid #E5E7EB!important;
-  border-radius:8px!important;
-  color:#374151!important;
-  font-size:13px!important; font-weight:500!important;
-  padding:8px 14px!important;
-  box-shadow:0 1px 2px rgba(0,0,0,.04)!important;
-  transition:all .15s!important;
-}}
-.stExpander .stDownloadButton > button:hover {{
-  border-color:#1E3A5F!important; color:#1E3A5F!important;
-  box-shadow:0 1px 4px rgba(0,0,0,.08)!important;
-}}
-/* ── 主操作按钮 ── */
-.stExpander .stButton > button[kind="primary"] {{
-  background:#1E3A5F!important;
-  border:none!important; border-radius:8px!important;
-  color:#fff!important; font-size:13px!important; font-weight:600!important;
-  padding:8px 18px!important;
-}}
-.stExpander .stButton > button[kind="primary"]:hover {{
-  background:#16304f!important;
-}}
-.stExpander .stButton > button:not([kind="primary"]) {{
-  background:#fff!important;
-  border:1px solid #E5E7EB!important; border-radius:8px!important;
-  color:#374151!important; font-size:13px!important;
-  padding:8px 14px!important;
-}}
-/* ── 文件上传区 ── */
-.stExpander [data-testid="stFileUploader"] {{
-  border:1.5px dashed #D1D5DB!important;
-  border-radius:10px!important;
-  background:#FAFAFA!important;
-  padding:12px!important;
-  transition:border-color .15s!important;
-}}
-.stExpander [data-testid="stFileUploader"]:hover {{
-  border-color:#1E3A5F!important;
-}}
-.stExpander [data-testid="stFileUploadDropzone"] {{
-  background:transparent!important;
-}}
-/* ── Radio 按钮组 ── */
-.stExpander .stRadio > div {{
-  gap:8px!important; flex-direction:row!important; flex-wrap:wrap!important;
-}}
-.stExpander .stRadio label {{
-  border:1px solid #E5E7EB!important;
-  border-radius:7px!important;
-  padding:5px 12px!important;
-  font-size:12px!important; font-weight:500!important;
-  color:#374151!important;
-  background:#fff!important;
-  cursor:pointer!important;
-  transition:all .12s!important;
-  margin:0!important;
-}}
-.stExpander .stRadio label:has(input:checked) {{
-  background:#EFF6FF!important;
-  border-color:#1E3A5F!important;
-  color:#1E3A5F!important; font-weight:600!important;
-}}
-.stExpander .stRadio input {{ display:none!important; }}
-/* ── caption / info 文字 ── */
-.stExpander .stCaptionContainer p {{
-  color:#9CA3AF!important; font-size:12px!important;
-  margin-bottom:10px!important;
-}}
-.stExpander [data-testid="stAlert"] {{
-  border-radius:8px!important; font-size:12px!important;
-}}
-/* ── DataFrame ── */
-.stExpander [data-testid="stDataFrame"] {{
-  border:1px solid #F3F4F6!important;
-  border-radius:8px!important;
-  overflow:hidden!important;
-}}
-      `;
-      pd.head.appendChild(s);
-    }} catch(e) {{}}
+    // 已删除 — 样式由父页面 st.markdown #wp-import-panel 单一注入
   }}
   window.addEventListener('load', function() {{
     autoFit();
-    injectExpStyle();
     setTimeout(autoFit, 300);
   }});
 }})();
@@ -791,15 +656,9 @@ window.addEventListener('resize', () => chart.resize());
 </html>"""
 
 
-def _build_bottom_html(bs, alerts: list, liabilities: list = None) -> str:
-    """
-    Bottom HTML fragment: 负债明细 + 风险告警 + AI section.
-    Rendered below the 导入/导出 expander.
-    """
-    if liabilities is None:
-        liabilities = []
-
-    # ── 负债明细表格行（仅展示"投资杠杆"用途）────────────────────────────────
+def _build_liab_table_html(bs, liabilities: list = None) -> str:
+    """构建负债明细表格 HTML"""
+    if liabilities is None: liabilities = []
     inv_liabilities = [lb for lb in liabilities if lb.purpose == "投资杠杆"]
     liab_rows_html = ""
     total_liab = sum(lb.amount for lb in inv_liabilities) or 1.0
@@ -818,68 +677,14 @@ def _build_bottom_html(bs, alerts: list, liabilities: list = None) -> str:
     if not liab_rows_html:
         liab_rows_html = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:20px">暂无负债数据</td></tr>'
 
-    # ── 风险告警 ──────────────────────────────────────────────────────────────
-    hi = [a for a in alerts if a.severity == "高"]
-    mi = [a for a in alerts if a.severity == "中"]
-    imp_alerts = hi + mi
-
-    alerts_html = ""
-    if imp_alerts:
-        cnt_label   = f"{len(hi)} 项高风险" if hi else f"{len(mi)} 项中风险"
-        badge_color = "var(--red-600)" if hi else "var(--amber-500)"
-        items_html  = ""
-        for i, a in enumerate(imp_alerts):
-            icon  = "🔴" if a.severity == "高" else "🟡"
-            extra = ' style="margin-bottom:0"' if i == len(imp_alerts) - 1 else ""
-            items_html += f"""
-      <div class="alert-item"{extra}>
-        <div class="alert-icon">{icon}</div>
-        <div>
-          <div class="alert-title">[{a.alert_type}] {a.title}</div>
-          <div class="alert-body">{a.description}</div>
-        </div>
-      </div>"""
-        alerts_html = f"""
-    <div class="card" style="border-color:#FECACA;background:#FFFBFB;margin-top:16px">
-      <div class="card-title" style="color:#991B1B">
-        🔴 风险告警
-        <span class="card-title-badge" style="color:{badge_color}">{cnt_label}</span>
-      </div>
-      {items_html}
-    </div>"""
-
-    # ── AI 区域徽章 ───────────────────────────────────────────────────────────
-    if hi:
-        ai_badge = f'<span class="ai-badge">🔴 {len(hi)} 项高风险</span>'
-    elif mi:
-        ai_badge = f'<span class="ai-badge" style="background:var(--amber-100);color:#92400E">🟡 {len(mi)} 项中风险</span>'
-    else:
-        ai_badge = '<span class="ai-badge" style="background:var(--green-100);color:var(--green-600)">✅ 无高风险</span>'
-
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-/* ═══════════════════════════════════════════
-   Design Tokens — 原样来自 ui_preview.html
-═══════════════════════════════════════════ */
 :root {{
-  --ocean-900: #0F1E35;
   --ocean-800: #1B2A4A;
-  --ocean-700: #243558;
-  --ocean-600: #2D4A7A;
   --ocean-50:  #F4F6FA;
-  --blue-500:  #3B82F6;
-  --blue-200:  #BFDBFE;
-  --blue-100:  #DBEAFE;
-  --green-600: #16A34A;
-  --green-100: #DCFCE7;
-  --red-600:   #DC2626;
-  --red-100:   #FEE2E2;
-  --amber-500: #F59E0B;
-  --amber-100: #FEF3C7;
   --gray-700:  #374151;
   --gray-500:  #6B7280;
   --gray-400:  #9CA3AF;
@@ -887,12 +692,9 @@ def _build_bottom_html(bs, alerts: list, liabilities: list = None) -> str:
   --gray-100:  #F3F4F6;
   --white:     #FFFFFF;
   --shadow-sm: 0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04);
-  --shadow-dark: 0 6px 20px rgba(15,30,53,0.28);
   --radius: 12px;
 }}
-
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-
 body {{
   font-family: 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--ocean-50);
@@ -900,17 +702,7 @@ body {{
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }}
-
-.main-wrap {{ display: block; }}
-
-.content-left {{
-  padding: 0 28px 24px 28px;
-  min-width: 0;
-}}
-
-/* ═══════════════════════════════════════════
-   卡片 — 原样
-═══════════════════════════════════════════ */
+.content-left {{ padding: 0 28px 0 28px; }}
 .card {{
   background: var(--white); border: 1px solid var(--gray-200);
   border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm);
@@ -920,10 +712,6 @@ body {{
   display: flex; align-items: center; gap: 6px; margin-bottom: 16px;
 }}
 .card-title-badge {{ margin-left: auto; font-size: 11px; font-weight: 400; color: var(--gray-400); }}
-
-/* ═══════════════════════════════════════════
-   表格 — 原样
-═══════════════════════════════════════════ */
 .data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
 .data-table thead th {{ padding: 8px 10px; font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--gray-200); white-space: nowrap; background: var(--white); }}
 .data-table thead th.r {{ text-align: right; }}
@@ -934,43 +722,12 @@ body {{
 .td-name {{ font-weight: 500; color: var(--ocean-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }}
 .td-mv   {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
 .td-pct  {{ color: var(--gray-500); font-size: 12px; }}
-
-/* ═══════════════════════════════════════════
-   风险告警 — 原样
-═══════════════════════════════════════════ */
-.alert-item {{ display: flex; gap: 10px; padding: 12px 14px; background: #FFF5F5; border: 1px solid #FECACA; border-radius: 10px; margin-bottom: 8px; }}
-.alert-item:last-child {{ margin-bottom: 0; }}
-.alert-icon  {{ font-size: 15px; flex-shrink: 0; margin-top: 1px; }}
-.alert-title {{ font-size: 13px; font-weight: 600; color: #991B1B; }}
-.alert-body  {{ font-size: 12px; color: #B91C1C; margin-top: 3px; line-height: 1.5; }}
-
-/* AI 报告 — 原样 */
-.ai-section {{ background: linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%); border: 1px solid var(--blue-200); border-radius: var(--radius); padding: 20px; margin-top: 16px; }}
-.ai-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
-.ai-title  {{ font-size: 14px; font-weight: 700; color: var(--ocean-800); }}
-.ai-badge  {{ background: var(--red-100); color: var(--red-600); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
-.ai-desc   {{ font-size: 12px; color: var(--gray-500); margin-bottom: 14px; line-height: 1.6; }}
-.btn-primary {{
-  background: linear-gradient(135deg, var(--blue-500), #1D4ED8);
-  color: #fff; border: none; border-radius: 8px; padding: 9px 20px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
-  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
-}}
-.btn-primary:hover {{ opacity: 0.9; }}
-
-::-webkit-scrollbar {{ width: 4px; height: 4px; }}
-::-webkit-scrollbar-track {{ background: transparent; }}
-::-webkit-scrollbar-thumb {{ background: var(--gray-200); border-radius: 2px; }}
 </style>
 </head>
 <body>
-
-<div class="main-wrap">
-  <div class="content-left">
-
-    <!-- 负债明细表格 -->
-    <div class="card" style="padding:20px 20px 16px;margin-bottom:16px">
-      <div class="card-title">
+	<div class="content-left">
+	    <div class="card" style="padding:20px 20px 16px;margin-top:20px;margin-bottom:0">
+	      <div class="card-title">
         🏦 负债明细
         <span class="card-title-badge">¥{bs.total_liabilities:,.0f}</span>
       </div>
@@ -1000,11 +757,124 @@ body {{
         </table>
       </div>
     </div>
+</div>
+<script>
+(function() {{
+  function autoFit() {{
+    const h = document.documentElement.scrollHeight + 8;
+    if (window.frameElement) window.frameElement.style.height = h + 'px';
+  }}
+  window.addEventListener('load', function() {{
+    autoFit();
+    setTimeout(autoFit, 300);
+  }});
+}})();
+</script>
+</body>
+</html>"""
 
-    <!-- 风险告警 -->
+def _build_alerts_ai_html(bs, alerts: list) -> str:
+    """构建风险告警 + AI 报告 HTML"""
+    hi = [a for a in alerts if a.severity == "高"]
+    mi = [a for a in alerts if a.severity == "中"]
+    imp_alerts = hi + mi
+    alerts_html = ""
+    if imp_alerts:
+        cnt_label   = f"{len(hi)} 项高风险" if hi else f"{len(mi)} 项中风险"
+        badge_color = "var(--red-600)" if hi else "var(--amber-500)"
+        items_html  = ""
+        for i, a in enumerate(imp_alerts):
+            icon  = "🔴" if a.severity == "高" else "🟡"
+            extra = ' style="margin-bottom:0"' if i == len(imp_alerts) - 1 else ""
+            items_html += f"""
+      <div class="alert-item"{extra}>
+        <div class="alert-icon">{icon}</div>
+        <div>
+          <div class="alert-title">[{a.alert_type}] {a.title}</div>
+          <div class="alert-body">{a.description}</div>
+        </div>
+      </div>"""
+        alerts_html = f"""
+    <div class="card" style="border-color:#FECACA;background:#FFFBFB;margin-top:0;margin-bottom:20px">
+      <div class="card-title" style="color:#991B1B">
+        🔴 风险告警
+        <span class="card-title-badge" style="color:{badge_color}">{cnt_label}</span>
+      </div>
+      {items_html}
+    </div>"""
+
+    if hi:
+        ai_badge = f'<span class="ai-badge">🔴 {len(hi)} 项高风险</span>'
+    elif mi:
+        ai_badge = f'<span class="ai-badge" style="background:var(--amber-100);color:#92400E">🟡 {len(mi)} 项中风险</span>'
+    else:
+        ai_badge = '<span class="ai-badge" style="background:var(--green-100);color:var(--green-600)">✅ 无高风险</span>'
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+:root {{
+  --ocean-800: #1B2A4A;
+  --ocean-50:  #F4F6FA;
+  --blue-500:  #3B82F6;
+  --blue-200:  #BFDBFE;
+  --green-600: #16A34A;
+  --green-100: #DCFCE7;
+  --red-600:   #DC2626;
+  --red-100:   #FEE2E2;
+  --amber-500: #F59E0B;
+  --amber-100: #FEF3C7;
+  --gray-700:  #374151;
+  --gray-500:  #6B7280;
+  --gray-400:  #9CA3AF;
+  --gray-200:  #E5E7EB;
+  --gray-100:  #F3F4F6;
+  --white:     #FFFFFF;
+  --shadow-sm: 0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04);
+  --radius: 12px;
+}}
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--ocean-50);
+  color: var(--gray-700);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}}
+.content-left {{ padding: 0 28px 24px 28px; }}
+.card {{
+  background: var(--white); border: 1px solid var(--gray-200);
+  border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm);
+}}
+.card-title {{
+  font-size: 13px; font-weight: 600; color: var(--gray-700);
+  display: flex; align-items: center; gap: 6px; margin-bottom: 16px;
+}}
+.card-title-badge {{ margin-left: auto; font-size: 11px; font-weight: 400; color: var(--gray-400); }}
+.alert-item {{ display: flex; gap: 10px; padding: 12px 14px; background: #FFF5F5; border: 1px solid #FECACA; border-radius: 10px; margin-bottom: 8px; }}
+.alert-item:last-child {{ margin-bottom: 0; }}
+.alert-icon  {{ font-size: 15px; flex-shrink: 0; margin-top: 1px; }}
+.alert-title {{ font-size: 13px; font-weight: 600; color: #991B1B; }}
+.alert-body  {{ font-size: 12px; color: #B91C1C; margin-top: 3px; line-height: 1.5; }}
+.ai-section {{ background: linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%); border: 1px solid var(--blue-200); border-radius: var(--radius); padding: 20px; margin-top: 0; }}
+.ai-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
+.ai-title  {{ font-size: 14px; font-weight: 700; color: var(--ocean-800); }}
+.ai-badge  {{ background: var(--red-100); color: var(--red-600); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
+.ai-desc   {{ font-size: 12px; color: var(--gray-500); margin-bottom: 14px; line-height: 1.6; }}
+.btn-primary {{
+  background: linear-gradient(135deg, var(--blue-500), #1D4ED8);
+  color: #fff; border: none; border-radius: 8px; padding: 9px 20px;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
+}}
+.btn-primary:hover {{ opacity: 0.9; }}
+</style>
+</head>
+<body>
+<div class="content-left">
     {alerts_html}
-
-    <!-- AI 报告 -->
     <div class="ai-section">
       <div class="ai-header">
         <div class="ai-title">✨ AI 综合分析报告</div>
@@ -1013,10 +883,7 @@ body {{
       <div class="ai-desc">报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · 风险告警，生成个性化投资建议。</div>
       <button class="btn-primary" onclick="this.textContent='🚧 功能建设中…';setTimeout(()=>this.textContent='✨ 生成报告',2000)">✨ 生成报告</button>
     </div>
-
-  </div><!-- /content-left -->
-</div><!-- /main-wrap -->
-
+</div>
 <script>
 (function() {{
   function autoFit() {{
@@ -1066,106 +933,467 @@ def render():
     n_inv_liab = len([lb for lb in liabilities if lb.purpose == "投资杠杆"])
 
     # ── 注入导入面板样式（在 iframe 渲染前写入 DOM，确保每次生效）────────────
-    st.markdown("""<style>
-/* ── Expander 外层容器：与 iframe 卡片样式完全一致 ── */
-.stExpander {
+    # ── 注入导入面板样式（单一来源，作用域限定在 #wp-import-panel）────────────
+    # 说明：此处是 expander 样式的唯一注入点。
+    # 已删除顶部 iframe 内的 injectExpStyle() JS 函数（双重注入来源之一），
+    # 消除了两套 CSS 选择器数值冲突（border-radius 16px vs 12px 等）。
+    # 已废弃 [stLayoutWrapper]:has([stExpander]) { margin-bottom: -16px } hack，
+    # 改由 expander 容器自身的 margin-top/bottom 控制垂直节奏。
+    st.markdown("""
+<style>
+/* ══════════════════════════════════════════════════════
+   导入/导出面板 — 唯一样式来源（v2.0 紧凑版）
+   设计目标：消除双层卡片感、压缩垂直空间、轻量化 Uploader
+   下载按钮绝对定位到 Tabs 行右上角
+══════════════════════════════════════════════════════ */
+
+/* ── 统一垂直间距系统 (Vertical Spacing System v3.0) ── */
+/* 1. 彻底清除主内容区默认垂直间距 (Gap)，但不影响侧边栏 */
+[data-testid="stMainView"] [data-testid="stVerticalBlock"] {
+  gap: 0 !important;
+}
+
+/* 2. 强制消除所有 stHtml (iframe) 容器自带的边距 */
+[data-testid="stMainView"] [data-testid="stHtml"] {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* 3. 强制消除 stMarkdown 容器自带的边距 */
+[data-testid="stMainView"] [data-testid="stMarkdownContainer"] p {
+  margin-bottom: 0 !important;
+}
+[data-testid="stMainView"] .stMarkdown {
+  margin-bottom: 0 !important;
+}
+
+/* 4. 恢复模块内部内容区的间距 (Tabs/Container 内部) */
+[data-testid="stLayoutWrapper"] [data-testid="stVerticalBlock"] {
+  gap: 8px !important;
+}
+
+/* 5. 导入模块卡片间距控制 (Section Gap = 20px) */
+/* 资产导入模块：底部留出 20px 标准间距 */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) + [data-testid="stElementContainer"] {
+  margin-bottom: 20px !important;
+}
+/* 负债导入模块：底部留出 20px 标准间距 */
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) + [data-testid="stElementContainer"] {
+  margin-bottom: 20px !important;
+}
+
+/* ── anchor EC：高度为 0，不占空间 ── */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-container-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-body-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-container-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-body-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) {
+  height: 0 !important;
+  overflow: visible !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ── 按钮 EC：左缩进 28px + 宽度自适应 ── */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) + [data-testid="stElementContainer"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) + [data-testid="stElementContainer"] {
+  margin-left: 28px !important;
+  width: calc(100% - 56px) !important;
+}
+
+/* ── 头部按钮：卡片头部外观 ── */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) + [data-testid="stElementContainer"] button,
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) + [data-testid="stElementContainer"] button {
   background: #ffffff !important;
-  border: none !important;
-  border-radius: 16px !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04) !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04) !important;
+  color: #1E3A5F !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1px !important;
+  padding: 0 20px !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  display: flex !important;
+  align-items: center !important;
+  cursor: pointer !important;
+  transition: background .12s, border-color .12s !important;
+  width: 100% !important;
+  white-space: nowrap !important;
   overflow: hidden !important;
 }
-/* ── 消除 expander 与下方 iframe 之间 Streamlit 默认 16px 间距 ── */
-[data-testid="stLayoutWrapper"]:has([data-testid="stExpander"]) {
-  margin-bottom: -16px !important;
+/* 强制覆盖头部按钮内部 p 标签的字号 */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) + [data-testid="stElementContainer"] button p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) + [data-testid="stElementContainer"] button p {
+  font-size: 13px !important;
+  font-weight: 600 !important;
 }
-.stExpander details { background: #fff !important; }
-/* ── Summary 头部：与页面 card-title 字重、颜色完全一致 ── */
-.stExpander details summary {
-  padding: 16px 24px !important;
-  font-size: 14px !important; font-weight: 700 !important;
-  color: #1E3A5F !important; background: #fff !important;
-  letter-spacing: 0.3px !important;
-  min-height: 52px !important;
-  display: flex !important; align-items: center !important;
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) + [data-testid="stElementContainer"] button:hover,
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) + [data-testid="stElementContainer"] button:hover {
+  background: #F9FAFB !important;
+  border-color: #D1D5DB !important;
+  box-shadow: 0 2px 6px rgba(15,30,53,0.10) !important;
 }
-.stExpander details summary:hover { background: #F9FAFB !important; }
-.stExpander details > div {
-  border-top: 1px solid #F3F4F6 !important;
-  padding: 8px 24px 24px !important;
-  background: #fff !important;
+/* 展开状态：头部去掉下方圆角，与内容区无缝拼合 */
+[data-testid="stVerticalBlock"]:has(#wp-import-card-anchor):has([data-testid="stLayoutWrapper"]) > [data-testid="stElementContainer"]:nth-child(2) button,
+[data-testid="stVerticalBlock"]:has(#wp-liab-import-card-anchor):has([data-testid="stLayoutWrapper"]) > [data-testid="stElementContainer"]:nth-child(2) button {
+  border-radius: 12px 12px 0 0 !important;
+  border-bottom: 1px solid #F3F4F6 !important;
 }
-/* ── Tabs ── */
-.stExpander .stTabs [data-baseweb="tab-list"] {
-  border-bottom: 2px solid #F3F4F6 !important;
-  gap: 0 !important; background: transparent !important;
+
+/* ── 内容区 stLayoutWrapper：紧凑 padding，无双层卡片 ── */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) ~ [data-testid="stLayoutWrapper"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) ~ [data-testid="stLayoutWrapper"] {
+  margin-top: -32px !important;
+  margin-left: 28px !important;
+  width: calc(100% - 56px) !important;
+  background: #ffffff !important;
+  border-top: 0px none !important;
+  border-right: 1px solid #E5E7EB !important;
+  border-bottom: 1px solid #E5E7EB !important;
+  border-left: 1px solid #E5E7EB !important;
+  border-radius: 0 0 12px 12px !important;
+  box-shadow: 0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04) !important;
+  padding: 10px 16px 12px !important;
+  position: relative !important;  /* 为下载按钮绝对定位提供 containing block */
 }
-.stExpander .stTabs button[data-baseweb="tab"] {
-  background: transparent !important; border: none !important;
+/* 内层 stVerticalBlock：压缩元素间距 */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) ~ [data-testid="stLayoutWrapper"] [data-testid="stVerticalBlock"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) ~ [data-testid="stLayoutWrapper"] [data-testid="stVerticalBlock"] {
+  gap: 8px !important;
+}
+
+/* ── 所有 anchor EC 自身高度为 0 ── */
+[data-testid="stElementContainer"]:has(#wp-import-container-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-body-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor),
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-container-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-body-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor),
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) {
+  height: 0 !important;
+  overflow: visible !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ── 全局字体：对齐表格/Panel 字体系统 ── */
+[data-testid="stElementContainer"]:has(#wp-import-card-anchor) ~ [data-testid="stLayoutWrapper"] *,
+[data-testid="stElementContainer"]:has(#wp-liab-import-card-anchor) ~ [data-testid="stLayoutWrapper"] * {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  line-height: 1.5 !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   Tabs：对齐资产表格表头风格
+   position: relative 为下载按钮绝对定位提供锚点
+══════════════════════════════════════════════════════ */
+/* Tabs 选择器：tabsAnchor EC 后紧邻的是 stTabs（直接兄弟，不经过 stElementContainer） */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] {
+  position: relative !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-baseweb="tab-list"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-baseweb="tab-list"] {
+  border-bottom: 1px solid #F3F4F6 !important;
+  gap: 20px !important;
+  background: transparent !important;
+  padding-bottom: 0 !important;
+  min-height: 32px !important;
+  padding-right: 110px !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"] {
+  background: transparent !important;
+  border: none !important;
   border-bottom: 2px solid transparent !important;
-  margin-bottom: -2px !important; border-radius: 0 !important;
-  color: #6B7280 !important; font-size: 13px !important;
-  font-weight: 500 !important; padding: 10px 16px !important;
+  margin-bottom: -1px !important;
+  border-radius: 0 !important;
+  color: #9CA3AF !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding: 5px 0 !important;
+  transition: color .12s ease !important;
 }
-.stExpander .stTabs button[data-baseweb="tab"]:hover { color: #1E3A5F !important; }
-.stExpander .stTabs button[aria-selected="true"][data-baseweb="tab"] {
-  color: #1E3A5F !important; font-weight: 600 !important;
-  border-bottom: 2px solid #1E3A5F !important;
+/* 强制覆盖 Tab 内部 p 标签的字号 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"] p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"] p {
+  font-size: 13px !important;
+  font-weight: 500 !important;
 }
-/* ── 下载按钮 ── */
-.stExpander .stDownloadButton > button {
-  background: #fff !important; border: 1px solid #E5E7EB !important;
-  border-radius: 8px !important; color: #374151 !important;
-  font-size: 13px !important; font-weight: 500 !important;
-  padding: 8px 14px !important; box-shadow: 0 1px 2px rgba(0,0,0,.04) !important;
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"]:hover,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] button[data-baseweb="tab"]:hover {
+  color: #1E3A5F !important;
 }
-.stExpander .stDownloadButton > button:hover {
-  border-color: #1E3A5F !important; color: #1E3A5F !important;
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] button[aria-selected="true"][data-baseweb="tab"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] button[aria-selected="true"][data-baseweb="tab"] {
+  color: #1B2A4A !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid transparent !important;
 }
-/* ── 主按钮 ── */
-.stExpander .stButton > button[kind="primary"] {
-  background: #1E3A5F !important; border: none !important;
-  border-radius: 8px !important; color: #fff !important;
-  font-size: 13px !important; font-weight: 600 !important;
-  padding: 8px 18px !important;
+/* Streamlit 默认红色 tab-highlight 覆盖为品牌深蓝 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+  background-color: #1B2A4A !important;
+  background: #1B2A4A !important;
 }
-.stExpander .stButton > button:not([kind="primary"]) {
-  background: #fff !important; border: 1px solid #E5E7EB !important;
-  border-radius: 8px !important; color: #374151 !important;
+/* Tab 内容区：压缩上方 padding */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stTabsContent"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stTabsContent"] {
+  padding-top: 8px !important;
 }
-/* ── 文件上传区 ── */
-.stExpander [data-testid="stFileUploadDropzone"] {
-  border: 1.5px dashed #D1D5DB !important;
-  border-radius: 10px !important; background: #FAFAFA !important;
+
+/* ══════════════════════════════════════════════════════
+   下载按钮：绝对定位到内容区右上角（Tabs 行旁边）
+   containing block = stLayoutWrapper（已设 position: relative）
+══════════════════════════════════════════════════════ */
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor) + [data-testid="stElementContainer"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) + [data-testid="stElementContainer"] {
+  position: absolute !important;
+  top: 10px !important;
+  right: 16px !important;
+  width: auto !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
-.stExpander [data-testid="stFileUploadDropzone"]:hover {
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button,
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button {
+  background: #ffffff !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 6px !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding: 3px 10px !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+  transition: all .15s ease !important;
+  height: auto !important;
+  min-height: 0 !important;
+  line-height: 1.4 !important;
+}
+/* 强制覆盖下载按钮内部 p 标签的字号 */
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button p {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button:hover,
+[data-testid="stElementContainer"]:has(#wp-liab-import-dl-anchor) + [data-testid="stElementContainer"] .stDownloadButton > button:hover {
+  border-color: #D1D5DB !important;
+  background: #F9FAFB !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   Uploader 轻量化：单行入口，去掉大灰块
+   注意：Streamlit 实际 testid 是 stFileUploaderDropzone（不是 stFileUploadDropzone）
+══════════════════════════════════════════════════════ */
+/* 整体容器：去掉背景、边框、padding，不再是独立卡片块 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploader"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploader"] {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin-top: 6px !important;
+  box-shadow: none !important;
+}
+/* label 标签：隐藏（说明文字已用 st.caption 替代） */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stWidgetLabel"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stWidgetLabel"] {
+  display: none !important;
+}
+/* Dropzone section：压缩为单行高度，透明背景，极细边框 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"] {
+  background: transparent !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 6px !important;
+  padding: 4px 10px !important;
+  min-height: 0 !important;
+  height: auto !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+/* Dropzone 内部说明区：flex 横排 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  flex: 1 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}
+/* Dropzone 内部说明区的 span（云朵图标容器）：隐藏 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] > span:first-child,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] > span:first-child {
+  display: none !important;
+}
+/* Dropzone 内部说明区的 div（文字容器）：横排 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] > div,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] > div {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
+}
+/* 隐藏云朵 SVG 图标 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] svg,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] svg {
+  display: none !important;
+}
+/* "Drag and drop" 提示文字：单行，极小字号，灰色 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] span,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzoneInstructions"] span {
+  font-size: 11px !important;
+  color: #9CA3AF !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+}
+/* "Browse files" 按钮：轻量链接风格，精确选择器 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"] button,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"] button {
+  background: #F9FAFB !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 4px !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding: 2px 10px !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  height: 24px !important;
+  min-height: 0 !important;
+  line-height: 1 !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"] button:hover,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ * [data-testid="stFileUploaderDropzone"] button:hover {
+  background: #F3F4F6 !important;
+  border-color: #D1D5DB !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   Tab 内部其他控件（选择器基于 stTabs，精确作用于 Tab 内容区）
+══════════════════════════════════════════════════════ */
+/* 说明文字（st.caption）：紧凑，对齐表格辅助文字 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stCaptionContainer"] p,
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stMarkdown"] p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stCaptionContainer"] p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stMarkdown"] p {
+  color: #6B7280 !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.5 !important;
+  margin-bottom: 4px !important;
+  margin-top: 0 !important;
+}
+
+/* Radio 按钮组：pill 样式 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio > div,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio > div {
+  gap: 6px !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  margin-bottom: 6px !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label {
+  border: 1px solid #E5E7EB !important;
+  border-radius: 6px !important;
+  padding: 3px 10px !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  color: #6B7280 !important;
+  background: #fff !important;
+  cursor: pointer !important;
+  transition: all .12s !important;
+  margin: 0 !important;
+}
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label:has(input:checked),
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label:has(input:checked) {
+  background: #EFF6FF !important;
   border-color: #1E3A5F !important;
+  color: #1E3A5F !important;
+  font-weight: 600 !important;
 }
-/* ── Radio ── */
-.stExpander .stRadio > div { gap: 6px !important; }
-.stExpander .stRadio label {
-  border: 1px solid #E5E7EB !important; border-radius: 7px !important;
-  padding: 5px 12px !important; font-size: 12px !important;
-  font-weight: 500 !important; color: #374151 !important;
-  background: #fff !important; cursor: pointer !important;
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio input,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio input {
+  display: none !important;
 }
-.stExpander .stRadio label:has(input:checked) {
-  background: #EFF6FF !important; border-color: #1E3A5F !important;
-  color: #1E3A5F !important; font-weight: 600 !important;
+/* ── Typography: radio label > p 字号修复（解决 Streamlit 16px 继承）── */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stRadio label p {
+  font-size: 11px !important;
+  font-weight: inherit !important;
+  color: inherit !important;
+  line-height: 1.4 !important;
+  margin: 0 !important;
 }
-.stExpander .stRadio input { display: none !important; }
-/* ── 说明文字 / 提示 ── */
-.stExpander .stCaptionContainer p {
-  color: #9CA3AF !important; font-size: 12px !important;
+
+/* 主操作按钮（确认导入）：Fintech 蓝，紧凑比例 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] .stButton > button[kind="primary"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] .stButton > button[kind="primary"] {
+  background: #1E3A5F !important;
+  border: none !important;
+  border-radius: 6px !important;
+  color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 4px 14px !important;
+  margin-top: 8px !important;
 }
-.stExpander [data-testid="stAlert"] {
-  border-radius: 8px !important; font-size: 12px !important;
+
+/* ── Typography: st.info 提示条 — 去掉蓝底，改为内联说明文字 ── */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 0 4px 0 !important;
+  margin-bottom: 4px !important;
+  box-shadow: none !important;
 }
-.stExpander [data-testid="stDataFrame"] {
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] p,
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] p,
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #6B7280 !important;
+  line-height: 1.5 !important;
+}
+/* 隐藏 alert 图标（info icon） */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] [data-testid="stAlertContentIcon"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stAlert"] [data-testid="stAlertContentIcon"] {
+  display: none !important;
+}
+
+/* DataFrame 预览：极细边框 */
+[data-testid="stElementContainer"]:has(#wp-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stDataFrame"],
+[data-testid="stElementContainer"]:has(#wp-liab-import-tabs-anchor) ~ [data-testid="stTabs"] [data-testid="stDataFrame"] {
   border: 1px solid #F3F4F6 !important;
-  border-radius: 8px !important; overflow: hidden !important;
-}
-</style>""", unsafe_allow_html=True)
+  border-radius: 6px !important;
+  overflow: hidden !important;
+  margin-top: 6px !important;
+    }
+    </style>""", unsafe_allow_html=True)
+
 
     # ── 构建顶部 HTML（标题 + KPI + 图表 + 资产明细）────────────────────────
     html_top = _build_overview_html(bs, positions, alerts, portfolio, liabilities)
@@ -1177,23 +1405,63 @@ def render():
     components.html(html_top, height=height_top, scrolling=False)
 
     # ── 导入 / 导出区（资产明细与负债明细之间）──────────────────────────────
-    with st.expander("📥  导入 / 导出数据", expanded=False):
-        _render_import_panel(portfolio_id)
+    # v1.10.4: 用 @st.fragment 包裹，点击展开/收起只 rerun fragment，不触发整页 rerun
+    # 这样滚动位置不会跳动，体验更顺
+    _render_import_card(portfolio_id)
 
-    # ── 构建底部 HTML（负债明细 + 风险告警 + AI）────────────────────────────
-    html_bottom = _build_bottom_html(bs, alerts, liabilities)
-    height_bottom = (
-        80 + n_inv_liab * 42 + 60        # 负债卡片
-        + max(0, n_alerts) * 95           # 告警
+    # ── 构建底部 HTML（仅负债明细）──────────────────────────────────────────
+    # 拆分 html_bottom，将导入模块插入负债明细与风险告警之间
+    html_liab_table = _build_liab_table_html(bs, liabilities)
+    # 调整高度计算，确保 HTML 内部 Padding 能够正确显示
+    height_liab_table = 80 + n_inv_liab * 42 + 40
+    components.html(html_liab_table, height=height_liab_table, scrolling=False)
+
+    # ── 负债导入 / 导出区（负债明细下方，风险告警上方）──────────────────────
+    _render_liab_import_card(portfolio_id)
+
+    # ── 构建底部 HTML（风险告警 + AI）───────────────────────────────────────
+    html_alerts_ai = _build_alerts_ai_html(bs, alerts)
+    height_alerts_ai = (
+        max(0, n_alerts) * 95           # 告警
         + (70 if n_alerts > 0 else 0)
-        + 88                              # AI + padding（含 components.html -16 补偿）
+        + 88                              # AI + padding
     )
-    components.html(html_bottom, height=height_bottom, scrolling=False)
+    components.html(html_alerts_ai, height=height_alerts_ai, scrolling=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 导入 / 导出面板（Streamlit 原生）
+# 导入 / 导出卡片（fragment）+ 导入 / 导出面板（Streamlit 原生）
 # ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment
+def _render_import_card(portfolio_id: int):
+    """导入/导出卡片外壳（fragment）
+    用 @st.fragment 装饰，点击展开/收起只 rerun 这个 fragment，不触发整页 rerun
+    这样滚动位置不会跳动
+    """
+    # 初始化 session_state
+    if "import_panel_open" not in st.session_state:
+        st.session_state["import_panel_open"] = False
+    is_open = st.session_state["import_panel_open"]
+
+    # 卡片头部：用 st.button 实现整个头部区域可点击，用 CSS 将其渲染成卡片头部外观
+    toggle_text = "📥  导入 / 导出数据        ▲" if is_open else "📥  导入 / 导出数据        ▼"
+    st.markdown('<div id="wp-import-card-anchor"></div>', unsafe_allow_html=True)
+    if st.button(toggle_text, key="wp_import_toggle", use_container_width=True):
+        st.session_state["import_panel_open"] = not is_open
+        st.rerun()
+
+    # 内容区：仅展开时渲染
+    # 用 st.container 创建独立的 stVerticalBlock，使 ~ 选择器只作用于内容区内部，不影响底部 iframe
+    if is_open:
+        # 内联 margin-top:-16px 消除 stVerticalBlock gap，不依赖 CSS 选择器
+        st.markdown('<div id="wp-import-body-anchor" style="margin-top:-16px"></div>', unsafe_allow_html=True)
+        # border=False：外层卡片边框已由 CSS stLayoutWrapper 选择器统一控制
+        # 不需要 border=True 再叠一层白底圆角框（消除双层卡片感）
+        with st.container(border=False):
+            st.markdown('<div id="wp-import-container-anchor"></div>', unsafe_allow_html=True)
+            _render_import_panel(portfolio_id)
+
 
 def _render_import_panel(pid: int):
     """导入导出功能面板（CSV / 截图识别）"""
@@ -1205,16 +1473,9 @@ def _render_import_panel(pid: int):
     finally:
         session.close()
 
-    col_dl, col_void = st.columns([1, 3])
-    with col_dl:
-        csv_str = positions_to_csv(session_positions_reload(pid, segment="投资"))
-        st.download_button(
-            "⬇ 下载资产明细 CSV",
-            data=csv_str.encode("utf-8-sig"),
-            file_name="positions.csv", mime="text/csv",
-            use_container_width=True,
-        )
-
+    # ── Tabs 先渲染（占据左侧），下载按钮后渲染，CSS 绝对定位到 Tabs 行右上角 ──
+    # 用 wp-import-tabs-anchor 标记 Tabs 容器，使 position:relative 作用域正确
+    st.markdown('<div id="wp-import-tabs-anchor"></div>', unsafe_allow_html=True)
     tab_generic, tab_broker, tab_bank = st.tabs([
         "通用 CSV（全量覆盖）", "CSV 导入（按平台替换）", "截图识别（按平台替换）",
     ])
@@ -1334,6 +1595,90 @@ def _render_import_panel(pid: int):
                         del st.session_state[cache_key]
                         st.session_state["bank_upload_counter"] = upload_counter + 1
                         st.success(f"✅ {platform} 已导入 {len(db_positions)} 条持仓数据！"); st.rerun()
+
+    # ── 下载按钮：渲染在 Tabs 之后，CSS 绝对定位到 Tabs 行右上角 ──
+    st.markdown('<div id="wp-import-dl-anchor"></div>', unsafe_allow_html=True)
+    csv_str = positions_to_csv(session_positions_reload(portfolio_id, segment="投资"))
+    st.download_button(
+        "⬇ 下载 CSV",
+        data=csv_str.encode("utf-8-sig"),
+        file_name="positions.csv", mime="text/csv",
+        key="wp_dl_csv",
+    )
+
+@st.fragment
+def _render_liab_import_card(portfolio_id: int):
+    """负债导入/导出卡片外壳（fragment）
+    用 @st.fragment 装饰，点击展开/收起只 rerun 这个 fragment，不触发整页 rerun
+    这样滚动位置不会跳动
+    """
+    # 初始化 session_state
+    if "liab_import_panel_open" not in st.session_state:
+        st.session_state["liab_import_panel_open"] = False
+    is_open = st.session_state["liab_import_panel_open"]
+
+    # 卡片头部：用 st.button 实现整个头部区域可点击，用 CSS 将其渲染成卡片头部外观
+    toggle_text = "📥  导入 / 导出数据        ▲" if is_open else "📥  导入 / 导出数据        ▼"
+    st.markdown('<div id="wp-liab-import-card-anchor"></div>', unsafe_allow_html=True)
+    if st.button(toggle_text, key="wp_liab_import_toggle", use_container_width=True):
+        st.session_state["liab_import_panel_open"] = not is_open
+        st.rerun()
+
+    # 内容区：仅展开时渲染
+    # 用 st.container 创建独立的 stVerticalBlock，使 ~ 选择器只作用于内容区内部，不影响底部 iframe
+    if is_open:
+        # 内联 margin-top:-16px 消除 stVerticalBlock gap，不依赖 CSS 选择器
+        st.markdown('<div id="wp-liab-import-body-anchor" style="margin-top:-16px"></div>', unsafe_allow_html=True)
+        # border=False：外层卡片边框已由 CSS stLayoutWrapper 选择器统一控制
+        # 不需要 border=True 再叠一层白底圆角框（消除双层卡片感）
+        with st.container(border=False):
+            st.markdown('<div id="wp-liab-import-container-anchor"></div>', unsafe_allow_html=True)
+            _render_liab_import_panel(portfolio_id)
+
+
+def _render_liab_import_panel(pid: int):
+    """负债导入导出功能面板（仅保留通用 CSV 选项）"""
+    session = get_session()
+    try:
+        liabilities_all = session.query(Liability).filter_by(
+            portfolio_id=pid
+        ).all()
+    finally:
+        session.close()
+
+    # ── Tabs 先渲染（占据左侧），下载按钮后渲染，CSS 绝对定位到 Tabs 行右上角 ──
+    # 用 wp-liab-import-tabs-anchor 标记 Tabs 容器，使 position:relative 作用域正确
+    st.markdown('<div id="wp-liab-import-tabs-anchor"></div>', unsafe_allow_html=True)
+    tab_generic = st.tabs(["通用 CSV（全量覆盖）"])[0]
+
+    with tab_generic:
+        st.caption("上传后将全量覆盖全部负债数据。")
+        uploaded = st.file_uploader("选择负债 CSV 文件", type=["csv"], key="liab_upload")
+        if uploaded:
+            content = uploaded.read().decode("utf-8-sig")
+            new_liabilities, errors = parse_liabilities_csv(content)
+            if errors:
+                for e in errors: st.error(e)
+            elif new_liabilities:
+                st.success(f"解析成功，共 {len(new_liabilities)} 条负债。")
+                if st.button("确认覆盖全部负债数据", key="confirm_liab_import"):
+                    _import_liabilities_by_purpose(pid, new_liabilities, ["投资杠杆", "购房", "日常消费"])
+                    st.success("负债数据已更新！"); st.rerun()
+
+    # ── 下载按钮：渲染在 Tabs 之后，CSS 绝对定位到 Tabs 行右上角 ──
+    st.markdown('<div id="wp-liab-import-dl-anchor"></div>', unsafe_allow_html=True)
+    session = get_session()
+    try:
+        liabilities_reload = session.query(Liability).filter_by(portfolio_id=pid).all()
+    finally:
+        session.close()
+    csv_str = liabilities_to_csv(liabilities_reload)
+    st.download_button(
+        "⬇ 下载 CSV",
+        data=csv_str.encode("utf-8-sig"),
+        file_name="liabilities.csv", mime="text/csv",
+        key="wp_liab_dl_csv",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
