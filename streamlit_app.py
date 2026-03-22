@@ -1,5 +1,5 @@
 """
-WealthPilot - 主入口
+WealthPilot - 主入口（UI v2 — 司南风格重构）
 负责页面配置、侧边栏导航，业务逻辑全部委托给 app_pages/ 下各模块。
 """
 
@@ -17,11 +17,97 @@ from app_pages import placeholder
 # 页面配置
 # ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="WealthPilot - 个人资产配置与智能投顾",
+    page_title="WealthPilot · 个人智能投顾",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ──────────────────────────────────────────────
+# 全局侧边栏样式（深蓝主题）
+# ──────────────────────────────────────────────
+st.markdown("""
+<style>
+/* 侧边栏深蓝渐变背景 */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #1B2A4A 0%, #243558 100%) !important;
+    border-right: 1px solid #2D4A7A !important;
+}
+
+/* 侧边栏所有文字 */
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown strong,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] span {
+    color: #C8D6E8 !important;
+}
+
+/* 侧边栏标题 */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    color: #FFFFFF !important;
+}
+
+/* 侧边栏分割线 */
+[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.12) !important;
+}
+
+/* 侧边栏按钮 — 通用 */
+[data-testid="stSidebar"] .stButton button {
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    border: none !important;
+    text-align: left !important;
+    transition: all 0.15s ease !important;
+    color: #C8D6E8 !important;
+    background: transparent !important;
+}
+
+/* 侧边栏按钮 — 悬浮 */
+[data-testid="stSidebar"] .stButton button:hover {
+    background: rgba(255,255,255,0.08) !important;
+    color: #FFFFFF !important;
+}
+
+/* 侧边栏按钮 — 激活（primary） */
+[data-testid="stSidebar"] .stButton button[kind="primary"] {
+    background: rgba(59,130,246,0.20) !important;
+    color: #93C5FD !important;
+    font-weight: 600 !important;
+    border-left: 2px solid #3B82F6 !important;
+}
+
+/* 侧边栏 caption */
+[data-testid="stSidebar"] .stCaption {
+    color: rgba(200,214,232,0.6) !important;
+}
+
+/* 主内容区背景 */
+.stApp { background-color: #F4F6FA !important; }
+
+/* 隐藏 Streamlit 默认 header */
+header[data-testid="stHeader"] { display: none !important; }
+
+/* 减少顶部空白 */
+.block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 2rem !important;
+}
+
+/* ★ 侧边栏宽度固定 220px */
+section[data-testid="stSidebar"] {
+    width: 220px !important;
+    min-width: 220px !important;
+}
+section[data-testid="stSidebar"] > div:first-child {
+    width: 220px !important;
+    min-width: 220px !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────
 # 导航结构定义
@@ -58,23 +144,43 @@ _IMPLEMENTED = {
     "投研观点":     research,
 }
 
-# 首页策略：有持仓数据时直接进投资账户总览，否则引导至用户画像
 _DEFAULT_PAGE = "投资账户总览"
+
+
+# ──────────────────────────────────────────────
+# 侧边栏品牌标识
+# ──────────────────────────────────────────────
+st.sidebar.markdown("""
+<div style="display:flex;align-items:center;gap:10px;padding:4px 0 12px">
+  <div style="width:34px;height:34px;border-radius:9px;
+              background:linear-gradient(135deg,#3B82F6,#1D4ED8);
+              display:flex;align-items:center;justify-content:center;
+              font-size:17px;flex-shrink:0">📊</div>
+  <div>
+    <div style="font-size:15px;font-weight:700;color:#FFFFFF;line-height:1.2">WealthPilot</div>
+    <div style="font-size:11px;color:rgba(200,214,232,0.65);line-height:1.2">个人智能投顾系统</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+st.sidebar.divider()
 
 
 # ──────────────────────────────────────────────
 # 侧边栏导航
 # ──────────────────────────────────────────────
 def _sidebar_nav() -> str:
-    """渲染分组侧边栏导航，返回当前选中的页面名称。
-    使用 session_state["current_page"] 持久化选中状态，
-    任何页面内的 button 点击不会导致导航跳回。
-    """
+    """渲染分组侧边栏导航，返回当前选中的页面名称。"""
     if "current_page" not in st.session_state:
         st.session_state["current_page"] = _DEFAULT_PAGE
 
     for section_title, items in _NAV_SECTIONS:
-        st.sidebar.markdown(f"**{section_title}**")
+        st.sidebar.markdown(
+            f'<div style="display:flex;align-items:center;gap:8px;padding:14px 0 4px 0">'
+            f'<span style="font-size:13px;font-weight:700;color:rgba(255,255,255,0.88);'
+            f'letter-spacing:0.1px">{section_title}</span></div>',
+            unsafe_allow_html=True,
+        )
         for item in items:
             is_active = st.session_state["current_page"] == item
             if st.sidebar.button(
@@ -84,17 +190,10 @@ def _sidebar_nav() -> str:
                 type="primary" if is_active else "secondary",
             ):
                 st.session_state["current_page"] = item
-        st.sidebar.write("")  # 组间间距
+        st.sidebar.write("")
 
     return st.session_state["current_page"]
 
-
-# ──────────────────────────────────────────────
-# 渲染侧边栏
-# ──────────────────────────────────────────────
-st.sidebar.title("WealthPilot")
-st.sidebar.caption("个人资产配置与智能投顾系统")
-st.sidebar.divider()
 
 current_page = _sidebar_nav()
 
