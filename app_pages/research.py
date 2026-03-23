@@ -89,37 +89,6 @@ def _tags_input_to_json(text: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────
-# 导航
-# ──────────────────────────────────────────────────────────
-
-def _research_nav() -> str:
-    if "research_nav" not in st.session_state:
-        st.session_state["research_nav"] = _NAV_ITEMS[0]
-
-    _sc = getattr(st, "segmented_control", None)
-    if _sc is not None:
-        try:
-            result = _sc(
-                "投研导航", options=_NAV_ITEMS, key="research_nav",
-                label_visibility="collapsed", use_container_width=True,
-            )
-        except TypeError:
-            result = _sc(
-                "投研导航", options=_NAV_ITEMS, key="research_nav",
-                label_visibility="collapsed",
-            )
-        return result if result is not None else _NAV_ITEMS[0]
-
-    cols = st.columns(len(_NAV_ITEMS))
-    for col, item in zip(cols, _NAV_ITEMS):
-        with col:
-            if st.button(
-                item, use_container_width=True,
-                type="primary" if st.session_state.get("research_nav") == item else "secondary",
-                key=f"_rnav_{item}",
-            ):
-                st.session_state["research_nav"] = item
-    return st.session_state.get("research_nav", _NAV_ITEMS[0])
 
 
 # ──────────────────────────────────────────────────────────
@@ -327,10 +296,7 @@ def _render_import() -> None:
                     session.add(card)
                     doc.parse_status = "parsed"
                     session.commit()
-                    # 用独立中转变量传递跳转意图，render() 顶部在 widget 实例化前统一应用，
-                    # 避免在 segmented_control(key="research_nav") 创建后修改其绑定的 state
-                    st.toast("✅ 资料已保存，AI 解析完成！", icon="✅")
-                    st.session_state["_research_nav_target"] = _NAV_ITEMS[1]
+                    st.toast("✅ 资料已保存，AI 解析完成！请点击「候选观点卡」Tab 查看。", icon="✅")
                     st.rerun()
             else:
                 session.commit()
@@ -455,8 +421,7 @@ def _run_parse_for_doc(doc: ResearchDocument) -> None:
 
         doc_db.parse_status = "parsed"
         session.commit()
-        st.success("✅ 解析完成！请前往「候选观点卡」查看。")
-        st.session_state["_research_nav_target"] = _NAV_ITEMS[1]
+        st.success("✅ 解析完成！请点击上方「候选观点卡」Tab 查看。")
         st.rerun()
     except Exception as e:
         session.rollback()
@@ -943,23 +908,18 @@ def render() -> None:
     st.title("投研观点")
     st.caption("资料导入 → AI 提炼 → 候选卡审核 → 观点库 → 决策检索")
 
-    # 处理程序触发的 Tab 跳转：必须在 _research_nav() 实例化 segmented_control 前应用，
-    # 避免在 widget 创建后修改其绑定的 session_state key（会触发 Streamlit 警告/异常）。
-    if "_research_nav_target" in st.session_state:
-        st.session_state["research_nav"] = st.session_state.pop("_research_nav_target")
+    tab_import, tab_cards, tab_viewpoints, tab_retrieval = st.tabs(
+        ["📥 资料导入", "🃏 候选观点卡", "📚 观点库", "🔍 决策检索"]
+    )
 
-    active_nav = _research_nav()
-
-    # 全量 elif 路由，避免 else 兜底导致任意非法值都渲染检索页
-    if active_nav == _NAV_ITEMS[0]:
+    with tab_import:
         _render_import()
-    elif active_nav == _NAV_ITEMS[1]:
+
+    with tab_cards:
         _render_cards()
-    elif active_nav == _NAV_ITEMS[2]:
+
+    with tab_viewpoints:
         _render_viewpoints()
-    elif active_nav == _NAV_ITEMS[3]:
+
+    with tab_retrieval:
         _render_retrieval()
-    else:
-        # 兜底：session_state 被外部写入了非法值时，重置到首页
-        st.session_state["research_nav"] = _NAV_ITEMS[0]
-        st.rerun()

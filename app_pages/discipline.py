@@ -1511,52 +1511,6 @@ def _render_handbook() -> None:
 # 主渲染函数
 # ─────────────────────────────────────────────────────────
 
-_NAV_ITEMS = ["📊  账户风险仪表盘", "📖  纪律手册速查"]
-
-
-def _discipline_nav() -> str:
-    """返回当前选中的导航项，状态持久化到 session_state["discipline_nav"]。
-
-    优先级：
-    1. st.segmented_control + use_container_width=True  (Streamlit ≥ 1.40)
-    2. st.segmented_control（无 use_container_width）   (Streamlit 1.36~1.39)
-    3. 全宽按钮组 fallback                              (Streamlit < 1.36)
-
-    任何 button 点击触发的 rerun 都不会重置导航位置。
-    """
-    if "discipline_nav" not in st.session_state:
-        st.session_state["discipline_nav"] = _NAV_ITEMS[0]
-
-    _sc = getattr(st, "segmented_control", None)
-    if _sc is not None:
-        # 尝试带 use_container_width（≥1.40），不支持时降级
-        try:
-            result = _sc(
-                "导航", options=_NAV_ITEMS, key="discipline_nav",
-                label_visibility="collapsed", use_container_width=True,
-            )
-        except TypeError:
-            result = _sc(
-                "导航", options=_NAV_ITEMS, key="discipline_nav",
-                label_visibility="collapsed",
-            )
-        return result if result is not None else _NAV_ITEMS[0]
-
-    # Fallback：全宽按钮组，active = primary，inactive = secondary
-    cols = st.columns(len(_NAV_ITEMS))
-    for col, item in zip(cols, _NAV_ITEMS):
-        with col:
-            if st.button(
-                item,
-                use_container_width=True,
-                type="primary" if st.session_state.get("discipline_nav") == item else "secondary",
-                key=f"_nav_{item}",
-            ):
-                st.session_state["discipline_nav"] = item
-
-    return st.session_state.get("discipline_nav", _NAV_ITEMS[0])
-
-
 def render() -> None:
     st.title("投资纪律中心")
 
@@ -1575,17 +1529,17 @@ def render() -> None:
     # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
     has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
 
-    # 导航：state 存于 session_state，button 点击后不会丢失
-    active_nav = _discipline_nav()
-
-    # 💡 交易前决策引导：统一入口已迁移至「投资决策」模块
+    # 💡 交易前决策引导
     st.info(
         "💡 如需进行**买入 / 卖出 / 加仓 / 减仓**等交易前判断，"
         "请前往左侧菜单的「**投资决策**」模块。",
         icon="🧠",
     )
 
-    if active_nav == _NAV_ITEMS[0]:
+    tab_dashboard, tab_handbook = st.tabs(["📊 账户风险仪表盘", "📖 纪律手册速查"])
+
+    with tab_dashboard:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
-    else:
+
+    with tab_handbook:
         _render_handbook()
