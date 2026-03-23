@@ -380,10 +380,24 @@ def _render_dashboard(
 
 
 # ─────────────────────────────────────────────────────────
-# Tab 2：操作评估器
+# [已退役] 操作评估器（原 Tab 2）
+# UI 入口已关闭，底层能力保留供复用
 # ─────────────────────────────────────────────────────────
 
 def _render_evaluator(raw: list[dict], portfolio_drawdown_pct: float) -> None:
+    """
+    [已退役 · UI 入口已关闭]
+
+    原「投资纪律」Tab 2「操作评估器」的渲染函数（表单手动填写版）。
+    已被 _render_pre_trade_eval()（自然语言输入版）取代，后者同样退役。
+    交易前决策功能已整合至「投资决策」模块（app_pages/strategy.py）。
+
+    底层逻辑完整保留，如需复用请直接调用：
+        - app.discipline.engine_runner.evaluate_action()  三层引擎统一入口
+        - app.discipline.risk_engine.run()                硬性风控约束
+        - app.discipline.psychology_engine.run()          情绪冷却约束
+        - app.discipline.decision_engine.run()            策略判断层
+    """
     total = sum(r["market_value_cny"] for r in raw) or 1.0
     position_names = [r["name"] for r in raw]
 
@@ -702,7 +716,8 @@ def _render_checklist(raw: list[dict], portfolio_drawdown_pct: float) -> None:
 
 
 # ─────────────────────────────────────────────────────────
-# Tab 2（新）：交易前评估 — 自然语言解析 + 自动清单检查
+# [已退役] 交易前评估（自然语言版）— UI 入口已关闭
+# 底层能力保留，供后续规则/风控/心理约束等复用
 # ─────────────────────────────────────────────────────────
 
 _PRE_EVAL_FORM_KEYS = [
@@ -1001,8 +1016,19 @@ def _render_checklist_auto(
 
 def _render_pre_trade_eval(raw: list[dict], portfolio_drawdown_pct: float) -> None:
     """
-    Tab 2（新）：交易前评估
-    流程：自然语言描述 → 关键词解析 → 参数确认 → 纪律评估 + 自动清单检查
+    [已退役 · UI 入口已关闭]
+
+    原「投资纪律」Tab 2「交易前评估」的渲染函数（自然语言输入版）。
+    完整覆盖了：自然语言描述 → 关键词解析 → 参数确认表单 → 纪律评估 + 自动清单检查。
+
+    退役原因：功能与「投资决策」模块（app_pages/strategy.py）高度重叠，
+    统一由「投资决策」作为交易前决策的唯一入口，避免信息架构碎片化。
+
+    底层能力完整保留，如需复用请直接调用：
+        - _parse_trade_intent()                           自然语言关键词解析
+        - app.discipline.engine_runner.evaluate_action()  三层引擎统一入口
+        - _render_eval_result_section()                   结果渲染组件
+        - _render_checklist_auto()                        自动清单检查组件
     """
     total = sum(r["market_value_cny"] for r in raw) or 1.0
     position_names = [r["name"] for r in raw]
@@ -1485,7 +1511,7 @@ def _render_handbook() -> None:
 # 主渲染函数
 # ─────────────────────────────────────────────────────────
 
-_NAV_ITEMS = ["📊  账户风险仪表盘", "🔍  交易前评估", "📖  纪律手册速查"]
+_NAV_ITEMS = ["📊  账户风险仪表盘", "📖  纪律手册速查"]
 
 
 def _discipline_nav() -> str:
@@ -1552,9 +1578,14 @@ def render() -> None:
     # 导航：state 存于 session_state，button 点击后不会丢失
     active_nav = _discipline_nav()
 
+    # 💡 交易前决策引导：统一入口已迁移至「投资决策」模块
+    st.info(
+        "💡 如需进行**买入 / 卖出 / 加仓 / 减仓**等交易前判断，"
+        "请前往左侧菜单的「**投资决策**」模块。",
+        icon="🧠",
+    )
+
     if active_nav == _NAV_ITEMS[0]:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
-    elif active_nav == _NAV_ITEMS[1]:
-        _render_pre_trade_eval(raw, portfolio_drawdown)
     else:
         _render_handbook()
