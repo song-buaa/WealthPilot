@@ -1558,7 +1558,7 @@ def _discipline_nav() -> str:
 
 
 def render() -> None:
-    st.title("投资纪律执行引擎")
+    st.title("投资纪律中心")
 
     # 加载数据
     raw = _load_positions(portfolio_id)
