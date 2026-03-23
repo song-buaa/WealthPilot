@@ -47,22 +47,28 @@ def _render_decision_engine():
     st.markdown("#### 📝 输入决策需求")
     st.caption("用自然语言描述您的投资想法，系统将逐步分析并给出结构化建议。")
 
-    # 示例快捷按钮
+    # 根因修复：用 session_state + key= 管理文本框状态，替代 value=example_input。
+    # 原因：st.text_area(value=X) 中 X 为 non-None 时每次 rerun 都会覆盖 widget 内容。
+    # 示例按钮点击后 example_input 局部变量重置为 ""，导致"开始分析"那次 rerun 时
+    # text_area 被清空，user_input="" 传入 intent_parser，触发空字符串守卫。
+    if "de_user_input" not in st.session_state:
+        st.session_state["de_user_input"] = ""
+
+    # 示例快捷按钮：直接写入 session_state，在 text_area 渲染前完成，下次 rerun 持久生效
     example_col1, example_col2, example_col3 = st.columns(3)
-    example_input = ""
     with example_col1:
         if st.button("💡 理想汽车发布会前加仓吗？", use_container_width=True):
-            example_input = "理想汽车下周有新车发布会，我想在发布会前加仓，合适吗？"
+            st.session_state["de_user_input"] = "理想汽车下周有新车发布会，我想在发布会前加仓，合适吗？"
     with example_col2:
         if st.button("💡 Meta仓位太重，要减吗？", use_container_width=True):
-            example_input = "我的Meta仓位感觉有点重了，要不要减一部分？"
+            st.session_state["de_user_input"] = "我的Meta仓位感觉有点重了，要不要减一部分？"
     with example_col3:
         if st.button("💡 现在可以建仓苹果吗？", use_container_width=True):
-            example_input = "我想买入苹果，当前时机合适吗？"
+            st.session_state["de_user_input"] = "我想买入苹果，当前时机合适吗？"
 
     user_input = st.text_area(
         label="投资决策输入",
-        value=example_input,
+        key="de_user_input",   # session_state 驱动，跨 rerun 持久保留内容
         placeholder="例如：理想汽车发布会后我想加仓，当前仓位合适吗？",
         height=80,
         label_visibility="collapsed",
