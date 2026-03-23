@@ -27,6 +27,7 @@ UI 映射：
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -34,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import anthropic
+import httpx
 
 from .data_loader import LoadedData
 from .intent_parser import IntentResult
@@ -113,7 +115,27 @@ def _get_client() -> anthropic.Anthropic:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise EnvironmentError("未找到 ANTHROPIC_API_KEY 环境变量。")
-        _client = anthropic.Anthropic(api_key=api_key)
+
+        # 与 intent_parser 相同的 proxy 修复：避免 Streamlit ScriptRunnerThread 无 event loop
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
+        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        all_proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+        proxy_url = None
+        if https_proxy and not https_proxy.startswith("socks"):
+            proxy_url = https_proxy
+        elif all_proxy:
+            proxy_url = all_proxy
+
+        try:
+            http_client = httpx.Client(proxy=proxy_url) if proxy_url else httpx.Client()
+            _client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
+        except Exception:
+            _client = anthropic.Anthropic(api_key=api_key)
+
     return _client
 
 
@@ -187,21 +209,28 @@ def _build_payload(
 ) -> dict:
     """拼接送给 LLM 的结构化 payload（PRD 指定格式）。"""
 
-    # 持仓摘要（TOP5）
+    # 持仓摘要（TOP5，已聚合，每标的唯一一条）
     top_positions = sorted(data.positions, key=lambda p: p.weight, reverse=True)[:5]
     position_summary = [
-        {"name": p.name, "weight": f"{p.weight:.1%}", "asset_class": p.asset_class}
+        {
+            "name": p.name,
+            "weight": f"{p.weight:.1%}",
+            "asset_class": p.asset_class,
+            "platforms": p.platforms if p.platforms else [],
+        }
         for p in top_positions
     ]
 
-    # 目标持仓信息
+    # 目标持仓信息（聚合后，包含跨平台合并市值）
     target_info = None
     if data.target_position:
         tp = data.target_position
         target_info = {
             "name": tp.name,
-            "current_weight": f"{tp.weight:.1%}",
+            "current_weight": f"{tp.weight:.1%}",   # 聚合后占比，与规则校验完全一致
+            "market_value_cny": f"¥{tp.market_value_cny:,.0f}",
             "profit_loss_rate": f"{tp.profit_loss_rate:.1%}",
+            "platforms": tp.platforms if tp.platforms else [],
         }
 
     return {

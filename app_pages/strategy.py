@@ -184,22 +184,31 @@ def _render_intent(intent):
 def _render_data_summary(data, intent):
     """③ 数据展示：用户画像 / 持仓 / 投研。"""
     with st.expander("📊 数据详情（用户画像 / 持仓 / 投研观点）", expanded=False):
+
+        # 数据质量告警（warning 级，error 级已在 decision_flow 中断）
+        for w in (data.data_warnings or []):
+            if w.level == "warning":
+                st.warning(f"⚠️ {w.message}", icon="⚠️")
+
         col_a, col_b = st.columns(2)
 
         with col_a:
             st.markdown("**👤 用户画像**")
             st.markdown(f"- 风险偏好：{data.profile.risk_level}")
             st.markdown(f"- 投资目标：{data.profile.goal}")
-            st.markdown(f"- 总资产：¥{data.total_assets:,.0f}")
+            st.markdown(f"- 投资组合总市值：¥{data.total_assets:,.0f}")
+            st.caption("💡 仓位口径：聚合市值 / 投资组合总市值（与投资纪律页面完全一致）")
 
-            st.markdown("**📌 目标持仓**")
+            st.markdown("**📌 目标持仓（全账户聚合）**")
             if data.target_position:
                 tp = data.target_position
-                st.markdown(f"- 当前仓位：{tp.weight:.1%}")
-                st.markdown(f"- 市值：¥{tp.market_value_cny:,.0f}")
-                st.markdown(f"- 收益率：{tp.profit_loss_rate:.1%}")
+                st.markdown(f"- 当前仓位：**{tp.weight:.1%}**（占投资组合）")
+                st.markdown(f"- 聚合市值：¥{tp.market_value_cny:,.0f}")
+                st.markdown(f"- 加权收益率：{tp.profit_loss_rate:.1%}")
+                if tp.platforms:
+                    st.markdown(f"- 持仓平台：{' / '.join(tp.platforms)}")
             else:
-                st.caption("当前未持有该标的")
+                st.caption("当前未持有该标的（新建仓操作）")
 
         with col_b:
             st.markdown("**📖 投研观点**")

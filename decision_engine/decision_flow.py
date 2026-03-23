@@ -132,13 +132,25 @@ def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
         result.aborted_reason = f"数据加载失败：{e}"
         return result
 
-    # BUG-03 修复：歧义匹配 → 提示用户确认，不默认选第一个
+    # 歧义匹配 → 提示用户确认，不默认选第一个
     if loaded.ambiguous_matches:
         names = "、".join(p.name for p in loaded.ambiguous_matches)
         result.stage = FlowStage.ABORTED
         result.aborted_reason = (
             f"🔍 找到多个名称相似的标的：**{names}**。\n\n"
             f"请输入更精确的名称（如完整股票名称或股票代码），以避免误判。"
+        )
+        return result
+
+    # 数据 error 级告警 → 关键数据缺失，不应继续输出 BUY/HOLD/SELL
+    if loaded.has_data_errors:
+        error_msgs = "\n".join(
+            f"- {w.message}" for w in loaded.data_warnings if w.level == "error"
+        )
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = (
+            f"⚠️ **数据质量问题，无法可靠给出投资建议**：\n\n{error_msgs}\n\n"
+            f"请先在「投资账户总览」核实持仓数据后重试。"
         )
         return result
 
@@ -174,6 +186,22 @@ def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
     sig = signal_engine.generate(loaded, intent, rule_result)
     result.signals = sig
     result.stage = FlowStage.SIGNAL
+
+    # ── Step 5.5: 数据一致性校验 ─────────────────────────────────────────────
+    # 确保 target_position.weight 与 rule_result.current_weight 完全一致；
+    # 如果出现偏差（理论上不应发生，属于数据管道 bug），中断最终结论。
+    if loaded.target_position is not None:
+        tp_weight = loaded.target_position.weight
+        rule_weight = rule_result.current_weight
+        if abs(tp_weight - rule_weight) > 1e-6:
+            result.stage = FlowStage.ABORTED
+            result.aborted_reason = (
+                f"⚠️ **内部数据口径不一致**：\n\n"
+                f"- 持仓详情中仓位：{tp_weight:.2%}\n"
+                f"- 规则校验中仓位：{rule_weight:.2%}\n\n"
+                f"数据管道存在异常，已中断结论输出，请联系开发者排查。"
+            )
+            return result
 
     # ── Step 6: LLM 推理 ─────────────────────────────────────────────────────
     llm_result = llm_engine.reason(

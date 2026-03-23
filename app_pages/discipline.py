@@ -19,6 +19,7 @@ from app.discipline.models import (
     UserState, TradeAction,
 )
 from app.discipline.engine_runner import evaluate_action
+from app.utils.position_aggregator import aggregate as _aggregate_positions_shared
 
 
 # ─────────────────────────────────────────────────────────
@@ -141,81 +142,17 @@ def _detect_level0_status(pid: int) -> tuple[bool, bool, bool]:
         session.close()
 
 
-def _aggregate_positions(raw: list[dict]) -> list[dict]:
+def _aggregate_positions(raw: list[dict]) -> list:
     """
-    规则3 持仓聚合——跨平台合并同一标的/分类：
+    持仓聚合——委托公共聚合模块处理，确保与投资决策模块使用完全一致的逻辑。
 
-    - 券商平台（非银行/三方）：按 ticker 合并；无 ticker 时用正则标准化名称查找已知 ticker
-    - 银行/支付宝平台：按 name 合并（活钱管理/稳健投资/进取投资 分类汇总）
+    原聚合逻辑已提取至 app.utils.position_aggregator.aggregate()，
+    此函数仅作为兼容性入口保留，供 discipline.py 内部使用。
 
-    名称标准化规则（处理国金证券等平台的名称变体）：
-        "理想汽车-W_1" / "理想汽车-W_2" → "理想汽车"
-        "理想汽车 (LI)"                  → "理想汽车"
-
-    返回聚合后的列表，每项包含：
-        name, ticker, asset_class, market_value_cny,
-        is_leverage_etf, platforms（平台列表）, pl_rate（加权盈亏率）
+    返回 list[AggregatedPosition]，按市值降序排列。
     """
-
-    def _norm(name: str) -> str:
-        """标准化名称：去掉序号后缀、港股标识、括号内容"""
-        name = re.sub(r'_\d+$', '', name)          # 去掉 _1 _2 等序号
-        name = re.sub(r'-W$', '', name)             # 去掉港股 -W 标识
-        name = re.sub(r'\s*\(.*?\)\s*$', '', name)  # 去掉括号内容如 (LI)
-        return name.strip()
-
-    # 第一遍：建立「标准名 → ticker」映射（仅来自有 ticker 的持仓）
-    norm_to_ticker: dict[str, str] = {}
-    for r in raw:
-        if r["platform"] not in _BANK_PLATFORMS and r["ticker"]:
-            norm_to_ticker[_norm(r["name"])] = r["ticker"]
-
-    # 第二遍：聚合
-    buckets: dict[str, dict] = {}
-
-    for r in raw:
-        is_bank = r["platform"] in _BANK_PLATFORMS
-        if is_bank:
-            # 建设银行：将产品名称映射到标准三类；其他银行/支付宝直接用 name
-            key = _CCB_NAME_MAP.get(r["name"], r["name"]) if r["platform"] == "建设银行" else r["name"]
-        elif r["ticker"]:
-            key = r["ticker"]
-        else:
-            # 无 ticker：用标准化名称查已知映射，fallback 到标准化名称本身
-            key = norm_to_ticker.get(_norm(r["name"]), _norm(r["name"]))
-
-        if key not in buckets:
-            # 显示名：银行用 key（已映射为标准名），券商用标准化名称
-            display_name = key if is_bank else _norm(r["name"])
-            buckets[key] = {
-                "name": display_name,
-                "ticker": r["ticker"] or key,
-                "asset_class": r["asset_class"],
-                "market_value_cny": 0.0,
-                "profit_loss_value": 0.0,
-                "cost_value": 0.0,
-                "is_leverage_etf": r["is_leverage_etf"],
-                "platforms": [],
-            }
-
-        b = buckets[key]
-        b["market_value_cny"] += r["market_value_cny"]
-        b["profit_loss_value"] += r.get("profit_loss_value", 0.0)
-        b["cost_value"] += r["market_value_cny"] - r.get("profit_loss_value", 0.0)
-        if r["platform"] not in b["platforms"]:
-            b["platforms"].append(r["platform"])
-
-    result = []
-    for b in buckets.values():
-        pl_rate = (b["profit_loss_value"] / b["cost_value"] * 100
-                   if b["cost_value"] > 0 else 0.0)
-        result.append({
-            **b,
-            "pl_rate": pl_rate,
-            "platform_display": " / ".join(b["platforms"]),
-        })
-
-    return sorted(result, key=lambda x: -x["market_value_cny"])
+    positions, _ = _aggregate_positions_shared(raw)
+    return positions
 
 
 def _build_portfolio_state(
@@ -312,9 +249,9 @@ def _render_dashboard(
 
     # 规则3：跨平台聚合后计算最大单仓
     aggregated = _aggregate_positions(raw)
-    max_agg = max(aggregated, key=lambda a: a["market_value_cny"], default=None)
-    max_weight = max_agg["market_value_cny"] / total if max_agg else 0.0
-    max_name   = max_agg["name"] if max_agg else ""
+    max_agg = max(aggregated, key=lambda a: a.market_value_cny, default=None)
+    max_weight = max_agg.market_value_cny / total if max_agg else 0.0
+    max_name   = max_agg.name if max_agg else ""
 
     # ── 顶部四格指标（仅数值+状态图标，问题统一汇总在下方）──
     alerts: list[tuple[str, str]] = []   # (level, message)  level="error"/"warning"
@@ -425,7 +362,7 @@ def _render_dashboard(
         st.subheader("持仓集中度（规则3）", divider=False)
         rows = []
         for a in aggregated:
-            w = a["market_value_cny"] / total
+            w = a.market_value_cny / total
             if w > cfg_pos["max_position_pct"]:
                 status = "🚨 超限"
             elif w >= cfg_pos["warning_position_pct"]:
@@ -433,11 +370,11 @@ def _render_dashboard(
             else:
                 status = "🟢 安全"
             rows.append({
-                "持仓名称": a["name"],
+                "持仓名称": a.name,
                 "仓位": f"{w*100:.1f}%",
                 "状态": status,
-                "盈亏%": f"{a['pl_rate']:+.1f}%",
-                "持仓平台": a["platform_display"],
+                "盈亏%": f"{a.pl_rate:+.1f}%",
+                "持仓平台": a.platform_display,
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

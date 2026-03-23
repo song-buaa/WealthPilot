@@ -70,32 +70,20 @@ def _get_client() -> anthropic.Anthropic:
         except RuntimeError:
             asyncio.set_event_loop(asyncio.new_event_loop())
 
-        # Build an explicit synchronous httpx.Client that respects proxy env vars
-        # but avoids the SOCKS async transport issue in non-asyncio threads.
-        proxies = {}
-        https_proxy = (
-            os.environ.get("HTTPS_PROXY")
-            or os.environ.get("https_proxy")
-            or os.environ.get("ALL_PROXY")
-            or os.environ.get("all_proxy")
-        )
-        if https_proxy and not https_proxy.startswith("socks"):
-            # Only pass HTTP/HTTPS proxies directly; SOCKS handled by socksio below
-            proxies["https://"] = https_proxy
-
-        socks_proxy = None
+        # Build an explicit synchronous httpx.Client.
+        # Priority: HTTPS_PROXY (HTTP tunnel, no extra deps) > ALL_PROXY (SOCKS, needs httpcore[socks])
+        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         all_proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
-        if all_proxy and all_proxy.startswith("socks"):
-            socks_proxy = all_proxy
+
+        # Prefer HTTP/HTTPS proxy over SOCKS — avoids httpcore[socks] dependency
+        proxy_url = None
+        if https_proxy and not https_proxy.startswith("socks"):
+            proxy_url = https_proxy
+        elif all_proxy:
+            proxy_url = all_proxy  # SOCKS fallback (needs httpcore[socks] installed)
 
         try:
-            if socks_proxy:
-                http_client = httpx.Client(proxy=socks_proxy)
-            elif proxies:
-                http_client = httpx.Client(proxy=next(iter(proxies.values())))
-            else:
-                http_client = httpx.Client()
-
+            http_client = httpx.Client(proxy=proxy_url) if proxy_url else httpx.Client()
             _client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
         except Exception:
             # Fallback: let Anthropic pick up proxies automatically
