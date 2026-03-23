@@ -1,8 +1,13 @@
 """
-意图解析模块 (Intent Parser)
+意图解析模块 (Intent Parser) — V3.1
 
 职责：将用户自然语言输入解析为结构化 JSON，供后续模块使用。
 实现：调用 Claude LLM，输出固定格式 JSON。
+
+V3.1 新增：
+    - intent_type 三路分类：investment_decision / general_chat / hypothetical
+    - last_intent 上下文继承：追问时自动补全缺失字段
+    - is_context_inherited 标记是否有字段来自继承
 
 输出结构：
     {
@@ -10,12 +15,16 @@
         "action_type": "加仓判断",
         "time_horizon": "短期",
         "trigger": "发布会",
-        "confidence_score": 0.85
+        "confidence_score": 0.85,
+        "intent_type": "investment_decision",
+        "is_context_inherited": false
     }
 
 规则：
     - confidence_score < 0.6 → 不进入后续流程，返回澄清问题
     - 标的不识别 → asset = None，confidence_score 偏低
+    - intent_type = hypothetical → 拦截，不进入决策流程
+    - intent_type = general_chat → 转普通对话，不进入决策流程
 """
 
 import asyncio
@@ -34,13 +43,16 @@ import httpx
 
 @dataclass
 class IntentResult:
-    """意图解析结果"""
+    """意图解析结果 — V3.1"""
     asset: Optional[str]         # 标的名称，如 "理想汽车"，None 表示未识别
     action_type: str             # 加仓判断 / 减仓判断 / 持有评估 / 买入判断 / 卖出判断
     time_horizon: str            # 短期 / 中期 / 长期 / 未知
     trigger: Optional[str]       # 触发事件，如 "发布会"，可为 None
     confidence_score: float      # 0~1，解析置信度
     clarification: Optional[str] = None  # 仅 confidence < 0.6 时有值
+    # V3.1 新增
+    intent_type: str = "investment_decision"  # investment_decision / general_chat / hypothetical
+    is_context_inherited: bool = False        # 是否有字段继承自上轮 last_intent
 
     @property
     def needs_clarification(self) -> bool:
@@ -94,24 +106,41 @@ def _get_client() -> anthropic.Anthropic:
 
 # ── Prompt ─────────────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """你是一个投资决策助手，负责解析用户的投资意图。
+_SYSTEM_PROMPT = """你是一个投资决策助手，负责分类和解析用户的投资意图。
 
-请将用户输入解析为以下 JSON 格式，**只返回 JSON，不要有任何其他文字**：
+**第一步：识别 intent_type**
+
+判断规则（按优先级）：
+1. "hypothetical"：用户提出假设性问题，如"如果...会怎样""假如我...呢""要是...的话""如果减仓..."
+2. "general_chat"：日常对话、问候、无关投资的问题，或无法解析为具体投资操作的输入
+3. "investment_decision"：包含明确的投资标的 + 操作意图（买入/卖出/加仓/减仓/持有评估）
+
+**第二步：返回 JSON**
+
+对于所有类型，统一返回以下格式（只返回 JSON，不要任何其他文字）：
 
 {
-  "asset": "标的名称（如理想汽车、腾讯、纳指ETF），无法识别则为 null",
+  "intent_type": "investment_decision 或 general_chat 或 hypothetical",
+  "asset": "标的名称（如理想汽车、腾讯、纳指ETF），无法识别或不适用则为 null",
   "action_type": "加仓判断 / 减仓判断 / 买入判断 / 卖出判断 / 持有评估",
   "time_horizon": "短期 / 中期 / 长期 / 未知",
-  "trigger": "触发事件或原因（如发布会、财报、市场下跌），没有则为 null",
-  "confidence_score": 0.0到1.0的小数，表示你对解析结果的置信度
+  "trigger": "触发事件或原因（如发布会、财报），没有则为 null",
+  "confidence_score": 0.0到1.0的小数,
+  "is_context_inherited": false
 }
 
-confidence_score 评分规则：
+**上下文继承规则**（仅 investment_decision 生效）：
+若输入包含 [历史上下文] 字段，且当前输入缺少 action_type 或 time_horizon：
+- 缺少 action_type → 从 last_intent.action_type 继承，设 is_context_inherited = true
+- 缺少 time_horizon → 从 last_intent.time_horizon 继承，设 is_context_inherited = true
+
+**confidence_score 规则（investment_decision）**：
 - 标的清晰 + 意图明确 → 0.8~1.0
 - 标的清晰但意图模糊 → 0.5~0.7
 - 标的不明确 → 0.3~0.5
 - 完全无法识别投资意图 → 0.0~0.3
 
+对于 general_chat / hypothetical，confidence_score 设为 0.9。
 action_type 必须从以下选项中选择：加仓判断 / 减仓判断 / 买入判断 / 卖出判断 / 持有评估
 """
 
@@ -128,15 +157,20 @@ _CLARIFICATION_PROMPT = """你是一个投资决策助手。
 
 # ── 核心函数 ───────────────────────────────────────────────────────────────────
 
-def parse(user_input: str) -> IntentResult:
+def parse(user_input: str, last_intent: Optional["IntentResult"] = None) -> "IntentResult":
     """
-    解析用户自然语言输入，返回结构化意图。
+    解析用户自然语言输入，返回结构化意图。V3.1 新增 last_intent 上下文继承。
 
     Args:
-        user_input: 用户输入字符串
+        user_input:  用户输入字符串
+        last_intent: 上轮解析结果（从 conversation_history 最近 user 消息的 intent 获取）。
+                     仅用于意图字段继承，不改变是否执行完整决策流程的逻辑。
 
     Returns:
-        IntentResult，若 needs_clarification=True 则 clarification 字段有值
+        IntentResult。intent_type 决定后续路由：
+        - investment_decision → 进入完整决策流程
+        - general_chat        → 走普通对话，不生成 decision_id
+        - hypothetical        → 中断，提示不支持假设推演
     """
     if not user_input or not user_input.strip():
         return IntentResult(
@@ -148,13 +182,25 @@ def parse(user_input: str) -> IntentResult:
             clarification="请输入您想做的投资决策，例如：'我想加仓理想汽车，发布会后怎么看？'"
         )
 
+    # 构建携带上下文的用户消息，供 LLM 进行字段继承
+    if last_intent and last_intent.intent_type == "investment_decision":
+        full_input = (
+            f"[历史上下文]\n"
+            f"上轮标的：{last_intent.asset or 'N/A'}，"
+            f"上轮操作：{last_intent.action_type}，"
+            f"上轮时间维度：{last_intent.time_horizon}\n\n"
+            f"[当前输入]\n{user_input}"
+        )
+    else:
+        full_input = user_input
+
     try:
         client = _get_client()
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=512,
             system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_input}]
+            messages=[{"role": "user", "content": full_input}]
         )
         raw = response.content[0].text.strip()
 
@@ -167,9 +213,15 @@ def parse(user_input: str) -> IntentResult:
             time_horizon=intent_data.get("time_horizon", "未知"),
             trigger=intent_data.get("trigger"),
             confidence_score=float(intent_data.get("confidence_score", 0.5)),
+            intent_type=intent_data.get("intent_type", "investment_decision"),
+            is_context_inherited=bool(intent_data.get("is_context_inherited", False)),
         )
 
-        # 置信度不足 → 生成澄清问题
+        # general_chat / hypothetical 不需要澄清，直接返回
+        if result.intent_type in ("general_chat", "hypothetical"):
+            return result
+
+        # investment_decision：置信度不足 → 生成澄清问题
         if result.needs_clarification:
             result.clarification = _generate_clarification(client, user_input)
 

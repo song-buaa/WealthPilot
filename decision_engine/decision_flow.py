@@ -1,24 +1,32 @@
 """
-决策流程编排（Decision Flow）
+决策流程编排（Decision Flow）— V3.1
 
 职责：按 PRD 规定的固定链路编排完整决策流程。
 
-执行链路：
+V3.1 新增：
+    - decision_id：每次 investment_decision 流程生成唯一 ID
+    - last_intent：从 conversation_history 注入，用于意图字段继承
+    - context：最近 1 轮对话，供 general_chat 路由使用
+    - hypothetical 拦截：不进入决策流程
+    - general_chat 路由：只调 llm_engine.chat()，不生成 decision_id
+
+执行链路（investment_decision）：
     用户输入
-    → 意图解析（intent_parser）
+    → 意图解析（intent_parser，含 last_intent 继承）
     → 数据加载（data_loader）
     → 前置校验（pre_check）
     → 规则校验（rule_engine）
     → 信号生成（signal_engine）
     → LLM推理（llm_engine）
-    → 返回 DecisionResult
+    → 返回 DecisionResult（含 decision_id）
 
 对外接口：
-    run(user_input, portfolio_id) → DecisionResult
+    run(user_input, last_intent, context, portfolio_id) → DecisionResult
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -53,10 +61,18 @@ class DecisionResult:
     """
     决策流程完整输出，包含各阶段中间结果。
     Streamlit UI 直接读取此结构进行渲染。
+
+    V3.1 新增：
+        decision_id   — investment_decision 流程唯一 ID，用于 Explain Panel 绑定
+        chat_response — general_chat 路由时的普通对话回复文本
     """
     # 流程元数据
     stage: FlowStage = FlowStage.INTENT
     aborted_reason: Optional[str] = None   # 流程中断原因
+
+    # V3.1 新增
+    decision_id: Optional[str] = None      # 仅 investment_decision 完整流程生成
+    chat_response: Optional[str] = None    # 仅 general_chat 时有值
 
     # 各阶段输出（按执行顺序）
     intent: Optional[IntentResult] = None
@@ -83,22 +99,31 @@ class DecisionResult:
 
 # ── 核心函数 ───────────────────────────────────────────────────────────────────
 
-def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
+def run(
+    user_input: str,
+    last_intent: Optional[IntentResult] = None,
+    context: Optional[list] = None,
+    pid: int = default_portfolio_id,
+) -> DecisionResult:
     """
-    执行完整决策流程。
+    执行完整决策流程。V3.1 支持多轮对话上下文。
 
     Args:
-        user_input: 用户自然语言输入
-        pid: portfolio_id（默认从 app.state 读取）
+        user_input:   用户自然语言输入
+        last_intent:  从 conversation_history 最近 user 消息的 intent 字段获取，
+                      用于意图字段继承（仅 investment_decision 时生效）。
+                      ⚠️ 不从 context 中读取，context 仅供 general_chat LLM 使用。
+        context:      最近 1 轮对话（[user_msg, ai_msg]），传给 general_chat LLM。
+        pid:          portfolio_id（默认从 app.state 读取）
 
     Returns:
-        DecisionResult，包含各阶段输出
+        DecisionResult，包含各阶段输出 + decision_id（investment_decision 时）
     """
     result = DecisionResult()
 
     # ── Step 1: 意图解析 ─────────────────────────────────────────────────────
     try:
-        intent = intent_parser.parse(user_input)
+        intent = intent_parser.parse(user_input, last_intent=last_intent)
         result.intent = intent
         result.stage = FlowStage.INTENT
     except EnvironmentError as e:
@@ -110,6 +135,29 @@ def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
         result.stage = FlowStage.ABORTED
         result.aborted_reason = f"意图解析失败：{e}"
         return result
+
+    # ── Step 1.5: 意图类型路由 ────────────────────────────────────────────────
+
+    # 假设性问题 → 拦截，PRD §九
+    if intent.intent_type == "hypothetical":
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = (
+            "当前系统暂不支持假设性推演（如\"如果...会怎样\"）。\n\n"
+            "请提供明确的操作意图，例如：\n"
+            "- 我要不要减仓理想汽车？\n"
+            "- 现在适合加仓吗？"
+        )
+        return result
+
+    # 普通对话 → 跳过决策流程，直接 LLM chat，不生成 decision_id，PRD §3.3
+    if intent.intent_type == "general_chat":
+        chat_text = llm_engine.chat(user_input, context=context)
+        result.chat_response = chat_text
+        result.stage = FlowStage.DONE
+        return result
+
+    # investment_decision → 生成唯一 decision_id，进入完整流程
+    result.decision_id = f"decision_{uuid.uuid4().hex[:8]}"
 
     # 置信度不足 → 中断，返回澄清问题
     if intent.needs_clarification:

@@ -31,6 +31,7 @@ import asyncio
 import json
 import os
 import re
+import traceback
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -319,6 +320,54 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
         decision_corrected=decision_corrected,
         original_decision=original_decision,
     )
+
+
+# ── general_chat 普通对话 ───────────────────────────────────────────────────────
+
+_CHAT_SYSTEM_PROMPT = """你是 WealthPilot 的投资助手，负责回答用户的日常问题。
+
+规则：
+- 回答自然、友好、简洁
+- 如果问题涉及具体的买入/卖出/加仓/减仓操作，引导用户直接在对话框中描述操作意图，系统会自动进入决策流程
+- 禁止输出【结论】【原因】【建议】格式的结构化投资决策
+- 不提供任何形式的具体买卖建议"""
+
+
+def chat(user_query: str, context: Optional[list] = None) -> str:
+    """
+    普通对话模式（intent_type=general_chat），不进入决策流程，不输出结构化结论。
+
+    Args:
+        user_query: 用户当前输入
+        context:    最近 1 轮对话记录（[{"role": "user", "content": ...}, {"role": "assistant", ...}]）
+
+    Returns:
+        纯文本回复
+    """
+    messages: list = []
+    if context:
+        for msg in context[-2:]:  # 最多保留最近 1 轮（2 条）
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_query})
+
+    try:
+        client = _get_client()
+        response = client.messages.create(
+            model="claude-haiku-4-20250514",  # 普通对话用轻量模型
+            max_tokens=512,
+            system=_CHAT_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        return response.content[0].text.strip()
+    except EnvironmentError:
+        return "⚙️ 未配置 API Key，无法回复。"
+    except Exception as e:
+        tb_lines = traceback.format_exc()
+        print(f"[llm_engine.chat] 失败:\n{tb_lines}", flush=True)
+        return "抱歉，系统暂时繁忙，请稍后再试。"
 
 
 def _fallback_result(error_msg: str, decision: str = "HOLD") -> LLMResult:
