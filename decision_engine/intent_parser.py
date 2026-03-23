@@ -18,13 +18,16 @@
     - 标的不识别 → asset = None，confidence_score 偏低
 """
 
+import asyncio
 import json
 import os
 import re
+import traceback
 from dataclasses import dataclass, field
 from typing import Optional
 
 import anthropic
+import httpx
 
 
 # ── 数据类 ────────────────────────────────────────────────────────────────────
@@ -58,7 +61,46 @@ def _get_client() -> anthropic.Anthropic:
                 "未找到 ANTHROPIC_API_KEY 环境变量。\n"
                 "请在终端执行：export ANTHROPIC_API_KEY='sk-ant-your-key'"
             )
-        _client = anthropic.Anthropic(api_key=api_key)
+
+        # Fix: Streamlit's ScriptRunnerThread has no event loop.
+        # httpx 0.28.x with SOCKS proxy may attempt asyncio internals → RuntimeError.
+        # Ensure a fresh event loop exists in this thread before creating the client.
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
+        # Build an explicit synchronous httpx.Client that respects proxy env vars
+        # but avoids the SOCKS async transport issue in non-asyncio threads.
+        proxies = {}
+        https_proxy = (
+            os.environ.get("HTTPS_PROXY")
+            or os.environ.get("https_proxy")
+            or os.environ.get("ALL_PROXY")
+            or os.environ.get("all_proxy")
+        )
+        if https_proxy and not https_proxy.startswith("socks"):
+            # Only pass HTTP/HTTPS proxies directly; SOCKS handled by socksio below
+            proxies["https://"] = https_proxy
+
+        socks_proxy = None
+        all_proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+        if all_proxy and all_proxy.startswith("socks"):
+            socks_proxy = all_proxy
+
+        try:
+            if socks_proxy:
+                http_client = httpx.Client(proxy=socks_proxy)
+            elif proxies:
+                http_client = httpx.Client(proxy=next(iter(proxies.values())))
+            else:
+                http_client = httpx.Client()
+
+            _client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
+        except Exception:
+            # Fallback: let Anthropic pick up proxies automatically
+            _client = anthropic.Anthropic(api_key=api_key)
+
     return _client
 
 
@@ -150,13 +192,22 @@ def parse(user_input: str) -> IntentResult:
 
     except Exception as e:
         # 解析失败：降级处理，返回低置信度结果
+        # 将完整 traceback 打印到 stderr，便于开发调试
+        tb = traceback.format_exc()
+        print(f"[intent_parser] API 调用失败:\n{tb}", flush=True)
+
+        # 重置缓存的 client，下次重试时重新创建
+        global _client
+        _client = None
+
+        err_summary = str(e)[:120] if str(e) else type(e).__name__
         return IntentResult(
             asset=None,
             action_type="持有评估",
             time_horizon="未知",
             trigger=None,
             confidence_score=0.2,
-            clarification=f"意图解析遇到问题，请重新描述您的决策需求。（{type(e).__name__}）"
+            clarification=f"意图解析遇到问题，请重新描述您的决策需求。（{type(e).__name__}: {err_summary}）"
         )
 
 
