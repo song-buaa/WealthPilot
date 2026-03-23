@@ -32,15 +32,16 @@ def _render_decision_engine():
     from decision_engine import decision_flow
     from decision_engine.decision_flow import FlowStage
 
-    # ── API Key 检查 ──────────────────────────────────────────────────────────
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        st.warning(
-            "⚙️ 未检测到 `ANTHROPIC_API_KEY`。\n\n"
-            "请在终端运行：\n```\nexport ANTHROPIC_API_KEY='sk-ant-your-key'\n```\n"
-            "然后重启 Streamlit。",
-            icon="🔑"
+    # BUG-01 修复：API Key 检查改为非阻塞提示，不再 st.stop()
+    # 真正缺失时在点击"开始分析"后才拦截，确保策略设定等非 AI 功能始终可访问
+    _has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if not _has_api_key:
+        st.info(
+            "🔑 **未检测到 `ANTHROPIC_API_KEY`**，AI 分析功能暂不可用。\n\n"
+            "如需使用决策引擎，请在终端运行：\n"
+            "```\nexport ANTHROPIC_API_KEY='sk-ant-your-key'\n```\n"
+            "然后重启 Streamlit。页面其他功能（策略设定等）不受影响。",
         )
-        st.stop()
 
     # ── ① 输入区 ──────────────────────────────────────────────────────────────
     st.markdown("#### 📝 输入决策需求")
@@ -76,6 +77,15 @@ def _render_decision_engine():
         _render_placeholder()
         return
 
+    # BUG-01 修复：点击"开始分析"后才做 API Key 硬检查（不用 st.stop()）
+    if not _has_api_key:
+        st.error(
+            "⚙️ 无法启动 AI 分析：未配置 `ANTHROPIC_API_KEY`。\n\n"
+            "请在终端执行 `export ANTHROPIC_API_KEY='sk-ant-your-key'` 后重启 Streamlit。",
+            icon="🔑",
+        )
+        return
+
     # ── 执行决策流程 ──────────────────────────────────────────────────────────
     with st.spinner("正在分析中，请稍候..."):
         result = decision_flow.run(user_input.strip(), pid=portfolio_id)
@@ -86,14 +96,23 @@ def _render_decision_engine():
     if result.intent:
         _render_intent(result.intent)
 
-    # 流程中断：显示原因（澄清问题 / 前置校验失败）
+    # 流程中断：按中断原因分类展示
     if result.was_aborted:
+        aborted_msg = result.aborted_reason or "流程中断，原因未知。"
         if result.pre_check and not result.pre_check.passed:
-            st.error(f"⛔ 前置校验未通过：{result.aborted_reason}", icon="⚠️")
+            # 前置校验失败
+            st.error(aborted_msg, icon="⚠️")
         elif result.intent and result.intent.needs_clarification:
-            st.info(f"🤔 {result.aborted_reason}", icon="💬")
+            # 意图不明确 → 澄清问题（info 样式，引导用户）
+            st.info(aborted_msg, icon="💬")
+        elif result.data and result.data.ambiguous_matches:
+            # BUG-03：歧义匹配 → 提示用户精确输入（warning 样式）
+            st.warning(aborted_msg, icon="🔍")
+        elif "无效操作" in aborted_msg or "无法执行" in aborted_msg:
+            # BUG-05：空仓减仓 → 明确操作无效（error 样式）
+            st.error(aborted_msg, icon="⛔")
         else:
-            st.error(f"流程中断：{result.aborted_reason}")
+            st.error(f"流程中断：{aborted_msg}")
         _render_compliance_notice()
         return
 
@@ -240,6 +259,13 @@ def _render_final_decision(llm_result):
 
     if llm_result.is_fallback:
         st.warning(f"⚠️ AI 推理不可用：{llm_result.error}", icon="🤖")
+
+    # BUG-04 修复：LLM 输出非标准时，告知用户已自动修正
+    if llm_result.decision_corrected:
+        st.caption(
+            f"ℹ️ AI 原始输出「{llm_result.original_decision}」不在标准选项（加仓/观望/减仓）内，"
+            f"已自动修正为「{llm_result.decision_cn}」。"
+        )
 
     st.markdown(
         f'<div style="text-align:center;padding:20px 0;">'

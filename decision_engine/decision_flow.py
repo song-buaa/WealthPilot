@@ -122,9 +122,24 @@ def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
         loaded = data_loader.load(asset_name=intent.asset, pid=pid)
         result.data = loaded
         result.stage = FlowStage.LOADED
+    except ValueError as e:
+        # 非法字段值（如负数百分比）→ 明确报错，不静默降级
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = f"⚠️ 数据异常：{e}"
+        return result
     except Exception as e:
         result.stage = FlowStage.ABORTED
         result.aborted_reason = f"数据加载失败：{e}"
+        return result
+
+    # BUG-03 修复：歧义匹配 → 提示用户确认，不默认选第一个
+    if loaded.ambiguous_matches:
+        names = "、".join(p.name for p in loaded.ambiguous_matches)
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = (
+            f"🔍 找到多个名称相似的标的：**{names}**。\n\n"
+            f"请输入更精确的名称（如完整股票名称或股票代码），以避免误判。"
+        )
         return result
 
     # ── Step 3: 前置校验 ─────────────────────────────────────────────────────
@@ -142,8 +157,18 @@ def run(user_input: str, pid: int = default_portfolio_id) -> DecisionResult:
     result.rules = rule_result
     result.stage = FlowStage.RULE_CHECK
 
-    # 规则违规 + 操作是加仓/买入 → 可以继续流程但在 LLM 中体现（不直接中断）
-    # PRD 未规定硬性中断，信号层会体现 violation，LLM 会据此给出 HOLD/SELL
+    # BUG-05 修复：空仓减仓/卖出 → 无效操作，明确中断（FlowStage=ABORTED）
+    _sell_actions = ("减仓判断", "卖出判断")
+    if rule_result.violation and rule_result.current_weight == 0.0 and intent.action_type in _sell_actions:
+        asset_label = intent.asset or "该标的"
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = (
+            f"⛔ 无效操作：当前未持有「{asset_label}」，无法执行 {intent.action_type}。\n\n"
+            f"请先确认持仓情况，或改为「买入判断」进行建仓分析。"
+        )
+        return result
+
+    # 其他规则违规（如仓位超限 + 加仓）→ 不中断，信号层体现 violation，LLM 据此给出 HOLD/SELL
 
     # ── Step 5: 信号生成 ─────────────────────────────────────────────────────
     sig = signal_engine.generate(loaded, intent, rule_result)

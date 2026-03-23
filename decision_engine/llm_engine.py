@@ -52,6 +52,9 @@ class LLMResult:
     strategy: list[str]        # 操作策略建议列表
     raw_output: str = ""       # LLM 原始输出（调试用）
     error: Optional[str] = None  # 异常时的错误描述
+    # BUG-04 修复：记录决策是否经过自动修正
+    decision_corrected: bool = False     # True 表示原始输出非标准，已被自动修正
+    original_decision: Optional[str] = None  # 修正前的原始决策值
 
     @property
     def decision_cn(self) -> str:
@@ -260,8 +263,15 @@ def _extract_json(text: str) -> dict:
 
 def _build_result(parsed: dict, raw: str) -> LLMResult:
     """从解析后的 dict 构建 LLMResult。"""
-    decision = parsed.get("decision", "HOLD").upper()
+    raw_decision = str(parsed.get("decision", "HOLD")).strip()
+    decision = raw_decision.upper()
+
+    # BUG-04 修复：检测并记录非标准决策被自动修正的情况
+    decision_corrected = False
+    original_decision: Optional[str] = None
     if decision not in ("BUY", "HOLD", "SELL"):
+        decision_corrected = True
+        original_decision = raw_decision
         decision = "HOLD"
 
     def _to_list(v) -> list[str]:
@@ -277,6 +287,8 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
         risk=_to_list(parsed.get("risk", [])),
         strategy=_to_list(parsed.get("strategy", [])),
         raw_output=raw,
+        decision_corrected=decision_corrected,
+        original_decision=original_decision,
     )
 
 
