@@ -250,9 +250,9 @@ def _process_submit(user_input: str):
     # 回填 intent
     history[user_msg_idx]["intent"] = result.intent
 
-    # 生成自然语言回答
-    ai_content   = _format_natural_answer(result, user_input)
-    intent_type  = result.intent.intent_type if result.intent else "investment_decision"
+    # 生成左侧 Chat 回答
+    ai_content  = _build_chat_answer(result, user_input)
+    intent_type = result.intent.intent_type if result.intent else "investment_decision"
 
     history.append({
         "role":        "assistant",
@@ -267,65 +267,46 @@ def _process_submit(user_input: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 左侧 AI 回答：自然语言生成（基于 DecisionResult，不额外调用 API）
+# 左侧 Chat 回答生成
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _format_natural_answer(result, user_input: str) -> str:
+def _build_chat_answer(result, user_input: str) -> str:
     """
-    将 DecisionResult 渲染为自然语言段落，不使用【结论】【原因】【建议】机械模板。
-    风格：专业、克制、投资助手口吻，可读性优先。
+    生成左侧 Chat 面板的 AI 回答。
+
+    - general_chat：返回 result.chat_response（已由 llm_engine.chat() 生成）
+    - aborted：返回中断原因
+    - investment_decision 完整结果：调用 llm_engine.generate_chat_answer() 生成自然语言
     """
+    from decision_engine import llm_engine
+
     intent_type = result.intent.intent_type if result.intent else "investment_decision"
 
-    # general_chat：直接返回 LLM 的普通回复
     if intent_type == "general_chat":
         return result.chat_response or "（系统暂无回复，请重试）"
 
-    # 流程中断（包含假设性问题拦截）
     if result.was_aborted:
         return result.aborted_reason or "分析中断，请重新描述您的投资需求。"
 
-    # investment_decision 完整结果
     if result.is_complete and result.llm:
-        llm    = result.llm
-        intent = result.intent
-        asset  = intent.asset if intent else "该标的"
-
-        # 开头句：根据决策结果定调
-        _opening = {
-            "BUY":  f"综合分析来看，当前**可以考虑**对 {asset} 进行加仓操作。",
-            "HOLD": f"综合分析来看，当前**建议暂时观望**，不急于对 {asset} 进行操作。",
-            "SELL": f"综合分析来看，**建议适当减仓** {asset}，控制风险。",
-        }.get(llm.decision, f"综合分析结果：建议 {llm.decision_cn} {asset}。")
-
-        paras = [_opening]
-
-        # 推理依据 → 转为自然段落（不是 bullet list）
-        if llm.reasoning:
-            reasoning_para = "；".join(llm.reasoning) + "。"
-            paras.append(f"\n主要考量是：{reasoning_para}")
-
-        # 操作建议 → 保留 bullet（简短列表更清晰）
-        if llm.strategy:
-            paras.append("\n**操作建议**")
-            paras.extend(f"- {s}" for s in llm.strategy)
-
-        # 风险提示 → 简短
-        if llm.risk:
-            paras.append("\n**风险提示**")
-            paras.extend(f"- {r}" for r in llm.risk)
-
-        # 降级提示
-        if llm.is_fallback:
-            paras.append(f"\n> ⚠️ *AI 推理遇到问题（{llm.error}），以上为降级结果，仅供参考。*")
-        if llm.decision_corrected:
-            paras.append(
-                f"\n> *ℹ️ AI 原始输出「{llm.original_decision}」不在标准选项内，"
-                f"已自动修正为「{llm.decision_cn}」。*"
+        answer = llm_engine.generate_chat_answer(
+            user_query=user_input,
+            intent=result.intent,
+            data=result.data,
+            rules=result.rules,
+            llm_result=result.llm,
+        )
+        # 降级提示追加
+        suffix_parts = []
+        if result.llm.is_fallback:
+            suffix_parts.append(f"⚠️ *AI 推理遇到问题（{result.llm.error}），结论为降级结果。*")
+        if result.llm.decision_corrected:
+            suffix_parts.append(
+                f"ℹ️ *AI 原始输出「{result.llm.original_decision}」不在标准选项内，"
+                f"已自动修正为「{result.llm.decision_cn}」。*"
             )
-
-        paras.append("\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*")
-        return "\n".join(paras)
+        suffix = ("\n\n> " + "\n> ".join(suffix_parts)) if suffix_parts else ""
+        return answer + suffix + "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
 
     return "分析未能完成，请重试。"
 

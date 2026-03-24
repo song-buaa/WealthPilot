@@ -168,13 +168,15 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id) -> LoadedDa
     warnings: list[DataWarning] = []
     session = get_session()
     try:
-        # ── 1. Portfolio（策略设置）──────────────────────────────────────────
+        # ── 1. 投资纪律配置（Portfolio 表，由「投资纪律」模块统一管理）─────────
+        # 注：删除「策略设定」Tab 后，Portfolio 表的唯一写入来源是「投资纪律」UI。
+        # _MockPortfolio 仅在数据库无记录时作兜底，其默认值与 discipline/config.py 对齐。
         portfolio = session.query(Portfolio).filter_by(id=pid).first()
         if portfolio is None:
             portfolio = _mock_portfolio()
             warnings.append(DataWarning(
                 level="warning",
-                message="未找到投资组合配置，使用保守默认值。"
+                message="未找到投资纪律配置，使用纪律手册默认值（单标上限 40%，权益上限 80%）。"
             ))
 
         # ── 2. 持仓数据（通过公共聚合模块，口径与投资纪律完全一致）───────────
@@ -208,11 +210,16 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id) -> LoadedDa
                 ambiguous_matches = [PositionInfo.from_aggregated(p) for p in agg_ambiguous]
 
         # ── 6. 投资纪律规则 ──────────────────────────────────────────────────
+        # 所有字段统一来自 Portfolio 表（由「投资纪律」模块管理）：
+        #   max_single_position  ← portfolio.max_single_stock_pct  （用户设定的单标上限）
+        #   max_equity_pct       ← portfolio.max_equity_pct        （用户设定的权益上限）
+        #   min_cash_pct         ← discipline/config.py            （纪律手册硬性流动性规则，不可配置）
+        #   max_leverage_ratio   ← portfolio.max_leverage_ratio    （用户设定的杠杆上限）
         rules = InvestmentRules(
-            max_single_position=_safe_pct(portfolio.max_single_stock_pct, default=0.25),
+            max_single_position=_safe_pct(portfolio.max_single_stock_pct, default=0.40),
             max_equity_pct=_safe_pct(portfolio.max_equity_pct, default=0.80),
-            min_cash_pct=DISCIPLINE_RULES["liquidity_limits"]["min_cash_pct"],
-            max_leverage_ratio=_safe_pct(portfolio.max_leverage_ratio, default=0.50),
+            min_cash_pct=DISCIPLINE_RULES["liquidity_limits"]["min_cash_pct"],  # 固定规则 0.20
+            max_leverage_ratio=_safe_pct(portfolio.max_leverage_ratio, default=1.0),
         )
 
         # ── 7. 投研观点 ──────────────────────────────────────────────────────
@@ -292,13 +299,18 @@ def _safe_pct(value, default: float) -> float:
 
 
 class _MockPortfolio:
-    """当数据库中没有 Portfolio 时使用的保守默认值对象。"""
-    max_single_stock_pct = 25.0
+    """当数据库中没有 Portfolio 时使用的默认值对象。
+    所有值与 app/discipline/config.py (RULES) 对齐，确保行为一致。"""
+    # 单标上限：对齐 RULES["single_asset_limits"]["max_position_pct"] = 0.40 → 40.0
+    max_single_stock_pct = 40.0
+    # 权益上限：对齐 RULES["asset_allocation_ranges"]["equity_max"] = 0.80 → 80.0
     max_equity_pct = 80.0
-    min_cash_pct = 10.0
-    max_leverage_ratio = 50.0
-    min_equity_pct = 0.0
-    min_fixed_income_pct = 0.0
+    # 杠杆：对齐 RULES["leverage_limits"]["leverage_ratio_max"] = 1.0 → 100.0
+    max_leverage_ratio = 100.0
+    # 以下为资产配置目标区间默认值（非规则校验字段）
+    min_cash_pct = 0.0
+    min_equity_pct = 40.0
+    min_fixed_income_pct = 20.0
     max_fixed_income_pct = 60.0
     max_cash_pct = 100.0
     min_alternative_pct = 0.0

@@ -370,6 +370,104 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
         return "抱歉，系统暂时繁忙，请稍后再试。"
 
 
+# ── 左侧 Chat 自然语言回答生成 ────────────────────────────────────────────────
+
+_CHAT_ANSWER_SYSTEM = """你是 WealthPilot 个人投资助手。系统已对用户的投资决策请求完成了完整分析，现在由你用自然对话的方式把结论和理由讲给用户听。
+
+要求：
+- 开头直接给判断，结合用户的具体问题和持仓情况来说，不要千篇一律的开场白
+- 解释要融入真实数据：持仓比例、纪律约束、事件因素——不要泛泛而谈
+- 结尾给出具体的行动建议和需要警惕的风险
+- 语气专业克制，像一个了解你情况的私人投顾，不是机器人念报告
+- 禁止使用【结论】【原因】【建议】【风险提示】等机械标题
+- 禁止千篇一律地以"综合分析来看"开头
+- 可以用 **粗体** 强调关键词，但不要滥用
+- 字数控制在 150～250 字，不要太短也不要冗长"""
+
+
+def generate_chat_answer(
+    user_query: str,
+    intent,       # IntentResult
+    data,         # LoadedData | None
+    rules,        # RuleResult | None
+    llm_result,   # LLMResult
+) -> str:
+    """
+    基于完整决策链路结果，生成面向用户的自然语言对话回答。
+    使用 Haiku 模型（速度快、成本低）。失败时返回简洁 fallback 文本。
+    """
+    asset = (intent.asset or "该标的") if intent else "该标的"
+    decision_cn = {"BUY": "加仓", "HOLD": "观望", "SELL": "减仓"}.get(
+        llm_result.decision, "观望"
+    )
+
+    # 持仓上下文
+    if data and data.target_position:
+        tp = data.target_position
+        pos_desc = (
+            f"{asset} 当前仓位 {tp.weight:.1%}，"
+            f"市值约 ¥{tp.market_value_cny:,.0f}，"
+            f"持仓收益率 {tp.profit_loss_rate:+.1%}"
+        )
+    else:
+        pos_desc = f"当前未持有 {asset}（新建仓场景）"
+
+    # 纪律约束
+    if rules:
+        if rules.violation:
+            rule_desc = (
+                f"仓位已超限：当前 {rules.current_weight:.1%}，"
+                f"上限 {rules.max_position:.1%}，已超出 {rules.current_weight - rules.max_position:.1%}"
+            )
+        elif rules.warning:
+            rule_desc = f"仓位接近上限：当前 {rules.current_weight:.1%}，上限 {rules.max_position:.1%}"
+        else:
+            rule_desc = f"仓位合规：当前 {rules.current_weight:.1%}，上限 {rules.max_position:.1%}"
+    else:
+        rule_desc = "无规则数据"
+
+    reasoning_text = "\n".join(f"- {r}" for r in llm_result.reasoning) if llm_result.reasoning else "（无）"
+    strategy_text  = "\n".join(f"- {s}" for s in llm_result.strategy)  if llm_result.strategy  else "（无）"
+    risk_text      = "\n".join(f"- {r}" for r in llm_result.risk)      if llm_result.risk      else "（无）"
+
+    user_content = f"""用户问题：{user_query}
+
+系统决策建议：{decision_cn}（{llm_result.decision}）
+
+持仓情况：{pos_desc}
+纪律约束：{rule_desc}
+
+AI 推理依据：
+{reasoning_text}
+
+操作建议：
+{strategy_text}
+
+风险提示：
+{risk_text}
+
+请基于以上完整信息，用自然对话方式向用户解释这个决策建议。"""
+
+    try:
+        client = _get_client()
+        resp = client.messages.create(
+            model="claude-haiku-4-20250514",
+            max_tokens=500,
+            system=_CHAT_ANSWER_SYSTEM,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        return resp.content[0].text.strip()
+    except Exception:
+        # Fallback：简洁直接，不用机械模板
+        tb_lines = traceback.format_exc()
+        print(f"[llm_engine.generate_chat_answer] 失败:\n{tb_lines}", flush=True)
+        reasons = "；".join(llm_result.reasoning[:2]) if llm_result.reasoning else ""
+        return (
+            f"**{asset}** 当前建议**{decision_cn}**。"
+            + (f"\n\n{reasons}。" if reasons else "")
+        )
+
+
 def _fallback_result(error_msg: str, decision: str = "HOLD") -> LLMResult:
     """API 异常或解析失败时的降级结果（PRD §3.8：数据缺失→默认HOLD）。"""
     return LLMResult(
