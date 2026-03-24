@@ -356,7 +356,7 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
     try:
         client = _get_client()
         response = client.messages.create(
-            model="claude-haiku-4-20250514",  # 普通对话用轻量模型
+            model="claude-haiku-4-5-20251001",  # 普通对话用轻量模型
             max_tokens=512,
             system=_CHAT_SYSTEM_PROMPT,
             messages=messages,
