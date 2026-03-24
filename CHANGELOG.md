@@ -4,6 +4,59 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [1.13.0] - 2026-03-24 - 投资决策模块业务逻辑稳定版
+
+> **封板状态**：投资决策核心逻辑全部验证通过，UI 样式冻结，可进入下一轮功能迭代。
+> 本版本不含新功能，聚焦逻辑正确性审计与已知 bug 修复。
+
+### Fixed — 规则来源统一（`decision_engine/data_loader.py`）
+
+- **原问题**：`InvestmentRules` 从 `Portfolio` 表读取 `max_single_stock_pct`，该字段由用户在「策略设定」Tab 手动输入，默认值 15%，与「投资纪律」页面使用的 `DISCIPLINE_RULES`（40%）完全割裂，导致决策引擎和纪律中心对同一仓位给出相互矛盾的结论
+- **修复**：`InvestmentRules` 四个字段全部改为读取 `discipline/config.py` 的 `DISCIPLINE_RULES` 常量
+  - `max_single_position`：15%（Portfolio 表）→ 40%（`DISCIPLINE_RULES`）
+  - `max_equity_pct`：Portfolio 表 → 80%
+  - `min_cash_pct`：Portfolio 表 → 20%
+  - `max_leverage_ratio`：Portfolio 表 → 1.0
+- **效果**：全系统规则口径唯一，投资决策与投资纪律模块结论一致
+
+### Fixed — general_chat 模型 ID 无效（`decision_engine/llm_engine.py`）
+
+- **原问题**：`llm_engine.chat()` 使用 `claude-haiku-4-20250514`，该模型 ID 不存在，导致每次普通问答（`general_chat` 路径）都静默 fallback，返回"抱歉，系统暂时繁忙"
+- **修复**：改为 `claude-haiku-4-5-20251001`（Haiku 4.5 正式 ID）
+- **效果**：普通对话路径正常走 LLM，不再静默失败
+
+### Fixed — 左侧 Chat 回答改为完整 LLM 生成（`decision_engine/llm_engine.py`）
+
+- **原问题**：`generate_chat_answer()` 使用 `claude-haiku-4-20250514` + max_tokens=500，模型 ID 无效且 token 不足，实际输出为机械 fallback 文本
+- **修复**：切换为 `claude-sonnet-4-20250514` + max_tokens=800，Prompt 增加结构引导（建议判断 / 推理解释 / 行动风险），字数下限 180 字
+- **效果**：左侧回答为完整自然语言，有数据引用，不再是模板拼接
+
+### Reverted — 回退 3 次失败的 UI 布局重构（`app_pages/strategy.py`）
+
+- 回退提交：`aaebcec` / `5926cb7` / `1a24a57`
+- 原因：尝试通过 CSS `:has()` 选择器 + JS iframe DOM 操控实现左右独立滚动，因 Streamlit 每个 widget 有多层 wrapper div 导致 flex chain 断裂，方案无效，页面行为与修改前无差异
+- 当前版本：`st.container(height=420)` 消息区 + `st.divider()` + text_area 输入
+- **UI 样式已冻结，暂不继续调整**
+
+### Added — 归档设计文档（`docs/`）
+
+- `WealthPilot Typography System.md`
+- `WealthPilot 投资决策页 UI结构规范.md`
+- `投资决策模块PRD V3.1（补充优化）.md`
+
+### 业务逻辑审计结论
+
+| 项目 | 结论 |
+|------|------|
+| 多轮对话上下文继承 | ✅ 逻辑正确，last_intent 从历史 user 消息取，context 正确构建 |
+| 每轮独立 decision_id | ✅ UUID 保证唯一，general_chat 不生成 |
+| 投资纪律唯一规则来源 | ✅ 已统一至 DISCIPLINE_RULES 常量 |
+| 左侧 LLM 生成（非模板） | ✅ Sonnet + max_tokens=800，完整自然语言 |
+| general_chat 路径 | ✅ 模型 ID 已修正 |
+| 异常路径覆盖 | ✅ hypothetical / aborted / fallback / data_error 全覆盖 |
+
+---
+
 ## [1.12.1] - 2026-03-23 - 投资决策模块缺陷修复封板（Manus 测试回归通过）
 
 > **封板状态**：投资决策模块本轮开发已闭环，可进入下一轮功能开发。
