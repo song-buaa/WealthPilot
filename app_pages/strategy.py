@@ -37,29 +37,111 @@ from app.state import portfolio_id
 
 _STRATEGY_CSS = """
 <style>
-/* ── 布局：左侧输入区贴底 ────────────────────────────────── */
-[data-testid="column"]:first-of-type > div > [data-testid="stVerticalBlock"]
-    > [data-testid="element-container"]:last-child {
-  position: sticky;
-  bottom: 0;
-  background: var(--ocean-50, #F4F6FA);
-  z-index: 10;
-  padding-bottom: 4px;
+/* ══════════════════════════════════════════════════════════
+   WealthPilot 投资决策页 — 布局规范实现
+   规范来源：docs/WealthPilot 投资决策页 UI结构规范.md
+   ══════════════════════════════════════════════════════════ */
+
+/* ── 1. 页面级：禁止整体滚动，高度锁定视口 ─────────────── */
+.main .block-container {
+  height: calc(100vh - 64px) !important;
+  overflow: hidden !important;
+  padding: 16px 24px 0 24px !important;
+  max-width: 100% !important;
 }
 
-/* ── Chat 消息区：Body 字号 + 段落间距 ───────────────────── */
+/* ── 2. 两列：等高对齐，各自独立 ───────────────────────── */
+section.main [data-testid="stHorizontalBlock"] {
+  align-items: stretch !important;
+  height: calc(100vh - 96px) !important;
+  gap: 16px !important;
+}
+section.main [data-testid="stHorizontalBlock"] > [data-testid="column"],
+section.main [data-testid="stHorizontalBlock"] > [data-testid="column"] > div {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* ── 3. 左列 Chat：Flex Column（规范 §二.实现约束）──────── */
+[data-testid="stVerticalBlock"]:has(.de-left-marker) {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* 消息区 → flex:1，overflow-y:auto（规范：Message List）*/
+[data-testid="stVerticalBlock"]:has(.de-left-marker)
+  > [data-testid="element-container"]:has(#de-msgs-body) {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  min-height: 0 !important;
+}
+
+/* 示例按钮区 → 不伸展 */
+[data-testid="stVerticalBlock"]:has(.de-left-marker)
+  > [data-testid="element-container"]:has(#de-example-btns) {
+  flex: 0 0 auto !important;
+}
+
+/* 输入区 → 固定底部，不伸展（规范：Input Area）*/
+[data-testid="stVerticalBlock"]:has(.de-left-marker)
+  > [data-testid="element-container"]:has(#de-input-zone) {
+  flex: 0 0 auto !important;
+  border-top: 1px solid #E5E7EB !important;
+  background: #FFFFFF !important;
+  padding: 10px 0 6px !important;
+}
+
+/* ── 4. 右列 Panel：标题固定，内容独立滚动（规范 §三）───── */
+[data-testid="stVerticalBlock"]:has(.de-right-marker) {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+/* 内容容器 → 独立滚动，带边框（规范：容器规则）*/
+[data-testid="stVerticalBlock"]:has(.de-right-marker)
+  > [data-testid="element-container"]:has(#de-panel-content) {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  min-height: 0 !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  box-sizing: border-box !important;
+}
+
+/* ── 5. Chat 消息排版（规范 §二.4 排版规则）─────────────── */
 .stChatMessage p {
   font-size: var(--wp-text-body) !important;
   color: var(--wp-color-body) !important;
   line-height: 1.65 !important;
-  margin-bottom: 8px !important;
+  margin-bottom: 10px !important;
 }
 .stChatMessage p:last-child { margin-bottom: 0 !important; }
-
-/* ── Explain Panel：模块容器内边距收紧 ───────────────────── */
-[data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]
-    [data-testid="stVerticalBlock"] {
-  gap: 0 !important;
+.stChatMessage ul, .stChatMessage ol {
+  margin: 4px 0 10px 16px !important;
+  padding: 0 !important;
+}
+.stChatMessage li {
+  font-size: var(--wp-text-body) !important;
+  color: var(--wp-color-body) !important;
+  line-height: 1.6 !important;
+  margin-bottom: 4px !important;
+}
+.stChatMessage strong {
+  color: var(--wp-color-h1) !important;
+  font-weight: 700 !important;
+}
+/* AI 回答中的小节标题（操作建议 / 风险提示）*/
+.stChatMessage h4 {
+  font-size: var(--wp-text-title) !important;
+  font-weight: 600 !important;
+  color: var(--wp-color-title) !important;
+  margin: 14px 0 4px !important;
 }
 </style>
 """
@@ -102,9 +184,12 @@ def render():
     # 处理示例按钮触发的待处理输入（在渲染列之前执行）
     _handle_pending_input()
 
-    left_col, right_col = st.columns([11, 9], gap="medium")  # 55:45
+    left_col, right_col = st.columns([1, 1], gap="medium")  # 50:50
 
     with left_col:
+        # CSS layout marker: identifies this stVerticalBlock as the left chat column
+        st.markdown('<div class="de-left-marker" style="display:none"></div>',
+                    unsafe_allow_html=True)
         _render_chat_panel()
 
     with right_col:
@@ -161,11 +246,14 @@ def _render_chat_panel():
             icon="⚠️",
         )
 
-    # ── 消息历史区（固定高度可滚动）──────────────────────────────────────────
+    # ── 消息历史区（flex:1，CSS 控制可滚动 — 无 height 参数）─────────────────
     history = st.session_state["chat_history"]
 
-    msg_container = st.container(height=480)
+    msg_container = st.container()  # 无 height，由 CSS flex:1 + overflow-y:auto 控制
     with msg_container:
+        # CSS layout marker: 让 CSS 找到此容器并应用 flex:1
+        st.markdown('<div id="de-msgs-body" style="display:none"></div>',
+                    unsafe_allow_html=True)
         if not history:
             _render_empty_welcome()
         else:
@@ -176,7 +264,6 @@ def _render_chat_panel():
                 else:
                     with st.chat_message("assistant"):
                         st.markdown(msg["content"])
-                        # investment_decision 才有 decision_id
                         if msg.get("decision_id"):
                             btn_key = f"view_{msg['decision_id']}_{idx}"
                             if st.button("查看决策逻辑 📊", key=btn_key,
@@ -186,8 +273,10 @@ def _render_chat_panel():
                                 )
                                 st.rerun()
 
-    # ── 示例按钮（无历史时展示）──────────────────────────────────────────────
+    # ── 示例按钮（无历史时展示，flex:0 0 auto）────────────────────────────────
     if not history:
+        st.markdown('<div id="de-example-btns" style="display:none"></div>',
+                    unsafe_allow_html=True)
         st.caption("**💡 快速体验：**")
         ex1, ex2, ex3 = st.columns(3)
         _example_btn(ex1, "理想汽车发布会前加仓吗？",
@@ -197,13 +286,12 @@ def _render_chat_panel():
         _example_btn(ex3, "现在可以建仓苹果吗？",
                      "我想买入苹果，当前时机合适吗？")
 
-    # ── 输入区（贴底固定）─────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="border-top:1px solid var(--gray-200);margin:8px 0 6px"></div>',
-        unsafe_allow_html=True,
-    )
+    # ── 输入区（CSS 贴底 — border-top 和 padding 由 CSS 控制）──────────────────
     inp_col, btn_col = st.columns([6, 1])
     with inp_col:
+        # CSS layout marker（必须在 text_area 之前，用于 :has() CSS 选择器定位输入区）
+        st.markdown('<div id="de-input-zone" style="display:none"></div>',
+                    unsafe_allow_html=True)
         user_text = st.text_area(
             "投资想法",
             key="de_chat_input",
@@ -213,7 +301,6 @@ def _render_chat_panel():
             disabled=not _has_api_key,
         )
     with btn_col:
-        # 对齐按钮高度
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         send = st.button("发送", type="primary", use_container_width=True,
                          disabled=not _has_api_key)
@@ -337,24 +424,46 @@ def _build_chat_answer(result, user_input: str) -> str:
         return result.aborted_reason or "分析中断，请重新描述您的投资需求。"
 
     if result.is_complete and result.llm:
-        answer = llm_engine.generate_chat_answer(
+        llm = result.llm
+
+        # ① 结论行（H2 级别，最先看到）
+        conclusion = f"**{llm.decision_emoji} 建议{llm.decision_cn}**"
+
+        # ② 自然语言解释（LLM 生成，仅含结论+原因，不含策略/风险）
+        explanation = llm_engine.generate_chat_answer(
             user_query=user_input,
             intent=result.intent,
             data=result.data,
             rules=result.rules,
-            llm_result=result.llm,
+            llm_result=llm,
         )
-        # 降级提示追加
+
+        # ③ 操作建议（结构化 bullet，来自决策引擎 strategy 字段）
+        strategy_md = ""
+        if llm.strategy:
+            bullets = "\n".join(f"- {s}" for s in llm.strategy)
+            strategy_md = f"\n\n#### 操作建议\n{bullets}"
+
+        # ④ 风险提示（结构化 bullet，来自决策引擎 risk 字段）
+        risk_md = ""
+        if llm.risk:
+            bullets = "\n".join(f"- {r}" for r in llm.risk)
+            risk_md = f"\n\n#### 风险提示\n{bullets}"
+
+        # 降级提示
         suffix_parts = []
-        if result.llm.is_fallback:
-            suffix_parts.append(f"⚠️ *AI 推理遇到问题（{result.llm.error}），结论为降级结果。*")
-        if result.llm.decision_corrected:
+        if llm.is_fallback:
+            suffix_parts.append(f"⚠️ *AI 推理遇到问题（{llm.error}），结论为降级结果。*")
+        if llm.decision_corrected:
             suffix_parts.append(
-                f"ℹ️ *AI 原始输出「{result.llm.original_decision}」不在标准选项内，"
-                f"已自动修正为「{result.llm.decision_cn}」。*"
+                f"ℹ️ *AI 原始输出「{llm.original_decision}」不在标准选项内，"
+                f"已自动修正为「{llm.decision_cn}」。*"
             )
         suffix = ("\n\n> " + "\n> ".join(suffix_parts)) if suffix_parts else ""
-        return answer + suffix + "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
+        disclaimer = "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
+
+        # 拼装结构：结论 + 解释 + 操作建议 + 风险提示（规范 §二.5 AI回答强制格式）
+        return f"{conclusion}\n\n{explanation}{strategy_md}{risk_md}{suffix}{disclaimer}"
 
     return "分析未能完成，请重试。"
 
@@ -364,6 +473,10 @@ def _build_chat_answer(result, user_input: str) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _render_explain_panel():
+    # CSS layout marker: 识别右列 stVerticalBlock，应用 flex column 布局
+    st.markdown('<div class="de-right-marker" style="display:none"></div>',
+                unsafe_allow_html=True)
+    # 标题固定（不参与滚动）
     st.markdown(
         '<h2 style="font-size:var(--wp-text-h2);font-weight:600;'
         'color:var(--wp-color-h1);margin:0 0 6px 0;line-height:1.4">📊 决策链路</h2>',
@@ -374,10 +487,13 @@ def _render_explain_panel():
     decision_map = st.session_state.get("decision_map", {})
     history      = st.session_state.get("chat_history", [])
 
-    # 固定高度 + 独立滚动的右侧容器
-    panel = st.container(height=540, border=True)
+    # 内容容器（无 height 参数，由 CSS flex:1 + overflow-y:auto + border 控制）
+    panel = st.container()
 
     with panel:
+        # CSS layout marker: 识别此容器，CSS 应用 border + 独立滚动
+        st.markdown('<div id="de-panel-content" style="display:none"></div>',
+                    unsafe_allow_html=True)
         # 无历史
         if not history:
             st.markdown(
