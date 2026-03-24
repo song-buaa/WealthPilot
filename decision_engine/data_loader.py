@@ -210,16 +210,16 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id) -> LoadedDa
                 ambiguous_matches = [PositionInfo.from_aggregated(p) for p in agg_ambiguous]
 
         # ── 6. 投资纪律规则 ──────────────────────────────────────────────────
-        # 所有字段统一来自 Portfolio 表（由「投资纪律」模块管理）：
-        #   max_single_position  ← portfolio.max_single_stock_pct  （用户设定的单标上限）
-        #   max_equity_pct       ← portfolio.max_equity_pct        （用户设定的权益上限）
-        #   min_cash_pct         ← discipline/config.py            （纪律手册硬性流动性规则，不可配置）
-        #   max_leverage_ratio   ← portfolio.max_leverage_ratio    （用户设定的杠杆上限）
+        # 全部来自 discipline/config.py 的 RULES 常量，与「投资纪律」页面同源，确保口径一致：
+        #   max_single_position  ← DISCIPLINE_RULES["single_asset_limits"]["max_position_pct"]  = 0.40
+        #   max_equity_pct       ← DISCIPLINE_RULES["asset_allocation_ranges"]["equity_max"]    = 0.80
+        #   min_cash_pct         ← DISCIPLINE_RULES["liquidity_limits"]["min_cash_pct"]         = 0.20
+        #   max_leverage_ratio   ← DISCIPLINE_RULES["leverage_limits"]["leverage_ratio_max"]    = 1.0
         rules = InvestmentRules(
-            max_single_position=_safe_pct(portfolio.max_single_stock_pct, default=0.40),
-            max_equity_pct=_safe_pct(portfolio.max_equity_pct, default=0.80),
-            min_cash_pct=DISCIPLINE_RULES["liquidity_limits"]["min_cash_pct"],  # 固定规则 0.20
-            max_leverage_ratio=_safe_pct(portfolio.max_leverage_ratio, default=1.0),
+            max_single_position=DISCIPLINE_RULES["single_asset_limits"]["max_position_pct"],
+            max_equity_pct=DISCIPLINE_RULES["asset_allocation_ranges"]["equity_max"],
+            min_cash_pct=DISCIPLINE_RULES["liquidity_limits"]["min_cash_pct"],
+            max_leverage_ratio=DISCIPLINE_RULES["leverage_limits"]["leverage_ratio_max"],
         )
 
         # ── 7. 投研观点 ──────────────────────────────────────────────────────
