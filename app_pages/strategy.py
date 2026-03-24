@@ -35,6 +35,42 @@ import streamlit as st
 from app.state import portfolio_id
 
 
+_STRATEGY_CSS = """
+<style>
+/* ── 投资决策页面布局 ────────────────────────────────────── */
+
+/* 右侧 Explain Panel 容器：固定高度 + 独立滚动 */
+.de-explain-container > div {
+  overflow-y: auto !important;
+}
+
+/* 左侧 Chat：尝试让最后一个子块（输入区）贴底 */
+[data-testid="column"]:first-of-type > div > [data-testid="stVerticalBlock"]
+    > [data-testid="element-container"]:last-child {
+  position: sticky;
+  bottom: 0;
+  background: var(--ocean-50, #F4F6FA);
+  z-index: 10;
+  padding-bottom: 4px;
+}
+
+/* ── strategy 页面 Typography 覆盖 ──────────────────────── */
+/* 消息区内的 chat message 文字 */
+.stChatMessage p {
+  font-size: var(--wp-text-body) !important;
+  color: var(--wp-color-body) !important;
+  line-height: 1.6 !important;
+}
+/* Caption 样式统一 */
+.stChatMessage .stMarkdown small,
+.stChatMessage .stMarkdown p small {
+  font-size: var(--wp-text-meta) !important;
+  color: var(--wp-color-meta) !important;
+}
+</style>
+"""
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 状态初始化
 # ══════════════════════════════════════════════════════════════════════════════
@@ -58,7 +94,15 @@ def _init_session_state():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render():
-    st.title("💡 投资决策")
+    from ui_components import inject_global_css
+    inject_global_css()
+    st.markdown(_STRATEGY_CSS, unsafe_allow_html=True)
+
+    st.markdown(
+        f'<h1 style="font-size:var(--wp-text-h1);font-weight:700;'
+        f'color:var(--wp-color-h1);margin-bottom:8px">💡 投资决策</h1>',
+        unsafe_allow_html=True,
+    )
     _init_session_state()
 
     # 处理示例按钮触发的待处理输入（在渲染列之前执行）
@@ -122,7 +166,7 @@ def _render_chat_panel():
     # ── 消息历史区（固定高度可滚动）──────────────────────────────────────────
     history = st.session_state["chat_history"]
 
-    msg_container = st.container(height=420)
+    msg_container = st.container(height=480)
     with msg_container:
         if not history:
             _render_empty_welcome()
@@ -155,8 +199,11 @@ def _render_chat_panel():
         _example_btn(ex3, "现在可以建仓苹果吗？",
                      "我想买入苹果，当前时机合适吗？")
 
-    # ── 输入区（固定在左侧 Chat 内部底部）────────────────────────────────────
-    st.divider()
+    # ── 输入区（贴底固定）─────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="border-top:1px solid var(--gray-200);margin:8px 0 6px"></div>',
+        unsafe_allow_html=True,
+    )
     inp_col, btn_col = st.columns([6, 1])
     with inp_col:
         user_text = st.text_area(
@@ -190,16 +237,19 @@ def _example_btn(col, label: str, full_text: str):
 
 
 def _render_empty_welcome():
-    st.markdown("""
-    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;
-                padding:18px 20px;color:#64748B;">
-    <b style="color:#1E3A5F;font-size:15px">🧠 投资决策助手</b><br><br>
-    用自然语言描述您的投资想法，系统将完整分析后给出专业建议：<br>
-    <span style="font-size:12px;color:#94A3B8">
-      意图解析 → 数据加载 → 规则校验 → 信号分析 → AI 推理
-    </span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;'
+        'padding:18px 20px;">'
+        '<b style="color:var(--wp-color-h1);font-size:var(--wp-text-h2)">🧠 投资决策助手</b>'
+        '<br><br>'
+        '<span style="font-size:var(--wp-text-body);color:var(--wp-color-desc)">'
+        '用自然语言描述您的投资想法，系统将完整分析后给出专业建议：</span><br>'
+        '<span style="font-size:var(--wp-text-meta);color:var(--wp-color-meta)">'
+        '意图解析 → 数据加载 → 规则校验 → 信号分析 → AI 推理'
+        '</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -316,69 +366,77 @@ def _build_chat_answer(result, user_input: str) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _render_explain_panel():
-    st.markdown("### 📊 决策链路")
+    st.markdown(
+        '<div style="font-size:var(--wp-text-title);font-weight:600;'
+        'color:var(--wp-color-title);margin-bottom:6px">📊 决策链路</div>',
+        unsafe_allow_html=True,
+    )
 
     current_id   = st.session_state.get("current_decision_id")
     decision_map = st.session_state.get("decision_map", {})
     history      = st.session_state.get("chat_history", [])
 
-    # 无历史
-    if not history:
-        st.markdown(
-            "<div style='background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;"
-            "padding:14px;color:#0369A1;font-size:13px;margin-top:4px'>"
-            "💡 开始对话后，点击 AI 回复下方的「查看决策逻辑 📊」，"
-            "这里将展示完整的分析链路。</div>",
-            unsafe_allow_html=True,
-        )
-        return
+    # 固定高度 + 独立滚动的右侧容器
+    panel = st.container(height=540, border=True)
 
-    # 最近一条 AI 消息是 general_chat 且无 decision
-    last_ai = next((m for m in reversed(history) if m["role"] == "assistant"), None)
-    if last_ai and last_ai.get("intent_type") == "general_chat" and not current_id:
-        st.info("当前对话为普通问答，无投资决策链路。")
-        return
+    with panel:
+        # 无历史
+        if not history:
+            st.markdown(
+                '<div style="background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;'
+                'padding:14px;color:#0369A1;font-size:var(--wp-text-desc);margin-top:4px">'
+                '💡 开始对话后，点击 AI 回复下方的「查看决策逻辑 📊」，'
+                '这里将展示完整的分析链路。</div>',
+                unsafe_allow_html=True,
+            )
+            return
 
-    # 尚未点击过按钮
-    if not current_id or current_id not in decision_map:
-        st.caption("点击左侧 AI 回复下方的「查看决策逻辑 📊」按钮查看分析详情。")
-        return
+        # 最近一条 AI 消息是 general_chat 且无 decision
+        last_ai = next((m for m in reversed(history) if m["role"] == "assistant"), None)
+        if last_ai and last_ai.get("intent_type") == "general_chat" and not current_id:
+            st.info("当前对话为普通问答，无投资决策链路。")
+            return
 
-    result = decision_map[current_id]
-    st.caption(f"Decision ID: `{current_id}`")
+        # 尚未点击过按钮
+        if not current_id or current_id not in decision_map:
+            st.caption("点击左侧 AI 回复下方的「查看决策逻辑 📊」按钮查看分析详情。")
+            return
 
-    # ── ① 意图解析 ────────────────────────────────────────────────────────────
-    if result.intent:
-        _ep_intent(result.intent)
+        result = decision_map[current_id]
+        st.caption(f"Decision ID: `{current_id}`")
 
-    # ── ② 持仓数据（默认折叠）────────────────────────────────────────────────
-    if result.data:
-        _ep_data(result.data)
+        # ── ① 意图解析 ────────────────────────────────────────────────────────────
+        if result.intent:
+            _ep_intent(result.intent)
 
-    # ── ③ 规则校验 ────────────────────────────────────────────────────────────
-    if result.rules:
-        _ep_rules(result.rules)
+        # ── ② 持仓数据（默认折叠）────────────────────────────────────────────────
+        if result.data:
+            _ep_data(result.data)
 
-    # ── ④ 信号层 ──────────────────────────────────────────────────────────────
-    if result.signals:
-        _ep_signals(result.signals)
+        # ── ③ 规则校验 ────────────────────────────────────────────────────────────
+        if result.rules:
+            _ep_rules(result.rules)
 
-    # ── ⑤ AI 推理过程（默认折叠）────────────────────────────────────────────
-    if result.llm:
-        _ep_reasoning(result.llm)
+        # ── ④ 信号层 ──────────────────────────────────────────────────────────────
+        if result.signals:
+            _ep_signals(result.signals)
 
-    # ── ⑥ 最终结论（RESTORED — 彩色卡片）────────────────────────────────────
-    if result.llm:
-        _ep_conclusion(result.llm)
+        # ── ⑤ AI 推理过程（默认折叠）────────────────────────────────────────────
+        if result.llm:
+            _ep_reasoning(result.llm)
 
-    # 合规提示
-    st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
+        # ── ⑥ 最终结论（RESTORED — 彩色卡片）────────────────────────────────────
+        if result.llm:
+            _ep_conclusion(result.llm)
+
+        # 合规提示
+        st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
 
 
 # ── 紧凑子模块渲染函数 ─────────────────────────────────────────────────────────
 
-_EP_LABEL_CSS = "color:#6B7280;font-size:11px"
-_EP_VAL_CSS   = "font-weight:600;font-size:13px"
+_EP_LABEL_CSS = "color:var(--wp-color-desc);font-size:var(--wp-text-meta)"
+_EP_VAL_CSS   = "font-weight:600;font-size:var(--wp-text-body);color:var(--wp-color-title)"
 
 
 def _ep_row_md(label: str, value: str) -> str:
@@ -390,7 +448,11 @@ def _ep_row_md(label: str, value: str) -> str:
 
 
 def _ep_intent(intent):
-    st.markdown("**🎯 意图解析**")
+    st.markdown(
+        '<span style="font-size:var(--wp-text-title);font-weight:600;'
+        'color:var(--wp-color-title)">🎯 意图解析</span>',
+        unsafe_allow_html=True,
+    )
     # 紧凑行式展示，不用 st.metric（字号太大）
     rows = [
         _ep_row_md("标的", intent.asset or "未识别"),
@@ -439,7 +501,11 @@ def _ep_data(data):
 
 
 def _ep_rules(rule_result):
-    st.markdown("**📏 规则校验**")
+    st.markdown(
+        '<span style="font-size:var(--wp-text-title);font-weight:600;'
+        'color:var(--wp-color-title)">📏 规则校验</span>',
+        unsafe_allow_html=True,
+    )
     if rule_result.violation:
         st.error(f"⛔ {rule_result.status_label}", icon="🚫")
     elif rule_result.warning:
@@ -452,7 +518,11 @@ def _ep_rules(rule_result):
 
 
 def _ep_signals(signals):
-    st.markdown("**📡 信号层**")
+    st.markdown(
+        '<span style="font-size:var(--wp-text-title);font-weight:600;'
+        'color:var(--wp-color-title)">📡 信号层</span>',
+        unsafe_allow_html=True,
+    )
     pos_icon  = {"偏高": "🟠", "合理": "🟢", "偏低": "🔵"}.get(signals.position_signal, "⚪")
     fund_icon = {"正面": "📈", "负面": "📉", "中性": "➡️", "N/A": "❓"}.get(
         signals.fundamental_signal, "➡️")
@@ -490,12 +560,16 @@ def _ep_conclusion(llm):
               "SELL": ("#DC2626", "#FEF2F2", "#FECACA")}
     text_c, bg_c, border_c = colors.get(llm.decision, ("#64748B", "#F8FAFC", "#E2E8F0"))
 
-    st.markdown("**🏁 最终结论**")
+    st.markdown(
+        '<span style="font-size:var(--wp-text-title);font-weight:600;'
+        'color:var(--wp-color-title)">🏁 最终结论</span>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f'<div style="background:{bg_c};border:1px solid {border_c};border-radius:8px;'
         f'padding:12px 16px;margin:4px 0;">'
-        f'<span style="font-size:22px">{llm.decision_emoji}</span>'
-        f'<span style="font-size:18px;font-weight:700;color:{text_c};margin-left:10px">'
+        f'<span style="font-size:var(--wp-text-h1)">{llm.decision_emoji}</span>'
+        f'<span style="font-size:var(--wp-text-h2);font-weight:700;color:{text_c};margin-left:10px">'
         f'{llm.decision_cn}</span>'
         f'</div>',
         unsafe_allow_html=True,
@@ -507,11 +581,19 @@ def _ep_conclusion(llm):
         st.caption(f"ℹ️ 原始输出「{llm.original_decision}」已自动修正")
 
     if llm.strategy:
-        st.caption("**操作建议**")
+        st.markdown(
+            '<span style="font-size:var(--wp-text-desc);font-weight:600;'
+            'color:var(--wp-color-desc)">操作建议</span>',
+            unsafe_allow_html=True,
+        )
         for s in llm.strategy:
             st.caption(f"• {s}")
 
     if llm.risk:
-        st.caption("**风险提示**")
+        st.markdown(
+            '<span style="font-size:var(--wp-text-desc);font-weight:600;'
+            'color:var(--wp-color-desc)">风险提示</span>',
+            unsafe_allow_html=True,
+        )
         for r in llm.risk:
             st.caption(f"• {r}")

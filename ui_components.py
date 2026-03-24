@@ -45,6 +45,22 @@ def inject_global_css():
   --shadow-sm: 0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04);
   --shadow-dark: 0 6px 20px rgba(15,30,53,0.28);
   --radius: 12px;
+  /* ── Typography System Tokens ───────────────────── */
+  --wp-text-h1:     20px;
+  --wp-text-h2:     14px;
+  --wp-text-title:  13px;
+  --wp-text-nav:    12px;
+  --wp-text-body:   13px;
+  --wp-text-desc:   12px;
+  --wp-text-meta:   11px;
+  --wp-text-label:  11px;
+  --wp-color-h1:    #1B2A4A;
+  --wp-color-title: #374151;
+  --wp-color-nav:   #6B7280;
+  --wp-color-body:  #374151;
+  --wp-color-desc:  #6B7280;
+  --wp-color-meta:  #9CA3AF;
+  --wp-color-label: #9CA3AF;
 }
 
 /* ── 全局重置 ─────────────────────────────────── */
