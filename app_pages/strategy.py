@@ -37,14 +37,7 @@ from app.state import portfolio_id
 
 _STRATEGY_CSS = """
 <style>
-/* ── 投资决策页面布局 ────────────────────────────────────── */
-
-/* 右侧 Explain Panel 容器：固定高度 + 独立滚动 */
-.de-explain-container > div {
-  overflow-y: auto !important;
-}
-
-/* 左侧 Chat：尝试让最后一个子块（输入区）贴底 */
+/* ── 布局：左侧输入区贴底 ────────────────────────────────── */
 [data-testid="column"]:first-of-type > div > [data-testid="stVerticalBlock"]
     > [data-testid="element-container"]:last-child {
   position: sticky;
@@ -54,18 +47,19 @@ _STRATEGY_CSS = """
   padding-bottom: 4px;
 }
 
-/* ── strategy 页面 Typography 覆盖 ──────────────────────── */
-/* 消息区内的 chat message 文字 */
+/* ── Chat 消息区：Body 字号 + 段落间距 ───────────────────── */
 .stChatMessage p {
   font-size: var(--wp-text-body) !important;
   color: var(--wp-color-body) !important;
-  line-height: 1.6 !important;
+  line-height: 1.65 !important;
+  margin-bottom: 8px !important;
 }
-/* Caption 样式统一 */
-.stChatMessage .stMarkdown small,
-.stChatMessage .stMarkdown p small {
-  font-size: var(--wp-text-meta) !important;
-  color: var(--wp-color-meta) !important;
+.stChatMessage p:last-child { margin-bottom: 0 !important; }
+
+/* ── Explain Panel：模块容器内边距收紧 ───────────────────── */
+[data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"]
+    [data-testid="stVerticalBlock"] {
+  gap: 0 !important;
 }
 </style>
 """
@@ -146,7 +140,11 @@ def _render_chat_panel():
     # ── 标题行 ────────────────────────────────────────────────────────────────
     hcol, clcol = st.columns([5, 1])
     with hcol:
-        st.markdown("### 💬 对话")
+        st.markdown(
+            '<h2 style="font-size:var(--wp-text-h2);font-weight:600;'
+            'color:var(--wp-color-h1);margin:0 0 2px 0;line-height:1.4">💬 对话</h2>',
+            unsafe_allow_html=True,
+        )
     with clcol:
         if st.button("清空", use_container_width=True, type="secondary",
                      help="清空对话记录和决策历史"):
@@ -367,8 +365,8 @@ def _build_chat_answer(result, user_input: str) -> str:
 
 def _render_explain_panel():
     st.markdown(
-        '<div style="font-size:var(--wp-text-title);font-weight:600;'
-        'color:var(--wp-color-title);margin-bottom:6px">📊 决策链路</div>',
+        '<h2 style="font-size:var(--wp-text-h2);font-weight:600;'
+        'color:var(--wp-color-h1);margin:0 0 6px 0;line-height:1.4">📊 决策链路</h2>',
         unsafe_allow_html=True,
     )
 
@@ -435,8 +433,20 @@ def _render_explain_panel():
 
 # ── 紧凑子模块渲染函数 ─────────────────────────────────────────────────────────
 
-_EP_LABEL_CSS = "color:var(--wp-color-desc);font-size:var(--wp-text-meta)"
-_EP_VAL_CSS   = "font-weight:600;font-size:var(--wp-text-body);color:var(--wp-color-title)"
+# Label：小字 + uppercase（对应 Typography System Label 层级）
+_EP_LABEL_CSS = (
+    "color:var(--wp-color-label);"
+    "font-size:var(--wp-text-label);"
+    "font-weight:600;"
+    "text-transform:uppercase;"
+    "letter-spacing:0.5px"
+)
+# Value：正文 Body 层级
+_EP_VAL_CSS = (
+    "font-weight:600;"
+    "font-size:var(--wp-text-body);"
+    "color:var(--wp-color-title)"
+)
 
 
 def _ep_row_md(label: str, value: str) -> str:
@@ -448,29 +458,32 @@ def _ep_row_md(label: str, value: str) -> str:
 
 
 def _ep_intent(intent):
-    st.markdown(
-        '<span style="font-size:var(--wp-text-title);font-weight:600;'
-        'color:var(--wp-color-title)">🎯 意图解析</span>',
-        unsafe_allow_html=True,
-    )
-    # 紧凑行式展示，不用 st.metric（字号太大）
-    rows = [
-        _ep_row_md("标的", intent.asset or "未识别"),
-        _ep_row_md("操作", intent.action_type),
-        _ep_row_md("时间", intent.time_horizon),
-        _ep_row_md("置信度", f"{intent.confidence_score:.0%}"),
-    ]
-    if intent.trigger:
-        rows.append(_ep_row_md("触发", intent.trigger))
-    st.markdown(
-        "<div style='line-height:1.8;padding:6px 0'>" +
-        " &nbsp;·&nbsp; ".join(rows) +
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    if intent.is_context_inherited:
-        st.caption("🔗 部分字段继承自上轮对话")
-    st.divider()
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:var(--wp-text-title);font-weight:600;'
+            'color:var(--wp-color-title);margin-bottom:6px">🎯 意图解析</div>',
+            unsafe_allow_html=True,
+        )
+        rows = [
+            _ep_row_md("标的", intent.asset or "未识别"),
+            _ep_row_md("操作", intent.action_type),
+            _ep_row_md("时间", intent.time_horizon),
+            _ep_row_md("置信度", f"{intent.confidence_score:.0%}"),
+        ]
+        if intent.trigger:
+            rows.append(_ep_row_md("触发", intent.trigger))
+        st.markdown(
+            "<div style='line-height:2;padding:2px 0'>" +
+            "<br>".join(rows) +
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        if intent.is_context_inherited:
+            st.markdown(
+                '<div style="font-size:var(--wp-text-meta);color:var(--wp-color-meta);'
+                'margin-top:4px">🔗 部分字段继承自上轮对话</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def _ep_data(data):
@@ -501,47 +514,51 @@ def _ep_data(data):
 
 
 def _ep_rules(rule_result):
-    st.markdown(
-        '<span style="font-size:var(--wp-text-title);font-weight:600;'
-        'color:var(--wp-color-title)">📏 规则校验</span>',
-        unsafe_allow_html=True,
-    )
-    if rule_result.violation:
-        st.error(f"⛔ {rule_result.status_label}", icon="🚫")
-    elif rule_result.warning:
-        st.warning(f"⚠️ {rule_result.status_label}")
-    else:
-        st.success(f"✅ {rule_result.status_label}")
-    for detail in rule_result.rule_details:
-        st.caption(detail)
-    st.divider()
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:var(--wp-text-title);font-weight:600;'
+            'color:var(--wp-color-title);margin-bottom:6px">📏 规则校验</div>',
+            unsafe_allow_html=True,
+        )
+        if rule_result.violation:
+            st.error(f"⛔ {rule_result.status_label}", icon="🚫")
+        elif rule_result.warning:
+            st.warning(f"⚠️ {rule_result.status_label}")
+        else:
+            st.success(f"✅ {rule_result.status_label}")
+        for detail in rule_result.rule_details:
+            st.markdown(
+                f'<div style="font-size:var(--wp-text-desc);color:var(--wp-color-desc);'
+                f'padding:1px 0">• {detail}</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def _ep_signals(signals):
-    st.markdown(
-        '<span style="font-size:var(--wp-text-title);font-weight:600;'
-        'color:var(--wp-color-title)">📡 信号层</span>',
-        unsafe_allow_html=True,
-    )
-    pos_icon  = {"偏高": "🟠", "合理": "🟢", "偏低": "🔵"}.get(signals.position_signal, "⚪")
-    fund_icon = {"正面": "📈", "负面": "📉", "中性": "➡️", "N/A": "❓"}.get(
-        signals.fundamental_signal, "➡️")
-    unc_icon  = {"高": "⚠️", "中": "🔔", "低": "✅"}.get(
-        signals.event_signal.uncertainty, "❓")
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:var(--wp-text-title);font-weight:600;'
+            'color:var(--wp-color-title);margin-bottom:6px">📡 信号层</div>',
+            unsafe_allow_html=True,
+        )
+        pos_icon  = {"偏高": "🟠", "合理": "🟢", "偏低": "🔵"}.get(signals.position_signal, "⚪")
+        fund_icon = {"正面": "📈", "负面": "📉", "中性": "➡️", "N/A": "❓"}.get(
+            signals.fundamental_signal, "➡️")
+        unc_icon  = {"高": "⚠️", "中": "🔔", "低": "✅"}.get(
+            signals.event_signal.uncertainty, "❓")
 
-    rows = [
-        _ep_row_md("仓位", f"{pos_icon} {signals.position_signal}"),
-        _ep_row_md("基本面", f"{fund_icon} {signals.fundamental_signal}"),
-        _ep_row_md("事件", f"{unc_icon} 不确定性{signals.event_signal.uncertainty}"),
-        _ep_row_md("情绪", f"➡️ {signals.sentiment_signal}"),
-    ]
-    st.markdown(
-        "<div style='line-height:2;padding:4px 0'>" +
-        "<br>".join(rows) +
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    st.divider()
+        rows = [
+            _ep_row_md("仓位", f"{pos_icon} {signals.position_signal}"),
+            _ep_row_md("基本面", f"{fund_icon} {signals.fundamental_signal}"),
+            _ep_row_md("事件", f"{unc_icon} 不确定性{signals.event_signal.uncertainty}"),
+            _ep_row_md("情绪", f"➡️ {signals.sentiment_signal}"),
+        ]
+        st.markdown(
+            "<div style='line-height:2;padding:2px 0'>" +
+            "<br>".join(rows) +
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def _ep_reasoning(llm):
@@ -554,46 +571,66 @@ def _ep_reasoning(llm):
 
 
 def _ep_conclusion(llm):
-    """最终结论 — 彩色高亮卡片（RESTORED）"""
+    """最终结论 — 彩色高亮卡片"""
     colors = {"BUY": ("#059669", "#ECFDF5", "#D1FAE5"),
               "HOLD": ("#D97706", "#FFFBEB", "#FDE68A"),
               "SELL": ("#DC2626", "#FEF2F2", "#FECACA")}
     text_c, bg_c, border_c = colors.get(llm.decision, ("#64748B", "#F8FAFC", "#E2E8F0"))
 
-    st.markdown(
-        '<span style="font-size:var(--wp-text-title);font-weight:600;'
-        'color:var(--wp-color-title)">🏁 最终结论</span>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<div style="background:{bg_c};border:1px solid {border_c};border-radius:8px;'
-        f'padding:12px 16px;margin:4px 0;">'
-        f'<span style="font-size:var(--wp-text-h1)">{llm.decision_emoji}</span>'
-        f'<span style="font-size:var(--wp-text-h2);font-weight:700;color:{text_c};margin-left:10px">'
-        f'{llm.decision_cn}</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    if llm.is_fallback:
-        st.caption(f"⚠️ AI 推理不可用：{llm.error}")
-    if llm.decision_corrected:
-        st.caption(f"ℹ️ 原始输出「{llm.original_decision}」已自动修正")
-
-    if llm.strategy:
+    with st.container(border=True):
         st.markdown(
-            '<span style="font-size:var(--wp-text-desc);font-weight:600;'
-            'color:var(--wp-color-desc)">操作建议</span>',
+            '<div style="font-size:var(--wp-text-title);font-weight:600;'
+            'color:var(--wp-color-title);margin-bottom:6px">🏁 最终结论</div>',
             unsafe_allow_html=True,
         )
-        for s in llm.strategy:
-            st.caption(f"• {s}")
-
-    if llm.risk:
+        # 决策结果大卡片
         st.markdown(
-            '<span style="font-size:var(--wp-text-desc);font-weight:600;'
-            'color:var(--wp-color-desc)">风险提示</span>',
+            f'<div style="background:{bg_c};border:1px solid {border_c};border-radius:8px;'
+            f'padding:12px 16px;margin:0 0 8px 0">'
+            f'<span style="font-size:var(--wp-text-h1)">{llm.decision_emoji}</span>'
+            f'<span style="font-size:var(--wp-text-h2);font-weight:700;color:{text_c};'
+            f'margin-left:10px">{llm.decision_cn}</span>'
+            f'</div>',
             unsafe_allow_html=True,
         )
-        for r in llm.risk:
-            st.caption(f"• {r}")
+
+        if llm.is_fallback:
+            st.markdown(
+                f'<div style="font-size:var(--wp-text-meta);color:var(--wp-color-meta)">'
+                f'⚠️ AI 推理不可用：{llm.error}</div>',
+                unsafe_allow_html=True,
+            )
+        if llm.decision_corrected:
+            st.markdown(
+                f'<div style="font-size:var(--wp-text-meta);color:var(--wp-color-meta)">'
+                f'ℹ️ 原始输出「{llm.original_decision}」已自动修正</div>',
+                unsafe_allow_html=True,
+            )
+
+        if llm.strategy:
+            # "操作建议" → Title 层级（小节标题）
+            st.markdown(
+                '<div style="font-size:var(--wp-text-title);font-weight:600;'
+                'color:var(--wp-color-title);margin:6px 0 3px">操作建议</div>',
+                unsafe_allow_html=True,
+            )
+            items_html = "".join(
+                f'<div style="font-size:var(--wp-text-desc);color:var(--wp-color-desc);'
+                f'padding:2px 0 2px 8px;line-height:1.5">• {s}</div>'
+                for s in llm.strategy
+            )
+            st.markdown(items_html, unsafe_allow_html=True)
+
+        if llm.risk:
+            # "风险提示" → Title 层级（小节标题）
+            st.markdown(
+                '<div style="font-size:var(--wp-text-title);font-weight:600;'
+                'color:var(--wp-color-title);margin:6px 0 3px">风险提示</div>',
+                unsafe_allow_html=True,
+            )
+            items_html = "".join(
+                f'<div style="font-size:var(--wp-text-desc);color:var(--wp-color-desc);'
+                f'padding:2px 0 2px 8px;line-height:1.5">• {r}</div>'
+                for r in llm.risk
+            )
+            st.markdown(items_html, unsafe_allow_html=True)
