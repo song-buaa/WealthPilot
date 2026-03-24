@@ -2,6 +2,98 @@
 
 All notable changes to the WealthPilot project will be documented in this file.
 
+---
+
+## [1.12.1] - 2026-03-23 - 投资决策模块缺陷修复封板（Manus 测试回归通过）
+
+> **封板状态**：投资决策模块本轮开发已闭环，可进入下一轮功能开发。
+> 基于《WealthPilot 投资决策模块正式测试报告 v1.1》（Manus，2026-03-23）完成全部 P0/P1/P2 问题修复，并落地 2 条产品策略确认项。回归验证 13/13 通过。
+
+### Fixed — BUG-01 P0：API Key 缺失导致入口级阻塞（`app_pages/strategy.py`）
+
+- **原问题**：未配置 `ANTHROPIC_API_KEY` 时，页面入口 `st.stop()` 导致"策略设定"等非 AI 功能全部不可用
+- **修复**：入口改为非阻塞 `st.info()` 提示；API Key 检查下移至点击"开始分析"后，仅拦截 AI 分析链路
+- **效果**：无 API Key 时，Tab 2 策略设定可正常访问和保存
+
+### Fixed — BUG-02 P1：百分比负值被静默替换（`decision_engine/data_loader.py`）
+
+- **原问题**：`_safe_pct()` 将负值静默 fallback 为默认值（如 `-0.1 → 0.25`），用户无感知
+- **修复**：负值（`v < 0`）抛出 `ValueError`，`decision_flow` 新增专属捕获，向用户展示"⚠️ 数据异常"
+- **效果**：非法负值明确报错，不再静默替换
+
+### Fixed — BUG-03 P1：模糊匹配首项风险（`data_loader.py` + `decision_flow.py`）
+
+- **原问题**：多个相似标的并存时（如"理想汽车"/"理想汽车-W_1"），系统静默选择第一个
+- **修复**：重构为 `_find_all_positions()`，引入**精确匹配优先**策略（归一化名称完全相等 → 优先返回；无精确匹配时才使用模糊结果）；`LoadedData` 新增 `ambiguous_matches` 字段；多候选时流程 `ABORTED` 并展示候选名称列表
+- **效果**：精确输入（如"理想汽车"）唯一命中；短词（如"理想"）触发歧义提示，要求用户精确输入
+
+### Fixed — BUG-04 P2：LLM 结论自动修正缺乏提示（`llm_engine.py` + `strategy.py`）
+
+- **原问题**：LLM 返回非标准值时静默修正为 HOLD，用户无感知
+- **修复**：`LLMResult` 新增 `decision_corrected` / `original_decision` 字段；UI 展示灰色小字提示"已自动修正"
+- **效果**：修正事件透明化，用户可感知结论经过自动调整
+
+### Fixed — BUG-05 P2：空仓减仓 FlowStage 与提示文案歧义（`decision_flow.py`）
+
+- **原问题**：未持有标的 + 减仓意图时，规则 `violation=True` 但流程继续至 LLM，最终返回 `FlowStage.DONE` + HOLD 建议，用户无法判断这是无效操作
+- **修复**：规则校验后检测该场景，直接 `FlowStage.ABORTED`，UI 展示红色"⛔ 无效操作"
+- **效果**：空仓减仓明确中断，状态与提示文案一致
+
+### Added — 产品策略落地（`data_loader.py`）
+
+**策略 A — 不支持单字匹配**
+- `_find_all_positions()` 增加 `len(name_lower) < 2` 守卫，单字直接返回空，不进行任何匹配
+- 避免"理"误匹配"理想汽车"等场景
+
+**策略 B — 百分比 0 值为合法边界值**
+- `_safe_pct()` 修改条件：`0` 直接返回 `0.0`，不替换为默认值
+- 负值（`v < 0`）仍为非法输入，抛出 `ValueError`
+
+### Added — 交接文档
+
+- `INVESTMENT_DECISION_TEST_HANDOFF.md`：投资决策模块完整测试交接说明（测试范围/入口/数据依赖/已知限制）
+- `TEST_DATA_TEMPLATE.md`：配套测试数据模板（典型用例 + 边界用例 + 信号层速查表）
+- `INVESTMENT_DECISION_FIX_SUMMARY.md`：修复验证交接文档（每项 Bug 修复说明 + 最小回归测试建议 7 条）
+
+---
+
+## [1.12.0] - 2026-03-23 - 投资决策引擎 MVP 上线（PRD V2.0）
+
+### Added — `decision_engine/` 决策引擎包（7 文件）
+
+全新模块，基于 PRD V2.0 实现完整投资决策链路：
+
+| 文件 | 职责 |
+|------|------|
+| `intent_parser.py` | 自然语言 → 结构化意图（Claude Sonnet 4），置信度 < 0.6 触发澄清问题 |
+| `data_loader.py` | 多源数据加载：SQLite 持仓 + ResearchViewpoint + mock 用户画像 |
+| `pre_check.py` | 三要素前置校验（画像 / 持仓 / 纪律规则） |
+| `rule_engine.py` | 仓位纪律规则校验，violation / warning 分级 |
+| `signal_engine.py` | 四维信号生成（仓位 / 事件 / 基本面 / 情绪） |
+| `llm_engine.py` | Claude Sonnet 4 综合推理 → BUY / HOLD / SELL |
+| `decision_flow.py` | 全链路编排 + FlowStage 状态机（INTENT→LOADED→PRE_CHECK→RULE_CHECK→SIGNAL→LLM→DONE/ABORTED） |
+
+### Changed — `app_pages/strategy.py` 重写
+
+- 新增「🧠 决策引擎」Tab（8 步结构化展示：意图 → 数据 → 规则 → 信号 → AI 推理 → 结论 → 免责声明）
+- 原「⚙️ 策略设定」Tab 完整保留
+- 快捷示例按钮（3 个预设查询）
+
+### Added — 依赖
+
+- `anthropic>=0.86.0` 加入 `requirements.txt`
+
+---
+
+## [1.11.0] - 2026-03-23 - 接入 Manus UI 调整成果，建立功能开发新基线
+
+### Changed
+- 接入 Manus 对 `app_pages/overview.py` 和 `streamlit_app.py` 的 UI 微调成果
+- 建立 `feature/manus-handoff-v2` 分支作为后续功能开发主线
+- 打 `backup/pre-manus-v1.10.0` 安全备份 tag
+
+---
+
 ## [1.10.0] - 2026-03-22 - 投资账户总览 UI 深度重构 + 项目交接归档
 
 ### Changed — 投资账户总览（app_pages/overview.py）重大 UI 升级

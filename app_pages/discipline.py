@@ -19,6 +19,7 @@ from app.discipline.models import (
     UserState, TradeAction,
 )
 from app.discipline.engine_runner import evaluate_action
+from app.utils.position_aggregator import aggregate as _aggregate_positions_shared
 
 
 # ─────────────────────────────────────────────────────────
@@ -141,81 +142,17 @@ def _detect_level0_status(pid: int) -> tuple[bool, bool, bool]:
         session.close()
 
 
-def _aggregate_positions(raw: list[dict]) -> list[dict]:
+def _aggregate_positions(raw: list[dict]) -> list:
     """
-    规则3 持仓聚合——跨平台合并同一标的/分类：
+    持仓聚合——委托公共聚合模块处理，确保与投资决策模块使用完全一致的逻辑。
 
-    - 券商平台（非银行/三方）：按 ticker 合并；无 ticker 时用正则标准化名称查找已知 ticker
-    - 银行/支付宝平台：按 name 合并（活钱管理/稳健投资/进取投资 分类汇总）
+    原聚合逻辑已提取至 app.utils.position_aggregator.aggregate()，
+    此函数仅作为兼容性入口保留，供 discipline.py 内部使用。
 
-    名称标准化规则（处理国金证券等平台的名称变体）：
-        "理想汽车-W_1" / "理想汽车-W_2" → "理想汽车"
-        "理想汽车 (LI)"                  → "理想汽车"
-
-    返回聚合后的列表，每项包含：
-        name, ticker, asset_class, market_value_cny,
-        is_leverage_etf, platforms（平台列表）, pl_rate（加权盈亏率）
+    返回 list[AggregatedPosition]，按市值降序排列。
     """
-
-    def _norm(name: str) -> str:
-        """标准化名称：去掉序号后缀、港股标识、括号内容"""
-        name = re.sub(r'_\d+$', '', name)          # 去掉 _1 _2 等序号
-        name = re.sub(r'-W$', '', name)             # 去掉港股 -W 标识
-        name = re.sub(r'\s*\(.*?\)\s*$', '', name)  # 去掉括号内容如 (LI)
-        return name.strip()
-
-    # 第一遍：建立「标准名 → ticker」映射（仅来自有 ticker 的持仓）
-    norm_to_ticker: dict[str, str] = {}
-    for r in raw:
-        if r["platform"] not in _BANK_PLATFORMS and r["ticker"]:
-            norm_to_ticker[_norm(r["name"])] = r["ticker"]
-
-    # 第二遍：聚合
-    buckets: dict[str, dict] = {}
-
-    for r in raw:
-        is_bank = r["platform"] in _BANK_PLATFORMS
-        if is_bank:
-            # 建设银行：将产品名称映射到标准三类；其他银行/支付宝直接用 name
-            key = _CCB_NAME_MAP.get(r["name"], r["name"]) if r["platform"] == "建设银行" else r["name"]
-        elif r["ticker"]:
-            key = r["ticker"]
-        else:
-            # 无 ticker：用标准化名称查已知映射，fallback 到标准化名称本身
-            key = norm_to_ticker.get(_norm(r["name"]), _norm(r["name"]))
-
-        if key not in buckets:
-            # 显示名：银行用 key（已映射为标准名），券商用标准化名称
-            display_name = key if is_bank else _norm(r["name"])
-            buckets[key] = {
-                "name": display_name,
-                "ticker": r["ticker"] or key,
-                "asset_class": r["asset_class"],
-                "market_value_cny": 0.0,
-                "profit_loss_value": 0.0,
-                "cost_value": 0.0,
-                "is_leverage_etf": r["is_leverage_etf"],
-                "platforms": [],
-            }
-
-        b = buckets[key]
-        b["market_value_cny"] += r["market_value_cny"]
-        b["profit_loss_value"] += r.get("profit_loss_value", 0.0)
-        b["cost_value"] += r["market_value_cny"] - r.get("profit_loss_value", 0.0)
-        if r["platform"] not in b["platforms"]:
-            b["platforms"].append(r["platform"])
-
-    result = []
-    for b in buckets.values():
-        pl_rate = (b["profit_loss_value"] / b["cost_value"] * 100
-                   if b["cost_value"] > 0 else 0.0)
-        result.append({
-            **b,
-            "pl_rate": pl_rate,
-            "platform_display": " / ".join(b["platforms"]),
-        })
-
-    return sorted(result, key=lambda x: -x["market_value_cny"])
+    positions, _ = _aggregate_positions_shared(raw)
+    return positions
 
 
 def _build_portfolio_state(
@@ -312,9 +249,9 @@ def _render_dashboard(
 
     # 规则3：跨平台聚合后计算最大单仓
     aggregated = _aggregate_positions(raw)
-    max_agg = max(aggregated, key=lambda a: a["market_value_cny"], default=None)
-    max_weight = max_agg["market_value_cny"] / total if max_agg else 0.0
-    max_name   = max_agg["name"] if max_agg else ""
+    max_agg = max(aggregated, key=lambda a: a.market_value_cny, default=None)
+    max_weight = max_agg.market_value_cny / total if max_agg else 0.0
+    max_name   = max_agg.name if max_agg else ""
 
     # ── 顶部四格指标（仅数值+状态图标，问题统一汇总在下方）──
     alerts: list[tuple[str, str]] = []   # (level, message)  level="error"/"warning"
@@ -425,7 +362,7 @@ def _render_dashboard(
         st.subheader("持仓集中度（规则3）", divider=False)
         rows = []
         for a in aggregated:
-            w = a["market_value_cny"] / total
+            w = a.market_value_cny / total
             if w > cfg_pos["max_position_pct"]:
                 status = "🚨 超限"
             elif w >= cfg_pos["warning_position_pct"]:
@@ -433,20 +370,34 @@ def _render_dashboard(
             else:
                 status = "🟢 安全"
             rows.append({
-                "持仓名称": a["name"],
+                "持仓名称": a.name,
                 "仓位": f"{w*100:.1f}%",
                 "状态": status,
-                "盈亏%": f"{a['pl_rate']:+.1f}%",
-                "持仓平台": a["platform_display"],
+                "盈亏%": f"{a.pl_rate:+.1f}%",
+                "持仓平台": a.platform_display,
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────
-# Tab 2：操作评估器
+# [已退役] 操作评估器（原 Tab 2）
+# UI 入口已关闭，底层能力保留供复用
 # ─────────────────────────────────────────────────────────
 
 def _render_evaluator(raw: list[dict], portfolio_drawdown_pct: float) -> None:
+    """
+    [已退役 · UI 入口已关闭]
+
+    原「投资纪律」Tab 2「操作评估器」的渲染函数（表单手动填写版）。
+    已被 _render_pre_trade_eval()（自然语言输入版）取代，后者同样退役。
+    交易前决策功能已整合至「投资决策」模块（app_pages/strategy.py）。
+
+    底层逻辑完整保留，如需复用请直接调用：
+        - app.discipline.engine_runner.evaluate_action()  三层引擎统一入口
+        - app.discipline.risk_engine.run()                硬性风控约束
+        - app.discipline.psychology_engine.run()          情绪冷却约束
+        - app.discipline.decision_engine.run()            策略判断层
+    """
     total = sum(r["market_value_cny"] for r in raw) or 1.0
     position_names = [r["name"] for r in raw]
 
@@ -765,7 +716,8 @@ def _render_checklist(raw: list[dict], portfolio_drawdown_pct: float) -> None:
 
 
 # ─────────────────────────────────────────────────────────
-# Tab 2（新）：交易前评估 — 自然语言解析 + 自动清单检查
+# [已退役] 交易前评估（自然语言版）— UI 入口已关闭
+# 底层能力保留，供后续规则/风控/心理约束等复用
 # ─────────────────────────────────────────────────────────
 
 _PRE_EVAL_FORM_KEYS = [
@@ -1064,8 +1016,19 @@ def _render_checklist_auto(
 
 def _render_pre_trade_eval(raw: list[dict], portfolio_drawdown_pct: float) -> None:
     """
-    Tab 2（新）：交易前评估
-    流程：自然语言描述 → 关键词解析 → 参数确认 → 纪律评估 + 自动清单检查
+    [已退役 · UI 入口已关闭]
+
+    原「投资纪律」Tab 2「交易前评估」的渲染函数（自然语言输入版）。
+    完整覆盖了：自然语言描述 → 关键词解析 → 参数确认表单 → 纪律评估 + 自动清单检查。
+
+    退役原因：功能与「投资决策」模块（app_pages/strategy.py）高度重叠，
+    统一由「投资决策」作为交易前决策的唯一入口，避免信息架构碎片化。
+
+    底层能力完整保留，如需复用请直接调用：
+        - _parse_trade_intent()                           自然语言关键词解析
+        - app.discipline.engine_runner.evaluate_action()  三层引擎统一入口
+        - _render_eval_result_section()                   结果渲染组件
+        - _render_checklist_auto()                        自动清单检查组件
     """
     total = sum(r["market_value_cny"] for r in raw) or 1.0
     position_names = [r["name"] for r in raw]
@@ -1548,54 +1511,8 @@ def _render_handbook() -> None:
 # 主渲染函数
 # ─────────────────────────────────────────────────────────
 
-_NAV_ITEMS = ["📊  账户风险仪表盘", "🔍  交易前评估", "📖  纪律手册速查"]
-
-
-def _discipline_nav() -> str:
-    """返回当前选中的导航项，状态持久化到 session_state["discipline_nav"]。
-
-    优先级：
-    1. st.segmented_control + use_container_width=True  (Streamlit ≥ 1.40)
-    2. st.segmented_control（无 use_container_width）   (Streamlit 1.36~1.39)
-    3. 全宽按钮组 fallback                              (Streamlit < 1.36)
-
-    任何 button 点击触发的 rerun 都不会重置导航位置。
-    """
-    if "discipline_nav" not in st.session_state:
-        st.session_state["discipline_nav"] = _NAV_ITEMS[0]
-
-    _sc = getattr(st, "segmented_control", None)
-    if _sc is not None:
-        # 尝试带 use_container_width（≥1.40），不支持时降级
-        try:
-            result = _sc(
-                "导航", options=_NAV_ITEMS, key="discipline_nav",
-                label_visibility="collapsed", use_container_width=True,
-            )
-        except TypeError:
-            result = _sc(
-                "导航", options=_NAV_ITEMS, key="discipline_nav",
-                label_visibility="collapsed",
-            )
-        return result if result is not None else _NAV_ITEMS[0]
-
-    # Fallback：全宽按钮组，active = primary，inactive = secondary
-    cols = st.columns(len(_NAV_ITEMS))
-    for col, item in zip(cols, _NAV_ITEMS):
-        with col:
-            if st.button(
-                item,
-                use_container_width=True,
-                type="primary" if st.session_state.get("discipline_nav") == item else "secondary",
-                key=f"_nav_{item}",
-            ):
-                st.session_state["discipline_nav"] = item
-
-    return st.session_state.get("discipline_nav", _NAV_ITEMS[0])
-
-
 def render() -> None:
-    st.title("投资纪律执行引擎")
+    st.title("投资纪律中心")
 
     # 加载数据
     raw = _load_positions(portfolio_id)
@@ -1612,12 +1529,17 @@ def render() -> None:
     # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
     has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
 
-    # 导航：state 存于 session_state，button 点击后不会丢失
-    active_nav = _discipline_nav()
+    # 💡 交易前决策引导
+    st.info(
+        "💡 如需进行**买入 / 卖出 / 加仓 / 减仓**等交易前判断，"
+        "请前往左侧菜单的「**投资决策**」模块。",
+        icon="🧠",
+    )
 
-    if active_nav == _NAV_ITEMS[0]:
+    tab_dashboard, tab_handbook = st.tabs(["📊 账户风险仪表盘", "📖 纪律手册速查"])
+
+    with tab_dashboard:
         _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
-    elif active_nav == _NAV_ITEMS[1]:
-        _render_pre_trade_eval(raw, portfolio_drawdown)
-    else:
+
+    with tab_handbook:
         _render_handbook()

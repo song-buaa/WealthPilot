@@ -1,86 +1,517 @@
 """
-WealthPilot - 策略设定页面
+WealthPilot — 投资决策页面 (strategy.py) — V3.2
+
+核心设计：
+- 左侧 Chat：主交互区，输入框在左侧内部，AI 回答为自然语言总结
+- 右侧 Explain Panel：决策链路黑箱拆解，包含完整 6 个模块（含最终结论）
+- 布局：55:45（左:右）
+- 不使用 st.chat_input（页面底部公共输入框），改用左侧内嵌 text_area + 按钮
+
+左侧 AI 回答规则：
+- 基于 decision result 生成自然语言段落，不使用【结论】【原因】【建议】模板
+- 保持专业、克制的投资助手口吻
+- 流程中断、假设问题、普通对话均有对应的自然语言处理
+
+右侧 Explain Panel 包含：
+  ① 意图解析（紧凑行式）
+  ② 持仓数据（默认折叠）
+  ③ 规则校验（状态 badge + 明细）
+  ④ 信号层（2×2 紧凑卡片）
+  ⑤ AI 推理过程（默认折叠）
+  ⑥ 最终结论（彩色高亮卡片，RESTORED）
+
+状态管理（session_state）：
+    chat_history         — list[dict]：对话记录
+    decision_map         — dict[str, DecisionResult]
+    current_decision_id  — str | None
+    de_pending_input     — str | None：示例按钮中转
+    de_chat_input        — str：文本框内容
+    de_should_clear      — bool：下次 rerun 时清空文本框
 """
 
+import os
+
 import streamlit as st
-from app.models import Portfolio, get_session
 from app.state import portfolio_id
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 状态初始化
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _init_session_state():
+    defaults = {
+        "chat_history": [],
+        "decision_map": {},
+        "current_decision_id": None,
+        "de_pending_input": None,
+        "de_chat_input": "",
+        "de_should_clear": False,
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 主入口
+# ══════════════════════════════════════════════════════════════════════════════
+
 def render():
-    st.title("⚙️ 策略设定")
-    st.write("设定您的目标资产配置和投资纪律约束。系统将基于这些设定进行偏离检测和风险告警。")
+    st.title("💡 投资决策")
+    _init_session_state()
 
-    session = get_session()
-    try:
-        p = session.query(Portfolio).filter_by(id=portfolio_id).first()
+    # 处理示例按钮触发的待处理输入（在渲染列之前执行）
+    _handle_pending_input()
 
-        with st.form("strategy_form"):
-            st.subheader("资产配置框架")
-            st.caption("设置每类资产的占比区间（下限 ~ 上限）。填写 0 ~ 100 表示不设约束。")
+    left_col, right_col = st.columns([11, 9], gap="medium")  # 55:45
 
-            st.markdown("**权益**")
-            col1, col2 = st.columns(2)
-            with col1:
-                min_equity = st.number_input("权益下限 (%)", 0.0, 100.0, float(p.min_equity_pct), 5.0)
-            with col2:
-                max_equity = st.number_input("权益上限 (%)", 0.0, 100.0, float(p.max_equity_pct), 5.0)
+    with left_col:
+        _render_chat_panel()
 
-            st.markdown("**固收**")
-            col3, col4 = st.columns(2)
-            with col3:
-                min_fi = st.number_input("固收下限 (%)", 0.0, 100.0, float(p.min_fixed_income_pct), 5.0)
-            with col4:
-                max_fi = st.number_input("固收上限 (%)", 0.0, 100.0, float(p.max_fixed_income_pct), 5.0)
+    with right_col:
+        _render_explain_panel()
 
-            st.markdown("**货币**")
-            col5, col6 = st.columns(2)
-            with col5:
-                min_cash = st.number_input("货币下限 (%)", 0.0, 100.0, float(p.min_cash_pct), 5.0)
-            with col6:
-                max_cash = st.number_input("货币上限 (%)", 0.0, 100.0, float(p.max_cash_pct), 5.0)
 
-            st.markdown("**另类**")
-            col7, col8 = st.columns(2)
-            with col7:
-                min_alt = st.number_input("另类下限 (%)", 0.0, 100.0, float(p.min_alternative_pct), 5.0)
-            with col8:
-                max_alt = st.number_input("另类上限 (%)", 0.0, 100.0, float(p.max_alternative_pct), 5.0)
+# ══════════════════════════════════════════════════════════════════════════════
+# 待处理输入（示例按钮 → de_pending_input → 下次 rerun 处理）
+# ══════════════════════════════════════════════════════════════════════════════
 
-            st.divider()
-            st.subheader("投资纪律约束")
+def _handle_pending_input():
+    pending = st.session_state.get("de_pending_input")
+    if pending:
+        st.session_state["de_pending_input"] = None
+        st.session_state["de_should_clear"] = True  # 同步清空输入框
+        with st.spinner("正在分析，请稍候..."):
+            _process_submit(pending)
+        st.rerun()
 
-            col9, col10 = st.columns(2)
-            with col9:
-                max_single = st.number_input("单一持仓上限 (%)", 5.0, 50.0, float(p.max_single_stock_pct), 5.0)
-            with col10:
-                max_leverage = st.number_input("最大杠杆率 (%)", 0.0, 100.0, float(p.max_leverage_ratio), 5.0)
 
-            submitted = st.form_submit_button("保存策略", type="primary")
+# ══════════════════════════════════════════════════════════════════════════════
+# 左侧：Chat 面板
+# ══════════════════════════════════════════════════════════════════════════════
 
-            if submitted:
-                errors = []
-                for label, mn, mx in [("权益", min_equity, max_equity),
-                                       ("固收", min_fi, max_fi),
-                                       ("货币", min_cash, max_cash),
-                                       ("另类", min_alt, max_alt)]:
-                    if mn > mx:
-                        errors.append(f"{label}：下限 ({mn}%) 不能大于上限 ({mx}%)")
-                if errors:
-                    for e in errors:
-                        st.error(e)
+def _render_chat_panel():
+    # ── 清空输入框（必须在 text_area widget 创建前执行）──────────────────────
+    if st.session_state.get("de_should_clear"):
+        st.session_state["de_chat_input"] = ""
+        st.session_state["de_should_clear"] = False
+
+    _has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    # ── 标题行 ────────────────────────────────────────────────────────────────
+    hcol, clcol = st.columns([5, 1])
+    with hcol:
+        st.markdown("### 💬 对话")
+    with clcol:
+        if st.button("清空", use_container_width=True, type="secondary",
+                     help="清空对话记录和决策历史"):
+            st.session_state["chat_history"] = []
+            st.session_state["decision_map"] = {}
+            st.session_state["current_decision_id"] = None
+            st.session_state["de_chat_input"] = ""
+            st.rerun()
+
+    if not _has_api_key:
+        st.warning(
+            "🔑 **未配置 `ANTHROPIC_API_KEY`**，AI 功能暂不可用。"
+            "请在终端执行 `export ANTHROPIC_API_KEY='sk-ant-...'` 后重启 Streamlit。",
+            icon="⚠️",
+        )
+
+    # ── 消息历史区（固定高度可滚动）──────────────────────────────────────────
+    history = st.session_state["chat_history"]
+
+    msg_container = st.container(height=420)
+    with msg_container:
+        if not history:
+            _render_empty_welcome()
+        else:
+            for idx, msg in enumerate(history):
+                if msg["role"] == "user":
+                    with st.chat_message("user"):
+                        st.markdown(msg["content"])
                 else:
-                    p.min_equity_pct = min_equity
-                    p.max_equity_pct = max_equity
-                    p.min_fixed_income_pct = min_fi
-                    p.max_fixed_income_pct = max_fi
-                    p.min_cash_pct = min_cash
-                    p.max_cash_pct = max_cash
-                    p.min_alternative_pct = min_alt
-                    p.max_alternative_pct = max_alt
-                    p.max_single_stock_pct = max_single
-                    p.max_leverage_ratio = max_leverage
-                    session.commit()
-                    st.success("策略已保存！")
-    finally:
-        session.close()
+                    with st.chat_message("assistant"):
+                        st.markdown(msg["content"])
+                        # investment_decision 才有 decision_id
+                        if msg.get("decision_id"):
+                            btn_key = f"view_{msg['decision_id']}_{idx}"
+                            if st.button("查看决策逻辑 📊", key=btn_key,
+                                         type="secondary"):
+                                st.session_state["current_decision_id"] = (
+                                    msg["decision_id"]
+                                )
+                                st.rerun()
+
+    # ── 示例按钮（无历史时展示）──────────────────────────────────────────────
+    if not history:
+        st.caption("**💡 快速体验：**")
+        ex1, ex2, ex3 = st.columns(3)
+        _example_btn(ex1, "理想汽车发布会前加仓吗？",
+                     "理想汽车下周有新车发布会，我想在发布会前加仓，合适吗？")
+        _example_btn(ex2, "Meta仓位太重，要减吗？",
+                     "我的Meta仓位感觉有点重了，要不要减一部分？")
+        _example_btn(ex3, "现在可以建仓苹果吗？",
+                     "我想买入苹果，当前时机合适吗？")
+
+    # ── 输入区（固定在左侧 Chat 内部底部）────────────────────────────────────
+    st.divider()
+    inp_col, btn_col = st.columns([6, 1])
+    with inp_col:
+        user_text = st.text_area(
+            "投资想法",
+            key="de_chat_input",
+            placeholder="例如：理想汽车要不要加仓？那蔚来呢？",
+            height=76,
+            label_visibility="collapsed",
+            disabled=not _has_api_key,
+        )
+    with btn_col:
+        # 对齐按钮高度
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        send = st.button("发送", type="primary", use_container_width=True,
+                         disabled=not _has_api_key)
+
+    if send:
+        text = (st.session_state.get("de_chat_input") or "").strip()
+        if text:
+            st.session_state["de_should_clear"] = True
+            with st.spinner("正在分析，请稍候..."):
+                _process_submit(text)
+            st.rerun()
+
+
+def _example_btn(col, label: str, full_text: str):
+    with col:
+        if st.button(label, use_container_width=True):
+            st.session_state["de_pending_input"] = full_text
+            st.rerun()
+
+
+def _render_empty_welcome():
+    st.markdown("""
+    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;
+                padding:18px 20px;color:#64748B;">
+    <b style="color:#1E3A5F;font-size:15px">🧠 投资决策助手</b><br><br>
+    用自然语言描述您的投资想法，系统将完整分析后给出专业建议：<br>
+    <span style="font-size:12px;color:#94A3B8">
+      意图解析 → 数据加载 → 规则校验 → 信号分析 → AI 推理
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 输入处理：执行完整决策链路，更新对话历史
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _process_submit(user_input: str):
+    """
+    1. 获取 last_intent（从历史最近一条 user 消息的 intent 字段，不从 context 读取）
+    2. 构建 context（最近 1 轮，供 general_chat LLM 使用）
+    3. 执行 decision_flow.run()
+    4. 生成自然语言回答（左侧）
+    5. 更新 chat_history / decision_map / current_decision_id
+    """
+    from decision_engine import decision_flow
+
+    history = st.session_state["chat_history"]
+
+    # last_intent：从历史中最近一条 user 消息的 intent 字段取（PRD §补充1）
+    last_intent = None
+    for msg in reversed(history):
+        if msg["role"] == "user" and msg.get("intent") is not None:
+            last_intent = msg["intent"]
+            break
+
+    # context：最近 1 轮（user + assistant），仅用于 general_chat
+    context = None
+    user_msgs = [m for m in history if m["role"] == "user"]
+    ai_msgs   = [m for m in history if m["role"] == "assistant"]
+    if user_msgs and ai_msgs:
+        context = [
+            {"role": "user",      "content": user_msgs[-1]["content"]},
+            {"role": "assistant", "content": ai_msgs[-1]["content"]},
+        ]
+
+    # 先把用户消息加入历史（intent 稍后回填）
+    user_msg_idx = len(history)
+    history.append({"role": "user", "content": user_input, "intent": None})
+
+    # 执行决策流程
+    result = decision_flow.run(
+        user_input=user_input,
+        last_intent=last_intent,
+        context=context,
+        pid=portfolio_id,
+    )
+
+    # 回填 intent
+    history[user_msg_idx]["intent"] = result.intent
+
+    # 生成左侧 Chat 回答
+    ai_content  = _build_chat_answer(result, user_input)
+    intent_type = result.intent.intent_type if result.intent else "investment_decision"
+
+    history.append({
+        "role":        "assistant",
+        "content":     ai_content,
+        "intent_type": intent_type,
+        "decision_id": result.decision_id,
+    })
+
+    if result.decision_id:
+        st.session_state["decision_map"][result.decision_id] = result
+        st.session_state["current_decision_id"] = result.decision_id
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 左侧 Chat 回答生成
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_chat_answer(result, user_input: str) -> str:
+    """
+    生成左侧 Chat 面板的 AI 回答。
+
+    - general_chat：返回 result.chat_response（已由 llm_engine.chat() 生成）
+    - aborted：返回中断原因
+    - investment_decision 完整结果：调用 llm_engine.generate_chat_answer() 生成自然语言
+    """
+    from decision_engine import llm_engine
+
+    intent_type = result.intent.intent_type if result.intent else "investment_decision"
+
+    if intent_type == "general_chat":
+        return result.chat_response or "（系统暂无回复，请重试）"
+
+    if result.was_aborted:
+        return result.aborted_reason or "分析中断，请重新描述您的投资需求。"
+
+    if result.is_complete and result.llm:
+        answer = llm_engine.generate_chat_answer(
+            user_query=user_input,
+            intent=result.intent,
+            data=result.data,
+            rules=result.rules,
+            llm_result=result.llm,
+        )
+        # 降级提示追加
+        suffix_parts = []
+        if result.llm.is_fallback:
+            suffix_parts.append(f"⚠️ *AI 推理遇到问题（{result.llm.error}），结论为降级结果。*")
+        if result.llm.decision_corrected:
+            suffix_parts.append(
+                f"ℹ️ *AI 原始输出「{result.llm.original_decision}」不在标准选项内，"
+                f"已自动修正为「{result.llm.decision_cn}」。*"
+            )
+        suffix = ("\n\n> " + "\n> ".join(suffix_parts)) if suffix_parts else ""
+        return answer + suffix + "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
+
+    return "分析未能完成，请重试。"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 右侧：Explain Panel（完整 6 模块，紧凑样式）
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_explain_panel():
+    st.markdown("### 📊 决策链路")
+
+    current_id   = st.session_state.get("current_decision_id")
+    decision_map = st.session_state.get("decision_map", {})
+    history      = st.session_state.get("chat_history", [])
+
+    # 无历史
+    if not history:
+        st.markdown(
+            "<div style='background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;"
+            "padding:14px;color:#0369A1;font-size:13px;margin-top:4px'>"
+            "💡 开始对话后，点击 AI 回复下方的「查看决策逻辑 📊」，"
+            "这里将展示完整的分析链路。</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # 最近一条 AI 消息是 general_chat 且无 decision
+    last_ai = next((m for m in reversed(history) if m["role"] == "assistant"), None)
+    if last_ai and last_ai.get("intent_type") == "general_chat" and not current_id:
+        st.info("当前对话为普通问答，无投资决策链路。")
+        return
+
+    # 尚未点击过按钮
+    if not current_id or current_id not in decision_map:
+        st.caption("点击左侧 AI 回复下方的「查看决策逻辑 📊」按钮查看分析详情。")
+        return
+
+    result = decision_map[current_id]
+    st.caption(f"Decision ID: `{current_id}`")
+
+    # ── ① 意图解析 ────────────────────────────────────────────────────────────
+    if result.intent:
+        _ep_intent(result.intent)
+
+    # ── ② 持仓数据（默认折叠）────────────────────────────────────────────────
+    if result.data:
+        _ep_data(result.data)
+
+    # ── ③ 规则校验 ────────────────────────────────────────────────────────────
+    if result.rules:
+        _ep_rules(result.rules)
+
+    # ── ④ 信号层 ──────────────────────────────────────────────────────────────
+    if result.signals:
+        _ep_signals(result.signals)
+
+    # ── ⑤ AI 推理过程（默认折叠）────────────────────────────────────────────
+    if result.llm:
+        _ep_reasoning(result.llm)
+
+    # ── ⑥ 最终结论（RESTORED — 彩色卡片）────────────────────────────────────
+    if result.llm:
+        _ep_conclusion(result.llm)
+
+    # 合规提示
+    st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
+
+
+# ── 紧凑子模块渲染函数 ─────────────────────────────────────────────────────────
+
+_EP_LABEL_CSS = "color:#6B7280;font-size:11px"
+_EP_VAL_CSS   = "font-weight:600;font-size:13px"
+
+
+def _ep_row_md(label: str, value: str) -> str:
+    """生成一行 label: value 的紧凑 HTML。"""
+    return (
+        f'<span style="{_EP_LABEL_CSS}">{label}</span>&nbsp;'
+        f'<span style="{_EP_VAL_CSS}">{value}</span>'
+    )
+
+
+def _ep_intent(intent):
+    st.markdown("**🎯 意图解析**")
+    # 紧凑行式展示，不用 st.metric（字号太大）
+    rows = [
+        _ep_row_md("标的", intent.asset or "未识别"),
+        _ep_row_md("操作", intent.action_type),
+        _ep_row_md("时间", intent.time_horizon),
+        _ep_row_md("置信度", f"{intent.confidence_score:.0%}"),
+    ]
+    if intent.trigger:
+        rows.append(_ep_row_md("触发", intent.trigger))
+    st.markdown(
+        "<div style='line-height:1.8;padding:6px 0'>" +
+        " &nbsp;·&nbsp; ".join(rows) +
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    if intent.is_context_inherited:
+        st.caption("🔗 部分字段继承自上轮对话")
+    st.divider()
+
+
+def _ep_data(data):
+    with st.expander("📊 持仓数据", expanded=False):
+        for w in (data.data_warnings or []):
+            if w.level == "warning":
+                st.caption(f"⚠️ {w.message}")
+
+        st.caption(f"组合总市值：¥{data.total_assets:,.0f}　口径：聚合市值 / 组合总市值")
+
+        if data.target_position:
+            tp = data.target_position
+            st.markdown(
+                f"**{tp.name}**　"
+                f"仓位 **{tp.weight:.1%}**　"
+                f"市值 ¥{tp.market_value_cny:,.0f}　"
+                f"收益率 {tp.profit_loss_rate:.1%}"
+            )
+            if tp.platforms:
+                st.caption(f"持仓平台：{' / '.join(tp.platforms)}")
+        else:
+            st.caption("当前未持有该标的（新建仓）")
+
+        if data.research:
+            st.caption("**投研观点：**")
+            for v in data.research[:3]:
+                st.caption(f"• {v}")
+
+
+def _ep_rules(rule_result):
+    st.markdown("**📏 规则校验**")
+    if rule_result.violation:
+        st.error(f"⛔ {rule_result.status_label}", icon="🚫")
+    elif rule_result.warning:
+        st.warning(f"⚠️ {rule_result.status_label}")
+    else:
+        st.success(f"✅ {rule_result.status_label}")
+    for detail in rule_result.rule_details:
+        st.caption(detail)
+    st.divider()
+
+
+def _ep_signals(signals):
+    st.markdown("**📡 信号层**")
+    pos_icon  = {"偏高": "🟠", "合理": "🟢", "偏低": "🔵"}.get(signals.position_signal, "⚪")
+    fund_icon = {"正面": "📈", "负面": "📉", "中性": "➡️", "N/A": "❓"}.get(
+        signals.fundamental_signal, "➡️")
+    unc_icon  = {"高": "⚠️", "中": "🔔", "低": "✅"}.get(
+        signals.event_signal.uncertainty, "❓")
+
+    rows = [
+        _ep_row_md("仓位", f"{pos_icon} {signals.position_signal}"),
+        _ep_row_md("基本面", f"{fund_icon} {signals.fundamental_signal}"),
+        _ep_row_md("事件", f"{unc_icon} 不确定性{signals.event_signal.uncertainty}"),
+        _ep_row_md("情绪", f"➡️ {signals.sentiment_signal}"),
+    ]
+    st.markdown(
+        "<div style='line-height:2;padding:4px 0'>" +
+        "<br>".join(rows) +
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+
+def _ep_reasoning(llm):
+    with st.expander("🔬 AI 推理过程", expanded=False):
+        if llm.reasoning:
+            for item in llm.reasoning:
+                st.caption(f"• {item}")
+        else:
+            st.caption("（无推理依据）")
+
+
+def _ep_conclusion(llm):
+    """最终结论 — 彩色高亮卡片（RESTORED）"""
+    colors = {"BUY": ("#059669", "#ECFDF5", "#D1FAE5"),
+              "HOLD": ("#D97706", "#FFFBEB", "#FDE68A"),
+              "SELL": ("#DC2626", "#FEF2F2", "#FECACA")}
+    text_c, bg_c, border_c = colors.get(llm.decision, ("#64748B", "#F8FAFC", "#E2E8F0"))
+
+    st.markdown("**🏁 最终结论**")
+    st.markdown(
+        f'<div style="background:{bg_c};border:1px solid {border_c};border-radius:8px;'
+        f'padding:12px 16px;margin:4px 0;">'
+        f'<span style="font-size:22px">{llm.decision_emoji}</span>'
+        f'<span style="font-size:18px;font-weight:700;color:{text_c};margin-left:10px">'
+        f'{llm.decision_cn}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if llm.is_fallback:
+        st.caption(f"⚠️ AI 推理不可用：{llm.error}")
+    if llm.decision_corrected:
+        st.caption(f"ℹ️ 原始输出「{llm.original_decision}」已自动修正")
+
+    if llm.strategy:
+        st.caption("**操作建议**")
+        for s in llm.strategy:
+            st.caption(f"• {s}")
+
+    if llm.risk:
+        st.caption("**风险提示**")
+        for r in llm.risk:
+            st.caption(f"• {r}")
