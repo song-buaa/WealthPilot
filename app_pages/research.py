@@ -19,8 +19,23 @@ from app.models import (
     ResearchDocument, ResearchCard, ResearchViewpoint,
     get_session, init_db,
 )
-from app.ai_advisor import generate_research_card
+from app.ai_advisor import generate_research_card, generate_research_card_full
 from app.research import retrieve_research_context, _parse_json_list
+
+# pypdf / requests / bs4：在模块级导入，避免在每次 Streamlit rerun 时重复初始化
+import io as _io
+try:
+    import pypdf as _pypdf
+    _HAS_PYPDF = True
+except ImportError:
+    _HAS_PYPDF = False
+
+try:
+    import requests as _requests
+    from bs4 import BeautifulSoup as _BeautifulSoup
+    _HAS_BS4 = True
+except ImportError:
+    _HAS_BS4 = False
 
 
 # ──────────────────────────────────────────────────────────
@@ -95,17 +110,67 @@ def _tags_input_to_json(text: str) -> str:
 # Section 1：资料导入
 # ──────────────────────────────────────────────────────────
 
+def _extract_pdf_text(file_bytes: bytes) -> tuple[str, str]:
+    """
+    从 PDF 字节流提取纯文本（最多 20 页）。
+    返回 (text, error_msg)；成功时 error_msg 为空字符串。
+    """
+    if not _HAS_PYPDF:
+        return "", "pypdf 未安装，请联系管理员"
+    try:
+        reader = _pypdf.PdfReader(_io.BytesIO(file_bytes))
+        texts = [page.extract_text() or "" for page in reader.pages[:20]]
+        text = "\n\n".join(t for t in texts if t.strip())
+        return text, ""
+    except Exception as e:
+        return "", str(e)
+
+
+def _fetch_url_text(url: str) -> str:
+    """抓取链接正文（requests + BeautifulSoup）。失败或超时返回空字符串。"""
+    if not _HAS_BS4:
+        return ""
+    try:
+        import re as _re
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; WealthPilot/1.0)"}
+        resp = _requests.get(url, headers=headers, timeout=12)
+        resp.raise_for_status()
+        soup = _BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        text = _re.sub(r"\n{3,}", "\n\n", text)
+        return text[:8000]
+    except Exception:
+        return ""
+
+
 def _render_import() -> None:
+    if st.session_state.get("ri_step", 0) == 1:
+        _render_import_step1_inline()
+    else:
+        _render_import_step0()
+
+    st.divider()
+    _render_pending_section()
+
+    st.divider()
+    st.subheader("已导入资料")
+    _render_document_list()
+
+
+def _render_import_step0() -> None:
+    """Step 0：选择资料来源并输入内容。"""
     st.subheader("新增研究资料")
 
     source_type = st.radio(
         "资料类型",
         ["text", "markdown", "link", "pdf"],
         format_func=lambda x: {
-            "text": "📝 纯文本粘贴",
+            "text":     "📝 纯文本粘贴",
             "markdown": "📄 Markdown",
-            "link": "🔗 链接（公众号/博客）",
-            "pdf": "📑 PDF 上传",
+            "link":     "🔗 链接（公众号/博客）",
+            "pdf":      "📑 PDF 上传",
         }[x],
         horizontal=True,
         key="ri_source_type",
@@ -113,211 +178,387 @@ def _render_import() -> None:
 
     st.divider()
 
-    col_meta, col_content = st.columns([1, 2], gap="large")
+    raw_content = ""
+    source_url = ""
 
-    with col_meta:
-        st.markdown("**基本信息**")
-        title = st.text_input("资料标题 *", key="ri_title",
-                              placeholder="如：美团2025年投资价值深度报告")
-        object_name = st.text_input("标的名称", key="ri_object",
-                                    placeholder="如：美团 / 拼多多 / 宏观流动性")
-        market_name = st.selectbox(
-            "市场", ["", "港股", "美股", "A股", "宏观", "行业", "其他"],
-            key="ri_market",
+    if source_type == "text":
+        raw_content = st.text_area(
+            "粘贴资料正文",
+            height=280,
+            key="ri_content",
+            placeholder=(
+                "把研报摘要、博主分析、会议纪要等原文粘贴到这里。\n"
+                "无需全文，关键论据 + 结论段落即可（建议 300~2000 字）。"
+            ),
+            label_visibility="collapsed",
         )
-        author = st.text_input("作者/来源", key="ri_author",
-                               placeholder="如：国泰君安、X用户 / 自研")
-        publish_time = st.text_input("发布时间（可模糊）", key="ri_publish",
-                                     placeholder="如：2025-03 / 2025-Q1 / 今天")
-        tags_input = st.text_input("标签（逗号分隔）", key="ri_tags",
-                                   placeholder="如：智能驾驶, 港股, 高增长")
-        notes = st.text_area("备注", height=60, key="ri_notes",
-                             placeholder="可选，记录你对这份资料的第一印象")
 
-    with col_content:
-        st.markdown("**资料内容**")
-
-        raw_content = ""
-        source_url = ""
-
-        if source_type == "text":
+    elif source_type == "markdown":
+        uploaded_md = st.file_uploader(
+            "上传 Markdown 文件（.md / .txt）",
+            type=["md", "markdown", "txt"],
+            key="ri_md",
+        )
+        if uploaded_md is not None:
+            if st.session_state.get("_ri_md_cache_name") != uploaded_md.name:
+                raw_content = uploaded_md.read().decode("utf-8", errors="replace")
+                st.session_state["_ri_md_cache"] = raw_content
+                st.session_state["_ri_md_cache_name"] = uploaded_md.name
+            else:
+                raw_content = st.session_state.get("_ri_md_cache", "")
+            st.caption(f"✅ 已读取：{uploaded_md.name}（{len(raw_content)} 字）")
+        else:
             raw_content = st.text_area(
-                "粘贴资料正文",
-                height=300,
-                key="ri_content",
-                placeholder=(
-                    "把研报摘要、博主分析、会议纪要等原文粘贴到这里。\n"
-                    "无需全文，关键论据 + 结论段落即可（建议 300-2000 字）。"
-                ),
-                label_visibility="collapsed",
-            )
-        elif source_type == "markdown":
-            uploaded_md = st.file_uploader(
-                "上传 Markdown 文件", type=["md", "markdown", "txt"],
-                key="ri_md",
-            )
-            # 关键：必须在 st.text_area(key="ri_md_content") 实例化【之前】写入 session_state。
-            # Streamlit 规则：widget 创建后不允许再修改其绑定的 session_state key，
-            # 否则抛出 StreamlitAPIException。
-            if uploaded_md is not None:
-                # 仅在新文件上传时（文件名变化）才更新，避免重复 read()
-                if st.session_state.get("_ri_md_cache_name") != uploaded_md.name:
-                    content = uploaded_md.read().decode("utf-8", errors="replace")
-                    st.session_state["_ri_md_cache"] = content
-                    st.session_state["_ri_md_cache_name"] = uploaded_md.name
-                    # 在 widget 实例化前写入，text_area 渲染时会直接使用此值
-                    st.session_state["ri_md_content"] = content
-            raw_content = st.text_area(
-                "文件内容（可编辑）" if st.session_state.get("ri_md_content") else "或直接粘贴 Markdown 正文",
-                height=300,
+                "或直接粘贴 Markdown 正文",
+                height=250,
                 key="ri_md_content",
-                placeholder="也可以不上传文件，直接把 Markdown 内容粘贴到这里。",
-            )
-        elif source_type == "link":
-            source_url = st.text_input(
-                "链接地址", key="ri_url",
-                placeholder="https://mp.weixin.qq.com/s/...",
-            )
-            raw_content = st.text_area(
-                "手动粘贴正文（目前不支持自动抓取，请手动复制核心内容）",
-                height=250, key="ri_content_link",
-                label_visibility="visible",
-            )
-            st.caption(
-                "🚧 公众号/博客自动抓取功能规划中，当前请手动粘贴正文。"
-            )
-        elif source_type == "pdf":
-            uploaded_pdf = st.file_uploader(
-                "上传 PDF", type=["pdf"], key="ri_pdf",
-            )
-            st.caption(
-                "🚧 PDF 自动解析功能规划中。\n"
-                "当前请在下方手动粘贴关键段落（摘要、结论、风险提示部分即可）。"
-            )
-            raw_content = st.text_area(
-                "手动粘贴 PDF 关键段落",
-                height=220, key="ri_content_pdf",
-                label_visibility="visible",
-            )
-            if uploaded_pdf:
-                source_url = uploaded_pdf.name  # 先存文件名作为 source_url
-
-        st.write("")  # 间距
-        col_save, col_parse = st.columns(2)
-        with col_save:
-            save_only = st.button(
-                "💾 仅保存资料（不解析）",
-                use_container_width=True, key="ri_save_only",
-            )
-        with col_parse:
-            save_and_parse = st.button(
-                "⚡ 保存并立即 AI 解析",
-                type="primary", use_container_width=True, key="ri_save_parse",
+                placeholder="也可以不上传文件，直接把内容粘贴到这里。",
             )
 
-    # ── 处理提交 ────────────────────────────────────────
-    if save_only or save_and_parse:
-        if not title.strip():
-            st.error("请填写资料标题")
-            return
-        if not raw_content.strip():
-            st.error("请粘贴资料正文（AI 解析需要内容）")
-            return
+    elif source_type == "link":
+        source_url = st.text_input(
+            "链接地址",
+            key="ri_url",
+            placeholder="https://mp.weixin.qq.com/s/...",
+        )
+        st.caption("系统将尝试自动抓取正文；若抓取失败（需登录的页面），请在下方手动粘贴。")
+        raw_content = st.text_area(
+            "手动粘贴正文（可选，自动抓取失败时使用）",
+            height=180,
+            key="ri_content_link",
+        )
 
-        # P2：超长文本提前提示（截断发生在 ai_advisor.py[:4000]）
-        if len(raw_content.strip()) > 4000:
-            st.warning(
-                f"⚠️ 资料正文共 {len(raw_content.strip())} 字，超过 4000 字上限，"
-                "AI 解析将仅处理前 4000 字，后半部分信息不会被提炼。"
-            )
+    elif source_type == "pdf":
+        uploaded_pdf = st.file_uploader(
+            "上传 PDF 文件",
+            type=["pdf"],
+            key="ri_pdf",
+        )
+        if uploaded_pdf is not None:
+            source_url = uploaded_pdf.name
+            if st.session_state.get("_ri_pdf_name") != uploaded_pdf.name:
+                st.session_state["_ri_pdf_bytes"] = uploaded_pdf.read()
+                st.session_state["_ri_pdf_name"] = uploaded_pdf.name
+            st.caption(f"✅ 已上传：{uploaded_pdf.name}")
+        else:
+            st.session_state.pop("_ri_pdf_bytes", None)
+            st.session_state.pop("_ri_pdf_name", None)
 
-        session = get_session()
-        try:
-            # P1：标题查重，存在同名资料时给出警告并中止，避免产生冗余数据
-            dup = session.query(ResearchDocument).filter_by(title=title.strip()).first()
-            if dup:
-                st.warning(
-                    f"⚠️ 已存在同名资料「{title.strip()}」（上传于 {dup.uploaded_at.strftime('%m-%d %H:%M') if dup.uploaded_at else '未知时间'}），"
-                    "请确认是否重复导入。如需重新解析，请在下方「已导入资料」中选择该资料触发解析。"
-                )
-                session.close()
+    st.write("")
+
+    if st.button("🔍 AI 解析", type="primary", key="ri_parse_btn"):
+        content_to_parse = raw_content
+
+        if source_type == "pdf":
+            pdf_bytes = st.session_state.get("_ri_pdf_bytes")
+            if not pdf_bytes:
+                st.error("请先上传 PDF 文件。")
+                return
+            with st.spinner("正在提取 PDF 文字…"):
+                content_to_parse, pdf_err = _extract_pdf_text(pdf_bytes)
+            if not content_to_parse.strip():
+                if pdf_err:
+                    st.error(f"PDF 文字提取出错：{pdf_err}")
+                else:
+                    st.error("PDF 未能提取到文字（可能是扫描件或图片 PDF），请手动粘贴关键段落后重试。")
                 return
 
-            doc = ResearchDocument(
+        elif source_type == "link" and source_url and not raw_content.strip():
+            with st.spinner("正在抓取链接正文…"):
+                content_to_parse = _fetch_url_text(source_url)
+            if not content_to_parse.strip():
+                st.warning("自动抓取失败，请在上方手动粘贴正文后重试。")
+                return
+
+        if not content_to_parse.strip():
+            st.error("请提供资料内容（上传文件或粘贴文字）。")
+            return
+
+        with st.spinner("AI 正在解析投研内容，请稍候…"):
+            parsed = generate_research_card_full(content_to_parse)
+
+        if "error" in parsed:
+            st.error(f"AI 解析失败：{parsed['error']}")
+            return
+
+        st.session_state["ri_raw_content"] = content_to_parse
+        st.session_state["ri_source_url"] = source_url
+        st.session_state["ri_source_type_val"] = source_type
+        st.session_state["ri_parsed"] = parsed
+        st.session_state["ri_step"] = 1
+        st.rerun()
+
+
+def _ai_str(v) -> str:
+    """将 AI 返回值统一转为可读字符串：列表 → 换行 bullet；其他 → str。"""
+    if isinstance(v, list):
+        return "\n".join(f"• {item}" for item in v if item)
+    return v or ""
+
+
+def _render_import_step1_inline() -> None:
+    """Step 1：卡片样式预览（只读）+ 可编辑元数据 + 四个操作按钮。"""
+    parsed = st.session_state.get("ri_parsed", {})
+    raw_content = st.session_state.get("ri_raw_content", "")
+    source_url = st.session_state.get("ri_source_url", "")
+    source_type = st.session_state.get("ri_source_type_val", "text")
+
+    col_hd, col_back = st.columns([5, 1])
+    with col_hd:
+        st.markdown("**AI 解析结果**")
+    with col_back:
+        if st.button("← 返回", key="ri_back"):
+            st.session_state["ri_step"] = 0
+            st.rerun()
+    st.caption("确认基本信息后选择操作。如需修改观点内容，选「修改后录入」，在下方待审核区编辑。")
+
+    # ── 元数据（紧凑可编辑，两行） ────────────────────────
+    c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+    with c1:
+        title = st.text_input("资料标题 *", value=parsed.get("title") or "", key="ri2_title")
+    with c2:
+        object_name = st.text_input("标的名称", value=parsed.get("object_name") or "", key="ri2_object")
+    with c3:
+        _mkt_opts = ["", "港股", "美股", "A股", "宏观", "行业", "其他"]
+        _mkt_ai = parsed.get("market_name") or ""
+        market_name = st.selectbox("市场", _mkt_opts,
+                                   index=_mkt_opts.index(_mkt_ai) if _mkt_ai in _mkt_opts else 0,
+                                   key="ri2_market")
+    with c4:
+        author = st.text_input("作者/来源", value=parsed.get("author") or "", key="ri2_author")
+
+    c5, c6, c7, c8 = st.columns([1, 2, 1, 1])
+    with c5:
+        publish_time = st.text_input("发布时间", value=parsed.get("publish_time") or "", key="ri2_publish")
+    with c6:
+        _ai_tags = parsed.get("suggested_tags")
+        tags_input = st.text_input(
+            "标签（逗号分隔）",
+            value=", ".join(_ai_tags) if isinstance(_ai_tags, list) else "",
+            key="ri2_tags",
+        )
+    with c7:
+        _horizon_opts = ["", "short", "medium", "long"]
+        _h_ai = parsed.get("horizon") or ""
+        horizon = st.selectbox("期限", _horizon_opts,
+                               index=_horizon_opts.index(_h_ai) if _h_ai in _horizon_opts else 0,
+                               format_func=lambda x: _HORIZON_LABELS.get(x, "未设置") if x else "未设置",
+                               key="ri2_horizon")
+    with c8:
+        _stance_opts = ["", "bullish", "bearish", "neutral", "watch"]
+        _s_ai = parsed.get("stance") or ""
+        stance = st.selectbox("立场", _stance_opts,
+                              index=_stance_opts.index(_s_ai) if _s_ai in _stance_opts else 0,
+                              format_func=lambda x: _STANCE_LABELS.get(x, "未设置") if x else "未设置",
+                              key="ri2_stance")
+
+    # ── 卡片内容（只读，与候选观点卡相同样式） ────────────
+    st.write("")
+    col_l, col_r = st.columns([3, 2])
+    with col_l:
+        if parsed.get("summary"):
+            st.markdown(f"**📌 摘要**\n\n{parsed['summary']}")
+        st.markdown(f"**💡 核心结论（Thesis）**\n\n{_ai_str(parsed.get('thesis')) or '—'}")
+        c_bull, c_bear = st.columns(2)
+        with c_bull:
+            st.markdown(f"**🟢 看多逻辑**\n\n{_ai_str(parsed.get('bull_case')) or '—'}")
+        with c_bear:
+            st.markdown(f"**🔴 看空逻辑**\n\n{_ai_str(parsed.get('bear_case')) or '—'}")
+        if parsed.get("action_suggestion"):
+            st.markdown(f"**⚡ 操作建议**\n\n{_ai_str(parsed.get('action_suggestion'))}")
+        if parsed.get("invalidation_conditions"):
+            st.markdown(f"**🚨 失效条件**\n\n{parsed['invalidation_conditions']}")
+    with col_r:
+        if parsed.get("key_drivers"):
+            st.markdown(f"**关键驱动**\n\n{_ai_str(parsed['key_drivers'])}")
+        if parsed.get("risks"):
+            st.markdown(f"**主要风险**\n\n{_ai_str(parsed['risks'])}")
+        if parsed.get("key_metrics"):
+            st.markdown(f"**观察指标**\n\n{_ai_str(parsed['key_metrics'])}")
+        if isinstance(parsed.get("suggested_tags"), list):
+            st.markdown(f"**建议标签**\n\n{'  '.join(f'`{t}`' for t in parsed['suggested_tags'])}")
+
+    # ── 操作按钮 ──────────────────────────────────────────
+    st.write("")
+    ca, cb, cc, cd = st.columns(4)
+    with ca:
+        approve = st.button("✅ 认可·直接录入", type="primary",
+                            use_container_width=True, key="ri2_approve")
+    with cb:
+        to_pending = st.button("✏️ 修改后录入", use_container_width=True, key="ri2_pending")
+    with cc:
+        save_only_btn = st.button("💾 仅保留资料", use_container_width=True, key="ri2_save_only")
+    with cd:
+        discard_btn = st.button("🗑️ 丢弃", use_container_width=True, key="ri2_discard")
+
+    # ── 辅助函数 ──────────────────────────────────────────
+    def _jl(key):
+        v = parsed.get(key)
+        return json.dumps(v, ensure_ascii=False) if isinstance(v, list) else None
+
+    def _build_doc(status="parsed"):
+        return ResearchDocument(
+            title=title.strip(),
+            source_type=source_type,
+            source_url=source_url.strip() or None,
+            raw_content=raw_content.strip(),
+            author=author.strip() or None,
+            publish_time=publish_time.strip() or None,
+            object_name=object_name.strip() or None,
+            market_name=market_name or None,
+            tags=_tags_input_to_json(tags_input) if tags_input.strip() else None,
+            parse_status=status,
+        )
+
+    def _build_card(doc_id):
+        return ResearchCard(
+            document_id=doc_id,
+            summary=parsed.get("summary"),
+            thesis=_ai_str(parsed.get("thesis")) or None,
+            bull_case=_ai_str(parsed.get("bull_case")) or None,
+            bear_case=_ai_str(parsed.get("bear_case")) or None,
+            key_drivers=_jl("key_drivers"),
+            risks=_jl("risks"),
+            key_metrics=_jl("key_metrics"),
+            horizon=horizon or None,
+            stance=stance or None,
+            action_suggestion=_ai_str(parsed.get("action_suggestion")) or None,
+            invalidation_conditions=parsed.get("invalidation_conditions"),
+            suggested_tags=_tags_input_to_json(tags_input) if tags_input.strip() else _jl("suggested_tags"),
+        )
+
+    def _clear_state():
+        for k in ["ri_step", "ri_parsed", "ri_raw_content", "ri_source_url",
+                  "ri_source_type_val", "_ri_pdf_bytes", "_ri_pdf_name"]:
+            st.session_state.pop(k, None)
+
+    if (approve or to_pending or save_only_btn) and not title.strip():
+        st.error("请填写资料标题")
+        return
+
+    if approve:
+        session = get_session()
+        try:
+            if session.query(ResearchDocument).filter(
+                ResearchDocument.title == title.strip(),
+                ResearchDocument.parse_status != "discarded",
+            ).first():
+                st.warning(f"⚠️ 已存在同名资料「{title.strip()}」")
+                return
+            doc = _build_doc()
+            session.add(doc)
+            session.flush()
+            card = _build_card(doc.id)
+            session.add(card)
+            session.flush()
+            vp = ResearchViewpoint(
                 title=title.strip(),
-                source_type=source_type,
-                source_url=source_url.strip() or None,
-                raw_content=raw_content.strip(),
-                author=author.strip() or None,
-                publish_time=publish_time.strip() or None,
+                object_type="asset",
                 object_name=object_name.strip() or None,
                 market_name=market_name or None,
-                tags=_tags_input_to_json(tags_input) if tags_input.strip() else None,
-                notes=notes.strip() or None,
-                parse_status="saved_only" if save_only else "pending",
+                topic_tags=_tags_input_to_json(tags_input) if tags_input.strip() else _jl("suggested_tags"),
+                thesis=_ai_str(parsed.get("thesis")) or None,
+                supporting_points=_jl("key_drivers"),
+                opposing_points=_ai_str(parsed.get("bear_case")) or None,
+                key_metrics=_jl("key_metrics"),
+                risks=_jl("risks"),
+                action_suggestion=_ai_str(parsed.get("action_suggestion")) or None,
+                invalidation_conditions=parsed.get("invalidation_conditions"),
+                horizon=horizon or None,
+                stance=stance or None,
+                user_approval_level="strong",
+                validity_status="active",
+                source_card_id=card.id,
+                source_document_id=doc.id,
             )
-            session.add(doc)
+            session.add(vp)
             session.commit()
-            doc_id = doc.id
-
-            if save_and_parse:
-                # 立即调用 AI 解析
-                with st.spinner("AI 正在提炼投研观点，请稍候…"):
-                    card_data = generate_research_card(
-                        raw_content=raw_content.strip(),
-                        title=title.strip(),
-                        object_name=object_name.strip(),
-                        market_name=market_name,
-                    )
-
-                if "error" in card_data:
-                    st.error(f"AI 解析失败：{card_data['error']}")
-                    doc.parse_status = "saved_only"
-                else:
-                    def _jl(key):
-                        v = card_data.get(key)
-                        return json.dumps(v, ensure_ascii=False) if isinstance(v, list) else None
-
-                    card = ResearchCard(
-                        document_id=doc_id,
-                        summary=card_data.get("summary"),
-                        thesis=card_data.get("thesis"),
-                        bull_case=card_data.get("bull_case"),
-                        bear_case=card_data.get("bear_case"),
-                        key_drivers=_jl("key_drivers"),
-                        risks=_jl("risks"),
-                        key_metrics=_jl("key_metrics"),
-                        horizon=card_data.get("horizon"),
-                        stance=card_data.get("stance"),
-                        action_suggestion=card_data.get("action_suggestion"),
-                        invalidation_conditions=card_data.get("invalidation_conditions"),
-                        suggested_tags=_jl("suggested_tags"),
-                    )
-                    session.add(card)
-                    doc.parse_status = "parsed"
-                    session.commit()
-                    st.toast("✅ 资料已保存，AI 解析完成！请点击「候选观点卡」Tab 查看。", icon="✅")
-                    st.rerun()
-            else:
-                session.commit()
-                st.success("✅ 资料已保存。可前往「候选观点卡」手动触发 AI 解析。")
-
+            _clear_state()
+            st.toast("✅ 已直接录入观点库！", icon="✅")
+            st.rerun()
         except Exception as e:
             session.rollback()
             st.error(f"保存失败：{str(e)}")
         finally:
             session.close()
 
-    # ── 现有资料列表 ─────────────────────────────────────
-    st.divider()
-    st.subheader("已导入资料")
-    _render_document_list()
+    elif to_pending:
+        session = get_session()
+        try:
+            if session.query(ResearchDocument).filter(
+                ResearchDocument.title == title.strip(),
+                ResearchDocument.parse_status != "discarded",
+            ).first():
+                st.warning(f"⚠️ 已存在同名资料「{title.strip()}」")
+                return
+            doc = _build_doc()
+            session.add(doc)
+            session.flush()
+            card = _build_card(doc.id)
+            session.add(card)
+            session.commit()
+            _clear_state()
+            st.toast("已保存到待审核，请在下方编辑后录入。", icon="📋")
+            st.rerun()
+        except Exception as e:
+            session.rollback()
+            st.error(f"保存失败：{str(e)}")
+        finally:
+            session.close()
+
+    elif save_only_btn:
+        session = get_session()
+        try:
+            doc = _build_doc(status="saved_only")
+            session.add(doc)
+            session.commit()
+            _clear_state()
+            st.toast("资料已保存（仅存档），可在下方已导入资料中触发解析。", icon="💾")
+            st.rerun()
+        except Exception as e:
+            session.rollback()
+            st.error(f"保存失败：{str(e)}")
+        finally:
+            session.close()
+
+    elif discard_btn:
+        _clear_state()
+        st.rerun()
+
+
+def _render_pending_section() -> None:
+    """待审核观点卡（原「候选观点卡」Tab 内容，合并到资料导入）。"""
+    st.subheader("待审核观点卡")
+    session = get_session()
+    try:
+        cards = (
+            session.query(ResearchCard)
+            .options(joinedload(ResearchCard.viewpoint), joinedload(ResearchCard.document))
+            .join(ResearchDocument, ResearchCard.document_id == ResearchDocument.id)
+            .filter(ResearchDocument.parse_status == "parsed")
+            .order_by(ResearchCard.created_at.desc())
+            .all()
+        )
+        card_docs = {c.id: c.document for c in cards}
+    finally:
+        session.close()
+
+    unreviewed = [c for c in cards if c.viewpoint is None]
+    if not unreviewed:
+        st.info("暂无待审核观点卡。解析完资料并选择「修改后录入」后，观点卡会出现在这里。")
+        return
+    st.markdown(f"共 **{len(unreviewed)}** 张待审核")
+    for card in unreviewed:
+        doc = card_docs.get(card.id) or card.document
+        _render_single_card(card, doc, reviewed=False)
 
 
 def _render_document_list() -> None:
     session = get_session()
     try:
-        docs = session.query(ResearchDocument).order_by(
+        docs = session.query(ResearchDocument).filter(
+            ResearchDocument.parse_status != "discarded"
+        ).order_by(
             ResearchDocument.uploaded_at.desc()
         ).limit(50).all()
     finally:
@@ -551,12 +792,13 @@ def _render_card_actions(card: ResearchCard, doc: ResearchDocument) -> None:
         st.session_state[edit_key] = True
     if approve:
         _save_viewpoint_from_card(card, doc, approval="strong", edited_fields={})
+        st.rerun()
     if save_only:
         _set_doc_status(doc.id, "saved_only")
         st.success("已标记为「仅保存」")
     if discard:
-        _set_doc_status(doc.id, "discarded")
-        st.info("已丢弃该资料")
+        _delete_doc(doc.id)
+        st.rerun()
 
     if st.session_state.get(edit_key):
         _render_edit_form(card, doc, key_prefix)
@@ -621,6 +863,7 @@ def _render_edit_form(card: ResearchCard, doc: ResearchDocument,
             },
         )
         st.session_state.pop(f"{key_prefix}_editing", None)
+        st.rerun()
 
 
 def _save_viewpoint_from_card(
@@ -657,10 +900,25 @@ def _save_viewpoint_from_card(
         if doc_db:
             doc_db.parse_status = "parsed"  # 保持 parsed，卡片已绑定 viewpoint
         session.commit()
-        st.success("✅ 已录入正式观点库！")
+        st.toast("✅ 已录入正式观点库！", icon="✅")
     except Exception as e:
         session.rollback()
         st.error(f"录入失败：{str(e)}")
+    finally:
+        session.close()
+
+
+def _delete_doc(doc_id: int) -> None:
+    """彻底删除文档及其关联的候选卡（级联删除）。"""
+    session = get_session()
+    try:
+        session.query(ResearchCard).filter_by(document_id=doc_id).delete()
+        doc = session.query(ResearchDocument).get(doc_id)
+        if doc:
+            session.delete(doc)
+        session.commit()
+    except Exception:
+        session.rollback()
     finally:
         session.close()
 
@@ -906,17 +1164,14 @@ def render() -> None:
     init_db()
 
     st.title("投研观点")
-    st.caption("资料导入 → AI 提炼 → 候选卡审核 → 观点库 → 决策检索")
+    st.caption("资料导入 → AI 提炼 → 观点审核 → 观点库 → 决策检索")
 
-    tab_import, tab_cards, tab_viewpoints, tab_retrieval = st.tabs(
-        ["📥 资料导入", "🃏 候选观点卡", "📚 观点库", "🔍 决策检索"]
+    tab_import, tab_viewpoints, tab_retrieval = st.tabs(
+        ["📥 资料导入", "📚 观点库", "🔍 决策检索"]
     )
 
     with tab_import:
         _render_import()
-
-    with tab_cards:
-        _render_cards()
 
     with tab_viewpoints:
         _render_viewpoints()

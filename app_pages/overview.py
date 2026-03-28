@@ -13,7 +13,7 @@ import pandas as pd
 from app.models import Portfolio, Position, Liability, get_session
 from app.analyzer import analyze_portfolio, check_deviations
 from app.state import portfolio_id, get_position_count
-from app.discipline.config import RULES as DISCIPLINE_RULES
+from app.discipline.config import get_rules as _get_discipline_rules
 from app.csv_importer import (
     parse_positions_csv, parse_liabilities_csv,
     positions_to_csv, liabilities_to_csv,
@@ -120,7 +120,7 @@ def _build_overview_html(bs, positions: list, alerts: list, portfolio, liabiliti
     leverage_tip = lev_tip
 
     # ── 偏差视图 ──────────────────────────────────────────────────────────────
-    _r9   = DISCIPLINE_RULES["asset_allocation_ranges"]
+    _r9   = _get_discipline_rules()["asset_allocation_ranges"]
     total = bs.total_assets or 1.0
     cash_min = _r9["monetary_min_amount"] / total * 100
     cash_max = _r9["monetary_max_amount"] / total * 100
@@ -234,9 +234,12 @@ def _build_overview_html(bs, positions: list, alerts: list, portfolio, liabiliti
             f'<td class="r td-pos">+¥{v:,.0f}</td>' if v > 0 else
             f'<td class="r td-neg">-¥{abs(v):,.0f}</td>'
         )
-        r = p.profit_loss_rate
+        # 与 position_aggregator 保持一致：profit / cost（标准公式），不读 DB 存储的 profit_loss_rate
+        _pnl_v = p.profit_loss_value or 0.0
+        _cost_v = (p.market_value_cny or 0.0) - _pnl_v
+        r = (_pnl_v / _cost_v * 100) if _cost_v > 0 else 0.0
         rate_td = (
-            '<td class="r td-zero">0.00%</td>' if not r or r == 0 else
+            '<td class="r td-zero">0.00%</td>' if r == 0 else
             f'<td class="r td-pos">+{r:.2f}%</td>' if r > 0 else
             f'<td class="r td-neg">{r:.2f}%</td>'
         )
@@ -803,13 +806,6 @@ def _build_alerts_ai_html(bs, alerts: list) -> str:
       {items_html}
     </div>"""
 
-    if hi:
-        ai_badge = f'<span class="ai-badge">🔴 {len(hi)} 项高风险</span>'
-    elif mi:
-        ai_badge = f'<span class="ai-badge" style="background:var(--amber-100);color:#92400E">🟡 {len(mi)} 项中风险</span>'
-    else:
-        ai_badge = '<span class="ai-badge" style="background:var(--green-100);color:var(--green-600)">✅ 无高风险</span>'
-
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -858,31 +854,11 @@ body {{
 .alert-icon  {{ font-size: 15px; flex-shrink: 0; margin-top: 1px; }}
 .alert-title {{ font-size: 13px; font-weight: 600; color: #991B1B; }}
 .alert-body  {{ font-size: 12px; color: #B91C1C; margin-top: 3px; line-height: 1.5; }}
-.ai-section {{ background: linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%); border: 1px solid var(--blue-200); border-radius: var(--radius); padding: 20px; margin-top: 0; }}
-.ai-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
-.ai-title  {{ font-size: 14px; font-weight: 700; color: var(--ocean-800); }}
-.ai-badge  {{ background: var(--red-100); color: var(--red-600); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
-.ai-desc   {{ font-size: 12px; color: var(--gray-500); margin-bottom: 14px; line-height: 1.6; }}
-.btn-primary {{
-  background: linear-gradient(135deg, var(--blue-500), #1D4ED8);
-  color: #fff; border: none; border-radius: 8px; padding: 9px 20px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
-  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
-}}
-.btn-primary:hover {{ opacity: 0.9; }}
 </style>
 </head>
 <body>
 <div class="content-left">
     {alerts_html}
-    <div class="ai-section">
-      <div class="ai-header">
-        <div class="ai-title">✨ AI 综合分析报告</div>
-        {ai_badge}
-      </div>
-      <div class="ai-desc">报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · 风险告警，生成个性化投资建议。</div>
-      <button class="btn-primary" onclick="this.textContent='🚧 功能建设中…';setTimeout(()=>this.textContent='✨ 生成报告',2000)">✨ 生成报告</button>
-    </div>
 </div>
 <script>
 (function() {{
@@ -1419,14 +1395,60 @@ def render():
     # ── 负债导入 / 导出区（负债明细下方，风险告警上方）──────────────────────
     _render_liab_import_card(portfolio_id)
 
-    # ── 构建底部 HTML（风险告警 + AI）───────────────────────────────────────
-    html_alerts_ai = _build_alerts_ai_html(bs, alerts)
-    height_alerts_ai = (
-        max(0, n_alerts) * 95           # 告警
-        + (70 if n_alerts > 0 else 0)
-        + 88                              # AI + padding
-    )
-    components.html(html_alerts_ai, height=height_alerts_ai, scrolling=False)
+    # ── 风险告警（有告警才渲染 iframe）──────────────────────────────────────
+    if n_alerts > 0:
+        html_alerts = _build_alerts_ai_html(bs, alerts)
+        height_alerts = n_alerts * 95 + 70
+        components.html(html_alerts, height=height_alerts, scrolling=False)
+
+    # ── AI 综合分析报告（Streamlit 原生 fragment）────────────────────────────
+    _render_ai_report_section(portfolio_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI 综合分析报告（fragment）
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment
+def _render_ai_report_section(portfolio_id: int):
+    """AI 综合分析报告区（fragment，按钮点击只 rerun 本区域）"""
+    if "overview_ai_report" not in st.session_state:
+        st.session_state["overview_ai_report"] = None
+
+    # 卡片头部样式
+    st.markdown("""
+<div style="background:linear-gradient(135deg,#EFF6FF 0%,#F0FDF4 100%);
+            border:1px solid #BFDBFE;border-radius:12px;
+            padding:18px 24px 14px;margin-top:4px;">
+  <div style="font-size:14px;font-weight:700;color:#1B2A4A;margin-bottom:5px;">✨ AI 综合分析报告</div>
+  <div style="font-size:12px;color:#6B7280;line-height:1.6;">
+    报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · 风险告警，生成个性化投资建议。
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
+
+    if st.button("✨ 生成报告", key="overview_ai_generate_btn", type="primary"):
+        with st.spinner("AI 分析中，请稍候…"):
+            try:
+                from decision_engine import data_loader, llm_engine
+                _QUERY = "请综合分析我当前的投资组合，从持仓集中度、资产配置、风险敞口三个维度给出评估，并给出具体的调仓建议。"
+                loaded = data_loader.load(asset_name=None, pid=portfolio_id)
+                result = llm_engine.review_portfolio(_QUERY, loaded)
+                st.session_state["overview_ai_report"] = result.chat_answer or "（AI 未返回内容，请重试）"
+            except Exception as e:
+                st.session_state["overview_ai_report"] = f"❌ 分析失败：{e}"
+
+    report = st.session_state.get("overview_ai_report")
+    if report:
+        st.markdown(
+            f'<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;'
+            f'padding:16px 20px;font-size:13px;line-height:1.8;color:#374151;margin-top:10px;">'
+            f'{report}'
+            f'<div style="margin-top:10px;font-size:11px;color:#9CA3AF;">'
+            f'⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1492,7 +1514,7 @@ def _render_import_panel(pid: int):
                 st.success(f"解析成功，共 {len(new_positions)} 条持仓。")
                 if st.button("确认覆盖全部资产数据", key="confirm_pos_import"):
                     _import_positions_by_segment(pid, new_positions, "投资")
-                    st.success("资产数据已更新！"); st.rerun()
+                    st.cache_data.clear(); st.rerun(scope="app")
 
     with tab_broker:
         st.caption("直接导入老虎证券对账单或富途持仓 CSV，只替换该平台数据，其他平台不受影响。")
@@ -1513,7 +1535,7 @@ def _render_import_panel(pid: int):
                 st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
                 if st.button(f"确认导入 {broker} 数据", key="confirm_broker_import", type="primary"):
                     _import_positions_by_platform(pid, positions_parsed, broker)
-                    st.success(f"{broker} 数据已更新！"); st.rerun()
+                    st.cache_data.clear(); st.rerun(scope="app")
             else:
                 st.error("未能解析到持仓数据，请检查文件格式。")
 
@@ -1558,7 +1580,7 @@ def _render_import_panel(pid: int):
                         if updated_count > 0:
                             del st.session_state[cache_key]
                             st.session_state["bank_upload_counter"] = upload_counter + 1
-                            st.success(f"✅ {platform} 已更新 {updated_count} 条持仓数据！"); st.rerun()
+                            st.cache_data.clear(); st.rerun(scope="app")
                         else:
                             st.error("⚠️ 未找到匹配的持仓记录，数据未更新。")
             else:
@@ -1594,7 +1616,7 @@ def _render_import_panel(pid: int):
                         _import_positions_by_platform(pid, db_positions, platform)
                         del st.session_state[cache_key]
                         st.session_state["bank_upload_counter"] = upload_counter + 1
-                        st.success(f"✅ {platform} 已导入 {len(db_positions)} 条持仓数据！"); st.rerun()
+                        st.cache_data.clear(); st.rerun(scope="app")
 
     # ── 下载按钮：渲染在 Tabs 之后，CSS 绝对定位到 Tabs 行右上角 ──
     st.markdown('<div id="wp-import-dl-anchor"></div>', unsafe_allow_html=True)
@@ -1663,7 +1685,7 @@ def _render_liab_import_panel(pid: int):
                 st.success(f"解析成功，共 {len(new_liabilities)} 条负债。")
                 if st.button("确认覆盖全部负债数据", key="confirm_liab_import"):
                     _import_liabilities_by_purpose(pid, new_liabilities, ["投资杠杆", "购房", "日常消费"])
-                    st.success("负债数据已更新！"); st.rerun()
+                    st.cache_data.clear(); st.rerun(scope="app")
 
     # ── 下载按钮：渲染在 Tabs 之后，CSS 绝对定位到 Tabs 行右上角 ──
     st.markdown('<div id="wp-liab-import-dl-anchor"></div>', unsafe_allow_html=True)

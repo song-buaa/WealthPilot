@@ -4,6 +4,58 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [1.14.0] - 2026-03-28 - 意图引擎升级 · 投研提炼重构 · 多标的决策 · 资产语义匹配
+
+### Added — 决策结论粒度扩展（`decision_engine/llm_engine.py`）
+
+- 决策结论从 3 档（BUY / HOLD / SELL）扩展为 6 档：
+  - `BUY` → 📈 加仓
+  - `HOLD` → 🔍 观望
+  - `TAKE_PROFIT` → 💰 部分止盈（新增）
+  - `REDUCE` → 📉 逐步减仓（新增）
+  - `SELL` → 🚨 减仓/清仓
+  - `STOP_LOSS` → 🛑 止损离场（新增）
+- LLM prompt 更新：每个决策值附带选择标准描述，模型选最精准选项而非强行归入三档
+- `_build_result()` 有效集合更新，非法值仍降级为 HOLD
+- `app_pages/strategy.py` 结论卡颜色映射更新（绿→琥珀→橙→橙红→红→深红）
+
+### Added — 多标的同操作决策分发（`intent_engine/` · `app_pages/strategy.py`）
+
+- `IntentEntities` 新增 `multi_assets: list[str]` 字段
+- 意图识别 system prompt 新增三种情况的多标的处理规则：
+  - 情况A：多标的同操作 → `multi_assets` 列表，`asset=null`
+  - 情况B：换仓（卖A买B）→ 以 SELL 侧为主，填入 `multi_assets`
+  - 情况C：单焦点标的（其他标的为背景）→ 保持原有规则
+- `_process_submit` 检测到 `multi_assets >= 2` 时，顺序运行每个标的的完整决策链路
+- 新增 `_process_multi_asset()` 与 `_build_multi_asset_chat_answer()`：各标的独立分析，合并为一条 chat 回答，右侧链路面板展示最后一个标的的决策详情
+
+### Added — 资产名称 LLM 语义匹配（`decision_engine/data_loader.py`）
+
+- 新增 `_resolve_asset_by_llm()`：当 `find_target()` 精确/模糊匹配失败时，调用 gpt-4.1-mini 进行语义理解
+- 把用户描述的资产名 + 实际持仓列表（名称+平台+类别）送给模型，利用大模型泛化理解能力匹配
+  - 自然理解平台别名：招行=招商银行、建行=建设银行等
+  - 理解品类语义：稳健/低风险≈固收类，进取/成长≈权益类
+  - 解决"招行的稳健理财"→实际持仓叫"稳健投资"这类命名不一致问题
+- 结果按 `asset_name` 缓存（session 级内存，避免同一标的重复调用）
+- 调用轻量：max_tokens=50，timeout=8s，temperature=0，约 $0.001/次
+
+### Fixed — 投研观点残缺条目问题（`decision_engine/data_loader.py`）
+
+- **根本修复**：投研观点来源从直接透传 `ResearchViewpoint` 字段改为从 `ResearchCard` 提炼
+  - `_distill_research_cards()`：读取 `ResearchCard` 的 thesis/bull_case/bear_case/key_drivers/risks/action_suggestion 全量字段，调用 gpt-4.1-mini 按重要性提炼 3-5 条完整结论句
+  - 结果缓存 24h（用户资料不常变）
+  - 避免了"利润率走势"这类只有标题没有内容的残缺条目被直接透传
+- `ResearchViewpoint` 仅读取 `action_suggestion` 和 `invalidation_conditions` 两个高置信度字段作为补充（最多 2 条）
+- 联网搜索解析优化：过滤以冒号结尾的节标题行（如 `**机构评级**:`），清除 `**` markdown 粗体标记
+
+### Fixed — 联网投研搜索格式问题（`decision_engine/data_loader.py`）
+
+- Perplexity API 有时返回分节标题格式（`**Section:**\n内容`），标题行被误作独立条目展示
+- 修复解析逻辑：跳过以 `:` 结尾的行，清除残余 `**` 标记
+- 搜索 prompt 明确禁止输出分节标题，要求每条直接写结论性内容
+
+---
+
 ## [1.13.0] - 2026-03-24 - 投资决策模块业务逻辑稳定版
 
 > **封板状态**：投资决策核心逻辑全部验证通过，UI 样式冻结，可进入下一轮功能迭代。

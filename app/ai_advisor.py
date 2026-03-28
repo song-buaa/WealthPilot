@@ -194,6 +194,79 @@ def generate_research_card(
         return {"error": f"AI 解析失败：{str(e)}"}
 
 
+def generate_research_card_full(raw_content: str) -> dict:
+    """
+    从原始内容中一次性提取元数据（标题、标的、市场、作者、发布时间）
+    和结构化投研观点卡字段。
+
+    返回 dict（字段名与 generate_research_card 一致，额外包含
+    title / object_name / market_name / author / publish_time）。
+    失败返回 {"error": "<msg>"}。
+    """
+    system_prompt = """你是一名专业的卖方研究分析师助理，负责从研究资料中提取结构化信息。
+
+任务：
+1. 识别文档元数据（标题、研究标的、市场、作者、发布时间）
+2. 提炼核心投研判断，区分看多/看空逻辑
+3. 缺失信息填 null，不要编造
+
+输出要求：
+- 输出纯 JSON 对象，不加 ```json 包裹，不加注释
+- 所有字段必须存在，可以为 null
+- market_name 只能是 "港股" / "美股" / "A股" / "宏观" / "行业" / "其他" / null
+- horizon 只能是 "short" / "medium" / "long" / null
+- stance 只能是 "bullish" / "bearish" / "neutral" / "watch" / null
+- key_drivers / risks / key_metrics / suggested_tags 输出为 JSON 数组
+- suggested_tags 最多 5 个"""
+
+    user_prompt = f"""请从以下研究资料中提取所有结构化信息：
+
+===资料正文===
+{raw_content[:5000]}
+===END===
+
+请输出以下 JSON 结构：
+{{
+  "title": "资料标题（从内容推断，若明显可见则直接提取）",
+  "object_name": "研究标的名称（如：美团、纳斯达克100 等，无则 null）",
+  "market_name": "港股|美股|A股|宏观|行业|其他|null",
+  "author": "作者或来源机构（无则 null）",
+  "publish_time": "发布时间（如：2025-03、2025年Q1，无则 null）",
+  "summary": "资料主要内容（1-2句）",
+  "thesis": "核心投研结论（1-3句，直接说判断，不要模糊）",
+  "bull_case": "看多逻辑（无则 null）",
+  "bear_case": "看空/风险逻辑（无则 null）",
+  "key_drivers": ["驱动因素1", "驱动因素2"],
+  "risks": ["风险1", "风险2"],
+  "key_metrics": ["后续观察指标1", "指标2"],
+  "horizon": "short|medium|long|null",
+  "stance": "bullish|bearish|neutral|watch|null",
+  "action_suggestion": "操作建议（如：加仓 / 减仓 / 持有观察，可为 null）",
+  "invalidation_conditions": "观点失效条件（可为 null）",
+  "suggested_tags": ["标签1", "标签2"]
+}}"""
+
+    try:
+        response = _get_client().chat.completions.create(
+            model=AI_RESEARCH_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=AI_TEMPERATURE,
+            max_tokens=AI_RESEARCH_MAX_TOKENS,
+            response_format={"type": "json_object"},
+        )
+        raw_json = response.choices[0].message.content
+        return json.loads(raw_json)
+    except EnvironmentError as e:
+        return {"error": f"配置错误：{str(e)}"}
+    except json.JSONDecodeError as e:
+        return {"error": f"AI 返回结果无法解析为 JSON：{str(e)}"}
+    except Exception as e:
+        return {"error": f"AI 解析失败：{str(e)}"}
+
+
 def generate_alert_explanation(alert: DeviationAlert) -> str:
     """针对单条告警生成详细解释"""
 

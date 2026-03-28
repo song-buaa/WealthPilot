@@ -30,6 +30,7 @@ WealthPilot — 投资决策页面 (strategy.py) — V3.2
 """
 
 import os
+import uuid
 
 import streamlit as st
 from app.state import portfolio_id
@@ -51,6 +52,9 @@ def _init_session_state():
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
+    # intent_engine 会话 ID（每次 Streamlit 进程生命周期内唯一）
+    if "ie_session_id" not in st.session_state:
+        st.session_state["ie_session_id"] = uuid.uuid4().hex
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -97,7 +101,7 @@ def _render_chat_panel():
         st.session_state["de_chat_input"] = ""
         st.session_state["de_should_clear"] = False
 
-    _has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    _has_api_key = bool(os.environ.get("OPENAI_API_KEY"))
 
     # ── 标题行 ────────────────────────────────────────────────────────────────
     hcol, clcol = st.columns([5, 1])
@@ -110,17 +114,27 @@ def _render_chat_panel():
             st.session_state["decision_map"] = {}
             st.session_state["current_decision_id"] = None
             st.session_state["de_chat_input"] = ""
+            st.session_state["ie_session_id"] = uuid.uuid4().hex  # 重置意图上下文
             st.rerun()
 
     if not _has_api_key:
         st.warning(
-            "🔑 **未配置 `ANTHROPIC_API_KEY`**，AI 功能暂不可用。"
-            "请在终端执行 `export ANTHROPIC_API_KEY='sk-ant-...'` 后重启 Streamlit。",
+            "🔑 **未配置 `OPENAI_API_KEY`**，AI 功能暂不可用。"
+            "请在终端执行 `export OPENAI_API_KEY='sk-...'` 后重启 Streamlit。",
             icon="⚠️",
         )
 
     # ── 消息历史区（固定高度可滚动）──────────────────────────────────────────
     history = st.session_state["chat_history"]
+
+    st.markdown("""
+    <style>
+    [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] li {
+        font-size: 0.8rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     msg_container = st.container(height=420)
     with msg_container:
@@ -206,64 +220,312 @@ def _render_empty_welcome():
 # 输入处理：执行完整决策链路，更新对话历史
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _process_submit(user_input: str):
+def _payload_to_intent_result(payload, ctx):
     """
-    1. 获取 last_intent（从历史最近一条 user 消息的 intent 字段，不从 context 读取）
-    2. 构建 context（最近 1 轮，供 general_chat LLM 使用）
-    3. 执行 decision_flow.run()
-    4. 生成自然语言回答（左侧）
-    5. 更新 chat_history / decision_map / current_decision_id
+    适配器：将 IntentPayload（intent_engine）转换为 IntentResult（decision_engine）。
+
+    action code 映射（英文 → 中文 action_type）：
+        BUY / ADD         → 买入判断 / 加仓判断
+        SELL / STOP_LOSS / TAKE_PROFIT → 卖出判断 / 减仓判断
+        REDUCE            → 减仓判断
+        ANALYZE / 其他    → 持有评估
+    """
+    from decision_engine.types import IntentResult
+
+    _ACTION_MAP = {
+        "BUY":         "买入判断",
+        "ADD":         "加仓判断",
+        "SELL":        "卖出判断",
+        "STOP_LOSS":   "卖出判断",
+        "TAKE_PROFIT": "减仓判断",
+        "REDUCE":      "减仓判断",
+        "HOLD":        "持有评估",
+        "ANALYZE":     "持有评估",
+    }
+
+    # 标的：本轮识别 → 上下文继承
+    asset = payload.entities.asset or ctx.inherited_fields.asset
+
+    # 操作类型：取 actions 中第一个有效映射
+    first_action = payload.actions[0] if payload.actions else "ANALYZE"
+    action_type = _ACTION_MAP.get(first_action, "持有评估")
+
+    # 时间跨度
+    time_horizon = payload.entities.time_horizon or ctx.inherited_fields.time_horizon or "未知"
+
+    return IntentResult(
+        asset=asset,
+        action_type=action_type,
+        time_horizon=time_horizon,
+        trigger=None,
+        confidence_score=payload.confidence,
+        clarification=None,
+        intent_type="investment_decision",
+        is_context_inherited=bool(not payload.entities.asset and ctx.inherited_fields.asset),
+    )
+
+
+def _process_multi_asset(payload, ctx, user_input, multi_assets, history, user_msg_idx):
+    """
+    多标的同操作分发：对 multi_assets 中每个标的顺序运行完整决策链路，
+    合并结论输出到左侧 Chat，右侧链路面板展示最后一个标的的决策详情。
     """
     from decision_engine import decision_flow
 
-    history = st.session_state["chat_history"]
+    results: list[tuple[str, object]] = []  # (asset_name, DecisionResult)
 
-    # last_intent：从历史中最近一条 user 消息的 intent 字段取（PRD §补充1）
-    last_intent = None
-    for msg in reversed(history):
-        if msg["role"] == "user" and msg.get("intent") is not None:
-            last_intent = msg["intent"]
-            break
+    for asset_name in multi_assets:
+        # 克隆 payload，替换 asset（保持其他字段不变）
+        from dataclasses import replace as _replace
+        from intent_engine.types import IntentEntities
+        new_entities = _replace(
+            payload.entities,
+            asset=asset_name,
+            multi_assets=[],  # 单次调用时清空，避免递归
+        )
+        single_payload = _replace(payload, entities=new_entities)
+        intent_result = _payload_to_intent_result(single_payload, ctx)
+        r = decision_flow.run_with_intent(
+            intent=intent_result,
+            user_input=user_input,
+            pid=portfolio_id,
+        )
+        results.append((asset_name, r))
 
-    # context：最近 1 轮（user + assistant），仅用于 general_chat
-    context = None
-    user_msgs = [m for m in history if m["role"] == "user"]
-    ai_msgs   = [m for m in history if m["role"] == "assistant"]
-    if user_msgs and ai_msgs:
-        context = [
-            {"role": "user",      "content": user_msgs[-1]["content"]},
-            {"role": "assistant", "content": ai_msgs[-1]["content"]},
-        ]
+    if not results:
+        return
 
-    # 先把用户消息加入历史（intent 稍后回填）
-    user_msg_idx = len(history)
-    history.append({"role": "user", "content": user_input, "intent": None})
+    # ── 左侧 Chat：合并回答 ─────────────────────────────────────────────────
+    ai_content = _build_multi_asset_chat_answer(results, user_input)
 
-    # 执行决策流程
-    result = decision_flow.run(
-        user_input=user_input,
-        last_intent=last_intent,
-        context=context,
-        pid=portfolio_id,
-    )
-
-    # 回填 intent
-    history[user_msg_idx]["intent"] = result.intent
-
-    # 生成左侧 Chat 回答
-    ai_content  = _build_chat_answer(result, user_input)
-    intent_type = result.intent.intent_type if result.intent else "investment_decision"
+    # ── 右侧链路：使用最后一个标的的决策结果 ──────────────────────────────────
+    last_name, last_result = results[-1]
+    history[user_msg_idx]["intent"] = last_result.intent
 
     history.append({
         "role":        "assistant",
         "content":     ai_content,
-        "intent_type": intent_type,
-        "decision_id": result.decision_id,
+        "intent_type": "investment_decision",
+        "decision_id": last_result.decision_id,
     })
 
-    if result.decision_id:
-        st.session_state["decision_map"][result.decision_id] = result
-        st.session_state["current_decision_id"] = result.decision_id
+    # 全部结果写入 decision_map（以标的名为 key 区分）
+    for asset_name, r in results:
+        if r.decision_id:
+            st.session_state["decision_map"][r.decision_id] = r
+    # 右侧链路面板默认展示最后一个标的
+    if last_result.decision_id:
+        st.session_state["current_decision_id"] = last_result.decision_id
+
+
+def _build_multi_asset_chat_answer(results: list, user_input: str) -> str:
+    """
+    将多个 DecisionResult 合并成一段自然语言回答。
+    按「标的名 → 结论 → 关键理由 → 风险」格式逐一展示。
+    """
+    parts = []
+    for asset_name, r in results:
+        if r.was_aborted:
+            parts.append(f"**{asset_name}**：{r.aborted_reason or '分析中断，请补充持仓数据后重试。'}")
+        elif r.is_complete and r.llm:
+            # 优先使用 LLM 生成的 chat_answer
+            if r.llm.chat_answer:
+                parts.append(f"**{asset_name}** — {r.llm.decision_emoji} {r.llm.decision_cn}\n\n{r.llm.chat_answer}")
+            else:
+                # 降级：从结构化字段拼接
+                decision_cn = r.llm.decision_cn
+                reasons = "；".join(r.llm.reasoning[:2]) if r.llm.reasoning else ""
+                parts.append(
+                    f"**{asset_name}** — {r.llm.decision_emoji} **{decision_cn}**。"
+                    + (f"\n\n{reasons}。" if reasons else "")
+                )
+        else:
+            parts.append(f"**{asset_name}**：数据加载失败，请稍后重试。")
+
+    combined = "\n\n---\n\n".join(parts)
+    suffix = "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
+    return combined + suffix
+
+
+def _run_portfolio_intent(payload, user_input: str, pid: int):
+    """
+    组合级别意图执行链路：数据加载 → LLM 推理。
+    适用于 PortfolioReview / AssetAllocation / PerformanceAnalysis。
+
+    Returns:
+        (DecisionResult, ai_content_str)
+    """
+    from decision_engine import data_loader, llm_engine
+    from decision_engine.decision_flow import DecisionResult, FlowStage
+    from decision_engine.types import IntentResult
+
+    _INTENT_CONFIG = {
+        "PortfolioReview":    ("portfolio_review",    "组合评估", llm_engine.review_portfolio),
+        "AssetAllocation":    ("asset_allocation",    "资产配置", llm_engine.analyze_allocation),
+        "PerformanceAnalysis":("performance_analysis","收益分析", llm_engine.analyze_performance),
+    }
+    intent_type_key, action_label, llm_fn = _INTENT_CONFIG[payload.primary_intent]
+
+    result = DecisionResult()
+    result.decision_id = f"decision_{uuid.uuid4().hex[:8]}"
+    result.intent = IntentResult(
+        asset=None,
+        action_type=action_label,
+        time_horizon="当前",
+        trigger=None,
+        confidence_score=payload.confidence,
+        intent_type=intent_type_key,
+    )
+    result.stage = FlowStage.INTENT
+
+    # 数据加载
+    try:
+        loaded = data_loader.load(asset_name=None, pid=pid)
+    except Exception as e:
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = f"数据加载失败：{e}"
+        return result, result.aborted_reason
+
+    result.data = loaded
+    result.stage = FlowStage.LOADED
+
+    if loaded.has_data_errors:
+        error_msgs = "\n".join(
+            f"- {w.message}" for w in loaded.data_warnings if w.level == "error"
+        )
+        result.stage = FlowStage.ABORTED
+        result.aborted_reason = f"⚠️ 数据质量问题，无法给出分析建议：\n\n{error_msgs}"
+        return result, result.aborted_reason
+
+    # LLM 推理
+    generic_llm = llm_fn(user_input, loaded)
+    result.generic_llm = generic_llm
+    result.stage = FlowStage.DONE
+
+    if generic_llm.is_fallback:
+        ai_content = f"⚠️ AI 分析遇到问题：{generic_llm.error}\n\n请稍后重试。"
+    else:
+        ai_content = (
+            (generic_llm.chat_answer or "分析完成，请查看右侧分析详情。")
+            + "\n\n---\n*⚖️ 仅供参考，不构成投资建议。投资有风险，入市需谨慎。*"
+        )
+    return result, ai_content
+
+
+def _process_submit(user_input: str):
+    """
+    路由逻辑（意图识别统一由 intent_engine 负责，不再重复调用 decision_engine.intent_parser）：
+
+    1. intent_engine.intent_recognizer.recognize() → (IntentPayload, clarification)
+    2. intent_engine.context_manager.build_context() → ExecutionContext（多轮继承）
+    3. 置信度不足 → 返回澄清问题
+    4. PositionDecision → 适配器 + decision_flow.run_with_intent() → DecisionResult（右侧链路不变）
+    5. 其他意图 → llm_engine.chat()（暂时保持普通对话，后续按意图精细化）
+    """
+    from intent_engine import intent_recognizer, context_manager
+    from decision_engine import decision_flow, llm_engine
+
+    history    = st.session_state["chat_history"]
+    session_id = st.session_state["ie_session_id"]
+
+    # ── Step 1: 意图识别（唯一来源）─────────────────────────────────────────
+    try:
+        payload, clarification = intent_recognizer.recognize(user_input)
+    except EnvironmentError as e:
+        history.append({"role": "user", "content": user_input, "intent": None})
+        history.append({
+            "role": "assistant",
+            "content": f"⚙️ 配置问题：{e}",
+            "intent_type": "error",
+            "decision_id": None,
+        })
+        return
+
+    # ── Step 2: 构建多轮上下文 ───────────────────────────────────────────────
+    ctx = context_manager.build_context(session_id, payload, portfolio_id)
+
+    # 先把用户消息写入历史
+    user_msg_idx = len(history)
+    history.append({"role": "user", "content": user_input, "intent": None})
+
+    # ── Step 3: 置信度不足 → 返回澄清问题 ───────────────────────────────────
+    if clarification and payload.confidence < 0.5:
+        history.append({
+            "role": "assistant",
+            "content": clarification,
+            "intent_type": payload.primary_intent,
+            "decision_id": None,
+        })
+        return
+
+    # ── Step 4: 按意图类型路由 ───────────────────────────────────────────────
+    if payload.primary_intent == "PositionDecision":
+        multi = list(payload.entities.multi_assets or [])
+
+        if len(multi) >= 2:
+            # 多标的同操作：依次运行每个标的的完整决策链路，合并回答
+            _process_multi_asset(
+                payload=payload,
+                ctx=ctx,
+                user_input=user_input,
+                multi_assets=multi,
+                history=history,
+                user_msg_idx=user_msg_idx,
+            )
+            return
+
+        # 单标的：完整 6 步链路（数据加载 → 前置校验 → 规则 → 信号 → LLM）
+        intent_result = _payload_to_intent_result(payload, ctx)
+        result = decision_flow.run_with_intent(
+            intent=intent_result,
+            user_input=user_input,
+            pid=portfolio_id,
+        )
+        history[user_msg_idx]["intent"] = result.intent
+        ai_content = _build_chat_answer(result, user_input)
+        history.append({
+            "role":        "assistant",
+            "content":     ai_content,
+            "intent_type": "investment_decision",
+            "decision_id": result.decision_id,
+        })
+        if result.decision_id:
+            st.session_state["decision_map"][result.decision_id] = result
+            st.session_state["current_decision_id"] = result.decision_id
+        return
+
+    if payload.primary_intent in ("PortfolioReview", "AssetAllocation", "PerformanceAnalysis"):
+        # 组合级别链路（数据加载 → LLM，无规则/信号步骤）
+        result, ai_content = _run_portfolio_intent(payload, user_input, portfolio_id)
+        history[user_msg_idx]["intent"] = result.intent
+        history.append({
+            "role":        "assistant",
+            "content":     ai_content,
+            "intent_type": payload.primary_intent.lower(),
+            "decision_id": result.decision_id,
+        })
+        if result.decision_id:
+            st.session_state["decision_map"][result.decision_id] = result
+            st.session_state["current_decision_id"] = result.decision_id
+        return
+
+    # ── Step 5: Education / GeneralChat → 普通对话 ───────────────────────────
+    context_msgs = None
+    user_msgs = [m for m in history[:-1] if m["role"] == "user"]
+    ai_msgs   = [m for m in history[:-1] if m["role"] == "assistant"]
+    if user_msgs and ai_msgs:
+        context_msgs = [
+            {"role": "user",      "content": user_msgs[-1]["content"]},
+            {"role": "assistant", "content": ai_msgs[-1]["content"]},
+        ]
+
+    chat_text = llm_engine.chat(user_input, context=context_msgs)
+    history.append({
+        "role":        "assistant",
+        "content":     chat_text or "（系统暂无回复，请重试）",
+        "intent_type": "general_chat",
+        "decision_id": None,
+    })
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -274,29 +536,31 @@ def _build_chat_answer(result, user_input: str) -> str:
     """
     生成左侧 Chat 面板的 AI 回答。
 
-    - general_chat：返回 result.chat_response（已由 llm_engine.chat() 生成）
     - aborted：返回中断原因
-    - investment_decision 完整结果：调用 llm_engine.generate_chat_answer() 生成自然语言
+    - investment_decision 完整结果：直接使用 llm.chat_answer（由 reason() 单次调用生成）
+    - fallback：降级文本
     """
-    from decision_engine import llm_engine
-
-    intent_type = result.intent.intent_type if result.intent else "investment_decision"
-
-    if intent_type == "general_chat":
-        return result.chat_response or "（系统暂无回复，请重试）"
-
     if result.was_aborted:
         return result.aborted_reason or "分析中断，请重新描述您的投资需求。"
 
     if result.is_complete and result.llm:
-        answer = llm_engine.generate_chat_answer(
-            user_query=user_input,
-            intent=result.intent,
-            data=result.data,
-            rules=result.rules,
-            llm_result=result.llm,
-        )
-        # 降级提示追加
+        # chat_answer 由 reason() 在同一次 LLM 调用中生成，无需二次调用
+        answer = result.llm.chat_answer
+        if not answer:
+            # 极少数情况：LLM 未输出 chat_answer，用简洁 fallback
+            decision_cn = {
+                "BUY":         "加仓",
+                "HOLD":        "观望",
+                "TAKE_PROFIT": "部分止盈",
+                "REDUCE":      "逐步减仓",
+                "SELL":        "减仓/清仓",
+                "STOP_LOSS":   "止损离场",
+            }.get(result.llm.decision, "观望")
+            asset = result.intent.asset or "该标的" if result.intent else "该标的"
+            reasons = "；".join(result.llm.reasoning[:2]) if result.llm.reasoning else ""
+            answer = f"**{asset}** 当前建议**{decision_cn}**。" + (f"\n\n{reasons}。" if reasons else "")
+
+        # 降级/修正提示追加
         suffix_parts = []
         if result.llm.is_fallback:
             suffix_parts.append(f"⚠️ *AI 推理遇到问题（{result.llm.error}），结论为降级结果。*")
@@ -347,31 +611,72 @@ def _render_explain_panel():
     result = decision_map[current_id]
     st.caption(f"Decision ID: `{current_id}`")
 
-    # ── ① 意图解析 ────────────────────────────────────────────────────────────
+    intent_type = result.intent.intent_type if result.intent else "investment_decision"
+
+    if intent_type == "investment_decision":
+        _render_panel_position_decision(result)
+    else:
+        _render_panel_portfolio_intent(result, intent_type)
+
+
+def _render_panel_position_decision(result):
+    """单标的决策右侧面板（完整 6 步链路）"""
     if result.intent:
         _ep_intent(result.intent)
-
-    # ── ② 持仓数据（默认折叠）────────────────────────────────────────────────
     if result.data:
         _ep_data(result.data)
-
-    # ── ③ 规则校验 ────────────────────────────────────────────────────────────
+    if result.data:
+        _ep_research(result.data)
     if result.rules:
         _ep_rules(result.rules)
-
-    # ── ④ 信号层 ──────────────────────────────────────────────────────────────
     if result.signals:
         _ep_signals(result.signals)
-
-    # ── ⑤ AI 推理过程（默认折叠）────────────────────────────────────────────
     if result.llm:
         _ep_reasoning(result.llm)
-
-    # ── ⑥ 最终结论（RESTORED — 彩色卡片）────────────────────────────────────
     if result.llm:
         _ep_conclusion(result.llm)
+    st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
 
-    # 合规提示
+
+def _render_panel_portfolio_intent(result, intent_type: str):
+    """组合级别意图右侧面板（PortfolioReview / AssetAllocation / PerformanceAnalysis）"""
+    _PANEL_TITLE = {
+        "portfolio_review":    "📊 组合评估",
+        "asset_allocation":    "🧩 资产配置",
+        "performance_analysis":"📈 收益分析",
+    }
+    if result.intent:
+        st.markdown(f"**🎯 意图解析**")
+        rows = [
+            _ep_row_md("类型", _PANEL_TITLE.get(intent_type, intent_type)),
+            _ep_row_md("置信度", f"{result.intent.confidence_score:.0%}"),
+        ]
+        st.markdown(
+            "<div style='line-height:1.8;padding:6px 0'>" +
+            " &nbsp;·&nbsp; ".join(rows) +
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.divider()
+
+    if result.was_aborted:
+        st.error(result.aborted_reason)
+        st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
+        return
+
+    if result.data:
+        _ep_portfolio_overview(result.data)
+
+    if result.generic_llm:
+        if result.generic_llm.is_fallback:
+            st.warning(f"⚠️ AI 分析遇到问题：{result.generic_llm.error}")
+        elif intent_type == "portfolio_review":
+            _ep_portfolio_review_result(result.generic_llm)
+        elif intent_type == "asset_allocation":
+            _ep_asset_allocation_result(result.generic_llm)
+        elif intent_type == "performance_analysis":
+            _ep_performance_analysis_result(result.generic_llm)
+
     st.caption("⚖️ 本系统输出仅供参考，不构成投资建议。")
 
 
@@ -417,25 +722,28 @@ def _ep_data(data):
             if w.level == "warning":
                 st.caption(f"⚠️ {w.message}")
 
-        st.caption(f"组合总市值：¥{data.total_assets:,.0f}　口径：聚合市值 / 组合总市值")
+        st.caption(f"- 组合总市值：**¥{data.total_assets:,.0f}**，口径：聚合市值 / 组合总市值")
 
         if data.target_position:
             tp = data.target_position
-            st.markdown(
-                f"**{tp.name}**　"
-                f"仓位 **{tp.weight:.1%}**　"
-                f"市值 ¥{tp.market_value_cny:,.0f}　"
-                f"收益率 {tp.profit_loss_rate:.1%}"
+            st.caption(
+                f"- {tp.name}：仓位 **{tp.weight:.1%}**，"
+                f"市值 **¥{tp.market_value_cny:,.0f}**，"
+                f"收益率 **{tp.profit_loss_rate:.1%}**"
             )
             if tp.platforms:
-                st.caption(f"持仓平台：{' / '.join(tp.platforms)}")
+                st.caption(f"- 持仓平台：{' / '.join(tp.platforms)}")
         else:
-            st.caption("当前未持有该标的（新建仓）")
+            st.caption("- 当前未持有该标的（新建仓）")
 
+
+def _ep_research(data):
+    with st.expander("📝 投研观点", expanded=False):
         if data.research:
-            st.caption("**投研观点：**")
-            for v in data.research[:3]:
+            for v in data.research:
                 st.caption(f"• {v}")
+        else:
+            st.caption("暂无该标的的投研观点，建议自行研究或参考市场报告。")
 
 
 def _ep_rules(rule_result):
@@ -485,9 +793,14 @@ def _ep_reasoning(llm):
 
 def _ep_conclusion(llm):
     """最终结论 — 彩色高亮卡片（RESTORED）"""
-    colors = {"BUY": ("#059669", "#ECFDF5", "#D1FAE5"),
-              "HOLD": ("#D97706", "#FFFBEB", "#FDE68A"),
-              "SELL": ("#DC2626", "#FEF2F2", "#FECACA")}
+    colors = {
+        "BUY":         ("#059669", "#ECFDF5", "#D1FAE5"),  # 绿
+        "HOLD":        ("#D97706", "#FFFBEB", "#FDE68A"),  # 琥珀
+        "TAKE_PROFIT": ("#B45309", "#FFF7ED", "#FED7AA"),  # 橙
+        "REDUCE":      ("#EA580C", "#FFF7ED", "#FDBA74"),  # 橙红
+        "SELL":        ("#DC2626", "#FEF2F2", "#FECACA"),  # 红
+        "STOP_LOSS":   ("#991B1B", "#FFF1F2", "#FECDD3"),  # 深红
+    }
     text_c, bg_c, border_c = colors.get(llm.decision, ("#64748B", "#F8FAFC", "#E2E8F0"))
 
     st.markdown("**🏁 最终结论**")
@@ -515,3 +828,110 @@ def _ep_conclusion(llm):
         st.caption("**风险提示**")
         for r in llm.risk:
             st.caption(f"• {r}")
+
+
+def _ep_portfolio_overview(data):
+    """持仓概览（组合级别意图用，展示全部标的）"""
+    with st.expander("📊 持仓概览", expanded=False):
+        for w in (data.data_warnings or []):
+            if w.level == "warning":
+                st.caption(f"⚠️ {w.message}")
+        st.caption(
+            f"- 组合总市值：**¥{data.total_assets:,.0f}**，共 **{len(data.positions)}** 个标的"
+        )
+        top = sorted(data.positions, key=lambda p: p.weight, reverse=True)[:8]
+        for p in top:
+            st.caption(
+                f"- {p.name}：仓位 **{p.weight:.1%}**，"
+                f"市值 **¥{p.market_value_cny:,.0f}**，"
+                f"收益率 **{p.profit_loss_rate:.1%}**"
+            )
+        if len(data.positions) > 8:
+            st.caption(f"_（仅显示前 8 大持仓）_")
+
+
+def _ep_portfolio_review_result(llm):
+    """组合评估结果面板"""
+    payload = llm.raw_payload
+
+    risk_level = payload.get("risk_level", "")
+    if risk_level:
+        risk_icon = {"高": "🔴", "中": "🟡", "低": "🟢"}.get(risk_level, "⚪")
+        st.markdown(f"**组合风险等级**：{risk_icon} {risk_level}")
+        st.divider()
+
+    findings = payload.get("key_findings", [])
+    if findings:
+        with st.expander("🔍 核心发现", expanded=True):
+            for f in findings:
+                st.caption(f"• {f}")
+
+    issues = payload.get("concentration_issues", [])
+    if issues:
+        with st.expander("⚠️ 集中度问题", expanded=False):
+            for i in issues:
+                st.caption(f"• {i}")
+
+    rebalance_needed = payload.get("rebalance_needed", False)
+    suggestions = payload.get("rebalance_suggestions", [])
+    if rebalance_needed and suggestions:
+        with st.expander("🔄 调仓建议", expanded=False):
+            for s in suggestions:
+                st.caption(f"• {s}")
+    elif not rebalance_needed:
+        st.caption("✅ 当前组合暂无调仓需求")
+
+
+def _ep_asset_allocation_result(llm):
+    """资产配置结果面板"""
+    payload = llm.raw_payload
+
+    principles = payload.get("allocation_principles", [])
+    if principles:
+        with st.expander("📌 配置原则", expanded=True):
+            for p in principles:
+                st.caption(f"• {p}")
+
+    suggestions = payload.get("allocation_suggestions", [])
+    if suggestions:
+        with st.expander("🧩 配置方向", expanded=False):
+            for s in suggestions:
+                direction = s.get("direction", "")
+                asset_class = s.get("asset_class", "")
+                rationale = s.get("rationale", "")
+                dir_icon = {"增加": "📈", "减少": "📉", "维持": "➡️"}.get(direction, "")
+                st.caption(f"• {dir_icon} **{asset_class}**（{direction}）：{rationale}")
+
+    risks = payload.get("risks", [])
+    if risks:
+        with st.expander("⚠️ 风险提示", expanded=False):
+            for r in risks:
+                st.caption(f"• {r}")
+
+
+def _ep_performance_analysis_result(llm):
+    """收益分析结果面板"""
+    payload = llm.raw_payload
+
+    summary = payload.get("summary", "")
+    if summary:
+        st.markdown(f"**收益概况**：{summary}")
+        st.divider()
+
+    drivers = payload.get("key_drivers", [])
+    if drivers:
+        with st.expander("📈 收益驱动", expanded=True):
+            for d in drivers:
+                st.caption(f"• {d}")
+
+    losses = payload.get("loss_reasons", [])
+    if losses:
+        with st.expander("📉 亏损/拖累来源", expanded=False):
+            for l in losses:
+                st.caption(f"• {l}")
+
+    improvements = payload.get("improvement_suggestions", [])
+    if improvements:
+        with st.expander("💡 改进建议", expanded=False):
+            for i in improvements:
+                st.caption(f"• {i}")

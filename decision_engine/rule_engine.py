@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .data_loader import LoadedData, InvestmentRules
-from .intent_parser import IntentResult
+from .types import IntentResult
 
 
 # ── 数据类 ────────────────────────────────────────────────────────────────────
@@ -80,23 +80,22 @@ def check(data: LoadedData, intent: IntentResult) -> RuleResult:
         warning = "接近上限"
         details.append(
             f"⚠️  单一持仓接近上限：当前 {current_weight:.1%}，"
-            f"上限 {max_pos:.1%}（已用 {position_ratio:.0%}）"
+            f"上限 {max_pos:.1%}"
         )
     else:
         details.append(
-            f"✅ 单一持仓正常：当前 {current_weight:.1%}，"
-            f"上限 {max_pos:.1%}（已用 {position_ratio:.0%}）"
+            f"✅ 单一持仓正常：当前 {current_weight:.1%}，上限 {max_pos:.1%}"
         )
 
     # ── 加仓特殊规则：目标不在持仓中，仓位为 0，提示 ───────────────────────
     if data.target_position is None and intent.action_type in ("加仓判断", "买入判断"):
         details.append("ℹ️  当前持仓中未持有该标的，属于新建仓操作。")
 
-    # ── 操作类型为减仓/卖出时，持仓为 0 的情况 ──────────────────────────────
-    if current_weight == 0.0 and intent.action_type in ("减仓判断", "卖出判断"):
-        violation = True
-        warning = "未持有该标的，无法减仓"
-        details.append(f"⛔ 未持有该标的，无法执行减仓/卖出操作。")
+    # ── 操作类型为减仓/卖出时，标的不在持仓中的情况 ──────────────────────────
+    # 注意：不设 violation（"超限"语义不符）；实际流程拦截已由 decision_flow 的
+    # target_position is None 检查负责，此处只记录信息供 UI 展示。
+    if data.target_position is None and intent.action_type in ("减仓判断", "卖出判断"):
+        details.append("ℹ️ 当前持仓中未找到该标的，无法执行减仓/卖出操作。")
 
     return RuleResult(
         position_ratio=position_ratio,

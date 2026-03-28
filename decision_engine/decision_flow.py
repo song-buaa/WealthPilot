@@ -1,27 +1,20 @@
 """
-决策流程编排（Decision Flow）— V3.1
+决策流程执行层（Decision Flow）— V3.2
 
-职责：按 PRD 规定的固定链路编排完整决策流程。
+职责：接收已解析的 IntentResult，执行完整 5 步投资决策管道。
+意图识别由 intent_engine 统一负责，本模块不做意图解析。
 
-V3.1 新增：
-    - decision_id：每次 investment_decision 流程生成唯一 ID
-    - last_intent：从 conversation_history 注入，用于意图字段继承
-    - context：最近 1 轮对话，供 general_chat 路由使用
-    - hypothetical 拦截：不进入决策流程
-    - general_chat 路由：只调 llm_engine.chat()，不生成 decision_id
-
-执行链路（investment_decision）：
-    用户输入
-    → 意图解析（intent_parser，含 last_intent 继承）
+执行链路：
+    IntentResult（由 intent_engine 适配器传入）
     → 数据加载（data_loader）
     → 前置校验（pre_check）
     → 规则校验（rule_engine）
     → 信号生成（signal_engine）
-    → LLM推理（llm_engine）
-    → 返回 DecisionResult（含 decision_id）
+    → LLM 推理（llm_engine）
+    → 返回 DecisionResult（含 decision_id + llm.chat_answer）
 
 对外接口：
-    run(user_input, last_intent, context, portfolio_id) → DecisionResult
+    run_with_intent(intent, user_input, pid) → DecisionResult
 """
 
 from __future__ import annotations
@@ -31,13 +24,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from . import intent_parser, data_loader, pre_check, rule_engine, signal_engine, llm_engine
-from .intent_parser import IntentResult
+from . import data_loader, pre_check, rule_engine, signal_engine, llm_engine
+from .types import IntentResult
 from .data_loader import LoadedData
 from .pre_check import PreCheckResult
 from .rule_engine import RuleResult
 from .signal_engine import SignalResult
-from .llm_engine import LLMResult
+from .llm_engine import LLMResult, GenericLLMResult
 from app.state import portfolio_id as default_portfolio_id
 
 
@@ -81,6 +74,7 @@ class DecisionResult:
     rules: Optional[RuleResult] = None
     signals: Optional[SignalResult] = None
     llm: Optional[LLMResult] = None
+    generic_llm: Optional[GenericLLMResult] = None  # 组合级别意图（非 PositionDecision）的 LLM 结果
 
     @property
     def is_complete(self) -> bool:
@@ -99,71 +93,40 @@ class DecisionResult:
 
 # ── 核心函数 ───────────────────────────────────────────────────────────────────
 
-def run(
+def run_with_intent(
+    intent: IntentResult,
     user_input: str,
-    last_intent: Optional[IntentResult] = None,
-    context: Optional[list] = None,
     pid: int = default_portfolio_id,
 ) -> DecisionResult:
     """
-    执行完整决策流程。V3.1 支持多轮对话上下文。
+    跳过意图解析，直接用外部传入的 IntentResult 执行步骤 2-6。
 
-    Args:
-        user_input:   用户自然语言输入
-        last_intent:  从 conversation_history 最近 user 消息的 intent 字段获取，
-                      用于意图字段继承（仅 investment_decision 时生效）。
-                      ⚠️ 不从 context 中读取，context 仅供 general_chat LLM 使用。
-        context:      最近 1 轮对话（[user_msg, ai_msg]），传给 general_chat LLM。
-        pid:          portfolio_id（默认从 app.state 读取）
-
-    Returns:
-        DecisionResult，包含各阶段输出 + decision_id（investment_decision 时）
+    供 intent_engine 识别完意图后注入使用，避免重复调用 LLM 做意图识别。
+    意图路由（hypothetical/general_chat 拦截）由调用方负责，此函数只处理
+    investment_decision 完整链路。
     """
     result = DecisionResult()
-
-    # ── Step 1: 意图解析 ─────────────────────────────────────────────────────
-    try:
-        intent = intent_parser.parse(user_input, last_intent=last_intent)
-        result.intent = intent
-        result.stage = FlowStage.INTENT
-    except EnvironmentError as e:
-        # 无 API Key → 中断并提示
-        result.stage = FlowStage.ABORTED
-        result.aborted_reason = f"⚙️ 配置问题：{e}"
-        return result
-    except Exception as e:
-        result.stage = FlowStage.ABORTED
-        result.aborted_reason = f"意图解析失败：{e}"
-        return result
-
-    # ── Step 1.5: 意图类型路由 ────────────────────────────────────────────────
-
-    # 假设性问题 → 拦截，PRD §九
-    if intent.intent_type == "hypothetical":
-        result.stage = FlowStage.ABORTED
-        result.aborted_reason = (
-            "当前系统暂不支持假设性推演（如\"如果...会怎样\"）。\n\n"
-            "请提供明确的操作意图，例如：\n"
-            "- 我要不要减仓理想汽车？\n"
-            "- 现在适合加仓吗？"
-        )
-        return result
-
-    # 普通对话 → 跳过决策流程，直接 LLM chat，不生成 decision_id，PRD §3.3
-    if intent.intent_type == "general_chat":
-        chat_text = llm_engine.chat(user_input, context=context)
-        result.chat_response = chat_text
-        result.stage = FlowStage.DONE
-        return result
-
-    # investment_decision → 生成唯一 decision_id，进入完整流程
+    result.intent = intent
+    result.stage = FlowStage.INTENT
     result.decision_id = f"decision_{uuid.uuid4().hex[:8]}"
 
-    # 置信度不足 → 中断，返回澄清问题
     if intent.needs_clarification:
         result.stage = FlowStage.ABORTED
         result.aborted_reason = intent.clarification or "请重新描述您的投资决策需求。"
         return result
+
+    return _run_pipeline(result, intent, user_input, pid)
+
+
+# ── 步骤 2-6 公共管道（run_with_intent 调用）─────────────────────────────────
+
+def _run_pipeline(
+    result: DecisionResult,
+    intent: IntentResult,
+    user_input: str,
+    pid: int,
+) -> DecisionResult:
+    """执行数据加载 → 前置校验 → 规则校验 → 信号生成 → LLM推理。"""
 
     # ── Step 2: 数据加载 ─────────────────────────────────────────────────────
     try:
@@ -171,7 +134,6 @@ def run(
         result.data = loaded
         result.stage = FlowStage.LOADED
     except ValueError as e:
-        # 非法字段值（如负数百分比）→ 明确报错，不静默降级
         result.stage = FlowStage.ABORTED
         result.aborted_reason = f"⚠️ 数据异常：{e}"
         return result
@@ -180,7 +142,6 @@ def run(
         result.aborted_reason = f"数据加载失败：{e}"
         return result
 
-    # 歧义匹配 → 提示用户确认，不默认选第一个
     if loaded.ambiguous_matches:
         names = "、".join(p.name for p in loaded.ambiguous_matches)
         result.stage = FlowStage.ABORTED
@@ -190,7 +151,6 @@ def run(
         )
         return result
 
-    # 数据 error 级告警 → 关键数据缺失，不应继续输出 BUY/HOLD/SELL
     if loaded.has_data_errors:
         error_msgs = "\n".join(
             f"- {w.message}" for w in loaded.data_warnings if w.level == "error"
@@ -217,27 +177,23 @@ def run(
     result.rules = rule_result
     result.stage = FlowStage.RULE_CHECK
 
-    # BUG-05 修复：空仓减仓/卖出 → 无效操作，明确中断（FlowStage=ABORTED）
-    _sell_actions = ("减仓判断", "卖出判断")
-    if rule_result.violation and rule_result.current_weight == 0.0 and intent.action_type in _sell_actions:
+    # 未持有该标的 + 非买入操作 → LLM 生成智能引导回复
+    # 买入/加仓不需要持仓，可继续正常分析；卖出/减仓/持有评估则应告知用户
+    _buy_actions = ("买入判断", "加仓判断")
+    if loaded.target_position is None and intent.action_type not in _buy_actions:
         asset_label = intent.asset or "该标的"
         result.stage = FlowStage.ABORTED
-        result.aborted_reason = (
-            f"⛔ 无效操作：当前未持有「{asset_label}」，无法执行 {intent.action_type}。\n\n"
-            f"请先确认持仓情况，或改为「买入判断」进行建仓分析。"
+        result.aborted_reason = llm_engine.respond_not_in_portfolio(
+            user_query=user_input,
+            asset_name=asset_label,
         )
         return result
-
-    # 其他规则违规（如仓位超限 + 加仓）→ 不中断，信号层体现 violation，LLM 据此给出 HOLD/SELL
 
     # ── Step 5: 信号生成 ─────────────────────────────────────────────────────
     sig = signal_engine.generate(loaded, intent, rule_result)
     result.signals = sig
     result.stage = FlowStage.SIGNAL
 
-    # ── Step 5.5: 数据一致性校验 ─────────────────────────────────────────────
-    # 确保 target_position.weight 与 rule_result.current_weight 完全一致；
-    # 如果出现偏差（理论上不应发生，属于数据管道 bug），中断最终结论。
     if loaded.target_position is not None:
         tp_weight = loaded.target_position.weight
         rule_weight = rule_result.current_weight

@@ -1,23 +1,25 @@
 """
 LLM 推理模块 (LLM Engine)
 
-职责：将结构化信号 + 规则 + 投研观点送入 Claude，获取最终投资建议。
+职责：将结构化信号 + 规则 + 投研观点送入 LLM，获取最终投资建议。
 
-使用模型：claude-sonnet-4-20250514（由 PRD 指定）
-System Prompt：固定（由 PRD 指定，不允许修改）
+使用模型：gpt-4.1（由 PRD 指定）
 
 输出格式（强约束）：
     {
-        "decision": "BUY / HOLD / SELL",
+        "decision": "BUY / HOLD / TAKE_PROFIT / REDUCE / SELL / STOP_LOSS",
         "reasoning": ["..."],
         "risk": ["..."],
         "strategy": ["..."]
     }
 
 UI 映射：
-    BUY  → 加仓
-    HOLD → 观望
-    SELL → 减仓
+    BUY         → 加仓
+    HOLD        → 观望
+    TAKE_PROFIT → 部分止盈
+    REDUCE      → 逐步减仓
+    SELL        → 减仓/清仓
+    STOP_LOSS   → 止损离场
 
 异常处理：
     - API 调用失败 → 返回默认 HOLD 结果 + 提示
@@ -27,7 +29,6 @@ UI 映射：
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -35,16 +36,32 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Optional
 
-import anthropic
-import httpx
+import openai
 
 from .data_loader import LoadedData
-from .intent_parser import IntentResult
+from .types import IntentResult
 from .rule_engine import RuleResult
 from .signal_engine import SignalResult
 
 
 # ── 数据类 ────────────────────────────────────────────────────────────────────
+
+@dataclass
+class GenericLLMResult:
+    """
+    非 PositionDecision 意图的 LLM 结果。
+    适用于：PortfolioReview / AssetAllocation / PerformanceAnalysis
+    """
+    intent_type: str                              # portfolio_review / asset_allocation / performance_analysis
+    chat_answer: str                              # 左侧对话框展示文本
+    raw_payload: dict = field(default_factory=dict)  # 完整 JSON 解析结果，供右侧面板使用
+    raw_output: str = ""
+    error: Optional[str] = None
+
+    @property
+    def is_fallback(self) -> bool:
+        return self.error is not None
+
 
 @dataclass
 class LLMResult:
@@ -53,6 +70,7 @@ class LLMResult:
     reasoning: list[str]       # 推理依据列表
     risk: list[str]            # 风险提示列表
     strategy: list[str]        # 操作策略建议列表
+    chat_answer: str = ""      # 面向用户的自然语言对话回答（左侧面板直接展示）
     raw_output: str = ""       # LLM 原始输出（调试用）
     error: Optional[str] = None  # 异常时的错误描述
     # BUG-04 修复：记录决策是否经过自动修正
@@ -62,11 +80,25 @@ class LLMResult:
     @property
     def decision_cn(self) -> str:
         """决策结论的中文映射。"""
-        return {"BUY": "加仓", "HOLD": "观望", "SELL": "减仓"}.get(self.decision, "观望")
+        return {
+            "BUY":         "加仓",
+            "HOLD":        "观望",
+            "TAKE_PROFIT": "部分止盈",
+            "REDUCE":      "逐步减仓",
+            "SELL":        "减仓/清仓",
+            "STOP_LOSS":   "止损离场",
+        }.get(self.decision, "观望")
 
     @property
     def decision_emoji(self) -> str:
-        return {"BUY": "📈", "HOLD": "🔍", "SELL": "📉"}.get(self.decision, "🔍")
+        return {
+            "BUY":         "📈",
+            "HOLD":        "🔍",
+            "TAKE_PROFIT": "💰",
+            "REDUCE":      "📉",
+            "SELL":        "🚨",
+            "STOP_LOSS":   "🛑",
+        }.get(self.decision, "🔍")
 
     @property
     def is_fallback(self) -> bool:
@@ -74,69 +106,188 @@ class LLMResult:
         return self.error is not None
 
 
-# ── System Prompt（PRD 固定，不允许修改）────────────────────────────────────
+# ── 基础 Prompt（所有意图共用）───────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """你是一个专业的投资决策助手。
+_BASE_PROMPT = """你是 WealthPilot 的私人投资顾问，帮助用户基于真实持仓数据做出更理性的投资决策。
 
-你需要基于：
-- 用户持仓情况
-- 投资纪律
-- 投研观点
-- 信号层分析结果
-
-提供理性、克制、可解释的投资建议。
-
-要求：
-1. 不得使用绝对性表达（如"必须买入"）
-2. 必须给出理由
-3. 必须提示风险
+通用规范（所有意图均适用）：
+1. 不得使用绝对性表达（如"必须买入"、"一定会涨"）
+2. 建议必须有依据，不得凭空推断
+3. 涉及具体操作时，必须说明风险
 4. 输出语言为中文
-5. 风格类似投顾报告，简洁理性
+5. 分析只能基于系统提供的数据，数据中未提供的内容不得推测或补全
+6. 本系统输出仅供参考，不构成投资建议
+7. markdown 加粗规范：只对关键数字和结论词加粗（如 **34.9%**、**观望**），禁止对完整句子加粗；加粗标记前后须紧邻空格或标点，禁止直接贴合中文字符（错误：浮亏**-31.4%**，正确：浮亏 **-31.4%** ，）"""
+
+
+# ── 意图专属 Prompt ───────────────────────────────────────────────────────────
+# 调用时拼接：_BASE_PROMPT + "\n\n" + _XXXX_PROMPT
+# ─────────────────────────────────────────────────────────────────────────────
+
+_POSITION_DECISION_PROMPT = """当前任务：单标的决策（PositionDecision）
+判断用户对某一具体标的的操作是否合适（加仓/减仓/买入/卖出/持有），输出结构化建议。
 
 输出格式（严格 JSON，不含任何其他文字）：
 {
   "decision": "BUY 或 HOLD 或 SELL",
-  "reasoning": ["推理依据1", "推理依据2", "推理依据3"],
-  "risk": ["风险提示1", "风险提示2"],
-  "strategy": ["操作建议1", "操作建议2"]
+  "reasoning": ["核心推理依据，有几条写几条（2-5条），每条说清一个判断逻辑，不超过60字"],
+  "risk": ["核心风险点，有几条写几条（上限3条），每条说清一个要点，不超过60字"],
+  "strategy": ["操作建议，有几条写几条（上限3条），每条说清一个要点，不超过60字"],
+  "chat_answer": "见下方写作要求"
 }
 
-decision 只能是 BUY / HOLD / SELL 三选一。
-每个列表项控制在 40 字以内，简洁有力。"""
+decision 从以下6个选项中选一个，选最精准的那个：
+- BUY：基本面向好，仓位有空间，适合加仓或新建仓
+- HOLD：信号中性，当前仓位合理，建议维持观望
+- TAKE_PROFIT：已有较大浮盈，建议锁定部分收益（减仓幅度有限，仍看好后市）
+- REDUCE：风险上升或仓位过重，建议分批降低仓位（比 SELL 更保守）
+- SELL：基本面恶化或超出纪律上限，建议大幅减仓乃至清仓
+- STOP_LOSS：已出现明显亏损且下行风险未解除，建议止损出场
+
+chat_answer 写作要求：
+
+语气：用"您"直接对用户说，像私人投顾在当面解释，不是AI在出具报告。开头直接进入正题，禁止用"综合来看""根据系统""综合分析"等套话开场。
+
+结构（三段，不要输出段落标题）：
+
+第一段（2-3句）：先给出结论，然后用一句话说清楚最关键的理由。好的开头示例："您的理想汽车仓位已经到了34.9%…" / "发布会前加仓这个想法可以理解，但…" / "目前不建议加仓，主要是仓位的问题。"
+
+第二段（3-4句）：用实际数据说明判断依据，语言自然连贯，不要列表。涵盖有价值的维度：持仓仓位和收益情况、距纪律上限还有多少空间、信号层里有判断价值的项（如基本面、事件不确定性）、投研观点（有则引用：[用户录入] 的内容优先引用，[联网参考] 的内容作补充参考；无则跳过）。
+
+第三段（2-3句）：说清楚主要风险在哪，操作建议只基于系统已有数据，不编造具体数字。结尾给一个具体的观察点或行动触发条件，例如"等发布会后看交付数据再决定"。
+
+整体字数控制在 300-500 字。禁止重复 reasoning/risk/strategy 字段的原文。"""
+
+
+_PORTFOLIO_REVIEW_PROMPT = """当前任务：组合评估（PortfolioReview）
+评估用户整体投资组合的结构健康度，包括集中度、风险敞口、资产配比、是否需要再平衡。
+
+输出格式（严格 JSON，不含任何其他文字）：
+{
+  "risk_level": "高 或 中 或 低",
+  "key_findings": ["整体组合的核心发现，2-4条，每条不超过60字"],
+  "concentration_issues": ["集中度问题，有则列出，无则空数组，每条不超过60字"],
+  "rebalance_needed": true 或 false,
+  "rebalance_suggestions": ["调仓方向建议，有则列出（上限3条），无则空数组，每条不超过60字"],
+  "chat_answer": "见下方写作要求"
+}
+
+chat_answer 写作要求：
+
+语气：用"您"直接对用户说，像私人投顾在当面解释。开头直接进入正题，禁止套话。
+
+结构（三段，不要输出段落标题）：
+
+第一段（2-3句）：先给出对整体组合状态的判断，点明最核心的问题或亮点。
+
+第二段（3-4句）：用数据说明具体情况，涵盖有价值的维度：集中度是否过高、资产类别分布是否合理、整体风险水平、主要持仓的表现。
+
+第三段（2-3句）：说明是否需要调仓，以及调整的方向和优先级，操作建议只基于系统已有数据。
+
+整体字数控制在 300-500 字。"""
+
+
+_ASSET_ALLOCATION_PROMPT = """当前任务：资产配置（AssetAllocation）
+根据用户的资金规模、风险偏好、投资目标，给出资产配置方向建议。
+
+输出格式（严格 JSON，不含任何其他文字）：
+{
+  "allocation_principles": ["配置原则，2-4条，每条不超过60字"],
+  "allocation_suggestions": [
+    {"asset_class": "资产类别", "direction": "增加 或 维持 或 减少", "rationale": "理由，不超过60字"}
+  ],
+  "risks": ["主要风险点，上限3条，每条不超过60字"],
+  "chat_answer": "见下方写作要求"
+}
+
+注意：allocation_suggestions 只给方向性建议，不编造系统数据之外的具体比例数字。
+
+chat_answer 写作要求：
+
+语气：用"您"直接对用户说，像私人投顾在当面解释。开头直接进入正题，禁止套话。
+
+结构（三段，不要输出段落标题）：
+
+第一段（2-3句）：基于用户的风险偏好和投资目标，说明配置的总体方向和首要原则。
+
+第二段（3-4句）：结合用户当前持仓，说明哪些方向值得增加、哪些需要控制，说清楚理由。
+
+第三段（2-3句）：说明主要风险和注意事项，提示分散化和纪律执行的重要性。
+
+整体字数控制在 300-500 字。"""
+
+
+_PERFORMANCE_ANALYSIS_PROMPT = """当前任务：收益分析（PerformanceAnalysis）
+分析用户投资组合的盈亏情况，找出收益驱动因素和亏损来源，给出改进方向。
+
+输出格式（严格 JSON，不含任何其他文字）：
+{
+  "summary": "整体收益情况一句话概括，不超过40字",
+  "key_drivers": ["收益主要驱动因素，2-4条，每条不超过60字"],
+  "loss_reasons": ["主要亏损或拖累来源，有则列出（上限3条），无则空数组，每条不超过60字"],
+  "improvement_suggestions": ["改进建议，1-3条，每条不超过60字"],
+  "chat_answer": "见下方写作要求"
+}
+
+chat_answer 写作要求：
+
+语气：用"您"直接对用户说，像私人投顾在当面解释。开头直接进入正题，禁止套话。
+
+结构（三段，不要输出段落标题）：
+
+第一段（2-3句）：先给出整体收益状态的判断，点出最关键的亮点或问题。
+
+第二段（3-4句）：分别说明主要盈利来源和主要拖累来源，引用具体数据（收益率、占比等）。
+
+第三段（2-3句）：给出可以改进的方向，只基于数据中实际存在的问题，不编造建议。
+
+整体字数控制在 300-500 字。"""
+
+
+_NOT_IN_PORTFOLIO_PROMPT = """当前情况：用户询问了某只股票的投资操作（卖出/止损/持有判断），但系统在他的持仓记录中未找到该标的。
+
+你的任务：生成一段自然、有帮助的引导回复。
+
+回复结构（三段，不输出段落标题）：
+
+第一段（1-2句）：确认你理解了用户的问题，说清楚他问的是哪只股票以及他描述的情况（亏损/涨跌等）。
+
+第二段（2-3句）：说明在他的持仓记录里没有找到这只股票的数据，给出两条路径——
+路径一：如果已经持有但尚未录入，引导去「投资账户总览」页面添加持仓，录入后系统就能基于实际成本和仓位给出准确分析。
+路径二：如果想做通用参考分析，可以直接告诉我持仓数量和成本价，我可以帮你推演。
+
+第三段（1句）：简短收尾，引导用户选择一条路径继续。
+
+要求：
+- 语气直接友好，用"您"
+- 不使用套话（"很遗憾"、"根据系统数据"、"综合来看"）
+- 不在没有持仓数据的情况下给出具体买卖结论
+- 字数控制在 150-250 字"""
+
+
+_GENERAL_CHAT_PROMPT = """当前任务：通用问答（GeneralChat / Education）
+回答用户的投资知识问题或日常对话，不进入结构化决策流程，不输出 JSON。
+
+规则：
+- 回答自然、友好、有帮助，适当引用知识背景或市场常识举例说明
+- 如果问题涉及用户的具体持仓操作（加仓/减仓/买入/卖出），引导用户直接描述操作意图，系统会自动进入决策流程
+- 禁止输出结构化 JSON 或模板化结论
+- 不提供针对具体持仓的买卖建议（当前上下文中没有持仓数据）
+- 如果是投教类问题，结合实际例子解释，帮助用户建立认知"""
 
 
 # ── 客户端（懒加载）──────────────────────────────────────────────────────────
 
-_client: Optional[anthropic.Anthropic] = None
+_client: Optional[openai.OpenAI] = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> openai.OpenAI:
     global _client
     if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise EnvironmentError("未找到 ANTHROPIC_API_KEY 环境变量。")
-
-        # 与 intent_parser 相同的 proxy 修复：避免 Streamlit ScriptRunnerThread 无 event loop
-        try:
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-
-        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-        all_proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
-        proxy_url = None
-        if https_proxy and not https_proxy.startswith("socks"):
-            proxy_url = https_proxy
-        elif all_proxy:
-            proxy_url = all_proxy
-
-        try:
-            http_client = httpx.Client(proxy=proxy_url) if proxy_url else httpx.Client()
-            _client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
-        except Exception:
-            _client = anthropic.Anthropic(api_key=api_key)
-
+            raise EnvironmentError("未找到 OPENAI_API_KEY 环境变量。")
+        _client = openai.OpenAI(api_key=api_key)
     return _client
 
 
@@ -150,7 +301,7 @@ def reason(
     signals: SignalResult,
 ) -> LLMResult:
     """
-    调用 Claude 进行投资推理。
+    调用 LLM 进行投资推理。
 
     Args:
         user_query: 用户原始输入
@@ -167,32 +318,29 @@ def reason(
 
     try:
         client = _get_client()
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+        response = client.chat.completions.create(
+            model="gpt-4.1",
             max_tokens=1024,
-            system=_SYSTEM_PROMPT,
+            timeout=30,
             messages=[
-                {
-                    "role": "user",
-                    "content": json.dumps(payload, ensure_ascii=False, indent=2)
-                }
-            ]
+                {"role": "system", "content": _BASE_PROMPT + "\n\n" + _POSITION_DECISION_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+            ],
         )
-        raw = response.content[0].text.strip()
+        raw = response.choices[0].message.content.strip()
         parsed = _extract_json(raw)
         return _build_result(parsed, raw)
 
     except EnvironmentError as e:
         return _fallback_result(str(e), "HOLD")
 
-    except anthropic.APITimeoutError:
+    except openai.APITimeoutError:
         return _fallback_result("系统繁忙，请稍后再试。", "HOLD")
 
-    except anthropic.APIError as e:
+    except openai.APIError as e:
         return _fallback_result(f"API 调用失败：{e}", "HOLD")
 
     except (json.JSONDecodeError, ValueError, KeyError) as e:
-        # JSON 解析失败：降级为 HOLD
         return _fallback_result(f"推理结果解析失败，默认给出观望建议。（{type(e).__name__}）", "HOLD")
 
     except Exception as e:
@@ -251,7 +399,6 @@ def _build_payload(
             "max_single_position": f"{data.rules.max_single_position:.0%}",
             "min_cash_pct": f"{data.rules.min_cash_pct:.0%}",
             "rule_check": {
-                "position_ratio": f"{rule_result.position_ratio:.0%}",
                 "violation": rule_result.violation,
                 "warning": rule_result.warning,
             },
@@ -265,28 +412,110 @@ def _build_payload(
     }
 
 
+def _sanitize_json_strings(text: str) -> str:
+    """
+    将 JSON 字符串值内的原生控制字符转义。
+
+    LLM 有时在 chat_answer 等字段里写入真实换行符/制表符，
+    这在 JSON 规范中是非法的，会导致 json.loads 失败。
+    此函数只处理字符串值内部，不影响 JSON 结构字符。
+    """
+    result = []
+    in_string = False
+    escape_next = False
+    _ESCAPE = {'\n': '\\n', '\r': '\\r', '\t': '\\t'}
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            result.append(ch)
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            result.append(ch)
+            continue
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+        if in_string and ch in _ESCAPE:
+            result.append(_ESCAPE[ch])
+            continue
+        result.append(ch)
+    return ''.join(result)
+
+
+def _bracket_extract(text: str) -> Optional[str]:
+    """
+    用括号计数法从文本中定位第一个完整 JSON 对象的字符串范围。
+    返回该子串，或 None（找不到平衡的 {}）。
+    支持任意嵌套深度。
+    """
+    start = text.find('{')
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def _extract_json(text: str) -> dict:
-    """从 LLM 输出中稳健提取 JSON，兼容多种输出格式。"""
-    # 尝试直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    """
+    从 LLM 输出中稳健提取 JSON，兼容多种输出格式。
 
-    # 提取 ```json ... ``` 代码块
-    block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    解析优先级：
+    1. 直接解析
+    2. 去掉 ```json``` 包装后解析
+    3. 括号计数法定位 JSON 边界后解析
+    4. 上述任一步骤失败时，对字符串内控制字符转义后重试
+    """
+    def _try_loads(s: str) -> Optional[dict]:
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            pass
+        # 控制字符转义后重试（处理 chat_answer 里的原生换行符等）
+        try:
+            return json.loads(_sanitize_json_strings(s))
+        except json.JSONDecodeError:
+            return None
+
+    # Step 1: 直接解析
+    result = _try_loads(text)
+    if result is not None:
+        return result
+
+    # Step 2: 去掉 ```json ... ``` 包装
+    block = re.search(r'```(?:json)?\s*(\{.*?})\s*```', text, re.DOTALL)
     if block:
-        return json.loads(block.group(1))
+        result = _try_loads(block.group(1))
+        if result is not None:
+            return result
 
-    # 提取第一个完整 { ... }
-    brace = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', text, re.DOTALL)
-    if brace:
-        return json.loads(brace.group())
-
-    # 最后尝试：提取任意 { ... } 块
-    all_braces = re.search(r'\{.*\}', text, re.DOTALL)
-    if all_braces:
-        return json.loads(all_braces.group())
+    # Step 3: 括号计数法定位 JSON 边界
+    candidate = _bracket_extract(text)
+    if candidate:
+        result = _try_loads(candidate)
+        if result is not None:
+            return result
 
     raise ValueError(f"无法提取 JSON，原始输出：{text[:300]}")
 
@@ -297,9 +526,10 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
     decision = raw_decision.upper()
 
     # BUG-04 修复：检测并记录非标准决策被自动修正的情况
+    _VALID_DECISIONS = {"BUY", "HOLD", "TAKE_PROFIT", "REDUCE", "SELL", "STOP_LOSS"}
     decision_corrected = False
     original_decision: Optional[str] = None
-    if decision not in ("BUY", "HOLD", "SELL"):
+    if decision not in _VALID_DECISIONS:
         decision_corrected = True
         original_decision = raw_decision
         decision = "HOLD"
@@ -316,6 +546,7 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
         reasoning=_to_list(parsed.get("reasoning", [])),
         risk=_to_list(parsed.get("risk", [])),
         strategy=_to_list(parsed.get("strategy", [])),
+        chat_answer=str(parsed.get("chat_answer", "") or ""),
         raw_output=raw,
         decision_corrected=decision_corrected,
         original_decision=original_decision,
@@ -324,13 +555,7 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
 
 # ── general_chat 普通对话 ───────────────────────────────────────────────────────
 
-_CHAT_SYSTEM_PROMPT = """你是 WealthPilot 的投资助手，负责回答用户的日常问题。
-
-规则：
-- 回答自然、友好、简洁
-- 如果问题涉及具体的买入/卖出/加仓/减仓操作，引导用户直接在对话框中描述操作意图，系统会自动进入决策流程
-- 禁止输出【结论】【原因】【建议】格式的结构化投资决策
-- 不提供任何形式的具体买卖建议"""
+# _GENERAL_CHAT_PROMPT 已在上方意图专属 Prompt 区统一定义
 
 
 def chat(user_query: str, context: Optional[list] = None) -> str:
@@ -355,13 +580,13 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
 
     try:
         client = _get_client()
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # 普通对话用轻量模型
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
             max_tokens=512,
-            system=_CHAT_SYSTEM_PROMPT,
-            messages=messages,
+            timeout=20,
+            messages=[{"role": "system", "content": _BASE_PROMPT + "\n\n" + _GENERAL_CHAT_PROMPT}] + messages,
         )
-        return response.content[0].text.strip()
+        return response.choices[0].message.content.strip()
     except EnvironmentError:
         return "⚙️ 未配置 API Key，无法回复。"
     except Exception as e:
@@ -370,102 +595,130 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
         return "抱歉，系统暂时繁忙，请稍后再试。"
 
 
-# ── 左侧 Chat 自然语言回答生成 ────────────────────────────────────────────────
 
-_CHAT_ANSWER_SYSTEM = """你是 WealthPilot 个人投资助手。请用 1-2 段自然语言解释这个投资建议。
+def _build_portfolio_payload(user_query: str, data: LoadedData) -> dict:
+    """构建组合级别 LLM payload（PortfolioReview / AssetAllocation / PerformanceAnalysis 共用）"""
+    top_positions = sorted(data.positions, key=lambda p: p.weight, reverse=True)[:10]
+    holdings = [
+        {
+            "name": p.name,
+            "weight": f"{p.weight:.1%}",
+            "asset_class": p.asset_class,
+            "profit_loss_rate": f"{p.profit_loss_rate:.1%}",
+            "market_value_cny": f"¥{p.market_value_cny:,.0f}",
+        }
+        for p in top_positions
+    ]
+    return {
+        "user_query": user_query,
+        "portfolio": {
+            "total_assets_cny": f"¥{data.total_assets:,.0f}",
+            "holding_count": len(data.positions),
+            "holdings": holdings,
+        },
+        "rules": {
+            "max_single_position": f"{data.rules.max_single_position:.0%}",
+            "max_equity_pct": f"{data.rules.max_equity_pct:.0%}",
+            "min_cash_pct": f"{data.rules.min_cash_pct:.0%}",
+        },
+        "user_profile": {
+            "risk_level": data.profile.risk_level,
+            "goal": data.profile.goal,
+        },
+    }
 
-输出格式（严格执行）：
-- 第一段：直接说明建议结论（加仓/观望/减仓），结合持仓比例或关键事件说清楚为什么，1-2句
-- 第二段（可选）：补充核心推理依据，引用实际数据（仓位 X%、纪律上限 Y%、收益率 Z%等），1-2句
 
-禁止：
-- 输出"操作建议"、"风险提示"等小标题（由系统单独展示，禁止重复）
-- 以套话（"综合分析"、"根据系统"等）开头
-- 机械复述上面的 reasoning 列表
-
-要求：字数 60-120 字，语气克制，像私人投顾在解释，不是 AI 在汇报"""
-
-
-def generate_chat_answer(
-    user_query: str,
-    intent,       # IntentResult
-    data,         # LoadedData | None
-    rules,        # RuleResult | None
-    llm_result,   # LLMResult
-) -> str:
-    """
-    基于完整决策链路结果，生成面向用户的自然语言对话回答。
-    使用 Sonnet 模型（质量优先）。失败时返回简洁 fallback 文本。
-    """
-    asset = (intent.asset or "该标的") if intent else "该标的"
-    decision_cn = {"BUY": "加仓", "HOLD": "观望", "SELL": "减仓"}.get(
-        llm_result.decision, "观望"
-    )
-
-    # 持仓上下文
-    if data and data.target_position:
-        tp = data.target_position
-        pos_desc = (
-            f"{asset} 当前仓位 {tp.weight:.1%}，"
-            f"市值约 ¥{tp.market_value_cny:,.0f}，"
-            f"持仓收益率 {tp.profit_loss_rate:+.1%}"
-        )
-    else:
-        pos_desc = f"当前未持有 {asset}（新建仓场景）"
-
-    # 纪律约束
-    if rules:
-        if rules.violation:
-            rule_desc = (
-                f"仓位已超限：当前 {rules.current_weight:.1%}，"
-                f"上限 {rules.max_position:.1%}，已超出 {rules.current_weight - rules.max_position:.1%}"
-            )
-        elif rules.warning:
-            rule_desc = f"仓位接近上限：当前 {rules.current_weight:.1%}，上限 {rules.max_position:.1%}"
-        else:
-            rule_desc = f"仓位合规：当前 {rules.current_weight:.1%}，上限 {rules.max_position:.1%}"
-    else:
-        rule_desc = "无规则数据"
-
-    reasoning_text = "\n".join(f"- {r}" for r in llm_result.reasoning) if llm_result.reasoning else "（无）"
-    strategy_text  = "\n".join(f"- {s}" for s in llm_result.strategy)  if llm_result.strategy  else "（无）"
-    risk_text      = "\n".join(f"- {r}" for r in llm_result.risk)      if llm_result.risk      else "（无）"
-
-    user_content = f"""用户问题：{user_query}
-
-系统决策建议：{decision_cn}（{llm_result.decision}）
-
-持仓情况：{pos_desc}
-纪律约束：{rule_desc}
-
-AI 推理依据：
-{reasoning_text}
-
-操作建议：
-{strategy_text}
-
-风险提示：
-{risk_text}
-
-请基于以上完整信息，用自然对话方式向用户解释这个决策建议。"""
-
+def _call_generic_llm(
+    intent_type: str,
+    prompt: str,
+    payload: dict,
+) -> GenericLLMResult:
+    """通用 LLM 调用，供组合级别意图共用。"""
     try:
         client = _get_client()
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=800,
-            system=_CHAT_ANSWER_SYSTEM,
-            messages=[{"role": "user", "content": user_content}],
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            max_tokens=1024,
+            timeout=30,
+            messages=[
+                {"role": "system", "content": _BASE_PROMPT + "\n\n" + prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+            ],
         )
-        return resp.content[0].text.strip()
+        raw = response.choices[0].message.content.strip()
+        parsed = _extract_json(raw)
+        return GenericLLMResult(
+            intent_type=intent_type,
+            chat_answer=str(parsed.get("chat_answer", "") or ""),
+            raw_payload=parsed,
+            raw_output=raw,
+        )
+    except EnvironmentError as e:
+        return _fallback_generic(intent_type, str(e))
+    except openai.APITimeoutError:
+        return _fallback_generic(intent_type, "系统繁忙，请稍后再试。")
+    except openai.APIError as e:
+        return _fallback_generic(intent_type, f"API 调用失败：{e}")
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        return _fallback_generic(intent_type, f"推理结果解析失败。（{type(e).__name__}）")
+    except Exception as e:
+        return _fallback_generic(intent_type, f"未知错误：{type(e).__name__}：{e}")
+
+
+def review_portfolio(user_query: str, data: LoadedData) -> GenericLLMResult:
+    """组合评估 LLM 推理（PortfolioReview）"""
+    payload = _build_portfolio_payload(user_query, data)
+    return _call_generic_llm("portfolio_review", _PORTFOLIO_REVIEW_PROMPT, payload)
+
+
+def analyze_allocation(user_query: str, data: LoadedData) -> GenericLLMResult:
+    """资产配置 LLM 推理（AssetAllocation）"""
+    payload = _build_portfolio_payload(user_query, data)
+    return _call_generic_llm("asset_allocation", _ASSET_ALLOCATION_PROMPT, payload)
+
+
+def analyze_performance(user_query: str, data: LoadedData) -> GenericLLMResult:
+    """收益分析 LLM 推理（PerformanceAnalysis）"""
+    payload = _build_portfolio_payload(user_query, data)
+    return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload)
+
+
+def _fallback_generic(intent_type: str, error_msg: str) -> GenericLLMResult:
+    """组合级别意图的降级结果。"""
+    return GenericLLMResult(
+        intent_type=intent_type,
+        chat_answer="",
+        raw_payload={},
+        error=error_msg,
+    )
+
+
+def respond_not_in_portfolio(user_query: str, asset_name: str) -> str:
+    """
+    生成"标的不在持仓中"的智能引导回复。
+
+    用于用户询问一个未录入持仓的标的时（通常是卖出/止损/持有类操作），
+    代替硬编码的错误信息，给出有帮助的引导。
+    """
+    context = f"用户原始问题：{user_query}\n识别到的标的：{asset_name}"
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            max_tokens=512,
+            timeout=20,
+            messages=[
+                {"role": "system", "content": _BASE_PROMPT + "\n\n" + _NOT_IN_PORTFOLIO_PROMPT},
+                {"role": "user", "content": context},
+            ],
+        )
+        return response.choices[0].message.content.strip()
     except Exception:
-        # Fallback：简洁直接，不用机械模板
-        tb_lines = traceback.format_exc()
-        print(f"[llm_engine.generate_chat_answer] 失败:\n{tb_lines}", flush=True)
-        reasons = "；".join(llm_result.reasoning[:2]) if llm_result.reasoning else ""
         return (
-            f"**{asset}** 当前建议**{decision_cn}**。"
-            + (f"\n\n{reasons}。" if reasons else "")
+            f"我在您的持仓记录中没有找到 **{asset_name}** 的数据。\n\n"
+            f"如果您已在其他平台持有但尚未录入，可以先在「投资账户总览」中添加持仓信息，"
+            f"之后系统就能基于您的实际成本和仓位给出更准确的分析。\n\n"
+            f"或者，您可以直接告诉我持仓数量和成本价，我可以帮您做参考推演。"
         )
 
 
@@ -476,6 +729,7 @@ def _fallback_result(error_msg: str, decision: str = "HOLD") -> LLMResult:
         reasoning=["当前无法完成 AI 推理，建议保持观望。"],
         risk=["请稍后重试，或手动评估当前持仓风险。"],
         strategy=["维持当前仓位，等待更多信息后再做决策。"],
+        chat_answer="",
         raw_output="",
         error=error_msg,
     )

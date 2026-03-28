@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from app.models import Portfolio, Position, Liability, get_session
 from app.config import DEVIATION_THRESHOLD, HIGH_SEVERITY_THRESHOLD
+from app.discipline.config import get_rules
 
 
 @dataclass
@@ -174,18 +175,31 @@ def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[Dev
         _check_range("另类资产", balance_sheet.alternative_pct,
                      portfolio.min_alternative_pct, portfolio.max_alternative_pct)
 
-        # ── 2. 纪律触发检测 ──
+        # ── 2. 纪律触发检测（阈值来自 app/discipline/config.py，与投资纪律页统一）──
+        _cfg_pos = get_rules()["single_asset_limits"]
+        _max_pct     = _cfg_pos["max_position_pct"] * 100       # 40%
+        _warning_pct = _cfg_pos["warning_position_pct"] * 100   # 30%
         for key, pct in balance_sheet.concentration.items():
             display_name = key.split(":", 1)[1]  # 剥掉 "id:" 前缀，取可读名称
-            if pct > portfolio.max_single_stock_pct:
+            if pct > _max_pct:
                 alerts.append(DeviationAlert(
                     alert_type="纪律触发",
                     severity="高",
                     title=f"单一持仓超限: {display_name}",
-                    description=f"{display_name} 占总资产 {pct}%，超过单一持仓上限 {portfolio.max_single_stock_pct}%。建议减仓至上限以下。",
+                    description=f"{display_name} 占总资产 {pct}%，超过单一持仓上限 {_max_pct:.0f}%。建议减仓至上限以下。",
                     current_value=pct,
-                    target_value=portfolio.max_single_stock_pct,
-                    deviation=pct - portfolio.max_single_stock_pct,
+                    target_value=_max_pct,
+                    deviation=pct - _max_pct,
+                ))
+            elif pct >= _warning_pct:
+                alerts.append(DeviationAlert(
+                    alert_type="纪律触发",
+                    severity="中",
+                    title=f"单一持仓警戒区: {display_name}",
+                    description=f"{display_name} 占总资产 {pct}%，进入警戒区（{_warning_pct:.0f}%~{_max_pct:.0f}%）。禁止继续加仓。",
+                    current_value=pct,
+                    target_value=_warning_pct,
+                    deviation=pct - _warning_pct,
                 ))
 
         # ── 3. 风险暴露检测 ──

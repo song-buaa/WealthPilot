@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .data_loader import LoadedData
-from .intent_parser import IntentResult
+from .types import IntentResult
 from .rule_engine import RuleResult
 
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
@@ -13,7 +14,7 @@ from typing import Optional
 
 from app.models import Position, Liability, get_session
 from app.state import portfolio_id
-from app.discipline.config import RULES
+from app.discipline.config import get_rules, save_rules_config, reset_rules_to_default
 from app.discipline.models import (
     PortfolioState, PositionState, MarketContext,
     UserState, TradeAction,
@@ -97,7 +98,12 @@ def _load_positions(pid: int) -> list[dict]:
                 "platform": p.platform,
                 "asset_class": p.asset_class,
                 "market_value_cny": p.market_value_cny or 0.0,
-                "profit_loss_rate": p.profit_loss_rate or 0.0,
+                # 与 position_aggregator 一致：profit / cost（不用 DB 存储的 profit_loss_rate，避免口径不一致）
+                "profit_loss_rate": (
+                    (p.profit_loss_value / ((p.market_value_cny or 0.0) - p.profit_loss_value) * 100)
+                    if p.profit_loss_value and (p.market_value_cny or 0.0) - p.profit_loss_value != 0
+                    else 0.0
+                ),
                 "profit_loss_value": p.profit_loss_value or 0.0,
                 "is_leverage_etf": _is_leverage_etf(p),
             }
@@ -108,23 +114,25 @@ def _load_positions(pid: int) -> list[dict]:
 
 
 @st.cache_data(ttl=30)
-def _detect_level0_status(pid: int) -> tuple[bool, bool, bool]:
+def _detect_level0_status(pid: int) -> tuple[bool, bool, bool, float]:
     """
-    从 DB 自动检测规则1 Level 0 工具的使用情况。
-    返回 (has_credit, has_margin, has_options)
+    从 DB 检测规则1工具使用情况及总杠杆率。
+    返回 (has_credit, has_margin, has_options, leverage_ratio)
 
-    - has_credit : Liability.purpose == '投资杠杆' 且 amount > 0
-    - has_margin : 持仓名称含融资/融券关键词
-    - has_options: 持仓名称或代码含期权关键词
+    - has_credit     : Liability.purpose == '投资杠杆' 且 amount > 0
+    - has_margin     : 持仓名称含融资/融券关键词
+    - has_options    : 持仓名称或代码含期权关键词
+    - leverage_ratio : 总资产 / 净资产（净资产 = 总资产 - 投资杠杆负债）
     """
     session = get_session()
     try:
-        # 信用贷/借贷投资
-        has_credit = session.query(Liability).filter(
+        liabilities = session.query(Liability).filter(
             Liability.portfolio_id == pid,
             Liability.purpose == "投资杠杆",
             Liability.amount > 0,
-        ).count() > 0
+        ).all()
+        has_credit       = len(liabilities) > 0
+        total_liabilities = sum(lb.amount for lb in liabilities)
 
         positions = session.query(Position).filter_by(
             portfolio_id=pid, segment="投资"
@@ -137,7 +145,11 @@ def _detect_level0_status(pid: int) -> tuple[bool, bool, bool]:
         has_margin  = any(_match(p, _MARGIN_KEYWORDS)  for p in positions)
         has_options = any(_match(p, _OPTIONS_KEYWORDS) for p in positions)
 
-        return has_credit, has_margin, has_options
+        total_assets = sum(p.market_value_cny or 0.0 for p in positions)
+        net_assets   = total_assets - total_liabilities
+        leverage_ratio = (total_assets / max(net_assets, 1.0)) if total_assets > 0 else 1.0
+
+        return has_credit, has_margin, has_options, leverage_ratio
     finally:
         session.close()
 
@@ -227,11 +239,13 @@ def _render_dashboard(
     has_margin: bool = False,
     has_options: bool = False,
     has_credit: bool = False,
+    leverage_ratio: float = 1.0,
 ) -> None:
-    cfg_cb = RULES["portfolio_circuit_breaker"]
-    cfg_liq = RULES["liquidity_limits"]
-    cfg_pos = RULES["single_asset_limits"]
-    cfg_alloc = RULES["asset_allocation_ranges"]
+    rules     = get_rules()
+    cfg_cb    = rules["portfolio_circuit_breaker"]
+    cfg_liq   = rules["liquidity_limits"]
+    cfg_pos   = rules["single_asset_limits"]
+    cfg_alloc = rules["asset_allocation_ranges"]
 
     total = sum(r["market_value_cny"] for r in raw) or 1.0
     cash = sum(r["market_value_cny"] for r in raw if r["asset_class"] == "货币")
@@ -259,13 +273,17 @@ def _render_dashboard(
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        etf_limit = RULES["leverage_limits"]["level_1_max_pct"]
+        lev_cfg   = rules["leverage_limits"]
+        etf_limit = lev_cfg["level_1_max_pct"]
+        lr_normal     = lev_cfg.get("leverage_ratio_normal_max",     1.05)
+        lr_acceptable = lev_cfg.get("leverage_ratio_acceptable_max", 1.20)
+        lr_warning    = lev_cfg.get("leverage_ratio_warning_max",    1.35)
+
+        # Level0：仅期权/高危衍生品（v1.4）
         level0_items = []
-        if has_margin:  level0_items.append("融资融券")
-        if has_options: level0_items.append("期权")
-        if has_credit:  level0_items.append("信用贷")
-        level0_violated = bool(level0_items)
-        level1_violated = etf > etf_limit
+        if has_options: level0_items.append("期权/高危衍生品")
+        level0_violated  = bool(level0_items)
+        level1_etf_over  = etf > etf_limit
 
         if level0_violated:
             st.metric("🔴 杠杆工具（规则1）", "Level0 违规",
@@ -273,15 +291,30 @@ def _render_dashboard(
             alerts.append(("error",
                 f"[规则1·Level0] 持有绝对禁止工具：{'、'.join(level0_items)}。"
                 "须立即清除，任何情况不得持有。"))
-        elif level1_violated:
+        elif leverage_ratio > lr_warning:
+            st.metric("🚨 杠杆工具（规则1）", f"{leverage_ratio:.2f}x",
+                      f"超限 > {lr_warning:.2f}x，强制去杠杆")
+            alerts.append(("error",
+                f"[规则1·杠杆超限] 总杠杆率 {leverage_ratio:.2f}x 超过上限 {lr_warning:.2f}x，"
+                f"须尽快降回 {lr_acceptable:.2f}x 以下。"))
+        elif leverage_ratio > lr_acceptable:
+            st.metric("⚠️ 杠杆工具（规则1）", f"{leverage_ratio:.2f}x",
+                      f"警戒区 {lr_acceptable:.2f}~{lr_warning:.2f}x，禁止新增杠杆")
+            alerts.append(("warning",
+                f"[规则1·杠杆警戒] 总杠杆率 {leverage_ratio:.2f}x 进入警戒区，"
+                "禁止新增任何杠杆，仅允许降杠杆操作。"))
+        elif leverage_ratio > lr_normal:
+            st.metric("🟡 杠杆工具（规则1）", f"{leverage_ratio:.2f}x",
+                      f"可接受 {lr_normal:.2f}~{lr_acceptable:.2f}x，避免长期维持")
+        elif level1_etf_over:
             st.metric("🟡 杠杆工具（规则1）", f"ETF {etf*100:.1f}%",
                       f"超过上限 {etf_limit*100:.0f}%")
             alerts.append(("warning",
-                f"[规则1·Level1] 杠杆ETF持仓 {etf*100:.1f}%"
-                f" 超过上限 {etf_limit*100:.0f}%，须减仓至上限以下。"))
+                f"[规则1·杠杆ETF] 持仓 {etf*100:.1f}% 超过上限 {etf_limit*100:.0f}%，"
+                "须减仓至上限以下。"))
         else:
-            st.metric("🟢 杠杆工具（规则1）", f"ETF {etf*100:.1f}%",
-                      f"上限 {etf_limit*100:.0f}%")
+            st.metric("🟢 杠杆工具（规则1）", f"{leverage_ratio:.2f}x",
+                      f"正常（≤ {lr_normal:.2f}x）")
 
     with c2:
         icon = _status_icon(max_weight, cfg_pos["warning_position_pct"],
@@ -1432,11 +1465,62 @@ _DEFAULT_HANDBOOK_MD = """\
 """
 
 
+_OFFICIAL_HANDBOOK_FILE = Path("data/handbook_official.md")
+_CUSTOM_HANDBOOK_FILE   = Path("data/handbook_custom.md")
+
+
+def _inject_rules_config_block(md: str) -> str:
+    """
+    若 Markdown 手册中缺少 <!-- RULES_CONFIG ... --> 块，
+    则将当前 get_rules() 的配置序列化后注入到文件顶部。
+    保证下载的文件始终携带可解析的规则配置。
+    """
+    if "<!-- RULES_CONFIG" in md:
+        return md  # 已有块，不重复注入
+    import json as _json
+    block = "<!-- RULES_CONFIG\n" + _json.dumps(get_rules(), ensure_ascii=False, indent=2) + "\n-->\n\n"
+    return block + md
+
+
+def _load_official_handbook() -> str:
+    """读取官方手册文件；文件缺失时回退到代码内置内容（保底）。"""
+    if _OFFICIAL_HANDBOOK_FILE.exists():
+        try:
+            return _OFFICIAL_HANDBOOK_FILE.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    return _DEFAULT_HANDBOOK_MD
+
+
+def _load_custom_handbook() -> str | None:
+    """读取用户个人定制手册，不存在则返回 None。"""
+    if _CUSTOM_HANDBOOK_FILE.exists():
+        try:
+            return _CUSTOM_HANDBOOK_FILE.read_text(encoding="utf-8")
+        except Exception:
+            return None
+    return None
+
+
+def _save_custom_handbook(content: str) -> None:
+    """将用户个人定制手册持久化到文件。"""
+    _CUSTOM_HANDBOOK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CUSTOM_HANDBOOK_FILE.write_text(content, encoding="utf-8")
+
+
+def _clear_custom_handbook() -> None:
+    """删除用户个人定制手册，恢复显示官方版本。"""
+    if _CUSTOM_HANDBOOK_FILE.exists():
+        _CUSTOM_HANDBOOK_FILE.unlink()
+
+
 def _parse_handbook_md(md: str) -> tuple[str, list[tuple[str, str]]]:
     """
     将手册 Markdown 解析为 (header_text, [(rule_title, rule_content), ...])。
     以 '\\n### ' 作为规则章节分隔符。
+    渲染前自动剥离 <!-- RULES_CONFIG ... --> 块，避免 JSON 显示在页面上。
     """
+    md = re.sub(r"<!--\s*RULES_CONFIG[\s\S]*?-->", "", md).strip()
     parts = md.split("\n### ")
     header = parts[0].strip()
     sections: list[tuple[str, str]] = []
@@ -1451,12 +1535,15 @@ def _parse_handbook_md(md: str) -> tuple[str, list[tuple[str, str]]]:
     return header, sections
 
 
+@st.fragment
 def _render_handbook() -> None:
-    # ── 确定内容来源（session_state 缓存上传内容）────────────
+    # ── 确定内容来源：session_state 做缓存，冷启动时从文件读 ────────────────
+    # 优先级：用户个人定制（handbook_custom.md）> 官方版本（handbook_official.md）
     if "handbook_uploaded_md" not in st.session_state:
-        st.session_state["handbook_uploaded_md"] = None
+        st.session_state["handbook_uploaded_md"] = _load_custom_handbook()
 
-    md_content = st.session_state["handbook_uploaded_md"] or _DEFAULT_HANDBOOK_MD
+    is_custom = st.session_state["handbook_uploaded_md"] is not None
+    md_content = st.session_state["handbook_uploaded_md"] if is_custom else _load_official_handbook()
 
     # ── 解析并渲染 ────────────────────────────────────────
     header, sections = _parse_handbook_md(md_content)
@@ -1482,29 +1569,76 @@ def _render_handbook() -> None:
             label_visibility="collapsed",
         )
         if uploaded is not None:
-            st.session_state["handbook_uploaded_md"] = uploaded.read().decode("utf-8")
-            st.rerun()
+            new_md = uploaded.read().decode("utf-8")
+            if new_md != st.session_state.get("handbook_uploaded_md"):
+                from app.discipline.handbook_parser import (
+                    parse_rules_from_markdown_text, apply_text_rules,
+                    validate_rules_config, diff_rules_config,
+                )
+                # ── 从人类可读文字中提取规则参数（用户改表格数字即可）──
+                text_rules = parse_rules_from_markdown_text(new_md)
+                current_rules = get_rules()
+
+                if text_rules:
+                    new_config = apply_text_rules(current_rules, text_rules)
+                    errors = validate_rules_config(new_config)
+                    if errors:
+                        st.error("❌ 检测到规则参数超出合理范围，请修正后重新上传：")
+                        for e in errors:
+                            st.error(f"  • {e}")
+                    else:
+                        changes = diff_rules_config(current_rules, new_config)
+                        if changes:
+                            st.warning("⚠️ 检测到以下规则参数变更，确认后将即时生效：")
+                            rows = [{"参数": c["label"], "当前值": c["old"],
+                                     "新值": c["new"], "影响": c["note"]} for c in changes]
+                            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                            if st.button("✅ 确认应用新手册", type="primary", key="confirm_upload"):
+                                save_rules_config(new_config)
+                                _save_custom_handbook(new_md)
+                                st.session_state["handbook_uploaded_md"] = new_md
+                                st.cache_data.clear()
+                                st.session_state["_return_to_handbook_tab"] = True
+                                st.rerun(scope="app")
+                        else:
+                            # 规则参数无变化（文字/格式更新），直接保存
+                            _save_custom_handbook(new_md)
+                            st.session_state["handbook_uploaded_md"] = new_md
+                            st.rerun(scope="fragment")
+                else:
+                    # 文字解析未提取到任何规则参数（格式完全不符），直接保存
+                    _save_custom_handbook(new_md)
+                    st.session_state["handbook_uploaded_md"] = new_md
+                    st.rerun(scope="fragment")
 
     with col_dl:
+        # 从手册第一行提取版本号作为文件名
+        first_line = md_content.strip().splitlines()[0] if md_content.strip() else ""
+        version_tag = first_line.lstrip("# ").strip().replace(" ", "_") or "investment_discipline_handbook"
         st.download_button(
             label="⬇️ 下载手册 .md",
             data=md_content,
-            file_name="investment_discipline_handbook.md",
+            file_name=f"{version_tag}.md",
             mime="text/markdown",
             use_container_width=True,
-            help="下载当前手册为 Markdown 文件，修改后可重新上传",
+            help="下载当前手册为 Markdown 文件，修改后可重新上传。RULES_CONFIG 块中的数值会被系统自动解析。",
         )
 
-    if st.session_state["handbook_uploaded_md"]:
+    if is_custom:
         col_tip, col_clear = st.columns([4, 1])
         with col_tip:
-            st.caption("📂 当前显示：已上传的自定义手册")
+            st.caption("📂 当前显示：个人定制版手册")
         with col_clear:
-            if st.button("恢复默认", use_container_width=True):
+            if st.button("恢复官方版", use_container_width=True):
+                _clear_custom_handbook()
+                reset_rules_to_default()
                 st.session_state["handbook_uploaded_md"] = None
-                st.rerun()
+                st.cache_data.clear()
+                st.session_state["_return_to_handbook_tab"] = True
+                st.rerun(scope="app")
     else:
-        st.caption("💡 可下载手册在本地编辑后重新上传，支持添加个人案例备注")
+        official_first = _load_official_handbook().strip().splitlines()[0].lstrip("# ").strip()
+        st.caption(f"📖 当前显示：官方版（{official_first}）· 可下载后编辑为个人定制版重新上传")
 
 
 # ─────────────────────────────────────────────────────────
@@ -1526,8 +1660,8 @@ def render() -> None:
     _total_pl   = sum(r.get("profit_loss_value", 0.0) for r in raw)
     portfolio_drawdown = (_total_pl / _total_cost) if _total_cost > 0 else 0.0
 
-    # 自动检测规则5 Level 0 违规（从 DB 读取，无需手动输入）
-    has_credit, has_margin, has_options = _detect_level0_status(portfolio_id)
+    # 自动检测规则1 Level 0 违规及总杠杆率（从 DB 读取，无需手动输入）
+    has_credit, has_margin, has_options, leverage_ratio = _detect_level0_status(portfolio_id)
 
     # 💡 交易前决策引导
     st.info(
@@ -1538,8 +1672,19 @@ def render() -> None:
 
     tab_dashboard, tab_handbook = st.tabs(["📊 账户风险仪表盘", "📖 纪律手册速查"])
 
+    # 手册规则更新后：做 app rerun（刷新仪表盘），再用 JS 点回手册 Tab
+    if st.session_state.pop("_return_to_handbook_tab", False):
+        import streamlit.components.v1 as _components
+        _components.html("""<script>
+        (function tryClick() {
+            var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+            if (tabs.length >= 2) { tabs[1].click(); }
+            else { setTimeout(tryClick, 100); }
+        })();
+        </script>""", height=0)
+
     with tab_dashboard:
-        _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit)
+        _render_dashboard(raw, portfolio_drawdown, has_margin, has_options, has_credit, leverage_ratio)
 
     with tab_handbook:
         _render_handbook()
