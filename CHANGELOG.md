@@ -4,6 +4,88 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.0.0] - 2026-04-04 - 全栈重写：React+FastAPI · 四核心模块完整落地 · 1.X 封板
+
+> **里程碑**：WealthPilot 1.X 阶段正式结束。本版本完成了从 Streamlit 单体到
+> React 19 + FastAPI 前后端分离架构的完整迁移，四个核心模块全部在新架构上落地
+> 并交付生产可用状态。后续迭代版本号记作 2.X。
+
+### Breaking Changes — 架构迁移
+
+- **前端**：从 Streamlit 完全迁移至 React 19 + Vite + TypeScript + Tailwind v4 SPA
+- **后端**：从 Streamlit 内嵌逻辑完全迁移至 FastAPI（RESTful API + SSE 流式接口）
+- **启动方式变更**：
+  - 旧：`streamlit run streamlit_app.py`
+  - 新：后端 `uvicorn backend.main:app --reload --port 8000` + 前端 `npm run dev`（`frontend/`）
+- **API 前缀**：所有接口统一走 `/api/*`，Vite dev server proxy 转发
+
+### Added — backend/（FastAPI 服务层，全新）
+
+- `backend/main.py`：FastAPI 应用入口，挂载四个路由模块
+- `backend/api/portfolio.py`：持仓聚合、净值/盈亏计算、资产分布、负债管理、风险告警、多格式导入（CSV/券商CSV/截图）
+- `backend/api/discipline.py`：纪律规则 CRUD、投资手册上传/重置、实时行为评估（SSE 兼容）
+- `backend/api/research.py`：观点库增删改查、研究文档上传解析（URL/PDF/文本）、研究卡片审批工作流
+- `backend/api/decision.py`：SSE 流式决策对话、Explain Panel 数据接口、会话生命周期管理
+- `backend/api/tasks.py`：后台异步任务状态查询
+- `backend/services/`：各模块业务逻辑层，对接原有 `app/`、`decision_engine/`、`intent_engine/` 核心引擎
+
+### Added — frontend/（React SPA，全新）
+
+**布局与导航**
+- `AppLayout.tsx`：固定侧边栏 + 内容区布局，路由 `/` `/discipline` `/research` `/decision`
+- `Sidebar.tsx`：带图标的导航菜单，活跃态高亮
+
+**Dashboard（投资账户总览）**
+- 净值/总资产/总负债/总盈亏四卡片，支持多货币折算
+- 资产配置饼图（Recharts），按资产类别展示权重
+- 持仓列表：分段筛选、盈亏着色、TOP持仓高亮
+- 负债列表：类别/用途/利率展示
+- 风险告警 Badge（warning/danger 分级）
+- AI 综合分析报告：SSE 流式生成，打字光标动画
+- 多格式数据导入：标准CSV、券商CSV（多平台适配）、截图OCR
+
+**Discipline（投资纪律）**
+- 纪律规则可视化：单标的上限/权益类上限/杠杆上限等关键规则展示
+- 规则编辑：JSON 直接编辑 + 重置为默认
+- 投资手册：上传 PDF/Markdown、在线预览、一键重置
+- 实时行为评估：输入操作意图，即时返回纪律校验结果（通过/阻断/警告）
+
+**Research（投研观点）**
+- 观点库：观点卡片列表，支持关键词搜索、新建/编辑/删除
+- 文档解析工作流：URL/PDF/文本三种输入方式 → LLM 提炼 → 研究卡片 → 一键审批为观点
+- 卡片详情：bull case/bear case/关键指标/风险/行动建议完整展示
+- 审批时支持字段覆写
+
+**Decision（投资决策）**
+- SSE 流式 AI 对话（左侧 70%）：打字机效果、ReactMarkdown 渲染、多轮会话
+- 右侧 ExplainPanel（30%）：七模块决策依据可视化
+  - 识别意图：意图类型/资产/操作/置信度
+  - 持仓数据：当前仓位/盈亏/持仓平台
+  - 纪律校验：规则通过/违规状态、规则明细
+  - 投研观点：用户录入观点 + 联网参考，可折叠
+  - 市场信号：仓位/事件/基本面/情绪四维度信号
+  - AI 推理过程：LLM reasoning 条目，默认折叠
+  - 最终结论：决策档位 Emoji + 结论摘要 + 策略/风险要点 + 免责声明
+- 新建对话、清空会话功能
+
+### Changed — decision_engine/
+
+- `llm_engine.py`：
+  - system prompt 新增 markdown 加粗规范（只对关键数字/结论词加粗，禁止整句加粗）
+  - `chat_answer` 各意图 prompt 精化写作要求（三段结构、字数控制、禁套话）
+  - 恢复原始第6条"本系统输出仅供参考，不构成投资建议"
+
+### Changed — app/
+
+- `state.py`：新增 `portfolio_id` 全局状态，供 FastAPI 路由读取默认 portfolio
+- `analyzer.py`：扩展持仓聚合接口，对接 portfolio_service
+
+### Changed — requirements.txt
+
+- 新增 `fastapi`、`uvicorn[standard]`、`python-multipart`、`sse-starlette` 等后端依赖
+
+---
+
 ## [1.14.0] - 2026-03-28 - 意图引擎升级 · 投研提炼重构 · 多标的决策 · 资产语义匹配
 
 ### Added — 决策结论粒度扩展（`decision_engine/llm_engine.py`）
