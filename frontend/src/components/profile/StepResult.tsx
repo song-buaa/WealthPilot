@@ -35,6 +35,8 @@ export default function StepResult({ data, onPrev, onSaved }: Props) {
   const [summary, setSummary]  = useState(data.ai_summary ?? '')
   const [style, setStyle]      = useState(data.ai_style ?? '')
   const [confidence, setConf]  = useState(data.ai_confidence ?? '')
+  const [genError, setGenError]   = useState('')
+  const [saveError, setSaveError] = useState('')
 
   // 进入此步骤时，若尚无 AI 总结则自动生成
   useEffect(() => {
@@ -47,12 +49,16 @@ export default function StepResult({ data, onPrev, onSaved }: Props) {
         setStyle(res.style)
         setConf(res.confidence)
       })
-      .catch(console.error)
+      .catch((e) => {
+        console.error(e)
+        setGenError('AI 画像生成失败，请返回上一步后重试')
+      })
       .finally(() => setGenLoading(false))
   }, [])  // eslint-disable-line
 
   async function handleSave() {
     setLoading(true)
+    setSaveError('')
     try {
       await profileApi.save({
         ...data,
@@ -62,6 +68,9 @@ export default function StepResult({ data, onPrev, onSaved }: Props) {
       })
       onSaved()
       navigate('/dashboard')
+    } catch (e) {
+      console.error(e)
+      setSaveError('保存失败，请重试')
     } finally {
       setLoading(false)
     }
@@ -76,6 +85,11 @@ export default function StepResult({ data, onPrev, onSaved }: Props) {
         </div>
       ) : (
         <>
+          {genError && (
+            <div style={{ padding: '10px 14px', background: '#FEE2E2', borderRadius: 8, fontSize: 13, color: '#B91C1C' }}>
+              {genError}
+            </div>
+          )}
           {/* AI 总结 */}
           <div style={{
             background: 'linear-gradient(135deg, #EFF6FF, #F5F3FF)',
@@ -112,6 +126,12 @@ export default function StepResult({ data, onPrev, onSaved }: Props) {
             )}
           </div>
         </>
+      )}
+
+      {saveError && (
+        <div style={{ padding: '10px 14px', background: '#FEE2E2', borderRadius: 8, fontSize: 13, color: '#B91C1C' }}>
+          {saveError}
+        </div>
       )}
 
       <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>

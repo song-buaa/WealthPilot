@@ -38,7 +38,6 @@ export default function StepConflicts({ data, conflicts, onChange, onConflictsCh
       .then(res => {
         onConflictsChecked(res.conflicts)
         setChecked(true)
-        if (res.conflicts.length === 0) onNext()
       })
       .finally(() => setChecking(false))
   }, [])  // eslint-disable-line

@@ -11,7 +11,8 @@
  */
 import React, { useEffect, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
-import { profileApi, type UserProfile as TUserProfile, type ConflictItem } from '@/lib/api'
+import { profileApi, type UserProfile as TUserProfile } from '@/lib/api'
+import { useProfileStore } from '@/store/profileStore'
 
 import StepRisk      from '@/components/profile/StepRisk'
 import StepBasicInfo from '@/components/profile/StepBasicInfo'
@@ -86,9 +87,13 @@ function StepBar({ current }: { current: number }) {
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 
 export default function UserProfile() {
-  const [step, setStep]           = useState(1)
-  const [profile, setProfile]     = useState<Partial<TUserProfile>>({})
-  const [conflicts, setConflicts] = useState<ConflictItem[]>([])
+  const {
+    profile: storeProfile, step, conflicts,
+    patchProfile, setProfile, setStep, nextStep, prevStep, setConflicts,
+  } = useProfileStore()
+
+  const profile = (storeProfile ?? {}) as Partial<TUserProfile>
+
   const [initLoading, setInitLoading] = useState(true)
   const [riskExpired, setRiskExpired] = useState(false)
 
@@ -97,7 +102,7 @@ export default function UserProfile() {
     Promise.all([profileApi.get(), profileApi.isRiskExpired()])
       .then(([existing, expiredRes]) => {
         if (existing && Object.keys(existing).length > 0) {
-          setProfile(existing)
+          setProfile(existing as TUserProfile)
           // 已有画像时直接进入确认页
           setStep(6)
         }
@@ -105,15 +110,11 @@ export default function UserProfile() {
       })
       .catch(console.error)
       .finally(() => setInitLoading(false))
-  }, [])
-
-  function patchProfile(patch: Partial<TUserProfile>) {
-    setProfile(prev => ({ ...prev, ...patch }))
-  }
+  }, [])  // eslint-disable-line
 
   function goTo(s: number) { setStep(s) }
-  function next()          { setStep(s => Math.min(s + 1, 7)) }
-  function prev()          { setStep(s => Math.max(s - 1, 1)) }
+  function next()          { nextStep() }
+  function prev()          { prevStep() }
 
   if (initLoading) {
     return (
@@ -173,7 +174,7 @@ export default function UserProfile() {
               data={profile}
               conflicts={conflicts}
               onChange={patchProfile}
-              onConflictsChecked={c => { setConflicts(c); if (c.length === 0) goTo(6) }}
+              onConflictsChecked={c => setConflicts(c)}
               onNext={() => goTo(6)}
               onPrev={prev}
             />
@@ -185,7 +186,7 @@ export default function UserProfile() {
             <StepResult
               data={profile}
               onPrev={prev}
-              onSaved={() => setProfile({})}
+              onSaved={() => setProfile(null)}
             />
           )}
         </div>
