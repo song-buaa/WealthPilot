@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ══════════════════════════════════════════════════════
+   Tailwind v4 — 自定义 Design Tokens
+   只注册 Tailwind 默认色盘不包含的 ocean-* 色阶
+   blue/gray/green/red/amber 使用 Tailwind 默认值即可
+══════════════════════════════════════════════════════ */
+@theme {
+  /* Ocean 主色调（自定义） */
+  --color-ocean-900: #0F1E35;
+  --color-ocean-800: #1B2A4A;
+  --color-ocean-700: #243558;
+  --color-ocean-600: #2D4A7A;
+  --color-ocean-50:  #F4F6FA;
+
+  /* 字体 */
+  --font-sans: 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ══════════════════════════════════════════════════════
+   CSS 变量（阴影、侧边栏宽度等 @theme 不支持的属性）
+══════════════════════════════════════════════════════ */
+:root {
+  --shadow-sm:   0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04);
+  --shadow-dark: 0 6px 20px rgba(15,30,53,0.28);
+  --sidebar-w:   220px;
+}
+
+/* ══════════════════════════════════════════════════════
+   全局基础样式
+══════════════════════════════════════════════════════ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #F4F6FA;
+  color: #374151;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ══════════════════════════════════════════════════════
+   全局滚动条风格（细条、低对比）
+══════════════════════════════════════════════════════ */
+::-webkit-scrollbar          { width: 4px; height: 4px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: #E5E7EB; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #D1D5DB; }
+
+/* ══════════════════════════════════════════════════════
+   数字排版辅助类
+══════════════════════════════════════════════════════ */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════
+   投资纪律手册 Markdown 渲染样式
+══════════════════════════════════════════════════════ */
+.handbook-md { font-size: 13px; line-height: 1.8; color: #374151; }
+.handbook-md h1 { font-size: 17px; font-weight: 700; color: #1B2A4A; margin: 0 0 16px; }
+.handbook-md h2 { font-size: 14px; font-weight: 700; color: #1B2A4A; margin: 20px 0 8px; }
+.handbook-md h3 { font-size: 13px; font-weight: 600; color: #1B2A4A; margin: 16px 0 6px; padding-left: 8px; border-left: 3px solid #3B82F6; }
+.handbook-md p { margin: 0 0 8px; }
+.handbook-md ul, .handbook-md ol { margin: 4px 0 8px; padding-left: 20px; }
+.handbook-md ul { list-style-type: disc; }
+.handbook-md ol { list-style-type: decimal; }
+.handbook-md li { margin: 2px 0; display: list-item; }
+.handbook-md strong { font-weight: 600; color: #1B2A4A; }
+.handbook-md code { background: #EFF6FF; color: #1D4ED8; border-radius: 4px; padding: 1px 5px; font-size: 12px; font-family: ui-monospace, monospace; }
+.handbook-md table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 12px; }
+.handbook-md th { background: #F1F5F9; color: #374151; font-weight: 600; padding: 7px 10px; text-align: left; border: 1px solid #E5E7EB; }
+.handbook-md td { padding: 6px 10px; border: 1px solid #E5E7EB; vertical-align: top; line-height: 1.6; }
+.handbook-md tr:nth-child(even) td { background: #FAFAFA; }
+.handbook-md hr { border: none; border-top: 1px solid #E5E7EB; margin: 16px 0; }

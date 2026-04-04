@@ -202,16 +202,32 @@ def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[Dev
                     deviation=pct - _warning_pct,
                 ))
 
-        # ── 3. 风险暴露检测 ──
-        if balance_sheet.leverage_ratio > portfolio.max_leverage_ratio:
+        # ── 3. 风险暴露检测（杠杆倍数口径，与 KPI 卡片和投资纪律保持一致）──
+        _lev_rules   = get_rules()["leverage_limits"]
+        _lev_warning = _lev_rules.get("leverage_ratio_warning_max", 1.35)   # 警戒阈值（倍数）
+        _lev_limit   = _lev_rules.get("leverage_ratio_acceptable_max", 1.20)  # 可接受上限
+        net_worth    = max(balance_sheet.net_worth, 1.0)
+        lev_mult     = round(balance_sheet.total_assets / net_worth, 2)     # 同 KPI 卡片
+
+        if lev_mult > _lev_warning:
             alerts.append(DeviationAlert(
                 alert_type="风险暴露",
                 severity="高",
-                title="杠杆率过高",
-                description=f"当前杠杆率 {balance_sheet.leverage_ratio}%，超过安全阈值 {portfolio.max_leverage_ratio}%。建议降低负债或增加资产。",
-                current_value=balance_sheet.leverage_ratio,
-                target_value=portfolio.max_leverage_ratio,
-                deviation=balance_sheet.leverage_ratio - portfolio.max_leverage_ratio,
+                title="杠杆倍数超限",
+                description=f"当前杠杆倍数 {lev_mult:.2f}x，超过警戒阈值 {_lev_warning:.2f}x。建议降低负债或增加资产。",
+                current_value=lev_mult,
+                target_value=_lev_warning,
+                deviation=round(lev_mult - _lev_warning, 2),
+            ))
+        elif lev_mult > _lev_limit:
+            alerts.append(DeviationAlert(
+                alert_type="风险暴露",
+                severity="中",
+                title="杠杆倍数偏高",
+                description=f"当前杠杆倍数 {lev_mult:.2f}x，高于可接受上限 {_lev_limit:.2f}x，已进入警戒区间。",
+                current_value=lev_mult,
+                target_value=_lev_limit,
+                deviation=round(lev_mult - _lev_limit, 2),
             ))
 
         # 按严重程度排序
