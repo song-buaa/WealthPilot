@@ -4,11 +4,12 @@
  */
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AppLayout from '@/components/layout/AppLayout'
-import Dashboard  from '@/pages/Dashboard'
-import Discipline from '@/pages/Discipline'
-import Research   from '@/pages/Research'
-import Decision   from '@/pages/Decision'
+import Dashboard   from '@/pages/Dashboard'
+import Discipline  from '@/pages/Discipline'
+import Research    from '@/pages/Research'
+import Decision    from '@/pages/Decision'
 import Placeholder from '@/pages/Placeholder'
+import UserProfile from '@/pages/UserProfile'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/discipline" element={<Discipline />} />
           <Route path="/research"   element={<Research />} />
           <Route path="/decision"   element={<Decision />} />
+          <Route path="/profile"    element={<UserProfile />} />
 
           {/* 所有未实现功能统一走 Placeholder */}
           <Route path="/placeholder/:name" element={<Placeholder />} />

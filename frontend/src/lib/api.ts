@@ -365,6 +365,82 @@ export interface SSEEvent {
   data: Record<string, unknown>
 }
 
+// ── Profile ──────────────────────────────────────────────
+
+export interface UserProfile {
+  id?:                    number
+  version?:               number
+  created_at?:            string
+  updated_at?:            string
+  // 风险画像
+  risk_source?:           string   // "external" | "ai"
+  risk_provider?:         string
+  risk_original_level?:   string
+  risk_normalized_level?: number   // 1-5
+  risk_type?:             string   // "保守型"|"稳健型"|"平衡型"|"成长型"|"进取型"
+  risk_assessed_at?:      string   // ISO datetime
+  // 基础信息
+  income_level?:          string
+  income_stability?:      string
+  total_assets?:          string
+  investable_ratio?:      string
+  liability_level?:       string
+  family_status?:         string
+  asset_structure?:       string
+  investment_motivation?: string
+  fund_usage_timeline?:   string
+  // 投资目标
+  goal_type?:             string[]
+  target_return?:         string
+  max_drawdown?:          string
+  investment_horizon?:    string
+  // AI 结果
+  ai_summary?:            string
+  ai_style?:              string   // "稳健"|"平衡"|"进取"
+  ai_confidence?:         string   // "high"|"medium"|"low"
+}
+
+export interface ConflictItem {
+  type:    string
+  message: string
+  options: string[]
+}
+
+export interface ExtractResult {
+  extracted:      Partial<UserProfile>
+  missing_fields: string[]
+  next_question:  string | null
+  error?:         string
+}
+
+export const profileApi = {
+  get: () =>
+    request<UserProfile>('/profile'),
+
+  save: (data: Partial<UserProfile>) =>
+    request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) }),
+
+  extract: (text: string, existing_fields: Partial<UserProfile> = {}) =>
+    request<ExtractResult>('/profile/extract', {
+      method: 'POST',
+      body: JSON.stringify({ text, existing_fields }),
+    }),
+
+  generate: () =>
+    request<{ summary: string; style: string; confidence: string }>('/profile/generate', {
+      method: 'POST',
+    }),
+
+  checkConflicts: (max_drawdown: string, target_return: string, fund_usage_timeline: string) =>
+    request<{ conflicts: ConflictItem[] }>('/profile/conflicts', {
+      method: 'POST',
+      body: JSON.stringify({ max_drawdown, target_return, fund_usage_timeline }),
+    }),
+
+  isRiskExpired: () =>
+    request<{ expired: boolean }>('/profile/risk-expired'),
+}
+
 export interface ExplainData {
   decision_id: string
   intent?: {

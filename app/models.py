@@ -246,3 +246,47 @@ class ResearchViewpoint(Base):
     updated_at         = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     source_card = relationship("ResearchCard", back_populates="viewpoint")
+
+
+# ──────────────────────────────────────────────
+# 用户画像模块
+# ──────────────────────────────────────────────
+
+class UserProfile(Base):
+    """用户画像与投资目标（全局单条记录，upsert 语义）"""
+    __tablename__ = "user_profiles"
+
+    id      = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    version    = Column(Integer, default=1)
+
+    # 风险画像
+    risk_source           = Column(String(20),  nullable=True)   # "external" | "ai"
+    risk_provider         = Column(String(50),  nullable=True)   # "招商银行" | "ai_generated"
+    risk_original_level   = Column(String(10),  nullable=True)   # "C3" | "A2" | "高"
+    risk_normalized_level = Column(Integer,      nullable=True)   # 1-5
+    risk_type             = Column(String(20),  nullable=True)   # "保守型"|"稳健型"|"平衡型"|"成长型"|"进取型"
+    risk_assessed_at      = Column(DateTime,    nullable=True)   # 用于判断是否过期（12个月）
+
+    # 基础信息
+    income_level          = Column(String(20),  nullable=True)   # "<10万"|"10-30万"|"30-100万"|">100万"
+    income_stability      = Column(String(10),  nullable=True)   # "稳定"|"较稳定"|"波动"
+    total_assets          = Column(String(20),  nullable=True)   # "<50万"|"50-200万"|"200-500万"|">500万"
+    investable_ratio      = Column(String(10),  nullable=True)   # "<20%"|"20-50%"|"50-80%"|">80%"
+    liability_level       = Column(String(10),  nullable=True)   # "无"|"低"|"中"|"高"
+    family_status         = Column(String(20),  nullable=True)   # "单身"|"已婚无子"|"已婚有子"|"退休"
+    asset_structure       = Column(String(20),  nullable=True)   # "现金为主"|"固收为主"|"股票基金为主"|"多元配置"
+    investment_motivation = Column(String(20),  nullable=True)   # "新增资金"|"调整配置"|"市场波动调整"|"长期规划"
+    fund_usage_timeline   = Column(String(10),  nullable=True)   # "1年内"|"1-3年"|"3年以上"|"不确定"
+
+    # 投资目标
+    goal_type             = Column(Text,        nullable=True)   # JSON 字符串，存多选结果
+    target_return         = Column(String(10),  nullable=True)   # "<5%"|"5-10%"|"10-20%"|">20%"
+    max_drawdown          = Column(String(10),  nullable=True)   # "<5%"|"5-15%"|"15-30%"|">30%"
+    investment_horizon    = Column(String(10),  nullable=True)   # "<1年"|"1-3年"|"3-5年"|">5年"
+
+    # AI 生成结果
+    ai_summary            = Column(Text,        nullable=True)   # 自然语言总结
+    ai_style              = Column(String(10),  nullable=True)   # "稳健"|"平衡"|"进取"
+    ai_confidence         = Column(String(10),  nullable=True)   # "high"|"medium"|"low"

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/usr/local/lib/node_modules/npm/bin/npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
+      "cwd": "/Users/songbin/Documents/GitHub/WealthPilot/.claude/worktrees/sweet-robinson/frontend",
+      "port": 5174
+    }
+  ]
+}

@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.state import startup
-from backend.api import portfolio, discipline, research, decision, tasks
+from backend.api import portfolio, discipline, research, decision, tasks, profile
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ app.include_router(discipline.router, prefix="/api/discipline", tags=["disciplin
 app.include_router(research.router,   prefix="/api/research",   tags=["research"])
 app.include_router(decision.router,   prefix="/api/decision",   tags=["decision"])
 app.include_router(tasks.router,      prefix="/api/tasks",      tags=["tasks"])
+app.include_router(profile.router,    prefix="/api/profile",    tags=["profile"])
 
 
 @app.get("/api/health")
