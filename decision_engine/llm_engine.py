@@ -39,6 +39,7 @@ from typing import Optional
 import openai
 
 from .data_loader import LoadedData
+from .decision_context import build_decision_context, format_context_prompt
 from .types import IntentResult
 from .rule_engine import RuleResult
 from .signal_engine import SignalResult
@@ -73,6 +74,8 @@ class LLMResult:
     chat_answer: str = ""      # 面向用户的自然语言对话回答（左侧面板直接展示）
     raw_output: str = ""       # LLM 原始输出（调试用）
     error: Optional[str] = None  # 异常时的错误描述
+    # Phase 1: 结构化 DecisionResult（parse 成功时填充，失败时为 None）
+    structured_result: Optional[dict] = None
     # BUG-04 修复：记录决策是否经过自动修正
     decision_corrected: bool = False     # True 表示原始输出非标准，已被自动修正
     original_decision: Optional[str] = None  # 修正前的原始决策值
@@ -156,7 +159,34 @@ chat_answer 写作要求：
 
 第三段（2-3句）：说清楚主要风险在哪，操作建议只基于系统已有数据，不编造具体数字。结尾给一个具体的观察点或行动触发条件，例如"等发布会后看交付数据再决定"。
 
-整体字数控制在 300-500 字。禁止重复 reasoning/risk/strategy 字段的原文。"""
+整体字数控制在 300-500 字。禁止重复 reasoning/risk/strategy 字段的原文。
+
+---
+## 输出格式要求（严格遵守）
+
+你的回答必须且只能是如下 JSON 格式。第一个字符必须是 {，不要在 JSON 之外添加任何文字、解释或 Markdown。
+
+{
+  "decisionType": "buy_init | buy_more | hold | trim | exit | wait | need_info",
+  "coreSuggestion": "一句话核心判断（≤40字）",
+  "rationale": ["依据1", "依据2", "依据3（1-3条）"],
+  "riskPoints": ["风险点1", "风险点2（1-2条）"],
+  "recommendedAction": {
+    "action": "与 decisionType 相同的值",
+    "detail": "具体操作说明，包含价位或仓位比例"
+  },
+  "confidence": 0.0到1.0之间的小数,
+  "confidenceReason": "置信度原因 + 建议适用前提 + 主要不确定因素",
+  "infoNeeded": ["若 confidence < 0.5 必须填写，否则可为空数组"],
+  "evidenceSources": ["从以下枚举中选择：profile | position | discipline | research | recent_records | news | user_message"],
+  "chat_answer": "面向用户的自然语言回答，2-4句话，语气自然，不要重复 coreSuggestion 的原文，而是用对话语气解释判断和建议"
+}
+
+注意事项：
+- rationale 1-3 条，riskPoints 1-2 条
+- coreSuggestion 与 decisionType 结论必须语义一致
+- confidence < 0.5 时，infoNeeded 必须填写且不能为空数组
+- chat_answer 仍须按上方 chat_answer 写作要求生成（结构三段、300-500字），供前端直接展示"""
 
 
 _PORTFOLIO_REVIEW_PROMPT = """当前任务：组合评估（PortfolioReview）
@@ -291,6 +321,106 @@ def _get_client() -> openai.OpenAI:
     return _client
 
 
+# ── DecisionResult 结构化解析（Phase 1）───────────────────────────────────────
+
+# 新 decisionType → 旧 decision 枚举映射
+_NEW_TO_OLD_DECISION = {
+    'buy_init':  'BUY',
+    'buy_more':  'BUY',
+    'hold':      'HOLD',
+    'trim':      'REDUCE',
+    'exit':      'SELL',
+    'wait':      'HOLD',
+    'need_info': 'HOLD',
+}
+
+
+_VALID_DECISION_TYPES = ['buy_init', 'buy_more', 'hold', 'trim', 'exit', 'wait', 'need_info']
+_VALID_EVIDENCE_SOURCES = ['profile', 'position', 'discipline', 'research', 'recent_records', 'news', 'user_message']
+
+
+def validate_decision_result(result: dict) -> bool:
+    """
+    校验 LLM 返回的 DecisionResult JSON 结构是否合法。
+    返回 True 表示校验通过，False 表示不合法。
+    注意：evidenceSources 中的非法值会被过滤而不是直接拒绝整个结果。
+    """
+    try:
+        if result.get('decisionType') not in _VALID_DECISION_TYPES:
+            return False
+        if not isinstance(result.get('rationale'), list) or not (1 <= len(result['rationale']) <= 3):
+            return False
+        if not isinstance(result.get('riskPoints'), list) or not (1 <= len(result['riskPoints']) <= 2):
+            return False
+        if not isinstance(result.get('confidence'), (int, float)) or not (0 <= result['confidence'] <= 1):
+            return False
+        if result['confidence'] < 0.5:
+            if not (isinstance(result.get('infoNeeded'), list) and len(result['infoNeeded']) > 0):
+                return False
+        if not isinstance(result.get('evidenceSources'), list):
+            return False
+
+        # evidenceSources: 过滤非法值（宽容处理），过滤后至少保留 1 个
+        valid_sources = [s for s in result['evidenceSources'] if s in _VALID_EVIDENCE_SOURCES]
+        if len(valid_sources) == 0 and len(result['evidenceSources']) > 0:
+            # 全部非法但有值 → 仍通过，后续清洗
+            pass
+        # 就地修正为合法值
+        result['evidenceSources'] = valid_sources if valid_sources else result['evidenceSources']
+
+        return True
+    except Exception:
+        return False
+
+
+def parse_decision_result(raw_response: str) -> dict | None:
+    """
+    尝试解析 LLM 返回的 DecisionResult JSON。
+    返回 dict 表示解析成功，返回 None 表示解析失败（fallback 到纯文本）。
+    """
+    try:
+        # 清理可能的 markdown 代码块标记
+        text = raw_response.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+
+        result = json.loads(text)
+
+        if validate_decision_result(result):
+            return result
+        else:
+            return None
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def _structured_to_llm_result(structured: dict, raw: str) -> LLMResult:
+    """
+    将新 DecisionResult 结构映射为旧 LLMResult，保证后端管道兼容。
+    structured_result 字段存储完整的新格式 dict。
+    """
+    decision_type = structured.get('decisionType', 'hold')
+    old_decision = _NEW_TO_OLD_DECISION.get(decision_type, 'HOLD')
+
+    chat_answer = str(structured.get('chat_answer', '') or '')
+
+    # 去掉 chat_answer 后的纯结构化数据，供前端卡片化使用
+    decision_result_clean = {k: v for k, v in structured.items() if k != 'chat_answer'}
+
+    return LLMResult(
+        decision=old_decision,
+        reasoning=structured.get('rationale', []),
+        risk=structured.get('riskPoints', []),
+        strategy=[structured.get('recommendedAction', {}).get('detail', '')],
+        chat_answer=chat_answer,
+        raw_output=raw,
+        structured_result=decision_result_clean,
+    )
+
+
 # ── 核心函数 ───────────────────────────────────────────────────────────────────
 
 def reason(
@@ -316,6 +446,17 @@ def reason(
     # 构建输入 payload
     payload = _build_payload(user_query, data, intent, rule_result, signals)
 
+    # Phase 2: 构建 DecisionContext 并注入 system prompt
+    try:
+        pid = data.raw_portfolio.id if data.raw_portfolio and hasattr(data.raw_portfolio, 'id') else 1
+        decision_ctx = build_decision_context(user_query, data, portfolio_id=pid)
+        context_prompt = format_context_prompt(decision_ctx)
+        system_prompt = _BASE_PROMPT + "\n\n" + context_prompt + "\n\n" + _POSITION_DECISION_PROMPT
+        print(f"[llm_engine] DecisionContext 注入成功，prompt 长度={len(system_prompt)} 字符", flush=True)
+    except Exception as e:
+        print(f"[llm_engine] DecisionContext 构建失败，降级到无上下文: {e}", flush=True)
+        system_prompt = _BASE_PROMPT + "\n\n" + _POSITION_DECISION_PROMPT
+
     try:
         client = _get_client()
         response = client.chat.completions.create(
@@ -323,11 +464,20 @@ def reason(
             max_tokens=1024,
             timeout=30,
             messages=[
-                {"role": "system", "content": _BASE_PROMPT + "\n\n" + _POSITION_DECISION_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
             ],
         )
         raw = response.choices[0].message.content.strip()
+
+        # Phase 1: 优先尝试新 DecisionResult 格式解析
+        structured = parse_decision_result(raw)
+        if structured is not None:
+            print(f"[llm_engine] ✅ DecisionResult 结构化解析成功: decisionType={structured.get('decisionType')}, confidence={structured.get('confidence')}")
+            return _structured_to_llm_result(structured, raw)
+
+        # Fallback: 旧格式解析
+        print(f"[llm_engine] ⚠️ DecisionResult 结构化解析失败，fallback 到旧格式")
         parsed = _extract_json(raw)
         return _build_result(parsed, raw)
 

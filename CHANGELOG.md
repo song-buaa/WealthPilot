@@ -4,6 +4,45 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.2.0] - 2026-04-05 - 决策 I/O Contract v1.0（Phase 1 + Phase 2）
+
+### Added
+
+**Phase 1：DecisionResult 结构化输出**
+
+- `decision_engine/llm_engine.py`：在 `_POSITION_DECISION_PROMPT` 末尾追加结构化输出格式要求
+  - 新增 9 个结构化字段：`decisionType`、`coreSuggestion`、`rationale`、`riskPoints`、`recommendedAction`、`confidence`、`confidenceReason`、`infoNeeded`、`evidenceSources`
+  - 保留 `chat_answer` 字段（双输出方案），前端 SSE 流式输出不受影响
+- `decision_engine/llm_engine.py`：新增 `parse_decision_result()` + `validate_decision_result()` 解析校验层
+  - 解析成功 → `mode: "structured"`，结构化结果存入 `LLMResult.structured_result`
+  - 解析失败 → `mode: "fallback"`，自动降级到旧格式解析，旧管道完全兼容
+  - `evidenceSources` 非法枚举值宽容过滤（不拒绝整个结果）
+- `decision_engine/llm_engine.py`：新增 `_structured_to_llm_result()` 映射函数
+  - 新 `decisionType` → 旧 `decision` 枚举映射（`buy_init/buy_more→BUY`, `trim→REDUCE`, `exit→SELL`, `wait/need_info→HOLD`）
+  - `decisionResult` 字段中剥离 `chat_answer`，仅保留纯结构化数据供前端卡片化使用
+- `backend/services/decision_service.py`：SSE `done` 事件新增 `mode`、`decisionResult`、`rawText` 字段；`/explain` 端点序列化包含 `structured_result`
+
+**Phase 2：DecisionContext 结构化输入上下文**
+
+- `decision_engine/decision_context.py`（新建）：`build_decision_context()` 函数，在每次决策调用前自动组装结构化上下文
+  - `decisionTask` 推断：规则引擎从 `user_message` 提取 `targetAsset`（股票代码 + 公司名关键词表）、推断 `decisionScenario`（5 种场景）、`taskType`、`questionType`
+  - `userProfileSummary`：从 `user_profiles` 表读取 `riskTolerance`（1-2→conservative, 3→moderate, 4-5→aggressive）、`investmentGoal`、`investmentHorizon`；从 `portfolios` 表读取 `hardConstraints`
+  - `positionSnapshot`：复用 `data_loader.LoadedData`，计算 `currentHoldingStatus`（none/light/medium/heavy）
+  - `disciplineRules`：从 `app/discipline/config.py` 读取规则配置，转换为 `ruleId/title/content/triggerCondition` 格式，按 `targetAsset` 相关性过滤（最多 3 条）
+  - `researchViews`：从 `research_cards` 表读取 `bull_case/bear_case/key_metrics`，按 `targetAsset` LIKE 查询（最多 2 条）
+  - `recentRecords`：从 `decision_logs` 表读取近期决策记录
+  - 所有子步骤独立 try/catch，单字段失败不影响整体
+- `decision_engine/decision_context.py`：`format_context_prompt()` 将 DecisionContext 格式化为 system prompt 注入文本
+- `decision_engine/llm_engine.py`：`reason()` 函数在构建 system prompt 前调用 `build_decision_context()`，将上下文注入 `_BASE_PROMPT` 与 `_POSITION_DECISION_PROMPT` 之间
+
+### Status
+
+- 输出解析成功率：验证通过（gpt-4.1 稳定输出合规 JSON）
+- 旧管道兼容：`LLMResult` 所有旧字段正常映射，`decision_service.py` SSE 流式输出未受影响
+- 待填充：`decision_logs` 表（随用户使用自然积累）、`newsItems`（后续模块接入）、`softPreferences`（后续产品定义）
+
+---
+
 ## [2.1.0] - 2026-04-05 - 用户画像模块重构：单页双模态 · 图片解析 · 本地冲突校验
 
 ### Added

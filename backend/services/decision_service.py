@@ -176,13 +176,25 @@ async def _stream_position_decision(
     async for chunk_event in _stream_text(answer):
         yield chunk_event
 
-    # done 事件
+    # done 事件（含 Phase 1 结构化结果）
     conclusion_level, conclusion_label = _extract_conclusion(result)
-    yield _sse("done", {
+    done_payload = {
         "decision_id":     result.decision_id,
         "conclusion_level": conclusion_level,
         "conclusion_label": conclusion_label,
-    })
+    }
+
+    # Phase 1: 附加结构化 DecisionResult
+    if result.llm and result.llm.structured_result is not None:
+        done_payload["mode"] = "structured"
+        done_payload["decisionResult"] = result.llm.structured_result
+        done_payload["rawText"] = result.llm.raw_output
+    else:
+        done_payload["mode"] = "fallback"
+        done_payload["decisionResult"] = None
+        done_payload["rawText"] = result.llm.raw_output if result.llm else ""
+
+    yield _sse("done", done_payload)
 
 
 async def _stream_multi_asset(
@@ -485,6 +497,8 @@ def _serialize_decision_result(result: DecisionResult) -> dict:
             "is_fallback":        result.llm.is_fallback,
             "decision_corrected": result.llm.decision_corrected,
             "original_decision":  result.llm.original_decision,
+            # Phase 1: 结构化 DecisionResult
+            "structured_result":  result.llm.structured_result,
         }
 
     if result.generic_llm:
