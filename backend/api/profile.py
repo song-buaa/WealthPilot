@@ -41,8 +41,10 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class ExtractRequest(BaseModel):
-    text:            str
-    existing_fields: dict = {}
+    type:            str       = "text"   # "text" | "images"
+    text:            str       = ""
+    images:          list[str] = []       # base64 编码的图片列表
+    existing_fields: dict      = {}
 
 
 class ConflictRequest(BaseModel):
@@ -71,10 +73,15 @@ def update_profile(req: ProfileUpdateRequest):
 
 @router.post("/extract")
 def extract_profile(req: ExtractRequest):
-    """AI 槽位提取（body: {text, existing_fields}）"""
-    if not req.text.strip():
-        raise HTTPException(status_code=422, detail="text 不能为空")
-    return svc.extract_profile_from_text(req.text, req.existing_fields)
+    """AI 槽位提取（支持文本和图片两种模式）"""
+    if req.type == "images":
+        if not req.images:
+            raise HTTPException(status_code=422, detail="images 不能为空")
+        return svc.extract_profile_from_images(req.images, req.existing_fields)
+    else:
+        if not req.text.strip():
+            raise HTTPException(status_code=422, detail="text 不能为空")
+        return svc.extract_profile_from_text(req.text, req.existing_fields)
 
 
 @router.post("/generate")

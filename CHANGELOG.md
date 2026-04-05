@@ -4,6 +4,55 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.1.0] - 2026-04-05 - 用户画像模块重构：单页双模态 · 图片解析 · 本地冲突校验
+
+### Added
+
+**用户画像模块（全面重构，替代原7步骤向导）**
+
+- `frontend/src/components/profile/ModuleA.tsx`：风险评估 + 基础信息模块
+  - 支持截图上传（多张图片同时解析）和自然语言两种输入方式
+  - 调用 `POST /api/profile/extract`（新增 `type="images"` 模式）
+  - AI 解析完成后渲染可编辑字段列表，未识别字段标注"未识别"
+  - 本地计算标准化风险等级（R1-R5），只读展示
+  - 必填校验：risk_normalized_level / income_stability / asset_structure / fund_usage_timeline
+- `frontend/src/components/profile/ModuleB.tsx`：投资目标模块
+  - 模块A确认前灰色锁定
+  - goal_type 多选 checkbox，其余字段下拉选择
+  - 本地冲突校验（两条规则，字段标红，不阻断保存前可反复修改）
+  - 冲突清除后显示"生成画像"按钮
+- `frontend/src/components/profile/ProfileForm.tsx`：填写页编排（A → B 解锁流程）
+- `frontend/src/components/profile/ProfileResult.tsx`：画像结果展示页
+  - 顶部 AI 总结区，badge 顺序：风险等级 → 投资风格 → 置信度
+- `frontend/src/components/profile/ResultCardA.tsx`：风险+基础信息卡片，默认展开，支持内联编辑
+- `frontend/src/components/profile/ResultCardB.tsx`：投资目标卡片，支持内联编辑，保存时重新触发 AI 生成
+
+**后端扩展**
+
+- `POST /api/profile/extract` 新增 `type="images"` 模式，支持 base64 图片数组输入（gpt-4.1 视觉模型）
+- `backend/services/profile_service.py`：新增 `extract_profile_from_images()` 函数和图片解析 system prompt
+
+### Changed
+
+- `frontend/src/pages/UserProfile.tsx`：重构为双状态页面（无画像→填写页 / 有画像→结果页），去掉7步骤向导逻辑；标题区对齐 Discipline 页风格（User 图标 + 主副标题）
+- `frontend/src/store/profileStore.ts`：移除 step / conflicts 分步状态，精简为 profile + isLoading
+- `frontend/src/lib/api.ts`：`profileApi.extract` 签名扩展为联合类型（text 模式 / images 模式）
+- `backend/services/profile_service.py`：`generate_ai_profile` confidence 判断从 `== "external"` 修正为 `in ("bank", "broker", "custom", "external")`，修复高置信度无法命中的 bug
+- `ResultCardA.tsx`：字段名"风险来源"改为"风险评估来源"；收起摘要只显示风险等级，不显示收入稳定性
+- 券商风险等级选项修正为 C1-C5（去掉 C6）
+
+### Removed
+
+- `frontend/src/components/profile/StepRisk.tsx`
+- `frontend/src/components/profile/StepBasicInfo.tsx`
+- `frontend/src/components/profile/StepGoals.tsx`
+- `frontend/src/components/profile/StepAIChat.tsx`
+- `frontend/src/components/profile/StepConflicts.tsx`
+- `frontend/src/components/profile/StepConfirm.tsx`
+- `frontend/src/components/profile/StepResult.tsx`
+
+---
+
 ## [2.0.0] - 2026-04-04 - 全栈重写：React+FastAPI · 四核心模块完整落地 · 1.X 封板
 
 > **里程碑**：WealthPilot 1.X 阶段正式结束。本版本完成了从 Streamlit 单体到

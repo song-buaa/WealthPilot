@@ -153,6 +153,77 @@ def extract_profile_from_text(user_input: str, existing_fields: dict) -> dict:
         }
 
 
+_EXTRACT_IMAGES_SYSTEM = """你是 WealthPilot 的用户画像助手，从用户上传的风险评估报告截图中提取画像字段。
+
+严格规则：
+1. 只提取图片中能明确看到的字段，不确定的返回 null
+2. 所有字段值必须在以下枚举值范围内，否则返回 null：
+   - risk_source: "bank" | "broker" | "custom"
+   - risk_original_level:
+     若 risk_source=="bank": "A1"|"A2"|"A3"|"A4"|"A5"
+     若 risk_source=="broker": "C1"|"C2"|"C3"|"C4"|"C5"
+     若 risk_source=="custom": "低"|"中"|"高"
+   - income_level: "<10万" | "10-30万" | "30-100万" | ">100万"
+   - income_stability: "稳定" | "较稳定" | "波动"
+   - total_assets: "<50万" | "50-200万" | "200-500万" | ">500万"
+   - investable_ratio: "<20%" | "20-50%" | "50-80%" | ">80%"
+   - liability_level: "无" | "低" | "中" | "高"
+   - family_status: "单身" | "已婚无子" | "已婚有子" | "退休"
+   - asset_structure: "现金为主" | "固收为主" | "股票基金为主" | "多元配置"
+   - investment_motivation: "新增资金" | "调整配置" | "市场波动调整" | "长期规划"
+   - fund_usage_timeline: "1年内" | "1-3年" | "3年以上" | "不确定"
+3. 多张图片合并提取，字段有冲突时取更可信的值
+4. 返回严格 JSON，无 markdown 包裹
+
+返回格式：
+{
+  "extracted": {<字段名>: <值> | null},
+  "missing_fields": ["字段名列表"],
+  "next_question": null
+}"""
+
+
+def extract_profile_from_images(images: list[str], existing_fields: dict) -> dict:
+    """从图片（base64）提取画像字段，支持多张图片同时解析"""
+    try:
+        client = _get_client()
+        content = []
+        content.append({"type": "text", "text": f"请从以下图片中提取用户画像字段。已有字段（不要重复提取）：{json.dumps(existing_fields, ensure_ascii=False)}"})
+        for img_b64 in images:
+            # 判断是否已带 data URI 前缀
+            if img_b64.startswith("data:"):
+                url = img_b64
+            else:
+                url = f"data:image/jpeg;base64,{img_b64}"
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": url, "detail": "high"},
+            })
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            max_tokens=512,
+            timeout=30,
+            messages=[
+                {"role": "system", "content": _EXTRACT_IMAGES_SYSTEM},
+                {"role": "user",   "content": content},
+            ],
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip())
+    except Exception as e:
+        return {
+            "extracted": {},
+            "missing_fields": [],
+            "next_question": None,
+            "error": str(e),
+        }
+
+
 # ── AI 画像生成 ───────────────────────────────────────────────────────────────
 
 _GENERATE_SYSTEM = """你是 WealthPilot 的画像总结助手。根据用户画像数据，生成一段简洁的自然语言总结（2-3句话），以及一个风格标签。
@@ -175,7 +246,7 @@ def generate_ai_profile(profile: UserProfile) -> dict:
       - 否则 → "low"
     """
     # 本地计算 confidence
-    if profile.risk_source == "external":
+    if profile.risk_source in ("bank", "broker", "custom", "external"):
         confidence = "high"
     elif all([
         profile.risk_normalized_level,

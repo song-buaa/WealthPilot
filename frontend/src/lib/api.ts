@@ -407,7 +407,7 @@ export interface ConflictItem {
 }
 
 export interface ExtractResult {
-  extracted:      Partial<UserProfile>
+  extracted:      Record<string, unknown>
   missing_fields: string[]
   next_question:  string | null
   error?:         string
@@ -420,10 +420,10 @@ export const profileApi = {
   save: (data: Partial<UserProfile>) =>
     request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) }),
 
-  extract: (text: string, existing_fields: Partial<UserProfile> = {}) =>
+  extract: (payload: { type: 'text'; text: string; existing_fields?: Record<string, unknown> } | { type: 'images'; images: string[]; existing_fields?: Record<string, unknown> }) =>
     request<ExtractResult>('/profile/extract', {
       method: 'POST',
-      body: JSON.stringify({ text, existing_fields }),
+      body: JSON.stringify(payload),
     }),
 
   generate: () =>
