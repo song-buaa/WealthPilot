@@ -4,12 +4,15 @@
  */
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AppLayout from '@/components/layout/AppLayout'
+import RouteErrorBoundary from '@/components/shared/RouteErrorBoundary'
 import Dashboard   from '@/pages/Dashboard'
 import Discipline  from '@/pages/Discipline'
 import Research    from '@/pages/Research'
 import Decision    from '@/pages/Decision'
 import Placeholder from '@/pages/Placeholder'
 import UserProfile from '@/pages/UserProfile'
+import Allocation from '@/pages/Allocation'
+import AllocationChat from '@/pages/AllocationChat'
 
 export default function App() {
   return (
@@ -19,12 +22,14 @@ export default function App() {
           {/* 默认落地页：投资账户总览 */}
           <Route index element={<Navigate to="/dashboard" replace />} />
 
-          {/* 四个功能页 */}
-          <Route path="/dashboard"  element={<Dashboard />} />
-          <Route path="/discipline" element={<Discipline />} />
-          <Route path="/research"   element={<Research />} />
-          <Route path="/decision"   element={<Decision />} />
-          <Route path="/profile"    element={<UserProfile />} />
+          {/* 功能页 — 每个页面包裹 ErrorBoundary，单页崩溃不影响导航 */}
+          <Route path="/dashboard"  element={<RouteErrorBoundary><Dashboard /></RouteErrorBoundary>} />
+          <Route path="/discipline" element={<RouteErrorBoundary><Discipline /></RouteErrorBoundary>} />
+          <Route path="/research"   element={<RouteErrorBoundary><Research /></RouteErrorBoundary>} />
+          <Route path="/decision"   element={<RouteErrorBoundary><Decision /></RouteErrorBoundary>} />
+          <Route path="/profile"    element={<RouteErrorBoundary><UserProfile /></RouteErrorBoundary>} />
+          <Route path="/allocation"      element={<RouteErrorBoundary><Allocation /></RouteErrorBoundary>} />
+          <Route path="/allocation/chat" element={<RouteErrorBoundary><AllocationChat /></RouteErrorBoundary>} />
 
           {/* 所有未实现功能统一走 Placeholder */}
           <Route path="/placeholder/:name" element={<Placeholder />} />

@@ -8,7 +8,7 @@ import Sidebar from './Sidebar'
 
 export default function AppLayout() {
   const { pathname } = useLocation()
-  const isDecision = pathname === '/decision'
+  const isFullHeight = pathname === '/decision' || pathname === '/allocation/chat'
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -16,8 +16,8 @@ export default function AppLayout() {
       <Sidebar />
 
       {/* ── 主内容区 ── */}
-      {isDecision ? (
-        // 投资决策页：不加 padding，页面内部自行管理双栏布局
+      {isFullHeight ? (
+        // 投资决策 / 配置对话页：不加 padding，页面内部自行管理双栏布局
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           <Outlet />
         </main>

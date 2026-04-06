@@ -4,6 +4,80 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.3.0] - 2026-04-06 - 资产配置模块 V1
+
+### Added
+
+**后端核心**
+- `app/allocation/` — 资产配置模块核心包
+  - `types.py`：枚举（AllocAssetClass）、Pydantic 模型（AllocationSnapshot、DeviationSnapshot、AssetTarget 等）
+  - `calculator.py`：纯函数计算引擎（偏离度计算、增量分配算法、金额取整、初始配置）
+  - `classifier.py`：资产归类规则（中英文映射、混合基金处理、关键词匹配兜底）
+  - `discipline.py`：配置纪律校验 + block 级违规自动修正
+  - `defaults.py`：从投资纪律模块动态读取目标区间（不硬编码）
+
+**后端 API**
+- `backend/api/allocation.py` — 8 个 REST 端点
+  - `GET /snapshot` / `GET /deviation` / `GET /targets` — 配置状态查询
+  - `POST /increment-plan` / `POST /initial-plan` — 增量/初始分配计算
+  - `POST /discipline-check` — 纪律校验
+  - `POST /classify-asset` / `GET /unclassified-holdings` — 资产归类
+- `backend/services/allocation_service.py` — 服务编排层
+- `backend/services/allocation_ai.py` — AI 对话处理（意图识别、System Prompt、四段/三段式模板）
+
+**AI 对话合并到投资决策后端**
+- `backend/services/decision_service.py`：AssetAllocation 意图从通用 LLM 改为调用 allocation_ai 的完整处理逻辑
+  - 新增 `_stream_asset_allocation()` — 偏离计算 + 增量分配 + 纪律校验 + 强制模板 System Prompt
+  - 新增 `_build_allocation_explain()` — ExplainData 按约定结构填充（intent/data/rules/llm）
+  - 新增 `_ALLOC_SESSION_CTX` — AssetAllocation 意图的 sessionContext 多轮记忆
+  - 新增 `_ALLOC_EXPLAIN_STORE` — allocation explain 数据缓存
+  - PortfolioReview/PerformanceAnalysis 通用分支也存储 explain 数据
+
+**前端页面**
+- `frontend/src/pages/Allocation.tsx` — 资产配置首页（`/allocation`）
+  - 配置健康状态诊断（自然语言，基于 portfolio summary + ALLOC_CATS 同口径计算）
+  - 左右双列布局：大类资产配置卡片（复用 Dashboard） + 配置原则说明卡片
+  - 三条原则（多元资产配置 / 目标区间管理 / 动态再平衡）+ "了解更多"预填跳转
+  - 首次用户/无持仓引导态
+- `frontend/src/pages/AllocationChat.tsx` — 配置方案对话页（`/allocation/chat`）
+  - SSE 流式调用 `/api/decision/chat`（与投资决策共用后端）
+  - 消息结构对齐 Decision.tsx（streaming/stages/intent/conclusion 字段）
+  - 右侧面板复用 Decision.tsx 的 ExplainPanel + ExplainEmpty（含 AssetAllocation 专用视图）
+  - fallback 机制：decision_id 为 null 时从 AI 消息字段构建面板数据
+  - 支持 abort 中止 SSE 流
+  - Markdown 渲染（ReactMarkdown + remarkGfm）
+
+**共享组件**
+- `AssetAllocationCard.tsx` — 大类资产配置卡片（Dashboard + Allocation 复用）
+  - 货币类 tooltip 显示绝对金额区间（从纪律模块读取）
+- `DataTip.tsx` — 全局浮动 Tooltip（从 Dashboard 抽取）
+- `RouteErrorBoundary.tsx` — 路由级 Error Boundary（单页崩溃不影响导航）
+- `AllocationPrinciplesPanel.tsx` — 配置原则说明（空状态引导页使用）
+- `EmptyStateGuide.tsx` — 首次用户引导态
+
+**前端状态管理**
+- `frontend/src/store/allocationStore.ts` — Zustand store（看板 + SSE 对话）
+- `frontend/src/lib/allocation-api.ts` — TypeScript 类型 + API 客户端
+
+### Changed
+
+- `Decision.tsx`：ExplainPanel 和 ExplainEmpty export 为共享组件；新增 AllocationExplainView 分支；ReasoningPanel 防御性处理非数组输入；右侧面板标题统一为"分析过程"
+- `Dashboard.tsx`：AllocationCard 抽取为共享组件 AssetAllocationCard；DataTip 抽取为共享组件；修复空状态 ImportSection 变量引用 bug
+- `AppLayout.tsx`：`/allocation/chat` 路由添加 overflow:hidden 特殊处理
+- `Sidebar.tsx`：导航项"新增资产配置"改为"资产配置"，指向 `/allocation`
+- `App.tsx`：新增 `/allocation` 和 `/allocation/chat` 路由；所有页面包裹 RouteErrorBoundary
+
+### Fixed
+
+- 修复 Dashboard 空状态 `ImportSection` 引用不存在的 `importing` 变量导致白屏
+- 修复配置模块目标区间与 Dashboard ALLOC_CATS 不一致导致状态矛盾
+- 修复货币类目标区间硬编码，改为从投资纪律模块动态读取
+- 修复 allocation ExplainData 中 `reasoning` 字段为字符串（应为数组）导致 Decision.tsx 崩溃
+- 修复 allocation_ai.py 中 6 个返回分支缺失 `explain_panel` 导致右侧面板无数据
+- 修复 allocationStore getExplain 调用时序（从 SSE 循环内移到循环外，对齐 Decision.tsx）
+
+---
+
 ## [2.2.0] - 2026-04-05 - 决策 I/O Contract v1.0（Phase 1 + Phase 2）
 
 ### Added

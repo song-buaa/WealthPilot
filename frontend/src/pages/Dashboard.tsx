@@ -20,7 +20,10 @@ import {
   type PortfolioSummary, type Position, type Alert, type Liability,
 } from '@/lib/api'
 import { fmtCny, fmtCnySigned, fmtPct, fmtDelta, fmtQty, fmtFx, fmtLeverage } from '@/lib/fmt'
+import { allocationApi } from '@/lib/allocation-api'
 import EmptyState from '@/components/shared/EmptyState'
+import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
+import DataTip from '@/components/shared/DataTip'
 
 // ── 调色板（与原版一致）──────────────────────────────────────
 const CHART_PALETTE = [
@@ -55,57 +58,7 @@ const ALLOC_EXAMPLES: Record<string, string> = {
   derivative:   '期权、期货等',
 }
 
-// ── 全局浮动 Tooltip（复刻原版 data-tip 系统）──────────────────
-function DataTip() {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const box = ref.current!
-    function move(ev: MouseEvent) {
-      const w = box.offsetWidth || 160
-      const h = box.offsetHeight || 32
-      let x = ev.clientX + 14
-      let y = ev.clientY - h - 8
-      if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14
-      if (y < 8) y = ev.clientY + 16
-      box.style.left = x + 'px'
-      box.style.top  = y + 'px'
-    }
-    function onOver(ev: MouseEvent) {
-      const el = (ev.target as Element).closest('[data-tip]') as HTMLElement | null
-      if (!el) { box.style.display = 'none'; return }
-      box.textContent = el.dataset.tip ?? ''
-      box.style.display = 'block'
-      move(ev)
-    }
-    function onMove(ev: MouseEvent) {
-      if (box.style.display === 'block') move(ev)
-    }
-    function onOut(ev: MouseEvent) {
-      const rel = ev.relatedTarget as Element | null
-      if (!rel?.closest('[data-tip]')) box.style.display = 'none'
-    }
-    document.addEventListener('mouseover', onOver)
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseout',  onOut)
-    return () => {
-      document.removeEventListener('mouseover', onOver)
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseout',  onOut)
-    }
-  }, [])
-  return createPortal(
-    <div ref={ref} style={{
-      position: 'fixed', zIndex: 9999,
-      background: '#1F2937', color: '#F9FAFB',
-      borderRadius: 6, padding: '5px 10px',
-      fontSize: 12, fontWeight: 500,
-      whiteSpace: 'nowrap', pointerEvents: 'none',
-      display: 'none',
-      boxShadow: '0 3px 10px rgba(0,0,0,0.18)',
-    }} />,
-    document.body
-  )
-}
+// DataTip 已抽取为共享组件 @/components/shared/DataTip
 
 // ── concentration 按名称累加 ─────────────────────────────────
 function getPct(concentration: Record<string, number>, name: string): number {
@@ -122,6 +75,7 @@ export default function Dashboard() {
   const [alerts, setAlerts]         = useState<Alert[]>([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
+  const [cashRange, setCashRange]   = useState<{ min: number; max: number } | undefined>(undefined)
 
   // 导入/导出展开状态
   const [importOpen, setImportOpen]         = useState(false)
@@ -135,12 +89,17 @@ export default function Dashboard() {
       portfolioApi.getPositions(),
       portfolioApi.getLiabilities(),
       portfolioApi.getAlerts(),
+      allocationApi.getTargets().catch(() => []),
     ])
-      .then(([s, p, l, a]) => {
+      .then(([s, p, l, a, targets]) => {
         setSummary(s)
         setPositions(p.items)
         setLiabilities(l.items)
         setAlerts(a.items)
+        const ct = targets.find((t: { asset_class: string }) => t.asset_class === 'cash')
+        if (ct?.cash_min_amount != null && ct?.cash_max_amount != null) {
+          setCashRange({ min: ct.cash_min_amount, max: ct.cash_max_amount })
+        }
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : '加载失败'))
       .finally(() => setLoading(false))
@@ -179,8 +138,7 @@ export default function Dashboard() {
         {/* 仍然显示导入面板 */}
         <ImportSection
           open={importOpen} onToggle={() => setImportOpen(v => !v)}
-          importing={importing} importMsg={importMsg}
-          posFileRef={posFileRef} onPosFileChange={handlePosImport}
+          onRefresh={fetchAll}
         />
       </div>
     )
@@ -277,7 +235,7 @@ export default function Dashboard() {
 
       {/* ── 图表区 3fr 2fr ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16, marginBottom: 16 }}>
-        <AllocationCard allocation={bs.allocation} />
+        <AssetAllocationCard allocation={bs.allocation} cashRange={cashRange} />
 
         <PlatformCard platEntries={platEntries} />
       </div>
@@ -419,7 +377,7 @@ function PageHeader({ posCount }: { posCount: number }) {
       <div>
         <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: '-0.3px' }}>投资账户总览</div>
         <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>
-          Investment Portfolio Overview
+          账户总览 · 持仓分析
         </div>
       </div>
     </div>
@@ -538,82 +496,7 @@ function PlatformCard({ platEntries }: { platEntries: [string, number][] }) {
 }
 
 /** 大类资产配置偏差视图（复刻原版4列 grid 结构）*/
-function AllocationCard({ allocation }: { allocation: PortfolioSummary['allocation'] }) {
-  return (
-    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '16px 20px 8px', boxShadow: 'var(--shadow-sm)' }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-        📊 大类资产配置
-        <span style={{ fontSize: 11, fontWeight: 400, color: '#9CA3AF', marginLeft: 2 }}>当前 vs 目标区间</span>
-      </div>
-      {/* 图例 */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 8, fontSize: 11, color: '#9CA3AF', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{ width: 18, height: 7, background: 'rgba(59,130,246,0.14)', borderRadius: 3, border: '1px solid rgba(59,130,246,0.28)' }} />目标区间
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#3B82F6', border: '2px solid white', boxShadow: '0 0 0 1px rgba(0,0,0,0.12)' }} />当前配置
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{ width: 2, height: 11, background: 'rgba(59,130,246,0.45)', borderRadius: 1 }} />目标中值
-        </div>
-      </div>
-      {/* 偏差列表：4列 grid，原版样式 */}
-      <div>
-        {ALLOC_CATS.map(cat => {
-          const cur    = allocation[cat.key]?.pct   ?? 0
-          const amount = allocation[cat.key]?.value ?? 0
-          const { minPct: min, maxPct: max } = cat
-          const mid    = (min + max) / 2
-          const bw     = Math.max(max - min, 0.5)
-          const dotPos = Math.min(Math.max(cur, 0), 100)
-
-          let badge: { text: string; bg: string; color: string }
-          if (cur > max)
-            badge = { text: `↑ 超配 +${(cur - max).toFixed(1)}%`, bg: '#FEE2E2', color: '#DC2626' }
-          else if (min > 0 && cur < min)
-            badge = { text: `↓ 低配 −${(min - cur).toFixed(1)}%`, bg: '#DBEAFE', color: '#1D4ED8' }
-          else
-            badge = { text: '✓ 区间内', bg: '#DCFCE7', color: '#16A34A' }
-
-          const rangeTip   = `目标区间：${min}% ~ ${max}%`
-          const amountTip  = fmtCny(amount)
-          const exampleTip = ALLOC_EXAMPLES[cat.key] ?? ''
-
-          return (
-            <div key={cat.key} style={{
-              display: 'grid', gridTemplateColumns: '52px 1fr 64px 104px',
-              alignItems: 'center', gap: 12, height: 44,
-              borderBottom: '1px solid #F3F4F6',
-            }}>
-              {/* 类别名称 */}
-              <span data-tip={exampleTip} style={{ fontSize: 13, fontWeight: 500, color: '#374151', cursor: 'default' }}>
-                {cat.label}
-              </span>
-              {/* 进度条 */}
-              <div style={{ position: 'relative', height: 7, background: '#F3F4F6', borderRadius: 4 }}>
-                <div data-tip={rangeTip} style={{ position: 'absolute', top: 0, bottom: 0, left: `${min}%`, width: `${bw}%`, background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 4 }} />
-                <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${mid}%`, width: 2, background: 'rgba(59,130,246,0.35)', borderRadius: 1 }} />
-                <div data-tip={amountTip} style={{ position: 'absolute', top: '50%', left: `${dotPos}%`, transform: 'translate(-50%,-50%)', width: 11, height: 11, borderRadius: '50%', background: cat.color, border: '2px solid white', boxShadow: '0 0 0 1px rgba(0,0,0,0.12)', zIndex: 2 }} />
-              </div>
-              {/* 当前占比 */}
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
-                {fmtPct(cur)}
-              </span>
-              {/* 偏差 badge */}
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
-                whiteSpace: 'nowrap', background: badge.bg, color: badge.color,
-              }}>
-                {badge.text}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
+// AllocationCard 已抽取为共享组件 AssetAllocationCard
 
 // ── 截图识别平台提示 ────────────────────────────────────────────
 const SS_PLATFORMS = ['招商银行', '支付宝', '建设银行', '国金证券', '雪盈证券'] as const

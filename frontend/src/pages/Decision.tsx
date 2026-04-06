@@ -539,7 +539,7 @@ export default function Decision() {
             <Sparkles size={18} color="#3B82F6" />
           </div>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>决策依据</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>分析过程</div>
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>本次分析的关键数据与推理依据</div>
           </div>
         </div>
@@ -695,7 +695,10 @@ const ANALYSIS_STEPS = [
 ]
 
 // ── AI 推理过程折叠面板 ──────────────────────────────────────
-function ReasoningPanel({ reasoning }: { reasoning: string[] }) {
+function ReasoningPanel({ reasoning }: { reasoning: string[] | string }) {
+  // 防御性处理：reasoning 可能是字符串（AssetAllocation 意图）或数组
+  const items = Array.isArray(reasoning) ? reasoning : reasoning ? [reasoning] : []
+  if (items.length === 0) return null
   const [open, setOpen] = React.useState(false)
   return (
     <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '10px 14px' }}>
@@ -708,7 +711,7 @@ function ReasoningPanel({ reasoning }: { reasoning: string[] }) {
       </button>
       {open && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {reasoning.map((item, i) => (
+          {items.map((item, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <span style={{ flexShrink: 0, width: 5, height: 5, borderRadius: '50%', background: '#9CA3AF', marginTop: 6 }} />
               <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{item}</span>
@@ -720,7 +723,7 @@ function ReasoningPanel({ reasoning }: { reasoning: string[] }) {
   )
 }
 
-function ExplainEmpty() {
+export function ExplainEmpty() {
   return (
     <div style={{ padding: '24px 16px 16px' }}>
       <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.7, marginBottom: 16 }}>
@@ -857,7 +860,12 @@ function CollapsibleHeader({ label, open, onToggle }: { label: string; open: boo
 }
 
 // ── 右侧结果面板 ─────────────────────────────────────────────────
-function ExplainPanel({ data }: { data: ExplainData }) {
+export function ExplainPanel({ data }: { data: ExplainData }) {
+  // ── AssetAllocation 意图专用视图 ──
+  if (data.intent?.intent_type === 'asset_allocation') {
+    return <AllocationExplainView data={data} />
+  }
+
   const { stages, conclusion, rules, signals } = data
   const research  = data.data?.research
   const position  = data.data?.target_position
@@ -1166,6 +1174,119 @@ function ExplainPanel({ data }: { data: ExplainData }) {
           分析链路详情待后端接入 stage 事件后展示。
         </div>
       )}
+    </div>
+  )
+}
+
+
+// ── AssetAllocation 意图专用面板视图 ───────────────────────────
+
+const ALLOC_SUB_INTENT_LABELS: Record<string, string> = {
+  INITIAL_ALLOCATION:   '初始配置',
+  INCREMENT_ALLOCATION: '增量补配',
+  DIAGNOSIS:            '配置诊断',
+  EXPLAIN:              '配置解释',
+  CONCEPT:              '概念问答',
+}
+
+function AllocationExplainView({ data }: { data: ExplainData }) {
+  const intent = data.intent
+  const d = data.data as Record<string, unknown> | undefined
+  const rules = data.rules as Record<string, unknown> | undefined
+  const llm = data.llm as Record<string, unknown> | undefined
+
+  const subIntent = intent?.action ? (ALLOC_SUB_INTENT_LABELS[intent.action] ?? intent.action) : '资产配置'
+  const totalAssets = d?.totalAssets as number | undefined
+  const overallStatus = d?.overallStatus as string | undefined
+  const allocationPlan = d?.allocationPlan as Array<Record<string, unknown>> | undefined
+  const reasoning = llm?.reasoning as string[] | undefined
+
+  return (
+    <div style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+      {/* ── 意图识别 ── */}
+      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+        <SectionLabel label="识别意图" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>意图</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>资产配置</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>子类型</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{subIntent}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 配置数据 ── */}
+      {(totalAssets != null || overallStatus) && (
+        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+          <SectionLabel label="配置数据" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {totalAssets != null && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#6B7280' }}>
+                  {intent?.action === 'INITIAL_ALLOCATION' ? '规划金额' : intent?.action === 'INCREMENT_ALLOCATION' ? '新增金额' : '总资产'}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                  {(totalAssets / 10000).toFixed(1)}万元
+                </span>
+              </div>
+            )}
+            {overallStatus && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#6B7280' }}>配置状态</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: overallStatus === '接近目标' ? '#059669' : '#D97706' }}>
+                  {overallStatus}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 分配方案 ── */}
+      {allocationPlan && allocationPlan.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+          <SectionLabel label="分配方案" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {allocationPlan.map((item, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#6B7280' }}>{String(item.label || item.asset_class)}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                  {((item.suggested_amount as number) / 10000).toFixed(1)}万元
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 纪律校验 ── */}
+      {rules && (
+        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+          <SectionLabel label="纪律校验" />
+          <div style={{ fontSize: 12, fontWeight: 500, color: rules.passed ? '#059669' : '#DC2626' }}>
+            {rules.passed
+              ? '✅ 纪律校验通过'
+              : `❌ 触发 ${(rules.violations as unknown[])?.length ?? 0} 条，已自动修正`}
+          </div>
+          {!rules.passed && (rules.violations as Array<{ message: string; severity: string }> | undefined)?.map((v, i) => (
+            <div key={i} style={{ fontSize: 11, color: '#D97706', marginTop: 4 }}>{v.message}</div>
+          ))}
+        </div>
+      )}
+
+      {/* ── 核心判断 ── */}
+      {reasoning && reasoning.length > 0 && (
+        <ReasoningPanel reasoning={reasoning} />
+      )}
+
+      {/* 免责声明 */}
+      <div style={{ fontSize: 11, color: '#9CA3AF', lineHeight: 1.6, borderTop: '1px solid #F3F4F6', paddingTop: 8, marginTop: 2 }}>
+        本系统输出仅供参考，不构成投资建议。
+      </div>
     </div>
   )
 }

@@ -25,6 +25,11 @@ from decision_engine import decision_flow, llm_engine, data_loader
 from decision_engine.types import IntentResult
 from decision_engine.decision_flow import DecisionResult, FlowStage
 
+# 资产配置模块类型（延迟导入 allocation_ai 避免循环引用）
+from app.allocation.types import (
+    AllocationChatRequest, SessionContext as AllocationSessionContext,
+)
+
 
 # ── 进程内 decision 缓存（{session_id: {decision_id: DecisionResult}}）────────
 # 服务重启后清空是预期行为，无需持久化
@@ -33,6 +38,12 @@ _DECISION_STORE: dict[str, dict[str, DecisionResult]] = {}
 # ── primary_intent 缓存（intent_engine 输出，decision_engine 不存储）───────────
 # key: session_id，value: 该 session 最近一次的 primary_intent 字符串
 _PRIMARY_INTENT_CACHE: dict[str, str] = {}
+
+# ── AssetAllocation 意图的 sessionContext 缓存 ─────────────────────────────────
+_ALLOC_SESSION_CTX: dict[str, AllocationSessionContext] = {}
+
+# ── AssetAllocation ExplainData 缓存（{session_id:decision_id: dict}）──────────
+_ALLOC_EXPLAIN_STORE: dict[str, dict] = {}
 
 
 # ── 公开接口 ──────────────────────────────────────────────────────────────────
@@ -120,6 +131,13 @@ async def run_chat_stream(
 
 def get_decision_explain(session_id: str, decision_id: str) -> Optional[dict]:
     """获取某次决策的完整 DecisionResult（序列化为 dict）"""
+    # 先检查 allocation explain 缓存
+    alloc_key = f"{session_id}:{decision_id}"
+    alloc_explain = _ALLOC_EXPLAIN_STORE.get(alloc_key)
+    if alloc_explain is not None:
+        return alloc_explain
+
+    # 再检查 decision 缓存
     session_store = _DECISION_STORE.get(session_id, {})
     result = session_store.get(decision_id)
     if result is None:
@@ -136,6 +154,11 @@ def clear_session(session_id: str) -> None:
     """清除服务端会话（对话重置时调用）"""
     _DECISION_STORE.pop(session_id, None)
     _PRIMARY_INTENT_CACHE.pop(session_id, None)
+    _ALLOC_SESSION_CTX.pop(session_id, None)
+    # 清理 allocation explain 缓存
+    keys_to_remove = [k for k in _ALLOC_EXPLAIN_STORE if k.startswith(f"{session_id}:")]
+    for k in keys_to_remove:
+        _ALLOC_EXPLAIN_STORE.pop(k, None)
     context_manager.clear_session(session_id)
 
 
@@ -244,9 +267,16 @@ async def _stream_portfolio_intent(
     portfolio_id: int,
 ) -> AsyncGenerator[str, None]:
     """组合级别分析（PortfolioReview / AssetAllocation / PerformanceAnalysis）"""
+
+    # ── AssetAllocation：走资产配置模块的完整处理逻辑 ──────────────────
+    if payload.primary_intent == "AssetAllocation":
+        async for event in _stream_asset_allocation(payload, user_input, session_id, portfolio_id):
+            yield event
+        return
+
+    # ── 其他组合意图：PortfolioReview / PerformanceAnalysis ─────────
     _INTENT_CONFIG = {
         "PortfolioReview":     ("portfolio_review",    "组合全面评估", llm_engine.review_portfolio),
-        "AssetAllocation":     ("asset_allocation",    "资产配置分析", llm_engine.analyze_allocation),
         "PerformanceAnalysis": ("performance_analysis","收益表现分析", llm_engine.analyze_performance),
     }
     intent_type_key, action_label, llm_fn = _INTENT_CONFIG[payload.primary_intent]
@@ -281,10 +311,118 @@ async def _stream_portfolio_intent(
     async for chunk_event in _stream_text(answer):
         yield chunk_event
 
+    # 存储简化的 explain 数据供右侧面板查询
+    _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = {
+        "decision_id": decision_id,
+        "stage": "done",
+        "was_aborted": False,
+        "aborted_reason": None,
+        "intent": {
+            "primary_intent": payload.primary_intent,
+            "asset": None,
+            "action": action_label,
+            "time_context": None,
+            "confidence": payload.confidence,
+            "intent_type": intent_type_key,
+            "is_inherited": False,
+        },
+        "data": {
+            "total_assets": loaded.total_assets if loaded else None,
+        },
+        "rules": None,
+        "signals": None,
+        "pre_check": None,
+        "llm": {
+            "reasoning": [f"基于组合全部持仓数据进行{action_label}"],
+        } if not generic_llm.is_fallback else None,
+        "generic_llm": {
+            "chat_answer": generic_llm.chat_answer,
+            "is_fallback": generic_llm.is_fallback,
+            "error": generic_llm.error,
+        },
+    }
+
     yield _sse("done", {
         "decision_id":     decision_id,
         "conclusion_level": intent_type_key,
         "conclusion_label": action_label,
+    })
+
+
+async def _stream_asset_allocation(
+    payload,
+    user_input: str,
+    session_id: str,
+    portfolio_id: int,
+) -> AsyncGenerator[str, None]:
+    """
+    AssetAllocation 意图：调用资产配置模块的完整处理逻辑。
+    包含偏离计算、增量分配、纪律校验、强制模板 System Prompt。
+    结果存入 _DECISION_STORE 供 /explain 端点查询。
+    """
+    yield _sse("stage", {"stage": "loading", "label": "加载配置数据..."})
+
+    decision_id = f"decision_{uuid.uuid4().hex[:8]}"
+
+    # 获取或创建该 session 的 allocationSessionContext
+    alloc_ctx = _ALLOC_SESSION_CTX.get(session_id, AllocationSessionContext())
+
+    # 构建 AllocationChatRequest
+    req = AllocationChatRequest(
+        message=user_input,
+        conversation_history=[],
+        session_context=alloc_ctx,
+    )
+
+    yield _sse("stage", {"stage": "reasoning", "label": "资产配置分析中..."})
+
+    try:
+        from backend.services.allocation_ai import handle_chat as _allocation_handle_chat
+        result = await _allocation_handle_chat(req)
+    except Exception as e:
+        yield _sse("text", {"delta": f"⚠️ 资产配置分析失败：{str(e)}"})
+        yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+        return
+
+    # 更新 sessionContext
+    if result.updated_session_context:
+        _ALLOC_SESSION_CTX[session_id] = result.updated_session_context
+
+    # 构建回答文本
+    r = result.response
+    parts = []
+    if r.diagnosis:
+        parts.append(r.diagnosis)
+    if r.logic:
+        parts.append(r.logic)
+    if r.status_conclusion:
+        parts.append(f"**{r.status_conclusion}**")
+    if r.deviation_detail:
+        parts.append(r.deviation_detail)
+    if r.action_direction:
+        desc = r.action_direction.get("description", "") if isinstance(r.action_direction, dict) else ""
+        if desc:
+            parts.append(desc)
+    if r.risk_note:
+        parts.append(f"\n> {r.risk_note}")
+
+    answer = "\n\n".join(parts) if parts else "已收到你的消息。"
+
+    # 流式输出
+    async for chunk_event in _stream_text(answer):
+        yield chunk_event
+
+    # 构建 ExplainData 存入缓存（按约定结构）
+    explain_data = _build_allocation_explain(decision_id, result)
+    _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = explain_data
+
+    yield _sse("done", {
+        "decision_id": decision_id,
+        "conclusion_level": "asset_allocation",
+        "conclusion_label": "资产配置分析",
+        "mode": "allocation",
+        # 方案表格数据（前端用于渲染表格）
+        "allocationPlan": r.plan if r.plan else None,
     })
 
 
@@ -507,5 +645,68 @@ def _serialize_decision_result(result: DecisionResult) -> dict:
             "is_fallback": result.generic_llm.is_fallback,
             "error":       result.generic_llm.error,
         }
+
+    return d
+
+
+# ── AssetAllocation ExplainData 构建 ─────────────────────────────────────────
+
+def _build_allocation_explain(decision_id: str, alloc_result) -> dict:
+    """
+    将资产配置模块的 AllocationChatResponse 转换为 ExplainData 格式。
+    按约定结构填充 intent/data/rules 字段。
+    """
+    r = alloc_result.response
+    intent_type = alloc_result.intent_type
+    ep = r.explain_panel
+
+    d: dict = {
+        "decision_id": decision_id,
+        "stage": "done",
+        "was_aborted": False,
+        "aborted_reason": None,
+    }
+
+    # intent 字段
+    d["intent"] = {
+        "primary_intent": "AssetAllocation",
+        "asset": None,
+        "action": intent_type,           # 子意图类型
+        "time_context": None,
+        "confidence": 1.0,
+        "intent_type": "asset_allocation",
+        "is_inherited": False,
+    }
+
+    # data 字段
+    data_section: dict = {}
+    if ep and ep.key_data:
+        kd = ep.key_data
+        data_section["totalAssets"] = kd.get("totalAssets") or kd.get("totalAmount") or kd.get("incrementAmount")
+        data_section["overallStatus"] = kd.get("overallStatus")
+        data_section["actionHint"] = kd.get("actionHint")
+    if r.plan and r.plan.get("table"):
+        data_section["allocationPlan"] = r.plan["table"]
+    d["data"] = data_section
+
+    # rules 字段（纪律校验）
+    if r.plan and r.plan.get("discipline"):
+        disc = r.plan["discipline"]
+        d["rules"] = {
+            "passed": disc.get("passed", True),
+            "violations": disc.get("violations", []),
+        }
+    else:
+        d["rules"] = None
+
+    # signals / pre_check 留空
+    d["signals"] = None
+    d["pre_check"] = None
+
+    # reasoning（必须为数组，与 PositionDecision 的 ExplainData 格式一致）
+    reasoning_text = ep.reasoning if ep else ""
+    d["llm"] = {
+        "reasoning": [reasoning_text] if reasoning_text else [],
+    } if ep else None
 
     return d
