@@ -491,4 +491,19 @@ export interface ExplainData {
     strategy: string[]
     is_fallback: boolean
   }
+  generic_llm?: {
+    chat_answer: string
+    is_fallback: boolean
+    error?: string
+  }
+  portfolioResult?: {
+    risk_level?: string
+    key_findings?: string[]
+    concentration_issues?: string[]
+    rebalance_needed?: boolean
+    rebalance_suggestions?: string[]
+    conclusion_type?: string
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any
 }

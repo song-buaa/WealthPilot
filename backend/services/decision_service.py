@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from dataclasses import replace as _replace
 from typing import AsyncGenerator, Optional
@@ -46,6 +47,233 @@ _ALLOC_SESSION_CTX: dict[str, AllocationSessionContext] = {}
 _ALLOC_EXPLAIN_STORE: dict[str, dict] = {}
 
 
+# ── 多轮对话历史（持久化） ────────────────────────────────────────────────────
+
+def get_conversation_history(session_id: str, limit: int = 6) -> list[dict]:
+    """读取该 session 最近 limit 条记录，按 created_at 升序返回。"""
+    from app.database import get_session as get_db_session
+    from app.models import ConversationMessage
+
+    db = get_db_session()
+    try:
+        rows = (
+            db.query(ConversationMessage)
+            .filter(ConversationMessage.session_id == session_id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        rows.reverse()  # 升序
+        return [
+            {
+                "role": r.role,
+                "content": r.content,
+                "intent": r.intent,
+                "asset": r.asset,
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def save_conversation_turn(
+    session_id: str,
+    user_input: str,
+    chat_answer: str,
+    intent: str | None = None,
+    asset: str | None = None,
+) -> None:
+    """写入本轮的 user 消息和 assistant 消息，共两条记录。"""
+    from app.database import get_session as get_db_session
+    from app.models import ConversationMessage
+
+    db = get_db_session()
+    try:
+        db.add(ConversationMessage(
+            session_id=session_id, role="user", content=user_input,
+        ))
+        db.add(ConversationMessage(
+            session_id=session_id, role="assistant", content=chat_answer,
+            intent=intent, asset=asset,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ── 标的明确性校验与智能澄清 ────────────────────────────────────────────────
+
+VAGUE_ASSET_WORDS = [
+    "股票", "基金", "标的", "持仓", "资产", "仓位",
+    "这只", "那只", "某只", "一只", "一个", "这个", "那个",
+]
+
+# 进程内澄清上下文缓存 {session_id: {...}}
+_CLARIFICATION_CTX: dict[str, dict] = {}
+
+
+def _is_asset_clear(asset: str | None, positions: list) -> bool:
+    """判断意图识别出的标的是否明确可匹配到持仓。"""
+    if not asset:
+        return False
+    # 模糊标的词：仅当 asset 本身就是这些泛指词时才判定为不明确
+    # （如"股票""基金""这只"），而不是 asset 名称中包含这些字（如"景顺...股票A"）
+    stripped = asset.strip()
+    if len(stripped) <= 3 and any(vague == stripped for vague in VAGUE_ASSET_WORDS):
+        return False
+    if stripped in VAGUE_ASSET_WORDS:
+        return False
+    # 模糊匹配持仓名称
+    asset_lower = stripped.lower()
+    for p in positions:
+        if asset_lower in p.name.lower() or p.name.lower() in asset_lower:
+            return True
+        if p.ticker and (asset_lower == p.ticker.lower() or asset_lower in p.ticker.lower()):
+            return True
+    return False
+
+
+def _detect_feature_type(user_input: str) -> str:
+    """根据用户输入的关键词判断描述特征类型。"""
+    gain_kw = ["涨", "盈利", "赚", "落袋", "止盈", "涨了", "正收益"]
+    loss_kw = ["亏", "跌", "亏损", "止损", "割肉", "持续亏", "浮亏"]
+    heavy_kw = ["重", "加仓", "不轻", "占比高", "仓位大", "看好", "偏重"]
+    if any(k in user_input for k in gain_kw):
+        return "gain"
+    if any(k in user_input for k in loss_kw):
+        return "loss"
+    if any(k in user_input for k in heavy_kw):
+        return "heavy"
+    return "default"
+
+
+def _get_candidate_positions(user_input: str, positions: list) -> tuple[list, str]:
+    """根据用户描述特征从持仓里筛选候选标的，最多3条。返回 (candidates, feature_type)。"""
+    ft = _detect_feature_type(user_input)
+    if ft == "gain":
+        cands = sorted([p for p in positions if p.pl_rate > 0], key=lambda x: x.pl_rate, reverse=True)[:3]
+    elif ft == "loss":
+        cands = sorted([p for p in positions if p.pl_rate < 0], key=lambda x: x.pl_rate)[:3]
+    elif ft == "heavy":
+        cands = sorted(positions, key=lambda x: x.weight, reverse=True)[:3]
+    else:
+        cands = sorted(positions, key=lambda x: x.weight, reverse=True)[:3]
+    return cands, ft
+
+
+def _build_clarification_reply(user_input: str, candidates: list, feature_type: str) -> str:
+    """生成澄清回复文本。"""
+    if feature_type == "gain":
+        intro = "您持仓中目前涨幅较大的有："
+        suffix = "请问您说的是哪一只？或者直接告诉我标的名称也可以。"
+        items = [f"• {p.name}（+{p.pl_rate:.1f}%）" for p in candidates]
+    elif feature_type == "loss":
+        intro = "您持仓中目前处于浮亏的有："
+        suffix = "请问您说的是哪一只？"
+        items = [f"• {p.name}（{p.pl_rate:.1f}%）" for p in candidates]
+    elif feature_type == "heavy":
+        intro = "您持仓中仓位较重的标的有："
+        suffix = "请问您想分析的是哪一只？或者直接告诉我标的名称也可以。"
+        items = [f"• {p.name}（占比 {p.weight * 100:.1f}%）" for p in candidates]
+    else:
+        intro = "请问您指的是哪个标的？您当前持仓中包括："
+        suffix = "直接告诉我标的名称，我来帮您分析。"
+        items = [f"• {p.name}（占比 {p.weight * 100:.1f}%）" for p in candidates]
+    return f"{intro}\n" + "\n".join(items) + f"\n\n{suffix}"
+
+
+def _try_resolve_clarification(session_id: str, user_input: str, positions: list) -> str | None:
+    """
+    尝试从澄清上下文中解析用户的回复。
+    如果用户输入能匹配到候选标的之一，返回合并后的问题；否则返回 None。
+    """
+    ctx = _CLARIFICATION_CTX.get(session_id)
+    if not ctx or not ctx.get("pending_clarification"):
+        return None
+
+    input_lower = user_input.lower().strip()
+    candidates = ctx.get("candidates", [])
+
+    # 尝试匹配候选标的
+    matched_asset = None
+    for name in candidates:
+        if name.lower() in input_lower or input_lower in name.lower():
+            matched_asset = name
+            break
+    # 也尝试匹配持仓列表（用户可能给了一个不在候选中但在持仓中的名称）
+    if not matched_asset:
+        for p in positions:
+            if p.name.lower() in input_lower or input_lower in p.name.lower():
+                matched_asset = p.name
+                break
+            if p.ticker and (input_lower == p.ticker.lower()):
+                matched_asset = p.name
+                break
+
+    if matched_asset:
+        original = ctx.get("original_question", user_input)
+        # 清除澄清状态
+        _CLARIFICATION_CTX.pop(session_id, None)
+        return f"{original}（标的：{matched_asset}）"
+
+    return None
+
+
+def _extract_capital_amount(text: str) -> float | None:
+    """从自然语言中提取资金金额，返回标准化的元值。"""
+    if not text:
+        return None
+    m = re.search(r'(\d+(?:\.\d+)?)\s*[万wW]', text)
+    if m:
+        return float(m.group(1)) * 10000
+    m = re.search(r'(\d+(?:\.\d+)?)\s*千', text)
+    if m:
+        return float(m.group(1)) * 1000
+    m = re.search(r'\b(\d{4,})\b', text)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _calc_asset_breakdown(positions: list) -> dict:
+    """计算五大类资产占比和盈亏汇总。兼容 PositionInfo 和 AggregatedPosition。"""
+    cats: dict[str, dict] = {}
+    total_mv = sum(p.market_value_cny for p in positions) or 1.0
+    for p in positions:
+        ac = getattr(p, 'asset_class', '其他') or "其他"
+        if ac not in cats:
+            cats[ac] = {"market_value": 0.0, "pnl": 0.0, "count": 0}
+        cats[ac]["market_value"] += p.market_value_cny
+        # 兼容：PositionInfo 用 profit_loss_rate * market_value 估算盈亏金额
+        pnl = getattr(p, 'profit_loss_value', None)
+        if pnl is None:
+            rate = getattr(p, 'profit_loss_rate', 0) or 0
+            pnl = p.market_value_cny * rate / (1 + rate) if rate != -1 else 0
+        cats[ac]["pnl"] += pnl
+        cats[ac]["count"] += 1
+    for c in cats.values():
+        c["pct"] = round(c["market_value"] / total_mv * 100, 1)
+        c["pnl"] = round(c["pnl"], 0)
+
+    top3 = sorted(positions, key=lambda x: x.weight, reverse=True)[:3]
+    return {
+        "categories": cats,
+        "total": round(total_mv, 0),
+        "top3_by_weight": [
+            {
+                "name": p.name,
+                "weight": round(p.weight * 100, 1),
+                "pnl_pct": round((getattr(p, 'pl_rate', None) or getattr(p, 'profit_loss_rate', 0) or 0) * (100 if abs(getattr(p, 'profit_loss_rate', 0) or 0) < 1 else 1), 1),
+            }
+            for p in top3
+        ],
+    }
+
+
 # ── 公开接口 ──────────────────────────────────────────────────────────────────
 
 async def run_chat_stream(
@@ -58,12 +286,31 @@ async def run_chat_stream(
     每次 yield 一条格式化的 SSE 字符串（已含 "data: ...\n\n"）。
     """
     try:
+        # ── Stage 0: 读取对话历史 + 持仓数据 ────────────────────────────────
+        history = await asyncio.to_thread(get_conversation_history, session_id, 6)
+        position_names = await asyncio.to_thread(data_loader.get_position_names, portfolio_id)
+
+        # 加载持仓列表（用于澄清流程）
+        from app.utils.position_aggregator import aggregate_investment_positions
+        all_positions, _ = await asyncio.to_thread(aggregate_investment_positions, portfolio_id)
+
+        # ── Stage 0.5: 检查是否在回复澄清问题 ──────────────────────────────
+        combined = await asyncio.to_thread(
+            _try_resolve_clarification, session_id, message, all_positions
+        )
+        clarification_resolved = False
+        if combined:
+            # 用户回复了标的名称，用合并后的问题替换原始消息
+            print(f"[decision_service] 澄清继承: '{message}' → '{combined}'", flush=True)
+            message = combined
+            clarification_resolved = True  # 跳过后续标的明确性校验
+
         # ── Stage 1: 意图识别 ────────────────────────────────────────────────
         yield _sse("stage", {"stage": "intent", "label": "意图识别中..."})
 
         try:
             payload, clarification = await asyncio.to_thread(
-                intent_recognizer.recognize, message
+                intent_recognizer.recognize, message, history or None, position_names or None
             )
         except EnvironmentError as e:
             yield _sse("error", {"code": "config_error", "message": str(e)})
@@ -98,6 +345,34 @@ async def run_chat_stream(
         if payload.primary_intent == "PositionDecision":
             multi = list(payload.entities.multi_assets or [])
 
+            # ── 标的明确性校验（单标的场景，澄清已解决时跳过）─────────────
+            if not clarification_resolved:
+                _asset_clear = _is_asset_clear(payload.entities.asset, all_positions)
+            else:
+                _asset_clear = True  # 澄清流程已确认标的，直接通过
+            if len(multi) < 2 and not _asset_clear:
+                # 标的不明确，进入澄清流程
+                candidates, feature_type = _get_candidate_positions(message, all_positions)
+                if candidates:
+                    reply = _build_clarification_reply(message, candidates, feature_type)
+                    # 保存澄清上下文
+                    _CLARIFICATION_CTX[session_id] = {
+                        "original_question": message,
+                        "candidates": [p.name for p in candidates],
+                        "pending_clarification": True,
+                    }
+                    # 保存到对话历史
+                    try:
+                        await asyncio.to_thread(
+                            save_conversation_turn, session_id, message, reply,
+                            "PositionDecision", None,
+                        )
+                    except Exception:
+                        pass
+                    yield _sse("text", {"delta": reply})
+                    yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+                    return
+
             if len(multi) >= 2:
                 # 多标的：依次处理，合并回答
                 async for event in _stream_multi_asset(
@@ -107,8 +382,10 @@ async def run_chat_stream(
             else:
                 # 单标的：完整 6 步管道
                 intent_result = _payload_to_intent_result(payload, ctx)
+                # 澄清确认后视为新的第一轮，传空历史以获得完整标题格式
+                effective_history = [] if clarification_resolved else history
                 async for event in _stream_position_decision(
-                    intent_result, message, session_id, portfolio_id
+                    intent_result, message, session_id, portfolio_id, effective_history
                 ):
                     yield event
 
@@ -121,8 +398,31 @@ async def run_chat_stream(
                 yield event
 
         else:
-            # GeneralChat / Education
-            async for event in _stream_general_chat(message):
+            # GeneralChat / Education — 但如果含操作动词+模糊标的，走澄清
+            # 注意：Education 意图高置信度时跳过此检查（行为偏差/方法论类问题不走澄清）
+            _OP_KEYWORDS = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
+            is_education = payload.primary_intent == "Education" and payload.confidence >= 0.8
+            has_op = any(k in message for k in _OP_KEYWORDS)
+            has_vague = any(v in message for v in VAGUE_ASSET_WORDS)
+            if not is_education and has_op and has_vague and all_positions:
+                candidates, feature_type = _get_candidate_positions(message, all_positions)
+                if candidates:
+                    reply = _build_clarification_reply(message, candidates, feature_type)
+                    _CLARIFICATION_CTX[session_id] = {
+                        "original_question": message,
+                        "candidates": [p.name for p in candidates],
+                        "pending_clarification": True,
+                    }
+                    try:
+                        await asyncio.to_thread(
+                            save_conversation_turn, session_id, message, reply, "PositionDecision", None,
+                        )
+                    except Exception:
+                        pass
+                    yield _sse("text", {"delta": reply})
+                    yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+                    return
+            async for event in _stream_general_chat(message, session_id):
                 yield event
 
     except Exception as e:
@@ -169,6 +469,7 @@ async def _stream_position_decision(
     user_input: str,
     session_id: str,
     portfolio_id: int,
+    conversation_history: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """单标的完整 6 步决策管道，逐阶段 yield SSE 事件"""
 
@@ -179,6 +480,7 @@ async def _stream_position_decision(
         intent_result,
         user_input,
         portfolio_id,
+        conversation_history,
     )
 
     # 管道各阶段完成后补发中间阶段事件（给前端进度显示用）
@@ -198,6 +500,18 @@ async def _stream_position_decision(
     answer = _build_chat_answer(result, user_input)
     async for chunk_event in _stream_text(answer):
         yield chunk_event
+
+    # 保存对话历史（持久化）
+    chat_answer_text = result.llm.chat_answer if result.llm else (result.aborted_reason or "")
+    intent_str = intent_result.intent_type if hasattr(intent_result, 'intent_type') else "PositionDecision"
+    asset_str = intent_result.asset
+    try:
+        await asyncio.to_thread(
+            save_conversation_turn, session_id, user_input, chat_answer_text or answer,
+            intent_str, asset_str,
+        )
+    except Exception as e:
+        print(f"[decision_service] 保存对话历史失败: {e}", flush=True)
 
     # done 事件（含 Phase 1 结构化结果）
     conclusion_level, conclusion_label = _extract_conclusion(result)
@@ -268,15 +582,10 @@ async def _stream_portfolio_intent(
 ) -> AsyncGenerator[str, None]:
     """组合级别分析（PortfolioReview / AssetAllocation / PerformanceAnalysis）"""
 
-    # ── AssetAllocation：走资产配置模块的完整处理逻辑 ──────────────────
-    if payload.primary_intent == "AssetAllocation":
-        async for event in _stream_asset_allocation(payload, user_input, session_id, portfolio_id):
-            yield event
-        return
-
-    # ── 其他组合意图：PortfolioReview / PerformanceAnalysis ─────────
+    # ── 所有组合意图统一走 LLM prompt 路径 ──────────────────────────
     _INTENT_CONFIG = {
         "PortfolioReview":     ("portfolio_review",    "组合全面评估", llm_engine.review_portfolio),
+        "AssetAllocation":     ("asset_allocation",    "资产配置分析", llm_engine.analyze_allocation),
         "PerformanceAnalysis": ("performance_analysis","收益表现分析", llm_engine.analyze_performance),
     }
     intent_type_key, action_label, llm_fn = _INTENT_CONFIG[payload.primary_intent]
@@ -286,11 +595,38 @@ async def _stream_portfolio_intent(
 
     decision_id = f"decision_{uuid.uuid4().hex[:8]}"
 
+    # AssetAllocation: 提取资金金额（优先从 intent entities，兜底从原始消息）
+    capital_amount = None
+    if payload.primary_intent == "AssetAllocation":
+        capital_amount = _extract_capital_amount(payload.entities.capital or "")
+        if not capital_amount:
+            capital_amount = _extract_capital_amount(user_input)
+        if capital_amount:
+            print(f"[decision_service] 提取到资金金额: ¥{capital_amount:,.0f}", flush=True)
+        else:
+            print(f"[decision_service] 未检测到资金金额（用户未明确）", flush=True)
+
     def _run():
         loaded = data_loader.load(asset_name=None, pid=portfolio_id)
         if loaded.has_data_errors:
             return None, None
-        generic_llm = llm_fn(user_input, loaded)
+        # PortfolioReview：替换为宏观联网搜索结果
+        if payload.primary_intent == "PortfolioReview":
+            macro_research = data_loader.search_portfolio_research(loaded.positions)
+            if macro_research:
+                loaded.research = macro_research
+        # PerformanceAnalysis：不需要投研观点
+        elif payload.primary_intent == "PerformanceAnalysis":
+            loaded.research = []
+        # AssetAllocation: 传入资金金额和 portfolio_id
+        if payload.primary_intent == "AssetAllocation":
+            generic_llm = llm_engine.analyze_allocation(
+                user_input, loaded,
+                capital_amount=capital_amount,
+                portfolio_id=portfolio_id,
+            )
+        else:
+            generic_llm = llm_fn(user_input, loaded)
         return loaded, generic_llm
 
     loaded, generic_llm = await asyncio.to_thread(_run)
@@ -311,8 +647,47 @@ async def _stream_portfolio_intent(
     async for chunk_event in _stream_text(answer):
         yield chunk_event
 
-    # 存储简化的 explain 数据供右侧面板查询
-    _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = {
+    # 计算资产分布（用于右侧面板）
+    asset_breakdown = _calc_asset_breakdown(loaded.positions) if loaded else None
+
+    # 提取结构化结果（除 chat_answer 外）
+    portfolio_result = None
+    if generic_llm.raw_payload:
+        portfolio_result = {
+            k: v for k, v in generic_llm.raw_payload.items() if k != "chat_answer"
+        }
+
+    # 结论标签（从 LLM 结构化结果或降级推断）
+    conclusion_type = (
+        (portfolio_result or {}).get("conclusion_type")
+        or (portfolio_result or {}).get("allocation_type")
+        or intent_type_key
+    )
+
+    # 构建意图特定的推理步骤和结构化结果
+    perf_data = loaded.research  # 默认
+    if payload.primary_intent == "PerformanceAnalysis" and loaded:
+        from decision_engine.llm_engine import _build_performance_data
+        perf = _build_performance_data(loaded)
+        profit_names = [p["name"] for p in perf.get("profit_top3", [])]
+        loss_names = [p["name"] for p in perf.get("loss_top3", [])]
+        diag_label = {
+            "concentration": "集中度过高", "asset_mix": "资产配比问题",
+            "stock_selection": "个股分化明显", "healthy": "收益结构健康",
+            "low_defense": "防御资产不足",
+        }.get((portfolio_result or {}).get("diagnosis_type", ""), "综合分析")
+        llm_reasoning = [
+            f"计算各标的盈亏绝对金额，共{len(loaded.positions)}个持仓",
+            f"盈利Top3：{', '.join(profit_names)}" if profit_names else "无盈利标的",
+            f"亏损Top3：{', '.join(loss_names)}" if loss_names else "无亏损标的",
+            f"识别结构性问题：{diag_label}",
+        ]
+    else:
+        llm_reasoning = (portfolio_result or {}).get("key_findings",
+                         [f"基于组合全部持仓数据进行{action_label}"])
+
+    # 存储 explain 数据供右侧面板查询
+    explain_data = {
         "decision_id": decision_id,
         "stage": "done",
         "was_aborted": False,
@@ -320,7 +695,7 @@ async def _stream_portfolio_intent(
         "intent": {
             "primary_intent": payload.primary_intent,
             "asset": None,
-            "action": action_label,
+            "action": conclusion_type,
             "time_context": None,
             "confidence": payload.confidence,
             "intent_type": intent_type_key,
@@ -328,25 +703,60 @@ async def _stream_portfolio_intent(
         },
         "data": {
             "total_assets": loaded.total_assets if loaded else None,
+            "asset_breakdown": asset_breakdown,
+            "position_count": len(loaded.positions) if loaded else 0,
+            "research": [r for r in (loaded.research if loaded else [])],
         },
         "rules": None,
         "signals": None,
         "pre_check": None,
-        "llm": {
-            "reasoning": [f"基于组合全部持仓数据进行{action_label}"],
-        } if not generic_llm.is_fallback else None,
+        "llm": {"reasoning": llm_reasoning} if not generic_llm.is_fallback else None,
         "generic_llm": {
             "chat_answer": generic_llm.chat_answer,
             "is_fallback": generic_llm.is_fallback,
             "error": generic_llm.error,
         },
+        "portfolioResult": portfolio_result,
     }
+    # 意图特定字段
+    if payload.primary_intent == "PerformanceAnalysis" and portfolio_result:
+        explain_data["performanceResult"] = {
+            "diagnosis_type": portfolio_result.get("diagnosis_type"),
+            "overall_pnl": portfolio_result.get("overall_pnl"),
+            "structural_issue": portfolio_result.get("structural_issue"),
+            "profit_drivers": portfolio_result.get("profit_drivers", []),
+            "loss_drivers": portfolio_result.get("loss_drivers", []),
+        }
+    if payload.primary_intent == "AssetAllocation" and portfolio_result:
+        explain_data["allocationResult"] = {
+            "allocation_type": portfolio_result.get("allocation_type"),
+            "capital_amount": capital_amount,
+            "allocation_plan": portfolio_result.get("allocation_plan", []),
+            "priority_order": portfolio_result.get("priority_order", []),
+        }
+    _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = explain_data
 
-    yield _sse("done", {
+    # 保存对话历史（持久化）
+    try:
+        await asyncio.to_thread(
+            save_conversation_turn, session_id, user_input,
+            generic_llm.chat_answer or answer,
+            payload.primary_intent, payload.entities.asset,
+        )
+    except Exception as e:
+        print(f"[decision_service] 保存对话历史失败: {e}", flush=True)
+
+    done_payload = {
         "decision_id":     decision_id,
-        "conclusion_level": intent_type_key,
+        "conclusion_level": conclusion_type,
         "conclusion_label": action_label,
-    })
+        "portfolioResult":  portfolio_result,
+    }
+    if payload.primary_intent == "PerformanceAnalysis":
+        done_payload["performanceResult"] = explain_data.get("performanceResult")
+    if payload.primary_intent == "AssetAllocation":
+        done_payload["allocationResult"] = explain_data.get("allocationResult")
+    yield _sse("done", done_payload)
 
 
 async def _stream_asset_allocation(
@@ -426,7 +836,7 @@ async def _stream_asset_allocation(
     })
 
 
-async def _stream_general_chat(user_input: str) -> AsyncGenerator[str, None]:
+async def _stream_general_chat(user_input: str, session_id: str = "") -> AsyncGenerator[str, None]:
     """普通对话路由"""
     yield _sse("stage", {"stage": "reasoning", "label": "回复中..."})
 
@@ -435,6 +845,15 @@ async def _stream_general_chat(user_input: str) -> AsyncGenerator[str, None]:
 
     async for chunk_event in _stream_text(answer):
         yield chunk_event
+
+    # 保存对话历史（持久化）
+    if session_id:
+        try:
+            await asyncio.to_thread(
+                save_conversation_turn, session_id, user_input, answer, "Education", None,
+            )
+        except Exception as e:
+            print(f"[decision_service] 保存对话历史失败: {e}", flush=True)
 
     yield _sse("done", {"decision_id": None, "conclusion_level": "general_chat", "conclusion_label": "普通对话"})
 
@@ -571,9 +990,15 @@ def _serialize_decision_result(result: DecisionResult) -> dict:
     }
 
     if result.intent:
+        # 如果有 LLM 结构化结果，用 decisionType 覆盖 action 显示
+        action_display = result.intent.action_type
+        if result.llm and result.llm.structured_result:
+            dt = result.llm.structured_result.get("decisionType")
+            if dt:
+                action_display = dt  # 前端 ACTION_LABELS 会映射 trim→减仓 等
         d["intent"] = {
             "asset":         result.intent.asset,
-            "action":        result.intent.action_type,    # 前端统一用 action
+            "action":        action_display,
             "time_context":  result.intent.time_horizon,   # 前端统一用 time_context
             "confidence":    result.intent.confidence_score,
             "intent_type":   result.intent.intent_type,

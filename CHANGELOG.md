@@ -4,6 +4,47 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.4.0] - 2026-04-10 - 决策对话策略优化 Phase 2
+
+### Added
+
+**多轮对话持久化**
+- `app/models.py`：新增 `ConversationMessage` 模型，按 session 持久化 user/assistant 消息对，记录 intent、asset、metadata
+- `backend/services/decision_service.py`：新增 `get_conversation_history()` / `save_conversation_turn()` 多轮上下文管理
+
+**智能标的澄清系统**
+- `backend/services/decision_service.py`：当用户输入模糊标的（如"这只股票""亏损那个"）时，自动推断候选标的并生成澄清问答
+  - `_is_asset_clear()` — 标的名称校验
+  - `_detect_feature_type()` — 从描述推断特征（亏损/重仓/最近买的等）
+  - `_get_candidate_positions()` — 候选标的排序
+  - `_build_clarification_reply()` — 自然语言澄清 UI
+  - `_try_resolve_clarification()` — 解析用户选择并合并回查询
+
+**联网投研并行搜索**
+- `decision_engine/data_loader.py`：单标的搜索升级为 4 维度并行查询（财报/交付/评级/动态），结果去重 + 时间戳标注 `[YYYY-MM]` + URL 提取
+
+### Changed
+
+**决策输出结构升级（7 档制）**
+- `decision_engine/llm_engine.py`：decisionType 从旧 6 档（BUY/HOLD/SELL/TAKE_PROFIT/REDUCE/STOP_LOSS）改为新 7 档（buy_init/buy_more/hold/trim/exit/wait/need_info）
+  - 新增 `confidence` + `confidenceReason` 字段（决策透明度）
+  - 新增 `evidenceSources` 字段（证据来源枚举）
+  - 新增 `infoNeeded` 字段（confidence < 0.5 时必填）
+- `decision_engine/llm_engine.py`：chat_answer 分首轮/跟进轮两套模板
+  - 首轮：四段式（结论 / 核心依据 / 主要风险 / 操作建议）+ 严格数据引用规则
+  - 跟进轮：直接回答，不重复标题，避免信息冗余
+
+**意图识别增强**
+- `intent_engine/intent_recognizer.py`：5 类意图定义细化，增加大量边界案例和判断规则
+  - 新增多轮上下文感知：接收 `conversation_history` + `position_names`，动态注入历史对话
+  - 新增操作优先规则：显式标的 + 操作动词 → 强制 PositionDecision
+
+**前端适配**
+- `frontend/src/pages/Decision.tsx`：适配新 7 档 decisionType 标签映射；研报链接渲染支持 `[ref:url]` 格式
+- `frontend/src/lib/api.ts`：新增对话历史相关 API 类型定义
+
+---
+
 ## [2.3.0] - 2026-04-06 - 资产配置模块 V1
 
 ### Added

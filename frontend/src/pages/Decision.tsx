@@ -115,7 +115,7 @@ function buildPersonalizedQuestions(positions: Position[], totalAssets: number):
   }
 
   const questions: string[] = []
-  questions.push(`${q1h.name} 目前仓位偏重，我需要重新评估一下吗？`)
+  questions.push(`${q1h.name} 仓位偏重，是不是该考虑减仓或再平衡了？`)
   if (q2h) {
     questions.push(
       q2IsNegative
@@ -124,7 +124,7 @@ function buildPersonalizedQuestions(positions: Position[], totalAssets: number):
     )
   }
   if (q3h) {
-    questions.push(`如果新增一笔资金，${q3h.name} 在现有组合里还值得优先考虑吗？`)
+    questions.push(`如果新增一笔资金，现在加仓 ${q3h.name} 合适吗？`)
   }
   return questions
 }
@@ -147,7 +147,7 @@ const INTENT_CATEGORIES = [
     icon: '📊',
     questions: [
       '我的持仓里有几只股票集中在同一个行业，这样风险大吗？',
-      '我最近调仓比较频繁，整体组合现在是什么状态？',
+      '我的组合调整过几次了，现在整体是什么状态？',
       '我感觉我的组合在震荡市里跌得比较多，问题出在哪？',
     ],
   },
@@ -156,9 +156,9 @@ const INTENT_CATEGORIES = [
     label: '资产配置',
     icon: '🗂️',
     questions: [
-      '我现在大部分钱都在股票上，固收和现金留得很少，这样合理吗？',
-      '我准备把一笔到期的理财重新配置，不知道怎么分？',
-      '我的港股和A股持仓比例有点失衡，需要调整吗？',
+      '我有100万准备开始投资，应该怎么分配？',
+      '我准备把一笔即将到期的30万理财重新配置，不知道怎么分？',
+      '我想把组合调整到更稳健的结构，固收应该加多少？',
     ],
   },
   {
@@ -168,7 +168,7 @@ const INTENT_CATEGORIES = [
     questions: [
       '这段时间大盘还行，但我的组合收益明显跑输了，为什么？',
       '我有几笔投资一直是正收益，但整体算下来并不好看，哪里出了问题？',
-      '我想知道过去三个月里，是哪些持仓在拖累我的整体表现？',
+      '从我现在的持仓来看，哪些标的在拖累整体表现？',
     ],
   },
   {
@@ -288,6 +288,8 @@ export default function Decision() {
           const conclusionLevel = ev.data.conclusion_level as string | undefined
           const conclusionLabel = ev.data.conclusion_label as string | undefined
           if (did) lastDecisionId = did
+          // 从 decisionResult 中提取 decisionType，覆盖意图层的 action
+          const decisionType = (ev.data.decisionResult as Record<string, unknown>)?.decisionType as string | undefined
           updateAi(m => ({
             ...m,
             streaming: false,
@@ -296,6 +298,10 @@ export default function Decision() {
             stages: (m.stages ?? []).map(s =>
               s.status.toLowerCase() === 'running' ? { ...s, status: 'pass' } : s
             ),
+            // 用 decisionType 覆盖 intent.action，保持操作字段与结论一致
+            ...(decisionType && m.intent ? {
+              intent: { ...(m.intent as Record<string, unknown>), action: decisionType },
+            } : {}),
             // 从 done 事件提取结论
             ...(conclusionLevel ? {
               conclusion: { verdict: conclusionLabel ?? conclusionLevel, summary: '' },
@@ -648,6 +654,7 @@ function AiMessage({ msg }: { msg: Message }) {
                   h3:     ({ children }) => <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 6px' }}>{children}</h3>,
                   hr:     () => <hr style={{ border: 'none', borderTop: '1px solid #E5E7EB', margin: '10px 0' }} />,
                   code:   ({ children }) => <code style={{ background: '#F3F4F6', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
+                  a:      ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#3B82F6', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'border-color 0.15s' }} onMouseEnter={e => (e.currentTarget.style.borderBottomColor = '#3B82F6')} onMouseLeave={e => (e.currentTarget.style.borderBottomColor = 'transparent')}>{children}</a>,
                 }}
               >
                 {msg.streaming ? msg.content + '▊' : msg.content}
@@ -787,6 +794,15 @@ function stageChipStyle(name: string, status: string): { bg: string; color: stri
 // ── intent 字段辅助映射 ───────────────────────────────────────
 // 兼容两路数据：SSE fallback 传英文枚举值，getExplain 传中文值（直接透传）
 const ACTION_LABELS: Record<string, string> = {
+  // decisionType 值（优先级更高，done 事件后覆盖）
+  buy_init:   '建仓',
+  buy_more:   '加仓',
+  hold:       '持有',
+  trim:       '减仓',
+  exit:       '清仓',
+  wait:       '观望',
+  need_info:  '待确认',
+  // intent actions（兜底，done 事件前显示）
   BUY:        '买入判断',
   ADD:        '加仓判断',
   SELL:       '卖出判断',
@@ -795,9 +811,20 @@ const ACTION_LABELS: Record<string, string> = {
   ANALYZE:    '综合评估',
   TAKE_PROFIT:'止盈',
   STOP_LOSS:  '止损',
+  // PortfolioReview conclusion_type
+  rebalance_needed: '建议再平衡',
+  healthy:          '维持现状',
+  high_risk:        '建议降仓',
+  low_defense:      '补充防御',
+  portfolio_review: '组合评估',
+  performance_analysis: '收益分析',
+  // AssetAllocation allocation_type
+  new_cash:         '新增配置',
+  rebalance:        '再平衡',
+  asset_allocation: '资产配置',
 }
 function displayAction(action: string): string {
-  return ACTION_LABELS[action.toUpperCase()] ?? action  // 已是中文则直接透传
+  return ACTION_LABELS[action] ?? ACTION_LABELS[action.toUpperCase()] ?? action
 }
 
 const PRIMARY_INTENT_LABELS: Record<string, string> = {
@@ -821,8 +848,20 @@ function signalColor(value: string): string {
 function parseResearchItem(raw: string): { type: 'user' | 'web' | 'other'; text: string; url: string | null; domain: string | null } {
   let type: 'user' | 'web' | 'other' = 'other'
   let text = raw
+  let refUrl: string | null = null
+
   if (text.startsWith('[用户资料]')) { type = 'user'; text = text.slice(6).trim() }
   else if (text.startsWith('[联网参考]')) { type = 'web';  text = text.slice(6).trim() }
+
+  // 提取并过滤 [ref:url] 标记
+  const refMatch = text.match(/^\[ref:(https?:\/\/[^\]]+)\]\s*/)
+  if (refMatch) {
+    refUrl = refMatch[1]
+    text = text.slice(refMatch[0].length).trim()
+  }
+
+  // 过滤残留的日期标注 [2026-03] 等
+  text = text.replace(/^\[\d{4}-\d{2}\]\s*/, '').trim()
 
   // 匹配末尾括号（中文全角或半角）内的完整 URL
   const urlMatch = text.match(/\s*[（(](https?:\/\/[^）)]+)[）)]\s*$/)
@@ -832,6 +871,13 @@ function parseResearchItem(raw: string): { type: 'user' | 'web' | 'other'; text:
     const domain = domainMatch ? domainMatch[1].replace(/^www\./, '') : fullUrl
     text = text.slice(0, text.lastIndexOf(urlMatch[0])).trim()
     return { type, text, url: fullUrl, domain }
+  }
+
+  // 使用 ref 标记中的 URL
+  if (refUrl) {
+    const domainMatch = refUrl.match(/^https?:\/\/([^/?#]+)/)
+    const domain = domainMatch ? domainMatch[1].replace(/^www\./, '') : null
+    return { type, text, url: refUrl, domain }
   }
 
   // 兼容旧格式：末尾只有裸域名
@@ -924,59 +970,113 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 1b. 持仓数据 ── */}
-      {(position || data.data?.total_assets) && (
-        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
-          <SectionLabel label="持仓数据" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {data.data?.total_assets != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: '#6B7280' }}>组合总市值</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                  ¥{(data.data.total_assets / 10000).toFixed(2)}万
-                </span>
-              </div>
-            )}
-            {position && (
-              <>
-                <div style={{ height: 1, background: '#F3F4F6', margin: '2px 0' }} />
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{position.name}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#6B7280' }}>仓位占比</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                    {(position.weight * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#6B7280' }}>市值</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                    ¥{(position.market_value_cny / 10000).toFixed(2)}万
-                  </span>
-                </div>
-                {position.profit_loss_rate != null && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#6B7280' }}>收益率</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: position.profit_loss_rate >= 0 ? '#10B981' : '#EF4444' }}>
-                      {position.profit_loss_rate >= 0 ? '+' : ''}{(position.profit_loss_rate * 100).toFixed(2)}%
-                    </span>
-                  </div>
-                )}
-                {position.platforms && position.platforms.length > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#6B7280' }}>平台</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                      {position.platforms.join(' / ')}
-                    </span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── 1b. 持仓数据 / 资产分布（Education 不显示）── */}
+      {intent?.primary_intent !== 'Education' && (() => {
+        const isPortfolioReview = intent?.primary_intent === 'PortfolioReview' || intent?.intent_type === 'portfolio_review'
+        const breakdown = data.data?.asset_breakdown as Record<string, unknown> | undefined
+        const prResult = data.portfolioResult as Record<string, unknown> | undefined
 
-      {/* ── 2. 规则校验 ── */}
-      {rules && (
+        // PortfolioReview：显示资产分布
+        if (isPortfolioReview && breakdown) {
+          const cats = breakdown.categories as Record<string, { market_value: number; pnl: number; pct: number; count: number }>
+          const top3 = (breakdown.top3_by_weight as { name: string; weight: number; pnl_pct: number }[]) || []
+          return (
+            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+              <SectionLabel label="资产分布" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {data.data?.total_assets != null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, color: '#6B7280' }}>组合总市值</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                      ¥{(data.data.total_assets / 10000).toFixed(2)}万
+                    </span>
+                  </div>
+                )}
+                {cats && Object.entries(cats).map(([cat, info]) => (
+                  <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#6B7280', minWidth: 36 }}>{cat}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', flex: 1, textAlign: 'right', marginRight: 8 }}>
+                      {info.pct.toFixed(1)}%
+                    </span>
+                    <span style={{ fontSize: 11, color: info.pnl >= 0 ? '#EF4444' : '#10B981', minWidth: 60, textAlign: 'right' }}>
+                      {info.pnl >= 0 ? '+' : ''}{(info.pnl / 10000).toFixed(2)}万
+                    </span>
+                  </div>
+                ))}
+                {top3.length > 0 && (
+                  <>
+                    <div style={{ height: 1, background: '#F3F4F6', margin: '4px 0' }} />
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 2 }}>持仓前三</div>
+                    {top3.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#374151' }}>{p.name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{p.weight}%</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        }
+
+        // 非 PortfolioReview：原有持仓数据模块
+        if (position || data.data?.total_assets) {
+          return (
+            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+              <SectionLabel label="持仓数据" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {data.data?.total_assets != null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#6B7280' }}>组合总市值</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                      ¥{(data.data.total_assets / 10000).toFixed(2)}万
+                    </span>
+                  </div>
+                )}
+                {position && (
+                  <>
+                    <div style={{ height: 1, background: '#F3F4F6', margin: '2px 0' }} />
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{position.name}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#6B7280' }}>仓位占比</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                        {(position.weight * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#6B7280' }}>市值</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                        ¥{(position.market_value_cny / 10000).toFixed(2)}万
+                      </span>
+                    </div>
+                    {position.profit_loss_rate != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#6B7280' }}>收益率</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: position.profit_loss_rate >= 0 ? '#EF4444' : '#10B981' }}>
+                          {position.profit_loss_rate >= 0 ? '+' : ''}{(position.profit_loss_rate * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
+                    {position.platforms && position.platforms.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#6B7280' }}>平台</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
+                          {position.platforms.join(' / ')}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        }
+        return null
+      })()}
+
+      {/* ── 2. 规则校验（Education 不显示）── */}
+      {intent?.primary_intent !== 'Education' && rules && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <SectionLabel label="纪律校验" />
           {/* 整体结论 */}
@@ -994,8 +1094,8 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 3. 投研观点（默认折叠）── */}
-      {research && research.length > 0 && (
+      {/* ── 3. 投研观点（默认折叠，PerformanceAnalysis 不显示）── */}
+      {intent?.primary_intent !== 'PerformanceAnalysis' && research && research.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <CollapsibleHeader label="投研观点" open={researchOpen} onToggle={() => setResearchOpen(o => !o)} />
           {researchOpen && (
@@ -1040,8 +1140,8 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 4. 四维信号 ── */}
-      {signals && (
+      {/* ── 4. 四维信号（Education 不显示）── */}
+      {intent?.primary_intent !== 'Education' && signals && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <SectionLabel label="市场信号" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1066,8 +1166,8 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 5. 分析过程（折叠） ── */}
-      {(stages ?? []).length > 0 && (
+      {/* ── 5. 分析过程（折叠，Education 不显示）── */}
+      {intent?.primary_intent !== 'Education' && (stages ?? []).length > 0 && (
         <div>
           <button
             onClick={() => setChainOpen(o => !o)}
@@ -1100,8 +1200,93 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         <ReasoningPanel reasoning={data.llm.reasoning} />
       )}
 
-      {/* ── 6. 最终结论完整版 ── */}
-      {(conclusion || data.llm) && (
+      {/* ── 5b. 组合评估结论（PortfolioReview 专用）── */}
+      {data.portfolioResult && (() => {
+        const pr = data.portfolioResult as Record<string, unknown>
+        const PCLS: Record<string, string> = { healthy: '✅ 结构健康', rebalance_needed: '⚖️ 建议再平衡', high_risk: '⚠️ 风险偏高', low_defense: '🛡️ 防御不足' }
+        const ct = pr.conclusion_type as string || ''
+        const rl = pr.risk_level as string || ''
+        const findings = (pr.key_findings as string[]) || []
+        const concIssues = (pr.concentration_issues as string[]) || []
+        const rebalSugs = (pr.rebalance_suggestions as string[]) || []
+        return (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+            <SectionLabel label="组合评估结论" />
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>
+              {PCLS[ct] || ct}
+            </div>
+            {rl && <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>风险等级：<span style={{ fontWeight: 600, color: rl === '高' ? '#EF4444' : rl === '低' ? '#10B981' : '#F59E0B' }}>{rl}</span></div>}
+            {findings.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>核心发现</div>
+                {findings.map((f, i) => <div key={i} style={{ fontSize: 12, color: '#374151', lineHeight: 1.6, paddingLeft: 8, borderLeft: '2px solid #3B82F6', marginBottom: 3 }}>{f}</div>)}
+              </div>
+            )}
+            {concIssues.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>集中度问题</div>
+                {concIssues.map((c, i) => <div key={i} style={{ fontSize: 12, color: '#D97706', lineHeight: 1.6, paddingLeft: 8, borderLeft: '2px solid #F59E0B', marginBottom: 3 }}>{c}</div>)}
+              </div>
+            )}
+            {rebalSugs.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>调仓建议</div>
+                {rebalSugs.map((s, i) => <div key={i} style={{ fontSize: 12, color: '#059669', lineHeight: 1.6, paddingLeft: 8, borderLeft: '2px solid #10B981', marginBottom: 3 }}>{s}</div>)}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── 5b. 收益诊断（PerformanceAnalysis 专用）── */}
+      {(() => {
+        const pr = (data as Record<string, unknown>).performanceResult as Record<string, unknown> | undefined
+        if (!pr) return null
+        const DIAG: Record<string, string> = {
+          concentration: '📊 集中度过高', asset_mix: '⚖️ 资产配比问题',
+          stock_selection: '🎯 个股分化明显', healthy: '✅ 收益结构健康',
+          low_defense: '🛡️ 防御资产不足',
+        }
+        return (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+            <SectionLabel label="收益诊断" />
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>
+              {DIAG[pr.diagnosis_type as string] ?? '综合分析'}
+            </div>
+            {pr.structural_issue && (
+              <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{pr.structural_issue as string}</div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── 5c. 分配方案（AssetAllocation 专用）── */}
+      {(() => {
+        const ar = (data as Record<string, unknown>).allocationResult as Record<string, unknown> | undefined
+        if (!ar) return null
+        const plan = ar.allocation_plan as Array<Record<string, string>> | undefined
+        if (!plan || plan.length === 0) return null
+        const DIR_COLOR: Record<string, string> = { '增加': '#059669', '减少': '#EF4444', '维持': '#6B7280' }
+        return (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+            <SectionLabel label="分配方案" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {plan.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#374151' }}>{item.asset_class}</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: DIR_COLOR[item.direction] ?? '#6B7280', padding: '1px 6px', borderRadius: 4, background: `${DIR_COLOR[item.direction] ?? '#6B7280'}15` }}>{item.direction}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', minWidth: 50, textAlign: 'right' }}>{item.suggested_pct}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── 6. 最终结论完整版（Education 不显示）── */}
+      {intent?.primary_intent !== 'Education' && (conclusion || data.llm) && !data.portfolioResult && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <SectionLabel label="最终结论" />
 

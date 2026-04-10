@@ -290,3 +290,19 @@ class UserProfile(Base):
     ai_summary            = Column(Text,        nullable=True)   # 自然语言总结
     ai_style              = Column(String(10),  nullable=True)   # "稳健"|"平衡"|"进取"
     ai_confidence         = Column(String(10),  nullable=True)   # "high"|"medium"|"low"
+
+
+# ──────────────────────────────────────────────
+# 多轮对话历史（持久化存储）
+# ──────────────────────────────────────────────
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String,  nullable=False, index=True)
+    role       = Column(String,  nullable=False)   # "user" | "assistant"
+    content    = Column(Text,    nullable=False)   # user原文 / assistant的chat_answer
+    intent     = Column(String,  nullable=True)    # 仅assistant轮，如"PositionDecision"
+    asset      = Column(String,  nullable=True)    # 仅assistant轮，如"理想汽车"
+    created_at = Column(DateTime, default=datetime.utcnow)

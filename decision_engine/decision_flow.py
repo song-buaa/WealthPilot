@@ -97,6 +97,7 @@ def run_with_intent(
     intent: IntentResult,
     user_input: str,
     pid: int = default_portfolio_id,
+    conversation_history: list[dict] | None = None,
 ) -> DecisionResult:
     """
     跳过意图解析，直接用外部传入的 IntentResult 执行步骤 2-6。
@@ -115,7 +116,7 @@ def run_with_intent(
         result.aborted_reason = intent.clarification or "请重新描述您的投资决策需求。"
         return result
 
-    return _run_pipeline(result, intent, user_input, pid)
+    return _run_pipeline(result, intent, user_input, pid, conversation_history)
 
 
 # ── 步骤 2-6 公共管道（run_with_intent 调用）─────────────────────────────────
@@ -125,6 +126,7 @@ def _run_pipeline(
     intent: IntentResult,
     user_input: str,
     pid: int,
+    conversation_history: list[dict] | None = None,
 ) -> DecisionResult:
     """执行数据加载 → 前置校验 → 规则校验 → 信号生成 → LLM推理。"""
 
@@ -214,6 +216,7 @@ def _run_pipeline(
         intent=intent,
         rule_result=rule_result,
         signals=sig,
+        conversation_history=conversation_history,
     )
     result.llm = llm_result
     result.stage = FlowStage.DONE

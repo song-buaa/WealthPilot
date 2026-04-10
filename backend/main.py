@@ -5,8 +5,11 @@ WealthPilot — FastAPI 入口
     uvicorn backend.main:app --reload --port 8000
 """
 
+import os as _os
 from dotenv import load_dotenv
-load_dotenv()
+# 显式指定 .env 路径，避免从 worktree 等非项目根目录启动时找不到
+_project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+load_dotenv(_os.path.join(_project_root, ".env"))
 
 from contextlib import asynccontextmanager
 

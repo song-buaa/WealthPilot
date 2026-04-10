@@ -294,7 +294,10 @@ def _distill_research_cards(session, asset_name: str) -> list[str]:
 
 def _search_research_online(asset_name: str) -> list[str]:
     """
-    调用 Perplexity sonar-pro 联网搜索指定标的的最新投研观点。
+    多维度并行联网搜索指定标的的最新投研观点。
+
+    4 个 query 分别聚焦：财报业绩、交付/销量、分析师评级、动态/风险，
+    通过线程池并行执行后合并去重，上限 8 条。
 
     优先使用 PERPLEXITY_API_KEY；未配置时降级到 OPENAI_API_KEY + gpt-4o-search-preview。
     返回带 [联网参考] 前缀的字符串列表，供 LLM 与用户录入内容区分优先级。
@@ -313,58 +316,122 @@ def _search_research_online(asset_name: str) -> list[str]:
 
     try:
         import openai as _openai
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from datetime import datetime
 
         if perplexity_key:
-            # Perplexity API（格式与 OpenAI 兼容，sonar-pro 专为搜索优化）
             client = _openai.OpenAI(
                 api_key=perplexity_key,
                 base_url="https://api.perplexity.ai",
             )
             model = "sonar-pro"
         else:
-            # 降级：OpenAI gpt-4o-search-preview
             client = _openai.OpenAI(api_key=openai_key)
             model = "gpt-4o-search-preview"
 
-        response = client.chat.completions.create(
-            model=model,
-            max_tokens=600,
-            timeout=20,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的投资研究助手，擅长从市场最新信息中提炼简洁的投研观点。",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"请搜索「{asset_name}」的最新投研观点，以中文返回3-5条简洁摘要。"
-                        f"每条不超过60字，聚焦：近期基本面变化（业绩/产品/市场份额）、"
-                        f"机构评级或目标价变动、主要风险点。"
-                        f"格式要求：每条直接写结论性内容，以「- 」开头，"
-                        f"禁止输出分节标题（如「**机构评级**:」），禁止输出来源链接和前言介绍。"
-                    ),
-                },
-            ],
-        )
-        raw = response.choices[0].message.content.strip()
+        # 动态获取当前年份，搜索 query 带时间约束
+        current_year = datetime.now().year
 
-        # 解析返回列表（兼容"- ""• ""1. "等格式）
-        lines = []
-        for line in raw.split("\n"):
-            stripped = line.strip()
-            if not stripped or len(stripped) <= 8:
-                continue
-            # 去掉列表标记和行首 markdown 标记
-            cleaned = stripped.lstrip("-•·*1234567890. \t").strip()
-            # 去掉残余的 markdown 粗体标记（** 包裹）
-            cleaned = cleaned.replace("**", "")
-            # 跳过节标题行：内容以冒号结尾且不含实质信息
-            if cleaned.endswith(":") or cleaned.endswith("："):
-                continue
-            if len(cleaned) > 8:
-                lines.append(cleaned)
-        result = [f"[联网参考] {l}" for l in lines[:5] if l]
+        # 4 个维度的搜索 query
+        queries = [
+            f"请搜索「{asset_name}」{current_year}年财报数据，以中文返回2条简洁摘要。每条不超过80字，聚焦：营收、净利润、同比变化、毛利率等关键财务指标。每条必须在开头标注数据对应的年月（如[2026-03]），格式：以「- [YYYY-MM] 」开头，禁止输出标题和链接。",
+            f"请搜索「{asset_name}」{current_year}年交付量或销量数据，以中文返回2条简洁摘要。每条不超过80字，聚焦：月度/季度交付量、同比环比变化、市场份额。每条必须在开头标注数据对应的年月，格式：以「- [YYYY-MM] 」开头，禁止输出标题和链接。",
+            f"请搜索「{asset_name}」{current_year}年分析师评级和目标价，以中文返回2条简洁摘要。每条不超过80字，聚焦：机构名称、评级变动、目标价。每条必须在开头标注发布年月，格式：以「- [YYYY-MM] 」开头，禁止输出标题和链接。",
+            f"请搜索「{asset_name}」{current_year}年最新动态和风险因素，以中文返回2条简洁摘要。每条不超过80字，聚焦：产品发布、战略变化、行业竞争、政策风险。每条必须在开头标注事件年月，格式：以「- [YYYY-MM] 」开头，禁止输出标题和链接。",
+        ]
+
+        print(f"[data_loader] 联网搜索 query 年份={current_year}, 标的={asset_name}", flush=True)
+
+        sys_prompt = "你是一个专业的投资研究助手，擅长从市场最新信息中提炼简洁的投研观点。每条摘要必须在开头标注数据对应的年月（格式 [YYYY-MM]），如无法确定则标注 [日期未知]。"
+
+        def _run_single_query(query: str) -> list[str]:
+            """执行单维度搜索，通过 annotations 提取 URL（覆盖率 100%）。"""
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    max_tokens=400,
+                    timeout=20,
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": query},
+                    ],
+                )
+                msg = resp.choices[0].message
+                content = (msg.content or "").strip()
+
+                # 从 annotations 构建字符位置 → URL 映射
+                url_map: dict[int, str] = {}  # end_index → url
+                annotations = getattr(msg, "annotations", None) or []
+                for ann in annotations:
+                    cite = getattr(ann, "url_citation", None)
+                    if cite and hasattr(cite, "url") and hasattr(cite, "end_index"):
+                        url = cite.url
+                        # 清理 utm 参数
+                        import re as _re
+                        url = _re.sub(r'[?&]utm_source=[^&]*', '', url).rstrip('?&')
+                        url_map[cite.end_index] = url
+
+                # 解析文本行，为每行匹配最近的 annotation URL
+                lines = _parse_research_lines(content)
+                result_lines: list[str] = []
+                for line in lines:
+                    # 在 content 中找到该行的位置，匹配最近的 annotation
+                    matched_url = None
+                    line_pos = content.find(line[:30])  # 用前30字符定位
+                    if line_pos >= 0:
+                        line_end = line_pos + len(line) + 50  # 留余量
+                        # 找该行范围内最近的 annotation
+                        best_idx = None
+                        for end_idx, url in url_map.items():
+                            if line_pos <= end_idx <= line_end:
+                                if best_idx is None or end_idx < best_idx:
+                                    best_idx = end_idx
+                                    matched_url = url
+                    if matched_url:
+                        result_lines.append(f"[ref:{matched_url}] {line}")
+                    else:
+                        result_lines.append(line)
+
+                return result_lines
+            except Exception as e:
+                print(f"[data_loader] 单维度搜索失败: {e}", flush=True)
+                return []
+
+        # 并行执行 4 个 query
+        all_lines: list[str] = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_run_single_query, q) for q in queries]
+            for f in as_completed(futures):
+                all_lines.extend(f.result())
+
+        # 去重（基于前30字符相似度）
+        seen = set()
+        unique: list[str] = []
+        for line in all_lines:
+            # 跳过 [ref:...] 前缀取正文部分做去重
+            text_for_dedup = line
+            if line.startswith("[ref:"):
+                try:
+                    text_for_dedup = line[line.index("] ", 1) + 2:]
+                except ValueError:
+                    pass
+            key = text_for_dedup[:30]
+            if key not in seen:
+                seen.add(key)
+                unique.append(line)
+
+        # 拼接前缀：[联网参考] 放在 [ref:url] 之后（如有）
+        result = []
+        url_count = 0
+        for l in unique[:8]:
+            if l.startswith("[ref:"):
+                bracket_end = l.index("] ", 1) + 2
+                result.append(f"[联网参考]{l[:bracket_end]}{l[bracket_end:]}")
+                url_count += 1
+            else:
+                result.append(f"[联网参考] {l}")
+        print(f"[data_loader] 联网搜索完成 ({asset_name}): {len(result)} 条结果, {url_count} 条有URL", flush=True)
+        print(f"[data_loader] 联网搜索完成 ({asset_name}): {len(result)} 条结果", flush=True)
 
         if result:
             _RESEARCH_CACHE[asset_name] = (time.time(), result)
@@ -373,6 +440,197 @@ def _search_research_online(asset_name: str) -> list[str]:
 
     except Exception as e:
         print(f"[data_loader] 联网投研搜索失败 ({asset_name}): {e}", flush=True)
+        return []
+
+
+def search_portfolio_research(positions: list) -> list[str]:
+    """
+    针对 PortfolioReview 意图的宏观联网搜索。
+    搜索宏观市场、大类资产、主要行业维度，而非单一标的。
+    """
+    cached = _get_cached_research("__portfolio__")
+    if cached is not None:
+        return cached
+
+    perplexity_key = os.environ.get("PERPLEXITY_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if not perplexity_key and not openai_key:
+        return []
+
+    try:
+        import openai as _openai
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from datetime import datetime
+
+        if perplexity_key:
+            client = _openai.OpenAI(api_key=perplexity_key, base_url="https://api.perplexity.ai")
+            model = "sonar-pro"
+        else:
+            client = _openai.OpenAI(api_key=openai_key)
+            model = "gpt-4o-search-preview"
+
+        current_year = datetime.now().year
+
+        # 固定宏观维度 + 动态行业维度
+        queries = [
+            f"请搜索{current_year}年A股和港股市场整体走势，返回2条简洁摘要。每条不超过80字。格式：以「- 」开头。",
+            f"请搜索{current_year}年美股纳斯达克走势和科技股表现，返回2条简洁摘要。每条不超过80字。格式：以「- 」开头。",
+            f"请搜索{current_year}年债券市场利率走势和固收投资环境，返回2条简洁摘要。每条不超过80字。格式：以「- 」开头。",
+            f"请搜索{current_year}年黄金价格和大宗商品走势，返回1条简洁摘要。每条不超过80字。格式：以「- 」开头。",
+        ]
+
+        # 动态行业推断：从持仓名称中提取关键行业
+        sector_kw = {"新能源": "新能源汽车", "科技": "科技", "消费": "消费", "医药": "医药",
+                     "半导体": "半导体", "芯片": "芯片", "AI": "人工智能", "银行": "银行"}
+        detected = set()
+        for p in positions[:15]:
+            name = (getattr(p, 'name', '') or '').lower()
+            for kw, sector in sector_kw.items():
+                if kw.lower() in name:
+                    detected.add(sector)
+        for sector in list(detected)[:2]:
+            queries.append(
+                f"请搜索{current_year}年{sector}行业投资展望，返回1条简洁摘要。不超过80字。格式：以「- 」开头。"
+            )
+
+        print(f"[data_loader] 组合宏观搜索: {len(queries)} 个 query", flush=True)
+
+        sys_prompt = "你是投资研究助手，擅长提炼宏观和行业投研观点。"
+
+        def _run_q(query: str) -> list[str]:
+            try:
+                resp = client.chat.completions.create(
+                    model=model, max_tokens=300, timeout=20,
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": query},
+                    ],
+                )
+                msg = resp.choices[0].message
+                content = (msg.content or "").strip()
+                lines = _parse_research_lines(content)
+                # 从 annotations 提取 URL
+                url_map = {}
+                for ann in (getattr(msg, "annotations", None) or []):
+                    cite = getattr(ann, "url_citation", None)
+                    if cite and hasattr(cite, "url"):
+                        import re as _re
+                        url = _re.sub(r'[?&]utm_source=[^&]*', '', cite.url).rstrip('?&')
+                        url_map[getattr(cite, 'end_index', 0)] = url
+                result = []
+                for line in lines:
+                    matched_url = None
+                    pos = content.find(line[:30])
+                    if pos >= 0:
+                        for end_idx, url in url_map.items():
+                            if pos <= end_idx <= pos + len(line) + 50:
+                                matched_url = url
+                                break
+                    result.append(f"[ref:{matched_url}] {line}" if matched_url else line)
+                return result
+            except Exception as e:
+                print(f"[data_loader] 宏观搜索失败: {e}", flush=True)
+                return []
+
+        all_lines: list[str] = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_run_q, q) for q in queries]
+            for f in as_completed(futures):
+                all_lines.extend(f.result())
+
+        seen = set()
+        unique = []
+        for line in all_lines:
+            key = line[:30] if not line.startswith("[ref:") else line[line.index("] ", 1) + 2:][:30]
+            if key not in seen:
+                seen.add(key)
+                unique.append(line)
+
+        result = []
+        url_count = 0
+        for l in unique[:8]:
+            if l.startswith("[ref:"):
+                bracket_end = l.index("] ", 1) + 2
+                result.append(f"[联网参考]{l[:bracket_end]}{l[bracket_end:]}")
+                url_count += 1
+            else:
+                result.append(f"[联网参考] {l}")
+
+        print(f"[data_loader] 组合宏观搜索完成: {len(result)} 条, {url_count} 条有URL", flush=True)
+        if result:
+            _RESEARCH_CACHE["__portfolio__"] = (time.time(), result)
+        return result
+
+    except Exception as e:
+        print(f"[data_loader] 组合宏观搜索失败: {e}", flush=True)
+        return []
+
+
+def _parse_research_lines(raw: str) -> list[str]:
+    """
+    解析 LLM 返回的列表文本，兼容 '- ' '• ' '1. ' 等格式。
+    提取内联 URL 并转换为 [ref:url] 前缀格式。
+    """
+    import re
+    lines = []
+    for line in raw.split("\n"):
+        stripped = line.strip()
+        if not stripped or len(stripped) <= 8:
+            continue
+        # 去掉列表标记（- • · * 及编号如 1. 2.），但不误删年份等正文数字
+        import re as _re
+        cleaned = _re.sub(r'^[-•·*\s\t]*(?:\d{1,2}\.\s*)?', '', stripped).strip()
+        cleaned = cleaned.replace("**", "")
+        if cleaned.endswith(":") or cleaned.endswith("："):
+            continue
+
+        # 提取 URL：匹配 (text](url)) 或 ([text](url)) 或裸 (https://...)
+        url = None
+        # 模式1: markdown 链接 ([domain](https://...))
+        md_match = re.search(r'\(\[.*?\]\((https?://[^\s\)]+)\)\)', cleaned)
+        if md_match:
+            url = md_match.group(1)
+            # 去掉 markdown 链接部分
+            cleaned = cleaned[:md_match.start()].strip().rstrip("。，,.")
+        else:
+            # 模式2: 裸括号链接 (https://...)
+            bare_match = re.search(r'\((https?://[^\s\)]+)\)', cleaned)
+            if bare_match:
+                url = bare_match.group(1)
+                cleaned = cleaned[:bare_match.start()].strip().rstrip("。，,.")
+
+        # 清理 URL 中的 utm 参数
+        if url and "utm_source" in url:
+            url = re.sub(r'[?&]utm_source=[^&]*', '', url)
+            url = url.rstrip('?&')
+
+        if len(cleaned) > 8:
+            if url:
+                lines.append(f"[ref:{url}] {cleaned}")
+            else:
+                lines.append(cleaned)
+    return lines
+
+
+def get_position_names(pid: int = default_portfolio_id) -> list[str]:
+    """
+    从持仓数据中提取所有标的名称，用于意图识别的上下文辅助。
+    返回去重后的名称列表，包含中文名和 ticker（如有）。
+    """
+    try:
+        positions, _ = aggregate_investment_positions(pid)
+        names: list[str] = []
+        seen: set[str] = set()
+        for p in positions:
+            if p.name and p.name not in seen:
+                names.append(p.name)
+                seen.add(p.name)
+            if p.ticker and p.ticker not in seen:
+                names.append(p.ticker)
+                seen.add(p.ticker)
+        return names
+    except Exception as e:
+        print(f"[data_loader] 获取持仓名称失败: {e}", flush=True)
         return []
 
 
@@ -612,7 +870,7 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
         return online if online else _DEFAULT_MOCK_RESEARCH
     else:
         online = _search_research_online(asset_name)
-        return user_research + online[:2]
+        return user_research + online[:8]
 
 
 def _safe_pct(value, default: float) -> float:
