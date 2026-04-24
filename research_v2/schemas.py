@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── 枚举定义 ──────────────────────────────────────────────────────
@@ -178,6 +178,24 @@ class FactsLayer(BaseModel):
     affected_symbols: list[str] = Field(default_factory=list)  # 标准 symbol 字符串
     primary_symbol: Optional[str] = None
     primary_entity_id: Optional[str] = None
+
+    @field_validator("affected_symbols")
+    @classmethod
+    def _validate_affected_symbols(cls, v: list[str]) -> list[str]:
+        """校验每个 symbol 都能解析为合法 Symbol"""
+        from research_v2.symbol import Symbol
+        for s in v:
+            Symbol.parse(s)
+        return v
+
+    @field_validator("primary_symbol")
+    @classmethod
+    def _validate_primary_symbol(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        from research_v2.symbol import Symbol
+        Symbol.parse(v)
+        return v
     source_type: SourceType
     source_refs: list[SourceRef] = Field(default_factory=list)
     as_of: datetime
