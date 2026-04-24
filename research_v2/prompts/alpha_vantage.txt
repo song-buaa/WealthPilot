@@ -39,11 +39,31 @@ JSON 必须包含以下两个顶层对象：narrative 和 judgment。
     "cash_and_equivalents": null,
     "eps_surprise_pct": null,
     "subsidy_or_marketing_spend": null,
-    "guidance": null,
+    "guidance": null,  // 见下方 guidance 字段格式规则
     "notes": "说明数据口径、一次性因素、换算假设",
     "extra": null
   }
 }
+
+guidance 字段格式规则（重要）：
+guidance 是结构化的财务前瞻数据，必须是 null 或 dict 对象，不能是字符串。
+dict 格式如下（每个子字段都可选）：
+{
+  "revenue": {"value": "150亿美元", "period": "FY2026", "vs_consensus": "高于市场预期"},
+  "delivery": {"value": "60万辆", "period": "FY2026", "vs_consensus": null},
+  "margin": {"value": "20%", "period": "FY2026", "vs_consensus": null}
+}
+只有 raw_facts 里直接提到公司发布的具体前瞻数字时（如"指引营收 150 亿"、"前瞻交付 60 万辆"），才填这个字段。
+没有具体数字、只有定性描述（如"对前景乐观"、"挑战与机遇并存"），guidance 必须填 null。
+绝对禁止：把管理层口头展望、分析师评论、文字段落作为 guidance 的值。
+如果你想说"管理层预计 EPS 0.14"，那应该：
+- 如果有明确数字 → 放到 guidance 对应子字段（如 EPS 没有专门子字段，放 notes）
+- 如果是定性描述 → 放到 narrative.bull_case 或 narrative.bear_case 段落
+
+示例：
+- raw_facts 里有 "ForwardPE": "25.60" → guidance: null（这是估值不是前瞻指引）
+- raw_facts 里有 "管理层指引 FY2026 营收 150 亿" → guidance: {"revenue": {"value": "150亿", "period": "FY2026"}}
+- raw_facts 里只是普通新闻，无前瞻指引数字 → guidance: null
 
 event_type 必须从以下 15 项中选一项（严禁自创）：
 - earnings
