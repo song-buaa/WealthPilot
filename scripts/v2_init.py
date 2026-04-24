@@ -74,7 +74,9 @@ def step3_create_viewpoint_cards_v2(engine) -> None:
     """CREATE viewpoint_cards_v2 表（幂等）。"""
     logger.info("Step 3: CREATE viewpoint_cards_v2")
     if _table_exists(engine, "viewpoint_cards_v2"):
-        logger.info("  跳过: viewpoint_cards_v2 已存在")
+        logger.info("  表已存在，检查是否缺列")
+        _alter_add_column(engine, "viewpoint_cards_v2", "ingested_at",
+                          "DATETIME DEFAULT CURRENT_TIMESTAMP")
         return
 
     ddl = """
@@ -85,6 +87,7 @@ def step3_create_viewpoint_cards_v2(engine) -> None:
         primary_entity_id TEXT,
         source_type       TEXT    NOT NULL,
         as_of             DATETIME NOT NULL,
+        ingested_at       DATETIME NOT NULL,
         facts_json        TEXT    NOT NULL,
         narrative_json    TEXT    NOT NULL,
         judgment_json     TEXT    NOT NULL,
@@ -112,12 +115,13 @@ def step3_create_viewpoint_cards_v2(engine) -> None:
         "CREATE INDEX IF NOT EXISTS idx_vpc2_primary_entity_id ON viewpoint_cards_v2(primary_entity_id)",
         "CREATE INDEX IF NOT EXISTS idx_vpc2_validity_status ON viewpoint_cards_v2(validity_status)",
         "CREATE INDEX IF NOT EXISTS idx_vpc2_event_type ON viewpoint_cards_v2(event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_vpc2_ingested_at ON viewpoint_cards_v2(ingested_at)",
     ]
     with engine.connect() as conn:
         for idx_sql in indexes:
             conn.execute(text(idx_sql))
         conn.commit()
-    logger.info("  索引创建完成: 5 个")
+    logger.info("  索引创建完成: %d 个", len(indexes))
 
 
 def main() -> None:

@@ -328,6 +328,7 @@ class ViewpointCardV2(Base):
     primary_entity_id = Column(String(50), nullable=True, index=True)
     source_type       = Column(String(40), nullable=False)
     as_of             = Column(DateTime, nullable=False)
+    ingested_at       = Column(DateTime, nullable=False, default=datetime.now, index=True)
 
     # ── 三层 JSON ──
     facts_json        = Column(Text, nullable=False)      # FactsLayer.model_dump_json()
