@@ -35,6 +35,7 @@ def _make_card(
     url: str = "",
     kpi: ExtractedKPI = None,
     summary: str = "",
+    event_type: EventType = EventType.OTHER,
 ) -> ViewpointCard:
     """构建测试用 ViewpointCard。"""
     refs = []
@@ -54,7 +55,7 @@ def _make_card(
             bull_case=bull_case,
             bear_case=bear_case,
             narrative_summary=summary,
-            event_type=EventType.OTHER,
+            event_type=event_type,
             extracted_kpi=kpi,
         ),
         judgment=JudgmentLayer(),
@@ -71,6 +72,7 @@ class TestRendererUserUploadWithURL(unittest.TestCase):
             url="https://example.com/report",
             bull_case="新车型L6销量持续攀升，产品力强于竞品",
             bear_case="价格战压力依然存在，品牌溢价空间收窄",
+            event_type=EventType.EARNINGS,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
@@ -89,6 +91,7 @@ class TestRendererUserUploadNoURL(unittest.TestCase):
             source_type=SourceType.USER_UPLOAD,
             thesis="特斯拉Cybertruck产能爬坡低于预期，短期交付目标可能下调",
             bull_case="FSD技术领先优势明显，软件订阅收入增长可期",
+            event_type=EventType.DELIVERY_OR_SALES_DATA,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
@@ -110,6 +113,7 @@ class TestRendererAlphaVantageNews(unittest.TestCase):
                 target_price=28.0,
                 current_price=24.3,
             ),
+            event_type=EventType.ANALYST_RATING,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
@@ -133,6 +137,7 @@ class TestRendererAlphaVantageFundamental(unittest.TestCase):
                 gross_margin=22.5,
                 free_cash_flow=120.0,
             ),
+            event_type=EventType.FUNDAMENTAL_SNAPSHOT,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
@@ -159,6 +164,7 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
             ),
             bull_case="交付量持续增长，规模效应显现",
             bear_case="竞争加剧可能压制未来毛利率",
+            event_type=EventType.EARNINGS,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
@@ -189,6 +195,7 @@ class TestRendererAllLinesHavePrefix(unittest.TestCase):
                 deliveries_latest=500000,
                 deliveries_yoy=35.0,
             ),
+            event_type=EventType.FUNDAMENTAL_SNAPSHOT,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
@@ -207,6 +214,7 @@ class TestRendererFallbackToSummary(unittest.TestCase):
         card = _make_card(
             source_type=SourceType.USER_UPLOAD,
             summary="该研报讨论了新能源汽车行业2026年上半年的竞争格局变化和政策影响",
+            event_type=EventType.OTHER,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
@@ -222,6 +230,7 @@ class TestRendererEmptyKPI(unittest.TestCase):
             source_type=SourceType.ALPHA_VANTAGE_NEWS,
             thesis="大和重申理想汽车买入评级，维持目标价25美元不变",
             kpi=ExtractedKPI(),
+            event_type=EventType.OTHER,
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
