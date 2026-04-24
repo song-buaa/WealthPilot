@@ -115,7 +115,10 @@ def _build_facts_layer(raw_fact: RawFact) -> FactsLayer:
         as_of=raw_fact.as_of,
         ingested_at=datetime.now(),
         raw_facts=raw_fact.payload,
-        sentiment_raw=raw_fact.payload.get("ticker_sentiment") if raw_fact.source_type == SourceType.ALPHA_VANTAGE_NEWS else None,
+        sentiment_raw={"ticker_sentiment": raw_fact.payload.get("ticker_sentiment", []),
+                       "overall_sentiment_score": raw_fact.payload.get("overall_sentiment_score"),
+                       "overall_sentiment_label": raw_fact.payload.get("overall_sentiment_label")}
+        if raw_fact.source_type == SourceType.ALPHA_VANTAGE_NEWS else None,
     )
 
 
