@@ -1,0 +1,93 @@
+{
+    "items": "3",
+    "sentiment_score_definition": "x <= -0.35: Bearish; -0.35 < x <= -0.15: Somewhat-Bearish; -0.15 < x < 0.15: Neutral; 0.15 <= x < 0.35: Somewhat_Bullish; x >= 0.35: Bullish",
+    "relevance_score_definition": "0 < x <= 1, with a higher score indicating higher relevance.",
+    "feed": [
+        {
+            "title": "Short interest in Li Auto surges to record 9.6% amid intense premium SUV competition - report",
+            "url": "http://www.msn.com/en-us/money/companies/short-interest-in-li-auto-surges-to-record-9-6-amid-intense-premium-suv-competition-report/ar-AA1UMO1I",
+            "time_published": "20260423T143922",
+            "authors": [],
+            "summary": "Short interest in Chinese EV maker Li Auto has reached a new high of 9.6%, indicating increasing bearish sentiment among investors. This surge is attributed to intense competition in China's premium SUV market, particularly from Huawei-backed Aito. The rising short interest suggests concerns about Li Auto's ability to maintain its leading position and profit margins in this competitive environment.",
+            "banner_image": null,
+            "source": "MSN",
+            "category_within_source": "General",
+            "source_domain": "MSN",
+            "topics": [
+                {"topic": "financial_markets", "relevance_score": "0.902833"},
+                {"topic": "earnings", "relevance_score": "0.834008"},
+                {"topic": "energy_transportation", "relevance_score": "0.714515"}
+            ],
+            "overall_sentiment_score": -0.628256,
+            "overall_sentiment_label": "Bearish",
+            "ticker_sentiment": [
+                {
+                    "ticker": "LI",
+                    "relevance_score": "1.000000",
+                    "ticker_sentiment_score": "-0.612040",
+                    "ticker_sentiment_label": "Bearish"
+                }
+            ]
+        },
+        {
+            "title": "Li Auto Inc. Sponsored ADR (NASDAQ:LI) Given Average Recommendation of \"Reduce\" by Brokerages",
+            "url": "https://www.marketbeat.com/instant-alerts/li-auto-inc-sponsored-adr-nasdaqli-given-average-recommendation-of-reduce-by-brokerages-2026-04-21/",
+            "time_published": "20260421T083904",
+            "authors": ["MarketBeat"],
+            "summary": "Li Auto Inc. Sponsored ADR (NASDAQ:LI) has received an average \"Reduce\" rating from seventeen brokerage firms, with an average 12-month price target of $18.55. The company's shares are currently trading around $18.71, with a high price-to-earnings ratio of 143.93 and a market capitalization of approximately $19.98 billion. Despite institutional investors increasing their positions, analysts expect 0.14 EPS for the current year, following a recent quarter where the company reported a loss per share.",
+            "banner_image": "https://www.marketbeat.com/logos/li-auto-inc-logo-1200x675.png",
+            "source": "MarketBeat",
+            "category_within_source": "General",
+            "source_domain": "MarketBeat",
+            "topics": [
+                {"topic": "earnings", "relevance_score": "0.905160"},
+                {"topic": "financial_markets", "relevance_score": "0.807541"},
+                {"topic": "technology", "relevance_score": "0.712480"}
+            ],
+            "overall_sentiment_score": -0.212349,
+            "overall_sentiment_label": "Somewhat-Bearish",
+            "ticker_sentiment": [
+                {
+                    "ticker": "LI",
+                    "relevance_score": "1.000000",
+                    "ticker_sentiment_score": "-0.270136",
+                    "ticker_sentiment_label": "Somewhat-Bearish"
+                },
+                {
+                    "ticker": "GS",
+                    "relevance_score": "0.553805",
+                    "ticker_sentiment_score": "-0.128451",
+                    "ticker_sentiment_label": "Neutral"
+                }
+            ]
+        },
+        {
+            "title": "Li Auto Inc stock (KYG5496K1242): Why does its premium EV model matter more now for global investors",
+            "url": "https://www.ad-hoc-news.de/boerse/news/ueberblick/li-auto-inc-stock-kyg5496k1242-why-does-its-premium-ev-model-matter/69229706",
+            "time_published": "20260421T140728",
+            "authors": ["Elena Vasquez"],
+            "summary": "Li Auto Inc.'s focus on premium extended-range electric vehicles (EREVs) positions it uniquely in China's competitive market, offering a blend of luxury, range, and profitability. This strategy addresses common EV concerns like range anxiety and allows the company to maintain strong margins. For global investors, particularly in the U.S., Li Auto provides a Nasdaq-listed opportunity to gain exposure to China's booming EV sector, with analysts maintaining a positive outlook.",
+            "banner_image": "https://mdb.ad-hoc-news.de/bild/bild-2404981_480_300.webp",
+            "source": "AD HOC NEWS",
+            "category_within_source": "General",
+            "source_domain": "AD HOC NEWS",
+            "topics": [
+                {"topic": "earnings", "relevance_score": "0.939632"},
+                {"topic": "financial_markets", "relevance_score": "0.933123"},
+                {"topic": "economy_macro", "relevance_score": "0.720430"},
+                {"topic": "energy_transportation", "relevance_score": "0.907740"},
+                {"topic": "technology", "relevance_score": "0.837059"}
+            ],
+            "overall_sentiment_score": 0.489964,
+            "overall_sentiment_label": "Bullish",
+            "ticker_sentiment": [
+                {
+                    "ticker": "LI",
+                    "relevance_score": "1.000000",
+                    "ticker_sentiment_score": "0.498291",
+                    "ticker_sentiment_label": "Bullish"
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,43 @@
+{
+    "_fixture_note": "基于 Alpha Vantage EARNINGS API 真实 schema 构造的 LI 示例数据。数值来源于公开财报，用于开发测试。",
+    "symbol": "LI",
+    "annualEarnings": [
+        {"fiscalDateEnding": "2025-12-31", "reportedEPS": "0.13"},
+        {"fiscalDateEnding": "2024-12-31", "reportedEPS": "1.01"},
+        {"fiscalDateEnding": "2023-12-31", "reportedEPS": "1.58"}
+    ],
+    "quarterlyEarnings": [
+        {
+            "fiscalDateEnding": "2025-12-31",
+            "reportedDate": "2026-02-20",
+            "reportedEPS": "-0.06",
+            "estimatedEPS": "0.05",
+            "surprise": "-0.11",
+            "surprisePercentage": "-220.0"
+        },
+        {
+            "fiscalDateEnding": "2025-09-30",
+            "reportedDate": "2025-11-20",
+            "reportedEPS": "0.22",
+            "estimatedEPS": "0.18",
+            "surprise": "0.04",
+            "surprisePercentage": "22.22"
+        },
+        {
+            "fiscalDateEnding": "2025-06-30",
+            "reportedDate": "2025-08-21",
+            "reportedEPS": "-0.05",
+            "estimatedEPS": "0.02",
+            "surprise": "-0.07",
+            "surprisePercentage": "-350.0"
+        },
+        {
+            "fiscalDateEnding": "2025-03-31",
+            "reportedDate": "2025-05-19",
+            "reportedEPS": "0.02",
+            "estimatedEPS": "0.06",
+            "surprise": "-0.04",
+            "surprisePercentage": "-66.67"
+        }
+    ]
+}
