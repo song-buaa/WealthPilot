@@ -13,6 +13,7 @@ Alpha Vantage Adapter — 三个子能力合一个 class。
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -68,8 +69,25 @@ def _call_av_api(function_name: str, **params) -> dict:
     return data
 
 
+_MIN_CALL_INTERVAL = 13.0  # 免费版 5次/分钟 = 12秒/次 + 1秒缓冲
+
+
 class AlphaVantageAdapter(InfoAdapter):
     """Alpha Vantage 三合一 Adapter（news / fundamental / earnings）。"""
+
+    def __init__(self) -> None:
+        self._last_call_time: float = 0.0
+
+    def _throttle(self) -> None:
+        """真实 API 调用前的限频缓冲。AV_DEV_MOCK=1 时跳过。"""
+        if _is_mock_mode():
+            return
+        elapsed = time.time() - self._last_call_time
+        if elapsed < _MIN_CALL_INTERVAL:
+            sleep_duration = _MIN_CALL_INTERVAL - elapsed
+            logger.info("Alpha Vantage 限频缓冲，等待 %.1f 秒", sleep_duration)
+            time.sleep(sleep_duration)
+        self._last_call_time = time.time()
 
     @property
     def adapter_id(self) -> str:
@@ -113,6 +131,7 @@ class AlphaVantageAdapter(InfoAdapter):
             params = {"tickers": ticker, "limit": 10, "sort": "LATEST"}
             if since:
                 params["time_from"] = since.strftime("%Y%m%dT%H%M")
+            self._throttle()
             data = _call_av_api("NEWS_SENTIMENT", **params)
 
         feed = data.get("feed", [])
@@ -162,6 +181,7 @@ class AlphaVantageAdapter(InfoAdapter):
                 logger.warning("Mock fixture 不存在: %s", fixture_name)
                 return []
         else:
+            self._throttle()
             data = _call_av_api("COMPANY_OVERVIEW", symbol=ticker)
 
         if not data or "Symbol" not in data:
@@ -191,6 +211,7 @@ class AlphaVantageAdapter(InfoAdapter):
                 logger.warning("Mock fixture 不存在: %s", fixture_name)
                 return []
         else:
+            self._throttle()
             data = _call_av_api("EARNINGS", symbol=ticker)
 
         if not data or "quarterlyEarnings" not in data:
