@@ -198,7 +198,14 @@ class NarrativeLayer(BaseModel):
 
 
 class JudgmentLayer(BaseModel):
-    """判断层 — 人类填写（LLM 可预填），决策引擎消费核心"""
+    """判断层 — 人类填写（LLM 可预填），决策引擎消费核心。
+
+    is_ai_prefilled 是"用户是否确认"的唯一信号来源：
+    - True：LLM 预填状态，用户未确认，其他判断层字段的值只是 LLM 草稿。
+      决策引擎默认只消费 is_ai_prefilled=False 的卡。
+    - False：用户点击 Confirm 按钮后设为 False，表示值可信。
+    """
+    is_ai_prefilled: bool = True
     user_endorsement: UserEndorsement = UserEndorsement.REFERENCE_ONLY
     stance: Stance = Stance.NEUTRAL
     horizon: Horizon = Horizon.MEDIUM
