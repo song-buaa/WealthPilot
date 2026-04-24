@@ -171,6 +171,8 @@ def _get_cached_research(asset_name: str) -> Optional[list[str]]:
 
 
 def _search_research_online(asset_name: str) -> list[str]:
+    # v2.0: 暂保留作为 ViewpointRepository 空结果时的 fallback
+    # v2.1: 将迁移到 PerplexityAdapter 并删除本函数（参考工程 PRD §6.3）
     """
     多维度并行联网搜索指定标的的最新投研观点。
 
@@ -322,6 +324,8 @@ def _search_research_online(asset_name: str) -> list[str]:
 
 
 def search_portfolio_research(positions: list) -> list[str]:
+    # v2 不迁移：这是宏观背景（context），不是标的观点（opinion），
+    # 不属于投研模块（ViewpointCard）的范畴。详见工程 PRD §1.1。
     """
     针对 PortfolioReview 意图的宏观联网搜索。
     搜索宏观市场、大类资产、主要行业维度，而非单一标的。
