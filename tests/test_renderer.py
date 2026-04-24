@@ -15,6 +15,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_v2.schemas import (
+    EventType,
     ExtractedKPI,
     FactsLayer,
     JudgmentLayer,
@@ -53,6 +54,7 @@ def _make_card(
             bull_case=bull_case,
             bear_case=bear_case,
             narrative_summary=summary,
+            event_type=EventType.OTHER,
             extracted_kpi=kpi,
         ),
         judgment=JudgmentLayer(),

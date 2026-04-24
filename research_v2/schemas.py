@@ -191,7 +191,7 @@ class NarrativeLayer(BaseModel):
     bull_case: Optional[str] = None
     bear_case: Optional[str] = None
     narrative_summary: Optional[str] = None
-    event_type: EventType = EventType.OTHER
+    event_type: EventType  # 必填，Processor 必须显式给值
     topics: list[str] = Field(default_factory=list)
     extracted_kpi: Optional[ExtractedKPI] = None
     user_annotations: list[Annotation] = Field(default_factory=list)
