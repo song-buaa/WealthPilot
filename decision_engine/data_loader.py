@@ -829,48 +829,81 @@ def _resolve_asset_by_llm(positions: list, asset_name: str) -> Optional[object]:
 _RESOLVE_CACHE: dict[str, str] = {}
 
 
+def _resolve_symbol(asset_name: str, session) -> Optional[str]:
+    """将 asset_name 解析为标准 Symbol 字符串。
+
+    优先级:
+      1. 查 positions 表的 symbol_v2 字段（精确匹配 asset_name）
+      2. 查 EntityRegistry 的 display_name_cn / display_name_en
+      3. 返回 None
+    """
+    from app.models import Position
+
+    # 优先级 1: positions.symbol_v2
+    try:
+        row = (
+            session.query(Position.symbol_v2)
+            .filter(Position.asset_name.ilike(f"%{asset_name}%"))
+            .filter(Position.symbol_v2.isnot(None))
+            .first()
+        )
+        if row and row[0]:
+            return row[0]
+    except Exception:
+        pass
+
+    # 优先级 2: EntityRegistry
+    try:
+        from research_v2.symbol import get_registry
+        registry = get_registry()
+        for entity in registry.all_entities():
+            if (asset_name in entity.display_name_cn
+                    or asset_name.lower() in entity.display_name_en.lower()
+                    or entity.display_name_cn in asset_name):
+                if entity.symbols:
+                    return str(entity.symbols[0])
+    except Exception:
+        pass
+
+    return None
+
+
 def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     """
-    加载投研观点，三层融合策略：
-    1. 优先：ResearchCard 全量结构化字段 → LLM 提炼 3-5 条 [用户资料]（主来源）
-    2. 补充：ResearchViewpoint 的 action_suggestion / invalidation_conditions 等字段
-       （用户手动修订过的高置信度内容，最多2条）
-    3. 兜底：联网搜索 [联网参考]（无用户资料时全量，有用户资料时补充1-2条）
+    加载投研观点（v2 改造）。
 
-    核心原则：从 ResearchCard 提炼是根本解，避免直接透传残缺字段。
+    流程:
+      1. _resolve_symbol 将 asset_name 解析为标准 Symbol
+      2. 调 ViewpointRepository.query_for_decision 查询 confirmed 的 v2 卡
+      3. Repository 返回空时 fallback 到 _search_research_online（v2.0 临时保留）
+      4. fallback 也为空时返回 _DEFAULT_MOCK_RESEARCH
     """
     if not asset_name:
         return _DEFAULT_MOCK_RESEARCH
 
-    # ── 1. ResearchCard 提炼（主来源）────────────────────────────────────────
-    card_research = _distill_research_cards(session, asset_name)
+    # ── 1. 解析 Symbol ────────────────────────────────────────────────────
+    symbol_str = _resolve_symbol(asset_name, session)
 
-    # ── 2. ResearchViewpoint 补充高置信度字段（action_suggestion 等）──────────
-    # 不再透传 thesis/supporting_points（容易残缺），只读操作建议和失效条件
-    vp_supplement: list[str] = []
-    viewpoints = (
-        session.query(ResearchViewpoint)
-        .filter(ResearchViewpoint.object_name.ilike(f"%{asset_name}%"))
-        .order_by(ResearchViewpoint.updated_at.desc())
-        .limit(3)
-        .all()
-    )
-    for vp in viewpoints:
-        if vp.action_suggestion and len(vp.action_suggestion.strip()) >= 15:
-            vp_supplement.append(f"[用户资料] 操作建议：{vp.action_suggestion.strip()}")
-        if vp.invalidation_conditions and len(vp.invalidation_conditions.strip()) >= 15:
-            vp_supplement.append(f"[用户资料] 止损条件：{vp.invalidation_conditions.strip()}")
-    vp_supplement = vp_supplement[:2]
+    # ── 2. 查询 v2 ViewpointCard（主来源）──────────────────────────────────
+    v2_research: list[str] = []
+    if symbol_str:
+        try:
+            from research_v2 import repository
+            v2_research = repository.query_for_decision(session, symbol_str)
+        except Exception as e:
+            print(f"[data_loader] v2 query_for_decision 失败: {e}", flush=True)
 
-    user_research = card_research + vp_supplement
-
-    # ── 3. 联网搜索补充──────────────────────────────────────────────────────
-    if not user_research:
+    if v2_research:
+        # v2 有结果，仍补充联网搜索
         online = _search_research_online(asset_name)
-        return online if online else _DEFAULT_MOCK_RESEARCH
-    else:
-        online = _search_research_online(asset_name)
-        return user_research + online[:8]
+        return v2_research + online[:8]
+
+    # ── 3. v2 无结果，fallback 到联网搜索（v2.0 临时保留）──────────────────
+    online = _search_research_online(asset_name)
+    if online:
+        return online
+
+    return _DEFAULT_MOCK_RESEARCH
 
 
 def _safe_pct(value, default: float) -> float:
