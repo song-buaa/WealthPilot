@@ -39,6 +39,7 @@ class EventType(str, enum.Enum):
     MANAGEMENT_CHANGE = "management_change"
     EXECUTIVE_INTERVIEW = "executive_interview"
     CORPORATE_ACTION = "corporate_action"
+    FUNDAMENTAL_SNAPSHOT = "fundamental_snapshot"
     MARKET_MOVEMENT = "market_movement"
     OTHER = "other"
 
