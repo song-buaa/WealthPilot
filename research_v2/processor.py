@@ -122,9 +122,30 @@ def _build_facts_layer(raw_fact: RawFact) -> FactsLayer:
     )
 
 
+def _sanitize_extracted_kpi(kpi_data: dict) -> dict:
+    """对 LLM 输出的 extracted_kpi 做防御性清洗，处理已知的格式偏差。"""
+    if not isinstance(kpi_data, dict):
+        return kpi_data
+
+    guidance = kpi_data.get("guidance")
+
+    # 如果 guidance 是字符串（LLM 误把它当成文字段落），转成 null + 把内容塞到 notes
+    if isinstance(guidance, str):
+        logger.warning("LLM 把 guidance 输出为字符串，自动清洗为 null: %s", guidance[:80])
+        existing_notes = kpi_data.get("notes") or ""
+        suffix = f"[原 LLM guidance 误填文字: {guidance[:200]}]"
+        kpi_data["notes"] = (existing_notes + " " + suffix).strip() if existing_notes else suffix
+        kpi_data["guidance"] = None
+
+    return kpi_data
+
+
 def _build_narrative_from_llm(llm_data: dict) -> NarrativeLayer:
     """从 LLM 输出构建叙事层。"""
     narr = llm_data.get("narrative", {})
+    kpi_data = narr.get("extracted_kpi")
+    if isinstance(kpi_data, dict):
+        kpi_data = _sanitize_extracted_kpi(kpi_data)
     return NarrativeLayer(
         thesis=narr.get("thesis"),
         bull_case=narr.get("bull_case"),
@@ -132,7 +153,7 @@ def _build_narrative_from_llm(llm_data: dict) -> NarrativeLayer:
         narrative_summary=narr.get("narrative_summary"),
         event_type=EventType(narr.get("event_type", "other")),
         topics=narr.get("topics", []),
-        extracted_kpi=narr.get("extracted_kpi"),
+        extracted_kpi=kpi_data,
     )
 
 
