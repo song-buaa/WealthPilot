@@ -87,7 +87,35 @@ decision_signal.confidence_score 必须输出 0.3（硬约束）。
 ## 加工重点
 
 - 从用户上传的研报/文章中提炼核心论点和多空逻辑
-- event_type：根据内容判断属于哪种事件类型
-- extracted_kpi：如果文中有具体财务数字、交付数据、目标价等，填入对应字段；没有的留 null
 - thesis 和 bull_case / bear_case 必须用中文输出
 - 如果内容过长，聚焦最核心的投资结论，忽略背景介绍
+
+### event_type 选择规则（按优先级从具体到兜底）
+
+- 涉及具体财报数字、EPS、营收 → earnings
+- 涉及公司前瞻指引（guidance、forecast）的上调或下调 → guidance_update
+- 涉及分析师评级变动、目标价调整 → analyst_rating
+- 涉及新产品发布、新车型、新服务上线 → product_launch
+- 涉及产品实际表现、用户反馈、产品评测 → product_review
+- 涉及月度/季度交付量、销量数据 → delivery_or_sales_data
+- 涉及竞争对手、市场份额变化、价格战、补贴战 → industry_competition
+- 涉及宏观经济政策、利率、关税 → macro_policy
+- 涉及监管动作、合规、处罚 → regulatory
+- 涉及管理层变动、董事会变动 → management_change
+- 涉及高管访谈、高管表态 → executive_interview
+- 涉及回购、分红、并购、分拆 → corporate_action
+- 涉及股价大幅波动、市场情绪（如空头持仓变化、资金流向） → market_movement
+- 公司基本面快照数据 → fundamental_snapshot（此类专用，通常用户上传场景不选）
+- 以上都不匹配时 → other
+
+注意事项：
+- 如果文章同时涉及多个类别，选最能代表核心信号的那个
+- 核心信号判断：看 thesis 想表达的主题是什么
+- market_movement 是最后兜底选项之一，优先用具体分类
+
+### extracted_kpi 规则（硬约束）
+
+- extracted_kpi 的每个字段只能从研报/文章中明确提到的数字提取，不能自己推算
+- 文中没有提到的数字必须填 null
+- 唯一例外：百分比格式转换是允许的
+- 这条规则的原因：事实层需要可追溯，填入的数字必须能在原文中找到出处

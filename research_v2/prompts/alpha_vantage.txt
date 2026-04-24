@@ -87,29 +87,73 @@ decision_signal.confidence_score 必须输出 0.3（硬约束）。
 ## 按 source_type 的加工重点
 
 ### alpha_vantage_news
-- event_type：根据新闻内容判断，多数是 earnings / analyst_rating / product_launch / industry_competition / market_movement
+
+event_type 选择规则（按优先级从具体到兜底）：
+- 涉及具体财报数字、EPS、营收 → earnings
+- 涉及公司前瞻指引（guidance、forecast）的上调或下调 → guidance_update
+- 涉及分析师评级变动、目标价调整 → analyst_rating
+- 涉及新产品发布、新车型、新服务上线 → product_launch
+- 涉及产品实际表现、用户反馈、产品评测 → product_review
+- 涉及月度/季度交付量、销量数据 → delivery_or_sales_data
+- 涉及竞争对手、市场份额变化、价格战、补贴战 → industry_competition
+- 涉及宏观经济政策、利率、关税 → macro_policy
+- 涉及监管动作、合规、处罚 → regulatory
+- 涉及管理层变动、董事会变动 → management_change
+- 涉及高管访谈、高管表态 → executive_interview
+- 涉及回购、分红、并购、分拆 → corporate_action
+- 涉及股价大幅波动、市场情绪（如空头持仓变化、资金流向） → market_movement
+- 公司基本面快照数据 → fundamental_snapshot（此类专用，通常 news 场景不选）
+- 以上都不匹配时 → other
+
+注意事项：
+- 如果新闻同时涉及多个类别，选最能代表核心信号的那个
+- 核心信号判断：看 thesis 想表达的主题是什么
+- 例："因竞争激烈导致空头增加" → 核心信号是竞争 → industry_competition（而不是次要信号"空头变化" → market_movement）
+- market_movement 是最后兜底选项之一，优先用具体分类
+
+其他指引：
 - thesis：从新闻摘要中提炼核心投资含义
-- extracted_kpi：如果新闻中有具体数字（目标价、EPS等），填入对应字段
+- extracted_kpi：如果新闻中有具体数字（目标价、EPS等），填入对应字段；raw_facts 里没有的数字不要自己推算，填 null
 - stance：根据情感评分和内容判断
 
 ### alpha_vantage_fundamental
+
+重要规则（硬约束）：
+- extracted_kpi 的每个字段只能从 raw_facts 已有字段直接提取，不能自己做加减乘除或推导
+- raw_facts 里没有的字段必须填 null，不要尝试用其他字段计算得出
+- 例：raw_facts 有 GrossProfitTTM 和 RevenueTTM，但没有 GrossMargin，则 gross_margin 必须填 null（不要做 GrossProfitTTM / RevenueTTM 的除法）
+- 例：raw_facts 有 AnalystTargetPrice，但没有 current_price，则 analyst_target_upside 必须填 null
+- 唯一例外：百分比字段的"0.48"和"48%"之间的格式转换是允许的（如 QuarterlyRevenueGrowthYOY="0.48" → revenue_yoy=0.48）
+- 这条规则的原因：事实层需要可追溯，任何派生数据必须可以回 raw_facts 查证原始数字。如果 LLM 自己算，审计时无法分辨"这个数字是 API 给的"还是"LLM 推的"。
+
+其他指引：
 - event_type：必须填 "fundamental_snapshot"
 - thesis：概括公司当前基本面状态
-- extracted_kpi：重点填充（这是此类数据的核心价值）：
-  - pe_ttm / forward_pe / net_margin / gross_margin（从财务比率提取）
+- extracted_kpi：从 raw_facts 直接提取以下字段（有则填，无则 null）：
+  - pe_ttm（从 TrailingPE 或 PERatio 提取）
+  - forward_pe（从 ForwardPE 提取）
+  - net_margin（从 ProfitMargin 提取）
+  - gross_margin（仅当 raw_facts 有 GrossMargin 字段时提取，否则 null）
   - market_cap（从 MarketCapitalization 提取，转换为数字）
-  - analyst_target_upside（从 AnalystTargetPrice 和当前价计算）
+  - analyst_target_upside（仅当 raw_facts 同时有 AnalystTargetPrice 和当前价格字段时提取，否则 null）
   - revenue_yoy（从 QuarterlyRevenueGrowthYOY 提取）
   - earnings_yoy（从 QuarterlyEarningsGrowthYOY 提取）
   - notes：说明数据来源是 COMPANY_OVERVIEW 快照
 - horizon：通常为 "medium"
 
 ### alpha_vantage_earnings
+
+重要规则（硬约束）：
+- extracted_kpi 的每个字段只能从 raw_facts 已有字段直接提取，不能自己做加减乘除或推导
+- raw_facts 里没有的字段必须填 null
+- 唯一例外：百分比格式转换（如 surprisePercentage="-220.0" → eps_surprise_pct=-220.0）
+
+其他指引：
 - event_type：必须填 "earnings"
 - thesis：概括最新季度财报表现
-- extracted_kpi：必须填充：
-  - eps_surprise_pct（从 surprisePercentage 提取）
-  - earnings_yoy（从年度 EPS 变化计算）
+- extracted_kpi：从 raw_facts 直接提取以下字段：
+  - eps_surprise_pct（从 latest_quarterly.surprisePercentage 提取）
+  - earnings_yoy（从 annual_earnings 的年度 EPS 变化提取，这是允许的直接对比，不算推导）
   - notes：说明对应的财报季度
 - stance：根据 EPS surprise 方向判断
 - trigger_conditions 和 invalidation_conditions：基于财报趋势给出
