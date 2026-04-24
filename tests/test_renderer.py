@@ -172,5 +172,63 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
         self.assertTrue(len(bull_bear) >= 1)
 
 
+class TestRendererAllLinesHavePrefix(unittest.TestCase):
+    """Case 6: 所有返回行都以 [用户资料] 或 [联网参考] 开头"""
+
+    def test_all_lines_prefixed(self):
+        card = _make_card(
+            source_type=SourceType.ALPHA_VANTAGE_FUNDAMENTAL,
+            thesis="理想汽车2025年全年营收1400亿元，同比增长48%",
+            bull_case="新车型产品周期强劲，L6/L7销量持续攀升",
+            bear_case="价格战压力持续，毛利率可能承压下行",
+            kpi=ExtractedKPI(
+                revenue_yoy=48.0,
+                earnings_yoy=62.0,
+                gross_margin=22.5,
+                net_margin=8.2,
+                deliveries_latest=500000,
+                deliveries_yoy=35.0,
+            ),
+        )
+        lines = render_card(card)
+        self.assertTrue(len(lines) >= 2)
+        valid_prefixes = ("[用户资料]", "[联网参考]")
+        for i, line in enumerate(lines):
+            self.assertTrue(
+                line.startswith(valid_prefixes),
+                f"Line {i} missing prefix: {line[:50]}...",
+            )
+
+
+class TestRendererFallbackToSummary(unittest.TestCase):
+    """Case 7: thesis/bull/bear 都空时 fallback 到 narrative_summary"""
+
+    def test_summary_fallback(self):
+        card = _make_card(
+            source_type=SourceType.USER_UPLOAD,
+            summary="该研报讨论了新能源汽车行业2026年上半年的竞争格局变化和政策影响",
+        )
+        lines = render_card(card)
+        self.assertTrue(len(lines) >= 1)
+        self.assertTrue(lines[0].startswith("[用户资料]"))
+        self.assertIn("新能源汽车行业", lines[0])
+
+
+class TestRendererEmptyKPI(unittest.TestCase):
+    """Case 8: extracted_kpi 所有字段 None 时不产生 KPI 行也不抛异常"""
+
+    def test_empty_kpi_no_crash(self):
+        card = _make_card(
+            source_type=SourceType.ALPHA_VANTAGE_NEWS,
+            thesis="大和重申理想汽车买入评级，维持目标价25美元不变",
+            kpi=ExtractedKPI(),
+        )
+        lines = render_card(card)
+        self.assertTrue(len(lines) >= 1)
+        self.assertIn("大和重申", lines[0])
+        kpi_lines = [l for l in lines if "营收同比" in l or "盈利同比" in l or "毛利率" in l]
+        self.assertEqual(len(kpi_lines), 0, "Empty KPI should not produce KPI line")
+
+
 if __name__ == "__main__":
     unittest.main()
