@@ -534,7 +534,10 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
                 repository.insert(session, card)
                 cards_data.append(card.model_dump(mode="json"))
             except Exception as e:
-                _v2_logger.warning("单条 RawFact 处理失败，跳过: %s", e)
+                _v2_logger.exception(
+                    "Processor 处理 RawFact 失败，source_type=%s, symbol=%s",
+                    rf.source_type, rf.affected_symbols,
+                )
                 continue
 
         session.commit()

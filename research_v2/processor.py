@@ -191,6 +191,8 @@ def process(raw_fact: RawFact) -> ViewpointCard:
     for attempt in range(2):
         try:
             raw_output = _call_llm(system_prompt, user_message)
+            logger.debug("LLM raw_output (attempt=%d, source=%s):\n%s",
+                         attempt + 1, raw_fact.source_type.value, raw_output[:2000])
             llm_data = _parse_llm_output(raw_output)
             card = _attempt_build_card(raw_fact, llm_data)
 
