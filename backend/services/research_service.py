@@ -526,6 +526,7 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
         return {"cards": [], "message": "Alpha Vantage 未返回数据（可能限额已用尽或无新数据）"}
 
     cards_data = []
+    errors = []
     session = get_session()
     try:
         for rf in raw_facts:
@@ -538,11 +539,20 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
                     "Processor 处理 RawFact 失败，source_type=%s, symbol=%s",
                     rf.source_type, rf.affected_symbols,
                 )
+                errors.append({
+                    "source_type": rf.source_type.value if hasattr(rf.source_type, 'value') else str(rf.source_type),
+                    "raw_fact_summary": {
+                        "affected_symbols": [str(s) for s in rf.affected_symbols],
+                        "as_of": rf.as_of.isoformat() if rf.as_of else None,
+                    },
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:500],
+                })
                 continue
 
         session.commit()
-        _v2_logger.info("v2_ingest_alpha_vantage 完成: symbol=%s, %d 张卡", symbol_str, len(cards_data))
-        return {"cards": cards_data}
+        _v2_logger.info("v2_ingest_alpha_vantage 完成: symbol=%s, %d 张卡, %d 失败", symbol_str, len(cards_data), len(errors))
+        return {"cards": cards_data, "errors": errors}
     except Exception:
         session.rollback()
         raise

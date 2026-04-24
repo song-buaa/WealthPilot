@@ -3,6 +3,7 @@ Research API 路由 — 投研观点
 """
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -225,7 +226,11 @@ def v2_ingest_alpha_vantage(req: V2IngestAVRequest):
     if not req.symbol.strip():
         raise HTTPException(status_code=400, detail="symbol 不能为空")
     try:
-        return svc.v2_ingest_alpha_vantage(req.symbol)
+        result = svc.v2_ingest_alpha_vantage(req.symbol)
+        headers = {}
+        if result.get("errors"):
+            headers["X-Partial-Failure"] = "true"
+        return JSONResponse(content=result, status_code=201, headers=headers)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
