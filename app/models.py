@@ -306,3 +306,48 @@ class ConversationMessage(Base):
     intent     = Column(String,  nullable=True)    # 仅assistant轮，如"PositionDecision"
     asset      = Column(String,  nullable=True)    # 仅assistant轮，如"理想汽车"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ──────────────────────────────────────────────
+# 投研观点 v2（三层分离 ViewpointCard）
+# ──────────────────────────────────────────────
+
+class ViewpointCardV2(Base):
+    """v2 观点卡 — 三层分离：事实 / 叙事 / 判断
+
+    三层数据以 JSON 存储在 facts_json / narrative_json / judgment_json 中，
+    对应 Pydantic schema: research_v2.schemas.FactsLayer / NarrativeLayer / JudgmentLayer
+    """
+    __tablename__ = "viewpoint_cards_v2"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    card_id           = Column(String(36), unique=True, nullable=False, index=True)
+
+    # ── 事实层核心索引字段（从 facts_json 冗余，用于 SQL 查询）──
+    primary_symbol    = Column(String(20), nullable=True, index=True)
+    primary_entity_id = Column(String(50), nullable=True, index=True)
+    source_type       = Column(String(40), nullable=False)
+    as_of             = Column(DateTime, nullable=False)
+
+    # ── 三层 JSON ──
+    facts_json        = Column(Text, nullable=False)      # FactsLayer.model_dump_json()
+    narrative_json    = Column(Text, nullable=False)      # NarrativeLayer.model_dump_json()
+    judgment_json     = Column(Text, nullable=False)      # JudgmentLayer.model_dump_json()
+
+    # ── 判断层核心索引字段（从 judgment_json 冗余，用于过滤）──
+    validity_status   = Column(String(20), nullable=False, default="active", index=True)
+    confidence_score  = Column(Float, nullable=False, default=0.3)
+    user_endorsement  = Column(String(20), nullable=False, default="reference_only")
+    stance            = Column(String(20), nullable=True)
+    action_type       = Column(String(20), nullable=True)
+
+    # ── 叙事层核心索引字段 ──
+    event_type        = Column(String(40), nullable=True, index=True)
+
+    # ── 关系 JSON ──
+    relations_json    = Column(Text, nullable=True)       # list[Relation] JSON
+
+    # ── 状态 ──
+    status            = Column(String(20), nullable=False, default="pending_review")
+    created_at        = Column(DateTime, default=datetime.now)
+    updated_at        = Column(DateTime, default=datetime.now, onupdate=datetime.now)
