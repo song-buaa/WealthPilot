@@ -1,0 +1,49 @@
+# WealthPilot Entity Registry — 草稿
+# 状态: 待用户 review 确认，确认前不用于生产逻辑
+# 初始范围: 业务 PRD §4.2 锚点列表（10-15 家）
+
+entities:
+  - entity_id: li_auto
+    display_name_cn: 理想汽车
+    display_name_en: Li Auto Inc.
+    symbols: [LI:US, 2015:HK]
+
+  - entity_id: tencent_holdings
+    display_name_cn: 腾讯控股
+    display_name_en: Tencent Holdings
+    symbols: [0700:HK, TCEHY:US]
+
+  - entity_id: alibaba_group
+    display_name_cn: 阿里巴巴
+    display_name_en: Alibaba Group
+    symbols: [9988:HK, BABA:US]
+
+  - entity_id: meituan
+    display_name_cn: 美团
+    display_name_en: Meituan
+    symbols: [3690:HK, MPNGY:US]
+
+  - entity_id: nvidia
+    display_name_cn: 英伟达
+    display_name_en: NVIDIA Corporation
+    symbols: [NVDA:US]
+
+  - entity_id: tesla
+    display_name_cn: 特斯拉
+    display_name_en: Tesla Inc.
+    symbols: [TSLA:US]
+
+  - entity_id: apple
+    display_name_cn: 苹果
+    display_name_en: Apple Inc.
+    symbols: [AAPL:US]
+
+  - entity_id: meta_platforms
+    display_name_cn: Meta
+    display_name_en: Meta Platforms Inc.
+    symbols: [META:US]
+
+  - entity_id: coinbase
+    display_name_cn: Coinbase
+    display_name_en: Coinbase Global Inc.
+    symbols: [COIN:US]
