@@ -471,3 +471,126 @@ def _fetch_url_text(url: str) -> str:
         return text[:8000]
     except Exception:
         return ""
+
+
+# ══════════════════════════════════════════════════════════════════
+# v2 Service 方法（薄编排层，不含业务逻辑）
+# v1 方法保留在上面不动
+# ══════════════════════════════════════════════════════════════════
+
+import logging as _logging
+from datetime import datetime as _datetime
+
+_v2_logger = _logging.getLogger(__name__ + ".v2")
+
+
+def v2_ingest_upload(title: str, content: str, source_url: Optional[str] = None) -> dict:
+    """用户上传内容 → RawFact → ViewpointCard → 入库。"""
+    from research_v2.adapters.user_upload import UserUploadAdapter
+    from research_v2 import processor
+    from research_v2 import repository
+    from app.database import get_session
+
+    adapter = UserUploadAdapter()
+    raw_fact = adapter.fetch_from_text(content=content, title=title, source_url=source_url)
+
+    card = processor.process(raw_fact)
+
+    session = get_session()
+    try:
+        repository.insert(session, card)
+        session.commit()
+        _v2_logger.info("v2_ingest_upload 完成: card_id=%s", card.card_id)
+        return {"card_id": card.card_id, "card": card.model_dump(mode="json")}
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
+    """触发 Alpha Vantage 拉取 → 多张 ViewpointCard → 入库。"""
+    from research_v2.symbol import Symbol
+    from research_v2.router import InfoRouter
+    from research_v2 import processor
+    from research_v2 import repository
+    from research_v2.adapters.base import AdapterQuotaError
+    from app.database import get_session
+
+    symbol = Symbol.parse(symbol_str)
+    router = InfoRouter()
+
+    raw_facts = router.fetch_all(symbol)
+    if not raw_facts:
+        return {"cards": [], "message": "Alpha Vantage 未返回数据（可能限额已用尽或无新数据）"}
+
+    cards_data = []
+    session = get_session()
+    try:
+        for rf in raw_facts:
+            try:
+                card = processor.process(rf)
+                repository.insert(session, card)
+                cards_data.append(card.model_dump(mode="json"))
+            except Exception as e:
+                _v2_logger.warning("单条 RawFact 处理失败，跳过: %s", e)
+                continue
+
+        session.commit()
+        _v2_logger.info("v2_ingest_alpha_vantage 完成: symbol=%s, %d 张卡", symbol_str, len(cards_data))
+        return {"cards": cards_data}
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def v2_update_judgment(card_id: str, judgment_updates: dict, confirm: bool = False) -> Optional[dict]:
+    """更新判断层。confirm=True 时同步 is_ai_prefilled=False + confidence_score=0.6。"""
+    from research_v2 import repository
+    from app.database import get_session
+
+    session = get_session()
+    try:
+        card = repository.update_judgment(session, card_id, judgment_updates, confirm=confirm)
+        if card is None:
+            return None
+        session.commit()
+        _v2_logger.info("v2_update_judgment 完成: card_id=%s, confirm=%s", card_id, confirm)
+        return {"card": card.model_dump(mode="json")}
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def v2_query_cards(
+    symbol: Optional[str] = None,
+    status: Optional[str] = None,
+    event_type: Optional[str] = None,
+    render: bool = False,
+    top_k: int = 10,
+) -> dict:
+    """查询 v2 观点卡。render=True 时返回 Renderer 输出。"""
+    from research_v2 import repository
+    from app.database import get_session
+
+    session = get_session()
+    try:
+        if render and symbol:
+            lines = repository.query_for_decision(session, symbol, top_k=top_k)
+            return {"rendered": lines, "count": len(lines)}
+        else:
+            cards = repository.query_cards(
+                session,
+                symbol=symbol,
+                status=status,
+                event_type=event_type,
+                top_k=top_k,
+            )
+            return {"cards": [c.model_dump(mode="json") for c in cards], "count": len(cards)}
+    finally:
+        session.close()

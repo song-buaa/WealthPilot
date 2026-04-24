@@ -184,3 +184,73 @@ def reparse_document(document_id: int):
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# v2 Endpoints（路径前缀 /v2/，与 v1 不冲突）
+# ══════════════════════════════════════════════════════════════════
+
+
+class V2IngestUploadRequest(BaseModel):
+    title: str
+    content: str
+    source_url: Optional[str] = None
+
+
+class V2IngestAVRequest(BaseModel):
+    symbol: str
+
+
+class V2JudgmentUpdateRequest(BaseModel):
+    judgment: dict
+    confirm: bool = False
+
+
+@router.post("/v2/ingest/upload", status_code=201)
+def v2_ingest_upload(req: V2IngestUploadRequest):
+    """用户上传内容 → v2 ViewpointCard。"""
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="content 不能为空")
+    try:
+        return svc.v2_ingest_upload(req.title, req.content, req.source_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/v2/ingest/alpha_vantage", status_code=201)
+def v2_ingest_alpha_vantage(req: V2IngestAVRequest):
+    """触发 Alpha Vantage 拉取。"""
+    if not req.symbol.strip():
+        raise HTTPException(status_code=400, detail="symbol 不能为空")
+    try:
+        return svc.v2_ingest_alpha_vantage(req.symbol)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/v2/cards/{card_id}/judgment")
+def v2_update_judgment(card_id: str, req: V2JudgmentUpdateRequest):
+    """更新判断层。confirm=true 时确认卡片。"""
+    result = svc.v2_update_judgment(card_id, req.judgment, req.confirm)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"card {card_id} not found")
+    return result
+
+
+@router.get("/v2/cards")
+def v2_list_cards(
+    symbol: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    event_type: Optional[str] = Query(None),
+    render: bool = Query(False),
+    top_k: int = Query(10, ge=1, le=100),
+):
+    """查询 v2 观点卡。render=true 返回决策引擎可消费格式。"""
+    return svc.v2_query_cards(
+        symbol=symbol, status=status, event_type=event_type,
+        render=render, top_k=top_k,
+    )
