@@ -107,11 +107,14 @@ class EntityRegistry:
         return self._by_symbol.get(symbol)
 
     def expand_symbols(self, symbol: Symbol) -> list[Symbol]:
-        """按 Entity 扩展 symbol 列表。找不到 Entity 则返回 [symbol] 自身。"""
+        """按 Entity 扩展 symbol 列表。保证输入 symbol 一定在结果里。"""
         entity = self.lookup(symbol)
         if entity is None:
             return [symbol]
-        return list(entity.symbols)
+        result = list(set(entity.symbols))
+        if symbol not in result:
+            result.append(symbol)
+        return result
 
     def all_entities(self) -> list[Entity]:
         """返回所有已注册的 Entity。"""
