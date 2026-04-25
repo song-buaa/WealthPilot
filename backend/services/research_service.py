@@ -560,10 +560,30 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
         session.close()
 
 
-def v2_update_judgment(card_id: str, judgment_updates: dict, confirm: bool = False) -> Optional[dict]:
-    """更新判断层。confirm=True 时同步 is_ai_prefilled=False + confidence_score=0.6。"""
+def v2_update_judgment(card_id: str, judgment_updates: dict, confirm: bool = False, action: Optional[str] = None) -> Optional[dict]:
+    """更新判断层。支持 action: confirm/unconfirm/modify/discard/restore。"""
     from research_v2 import repository
     from app.database import get_session
+
+    # action 字段覆盖 confirm 参数
+    if action == "confirm":
+        confirm = True
+    elif action == "unconfirm":
+        judgment_updates["is_ai_prefilled"] = True
+        judgment_updates["confidence"] = "low"
+        judgment_updates.setdefault("decision_signal", {})["confidence_score"] = 0.3
+        confirm = False
+    elif action == "discard":
+        judgment_updates["user_endorsement"] = "disagree"
+        judgment_updates["validity_status"] = "invalidated"
+        confirm = False
+    elif action == "restore":
+        judgment_updates["is_ai_prefilled"] = True
+        judgment_updates["validity_status"] = "active"
+        judgment_updates["user_endorsement"] = "reference_only"
+        judgment_updates["confidence"] = "low"
+        judgment_updates.setdefault("decision_signal", {})["confidence_score"] = 0.3
+        confirm = False
 
     session = get_session()
     try:
@@ -571,7 +591,7 @@ def v2_update_judgment(card_id: str, judgment_updates: dict, confirm: bool = Fal
         if card is None:
             return None
         session.commit()
-        _v2_logger.info("v2_update_judgment 完成: card_id=%s, confirm=%s", card_id, confirm)
+        _v2_logger.info("v2_update_judgment 完成: card_id=%s, action=%s, confirm=%s", card_id, action, confirm)
         return {"card": card.model_dump(mode="json")}
     except Exception:
         session.rollback()

@@ -203,8 +203,9 @@ class V2IngestAVRequest(BaseModel):
 
 
 class V2JudgmentUpdateRequest(BaseModel):
-    judgment: dict
+    judgment: dict = {}
     confirm: bool = False
+    action: Optional[str] = None  # "confirm" | "unconfirm" | "modify" | "discard" | "restore"
 
 
 @router.post("/v2/ingest/upload", status_code=201)
@@ -240,7 +241,7 @@ def v2_ingest_alpha_vantage(req: V2IngestAVRequest):
 @router.post("/v2/cards/{card_id}/judgment")
 def v2_update_judgment(card_id: str, req: V2JudgmentUpdateRequest):
     """更新判断层。confirm=true 时确认卡片。"""
-    result = svc.v2_update_judgment(card_id, req.judgment, req.confirm)
+    result = svc.v2_update_judgment(card_id, req.judgment, req.confirm, req.action)
     if result is None:
         raise HTTPException(status_code=404, detail=f"card {card_id} not found")
     return result

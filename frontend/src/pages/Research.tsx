@@ -336,6 +336,7 @@ export default function Research() {
   const [v2ReviewCard,  setV2ReviewCard]  = useState<ViewpointCardV2 | null>(null)
   const [v2JudgEdit,    setV2JudgEdit]    = useState<Record<string, string>>({})
   const [v2Confirming,  setV2Confirming]  = useState(false)
+  const [v2DiscardedId, setV2DiscardedId] = useState<string | null>(null)
   // v2 Tab 3
   const [v2SearchSymbol, setV2SearchSymbol] = useState('')
   const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
@@ -633,14 +634,17 @@ export default function Research() {
     })
   }
 
-  async function handleV2Confirm(endorsement: 'endorse' | 'reference_only') {
+  async function handleV2Action(action: 'confirm' | 'unconfirm' | 'modify' | 'discard', endorsement?: string) {
     if (!v2ReviewCard) return
     setV2Confirming(true)
     try {
-      await researchV2Api.updateJudgment(v2ReviewCard.card_id, {
-        ...v2JudgEdit,
-        user_endorsement: endorsement,
-      }, true)
+      const judgment: Record<string, unknown> = { ...v2JudgEdit }
+      if (endorsement) judgment.user_endorsement = endorsement
+      await researchV2Api.updateJudgment(v2ReviewCard.card_id, judgment, action === 'confirm', action)
+      if (action === 'discard') {
+        setV2DiscardedId(v2ReviewCard.card_id)
+        setTimeout(() => setV2DiscardedId(null), 5000)
+      }
       setV2ReviewCard(null)
       loadV2Cards()
     } catch (err: unknown) {
@@ -650,20 +654,14 @@ export default function Research() {
     }
   }
 
-  async function handleV2Discard() {
-    if (!v2ReviewCard) return
-    setV2Confirming(true)
+  async function handleV2Restore() {
+    if (!v2DiscardedId) return
     try {
-      await researchV2Api.updateJudgment(v2ReviewCard.card_id, {
-        user_endorsement: 'disagree',
-        validity_status: 'invalidated',
-      }, false)
-      setV2ReviewCard(null)
+      await researchV2Api.updateJudgment(v2DiscardedId, {}, false, 'restore')
+      setV2DiscardedId(null)
       loadV2Cards()
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '操作失败')
-    } finally {
-      setV2Confirming(false)
+      alert(err instanceof Error ? err.message : '恢复失败')
     }
   }
 
@@ -1172,7 +1170,8 @@ export default function Research() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {v2Confirmed.map(card => (
-                  <div key={card.card_id} style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '10px 14px' }}>
+                  <div key={card.card_id} onClick={() => openV2Review(card)}
+                    style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '10px 14px', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                       <span style={{ fontSize: 10, background: '#D1FAE5', color: '#059669', padding: '1px 6px', borderRadius: 4 }}>已确认</span>
                       {stanceBadge(card.judgment.stance)}
@@ -1182,6 +1181,21 @@ export default function Research() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ══════════ v2: 丢弃撤销 Toast ══════════ */}
+          {v2DiscardedId && (
+            <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1100,
+              background: '#1F2937', color: '#fff', borderRadius: 10, padding: '10px 20px', fontSize: 13,
+              display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+              <span>观点卡已丢弃</span>
+              <button onClick={handleV2Restore}
+                style={{ background: '#3B82F6', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>
+                撤销
+              </button>
+              <button onClick={() => setV2DiscardedId(null)}
+                style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 14 }}>✕</button>
             </div>
           )}
 
@@ -1289,19 +1303,39 @@ export default function Research() {
                   </div>
                 </div>
 
-                {/* 底部按钮组 */}
+                {/* 底部按钮组：根据 is_ai_prefilled 切换 */}
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                  <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={handleV2Discard}>
-                    <Trash2 size={12} /> 丢弃
-                  </button>
-                  <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                    onClick={() => handleV2Confirm('reference_only')}>
-                    仅作参考
-                  </button>
-                  <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                    onClick={() => handleV2Confirm('endorse')}>
-                    <Check size={12} /> 确认并入库
-                  </button>
+                  {v2ReviewCard.judgment.is_ai_prefilled ? (
+                    <>
+                      <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('discard')}>
+                        <Trash2 size={12} /> 丢弃
+                      </button>
+                      <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('confirm', 'reference_only')}>
+                        仅作参考
+                      </button>
+                      <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('confirm', 'endorse')}>
+                        <Check size={12} /> 确认并入库
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('discard')}>
+                        <Trash2 size={12} /> 丢弃
+                      </button>
+                      <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('unconfirm')}>
+                        撤回确认
+                      </button>
+                      <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                        onClick={() => handleV2Action('modify')}>
+                        <Pencil size={12} /> 保存修改
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

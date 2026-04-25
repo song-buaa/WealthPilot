@@ -231,10 +231,10 @@ export const researchV2Api = {
   getHoldingsUS: () =>
     request<{ symbol: string; name: string; asset_name: string }[]>('/research/v2/holdings_us'),
 
-  updateJudgment: (cardId: string, judgment: Record<string, unknown>, confirm: boolean) =>
+  updateJudgment: (cardId: string, judgment: Record<string, unknown>, confirm: boolean, action?: string) =>
     request<{ card: ViewpointCardV2 }>(`/research/v2/cards/${cardId}/judgment`, {
       method: 'POST',
-      body: JSON.stringify({ judgment, confirm }),
+      body: JSON.stringify({ judgment, confirm, action }),
     }),
 
   queryCards: (params?: { symbol?: string; status?: string; event_type?: string; render?: boolean; top_k?: number }) => {
