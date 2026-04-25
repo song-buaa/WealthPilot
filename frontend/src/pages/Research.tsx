@@ -581,16 +581,16 @@ export default function Research() {
     }
   }
 
-  // ── 观点库过滤 ──
-  const filtered = viewpoints.filter(v => {
+  // ── 观点库过滤（v2 卡）──
+  const filteredV2 = v2Cards.filter(c => {
     const q = query.toLowerCase()
-    const matchQ = !q || v.title.toLowerCase().includes(q)
-      || (v.object_name ?? '').toLowerCase().includes(q)
-      || (v.thesis ?? '').toLowerCase().includes(q)
-    const matchV = filterValidity === 'all' || v.validity_status === filterValidity
-    const matchS = filterStance === 'all' || v.stance === filterStance
-    const matchH = filterHorizon === 'all' || v.horizon === filterHorizon
-    const matchO = !filterObject || (v.object_name ?? '').toLowerCase().includes(filterObject.toLowerCase())
+    const thesis = c.narrative.thesis ?? ''
+    const symbol = c.facts.primary_symbol ?? ''
+    const matchQ = !q || thesis.toLowerCase().includes(q) || symbol.toLowerCase().includes(q)
+    const matchV = filterValidity === 'all' || c.judgment.validity_status === filterValidity
+    const matchS = filterStance === 'all' || c.judgment.stance === filterStance
+    const matchH = filterHorizon === 'all' || c.judgment.horizon === filterHorizon
+    const matchO = !filterObject || symbol.toLowerCase().includes(filterObject.toLowerCase())
     return matchQ && matchV && matchS && matchH && matchO
   })
 
@@ -733,7 +733,7 @@ export default function Research() {
       <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '2px solid #E5E7EB' }}>
         {([
           { key: 'import',  label: '资料导入', badge: pendingCards.length > 0 ? pendingCards.length : null },
-          { key: 'library', label: '观点库',   badge: viewpoints.length > 0 ? viewpoints.length : null },
+          { key: 'library', label: '观点库',   badge: v2Cards.length > 0 ? v2Cards.length : null },
           { key: 'search',  label: '决策检索', badge: null },
         ] as const).map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -1354,46 +1354,79 @@ export default function Research() {
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索标题、标的、论点…"
                 style={{ border: 'none', outline: 'none', flex: 1, fontSize: 12, color: '#374151', background: 'transparent', fontFamily: 'inherit' }} />
             </div>
-            <input value={filterObject} onChange={e => setFilterObject(e.target.value)} placeholder="标的名称"
+            <input value={filterObject} onChange={e => setFilterObject(e.target.value)} placeholder="标的 symbol"
               style={{ ...S.select, width: 100 }} />
-            <select value={filterStance} onChange={e => setFilterStance(e.target.value)} style={S.select}>
-              <option value="all">全部立场</option>
-              <option value="bullish">做多</option><option value="bearish">做空</option><option value="neutral">中性</option>
-            </select>
             <select value={filterHorizon} onChange={e => setFilterHorizon(e.target.value)} style={S.select}>
               <option value="all">全部维度</option>
-              <option value="短期">短期</option><option value="中期">中期</option><option value="长期">长期</option><option value="不限">不限</option>
+              <option value="short">短期</option><option value="medium">中期</option><option value="long">长期</option>
             </select>
             <select value={filterValidity} onChange={e => setFilterValidity(e.target.value)} style={S.select}>
               <option value="all">全部状态</option>
-              <option value="active">有效</option><option value="suspect">存疑</option><option value="invalid">已作废</option>
+              <option value="active">有效</option><option value="expired">已过期</option><option value="invalidated">已失效</option>
             </select>
-            <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filtered.length} 条</span>
-            <button style={S.btnPrimary} onClick={() => { setEditTarget(null); setModalOpen(true); setFormError(null) }}>
-              <Plus size={13} /> 新建观点
-            </button>
+            <select value={filterStance} onChange={e => setFilterStance(e.target.value)} style={S.select}>
+              <option value="all">全部立场</option>
+              <option value="bullish">做多</option><option value="bearish">做空</option><option value="neutral">中性</option><option value="watch">观察</option>
+            </select>
+            <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filteredV2.length} 条</span>
           </div>
 
-          {filtered.length === 0 ? (
+          {filteredV2.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF', fontSize: 13 }}>
-              {viewpoints.length === 0 ? '暂无观点，点击「新建观点」添加' : '没有符合条件的观点'}
+              {v2Cards.length === 0 ? '暂无 v2 观点卡，请在「资料导入」Tab 拉取或上传' : '没有符合条件的观点'}
             </div>
           ) : (
             <div>
               <div style={{
-                display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 90px 80px',
+                display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 80px 90px',
                 gap: 8, padding: '6px 10px',
                 fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase',
                 borderBottom: '1px solid #F3F4F6',
               }}>
-                <span>标题 / 标的</span><span>立场</span><span>维度</span><span>认同</span><span>有效性</span><span>创建时间</span><span></span>
+                <span>论点 / 标的</span><span>立场</span><span>维度</span><span>认同</span><span>状态</span><span>来源</span><span>时间</span>
               </div>
-              {filtered.map(vp => (
-                <ViewpointRow key={vp.id} vp={vp}
-                  onEdit={() => { setEditTarget(vp); setModalOpen(true); setFormError(null) }}
-                  onDelete={() => handleDelete(vp.id)}
-                  onStatusChange={s => handleStatusChange(vp, s)} />
-              ))}
+              {filteredV2.map(card => {
+                const j = card.judgment
+                const isPending = j.is_ai_prefilled
+                const HORIZON_CN: Record<string, string> = { short: '短期', medium: '中期', long: '长期' }
+                const ENDORSEMENT_CN: Record<string, string> = { endorse: '认可', reference_only: '参考', disagree: '反对' }
+                const VALIDITY_CN: Record<string, { label: string; bg: string; color: string }> = {
+                  active: { label: '有效', bg: '#D1FAE5', color: '#059669' },
+                  expired: { label: '过期', bg: '#FEF3C7', color: '#D97706' },
+                  invalidated: { label: '失效', bg: '#F3F4F6', color: '#9CA3AF' },
+                }
+                const SOURCE_CN: Record<string, string> = {
+                  user_upload: '用户', alpha_vantage_news: 'AV新闻',
+                  alpha_vantage_fundamental: 'AV基本面', alpha_vantage_earnings: 'AV财报',
+                  perplexity_search: '联网', hybrid: '混合',
+                }
+                const vBadge = VALIDITY_CN[j.validity_status] ?? VALIDITY_CN.active
+                return (
+                  <div key={card.card_id} onClick={() => openV2Review(card)}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 80px 90px',
+                      gap: 8, padding: '8px 10px', alignItems: 'center',
+                      borderBottom: '1px solid #F9FAFB', cursor: 'pointer',
+                      background: isPending ? '#FFFBEB' : 'transparent',
+                    }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {card.narrative.thesis?.slice(0, 40) ?? '(无论点)'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9CA3AF' }}>
+                        {card.facts.primary_symbol ?? '—'}
+                        {isPending && <span style={{ marginLeft: 6, fontSize: 9, background: '#FEE2E2', color: '#DC2626', padding: '0 4px', borderRadius: 3 }}>待确认</span>}
+                      </div>
+                    </div>
+                    <span>{stanceBadge(j.stance)}</span>
+                    <span style={{ fontSize: 11, color: '#6B7280' }}>{HORIZON_CN[j.horizon] ?? j.horizon}</span>
+                    <span style={{ fontSize: 11, color: '#6B7280' }}>{ENDORSEMENT_CN[j.user_endorsement] ?? j.user_endorsement}</span>
+                    <span style={{ fontSize: 10, background: vBadge.bg, color: vBadge.color, padding: '1px 5px', borderRadius: 4, textAlign: 'center' }}>{vBadge.label}</span>
+                    <span style={{ fontSize: 10, color: '#9CA3AF' }}>{SOURCE_CN[card.facts.source_type] ?? card.facts.source_type}</span>
+                    <span style={{ fontSize: 10, color: '#9CA3AF' }}>{new Date(card.created_at).toLocaleDateString()}</span>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
