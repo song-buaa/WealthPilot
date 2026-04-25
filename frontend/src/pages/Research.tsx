@@ -50,6 +50,16 @@ const VALIDITY: Record<string, { label: string; bg: string; color: string }> = {
   suspect: { label: '存疑', bg: '#FEF3C7', color: '#D97706' },
   invalid: { label: '已作废', bg: '#F3F4F6', color: '#9CA3AF' },
 }
+// 来源类型中文映射（去品牌化）
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  user_upload: '用户上传',
+  alpha_vantage_news: '公开新闻',
+  alpha_vantage_fundamental: '基本面快照',
+  alpha_vantage_earnings: '财报数据',
+  perplexity_search: '联网搜索',
+  hybrid: '混合来源',
+}
+
 const STANCE: Record<string, { label: string; bg: string; color: string }> = {
   bullish: { label: '做多', bg: '#FEE2E2', color: '#DC2626' },
   bearish: { label: '做空', bg: '#D1FAE5', color: '#059669' },
@@ -1151,7 +1161,7 @@ export default function Research() {
                     style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                       <span style={{ fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4 }}>待确认</span>
-                      <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{card.facts.source_type}</span>
+                      <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{SOURCE_TYPE_LABEL[card.facts.source_type] ?? card.facts.source_type}</span>
                       <span style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{card.narrative.event_type}</span>
                       {card.facts.primary_symbol && <span style={{ fontSize: 10, color: '#6B7280' }}>{card.facts.primary_symbol}</span>}
                     </div>
@@ -1213,7 +1223,7 @@ export default function Research() {
                 <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>事实层（只读）</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12, color: '#374151' }}>
-                    <div><span style={{ color: '#9CA3AF' }}>来源：</span>{v2ReviewCard.facts.source_type}</div>
+                    <div><span style={{ color: '#9CA3AF' }}>来源：</span>{SOURCE_TYPE_LABEL[v2ReviewCard.facts.source_type] ?? v2ReviewCard.facts.source_type}</div>
                     <div><span style={{ color: '#9CA3AF' }}>时间：</span>{new Date(v2ReviewCard.facts.as_of).toLocaleDateString()}</div>
                     <div><span style={{ color: '#9CA3AF' }}>标的：</span>{v2ReviewCard.facts.primary_symbol ?? '未指定'}</div>
                     <div><span style={{ color: '#9CA3AF' }}>入库：</span>{new Date(v2ReviewCard.facts.ingested_at).toLocaleDateString()}</div>
@@ -1395,9 +1405,9 @@ export default function Research() {
                   expired: { label: '过期', bg: '#FEF3C7', color: '#D97706' },
                   invalidated: { label: '失效', bg: '#F3F4F6', color: '#9CA3AF' },
                 }
-                const SOURCE_CN: Record<string, string> = {
-                  user_upload: '用户', alpha_vantage_news: 'AV新闻',
-                  alpha_vantage_fundamental: 'AV基本面', alpha_vantage_earnings: 'AV财报',
+                const SOURCE_SHORT: Record<string, string> = {
+                  user_upload: '用户上传', alpha_vantage_news: '公开新闻',
+                  alpha_vantage_fundamental: '基本面', alpha_vantage_earnings: '财报',
                   perplexity_search: '联网', hybrid: '混合',
                 }
                 const vBadge = VALIDITY_CN[j.validity_status] ?? VALIDITY_CN.active
@@ -1422,7 +1432,7 @@ export default function Research() {
                     <span style={{ fontSize: 11, color: '#6B7280' }}>{HORIZON_CN[j.horizon] ?? j.horizon}</span>
                     <span style={{ fontSize: 11, color: '#6B7280' }}>{ENDORSEMENT_CN[j.user_endorsement] ?? j.user_endorsement}</span>
                     <span style={{ fontSize: 10, background: vBadge.bg, color: vBadge.color, padding: '1px 5px', borderRadius: 4, textAlign: 'center' }}>{vBadge.label}</span>
-                    <span style={{ fontSize: 10, color: '#9CA3AF' }}>{SOURCE_CN[card.facts.source_type] ?? card.facts.source_type}</span>
+                    <span style={{ fontSize: 10, color: '#9CA3AF' }}>{SOURCE_SHORT[card.facts.source_type] ?? card.facts.source_type}</span>
                     <span style={{ fontSize: 10, color: '#9CA3AF' }}>{new Date(card.created_at).toLocaleDateString()}</span>
                   </div>
                 )
