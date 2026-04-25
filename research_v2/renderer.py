@@ -20,12 +20,13 @@ from research_v2.schemas import (
 logger = logging.getLogger(__name__)
 
 _USER_SOURCES = {SourceType.USER_UPLOAD}
-_MACHINE_SOURCES = {
+_THIRD_PARTY_SOURCES = {
     SourceType.ALPHA_VANTAGE_NEWS,
     SourceType.ALPHA_VANTAGE_FUNDAMENTAL,
     SourceType.ALPHA_VANTAGE_EARNINGS,
+}
+_ONLINE_SOURCES = {
     SourceType.PERPLEXITY_SEARCH,
-    SourceType.HYBRID,
 }
 
 
@@ -33,7 +34,11 @@ def _get_prefix(source_type: SourceType) -> str:
     """根据来源类型返回前缀标签。"""
     if source_type in _USER_SOURCES:
         return "[用户资料]"
-    return "[联网参考]"
+    if source_type in _THIRD_PARTY_SOURCES:
+        return "[第三方数据]"
+    if source_type in _ONLINE_SOURCES:
+        return "[联网参考]"
+    return "[第三方数据]"
 
 
 def _extract_url(card: ViewpointCard) -> Optional[str]:

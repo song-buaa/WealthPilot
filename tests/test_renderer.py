@@ -103,7 +103,7 @@ class TestRendererUserUploadNoURL(unittest.TestCase):
 class TestRendererAlphaVantageNews(unittest.TestCase):
     """Case 3: alpha_vantage_news"""
 
-    def test_output_has_online_prefix(self):
+    def test_output_has_third_party_prefix(self):
         card = _make_card(
             source_type=SourceType.ALPHA_VANTAGE_NEWS,
             thesis="大和重申理想汽车买入评级，目标价上调至28美元",
@@ -117,7 +117,7 @@ class TestRendererAlphaVantageNews(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
-        self.assertTrue(lines[0].startswith("[联网参考]"))
+        self.assertTrue(lines[0].startswith("[第三方数据]"))
         self.assertIn("[ref:https://news.example.com/li-rating]", lines[0])
         self.assertIn("大和重申理想汽车买入评级", lines[0])
         kpi_line = [l for l in lines if "目标价上行空间" in l]
@@ -141,7 +141,7 @@ class TestRendererAlphaVantageFundamental(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        self.assertTrue(lines[0].startswith("[联网参考] "))
+        self.assertTrue(lines[0].startswith("[第三方数据] "))
         kpi_line = lines[1]
         self.assertIn("营收同比+48.0%", kpi_line)
         self.assertIn("净利率8.2%", kpi_line)
@@ -168,7 +168,7 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        self.assertTrue(lines[0].startswith("[联网参考]"))
+        self.assertTrue(lines[0].startswith("[第三方数据]"))
         self.assertIn("[ref:https://api.example.com/earnings/LI]", lines[0])
         self.assertIn("EPS超预期", lines[0])
         kpi_line = [l for l in lines if "盈利同比" in l]
@@ -179,7 +179,7 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
 
 
 class TestRendererAllLinesHavePrefix(unittest.TestCase):
-    """Case 6: 所有返回行都以 [用户资料] 或 [联网参考] 开头"""
+    """Case 6: 所有返回行都以 [用户资料] 或 [第三方数据] 或 [联网参考] 开头"""
 
     def test_all_lines_prefixed(self):
         card = _make_card(
@@ -199,7 +199,7 @@ class TestRendererAllLinesHavePrefix(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        valid_prefixes = ("[用户资料]", "[联网参考]")
+        valid_prefixes = ("[用户资料]", "[第三方数据]", "[联网参考]")
         for i, line in enumerate(lines):
             self.assertTrue(
                 line.startswith(valid_prefixes),
