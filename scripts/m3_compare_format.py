@@ -184,6 +184,60 @@ def main():
     else:
         print("\n✅ 格式合约对比通过")
 
+    # ── Fallback 行为断言 ────────────────────────────────────────────
+    print("\n" + "=" * 70)
+    print("Fallback 行为断言")
+    print("=" * 70)
+    _run_fallback_assertions()
+
+
+def _run_fallback_assertions():
+    """验证 _load_research 的 fallback 行为正确性。"""
+    from unittest.mock import patch
+    from app.database import get_session
+
+    session = get_session()
+    try:
+        # 断言 a: v2 有数据时，_load_research 返回行数 == v2 单独行数
+        print("\n[断言 a] v2 有数据时，返回行数 == v2 单独行数")
+        from research_v2 import repository
+        v2_only = repository.query_for_decision(session, "LI:US")
+        if v2_only:
+            from decision_engine.data_loader import _load_research
+            lr_result = _load_research(session, pid=1, asset_name="理想汽车")
+            if len(lr_result) == len(v2_only):
+                print(f"  ✅ PASS: _load_research={len(lr_result)}, v2={len(v2_only)}")
+            else:
+                print(f"  ❌ FAIL: _load_research={len(lr_result)}, v2={len(v2_only)}")
+        else:
+            print(f"  ⚠️  SKIP: v2 无 confirmed 数据，无法验证")
+
+        # 断言 b: v2 空时，_load_research 调用 _search_research_online 一次
+        print("\n[断言 b] v2 空时，调用联网搜索一次")
+        with patch("decision_engine.data_loader._search_research_online", return_value=["[联网参考] mock"]) as mock_online:
+            from decision_engine.data_loader import _load_research as lr
+            result_b = lr(session, pid=1, asset_name="不存在的标的XYZ")
+            if mock_online.call_count == 1:
+                print(f"  ✅ PASS: _search_research_online 被调用 {mock_online.call_count} 次")
+            else:
+                print(f"  ❌ FAIL: _search_research_online 被调用 {mock_online.call_count} 次（预期 1）")
+
+        # 断言 c: v2 命中时，_search_research_online 不被调用
+        print("\n[断言 c] v2 命中时，不调用联网搜索")
+        if v2_only:
+            with patch("decision_engine.data_loader._search_research_online") as mock_online_c:
+                from decision_engine.data_loader import _load_research as lr2
+                result_c = lr2(session, pid=1, asset_name="理想汽车")
+                if mock_online_c.call_count == 0:
+                    print(f"  ✅ PASS: _search_research_online 未被调用")
+                else:
+                    print(f"  ❌ FAIL: _search_research_online 被调用 {mock_online_c.call_count} 次（预期 0）")
+        else:
+            print(f"  ⚠️  SKIP: v2 无 confirmed 数据，无法验证")
+
+    finally:
+        session.close()
+
 
 if __name__ == "__main__":
     main()
