@@ -141,6 +141,10 @@ def render_card(card: ViewpointCard) -> list[str]:
             else:
                 lines.append(f"{prefix} {text}")
 
+    # 每行末尾追加 as_of 时间标注
+    as_of_str = card.facts.as_of.strftime("%Y-%m-%d")
+    lines = [f"{line} (数据截至 {as_of_str})" for line in lines]
+
     return lines
 
 

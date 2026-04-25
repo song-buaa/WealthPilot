@@ -98,6 +98,7 @@ class TestRendererUserUploadNoURL(unittest.TestCase):
         self.assertTrue(lines[0].startswith("[用户资料] "))
         self.assertNotIn("[ref:", lines[0])
         self.assertIn("特斯拉Cybertruck", lines[0])
+        self.assertTrue(lines[0].endswith("(数据截至 2026-04-01)"))
 
 
 class TestRendererAlphaVantageNews(unittest.TestCase):
@@ -122,6 +123,8 @@ class TestRendererAlphaVantageNews(unittest.TestCase):
         self.assertIn("大和重申理想汽车买入评级", lines[0])
         kpi_line = [l for l in lines if "目标价上行空间" in l]
         self.assertTrue(len(kpi_line) >= 1)
+        for line in lines:
+            self.assertIn("(数据截至 2026-04-01)", line)
 
 
 class TestRendererAlphaVantageFundamental(unittest.TestCase):
@@ -146,6 +149,8 @@ class TestRendererAlphaVantageFundamental(unittest.TestCase):
         self.assertIn("营收同比+48.0%", kpi_line)
         self.assertIn("净利率8.2%", kpi_line)
         self.assertNotIn("[ref:", kpi_line)
+        for line in lines:
+            self.assertIn("(数据截至 2026-04-01)", line)
 
 
 class TestRendererAlphaVantageEarnings(unittest.TestCase):
@@ -176,6 +181,8 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
         self.assertIn("+85.0%", kpi_line[0])
         bull_bear = [l for l in lines if "看多" in l or "看空" in l]
         self.assertTrue(len(bull_bear) >= 1)
+        for line in lines:
+            self.assertIn("(数据截至 2026-04-01)", line)
 
 
 class TestRendererAllLinesHavePrefix(unittest.TestCase):
@@ -220,6 +227,7 @@ class TestRendererFallbackToSummary(unittest.TestCase):
         self.assertTrue(len(lines) >= 1)
         self.assertTrue(lines[0].startswith("[用户资料]"))
         self.assertIn("新能源汽车行业", lines[0])
+        self.assertIn("(数据截至 2026-04-01)", lines[0])
 
 
 class TestRendererEmptyKPI(unittest.TestCase):
@@ -237,6 +245,8 @@ class TestRendererEmptyKPI(unittest.TestCase):
         self.assertIn("大和重申", lines[0])
         kpi_lines = [l for l in lines if "营收同比" in l or "盈利同比" in l or "毛利率" in l]
         self.assertEqual(len(kpi_lines), 0, "Empty KPI should not produce KPI line")
+        for line in lines:
+            self.assertIn("(数据截至 2026-04-01)", line)
 
 
 if __name__ == "__main__":
