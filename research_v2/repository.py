@@ -6,8 +6,9 @@ ViewpointRepository — ViewpointCard 的持久化与查询。
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -87,11 +88,86 @@ def _card_to_orm(card: ViewpointCard) -> ViewpointCardV2:
     )
 
 
+# ── 去重工具 ──────────────────────────────────────────────────────
+
+_TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+                    "ref", "source", "fbclid", "gclid"}
+
+
+def _normalize_url(url: str) -> str:
+    """规范化 URL：去掉 tracking 参数 + fragment，小写 host。"""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url.strip())
+        query_params = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() not in _TRACKING_PARAMS]
+        query_params.sort()
+        normalized = parsed._replace(
+            netloc=parsed.netloc.lower(),
+            query=urlencode(query_params),
+            fragment="",
+        )
+        return urlunparse(normalized)
+    except Exception:
+        return url.strip()
+
+
+def _bucket_minute(dt: datetime) -> datetime:
+    """对齐到分钟级（忽略秒和微秒）。"""
+    return dt.replace(second=0, microsecond=0)
+
+
+def _find_duplicate(session: Session, card: "ViewpointCard") -> Optional[ViewpointCardV2]:
+    """按去重规则查找已存在的卡。返回 ORM 对象或 None。"""
+    source_type = card.facts.source_type.value
+    primary_symbol = card.facts.primary_symbol
+    if not primary_symbol:
+        return None
+
+    as_of_bucket = _bucket_minute(card.facts.as_of)
+    as_of_end = as_of_bucket + timedelta(minutes=1)
+
+    query = (
+        session.query(ViewpointCardV2)
+        .filter(ViewpointCardV2.source_type == source_type)
+        .filter(ViewpointCardV2.primary_symbol == primary_symbol)
+        .filter(ViewpointCardV2.as_of >= as_of_bucket)
+        .filter(ViewpointCardV2.as_of < as_of_end)
+        .filter(ViewpointCardV2.validity_status != "invalidated")
+    )
+
+    refs = card.facts.source_refs
+    if refs and refs[0].ref_type == "url":
+        target_url = _normalize_url(refs[0].ref_value)
+        candidates = query.all()
+        for cand in candidates:
+            cand_facts = json.loads(cand.facts_json)
+            cand_refs = cand_facts.get("source_refs", [])
+            if cand_refs and cand_refs[0].get("ref_type") == "url":
+                cand_url = _normalize_url(cand_refs[0].get("ref_value", ""))
+                if cand_url == target_url:
+                    return cand
+        return None
+    else:
+        return query.first()
+
+
 # ── CRUD ─────────────────────────────────────────────────────────
 
 
 def insert(session: Session, card: ViewpointCard) -> ViewpointCard:
-    """写入一张 ViewpointCard。"""
+    """写入一张 ViewpointCard。如已存在相同内容的卡则跳过，返回已存在的 card。"""
+    existing = _find_duplicate(session, card)
+    if existing:
+        logger.info(
+            "检测到重复卡，跳过插入: source=%s symbol=%s as_of=%s existing_id=%s",
+            card.facts.source_type.value,
+            card.facts.primary_symbol,
+            card.facts.as_of,
+            existing.card_id,
+        )
+        return _orm_to_card(existing)
+
     row = _card_to_orm(card)
     session.add(row)
     session.flush()
