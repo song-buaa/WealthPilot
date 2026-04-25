@@ -350,6 +350,7 @@ export default function Research() {
   // v2 Tab 3
   const [v2SearchSymbol, setV2SearchSymbol] = useState('')
   const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
+  const [v2SearchCardCount, setV2SearchCardCount] = useState(0)
   const [v2Searching,    setV2Searching]    = useState(false)
 
   function loadV2Cards() {
@@ -681,6 +682,7 @@ export default function Research() {
     try {
       const res = await researchV2Api.queryCards({ symbol: v2SearchSymbol.trim(), render: true })
       setV2SearchLines(res.rendered ?? [])
+      setV2SearchCardCount((res as Record<string, unknown>).card_count as number ?? 0)
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : '检索失败')
     } finally {
@@ -1464,7 +1466,7 @@ export default function Research() {
           {v2SearchLines.length > 0 && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 10 }}>
-                决策引擎当前会消费 {v2SearchLines.length} 条观点
+                决策引擎当前消费 {v2SearchCardCount} 张观点卡（共 {v2SearchLines.length} 段文本）
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {v2SearchLines.map((line, i) => {

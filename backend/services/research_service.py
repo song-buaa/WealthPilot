@@ -615,7 +615,23 @@ def v2_query_cards(
     try:
         if render and symbol:
             lines = repository.query_for_decision(session, symbol, top_k=top_k)
-            return {"rendered": lines, "count": len(lines)}
+            # 查 confirmed 卡数（与 query_for_decision 同过滤条件）
+            from app.models import ViewpointCardV2
+            from research_v2.symbol import Symbol, get_registry
+            from sqlalchemy import or_ as sql_or
+            sym = Symbol.parse(symbol)
+            expanded = [str(s) for s in get_registry().expand_symbols(sym)]
+            sym_conds = []
+            for s in expanded:
+                sym_conds.append(ViewpointCardV2.primary_symbol == s)
+            cq = session.query(ViewpointCardV2).filter(
+                sql_or(*sym_conds),
+                ViewpointCardV2.validity_status == "active",
+                ViewpointCardV2.confidence_score >= 0.5,
+                ViewpointCardV2.judgment_json.like('%"is_ai_prefilled": false%'),
+            )
+            card_count = cq.count()
+            return {"rendered": lines, "count": len(lines), "card_count": card_count}
         else:
             cards = repository.query_cards(
                 session,
