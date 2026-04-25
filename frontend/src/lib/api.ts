@@ -16,7 +16,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({}))
     throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
   }
-  return res.json() as Promise<T>
+  // 204 No Content：返回 null
+  if (res.status === 204) {
+    return null as unknown as T
+  }
+  // 非 204 但 body 可能为空
+  const text = await res.text()
+  if (!text) {
+    return null as unknown as T
+  }
+  try {
+    return JSON.parse(text) as T
+  } catch (err) {
+    console.error('Failed to parse JSON response:', text.slice(0, 200))
+    throw new Error(`Invalid JSON response: ${err}`)
+  }
 }
 
 // ── Portfolio ────────────────────────────────────────────
