@@ -1391,12 +1391,20 @@ export default function Research() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {v2SearchLines.map((line, i) => {
-                  const isUser = line.startsWith('[用户资料]')
-                  const prefix = isUser ? '[用户资料]' : '[联网参考]'
-                  const text = line.replace(/^\[(用户资料|联网参考)\]\s*/, '')
+                  // 解析三种前缀：[用户资料] / [第三方数据] / [联网参考]
+                  const prefixMatch = line.match(/^\[(用户资料|第三方数据|联网参考)\]\s*/)
+                  const prefix = prefixMatch ? prefixMatch[1] : null
+                  const text = prefixMatch ? line.slice(prefixMatch[0].length) : line
+                  // 三种前缀三种颜色：用户=蓝，第三方=琥珀，联网=灰
+                  const badgeStyle: Record<string, { bg: string; color: string }> = {
+                    '用户资料':   { bg: '#DBEAFE', color: '#1D4ED8' },
+                    '第三方数据': { bg: '#FEF3C7', color: '#D97706' },
+                    '联网参考':   { bg: '#F3F4F6', color: '#6B7280' },
+                  }
+                  const badge = prefix ? badgeStyle[prefix] ?? { bg: '#F3F4F6', color: '#6B7280' } : null
                   return (
                     <div key={i} style={{ background: '#F8FAFC', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#374151', lineHeight: 1.6 }}>
-                      <span style={{ fontSize: 10, background: isUser ? '#DBEAFE' : '#FEF3C7', color: isUser ? '#1D4ED8' : '#D97706', padding: '1px 5px', borderRadius: 3, marginRight: 6, fontWeight: 500 }}>{prefix}</span>
+                      {badge && <span style={{ fontSize: 10, background: badge.bg, color: badge.color, padding: '1px 5px', borderRadius: 3, marginRight: 6, fontWeight: 500 }}>[{prefix}]</span>}
                       {text}
                     </div>
                   )

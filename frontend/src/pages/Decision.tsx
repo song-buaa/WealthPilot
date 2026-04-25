@@ -845,13 +845,20 @@ function signalColor(value: string): string {
 }
 
 // ── 投研观点条目解析 ─────────────────────────────────────────
-function parseResearchItem(raw: string): { type: 'user' | 'web' | 'other'; text: string; url: string | null; domain: string | null } {
-  let type: 'user' | 'web' | 'other' = 'other'
+function parseResearchItem(raw: string): { type: 'user' | 'web' | 'thirdparty' | 'other'; text: string; url: string | null; domain: string | null } {
+  let type: 'user' | 'web' | 'thirdparty' | 'other' = 'other'
   let text = raw
   let refUrl: string | null = null
 
-  if (text.startsWith('[用户资料]')) { type = 'user'; text = text.slice(6).trim() }
-  else if (text.startsWith('[联网参考]')) { type = 'web';  text = text.slice(6).trim() }
+  // 三种来源前缀：[用户资料] / [第三方数据] / [联网参考]
+  const prefixMatch = text.match(/^\[(用户资料|第三方数据|联网参考)\]\s*/)
+  if (prefixMatch) {
+    const tag = prefixMatch[1]
+    if (tag === '用户资料') type = 'user'
+    else if (tag === '第三方数据') type = 'thirdparty'
+    else if (tag === '联网参考') type = 'web'
+    text = text.slice(prefixMatch[0].length)
+  }
 
   // 提取并过滤 [ref:url] 标记
   const refMatch = text.match(/^\[ref:(https?:\/\/[^\]]+)\]\s*/)
