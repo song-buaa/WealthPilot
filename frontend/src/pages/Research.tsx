@@ -10,9 +10,9 @@ import {
   Pencil, ChevronDown, ChevronUp, Check, X, Sparkles, FileText, Link, RefreshCw,
 } from 'lucide-react'
 import {
-  researchApi,
+  researchApi, researchV2Api,
   type Viewpoint, type ViewpointCreate, type ResearchCard, type ResearchDocument,
-  type ParseResult,
+  type ParseResult, type ViewpointCardV2,
 } from '@/lib/api'
 
 // ── 样式常量 ──────────────────────────────────────────────────
@@ -54,6 +54,7 @@ const STANCE: Record<string, { label: string; bg: string; color: string }> = {
   bullish: { label: '做多', bg: '#FEE2E2', color: '#DC2626' },
   bearish: { label: '做空', bg: '#D1FAE5', color: '#059669' },
   neutral: { label: '中性', bg: '#EFF6FF', color: '#3B82F6' },
+  watch:   { label: '观察', bg: '#FEF3C7', color: '#D97706' },
 }
 
 function validityBadge(status: string | undefined) {
@@ -323,6 +324,28 @@ export default function Research() {
   const [searchResults, setSearchResults] = useState<Viewpoint[]>([])
   const [searchDone,    setSearchDone]    = useState(false)
 
+  // ── v2 状态 ──
+  const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
+  const [v2Loading,     setV2Loading]     = useState(false)
+  const [v2Symbol,      setV2Symbol]      = useState('LI:US')
+  const [v2Fetching,    setV2Fetching]    = useState(false)
+  const [v2FetchMsg,    setV2FetchMsg]    = useState('')
+  const [v2ReviewCard,  setV2ReviewCard]  = useState<ViewpointCardV2 | null>(null)
+  const [v2JudgEdit,    setV2JudgEdit]    = useState<Record<string, string>>({})
+  const [v2Confirming,  setV2Confirming]  = useState(false)
+  // v2 Tab 3
+  const [v2SearchSymbol, setV2SearchSymbol] = useState('')
+  const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
+  const [v2Searching,    setV2Searching]    = useState(false)
+
+  function loadV2Cards() {
+    setV2Loading(true)
+    researchV2Api.queryCards({ top_k: 50 })
+      .then(res => setV2Cards(res.cards ?? []))
+      .catch(() => {})
+      .finally(() => setV2Loading(false))
+  }
+
   function loadAll() {
     setLoading(true)
     Promise.all([
@@ -339,7 +362,7 @@ export default function Research() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll(); loadV2Cards() }, [])
 
   // 初始化元数据编辑区
   function initMeta(result: ParseResult) {
@@ -563,6 +586,86 @@ export default function Research() {
     const matchO = !filterObject || (v.object_name ?? '').toLowerCase().includes(filterObject.toLowerCase())
     return matchQ && matchV && matchS && matchH && matchO
   })
+
+  // ── v2 handlers ──
+  async function handleV2Fetch() {
+    if (!v2Symbol.trim()) return
+    setV2Fetching(true); setV2FetchMsg('')
+    try {
+      const res = await researchV2Api.ingestAlphaVantage(v2Symbol.trim())
+      const n = res.cards?.length ?? 0
+      const e = res.errors?.length ?? 0
+      setV2FetchMsg(`成功生成 ${n} 张待审核卡${e > 0 ? `，${e} 条处理失败` : ''}`)
+      loadV2Cards()
+    } catch (err: unknown) {
+      setV2FetchMsg(err instanceof Error ? err.message : '拉取失败')
+    } finally {
+      setV2Fetching(false)
+    }
+  }
+
+  function openV2Review(card: ViewpointCardV2) {
+    setV2ReviewCard(card)
+    setV2JudgEdit({
+      stance: card.judgment.stance,
+      confidence: card.judgment.confidence,
+      user_endorsement: card.judgment.user_endorsement,
+      action_type: card.judgment.action_type,
+      horizon: card.judgment.horizon,
+      trigger_conditions: card.judgment.trigger_conditions ?? '',
+      invalidation_conditions: card.judgment.invalidation_conditions ?? '',
+    })
+  }
+
+  async function handleV2Confirm(endorsement: 'endorse' | 'reference_only') {
+    if (!v2ReviewCard) return
+    setV2Confirming(true)
+    try {
+      await researchV2Api.updateJudgment(v2ReviewCard.card_id, {
+        ...v2JudgEdit,
+        user_endorsement: endorsement,
+      }, true)
+      setV2ReviewCard(null)
+      loadV2Cards()
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setV2Confirming(false)
+    }
+  }
+
+  async function handleV2Discard() {
+    if (!v2ReviewCard) return
+    setV2Confirming(true)
+    try {
+      await researchV2Api.updateJudgment(v2ReviewCard.card_id, {
+        user_endorsement: 'disagree',
+        validity_status: 'invalidated',
+      }, false)
+      setV2ReviewCard(null)
+      loadV2Cards()
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setV2Confirming(false)
+    }
+  }
+
+  async function handleV2Search() {
+    if (!v2SearchSymbol.trim()) return
+    setV2Searching(true)
+    try {
+      const res = await researchV2Api.queryCards({ symbol: v2SearchSymbol.trim(), render: true })
+      setV2SearchLines(res.rendered ?? [])
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '检索失败')
+    } finally {
+      setV2Searching(false)
+    }
+  }
+
+  const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled)
+  const v2Confirmed = v2Cards.filter(c => !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree')
 
   // 待审核（不含刚解析的那张）
   const pendingCards = cards.filter(c => !c.is_approved && c.id !== parseResult?.card.id)
@@ -967,6 +1070,187 @@ export default function Research() {
               </div>
             )}
           </div>
+
+          {/* ══════════ v2: 自动拉取资讯 ══════════ */}
+          <div style={{ ...S.card, padding: '16px 20px' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sparkles size={14} style={{ color: '#F59E0B' }} /> 自动拉取资讯 (Alpha Vantage v2)
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <input style={{ ...S.input, maxWidth: 200 }} value={v2Symbol} onChange={e => setV2Symbol(e.target.value)} placeholder="如 LI:US" />
+              <button style={{ ...S.btnPrimary, opacity: v2Fetching ? 0.6 : 1 }} disabled={v2Fetching} onClick={handleV2Fetch}>
+                {v2Fetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 刷新
+              </button>
+            </div>
+            {v2FetchMsg && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>{v2FetchMsg}</div>}
+          </div>
+
+          {/* ══════════ v2: 待审核卡列表 ══════════ */}
+          {v2Pending.length > 0 && (
+            <div style={{ ...S.card, padding: '16px 20px' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
+                v2 待审核观点卡 ({v2Pending.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {v2Pending.map(card => (
+                  <div key={card.card_id} onClick={() => openV2Review(card)}
+                    style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4 }}>待确认</span>
+                      <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{card.facts.source_type}</span>
+                      <span style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{card.narrative.event_type}</span>
+                      {card.facts.primary_symbol && <span style={{ fontSize: 10, color: '#6B7280' }}>{card.facts.primary_symbol}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{card.narrative.thesis ?? '(无论点)'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ v2: 已审核卡列表 ══════════ */}
+          {v2Confirmed.length > 0 && (
+            <div style={{ ...S.card, padding: '16px 20px' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
+                v2 已确认观点卡 ({v2Confirmed.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {v2Confirmed.map(card => (
+                  <div key={card.card_id} style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, background: '#D1FAE5', color: '#059669', padding: '1px 6px', borderRadius: 4 }}>已确认</span>
+                      {stanceBadge(card.judgment.stance)}
+                      <span style={{ fontSize: 10, color: '#6B7280' }}>{card.facts.primary_symbol}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151' }}>{card.narrative.thesis ?? ''}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ v2: 审核详情弹窗 ══════════ */}
+          {v2ReviewCard && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }}
+              onClick={e => { if (e.target === e.currentTarget) setV2ReviewCard(null) }}>
+              <div style={{ ...S.card, width: '100%', maxWidth: 720, padding: '20px 24px', margin: 'auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>观点卡审核</div>
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setV2ReviewCard(null)}><X size={18} /></button>
+                </div>
+
+                {/* 事实层 - 只读灰底 */}
+                <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>事实层（只读）</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12, color: '#374151' }}>
+                    <div><span style={{ color: '#9CA3AF' }}>来源：</span>{v2ReviewCard.facts.source_type}</div>
+                    <div><span style={{ color: '#9CA3AF' }}>时间：</span>{new Date(v2ReviewCard.facts.as_of).toLocaleDateString()}</div>
+                    <div><span style={{ color: '#9CA3AF' }}>标的：</span>{v2ReviewCard.facts.primary_symbol ?? '未指定'}</div>
+                    <div><span style={{ color: '#9CA3AF' }}>入库：</span>{new Date(v2ReviewCard.facts.ingested_at).toLocaleDateString()}</div>
+                  </div>
+                  {v2ReviewCard.facts.source_refs.filter(r => r.ref_type === 'url').map((r, i) => (
+                    <div key={i} style={{ marginTop: 6, fontSize: 11 }}>
+                      <a href={r.ref_value} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>
+                        {r.title ?? '原文链接'} ↗
+                      </a>
+                    </div>
+                  ))}
+                  {v2ReviewCard.facts.raw_facts.summary && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#6B7280', lineHeight: 1.5, borderTop: '1px solid #E5E7EB', paddingTop: 8 }}>
+                      {String(v2ReviewCard.facts.raw_facts.summary).slice(0, 300)}
+                    </div>
+                  )}
+                </div>
+
+                {/* 叙事层 - 只读白底 */}
+                <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>叙事层（只读）</div>
+                  {v2ReviewCard.narrative.thesis && (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', marginBottom: 8, lineHeight: 1.5 }}>{v2ReviewCard.narrative.thesis}</div>
+                  )}
+                  {v2ReviewCard.narrative.bull_case && (
+                    <div style={{ fontSize: 12, color: '#059669', marginBottom: 4, lineHeight: 1.5 }}>🟢 {v2ReviewCard.narrative.bull_case}</div>
+                  )}
+                  {v2ReviewCard.narrative.bear_case && (
+                    <div style={{ fontSize: 12, color: '#DC2626', marginBottom: 4, lineHeight: 1.5 }}>🔴 {v2ReviewCard.narrative.bear_case}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{v2ReviewCard.narrative.event_type}</span>
+                    {v2ReviewCard.narrative.topics.map((t, i) => (
+                      <span key={i} style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 判断层 - 可编辑 */}
+                <div style={{ background: '#fff', border: '2px solid #3B82F6', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#3B82F6', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    判断层（可编辑）
+                    {v2ReviewCard.judgment.is_ai_prefilled && (
+                      <span style={{ marginLeft: 8, fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4, fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>AI 预填，待确认</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 12px', marginBottom: 10 }}>
+                    <div>
+                      <label style={S.label}>立场</label>
+                      <select style={S.select} value={v2JudgEdit.stance ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, stance: e.target.value }))}>
+                        <option value="bullish">做多</option><option value="bearish">做空</option>
+                        <option value="neutral">中性</option><option value="watch">观察</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label}>置信度</label>
+                      <select style={S.select} value={v2JudgEdit.confidence ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, confidence: e.target.value }))}>
+                        <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label}>操作类型</label>
+                      <select style={S.select} value={v2JudgEdit.action_type ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, action_type: e.target.value }))}>
+                        <option value="consider_add">考虑加仓</option><option value="consider_reduce">考虑减仓</option>
+                        <option value="consider_exit">考虑清仓</option><option value="hold_observe">持有观察</option>
+                        <option value="no_action">无操作</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label}>时间跨度</label>
+                      <select style={S.select} value={v2JudgEdit.horizon ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, horizon: e.target.value }))}>
+                        <option value="short">短期(&lt;1月)</option><option value="medium">中期(1-6月)</option><option value="long">长期(&gt;6月)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div>
+                      <label style={S.label}>触发条件（可选）</label>
+                      <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.trigger_conditions ?? ''}
+                        onChange={e => setV2JudgEdit(p => ({ ...p, trigger_conditions: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label style={S.label}>失效条件（可选）</label>
+                      <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.invalidation_conditions ?? ''}
+                        onChange={e => setV2JudgEdit(p => ({ ...p, invalidation_conditions: e.target.value }))} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 底部按钮组 */}
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={handleV2Discard}>
+                    <Trash2 size={12} /> 丢弃
+                  </button>
+                  <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                    onClick={() => handleV2Confirm('reference_only')}>
+                    仅作参考
+                  </button>
+                  <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
+                    onClick={() => handleV2Confirm('endorse')}>
+                    <Check size={12} /> 确认并入库
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
@@ -1025,66 +1309,48 @@ export default function Research() {
         </div>
       )}
 
-      {/* ══════════ Tab 3：决策检索 ══════════ */}
+      {/* ══════════ Tab 3：决策检索 (v2) ══════════ */}
       {activeTab === 'search' && (
         <div style={{ ...S.card, padding: '20px 24px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Search size={14} style={{ color: '#3B82F6' }} /> 决策检索
+            <Search size={14} style={{ color: '#3B82F6' }} /> 决策检索（v2 — 决策引擎实际消费的内容）
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 600 }}>
-            <div>
-              <label style={S.label}>自然语言查询</label>
-              <textarea value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSearch() } }}
-                placeholder="如：理想汽车未来三个月的操作方向？" rows={3} style={S.textarea} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, maxWidth: 500 }}>
+            <div style={{ flex: 1 }}>
+              <label style={S.label}>标的 Symbol（如 LI:US）</label>
+              <input style={S.input} value={v2SearchSymbol} onChange={e => setV2SearchSymbol(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleV2Search() }}
+                placeholder="如 LI:US、NVDA:US" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={S.label}>精确标的（可选）</label>
-                <input style={S.input} value={searchObject} onChange={e => setSearchObject(e.target.value)} placeholder="如：理想汽车" />
-              </div>
-              <div>
-                <label style={S.label}>最多返回条数</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input type="range" min={1} max={20} value={searchLimit} onChange={e => setSearchLimit(Number(e.target.value))} style={{ flex: 1 }} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', minWidth: 24, textAlign: 'right' }}>{searchLimit}</span>
-                </div>
-              </div>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
-              <input type="checkbox" checked={searchExpired} onChange={e => setSearchExpired(e.target.checked)} />
-              包含已作废观点
-            </label>
-            <div>
-              <button style={{ ...S.btnPrimary, opacity: searching || !searchQuery.trim() ? 0.6 : 1 }}
-                disabled={searching || !searchQuery.trim()} onClick={handleSearch}>
-                {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} 检索
-              </button>
-            </div>
+            <button style={{ ...S.btnPrimary, marginTop: 18, opacity: v2Searching || !v2SearchSymbol.trim() ? 0.6 : 1 }}
+              disabled={v2Searching || !v2SearchSymbol.trim()} onClick={handleV2Search}>
+              {v2Searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} 检索
+            </button>
           </div>
-          {searchDone && (
-            <div style={{ marginTop: 20 }}>
+
+          {v2SearchLines.length > 0 && (
+            <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 10 }}>
-                检索结果（{searchResults.length} 条）
+                决策引擎当前会消费 {v2SearchLines.length} 条观点
               </div>
-              {searchResults.length === 0 ? (
-                <div style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>没有找到相关观点</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {searchResults.map(vp => (
-                    <div key={vp.id} style={{ background: '#F8FAFC', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        {stanceBadge(vp.stance)}
-                        {validityBadge(vp.validity_status)}
-                        <span style={{ fontSize: 11, color: '#9CA3AF' }}>{vp.horizon}</span>
-                        {vp.object_name && <span style={{ fontSize: 11, color: '#6B7280', fontWeight: 500 }}>{vp.object_name}</span>}
-                      </div>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: '#1B2A4A', marginBottom: 4 }}>{vp.title}</div>
-                      {vp.thesis && <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{vp.thesis}</div>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {v2SearchLines.map((line, i) => {
+                  const isUser = line.startsWith('[用户资料]')
+                  const prefix = isUser ? '[用户资料]' : '[联网参考]'
+                  const text = line.replace(/^\[(用户资料|联网参考)\]\s*/, '')
+                  return (
+                    <div key={i} style={{ background: '#F8FAFC', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#374151', lineHeight: 1.6 }}>
+                      <span style={{ fontSize: 10, background: isUser ? '#DBEAFE' : '#FEF3C7', color: isUser ? '#1D4ED8' : '#D97706', padding: '1px 5px', borderRadius: 3, marginRight: 6, fontWeight: 500 }}>{prefix}</span>
+                      {text}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {v2SearchLines.length === 0 && v2SearchSymbol.trim() && !v2Searching && (
+            <div style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+              该标的暂无已确认的 v2 观点卡（未确认的卡不会被决策引擎消费）
             </div>
           )}
         </div>
