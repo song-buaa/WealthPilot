@@ -171,16 +171,19 @@ chat_answer 输出格式：
 
 关于基本面和投研信息：
 - research字段中有具体数字的，必须直接引用原始数字（如"净利润同比下降94%"），禁止替换为"大幅下滑"等模糊表述
-- [用户资料]标注的内容优先引用，[联网参考]标注的内容作为补充
+- 引用优先级：[用户资料] > [第三方数据] > [联网参考]
+- [用户资料]是用户自己整理审核过的观点，优先引用且不附链接
+- [第三方数据]是 Alpha Vantage 等结构化第三方数据源（财报/基本面/新闻），引用时该句末尾附"（据公开数据）"文字
 - 如果research字段为空或无有效内容，跳过基本面引用，不编造数字
 - 分析师评级如果存在（如"大和重申买入"），在核心依据中一条带出
 
 关于引用链接（强制执行，不得省略）：
-- 有[ref:url]标注的联网参考，引用时该句末尾必须附 [[来源]](url)，不得省略
+- 有[ref:url]标注的内容，引用时该句末尾必须附 [[来源]](url)，不得省略
   例如："净利润同比下降85.8% [[来源]](https://wallstreetcn.com/...)"
-- 无[ref:url]标注的联网参考，引用时该句末尾附"（据公开信息）"文字，不附链接
+- 无[ref:url]标注的[联网参考]内容，引用时该句末尾附"（据公开信息）"文字，不附链接
+- 无[ref:url]标注的[第三方数据]内容，引用时该句末尾附"（据公开数据）"文字，不附链接
 - 不得对没有URL的内容伪造链接或省略来源标注
-- 每条联网参考数据最多附一个链接
+- 每条引用数据最多附一个链接
 - [用户资料]标注的内容不附链接
 - 日期标注（如[2026-03]）不要出现在chat_answer正文中"""
 
@@ -257,8 +260,8 @@ chat_answer 输出格式：
 持仓前三（top3_by_weight）必须至少提到仓位最重的一只，说明其占比和对组合风险的影响。
 
 ### 市场背景
-引用 research 字段中与持仓最相关的联网参考内容，2-3条，用"-"开头。
-每条引用必须附 [[来源]](url)。
+引用 research 字段中与持仓最相关的[第三方数据]或[联网参考]内容，2-3条，用"-"开头。
+有[ref:url]的引用必须附 [[来源]](url)，无URL的[第三方数据]附"（据公开数据）"，无URL的[联网参考]附"（据公开信息）"。
 聚焦与持仓行业或大类资产直接相关的内容（如持仓有科技股则引用科技行业展望，有固收则引用债券市场展望，有黄金则引用黄金走势）。
 如果 research 字段为空或无相关内容，跳过此段，不输出"市场背景"标题。
 
@@ -271,7 +274,7 @@ chat_answer 输出格式：
 建议必须基于前四段的分析，不得凭空给出。
 如不需要调整，说明原因。
 
-关于引用链接（强制执行）：凡引用带[ref:url]标注的联网内容，必须在句末附 [[来源]](url)。无[ref:url]标注的联网参考，末尾附"（据公开信息）"。[用户资料]标注的不附链接。"""
+关于引用链接（强制执行）：凡引用带[ref:url]标注的内容，必须在句末附 [[来源]](url)。无[ref:url]标注的[第三方数据]，末尾附"（据公开数据）"。无[ref:url]标注的[联网参考]，末尾附"（据公开信息）"。[用户资料]标注的不附链接。"""
 
 
 _ASSET_ALLOCATION_PROMPT = """当前任务：资产配置（AssetAllocation）
@@ -367,7 +370,7 @@ chat_answer 输出格式：
 
 多轮对话规则：有对话历史时不使用标题结构，直接用对话语气回答追问，不重复上轮已说过的内容。
 
-关于引用链接（强制执行）：凡引用带[ref:url]标注的联网内容，必须在句末附 [[来源]](url)。无[ref:url]标注的联网参考，末尾附"（据公开信息）"。[用户资料]标注的不附链接。"""
+关于引用链接（强制执行）：凡引用带[ref:url]标注的内容，必须在句末附 [[来源]](url)。无[ref:url]标注的[第三方数据]，末尾附"（据公开数据）"。无[ref:url]标注的[联网参考]，末尾附"（据公开信息）"。[用户资料]标注的不附链接。"""
 
 
 _PERFORMANCE_ANALYSIS_PROMPT = """当前任务：收益分析（PerformanceAnalysis）
@@ -644,6 +647,8 @@ def _structured_to_llm_result(structured: dict, raw: str) -> LLMResult:
     old_decision = _NEW_TO_OLD_DECISION.get(decision_type, 'HOLD')
 
     chat_answer = str(structured.get('chat_answer', '') or '')
+    if not chat_answer:
+        print(f"[llm_engine] ⚠️ chat_answer 为空！structured keys={list(structured.keys())}", flush=True)
 
     # 去掉 chat_answer 后的纯结构化数据，供前端卡片化使用
     decision_result_clean = {k: v for k, v in structured.items() if k != 'chat_answer'}
@@ -721,8 +726,8 @@ def reason(
 
         response = client.chat.completions.create(
             model="gpt-4.1",
-            max_tokens=2048,
-            timeout=30,
+            max_tokens=4096,
+            timeout=60,
             messages=messages,
         )
         raw = response.choices[0].message.content.strip()
