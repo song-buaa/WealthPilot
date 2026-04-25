@@ -134,6 +134,120 @@ export const researchApi = {
     }),
 }
 
+// ── Research v2 Types ────────────────────────────────────
+
+export interface SourceRefV2 {
+  ref_type: string
+  ref_value: string
+  title?: string | null
+}
+
+export interface ExtractedKPIV2 {
+  current_price?: number | null
+  target_price?: number | null
+  revenue_yoy?: number | null
+  earnings_yoy?: number | null
+  gross_margin?: number | null
+  net_margin?: number | null
+  eps_surprise_pct?: number | null
+  deliveries_latest?: number | null
+  deliveries_yoy?: number | null
+  analyst_target_upside?: number | null
+  market_cap?: number | null
+  pe_ttm?: number | null
+  forward_pe?: number | null
+  notes?: string | null
+}
+
+export interface FactsLayerV2 {
+  affected_symbols: string[]
+  primary_symbol: string | null
+  primary_entity_id: string | null
+  source_type: string
+  source_refs: SourceRefV2[]
+  as_of: string
+  ingested_at: string
+  raw_facts: Record<string, unknown>
+  sentiment_raw?: Record<string, unknown> | null
+}
+
+export interface NarrativeLayerV2 {
+  thesis: string | null
+  bull_case: string | null
+  bear_case: string | null
+  narrative_summary: string | null
+  event_type: string
+  topics: string[]
+  extracted_kpi: ExtractedKPIV2 | null
+}
+
+export interface DecisionSignalV2 {
+  direction: number
+  strength: number
+  confidence_score: number
+}
+
+export interface JudgmentLayerV2 {
+  is_ai_prefilled: boolean
+  user_endorsement: string
+  stance: string
+  horizon: string
+  confidence: string
+  decision_signal: DecisionSignalV2
+  action_type: string
+  trigger_conditions: string | null
+  invalidation_conditions: string | null
+  key_metrics_to_watch: string[]
+  validity_status: string
+  expires_at: string | null
+}
+
+export interface ViewpointCardV2 {
+  card_id: string
+  facts: FactsLayerV2
+  narrative: NarrativeLayerV2
+  judgment: JudgmentLayerV2
+  relations: unknown[]
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+// ── Research v2 API ──────────────────────────────────────
+
+export const researchV2Api = {
+  ingestUpload: (title: string, content: string, source_url?: string) =>
+    request<{ card_id: string; card: ViewpointCardV2 }>('/research/v2/ingest/upload', {
+      method: 'POST',
+      body: JSON.stringify({ title, content, source_url }),
+    }),
+
+  ingestAlphaVantage: (symbol: string) =>
+    request<{ cards: ViewpointCardV2[]; errors?: unknown[] }>('/research/v2/ingest/alpha_vantage', {
+      method: 'POST',
+      body: JSON.stringify({ symbol }),
+    }),
+
+  updateJudgment: (cardId: string, judgment: Record<string, unknown>, confirm: boolean) =>
+    request<{ card: ViewpointCardV2 }>(`/research/v2/cards/${cardId}/judgment`, {
+      method: 'POST',
+      body: JSON.stringify({ judgment, confirm }),
+    }),
+
+  queryCards: (params?: { symbol?: string; status?: string; event_type?: string; render?: boolean; top_k?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.symbol) qs.set('symbol', params.symbol)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.event_type) qs.set('event_type', params.event_type)
+    if (params?.render) qs.set('render', 'true')
+    if (params?.top_k) qs.set('top_k', String(params.top_k))
+    const q = qs.toString()
+    return request<{ cards?: ViewpointCardV2[]; rendered?: string[]; count: number }>(
+      `/research/v2/cards${q ? `?${q}` : ''}`
+    )
+  },
+}
+
 // ── Decision SSE ─────────────────────────────────────────
 
 /**
