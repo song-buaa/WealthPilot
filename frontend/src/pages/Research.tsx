@@ -327,9 +327,12 @@ export default function Research() {
   // ── v2 状态 ──
   const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
   const [v2Loading,     setV2Loading]     = useState(false)
-  const [v2Symbol,      setV2Symbol]      = useState('LI:US')
+  const [v2Holdings,    setV2Holdings]    = useState<{symbol: string; name: string}[]>([])
+  const [v2Selected,    setV2Selected]    = useState<Set<string>>(new Set())
+  const [v2ManualSym,   setV2ManualSym]   = useState('')
   const [v2Fetching,    setV2Fetching]    = useState(false)
   const [v2FetchMsg,    setV2FetchMsg]    = useState('')
+  const [v2FetchProgress, setV2FetchProgress] = useState('')
   const [v2ReviewCard,  setV2ReviewCard]  = useState<ViewpointCardV2 | null>(null)
   const [v2JudgEdit,    setV2JudgEdit]    = useState<Record<string, string>>({})
   const [v2Confirming,  setV2Confirming]  = useState(false)
@@ -362,7 +365,10 @@ export default function Research() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadAll(); loadV2Cards() }, [])
+  useEffect(() => {
+    loadAll(); loadV2Cards()
+    researchV2Api.getHoldingsUS().then(h => setV2Holdings(h)).catch(() => {})
+  }, [])
 
   // 初始化元数据编辑区
   function initMeta(result: ParseResult) {
@@ -589,19 +595,29 @@ export default function Research() {
 
   // ── v2 handlers ──
   async function handleV2Fetch() {
-    if (!v2Symbol.trim()) return
-    setV2Fetching(true); setV2FetchMsg('')
-    try {
-      const res = await researchV2Api.ingestAlphaVantage(v2Symbol.trim())
-      const n = res.cards?.length ?? 0
-      const e = res.errors?.length ?? 0
-      setV2FetchMsg(`成功生成 ${n} 张待审核卡${e > 0 ? `，${e} 条处理失败` : ''}`)
-      loadV2Cards()
-    } catch (err: unknown) {
-      setV2FetchMsg(err instanceof Error ? err.message : '拉取失败')
-    } finally {
-      setV2Fetching(false)
+    const symbols = [...v2Selected]
+    if (v2ManualSym.trim()) symbols.push(v2ManualSym.trim())
+    if (symbols.length === 0) return
+
+    setV2Fetching(true); setV2FetchMsg(''); setV2FetchProgress('')
+    let totalCards = 0; let totalErrors = 0
+    for (let i = 0; i < symbols.length; i++) {
+      const sym = symbols[i]
+      setV2FetchProgress(`处理中 (${i + 1}/${symbols.length}) — 正在拉取 ${sym}...`)
+      try {
+        const res = await researchV2Api.ingestAlphaVantage(sym)
+        totalCards += res.cards?.length ?? 0
+        totalErrors += res.errors?.length ?? 0
+      } catch (err: unknown) {
+        totalErrors++
+        setV2FetchMsg(prev => prev + `\n${sym}: ${err instanceof Error ? err.message : '失败'}`)
+      }
     }
+    setV2FetchProgress('')
+    setV2FetchMsg(`完成：${symbols.length} 个标的，生成 ${totalCards} 张待审核卡${totalErrors > 0 ? `，${totalErrors} 条处理失败` : ''}`)
+    setV2ManualSym('')
+    loadV2Cards()
+    setV2Fetching(false)
   }
 
   function openV2Review(card: ViewpointCardV2) {
@@ -1076,13 +1092,53 @@ export default function Research() {
             <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Sparkles size={14} style={{ color: '#F59E0B' }} /> 自动拉取资讯 (Alpha Vantage v2)
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <input style={{ ...S.input, maxWidth: 200 }} value={v2Symbol} onChange={e => setV2Symbol(e.target.value)} placeholder="如 LI:US" />
-              <button style={{ ...S.btnPrimary, opacity: v2Fetching ? 0.6 : 1 }} disabled={v2Fetching} onClick={handleV2Fetch}>
-                {v2Fetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 刷新
-              </button>
+
+            {v2Holdings.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <label style={S.label}>选择持仓标的（可多选）</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
+                  {v2Holdings.map(h => (
+                    <label key={h.symbol} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={v2Selected.has(h.symbol)}
+                        onChange={e => {
+                          const next = new Set(v2Selected)
+                          e.target.checked ? next.add(h.symbol) : next.delete(h.symbol)
+                          setV2Selected(next)
+                        }} />
+                      {h.name} <span style={{ color: '#9CA3AF' }}>({h.symbol})</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => setV2Selected(new Set(v2Holdings.map(h => h.symbol)))}>全选</button>
+                  <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => setV2Selected(new Set())}>清空</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={S.label}>或手动输入（用于持仓外探索）</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input style={{ ...S.input, maxWidth: 200 }} value={v2ManualSym} onChange={e => setV2ManualSym(e.target.value)} placeholder="如 META:US" />
+              </div>
             </div>
-            {v2FetchMsg && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>{v2FetchMsg}</div>}
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button style={{ ...S.btnPrimary, opacity: v2Fetching || (v2Selected.size === 0 && !v2ManualSym.trim()) ? 0.6 : 1 }}
+                disabled={v2Fetching || (v2Selected.size === 0 && !v2ManualSym.trim())} onClick={handleV2Fetch}>
+                {v2Fetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 刷新已选
+              </button>
+              {(v2Selected.size > 0 || v2ManualSym.trim()) && !v2Fetching && (
+                <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+                  {v2Selected.size + (v2ManualSym.trim() ? 1 : 0)} 个标的，约需 {(v2Selected.size + (v2ManualSym.trim() ? 1 : 0)) * 40} 秒
+                </span>
+              )}
+            </div>
+
+            {v2FetchProgress && <div style={{ fontSize: 12, color: '#3B82F6', marginTop: 6 }}>{v2FetchProgress}</div>}
+            {v2FetchMsg && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4, whiteSpace: 'pre-line' }}>{v2FetchMsg}</div>}
           </div>
 
           {/* ══════════ v2: 待审核卡列表 ══════════ */}
