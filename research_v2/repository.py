@@ -138,6 +138,7 @@ def _find_duplicate(session: Session, card: "ViewpointCard") -> Optional[Viewpoi
 
     refs = card.facts.source_refs
     if refs and refs[0].ref_type == "url":
+        # URL 类：精确到分钟桶 + URL 比对
         target_url = _normalize_url(refs[0].ref_value)
         candidates = query.all()
         for cand in candidates:
@@ -149,7 +150,19 @@ def _find_duplicate(session: Session, card: "ViewpointCard") -> Optional[Viewpoi
                     return cand
         return None
     else:
-        return query.first()
+        # api_call_id 类（fundamental/earnings）：放宽到日级别去重
+        # 因为 fundamental 的 as_of 是拉取时间（每次不同），分钟桶太严
+        day_start = as_of_bucket.replace(hour=0, minute=0)
+        day_end = day_start + timedelta(days=1)
+        day_query = (
+            session.query(ViewpointCardV2)
+            .filter(ViewpointCardV2.source_type == source_type)
+            .filter(ViewpointCardV2.primary_symbol == primary_symbol)
+            .filter(ViewpointCardV2.as_of >= day_start)
+            .filter(ViewpointCardV2.as_of < day_end)
+            .filter(ViewpointCardV2.validity_status != "invalidated")
+        )
+        return day_query.first()
 
 
 # ── CRUD ─────────────────────────────────────────────────────────
