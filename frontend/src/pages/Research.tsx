@@ -680,8 +680,8 @@ export default function Research() {
     }
   }
 
-  const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled)
-  const v2Confirmed = v2Cards.filter(c => !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree')
+  const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled && c.judgment.validity_status !== 'invalidated')
+  const v2Confirmed = v2Cards.filter(c => !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree' && c.judgment.validity_status !== 'invalidated')
 
   // 待审核（不含刚解析的那张）
   const pendingCards = cards.filter(c => !c.is_approved && c.id !== parseResult?.card.id)
