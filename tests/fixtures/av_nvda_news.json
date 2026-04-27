@@ -1,0 +1,69 @@
+{
+    "items": "3",
+    "sentiment_score_definition": "x <= -0.35: Bearish; -0.35 < x <= -0.15: Somewhat-Bearish; -0.15 < x < 0.15: Neutral; 0.15 <= x < 0.35: Somewhat_Bullish; x >= 0.35: Bullish",
+    "relevance_score_definition": "0 < x <= 1, with a higher score indicating higher relevance.",
+    "feed": [
+        {
+            "title": "Hedge funds exit US tech stocks, raising questions on Nvidia's market cap lead",
+            "url": "https://cryptobriefing.com/hedge-funds-exit-us-tech-stocks-raising-questions-on-nvidias-market-cap-lead/",
+            "time_published": "20260426T213016",
+            "authors": ["Estefano Gomez"],
+            "summary": "Hedge funds have significantly reduced their exposure to U.S. tech stocks, marking their largest exit in nearly a year. This move sparks questions about Nvidia's continued dominance in market capitalization, especially with geopolitical tensions rising. While the short-term outlook for Nvidia remains strong according to Polymarket contracts, confidence wanes slightly over a longer horizon.",
+            "banner_image": "https://static.cryptobriefing.com/wp-content/uploads/2026/04/26172720/largest-company-eoy-KS99l6lbxfCc-84-457x457.jpg",
+            "source": "Crypto Briefing",
+            "category_within_source": "General",
+            "source_domain": "Crypto Briefing",
+            "topics": [
+                {"topic": "financial_markets", "relevance_score": "0.910631"},
+                {"topic": "technology", "relevance_score": "0.815950"},
+                {"topic": "earnings", "relevance_score": "0.628112"}
+            ],
+            "overall_sentiment_score": -0.238505,
+            "overall_sentiment_label": "Somewhat-Bearish",
+            "ticker_sentiment": [
+                {"ticker": "NVDA", "relevance_score": "1.000000", "ticker_sentiment_score": "-0.214122", "ticker_sentiment_label": "Somewhat-Bearish"}
+            ]
+        },
+        {
+            "title": "Pony AI announces compute platform built on Nvidia Drive Hyperion",
+            "url": "https://www.tipranks.com/news/the-fly/pony-ai-announces-compute-platform-built-on-nvidia-drive-hyperion-thefly-news",
+            "time_published": "20260426T174002",
+            "authors": [],
+            "summary": "Pony AI has announced a new generation autonomous driving domain controller, which is a compute system designed for its L4 autonomous driving platform and various customer applications. Developed in collaboration with Nvidia, the controller is built on the Nvidia Drive Hyperion platform and powered by Nvidia Drive AGX Thor with Nvidia NVLink.",
+            "banner_image": null,
+            "source": "TipRanks",
+            "category_within_source": "General",
+            "source_domain": "TipRanks",
+            "topics": [
+                {"topic": "technology", "relevance_score": "0.849449"}
+            ],
+            "overall_sentiment_score": 0.287353,
+            "overall_sentiment_label": "Somewhat-Bullish",
+            "ticker_sentiment": [
+                {"ticker": "PONY", "relevance_score": "1.000000", "ticker_sentiment_score": "0.537300", "ticker_sentiment_label": "Bullish"},
+                {"ticker": "NVDA", "relevance_score": "0.811310", "ticker_sentiment_score": "0.491826", "ticker_sentiment_label": "Bullish"}
+            ]
+        },
+        {
+            "title": "Lumentum Stock Faces a Crucial AI Test After BlackRock Filing and 4% Friday Gain",
+            "url": "https://ts2.tech/en/lumentum-stock-faces-a-crucial-ai-test-after-blackrock-filing-and-4-friday-gain/",
+            "time_published": "20260426T173947",
+            "authors": ["Khadija Saeed"],
+            "summary": "Lumentum Holdings Inc. is heading into a crucial earnings week following a 4.1% stock gain and a BlackRock filing showing increased ownership. The company, a key player in AI infrastructure through its optical and photonic parts for data centers, will report fiscal Q3 results on May 5. Investors are focusing on Lumentum's ability to convert strong AI demand into shipped products, especially after a significant partnership with Nvidia.",
+            "banner_image": null,
+            "source": "TechStock",
+            "category_within_source": "General",
+            "source_domain": "TechStock",
+            "topics": [
+                {"topic": "earnings", "relevance_score": "0.919476"},
+                {"topic": "financial_markets", "relevance_score": "0.822153"},
+                {"topic": "technology", "relevance_score": "0.735402"}
+            ],
+            "overall_sentiment_score": 0.123104,
+            "overall_sentiment_label": "Neutral",
+            "ticker_sentiment": [
+                {"ticker": "NVDA", "relevance_score": "0.812831", "ticker_sentiment_score": "0.336199", "ticker_sentiment_label": "Somewhat-Bullish"}
+            ]
+        }
+    ]
+}
