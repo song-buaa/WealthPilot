@@ -1727,14 +1727,7 @@ export default function Research() {
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>解析结果</div>
                 {relCard ? (
-                  <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {relCard.thesis && <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', lineHeight: 1.5 }}>{relCard.thesis}</div>}
-                    {relCard.summary && <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>{relCard.summary}</div>}
-                    {relCard.bull_case && <div style={{ fontSize: 12, color: '#059669', borderLeft: '3px solid #059669', paddingLeft: 10, lineHeight: 1.5 }}>{relCard.bull_case}</div>}
-                    {relCard.bear_case && <div style={{ fontSize: 12, color: '#DC2626', borderLeft: '3px solid #DC2626', paddingLeft: 10, lineHeight: 1.5 }}>{relCard.bear_case}</div>}
-                    {relCard.action_suggestion && <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>操作建议：{relCard.action_suggestion}</div>}
-                    {relCard.invalidation_conditions && <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>失效条件：{relCard.invalidation_conditions}</div>}
-                  </div>
+                  <ParseCardPreview card={relCard} />
                 ) : (
                   <div style={{ color: '#9CA3AF', fontSize: 12, padding: '12px 0' }}>暂无解析结果</div>
                 )}
