@@ -347,6 +347,10 @@ export default function Research() {
   const [v2JudgEdit,    setV2JudgEdit]    = useState<Record<string, string>>({})
   const [v2Confirming,  setV2Confirming]  = useState(false)
   const [v2DiscardedId, setV2DiscardedId] = useState<string | null>(null)
+  // 批量操作
+  const [v2SelectedIds, setV2SelectedIds] = useState<Set<string>>(new Set())
+  const [v2BatchBusy,   setV2BatchBusy]   = useState(false)
+  const [v2BatchMsg,    setV2BatchMsg]    = useState('')
   // v2 Tab 3
   const [v2SearchSymbol, setV2SearchSymbol] = useState('')
   const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
@@ -688,6 +692,35 @@ export default function Research() {
     } finally {
       setV2Searching(false)
     }
+  }
+
+  async function handleV2BatchAction(action: 'confirm' | 'discard') {
+    const ids = [...v2SelectedIds]
+    if (ids.length === 0) return
+    setV2BatchBusy(true); setV2BatchMsg('')
+    let ok = 0; let fail = 0
+    for (let i = 0; i < ids.length; i++) {
+      setV2BatchMsg(`正在处理 ${i + 1}/${ids.length}...`)
+      try {
+        await researchV2Api.updateJudgment(ids[i], {}, action === 'confirm', action)
+        ok++
+      } catch {
+        fail++
+      }
+    }
+    setV2BatchMsg(`已处理 ${ok} 张${fail > 0 ? `，${fail} 张失败` : ''}`)
+    setV2SelectedIds(new Set())
+    loadV2Cards()
+    setV2BatchBusy(false)
+    setTimeout(() => setV2BatchMsg(''), 4000)
+  }
+
+  function toggleV2Select(cardId: string) {
+    setV2SelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(cardId) ? next.delete(cardId) : next.add(cardId)
+      return next
+    })
   }
 
   const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled && c.judgment.validity_status !== 'invalidated')
@@ -1154,23 +1187,56 @@ export default function Research() {
           {/* ══════════ v2: 待审核卡列表 ══════════ */}
           {v2Pending.length > 0 && (
             <div style={{ ...S.card, padding: '16px 20px' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
-                v2 待审核观点卡 ({v2Pending.length})
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                  v2 待审��观点卡 ({v2Pending.length})
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
+                    onClick={() => setV2SelectedIds(new Set(v2Pending.map(c => c.card_id)))}>全选</button>
+                  <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
+                    onClick={() => setV2SelectedIds(new Set())}>清空</button>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {v2Pending.map(card => (
-                  <div key={card.card_id} onClick={() => openV2Review(card)}
-                    style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4 }}>待确认</span>
-                      <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{SOURCE_TYPE_LABEL[card.facts.source_type] ?? card.facts.source_type}</span>
-                      <span style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{card.narrative.event_type}</span>
-                      {card.facts.primary_symbol && <span style={{ fontSize: 10, color: '#6B7280' }}>{card.facts.primary_symbol}</span>}
+                  <div key={card.card_id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#FFF7ED', border: v2SelectedIds.has(card.card_id) ? '2px solid #3B82F6' : '1px solid #FED7AA', borderRadius: 8, padding: '10px 14px' }}>
+                    <input type="checkbox" checked={v2SelectedIds.has(card.card_id)}
+                      onChange={() => toggleV2Select(card.card_id)}
+                      style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }} />
+                    <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => openV2Review(card)}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4 }}>待确认</span>
+                        <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{SOURCE_TYPE_LABEL[card.facts.source_type] ?? card.facts.source_type}</span>
+                        <span style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{card.narrative.event_type}</span>
+                        {card.facts.primary_symbol && <span style={{ fontSize: 10, color: '#6B7280' }}>{card.facts.primary_symbol}</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{card.narrative.thesis ?? '(无论点)'}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{card.narrative.thesis ?? '(无论点)'}</div>
                   </div>
                 ))}
               </div>
+
+              {/* 批量操作栏（sticky bottom） */}
+              {v2SelectedIds.size > 0 && (
+                <div style={{ position: 'sticky', bottom: 0, marginTop: 12, background: '#1F2937', borderRadius: 10, padding: '10px 16px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 -2px 10px rgba(0,0,0,0.15)' }}>
+                  <span style={{ fontSize: 13, color: '#fff', fontWeight: 500 }}>已选 {v2SelectedIds.size} 张</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button disabled={v2BatchBusy} onClick={() => handleV2BatchAction('discard')}
+                      style={{ background: '#FEE2E2', color: '#DC2626', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2BatchBusy ? 0.6 : 1 }}>
+                      <Trash2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量丢弃
+                    </button>
+                    <button disabled={v2BatchBusy} onClick={() => handleV2BatchAction('confirm')}
+                      style={{ background: '#3B82F6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2BatchBusy ? 0.6 : 1 }}>
+                      <Check size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量确认并入库
+                    </button>
+                  </div>
+                </div>
+              )}
+              {v2BatchMsg && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#3B82F6', textAlign: 'center' }}>{v2BatchMsg}</div>
+              )}
             </div>
           )}
 
