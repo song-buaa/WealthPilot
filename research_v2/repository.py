@@ -342,6 +342,51 @@ def query_for_decision(
     return render_cards(cards)
 
 
+def query_recent_av(
+    session: Session,
+    symbol: str,
+    days: int = 3,
+    top_k: int = 10,
+) -> list[str]:
+    """查最近 N 天内生成的 AV 卡（不管是否 confirmed），用于补充实时数据。
+
+    返回 Renderer 输出的 list[str]，pending 卡带"(AI 自动生成，未经人工审核)"标注。
+    """
+    sym = Symbol.parse(symbol) if isinstance(symbol, str) else symbol
+    registry = get_registry()
+    expanded = registry.expand_symbols(sym)
+    expanded_strs = [str(s) for s in expanded]
+
+    cutoff = datetime.now() - timedelta(days=days)
+
+    q = session.query(ViewpointCardV2)
+
+    sym_conditions = []
+    for s in expanded_strs:
+        sym_conditions.append(ViewpointCardV2.primary_symbol == s)
+    q = q.filter(or_(*sym_conditions))
+
+    q = q.filter(ViewpointCardV2.source_type.in_([
+        "alpha_vantage_news", "alpha_vantage_fundamental", "alpha_vantage_earnings",
+    ]))
+    q = q.filter(ViewpointCardV2.ingested_at >= cutoff)
+    q = q.filter(ViewpointCardV2.validity_status == "active")
+
+    q = q.order_by(ViewpointCardV2.as_of.desc()).limit(top_k)
+
+    cards = [_orm_to_card(row) for row in q.all()]
+
+    result = []
+    for card in cards:
+        card_lines = render_cards([card])
+        for cl in card_lines:
+            if card.judgment.is_ai_prefilled:
+                result.append(f"{cl} (AI 自动生成，未经人工审核)")
+            else:
+                result.append(cl)
+    return result
+
+
 def query_for_decision_relaxed(
     session: Session,
     symbol: str,

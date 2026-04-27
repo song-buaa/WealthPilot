@@ -832,13 +832,13 @@ def _trigger_bg_ingest(symbol_str: str) -> None:
 
 def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     """
-    加载投研观点（v2 改造，异步拉取）。
+    加载投研观点（v2：confirmed 卡 + AV 实时数据互补）。
 
     流程:
-      1. 查 v2 confirmed 卡 → 有则直接返回
-      2. 查 v2 pending 卡（宽松版）→ 有则返回 + 后台异步刷新
-      3. v2 完全没数据 + :US → 触发后台异步拉取，本次 fallback 联网
-      4. 联网也空 → mock
+      1. confirmed 卡（用户判断，长期有效）
+      2. AV 近期数据（客观事实，3 天内）— 有则补充，无则后台异步拉取
+      3. 去重合并
+      4. 完全无数据时 fallback 联网
     """
     import logging
     _lr_logger = logging.getLogger(__name__ + "._load_research")
@@ -846,42 +846,52 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     if not asset_name:
         return _DEFAULT_MOCK_RESEARCH
 
-    # ── 1. 解析 Symbol ────────────────────────────────────────────────────
     symbol_str = _resolve_symbol(asset_name, session)
+    results: list[str] = []
 
     if symbol_str:
-        # ── 2. 查 v2 confirmed 卡（严格版）──────────────────────────────
+        from research_v2 import repository
+
+        # ── 第一层：confirmed 卡（用户的主观判断）──────────────────────
         try:
-            from research_v2 import repository
-            v2_results = repository.query_for_decision(session, symbol_str)
-            if v2_results:
-                _lr_logger.info("v2 命中，返回 %d 条", len(v2_results))
-                return v2_results
+            confirmed = repository.query_for_decision(session, symbol_str)
+            if confirmed:
+                results.extend(confirmed)
+                _lr_logger.info("v2 confirmed 卡: %d 条", len(confirmed))
         except Exception:
-            _lr_logger.exception("v2 路径异常，降级")
+            _lr_logger.exception("v2 confirmed 查询异常")
 
-        # ── 3. 查 v2 pending 卡（宽松版）──────────────────────────────────
+        # ── 第二层：AV 实时数据（客观事实，不管有没有 confirmed 卡都补充）──
         try:
-            from research_v2 import repository
-            relaxed = repository.query_for_decision_relaxed(session, symbol_str)
-            if relaxed:
-                _lr_logger.info("v2 宽松命中（含 pending），返回 %d 条", len(relaxed))
-                if symbol_str.endswith(":US"):
-                    _trigger_bg_ingest(symbol_str)
-                return relaxed
+            recent_av = repository.query_recent_av(session, symbol_str, days=3)
+            if recent_av:
+                results.extend(recent_av)
+                _lr_logger.info("AV 近期数据: %d 条", len(recent_av))
+            elif symbol_str.endswith(":US"):
+                _trigger_bg_ingest(symbol_str)
+                _lr_logger.info("AV 数据过期，后台拉取已触发: %s", symbol_str)
+                # 用现有 pending 卡兜底
+                relaxed = repository.query_for_decision_relaxed(session, symbol_str)
+                if relaxed:
+                    results.extend(relaxed)
         except Exception:
-            _lr_logger.exception("v2 宽松查询异常，降级")
+            _lr_logger.exception("AV 近期数据查询异常")
 
-        # ── 4. v2 完全没数据：触发后台异步拉取，本次 fallback 联网 ────────
-        if symbol_str.endswith(":US"):
-            _trigger_bg_ingest(symbol_str)
-            _lr_logger.info("v2 空，后台拉取已触发，本次 fallback 联网: %s", symbol_str)
+        # ── 去重（confirmed 卡和 AV 卡可能有重叠）──────────────────────
+        if results:
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for line in results:
+                if line not in seen:
+                    seen.add(line)
+                    deduped.append(line)
+            return deduped
 
-    # ── 5. 联网 fallback ──────────────────────────────────────────────────
-    online_results = _search_research_online(asset_name)
-    if online_results:
-        _lr_logger.info("fallback 联网，返回 %d 条", len(online_results))
-        return online_results
+    # ── 第三层：联网兜底（v2 完全无数据时）──────────────────────────────
+    online = _search_research_online(asset_name)
+    if online:
+        _lr_logger.info("fallback 联网，返回 %d 条", len(online))
+        return online
 
     _lr_logger.info("全部路径空，返回 mock")
     return _DEFAULT_MOCK_RESEARCH
