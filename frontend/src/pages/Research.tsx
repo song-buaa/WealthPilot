@@ -351,6 +351,10 @@ export default function Research() {
   const [v2SelectedIds, setV2SelectedIds] = useState<Set<string>>(new Set())
   const [v2BatchBusy,   setV2BatchBusy]   = useState(false)
   const [v2BatchMsg,    setV2BatchMsg]    = useState('')
+  // 观点库批量
+  const [v2LibSelectedIds, setV2LibSelectedIds] = useState<Set<string>>(new Set())
+  const [v2LibBatchBusy,   setV2LibBatchBusy]   = useState(false)
+  const [v2LibBatchMsg,    setV2LibBatchMsg]    = useState('')
   // v2 Tab 3
   const [v2SearchSymbol, setV2SearchSymbol] = useState('')
   const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
@@ -713,6 +717,41 @@ export default function Research() {
     loadV2Cards()
     setV2BatchBusy(false)
     setTimeout(() => setV2BatchMsg(''), 4000)
+  }
+
+  async function handleV2LibBatchAction(action: 'confirm' | 'discard') {
+    const ids = [...v2LibSelectedIds]
+    if (ids.length === 0) return
+    setV2LibBatchBusy(true); setV2LibBatchMsg('')
+    let ok = 0; let skip = 0; let fail = 0
+    for (let i = 0; i < ids.length; i++) {
+      setV2LibBatchMsg(`正在处理 ${i + 1}/${ids.length}...`)
+      const card = v2Cards.find(c => c.card_id === ids[i])
+      // 批量 confirm 时，已 confirmed 的卡跳过
+      if (action === 'confirm' && card && !card.judgment.is_ai_prefilled) {
+        skip++; continue
+      }
+      try {
+        await researchV2Api.updateJudgment(ids[i], {}, action === 'confirm', action)
+        ok++
+      } catch { fail++ }
+    }
+    const parts = [`已处理 ${ok} 张`]
+    if (skip > 0) parts.push(`${skip} 张已确认跳过`)
+    if (fail > 0) parts.push(`${fail} 张失败`)
+    setV2LibBatchMsg(parts.join('，'))
+    setV2LibSelectedIds(new Set())
+    loadV2Cards()
+    setV2LibBatchBusy(false)
+    setTimeout(() => setV2LibBatchMsg(''), 4000)
+  }
+
+  function toggleV2LibSelect(cardId: string) {
+    setV2LibSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(cardId) ? next.delete(cardId) : next.add(cardId)
+      return next
+    })
   }
 
   function toggleV2Select(cardId: string) {
@@ -1305,6 +1344,10 @@ export default function Research() {
               <option value="bullish">做多</option><option value="bearish">做空</option><option value="neutral">中性</option><option value="watch">观察</option>
             </select>
             <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filteredV2.length} 条</span>
+            <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
+              onClick={() => setV2LibSelectedIds(new Set(filteredV2.map(c => c.card_id)))}>全选</button>
+            <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
+              onClick={() => setV2LibSelectedIds(new Set())}>清空</button>
           </div>
 
           {filteredV2.length === 0 ? (
@@ -1314,12 +1357,12 @@ export default function Research() {
           ) : (
             <div>
               <div style={{
-                display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 80px 90px',
+                display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 70px 80px 80px 90px',
                 gap: 8, padding: '6px 10px',
                 fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase',
                 borderBottom: '1px solid #F3F4F6',
               }}>
-                <span>论点 / 标的</span><span>立场</span><span>维度</span><span>认同</span><span>状态</span><span>来源</span><span>时间</span>
+                <span></span><span>论点 / 标的</span><span>立场</span><span>维度</span><span>认同</span><span>状态</span><span>来源</span><span>时间</span>
               </div>
               {filteredV2.map(card => {
                 const j = card.judgment
@@ -1338,14 +1381,19 @@ export default function Research() {
                 }
                 const vBadge = VALIDITY_CN[j.validity_status] ?? VALIDITY_CN.active
                 return (
-                  <div key={card.card_id} onClick={() => openV2Review(card)}
+                  <div key={card.card_id}
                     style={{
-                      display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 80px 90px',
+                      display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 70px 80px 80px 90px',
                       gap: 8, padding: '8px 10px', alignItems: 'center',
-                      borderBottom: '1px solid #F9FAFB', cursor: 'pointer',
+                      borderBottom: '1px solid #F9FAFB',
+                      border: v2LibSelectedIds.has(card.card_id) ? '2px solid #3B82F6' : undefined,
+                      borderRadius: v2LibSelectedIds.has(card.card_id) ? 6 : 0,
                       background: isPending ? '#FFFBEB' : 'transparent',
                     }}>
-                    <div style={{ minWidth: 0 }}>
+                    <input type="checkbox" checked={v2LibSelectedIds.has(card.card_id)}
+                      onChange={() => toggleV2LibSelect(card.card_id)}
+                      style={{ cursor: 'pointer' }} />
+                    <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => openV2Review(card)}>
                       <div style={{ fontSize: 12, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {card.narrative.thesis?.slice(0, 40) ?? '(无论点)'}
                       </div>
@@ -1365,10 +1413,31 @@ export default function Research() {
               })}
             </div>
           )}
+
+          {/* 观点库批量操作�� */}
+          {v2LibSelectedIds.size > 0 && (
+            <div style={{ position: 'sticky', bottom: 0, marginTop: 12, background: '#fff', borderRadius: 10, padding: '10px 16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 12px rgba(0,0,0,0.08)' }}>
+              <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>已选 {v2LibSelectedIds.size} 张</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button disabled={v2LibBatchBusy} onClick={() => handleV2LibBatchAction('discard')}
+                  style={{ background: '#FEE2E2', color: '#DC2626', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2LibBatchBusy ? 0.6 : 1 }}>
+                  <Trash2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量��弃
+                </button>
+                <button disabled={v2LibBatchBusy} onClick={() => handleV2LibBatchAction('confirm')}
+                  style={{ background: '#3B82F6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2LibBatchBusy ? 0.6 : 1 }}>
+                  <Check size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量确认并入库
+                </button>
+              </div>
+            </div>
+          )}
+          {v2LibBatchMsg && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#3B82F6', textAlign: 'center' }}>{v2LibBatchMsg}</div>
+          )}
         </div>
       )}
 
-      {/* ══════════ Tab 3：决策检索 (v2) ══════════ */}
+      {/* ══════════ Tab 3：决策检索 (v2) ══════��═══ */}
       {activeTab === 'search' && (
         <div style={{ ...S.card, padding: '20px 24px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
