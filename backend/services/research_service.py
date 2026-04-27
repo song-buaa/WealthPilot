@@ -163,6 +163,12 @@ def list_documents() -> dict:
 
 def delete_document(document_id: int) -> None:
     """删除文档及其关联的候选卡（级联）"""
+    # v2 副作用：先 invalidate 对应的 v2 卡（在删除 document 之前，因为需要读 doc.uploaded_at）
+    try:
+        _v2_invalidate_by_document(document_id)
+    except Exception:
+        pass
+
     session = get_session()
     try:
         d = session.query(ResearchDocument).get(document_id)
@@ -310,6 +316,98 @@ def parse_pdf(file_bytes: bytes, filename: str) -> dict:
 
 # ── 审核：候选卡 → 正式观点 ──────────────────────────────────────────────────
 
+def _v2_confirm_by_document(document_id: int) -> int:
+    """找到和 v1 document 对应的 v2 pending 卡，批量 confirm。返回 confirmed 数。"""
+    import json as _json
+    from datetime import timedelta as _td
+
+    try:
+        session = get_session()
+        try:
+            doc = session.query(ResearchDocument).filter_by(id=document_id).first()
+            if not doc or not doc.uploaded_at:
+                return 0
+
+            from app.models import ViewpointCardV2
+            cutoff_start = doc.uploaded_at - _td(seconds=120)
+            cutoff_end = doc.uploaded_at + _td(seconds=120)
+
+            q = session.query(ViewpointCardV2).filter(
+                ViewpointCardV2.source_type == "user_upload",
+                ViewpointCardV2.validity_status == "active",
+                ViewpointCardV2.ingested_at >= cutoff_start,
+                ViewpointCardV2.ingested_at <= cutoff_end,
+                ViewpointCardV2.judgment_json.like('%"is_ai_prefilled": true%'),
+            )
+
+            if doc.object_name:
+                from decision_engine.data_loader import _resolve_symbol
+                sym = _resolve_symbol(doc.object_name, session)
+                if sym:
+                    q = q.filter(ViewpointCardV2.primary_symbol == sym)
+
+            count = 0
+            for card_orm in q.all():
+                j = _json.loads(card_orm.judgment_json)
+                j["is_ai_prefilled"] = False
+                j["confidence"] = "medium"
+                j.setdefault("decision_signal", {})["confidence_score"] = 0.6
+                card_orm.judgment_json = _json.dumps(j, ensure_ascii=False)
+                card_orm.confidence_score = 0.6
+                count += 1
+
+            if count:
+                session.commit()
+            return count
+        finally:
+            session.close()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__ + ".v2").warning("v2 confirm by doc 失败: %s", e)
+        return 0
+
+
+def _v2_invalidate_by_document(document_id: int) -> int:
+    """找到和 v1 document 对应的 v2 卡，标记 invalidated。"""
+    import json as _json
+    from datetime import timedelta as _td
+
+    try:
+        session = get_session()
+        try:
+            doc = session.query(ResearchDocument).filter_by(id=document_id).first()
+            if not doc or not doc.uploaded_at:
+                return 0
+
+            from app.models import ViewpointCardV2
+            cutoff_start = doc.uploaded_at - _td(seconds=120)
+            cutoff_end = doc.uploaded_at + _td(seconds=120)
+
+            q = session.query(ViewpointCardV2).filter(
+                ViewpointCardV2.source_type == "user_upload",
+                ViewpointCardV2.ingested_at >= cutoff_start,
+                ViewpointCardV2.ingested_at <= cutoff_end,
+            )
+
+            count = 0
+            for card_orm in q.all():
+                card_orm.validity_status = "invalidated"
+                j = _json.loads(card_orm.judgment_json)
+                j["validity_status"] = "invalidated"
+                card_orm.judgment_json = _json.dumps(j, ensure_ascii=False)
+                count += 1
+
+            if count:
+                session.commit()
+            return count
+        finally:
+            session.close()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__ + ".v2").warning("v2 invalidate by doc 失败: %s", e)
+        return 0
+
+
 def approve_card(card_id: int, overrides: Optional[dict] = None) -> dict:
     """
     将候选卡升级为正式观点。
@@ -353,6 +451,16 @@ def approve_card(card_id: int, overrides: Optional[dict] = None) -> dict:
         session.add(v)
         session.commit()
         session.refresh(v)
+
+        # v2 副作用：confirm 对应的 v2 pending 卡
+        try:
+            n = _v2_confirm_by_document(card.document_id)
+            if n > 0:
+                import logging
+                logging.getLogger(__name__ + ".v2").info("approve_card 同步 confirm %d 张 v2 卡", n)
+        except Exception:
+            pass
+
         return _viewpoint_to_dict(v)
     except Exception:
         session.rollback()
