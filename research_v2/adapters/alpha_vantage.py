@@ -26,6 +26,42 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _FIXTURES_DIR = os.path.join(_PROJECT_ROOT, "tests", "fixtures")
 
+RELEVANCE_THRESHOLD = 0.6
+
+
+def _get_ticker_relevance(news_item: dict, target_ticker: str) -> float:
+    """获取新闻对目标 ticker 的 relevance_score。"""
+    for ts in news_item.get("ticker_sentiment", []):
+        if ts.get("ticker") == target_ticker:
+            try:
+                return float(ts.get("relevance_score", "0"))
+            except (ValueError, TypeError):
+                return 0.0
+    return 0.0
+
+
+def _is_news_relevant(news_item: dict, target_ticker: str) -> bool:
+    """判断新闻是否真的与目标 ticker 强相关。
+
+    双重条件：
+    1. relevance_score >= 阈值
+    2. target ticker 是该新闻中 relevance 最高的 ticker（即新闻主角）
+    """
+    target_rel = _get_ticker_relevance(news_item, target_ticker)
+    if target_rel < RELEVANCE_THRESHOLD:
+        return False
+
+    # 检查 target 是否是 primary ticker（relevance 最高）
+    max_rel = 0.0
+    for ts in news_item.get("ticker_sentiment", []):
+        try:
+            rel = float(ts.get("relevance_score", "0"))
+        except (ValueError, TypeError):
+            continue
+        if rel > max_rel:
+            max_rel = rel
+    return target_rel >= max_rel
+
 
 def _is_mock_mode() -> bool:
     return os.environ.get("AV_DEV_MOCK", "0") == "1"
@@ -139,8 +175,31 @@ class AlphaVantageAdapter(InfoAdapter):
             logger.info("AlphaVantage NEWS 返回 0 条: %s", symbol)
             return []
 
+        # 相关性过滤：只保留 relevance_score >= 阈值的新闻
+        filtered = []
+        dropped = []
+        for article in feed:
+            if _is_news_relevant(article, ticker):
+                filtered.append(article)
+            else:
+                dropped.append({
+                    "title": article.get("title", "")[:80],
+                    "relevance": _get_ticker_relevance(article, ticker),
+                })
+
+        if dropped:
+            logger.info(
+                "AlphaVantage news 相关性过滤: 保留 %d 条, drop %d 条 (relevance<%.2f). 被过滤示例: %s",
+                len(filtered), len(dropped), RELEVANCE_THRESHOLD,
+                dropped[0] if dropped else None,
+            )
+
+        if not filtered:
+            logger.info("AlphaVantage NEWS 过滤后 0 条: %s", symbol)
+            return []
+
         results: list[RawFact] = []
-        for article in feed[:5]:
+        for article in filtered[:5]:
             as_of = _parse_av_time(article.get("time_published", ""))
             source_url = article.get("url", "")
 
