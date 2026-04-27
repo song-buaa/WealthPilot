@@ -171,17 +171,27 @@ def _get_cached_research(asset_name: str) -> Optional[list[str]]:
 
 
 def _search_research_online(asset_name: str) -> list[str]:
-    # v2.0: 暂保留作为 ViewpointRepository 空结果时的 fallback
-    # v2.1: 将迁移到 PerplexityAdapter 并删除本函数（参考工程 PRD §6.3）
     """
-    多维度并行联网搜索指定标的的最新投研观点。
+    联网搜索投研观点（gpt-4o-search-preview）。
 
-    4 个 query 分别聚焦：财报业绩、交付/销量、分析师评级、动态/风险，
-    通过线程池并行执行后合并去重，上限 8 条。
+    v2.1 决策：本函数永久保留作为 _load_research 的兜底 fallback。
 
-    优先使用 PERPLEXITY_API_KEY；未配置时降级到 OPENAI_API_KEY + gpt-4o-search-preview。
-    返回带 [联网参考] 前缀的字符串列表，供 LLM 与用户录入内容区分优先级。
-    任何异常均静默处理，返回空列表，不影响主流程。
+    职责边界：
+    - v2 数据库（ViewpointRepository）有数据时，本函数不被调用（_load_research 严格 fallback）
+    - v2 空时，本函数提供联网搜索结果，直接进决策 prompt（不入库）
+    - 联网搜索结果属于即时参考，不持久化为 ViewpointCard
+
+    架构原因（为什么不入库）：
+    - 联网搜索是临时性、当下场景化的内容，不是用户"愿意签字"的观点
+    - 入库会污染"v2 库 = 用户认可观点"的清洁定义
+    - 如未来需要"联网搜索成果资产化"，参考 v2 业务 PRD §5 流程 A，引导用户主动上传
+
+    技术细节：
+    - 4 个 query 分别聚焦：财报业绩、交付/销量、分析师评级、动态/风险
+    - 通过线程池并行执行后合并去重，上限 8 条
+    - 优先使用 PERPLEXITY_API_KEY；未配置时降级到 OPENAI_API_KEY + gpt-4o-search-preview
+    - 返回带 [联网参考] 前缀的字符串列表
+    - 任何异常均静默处理，返回空列表，不影响主流程
     """
     # 优先走缓存
     cached = _get_cached_research(asset_name)
