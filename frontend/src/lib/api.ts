@@ -243,7 +243,7 @@ export const researchV2Api = {
     }),
 
   getHoldingsUS: () =>
-    request<{ symbol: string; name: string; asset_name: string }[]>('/research/v2/holdings_us'),
+    request<{ symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number }[]>('/research/v2/holdings_us'),
 
   updateJudgment: (cardId: string, judgment: Record<string, unknown>, confirm: boolean, action?: string) =>
     request<{ card: ViewpointCardV2 }>(`/research/v2/cards/${cardId}/judgment`, {

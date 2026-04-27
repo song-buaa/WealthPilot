@@ -264,21 +264,63 @@ def v2_list_cards(
 
 @router.get("/v2/holdings_us")
 def v2_holdings_us():
-    """返回当前持仓中 :US 市场的标的列表（从 entity_registry 匹配）。"""
+    """返回当前持仓列表，按市值占比排序，标注是否支持自动拉取。"""
+    from app.database import get_session
+    from app.models import Position
     from research_v2.symbol import get_registry
+    from app.state import portfolio_id as default_pid
 
-    # 从 EntityRegistry 获取所有 US symbols（positions.symbol_v2 暂未填充）
-    registry = get_registry()
-    seen = set()
-    result = []
-    for entity in registry.all_entities():
-        for s in entity.symbols:
-            if s.market == "US" and str(s) not in seen:
-                seen.add(str(s))
-                result.append({
-                    "symbol": str(s),
-                    "name": entity.display_name_cn,
-                    "asset_name": entity.display_name_cn,
-                })
+    session = get_session()
+    try:
+        positions = (
+            session.query(Position)
+            .filter(Position.portfolio_id == default_pid)
+            .filter(Position.market_value_cny > 0)
+            .order_by(Position.market_value_cny.desc())
+            .all()
+        )
 
-    return result
+        total_mv = sum(p.market_value_cny for p in positions) or 1.0
+        registry = get_registry()
+        seen_names = set()
+        result = []
+
+        for p in positions:
+            if p.name in seen_names:
+                continue
+            seen_names.add(p.name)
+
+            # 尝试推断 symbol
+            symbol = None
+            market = None
+            supported = False
+
+            # 优先级 1: EntityRegistry 按 name 匹配
+            for entity in registry.all_entities():
+                if (p.name and (entity.display_name_cn in p.name
+                                or p.name in entity.display_name_cn
+                                or (entity.display_name_en and entity.display_name_en.lower() in p.name.lower()))):
+                    # 取第一个 US symbol
+                    for s in entity.symbols:
+                        if s.market == "US":
+                            symbol = str(s)
+                            market = "US"
+                            supported = True
+                            break
+                    if not symbol and entity.symbols:
+                        symbol = str(entity.symbols[0])
+                        market = entity.symbols[0].market
+                    break
+
+            weight = round(p.market_value_cny / total_mv, 4)
+            result.append({
+                "symbol": symbol,
+                "asset_name": p.name,
+                "market": market,
+                "supported": supported,
+                "weight": weight,
+            })
+
+        return result
+    finally:
+        session.close()

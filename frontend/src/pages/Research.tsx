@@ -337,7 +337,7 @@ export default function Research() {
   // ── v2 状态 ──
   const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
   const [v2Loading,     setV2Loading]     = useState(false)
-  const [v2Holdings,    setV2Holdings]    = useState<{symbol: string; name: string}[]>([])
+  const [v2Holdings,    setV2Holdings]    = useState<{symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number}[]>([])
   const [v2Selected,    setV2Selected]    = useState<Set<string>>(new Set())
   const [v2ManualSym,   setV2ManualSym]   = useState('')
   const [v2Fetching,    setV2Fetching]    = useState(false)
@@ -1178,22 +1178,31 @@ export default function Research() {
             {v2Holdings.length > 0 && (
               <div style={{ marginBottom: 10 }}>
                 <label style={S.label}>选择持仓标的（可多选）</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
-                  {v2Holdings.map(h => (
-                    <label key={h.symbol} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={v2Selected.has(h.symbol)}
-                        onChange={e => {
-                          const next = new Set(v2Selected)
-                          e.target.checked ? next.add(h.symbol) : next.delete(h.symbol)
-                          setV2Selected(next)
-                        }} />
-                      {h.name} <span style={{ color: '#9CA3AF' }}>({h.symbol})</span>
-                    </label>
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
+                  {v2Holdings.map((h, idx) => {
+                    const key = h.symbol ?? `unsupported-${idx}`
+                    return (
+                      <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: h.supported ? '#374151' : '#9CA3AF', cursor: h.supported ? 'pointer' : 'default' }}
+                        title={h.supported ? undefined : '港股/A股暂不支持自动拉取，可手动上传研报'}>
+                        <input type="checkbox" disabled={!h.supported}
+                          checked={h.symbol ? v2Selected.has(h.symbol) : false}
+                          onChange={e => {
+                            if (!h.symbol) return
+                            const next = new Set(v2Selected)
+                            e.target.checked ? next.add(h.symbol) : next.delete(h.symbol)
+                            setV2Selected(next)
+                          }} />
+                        <span style={{ flex: 1 }}>{h.asset_name}</span>
+                        {h.symbol && <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>}
+                        <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
+                        {!h.supported && <span style={{ fontSize: 9, background: '#F3F4F6', color: '#9CA3AF', padding: '0 4px', borderRadius: 3 }}>暂不支持</span>}
+                      </label>
+                    )
+                  })}
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
-                    onClick={() => setV2Selected(new Set(v2Holdings.map(h => h.symbol)))}>全选</button>
+                    onClick={() => setV2Selected(new Set(v2Holdings.filter(h => h.supported && h.symbol).map(h => h.symbol!)))}>全选</button>
                   <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
                     onClick={() => setV2Selected(new Set())}>清空</button>
                 </div>
