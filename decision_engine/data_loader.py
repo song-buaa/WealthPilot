@@ -760,16 +760,45 @@ def _resolve_symbol(asset_name: str, session) -> Optional[str]:
     return None
 
 
+def _auto_ingest_av(symbol_str: str, session) -> None:
+    """后台自动触发 AV 拉取，生成 pending 卡入库。失败只 log 不抛异常。"""
+    import logging
+    _av_logger = logging.getLogger(__name__ + "._auto_ingest_av")
+
+    try:
+        from research_v2.adapters.alpha_vantage import AlphaVantageAdapter
+        from research_v2 import processor, repository
+        from research_v2.symbol import Symbol
+
+        symbol = Symbol.parse(symbol_str)
+        adapter = AlphaVantageAdapter()
+
+        raw_facts = adapter.fetch([symbol])
+        inserted = 0
+        for rf in raw_facts:
+            try:
+                card = processor.process(rf)
+                repository.insert(session, card)
+                inserted += 1
+            except Exception as e:
+                _av_logger.warning("自动拉取单条 RawFact 处理失败: %s", e)
+
+        session.commit()
+        _av_logger.info("AV 自动拉取完成: symbol=%s, 生成 %d 张卡", symbol_str, inserted)
+    except Exception as e:
+        _av_logger.warning("AV 自动拉取整体失败: symbol=%s, error=%s", symbol_str, e)
+
+
 def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     """
-    加载投研观点（v2 改造，严格 fallback）。
+    加载投研观点（v2 改造）。
 
     流程:
       1. _resolve_symbol 将 asset_name 解析为标准 Symbol
-      2. 调 ViewpointRepository.query_for_decision 查询 confirmed 的 v2 卡
-      3. v2 命中 → 直接返回，不调联网
-      4. v2 空 → fallback 到 _search_research_online（v2.0 临时保留）
-      5. 联网也空 → 返回 _DEFAULT_MOCK_RESEARCH
+      2. 查 v2 confirmed 卡 → 有则直接返回
+      3. v2 空 + :US 标的 → 自动触发 AV 拉取 → 用宽松查询返回（含 pending 卡）
+      4. 以上都空 → fallback 联网搜索
+      5. 联网也空 → mock
     """
     import logging
     _lr_logger = logging.getLogger(__name__ + "._load_research")
@@ -780,8 +809,8 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     # ── 1. 解析 Symbol ────────────────────────────────────────────────────
     symbol_str = _resolve_symbol(asset_name, session)
 
-    # ── 2. 查询 v2 ViewpointCard（主来源）──────────────────────────────────
     if symbol_str:
+        # ── 2. 查 v2 confirmed 卡（严格版）──────────────────────────────
         try:
             from research_v2 import repository
             v2_results = repository.query_for_decision(session, symbol_str)
@@ -789,15 +818,27 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
                 _lr_logger.info("v2 命中，返回 %d 条", len(v2_results))
                 return v2_results
         except Exception:
-            _lr_logger.exception("v2 路径异常，降级到联网")
+            _lr_logger.exception("v2 路径异常，降级")
 
-    # ── 3. v2 空，fallback 到联网搜索（v2.0 临时保留）──────────────────────
+        # ── 3. v2 空 + :US → 自动拉取 AV ────────────────────────────────
+        if symbol_str.endswith(":US"):
+            try:
+                _auto_ingest_av(symbol_str, session)
+                from research_v2 import repository
+                relaxed = repository.query_for_decision_relaxed(session, symbol_str)
+                if relaxed:
+                    _lr_logger.info("AV 自动拉取后宽松查询，返回 %d 条（含未 confirm 卡）", len(relaxed))
+                    return relaxed
+            except Exception as e:
+                _lr_logger.warning("AV 自动拉取失败，降级联网: %s", e)
+
+    # ── 4. fallback 联网搜索 ──────────────────────────────────────────────
     online_results = _search_research_online(asset_name)
     if online_results:
-        _lr_logger.info("v2 空，fallback 联网，返回 %d 条", len(online_results))
+        _lr_logger.info("fallback 联网，返回 %d 条", len(online_results))
         return online_results
 
-    _lr_logger.info("v2 和联网都空，返回 mock")
+    _lr_logger.info("全部路径空，返回 mock")
     return _DEFAULT_MOCK_RESEARCH
 
 

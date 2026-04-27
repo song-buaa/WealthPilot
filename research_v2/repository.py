@@ -340,3 +340,51 @@ def query_for_decision(
 
     cards = [_orm_to_card(row) for row in q.all()]
     return render_cards(cards)
+
+
+def query_for_decision_relaxed(
+    session: Session,
+    symbol: str,
+    since: Optional[datetime] = None,
+    top_k: int = 10,
+) -> list[str]:
+    """宽松版决策查询：包含 pending 卡（is_ai_prefilled=True 也返回）。
+
+    用于自动拉取后的即时使用场景。只过滤 validity_status=active。
+    输出每行追加 "(AI 自动生成，未经人工审核)" 标注。
+    """
+    sym = Symbol.parse(symbol) if isinstance(symbol, str) else symbol
+    registry = get_registry()
+    expanded = registry.expand_symbols(sym)
+    expanded_strs = [str(s) for s in expanded]
+
+    q = session.query(ViewpointCardV2)
+
+    sym_conditions = []
+    for s in expanded_strs:
+        sym_conditions.append(ViewpointCardV2.primary_symbol == s)
+        sym_conditions.append(ViewpointCardV2.facts_json.like(f'%"{s}"%'))
+    q = q.filter(or_(*sym_conditions))
+
+    q = q.filter(ViewpointCardV2.validity_status == "active")
+    q = q.filter(ViewpointCardV2.user_endorsement.in_(["endorse", "reference_only"]))
+
+    if since:
+        q = q.filter(ViewpointCardV2.as_of >= since)
+
+    q = q.order_by(ViewpointCardV2.as_of.desc()).limit(top_k)
+
+    cards = [_orm_to_card(row) for row in q.all()]
+    lines = render_cards(cards)
+    # 给 pending 卡的输出行加标注
+    result = []
+    card_map = {c.card_id: c for c in cards}
+    line_idx = 0
+    for card in cards:
+        card_lines = render_cards([card])
+        for cl in card_lines:
+            if card.judgment.is_ai_prefilled:
+                result.append(f"{cl} (AI 自动生成，未经人工审核)")
+            else:
+                result.append(cl)
+    return result
