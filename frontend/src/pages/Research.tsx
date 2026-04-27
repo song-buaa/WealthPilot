@@ -684,6 +684,23 @@ export default function Research() {
     }
   }
 
+  // 切换持仓选项时自动触发检索
+  const v2SearchSymbolRef = useRef(v2SearchSymbol)
+  useEffect(() => {
+    if (v2SearchSymbol && v2SearchSymbol !== v2SearchSymbolRef.current && activeTab === 'search') {
+      v2SearchSymbolRef.current = v2SearchSymbol
+      handleV2Search()
+    }
+  }, [v2SearchSymbol, activeTab])
+
+  // 首次进入 Tab 3 时默认选中第一个有 symbol 的持仓
+  useEffect(() => {
+    if (activeTab === 'search' && !v2SearchSymbol && v2Holdings.length > 0) {
+      const first = v2Holdings.find(h => h.symbol)
+      if (first?.symbol) setV2SearchSymbol(first.symbol)
+    }
+  }, [activeTab, v2Holdings])
+
   async function handleV2Search() {
     if (!v2SearchSymbol.trim()) return
     setV2Searching(true)
@@ -1451,9 +1468,34 @@ export default function Research() {
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Search size={14} style={{ color: '#3B82F6' }} /> 决策检索（v2 — 决策引擎实际消费的内容）
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, maxWidth: 500 }}>
+
+          {/* 持仓单选列表 */}
+          {v2Holdings.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.label}>选择持仓标的</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
+                {v2Holdings.map((h, idx) => {
+                  const sym = h.symbol
+                  const key = sym ?? `h-${idx}`
+                  return (
+                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>
+                      <input type="radio" name="v2search_holding" checked={v2SearchSymbol === (sym ?? '')}
+                        onChange={() => { if (sym) { setV2SearchSymbol(sym); /* auto-trigger below */ } }}
+                        disabled={!sym} />
+                      <span style={{ flex: 1, color: sym ? '#374151' : '#9CA3AF' }}>{h.asset_name}</span>
+                      {sym && <span style={{ color: '#9CA3AF', fontSize: 11 }}>{sym}</span>}
+                      <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 手动输入 */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, maxWidth: 400 }}>
             <div style={{ flex: 1 }}>
-              <label style={S.label}>标的 Symbol（如 LI:US）</label>
+              <label style={S.label}>或手动输入 Symbol</label>
               <input style={S.input} value={v2SearchSymbol} onChange={e => setV2SearchSymbol(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleV2Search() }}
                 placeholder="如 LI:US、NVDA:US" />
@@ -1464,6 +1506,7 @@ export default function Research() {
             </button>
           </div>
 
+          {/* 结果区 */}
           {v2SearchLines.length > 0 && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 10 }}>
@@ -1471,11 +1514,9 @@ export default function Research() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {v2SearchLines.map((line, i) => {
-                  // 解析三种前缀：[用户资料] / [第三方数据] / [联网参考]
                   const prefixMatch = line.match(/^\[(用户资料|第三方数据|联网参考)\]\s*/)
                   const prefix = prefixMatch ? prefixMatch[1] : null
                   const text = prefixMatch ? line.slice(prefixMatch[0].length) : line
-                  // 三种前缀三种颜色：用户=蓝，第三方=琥珀，联网=灰
                   const badgeStyle: Record<string, { bg: string; color: string }> = {
                     '用户资料':   { bg: '#DBEAFE', color: '#1D4ED8' },
                     '第三方数据': { bg: '#FEF3C7', color: '#D97706' },
@@ -1494,7 +1535,7 @@ export default function Research() {
           )}
           {v2SearchLines.length === 0 && v2SearchSymbol.trim() && !v2Searching && (
             <div style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
-              该标的暂无已确认的 v2 观点卡（未确认的卡不会被决策引擎消费）
+              该标的暂无可消费的观点数据
             </div>
           )}
         </div>
