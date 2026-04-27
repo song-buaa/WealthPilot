@@ -265,39 +265,20 @@ def v2_list_cards(
 @router.get("/v2/holdings_us")
 def v2_holdings_us():
     """返回当前持仓中 :US 市场的标的列表（从 entity_registry 匹配）。"""
-    from app.database import get_session
-    from app.models import Position
     from research_v2.symbol import get_registry
 
-    session = get_session()
-    try:
-        # 查 symbol_v2 不为空且为 US 的持仓
-        rows = (
-            session.query(Position.asset_name, Position.symbol_v2)
-            .filter(Position.symbol_v2.isnot(None))
-            .filter(Position.symbol_v2.like("%:US"))
-            .all()
-        )
-        seen = set()
-        result = []
-        for name, sym in rows:
-            if sym not in seen:
-                seen.add(sym)
-                result.append({"symbol": sym, "name": name, "asset_name": name})
+    # 从 EntityRegistry 获取所有 US symbols（positions.symbol_v2 暂未填充）
+    registry = get_registry()
+    seen = set()
+    result = []
+    for entity in registry.all_entities():
+        for s in entity.symbols:
+            if s.market == "US" and str(s) not in seen:
+                seen.add(str(s))
+                result.append({
+                    "symbol": str(s),
+                    "name": entity.display_name_cn,
+                    "asset_name": entity.display_name_cn,
+                })
 
-        # 如果 positions 表没有 symbol_v2，从 EntityRegistry 补充 US symbols
-        if not result:
-            registry = get_registry()
-            for entity in registry.all_entities():
-                for s in entity.symbols:
-                    if s.market == "US" and str(s) not in seen:
-                        seen.add(str(s))
-                        result.append({
-                            "symbol": str(s),
-                            "name": entity.display_name_cn,
-                            "asset_name": entity.display_name_cn,
-                        })
-
-        return result
-    finally:
-        session.close()
+    return result
