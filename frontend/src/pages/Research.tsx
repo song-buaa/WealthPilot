@@ -1277,148 +1277,6 @@ export default function Research() {
             </div>
           )}
 
-          {/* ══════════ v2: 审核详情弹窗 ══════════ */}
-          {v2ReviewCard && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }}
-              onClick={e => { if (e.target === e.currentTarget) setV2ReviewCard(null) }}>
-              <div style={{ ...S.card, width: '100%', maxWidth: 720, padding: '20px 24px', margin: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>观点卡审核</div>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setV2ReviewCard(null)}><X size={18} /></button>
-                </div>
-
-                {/* 事实层 - 只读灰底 */}
-                <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>事实层（只读）</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12, color: '#374151' }}>
-                    <div><span style={{ color: '#9CA3AF' }}>来源：</span>{SOURCE_TYPE_LABEL[v2ReviewCard.facts.source_type] ?? v2ReviewCard.facts.source_type}</div>
-                    <div><span style={{ color: '#9CA3AF' }}>时间：</span>{new Date(v2ReviewCard.facts.as_of).toLocaleDateString()}</div>
-                    <div><span style={{ color: '#9CA3AF' }}>标的：</span>{v2ReviewCard.facts.primary_symbol ?? '未指定'}</div>
-                    <div><span style={{ color: '#9CA3AF' }}>入库：</span>{new Date(v2ReviewCard.facts.ingested_at).toLocaleDateString()}</div>
-                  </div>
-                  {v2ReviewCard.facts.source_refs.filter(r => r.ref_type === 'url').map((r, i) => (
-                    <div key={i} style={{ marginTop: 6, fontSize: 11 }}>
-                      <a href={r.ref_value} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>
-                        {r.title ?? '原文链接'} ↗
-                      </a>
-                    </div>
-                  ))}
-                  {v2ReviewCard.facts.raw_facts.summary && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#6B7280', lineHeight: 1.5, borderTop: '1px solid #E5E7EB', paddingTop: 8 }}>
-                      {String(v2ReviewCard.facts.raw_facts.summary).slice(0, 300)}
-                    </div>
-                  )}
-                </div>
-
-                {/* 叙事层 - 只读白底 */}
-                <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>叙事层（只读）</div>
-                  {v2ReviewCard.narrative.thesis && (
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', marginBottom: 8, lineHeight: 1.5 }}>{v2ReviewCard.narrative.thesis}</div>
-                  )}
-                  {v2ReviewCard.narrative.bull_case && (
-                    <div style={{ fontSize: 12, color: '#059669', marginBottom: 4, lineHeight: 1.5 }}>🟢 {v2ReviewCard.narrative.bull_case}</div>
-                  )}
-                  {v2ReviewCard.narrative.bear_case && (
-                    <div style={{ fontSize: 12, color: '#DC2626', marginBottom: 4, lineHeight: 1.5 }}>🔴 {v2ReviewCard.narrative.bear_case}</div>
-                  )}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{v2ReviewCard.narrative.event_type}</span>
-                    {v2ReviewCard.narrative.topics.map((t, i) => (
-                      <span key={i} style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{t}</span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 判断层 - 可编辑 */}
-                <div style={{ background: '#fff', border: '2px solid #3B82F6', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#3B82F6', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-                    判断层（可编辑）
-                    {v2ReviewCard.judgment.is_ai_prefilled && (
-                      <span style={{ marginLeft: 8, fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4, fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>AI 预填，待确认</span>
-                    )}
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 12px', marginBottom: 10 }}>
-                    <div>
-                      <label style={S.label}>立场</label>
-                      <select style={S.select} value={v2JudgEdit.stance ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, stance: e.target.value }))}>
-                        <option value="bullish">做多</option><option value="bearish">做空</option>
-                        <option value="neutral">中性</option><option value="watch">观察</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={S.label}>置信度</label>
-                      <select style={S.select} value={v2JudgEdit.confidence ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, confidence: e.target.value }))}>
-                        <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={S.label}>操作类型</label>
-                      <select style={S.select} value={v2JudgEdit.action_type ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, action_type: e.target.value }))}>
-                        <option value="consider_add">考虑加仓</option><option value="consider_reduce">考虑减仓</option>
-                        <option value="consider_exit">考虑清仓</option><option value="hold_observe">持有观察</option>
-                        <option value="no_action">无操作</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={S.label}>时间跨度</label>
-                      <select style={S.select} value={v2JudgEdit.horizon ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, horizon: e.target.value }))}>
-                        <option value="short">短期(&lt;1月)</option><option value="medium">中期(1-6月)</option><option value="long">长期(&gt;6月)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div>
-                      <label style={S.label}>触发条件（可选）</label>
-                      <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.trigger_conditions ?? ''}
-                        onChange={e => setV2JudgEdit(p => ({ ...p, trigger_conditions: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label style={S.label}>失效条件（可选）</label>
-                      <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.invalidation_conditions ?? ''}
-                        onChange={e => setV2JudgEdit(p => ({ ...p, invalidation_conditions: e.target.value }))} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 底部按钮组：根据 is_ai_prefilled 切换 */}
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                  {v2ReviewCard.judgment.is_ai_prefilled ? (
-                    <>
-                      <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('discard')}>
-                        <Trash2 size={12} /> 丢弃
-                      </button>
-                      <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('confirm', 'reference_only')}>
-                        仅作参考
-                      </button>
-                      <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('confirm', 'endorse')}>
-                        <Check size={12} /> 确认并入库
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('discard')}>
-                        <Trash2 size={12} /> 丢弃
-                      </button>
-                      <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('unconfirm')}>
-                        撤回确认
-                      </button>
-                      <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming}
-                        onClick={() => handleV2Action('modify')}>
-                        <Pencil size={12} /> 保存修改
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
         </div>
       )}
 
@@ -1562,6 +1420,114 @@ export default function Research() {
               该标的暂无已确认的 v2 观点卡（未确认的卡不会被决策引擎消费）
             </div>
           )}
+        </div>
+      )}
+
+      {/* ══════════ v2: 审核详情弹窗（全 Tab 共用）══════════ */}
+      {v2ReviewCard && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }}
+          onClick={e => { if (e.target === e.currentTarget) setV2ReviewCard(null) }}>
+          <div style={{ ...S.card, width: '100%', maxWidth: 720, padding: '20px 24px', margin: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>观点卡审核</div>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setV2ReviewCard(null)}><X size={18} /></button>
+            </div>
+            <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>事实层（只读）</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12, color: '#374151' }}>
+                <div><span style={{ color: '#9CA3AF' }}>来源：</span>{SOURCE_TYPE_LABEL[v2ReviewCard.facts.source_type] ?? v2ReviewCard.facts.source_type}</div>
+                <div><span style={{ color: '#9CA3AF' }}>时间：</span>{new Date(v2ReviewCard.facts.as_of).toLocaleDateString()}</div>
+                <div><span style={{ color: '#9CA3AF' }}>标的：</span>{v2ReviewCard.facts.primary_symbol ?? '未指定'}</div>
+                <div><span style={{ color: '#9CA3AF' }}>入库：</span>{new Date(v2ReviewCard.facts.ingested_at).toLocaleDateString()}</div>
+              </div>
+              {v2ReviewCard.facts.source_refs.filter(r => r.ref_type === 'url').map((r, i) => (
+                <div key={i} style={{ marginTop: 6, fontSize: 11 }}>
+                  <a href={r.ref_value} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>{r.title ?? '原文链接'} ↗</a>
+                </div>
+              ))}
+              {v2ReviewCard.facts.raw_facts.summary && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#6B7280', lineHeight: 1.5, borderTop: '1px solid #E5E7EB', paddingTop: 8 }}>
+                  {String(v2ReviewCard.facts.raw_facts.summary).slice(0, 300)}
+                </div>
+              )}
+            </div>
+            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>叙事层（只读）</div>
+              {v2ReviewCard.narrative.thesis && <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', marginBottom: 8, lineHeight: 1.5 }}>{v2ReviewCard.narrative.thesis}</div>}
+              {v2ReviewCard.narrative.bull_case && <div style={{ fontSize: 12, color: '#059669', marginBottom: 4, lineHeight: 1.5 }}>🟢 {v2ReviewCard.narrative.bull_case}</div>}
+              {v2ReviewCard.narrative.bear_case && <div style={{ fontSize: 12, color: '#DC2626', marginBottom: 4, lineHeight: 1.5 }}>🔴 {v2ReviewCard.narrative.bear_case}</div>}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 10, background: '#EFF6FF', color: '#3B82F6', padding: '1px 6px', borderRadius: 4 }}>{v2ReviewCard.narrative.event_type}</span>
+                {v2ReviewCard.narrative.topics.map((t, i) => (
+                  <span key={i} style={{ fontSize: 10, background: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: 4 }}>{t}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ background: '#fff', border: '2px solid #3B82F6', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#3B82F6', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                判断层（可编辑）
+                {v2ReviewCard.judgment.is_ai_prefilled && (
+                  <span style={{ marginLeft: 8, fontSize: 10, background: '#FEE2E2', color: '#DC2626', padding: '1px 6px', borderRadius: 4, fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>AI 预填，待确认</span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 12px', marginBottom: 10 }}>
+                <div>
+                  <label style={S.label}>立场</label>
+                  <select style={S.select} value={v2JudgEdit.stance ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, stance: e.target.value }))}>
+                    <option value="bullish">做多</option><option value="bearish">做空</option>
+                    <option value="neutral">中性</option><option value="watch">观察</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.label}>置信度</label>
+                  <select style={S.select} value={v2JudgEdit.confidence ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, confidence: e.target.value }))}>
+                    <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.label}>操作类型</label>
+                  <select style={S.select} value={v2JudgEdit.action_type ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, action_type: e.target.value }))}>
+                    <option value="consider_add">考虑加仓</option><option value="consider_reduce">考虑减仓</option>
+                    <option value="consider_exit">考虑清仓</option><option value="hold_observe">持有观察</option>
+                    <option value="no_action">无操作</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.label}>时间跨度</label>
+                  <select style={S.select} value={v2JudgEdit.horizon ?? ''} onChange={e => setV2JudgEdit(p => ({ ...p, horizon: e.target.value }))}>
+                    <option value="short">短期(&lt;1月)</option><option value="medium">中期(1-6月)</option><option value="long">长期(&gt;6月)</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div>
+                  <label style={S.label}>触发条件（可选）</label>
+                  <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.trigger_conditions ?? ''}
+                    onChange={e => setV2JudgEdit(p => ({ ...p, trigger_conditions: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={S.label}>失效条件（可选）</label>
+                  <textarea style={{ ...S.textarea, minHeight: 40 }} rows={2} value={v2JudgEdit.invalidation_conditions ?? ''}
+                    onChange={e => setV2JudgEdit(p => ({ ...p, invalidation_conditions: e.target.value }))} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {v2ReviewCard.judgment.is_ai_prefilled ? (
+                <>
+                  <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('discard')}><Trash2 size={12} /> 丢弃</button>
+                  <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('confirm', 'reference_only')}>仅作参考</button>
+                  <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('confirm', 'endorse')}><Check size={12} /> 确认并入库</button>
+                </>
+              ) : (
+                <>
+                  <button style={{ ...S.btnDanger, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('discard')}><Trash2 size={12} /> 丢弃</button>
+                  <button style={{ ...S.btnSecondary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('unconfirm')}>撤回确认</button>
+                  <button style={{ ...S.btnPrimary, opacity: v2Confirming ? 0.6 : 1 }} disabled={v2Confirming} onClick={() => handleV2Action('modify')}><Pencil size={12} /> 保存修改</button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
