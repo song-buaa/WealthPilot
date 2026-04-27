@@ -120,6 +120,8 @@ export const researchApi = {
   getCards: () => request<PagedResult<ResearchCard>>('/research/cards'),
   getDocuments: () => request<PagedResult<ResearchDocument>>('/research/documents'),
   deleteDocument: (id: number) => request<void>(`/research/documents/${id}`, { method: 'DELETE' }),
+  updateDocument: (id: number, updates: Record<string, unknown>) =>
+    request<ResearchDocument>(`/research/documents/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }),
   reparseDocument: (id: number) =>
     request<ParseResult>(`/research/documents/${id}/reparse`, { method: 'POST' }),
   parseText: (content: string, title?: string, source_url?: string) =>

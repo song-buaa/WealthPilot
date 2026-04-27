@@ -355,6 +355,10 @@ export default function Research() {
   const [v2LibSelectedIds, setV2LibSelectedIds] = useState<Set<string>>(new Set())
   const [v2LibBatchBusy,   setV2LibBatchBusy]   = useState(false)
   const [v2LibBatchMsg,    setV2LibBatchMsg]    = useState('')
+  // 文档详情弹窗
+  const [docDetail,        setDocDetail]        = useState<ResearchDocument | null>(null)
+  const [docEditFields,    setDocEditFields]    = useState<Record<string, string>>({})
+  const [docSaving,        setDocSaving]        = useState(false)
   // v2 Tab 3
   const [v2SearchSymbol, setV2SearchSymbol] = useState('')
   const [v2SearchLines,  setV2SearchLines]  = useState<string[]>([])
@@ -779,6 +783,31 @@ export default function Research() {
     })
   }
 
+  function openDocDetail(doc: ResearchDocument) {
+    setDocDetail(doc)
+    setDocEditFields({
+      title: doc.title || '',
+      object_name: doc.object_name || '',
+      market_name: doc.market_name || '',
+      author: doc.author || '',
+      publish_time: doc.publish_time || '',
+    })
+  }
+
+  async function saveDocDetail() {
+    if (!docDetail) return
+    setDocSaving(true)
+    try {
+      const updated = await researchApi.updateDocument(docDetail.id, docEditFields)
+      setDocuments(prev => prev.map(d => d.id === docDetail.id ? updated : d))
+      setDocDetail(null)
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setDocSaving(false)
+    }
+  }
+
   const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled && c.judgment.validity_status !== 'invalidated')
   const v2Confirmed = v2Cards.filter(c => !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree' && c.judgment.validity_status !== 'invalidated')
 
@@ -1147,7 +1176,7 @@ export default function Research() {
                       const st = DOC_STATUS[doc.parse_status ?? ''] ?? { label: doc.parse_status ?? '—', bg: '#F3F4F6', color: '#9CA3AF' }
                       const canReparse = doc.parse_status === 'pending' || doc.parse_status === 'saved_only'
                       return (
-                        <tr key={doc.id} style={{ borderBottom: '1px solid #F9FAFB' }}>
+                        <tr key={doc.id} style={{ borderBottom: '1px solid #F9FAFB', cursor: 'pointer' }} onClick={() => openDocDetail(doc)}>
                           <td style={{ padding: '8px 10px', maxWidth: 220 }}>
                             <div style={{ fontWeight: 500, color: '#1B2A4A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || '（无标题）'}</div>
                           </td>
@@ -1167,12 +1196,12 @@ export default function Research() {
                                   title="重新解析"
                                   disabled={reparsingDocId === doc.id}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7C3AED', padding: 4, opacity: reparsingDocId === doc.id ? 0.5 : 1 }}
-                                  onClick={() => handleReparse(doc)}>
+                                  onClick={e => { e.stopPropagation(); handleReparse(doc) }}>
                                   {reparsingDocId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                                 </button>
                               )}
                               <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }}
-                                onClick={() => handleDeleteDocument(doc.id)}>
+                                onClick={e => { e.stopPropagation(); handleDeleteDocument(doc.id) }}>
                                 <Trash2 size={13} />
                               </button>
                             </div>
@@ -1648,6 +1677,100 @@ export default function Research() {
           </div>
         </div>
       )}
+
+      {/* ══════════ 文档详情/编辑弹窗 ══════════ */}
+      {docDetail && (() => {
+        const relCard = cards.find(c => c.document_id === docDetail.id)
+        const relV2 = v2Cards.filter(c =>
+          c.facts.source_type === 'user_upload' && docDetail.uploaded_at &&
+          Math.abs(new Date(c.facts.ingested_at).getTime() - new Date(docDetail.uploaded_at!).getTime()) < 120000
+        )
+        const v2Conf = relV2.filter(c => !c.judgment.is_ai_prefilled).length
+        const v2Pend = relV2.filter(c => c.judgment.is_ai_prefilled).length
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }}
+            onClick={e => { if (e.target === e.currentTarget) setDocDetail(null) }}>
+            <div style={{ ...S.card, width: '100%', maxWidth: 680, padding: '20px 24px', margin: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>文档详情</div>
+                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setDocDetail(null)}><X size={18} /></button>
+              </div>
+
+              {/* 区块 1: 基本信息（可编辑）*/}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>基本信息</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={S.label}>标题</label>
+                    <input style={S.input} value={docEditFields.title ?? ''} onChange={e => setDocEditFields(p => ({ ...p, title: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={S.label}>标的名称</label>
+                    <input style={S.input} value={docEditFields.object_name ?? ''} onChange={e => setDocEditFields(p => ({ ...p, object_name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={S.label}>市场</label>
+                    <input style={S.input} value={docEditFields.market_name ?? ''} onChange={e => setDocEditFields(p => ({ ...p, market_name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={S.label}>作者</label>
+                    <input style={S.input} value={docEditFields.author ?? ''} onChange={e => setDocEditFields(p => ({ ...p, author: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={S.label}>发布时间</label>
+                    <input style={S.input} value={docEditFields.publish_time ?? ''} onChange={e => setDocEditFields(p => ({ ...p, publish_time: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 区块 2: 解析结果（只读）*/}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>解析结果</div>
+                {relCard ? (
+                  <div style={{ background: '#F9FAFB', borderRadius: 8, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {relCard.thesis && <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', lineHeight: 1.5 }}>{relCard.thesis}</div>}
+                    {relCard.summary && <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>{relCard.summary}</div>}
+                    {relCard.bull_case && <div style={{ fontSize: 12, color: '#059669', borderLeft: '3px solid #059669', paddingLeft: 10, lineHeight: 1.5 }}>{relCard.bull_case}</div>}
+                    {relCard.bear_case && <div style={{ fontSize: 12, color: '#DC2626', borderLeft: '3px solid #DC2626', paddingLeft: 10, lineHeight: 1.5 }}>{relCard.bear_case}</div>}
+                    {relCard.action_suggestion && <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>操作建议：{relCard.action_suggestion}</div>}
+                    {relCard.invalidation_conditions && <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>失效条件：{relCard.invalidation_conditions}</div>}
+                  </div>
+                ) : (
+                  <div style={{ color: '#9CA3AF', fontSize: 12, padding: '12px 0' }}>暂无解析结果</div>
+                )}
+              </div>
+
+              {/* 区块 3: 关联 v2 卡（只读）*/}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>关联 v2 观点卡</div>
+                {relV2.length > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
+                    <span>{relV2.length} 张（{v2Conf} 张已确认，{v2Pend} 张待审核）</span>
+                    <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
+                      onClick={() => { setDocDetail(null); setActiveTab('library') }}>
+                      前往观点库
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ color: '#9CA3AF', fontSize: 12 }}>无关联 v2 卡</div>
+                )}
+              </div>
+
+              {/* 底部按钮 */}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid #E5E7EB', paddingTop: 12 }}>
+                <button style={{ ...S.btnDanger, opacity: docSaving ? 0.6 : 1 }} disabled={docSaving}
+                  onClick={e => { e.stopPropagation(); handleDeleteDocument(docDetail.id); setDocDetail(null) }}>
+                  <Trash2 size={12} /> 删除
+                </button>
+                <button style={S.btnSecondary} onClick={() => setDocDetail(null)}>关闭</button>
+                <button style={{ ...S.btnPrimary, opacity: docSaving ? 0.6 : 1 }} disabled={docSaving} onClick={saveDocDetail}>
+                  {docSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} 保存修改
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── 新建/编辑 Modal ── */}
       {modalOpen && (

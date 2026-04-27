@@ -161,6 +161,26 @@ def list_documents() -> dict:
         session.close()
 
 
+def update_document(document_id: int, updates: dict) -> dict:
+    """更新文档基本信息"""
+    session = get_session()
+    try:
+        d = session.query(ResearchDocument).get(document_id)
+        if d is None:
+            raise ValueError(f"document {document_id} not found")
+        for key, val in updates.items():
+            if hasattr(d, key):
+                setattr(d, key, val)
+        session.commit()
+        session.refresh(d)
+        return _document_to_dict(d)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def delete_document(document_id: int) -> None:
     """删除文档及其关联的候选卡（级联）"""
     # v2 副作用：先 invalidate 对应的 v2 卡（在删除 document 之前，因为需要读 doc.uploaded_at）

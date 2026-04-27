@@ -111,6 +111,23 @@ def list_documents():
     return svc.list_documents()
 
 
+class DocumentUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    object_name: Optional[str] = None
+    market_name: Optional[str] = None
+    author: Optional[str] = None
+    publish_time: Optional[str] = None
+
+
+@router.patch("/documents/{document_id}")
+def update_document(document_id: int, req: DocumentUpdateRequest):
+    """更新文档基本信息"""
+    try:
+        return svc.update_document(document_id, req.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: int):
     """删除文档及关联候选卡"""
