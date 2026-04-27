@@ -1414,7 +1414,7 @@ export default function Research() {
             </div>
           )}
 
-          {/* 观点库批量操作�� */}
+          {/* 观点库批量操作栏 */}
           {v2LibSelectedIds.size > 0 && (
             <div style={{ position: 'sticky', bottom: 0, marginTop: 12, background: '#fff', borderRadius: 10, padding: '10px 16px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 12px rgba(0,0,0,0.08)' }}>
@@ -1422,7 +1422,7 @@ export default function Research() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button disabled={v2LibBatchBusy} onClick={() => handleV2LibBatchAction('discard')}
                   style={{ background: '#FEE2E2', color: '#DC2626', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2LibBatchBusy ? 0.6 : 1 }}>
-                  <Trash2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量��弃
+                  <Trash2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />批量丢弃
                 </button>
                 <button disabled={v2LibBatchBusy} onClick={() => handleV2LibBatchAction('confirm')}
                   style={{ background: '#3B82F6', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2LibBatchBusy ? 0.6 : 1 }}>
@@ -1437,7 +1437,7 @@ export default function Research() {
         </div>
       )}
 
-      {/* ══════════ Tab 3：决策检索 (v2) ══════��═══ */}
+      {/* ══════════ Tab 3：决策检索 (v2) ══════════ */}
       {activeTab === 'search' && (
         <div style={{ ...S.card, padding: '20px 24px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
