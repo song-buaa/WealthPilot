@@ -725,22 +725,30 @@ def _resolve_symbol(asset_name: str, session) -> Optional[str]:
     """将 asset_name 解析为标准 Symbol 字符串。
 
     优先级:
-      1. 查 positions 表的 symbol_v2 字段（精确匹配 asset_name）
+      1. 查 positions 表按 name 模糊匹配 → 用 ticker+currency 推断 symbol
       2. 查 EntityRegistry 的 display_name_cn / display_name_en
       3. 返回 None
     """
+    import re
     from app.models import Position
 
-    # 优先级 1: positions.symbol_v2
+    # 优先级 1: positions 表按 name 匹配 → ticker + currency 推断
     try:
         row = (
-            session.query(Position.symbol_v2)
-            .filter(Position.asset_name.ilike(f"%{asset_name}%"))
-            .filter(Position.symbol_v2.isnot(None))
+            session.query(Position.ticker, Position.currency)
+            .filter(Position.name.ilike(f"%{asset_name}%"))
+            .filter(Position.market_value_cny > 0)
             .first()
         )
         if row and row[0]:
-            return row[0]
+            ticker = row[0].strip()
+            currency = (row[1] or 'CNY').strip()
+            # 纯字母 1-5 位 + USD → US
+            if re.match(r'^[A-Z]{1,5}$', ticker) and currency == 'USD':
+                return f"{ticker}:US"
+            # 数字.SH / 数字.SZ → A 股
+            if re.match(r'^\d{6}\.S[HZ]$', ticker):
+                return f"{ticker[:6]}:{ticker[-2:]}"
     except Exception:
         pass
 
@@ -789,16 +797,48 @@ def _auto_ingest_av(symbol_str: str, session) -> None:
         _av_logger.warning("AV 自动拉取整体失败: symbol=%s, error=%s", symbol_str, e)
 
 
+import threading
+
+_BG_INGEST_COOLDOWN: dict[str, float] = {}
+
+
+def _trigger_bg_ingest(symbol_str: str) -> None:
+    """在独立线程里异步执行 AV 拉取，不阻塞当前请求。同一 symbol 60 秒内不重复触发。"""
+    import logging
+    _bg_logger = logging.getLogger(__name__ + "._trigger_bg_ingest")
+
+    now = time.time()
+    last = _BG_INGEST_COOLDOWN.get(symbol_str, 0)
+    if now - last < 60:
+        _bg_logger.debug("后台拉取冷却中，跳过: %s", symbol_str)
+        return
+
+    _BG_INGEST_COOLDOWN[symbol_str] = now
+
+    def _run():
+        try:
+            bg_session = get_session()
+            try:
+                _auto_ingest_av(symbol_str, bg_session)
+            finally:
+                bg_session.close()
+        except Exception as e:
+            _bg_logger.warning("后台 AV 拉取线程异常: %s %s", symbol_str, e)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    _bg_logger.info("后台 AV 拉取线程已启动: %s", symbol_str)
+
+
 def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
     """
-    加载投研观点（v2 改造）。
+    加载投研观点（v2 改造，异步拉取）。
 
     流程:
-      1. _resolve_symbol 将 asset_name 解析为标准 Symbol
-      2. 查 v2 confirmed 卡 → 有则直接返回
-      3. v2 空 + :US 标的 → 自动触发 AV 拉取 → 用宽松查询返回（含 pending 卡）
-      4. 以上都空 → fallback 联网搜索
-      5. 联网也空 → mock
+      1. 查 v2 confirmed 卡 → 有则直接返回
+      2. 查 v2 pending 卡（宽松版）→ 有则返回 + 后台异步刷新
+      3. v2 完全没数据 + :US → 触发后台异步拉取，本次 fallback 联网
+      4. 联网也空 → mock
     """
     import logging
     _lr_logger = logging.getLogger(__name__ + "._load_research")
@@ -820,19 +860,24 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
         except Exception:
             _lr_logger.exception("v2 路径异常，降级")
 
-        # ── 3. v2 空 + :US → 自动拉取 AV ────────────────────────────────
-        if symbol_str.endswith(":US"):
-            try:
-                _auto_ingest_av(symbol_str, session)
-                from research_v2 import repository
-                relaxed = repository.query_for_decision_relaxed(session, symbol_str)
-                if relaxed:
-                    _lr_logger.info("AV 自动拉取后宽松查询，返回 %d 条（含未 confirm 卡）", len(relaxed))
-                    return relaxed
-            except Exception as e:
-                _lr_logger.warning("AV 自动拉取失败，降级联网: %s", e)
+        # ── 3. 查 v2 pending 卡（宽松版）──────────────────────────────────
+        try:
+            from research_v2 import repository
+            relaxed = repository.query_for_decision_relaxed(session, symbol_str)
+            if relaxed:
+                _lr_logger.info("v2 宽松命中（含 pending），返回 %d 条", len(relaxed))
+                if symbol_str.endswith(":US"):
+                    _trigger_bg_ingest(symbol_str)
+                return relaxed
+        except Exception:
+            _lr_logger.exception("v2 宽松查询异常，降级")
 
-    # ── 4. fallback 联网搜索 ──────────────────────────────────────────────
+        # ── 4. v2 完全没数据：触发后台异步拉取，本次 fallback 联网 ────────
+        if symbol_str.endswith(":US"):
+            _trigger_bg_ingest(symbol_str)
+            _lr_logger.info("v2 空，后台拉取已触发，本次 fallback 联网: %s", symbol_str)
+
+    # ── 5. 联网 fallback ──────────────────────────────────────────────────
     online_results = _search_research_online(asset_name)
     if online_results:
         _lr_logger.info("fallback 联网，返回 %d 条", len(online_results))
