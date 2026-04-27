@@ -264,11 +264,45 @@ def v2_list_cards(
 
 @router.get("/v2/holdings_us")
 def v2_holdings_us():
-    """返回当前持仓列表，按市值占比排序，标注是否支持自动拉取。"""
+    """返回当前持仓列表，按市值占比排序，从 ticker+currency 直接推断 symbol。"""
+    import re
     from app.database import get_session
     from app.models import Position
-    from research_v2.symbol import get_registry
     from app.state import portfolio_id as default_pid
+
+    def _infer_symbol(ticker: str, currency: str) -> tuple:
+        """从 ticker + currency 推断 (symbol, market, supported)。"""
+        if not ticker or not ticker.strip():
+            return None, None, False
+        t = ticker.strip()
+
+        # A 股：数字.SH / 数字.SZ
+        if re.match(r'^\d{6}\.S[HZ]$', t):
+            market = t[-2:]
+            code = t[:6]
+            return f"{code}:{market}", market, False  # A 股暂不支持自动拉取
+
+        # 期权格式（如 AAPL240621C00190000）：跳过
+        if re.match(r'^[A-Z]+\d{6}[CP]\d+$', t):
+            return None, None, False
+
+        # ISIN/基金代码（LU 开头、纯数字 6 位）：不支持
+        if t.startswith('LU') or t.startswith('IE') or re.match(r'^\d{6}$', t):
+            return None, None, False
+
+        # 其他特殊代码（含 - 或长度异常）：不支持
+        if '-' in t or len(t) > 10:
+            return None, None, False
+
+        # 纯字母 + USD → 美股
+        if re.match(r'^[A-Z]{1,5}$', t) and currency == 'USD':
+            return f"{t}:US", "US", True
+
+        # 纯字母但非 USD（罕见）
+        if re.match(r'^[A-Z]{1,5}$', t):
+            return f"{t}:US", "US", True  # 默认当 US
+
+        return None, None, False
 
     session = get_session()
     try:
@@ -281,7 +315,6 @@ def v2_holdings_us():
         )
 
         total_mv = sum(p.market_value_cny for p in positions) or 1.0
-        registry = get_registry()
         seen_names = set()
         result = []
 
@@ -290,29 +323,9 @@ def v2_holdings_us():
                 continue
             seen_names.add(p.name)
 
-            # 尝试推断 symbol
-            symbol = None
-            market = None
-            supported = False
-
-            # 优先级 1: EntityRegistry 按 name 匹配
-            for entity in registry.all_entities():
-                if (p.name and (entity.display_name_cn in p.name
-                                or p.name in entity.display_name_cn
-                                or (entity.display_name_en and entity.display_name_en.lower() in p.name.lower()))):
-                    # 取第一个 US symbol
-                    for s in entity.symbols:
-                        if s.market == "US":
-                            symbol = str(s)
-                            market = "US"
-                            supported = True
-                            break
-                    if not symbol and entity.symbols:
-                        symbol = str(entity.symbols[0])
-                        market = entity.symbols[0].market
-                    break
-
+            symbol, market, supported = _infer_symbol(p.ticker or '', p.currency or 'CNY')
             weight = round(p.market_value_cny / total_mv, 4)
+
             result.append({
                 "symbol": symbol,
                 "asset_name": p.name,
