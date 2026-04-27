@@ -1189,7 +1189,7 @@ export default function Research() {
             <div style={{ ...S.card, padding: '16px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
-                  v2 待审��观点卡 ({v2Pending.length})
+                  v2 待审核观点卡 ({v2Pending.length})
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
@@ -1219,9 +1219,9 @@ export default function Research() {
 
               {/* 批量操作栏（sticky bottom） */}
               {v2SelectedIds.size > 0 && (
-                <div style={{ position: 'sticky', bottom: 0, marginTop: 12, background: '#1F2937', borderRadius: 10, padding: '10px 16px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 -2px 10px rgba(0,0,0,0.15)' }}>
-                  <span style={{ fontSize: 13, color: '#fff', fontWeight: 500 }}>已选 {v2SelectedIds.size} 张</span>
+                <div style={{ position: 'sticky', bottom: 0, marginTop: 12, background: '#fff', borderRadius: 10, padding: '10px 16px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 12px rgba(0,0,0,0.08)' }}>
+                  <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>已选 {v2SelectedIds.size} 张</span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button disabled={v2BatchBusy} onClick={() => handleV2BatchAction('discard')}
                       style={{ background: '#FEE2E2', color: '#DC2626', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500, opacity: v2BatchBusy ? 0.6 : 1 }}>
