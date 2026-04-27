@@ -179,6 +179,50 @@ def delete_document(document_id: int) -> None:
 
 # ── 内容解析 ──────────────────────────────────────────────────────────────────
 
+def _try_generate_v2_card(content: str, title: str, source_url: Optional[str], object_name: Optional[str] = None) -> None:
+    """v2 副作用：从上传内容生成 ViewpointCard，失败只 log 不阻断。"""
+    import logging as _lg
+    _logger = _lg.getLogger(__name__ + ".v2")
+    try:
+        from research_v2.adapters.user_upload import UserUploadAdapter
+        from research_v2 import processor, repository
+        from research_v2.symbol import Symbol
+
+        # 尝试推断 symbol
+        affected_symbols = []
+        if object_name:
+            from decision_engine.data_loader import _resolve_symbol
+            session = get_session()
+            try:
+                sym_str = _resolve_symbol(object_name, session)
+                if sym_str:
+                    affected_symbols = [Symbol.parse(sym_str)]
+            finally:
+                session.close()
+
+        adapter = UserUploadAdapter()
+        raw_fact = adapter.fetch_from_text(
+            content=content, title=title, source_url=source_url,
+            affected_symbols=affected_symbols,
+        )
+
+        card = processor.process(raw_fact)
+
+        session = get_session()
+        try:
+            repository.insert(session, card)
+            session.commit()
+            _logger.info("v2 副作用成功: 用户上传 → card_id=%s, symbol=%s", card.card_id, card.facts.primary_symbol)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    except Exception as e:
+        _logger.warning("v2 副作用失败（不影响 v1）: %s", e)
+
+
 def parse_text(content: str, title: str, source_url: Optional[str] = None) -> dict:
     """
     解析纯文本/Markdown 内容，生成 ResearchDocument + ResearchCard。
@@ -215,7 +259,12 @@ def parse_text(content: str, title: str, source_url: Optional[str] = None) -> di
         session.commit()
         session.refresh(card)
 
-        return {"document_id": doc.id, "document_title": resolved_title, "card": _card_to_dict(card)}
+        result = {"document_id": doc.id, "document_title": resolved_title, "card": _card_to_dict(card)}
+
+        # v2 副作用：同步生成 ViewpointCard（失败不阻断 v1 流程）
+        _try_generate_v2_card(content, resolved_title, source_url, card_data.get("object_name"))
+
+        return result
     except Exception:
         session.rollback()
         raise
