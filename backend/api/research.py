@@ -287,7 +287,7 @@ def v2_list_cards(
     status: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
     render: bool = Query(False),
-    top_k: int = Query(10, ge=1, le=100),
+    top_k: int = Query(10, ge=1, le=500),
 ):
     """查询 v2 观点卡。render=true 返回决策引擎可消费格式。"""
     return svc.v2_query_cards(

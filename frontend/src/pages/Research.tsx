@@ -367,7 +367,7 @@ export default function Research() {
 
   function loadV2Cards() {
     setV2Loading(true)
-    researchV2Api.queryCards({ top_k: 50 })
+    researchV2Api.queryCards({ top_k: 500 })
       .then(res => setV2Cards(res.cards ?? []))
       .catch(() => {})
       .finally(() => setV2Loading(false))
