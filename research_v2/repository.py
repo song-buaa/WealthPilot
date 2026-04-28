@@ -339,6 +339,9 @@ def query_for_decision(
     q = q.order_by(ViewpointCardV2.as_of.desc()).limit(top_k)
 
     cards = [_orm_to_card(row) for row in q.all()]
+    # 第 5 条过滤：过期的卡不进决策（expires_at 在 judgment_json 里）
+    now = datetime.now()
+    cards = [c for c in cards if c.judgment.expires_at is None or c.judgment.expires_at > now]
     return render_cards(cards)
 
 
@@ -420,6 +423,9 @@ def query_for_decision_relaxed(
     q = q.order_by(ViewpointCardV2.as_of.desc()).limit(top_k)
 
     cards = [_orm_to_card(row) for row in q.all()]
+    # 过期过滤
+    now = datetime.now()
+    cards = [c for c in cards if c.judgment.expires_at is None or c.judgment.expires_at > now]
     lines = render_cards(cards)
     # 给 pending 卡的输出行加标注
     result = []

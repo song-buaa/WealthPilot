@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import openai
 
@@ -201,6 +201,26 @@ def _attempt_build_card(raw_fact: RawFact, llm_data: dict) -> ViewpointCard:
     )
 
 
+EXPIRY_DAYS_BY_SOURCE = {
+    "akshare_news": 14,
+    "akshare_hist": 7,
+    "akshare_fundamental": 90,
+    "alpha_vantage_news": 14,
+    "alpha_vantage_earnings": 90,
+    "alpha_vantage_fundamental": 90,
+    "perplexity_search": 7,
+    "user_upload": None,
+}
+
+
+def _set_expires_at(card: ViewpointCard) -> ViewpointCard:
+    """根据 source_type 自动设置 expires_at。user_upload 不设过期。"""
+    days = EXPIRY_DAYS_BY_SOURCE.get(card.facts.source_type.value)
+    if days is not None:
+        card.judgment.expires_at = datetime.now() + timedelta(days=days)
+    return card
+
+
 def process(raw_fact: RawFact) -> ViewpointCard:
     """将 RawFact 加工为 ViewpointCard。
 
@@ -223,6 +243,9 @@ def process(raw_fact: RawFact) -> ViewpointCard:
             assert card.judgment.is_ai_prefilled is True
             assert card.judgment.confidence == Confidence.LOW
             assert card.judgment.decision_signal.confidence_score == 0.3
+
+            # 自动设置过期时间
+            card = _set_expires_at(card)
 
             logger.info(
                 "ViewpointCard 生成成功: symbol=%s, source=%s, event=%s (attempt=%d)",
