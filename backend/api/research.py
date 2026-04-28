@@ -326,7 +326,7 @@ def v2_holdings_us():
 
         # A 股：数字.SH / 数字.SZ
         if re.match(r"^\d{6}\.S[HZ]$", t):
-            return f"{t[:6]}:{t[-2:]}", t[-2:], False
+            return f"{t[:6]}:{t[-2:]}", t[-2:], True
 
         # 期权
         if re.match(r"^[A-Z]+\d{6}[CP]\d+$", t):

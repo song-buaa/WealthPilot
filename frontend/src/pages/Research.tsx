@@ -1237,7 +1237,7 @@ export default function Research() {
 
             {v2Holdings.length > 0 && (
               <div style={{ marginBottom: 10 }}>
-                <label style={S.label}>选择持仓标的（可多选，当前支持美股和港股）</label>
+                <label style={S.label}>选择持仓标的（可多选，当前支持美股、港股和A股）</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
                   {(() => {
                     // 按 entity_id 合并同一公司的多个市场条目
@@ -1529,7 +1529,7 @@ export default function Research() {
           {/* 持仓单选列表 */}
           {v2Holdings.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>选择持仓标的（当前支持美股和港股）</label>
+              <label style={S.label}>选择持仓标的（当前支持美股、港股和A股）</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
                 {(() => {
                   const supported = v2Holdings.filter(h => h.supported)

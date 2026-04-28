@@ -53,7 +53,7 @@ class AKShareAdapter(InfoAdapter):
         ]
 
     def is_symbol_supported(self, symbol: Symbol) -> bool:
-        return symbol.market == "HK"
+        return symbol.market in ("HK", "SH", "SZ")
 
     def fetch(self, symbols: list[Symbol], since: Optional[datetime] = None) -> list[RawFact]:
         results: list[RawFact] = []
@@ -61,10 +61,17 @@ class AKShareAdapter(InfoAdapter):
             if not self.is_symbol_supported(symbol):
                 logger.info("AKShare 不支持 %s，跳过", symbol)
                 continue
-            hk_code = symbol.ticker.zfill(5)
-            for fetch_fn in [self.fetch_news, self.fetch_fundamental, self.fetch_hist]:
+
+            if symbol.market == "HK":
+                code = symbol.ticker.zfill(5)
+                fetch_fns = [self.fetch_news, self.fetch_fundamental, self.fetch_hist]
+            else:
+                code = symbol.ticker
+                fetch_fns = [self._fetch_a_news, self._fetch_a_fundamental]
+
+            for fetch_fn in fetch_fns:
                 try:
-                    facts = fetch_fn(symbol, hk_code)
+                    facts = fetch_fn(symbol, code)
                     results.extend(facts)
                 except Exception as e:
                     logger.warning("AKShare %s 失败: %s %s", fetch_fn.__name__, symbol, e)
@@ -194,4 +201,89 @@ class AKShareAdapter(InfoAdapter):
             affected_symbols=[symbol],
             payload={"records": records, "latest": latest},
             source_refs=[SourceRef(ref_type="api_call_id", ref_value=f"akshare_hist_{hk_code}")],
+        )]
+
+    # ── A 股子能力 ──────────────────────────────────────────────────
+
+    def _fetch_a_news(self, symbol: Symbol, code: str) -> list[RawFact]:
+        """A 股新闻（东方财富）。"""
+        if _is_mock_mode():
+            try:
+                data = _load_fixture(f"akshare_{code}_news.json")
+            except FileNotFoundError:
+                logger.warning("Mock fixture 不存在: akshare_%s_news.json", code)
+                return []
+            articles = data.get("articles", data) if isinstance(data, dict) else data
+        else:
+            import akshare as ak
+            df = ak.stock_news_em(symbol=code)
+            if df is None or df.empty:
+                return []
+            articles = []
+            for _, row in df.head(10).iterrows():
+                articles.append({
+                    "title": str(row.get("新闻标题", "")),
+                    "content": str(row.get("新闻内容", ""))[:2000],
+                    "datetime": str(row.get("发布时间", "")),
+                    "source": str(row.get("文章来源", "")),
+                    "url": str(row.get("新闻链接", "")),
+                })
+
+        if not articles:
+            return []
+
+        results: list[RawFact] = []
+        for art in (articles if isinstance(articles, list) else [articles])[:5]:
+            try:
+                as_of = datetime.strptime(str(art.get("datetime", ""))[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, KeyError):
+                as_of = datetime.now()
+
+            url = art.get("url", "")
+            refs = []
+            if url:
+                refs.append(SourceRef(ref_type="url", ref_value=url, title=art.get("title")))
+
+            results.append(RawFact(
+                source_type=SourceType.AKSHARE_NEWS,
+                source_url=url,
+                as_of=as_of,
+                affected_symbols=[symbol],
+                payload={
+                    "title": art.get("title", ""),
+                    "content": art.get("content", ""),
+                    "source": art.get("source", ""),
+                },
+                source_refs=refs,
+            ))
+
+        logger.info("AKShare A股 NEWS: %s → %d 条", symbol, len(results))
+        return results
+
+    def _fetch_a_fundamental(self, symbol: Symbol, code: str) -> list[RawFact]:
+        """A 股基本面（东方财富个股信息）。"""
+        if _is_mock_mode():
+            try:
+                data = _load_fixture(f"akshare_{code}_fundamental.json")
+            except FileNotFoundError:
+                logger.warning("Mock fixture 不存在: akshare_%s_fundamental.json", code)
+                return []
+        else:
+            import akshare as ak
+            df = ak.stock_individual_info_em(symbol=code)
+            if df is None or df.empty:
+                return []
+            data = dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
+
+        # 统一为 dict
+        if isinstance(data, list):
+            data = {item.get("item", f"key_{i}"): item.get("value") for i, item in enumerate(data)}
+
+        return [RawFact(
+            source_type=SourceType.AKSHARE_FUNDAMENTAL,
+            source_url=None,
+            as_of=datetime.now(),
+            affected_symbols=[symbol],
+            payload=data,
+            source_refs=[SourceRef(ref_type="api_call_id", ref_value=f"akshare_a_info_{code}")],
         )]

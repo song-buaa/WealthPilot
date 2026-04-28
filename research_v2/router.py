@@ -33,13 +33,8 @@ class InfoRouter:
         adapters: list[InfoAdapter] = []
         if symbol.market == "US":
             adapters.append(self._av_adapter)
-        elif symbol.market == "HK":
+        elif symbol.market in ("HK", "SH", "SZ"):
             adapters.append(self._akshare_adapter)
-        elif symbol.market in ("SH", "SZ"):
-            logger.info(
-                "%s 市场暂无专属 Adapter，仅支持 UserUpload",
-                symbol.market,
-            )
         return adapters
 
     def fetch_all(
