@@ -737,6 +737,52 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
         session.close()
 
 
+def v2_ingest_akshare(symbol_str: str) -> dict:
+    """触发 AKShare 港股拉取 ��� 多张 ViewpointCard → 入库。"""
+    from research_v2.symbol import Symbol
+    from research_v2.adapters.akshare_adapter import AKShareAdapter
+    from research_v2 import processor
+    from research_v2 import repository
+    from app.database import get_session
+
+    symbol = Symbol.parse(symbol_str)
+    adapter = AKShareAdapter()
+
+    raw_facts = adapter.fetch([symbol])
+    if not raw_facts:
+        return {"cards": [], "errors": [], "message": "AKShare 未返回数据"}
+
+    cards_data = []
+    errors = []
+    session = get_session()
+    try:
+        for rf in raw_facts:
+            try:
+                card = processor.process(rf)
+                repository.insert(session, card)
+                cards_data.append(card.model_dump(mode="json"))
+            except Exception as e:
+                _v2_logger.exception(
+                    "Processor 处理 RawFact 失败，source_type=%s, symbol=%s",
+                    rf.source_type, rf.affected_symbols,
+                )
+                errors.append({
+                    "source_type": rf.source_type.value if hasattr(rf.source_type, 'value') else str(rf.source_type),
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:500],
+                })
+                continue
+
+        session.commit()
+        _v2_logger.info("v2_ingest_akshare 完成: symbol=%s, %d 张卡, %d 失败", symbol_str, len(cards_data), len(errors))
+        return {"cards": cards_data, "errors": errors}
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def v2_update_judgment(card_id: str, judgment_updates: dict, confirm: bool = False, action: Optional[str] = None) -> Optional[dict]:
     """更新判断层。支持 action: confirm/unconfirm/modify/discard/restore。"""
     from research_v2 import repository

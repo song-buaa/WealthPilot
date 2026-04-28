@@ -244,8 +244,14 @@ export const researchV2Api = {
       body: JSON.stringify({ symbol }),
     }),
 
+  ingestAkshare: (symbol: string) =>
+    request<{ cards: ViewpointCardV2[]; errors?: unknown[] }>('/research/v2/ingest/akshare', {
+      method: 'POST',
+      body: JSON.stringify({ symbol }),
+    }),
+
   getHoldingsUS: () =>
-    request<{ symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number }[]>('/research/v2/holdings_us'),
+    request<{ symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number; entity_id?: string | null; sibling_symbols?: string[] }[]>('/research/v2/holdings_us'),
 
   updateJudgment: (cardId: string, judgment: Record<string, unknown>, confirm: boolean, action?: string) =>
     request<{ card: ViewpointCardV2 }>(`/research/v2/cards/${cardId}/judgment`, {

@@ -255,6 +255,23 @@ def v2_ingest_alpha_vantage(req: V2IngestAVRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/v2/ingest/akshare", status_code=201)
+def v2_ingest_akshare(req: V2IngestAVRequest):
+    """触发 AKShare 港股数据拉取。"""
+    if not req.symbol.strip():
+        raise HTTPException(status_code=400, detail="symbol 不能为空")
+    try:
+        result = svc.v2_ingest_akshare(req.symbol)
+        headers = {}
+        if result.get("errors"):
+            headers["X-Partial-Failure"] = "true"
+        return JSONResponse(content=result, status_code=201, headers=headers)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/v2/cards/{card_id}/judgment")
 def v2_update_judgment(card_id: str, req: V2JudgmentUpdateRequest):
     """更新判断层。confirm=true 时确认卡片。"""
@@ -281,7 +298,7 @@ def v2_list_cards(
 
 @router.get("/v2/holdings_us")
 def v2_holdings_us():
-    """返回当前持仓列表，按市值占比排序，从 ticker+currency 直接推断 symbol。"""
+    """返回当前持仓列表，按市值占比排序，支持跨市场分组。"""
     import re
     from app.database import get_session
     from app.models import Position
@@ -292,32 +309,37 @@ def v2_holdings_us():
         if not ticker or not ticker.strip():
             return None, None, False
         t = ticker.strip()
+        c = (currency or "").upper()
+
+        # 港股：带 .HK 后缀 或 HKD currency + 纯数字
+        if t.endswith(".HK"):
+            code = t.replace(".HK", "").lstrip("0") or "0"
+            return f"{code}:HK", "HK", True
+        if c == "HKD" and re.match(r"^\d{4,5}$", t):
+            code = t.lstrip("0") or "0"
+            return f"{code}:HK", "HK", True
 
         # A 股：数字.SH / 数字.SZ
-        if re.match(r'^\d{6}\.S[HZ]$', t):
-            market = t[-2:]
-            code = t[:6]
-            return f"{code}:{market}", market, False  # A 股暂不支持自动拉取
+        if re.match(r"^\d{6}\.S[HZ]$", t):
+            return f"{t[:6]}:{t[-2:]}", t[-2:], False
 
-        # 期权格式（如 AAPL240621C00190000）：跳过
-        if re.match(r'^[A-Z]+\d{6}[CP]\d+$', t):
+        # 期权
+        if re.match(r"^[A-Z]+\d{6}[CP]\d+$", t):
             return None, None, False
 
-        # ISIN/基金代码（LU 开头、纯数字 6 位）：不支持
-        if t.startswith('LU') or t.startswith('IE') or re.match(r'^\d{6}$', t):
+        # ISIN/基金代码
+        if t.startswith("LU") or t.startswith("IE") or re.match(r"^\d{6}$", t):
             return None, None, False
 
-        # 其他特殊代码（含 - 或长度异常）：不支持
-        if '-' in t or len(t) > 10:
+        # 含 - 或过长
+        if "-" in t or len(t) > 10:
             return None, None, False
 
-        # 纯字母 + USD → 美股
-        if re.match(r'^[A-Z]{1,5}$', t) and currency == 'USD':
+        # 美股：纯字母 + USD
+        if re.match(r"^[A-Z]{1,5}$", t) and c == "USD":
             return f"{t}:US", "US", True
-
-        # 纯字母但非 USD（罕见）
-        if re.match(r'^[A-Z]{1,5}$', t):
-            return f"{t}:US", "US", True  # 默认当 US
+        if re.match(r"^[A-Z]{1,5}$", t):
+            return f"{t}:US", "US", True
 
         return None, None, False
 
@@ -332,41 +354,75 @@ def v2_holdings_us():
         )
 
         total_mv = sum(p.market_value_cny for p in positions) or 1.0
-        seen_names = set()
-        result = []
 
+        # 按 symbol 去重（同名不同平台合并市值）
+        sym_map: dict[str, dict] = {}
         for p in positions:
+            symbol, market, supported = _infer_symbol(p.ticker or "", p.currency or "CNY")
+            if not symbol:
+                continue
+            if symbol in sym_map:
+                sym_map[symbol]["weight"] += p.market_value_cny / total_mv
+            else:
+                sym_map[symbol] = {
+                    "symbol": symbol,
+                    "asset_name": p.name,
+                    "market": market,
+                    "supported": supported,
+                    "weight": p.market_value_cny / total_mv,
+                    "entity_id": None,
+                    "sibling_symbols": [],
+                }
+
+        # 查 EntityRegistry 填 entity_id + sibling_symbols
+        try:
+            from research_v2.symbol import Symbol as Sym, get_registry
+            registry = get_registry()
+            for sym_str, item in sym_map.items():
+                try:
+                    entity = registry.lookup(Sym.parse(sym_str))
+                    if entity:
+                        item["entity_id"] = entity.entity_id
+                except Exception:
+                    pass
+
+            # 填 sibling_symbols
+            entity_groups: dict[str, list[str]] = {}
+            for sym_str, item in sym_map.items():
+                eid = item.get("entity_id")
+                if eid:
+                    entity_groups.setdefault(eid, []).append(sym_str)
+            for sym_str, item in sym_map.items():
+                eid = item.get("entity_id")
+                if eid and len(entity_groups.get(eid, [])) > 1:
+                    item["sibling_symbols"] = [s for s in entity_groups[eid] if s != sym_str]
+        except Exception:
+            pass
+
+        # 不支持的持仓也包含（标 supported=false）
+        seen_names = set()
+        unsupported = []
+        for p in positions:
+            symbol, _, _ = _infer_symbol(p.ticker or "", p.currency or "CNY")
+            if symbol and symbol in sym_map:
+                continue
             if p.name in seen_names:
                 continue
             seen_names.add(p.name)
-
-            symbol, market, supported = _infer_symbol(p.ticker or '', p.currency or 'CNY')
-
-            # 如果 ticker 推断失败，尝试 EntityRegistry 按名称匹配
-            if not symbol:
-                from research_v2.symbol import get_registry
-                registry = get_registry()
-                for entity in registry.all_entities():
-                    if (entity.display_name_cn in p.name or p.name in entity.display_name_cn
-                            or (entity.display_name_en and entity.display_name_en.lower() in (p.name or '').lower())):
-                        for s in entity.symbols:
-                            if s.market in ("US", "HK"):
-                                symbol = str(s)
-                                market = s.market
-                                supported = True
-                                break
-                        break
-
-            weight = round(p.market_value_cny / total_mv, 4)
-
-            result.append({
-                "symbol": symbol,
+            unsupported.append({
+                "symbol": None,
                 "asset_name": p.name,
-                "market": market,
-                "supported": supported,
-                "weight": weight,
+                "market": None,
+                "supported": False,
+                "weight": round(p.market_value_cny / total_mv, 4),
+                "entity_id": None,
+                "sibling_symbols": [],
             })
 
+        result = sorted(sym_map.values(), key=lambda x: -x["weight"])
+        for item in result:
+            item["weight"] = round(item["weight"], 4)
+        result.extend(unsupported)
         return result
     finally:
         session.close()

@@ -337,7 +337,7 @@ export default function Research() {
   // ── v2 状态 ──
   const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
   const [v2Loading,     setV2Loading]     = useState(false)
-  const [v2Holdings,    setV2Holdings]    = useState<{symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number}[]>([])
+  const [v2Holdings,    setV2Holdings]    = useState<{symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number; entity_id?: string | null; sibling_symbols?: string[]}[]>([])
   const [v2Selected,    setV2Selected]    = useState<Set<string>>(new Set())
   const [v2ManualSym,   setV2ManualSym]   = useState('')
   const [v2Fetching,    setV2Fetching]    = useState(false)
@@ -619,17 +619,30 @@ export default function Research() {
 
   // ── v2 handlers ──
   async function handleV2Fetch() {
-    const symbols = [...v2Selected]
-    if (v2ManualSym.trim()) symbols.push(v2ManualSym.trim())
-    if (symbols.length === 0) return
+    // 收集所有要拉取的 symbol（含 sibling）
+    const allSymbols: string[] = []
+    for (const sym of v2Selected) {
+      allSymbols.push(sym)
+      const h = v2Holdings.find(x => x.symbol === sym)
+      if (h?.sibling_symbols) {
+        for (const sib of h.sibling_symbols) {
+          if (!allSymbols.includes(sib)) allSymbols.push(sib)
+        }
+      }
+    }
+    if (v2ManualSym.trim()) allSymbols.push(v2ManualSym.trim())
+    if (allSymbols.length === 0) return
 
     setV2Fetching(true); setV2FetchMsg(''); setV2FetchProgress('')
     let totalCards = 0; let totalErrors = 0
-    for (let i = 0; i < symbols.length; i++) {
-      const sym = symbols[i]
-      setV2FetchProgress(`处理中 (${i + 1}/${symbols.length}) — 正在拉取 ${sym}...`)
+    for (let i = 0; i < allSymbols.length; i++) {
+      const sym = allSymbols[i]
+      const source = sym.endsWith(':HK') ? 'AKShare' : 'Alpha Vantage'
+      setV2FetchProgress(`处理中 (${i + 1}/${allSymbols.length}) — 正在拉取 ${sym} (${source})...`)
       try {
-        const res = await researchV2Api.ingestAlphaVantage(sym)
+        const res = sym.endsWith(':HK')
+          ? await researchV2Api.ingestAkshare(sym)
+          : await researchV2Api.ingestAlphaVantage(sym)
         totalCards += res.cards?.length ?? 0
         totalErrors += res.errors?.length ?? 0
       } catch (err: unknown) {
@@ -638,7 +651,7 @@ export default function Research() {
       }
     }
     setV2FetchProgress('')
-    setV2FetchMsg(`完成：${symbols.length} 个标的，生成 ${totalCards} 张待审核卡${totalErrors > 0 ? `，${totalErrors} 条处理失败` : ''}`)
+    setV2FetchMsg(`完成：${allSymbols.length} 次拉取，生成 ${totalCards} 张待审核卡${totalErrors > 0 ? `，${totalErrors} 条处理失败` : ''}`)
     setV2ManualSym('')
     loadV2Cards()
     setV2Fetching(false)
@@ -1218,27 +1231,43 @@ export default function Research() {
           {/* ══════════ v2: 自动拉取资讯 ══════════ */}
           <div style={{ ...S.card, padding: '16px 20px' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sparkles size={14} style={{ color: '#F59E0B' }} /> 自动拉取资讯 (Alpha Vantage v2)
+              <Sparkles size={14} style={{ color: '#F59E0B' }} /> 自动拉取资讯
             </div>
 
             {v2Holdings.length > 0 && (
               <div style={{ marginBottom: 10 }}>
                 <label style={S.label}>选择持仓标的（可多选，当前支持美股和港股）</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
-                  {v2Holdings.filter(h => h.supported).map(h => (
-                    <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
-                      <input type="checkbox"
-                        checked={v2Selected.has(h.symbol!)}
-                        onChange={e => {
-                          const next = new Set(v2Selected)
-                          e.target.checked ? next.add(h.symbol!) : next.delete(h.symbol!)
-                          setV2Selected(next)
-                        }} />
-                      <span style={{ flex: 1 }}>{h.asset_name}</span>
-                      <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>
-                      <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
-                    </label>
-                  ))}
+                  {(() => {
+                    // 按 entity_id 合并同一公司的多个市场条目
+                    const supported = v2Holdings.filter(h => h.supported)
+                    const seen = new Set<string>()
+                    const merged: typeof supported = []
+                    for (const h of supported) {
+                      if (h.entity_id && seen.has(h.entity_id)) continue
+                      if (h.entity_id) seen.add(h.entity_id)
+                      merged.push(h)
+                    }
+                    return merged.map(h => {
+                      const siblings = (h.sibling_symbols ?? []).filter(s => v2Holdings.some(x => x.symbol === s && x.supported))
+                      const totalWeight = h.weight + siblings.reduce((sum, s) => sum + (v2Holdings.find(x => x.symbol === s)?.weight ?? 0), 0)
+                      const allSyms = [h.symbol!, ...siblings]
+                      return (
+                        <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
+                          <input type="checkbox"
+                            checked={v2Selected.has(h.symbol!)}
+                            onChange={e => {
+                              const next = new Set(v2Selected)
+                              e.target.checked ? next.add(h.symbol!) : next.delete(h.symbol!)
+                              setV2Selected(next)
+                            }} />
+                          <span style={{ flex: 1 }}>{h.asset_name.split(' (')[0]}</span>
+                          <span style={{ color: '#9CA3AF', fontSize: 11 }}>{allSyms.join(' + ')}</span>
+                          <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(totalWeight * 100).toFixed(1)}%</span>
+                        </label>
+                      )
+                    })
+                  })()}
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
