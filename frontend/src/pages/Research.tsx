@@ -1223,7 +1223,7 @@ export default function Research() {
 
             {v2Holdings.length > 0 && (
               <div style={{ marginBottom: 10 }}>
-                <label style={S.label}>选择持仓标的（可多选，当前支持美股）</label>
+                <label style={S.label}>选择持仓标的（可多选，当前支持美股和港股）</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
                   {v2Holdings.filter(h => h.supported).map(h => (
                     <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
@@ -1495,7 +1495,7 @@ export default function Research() {
           {/* 持仓单选列表 */}
           {v2Holdings.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>选择持仓标的（当前支持美股）</label>
+              <label style={S.label}>选择持仓标的（当前支持美股和港股）</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
                 {v2Holdings.filter(h => h.supported).map(h => (
                   <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>

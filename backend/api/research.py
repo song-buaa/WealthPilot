@@ -341,6 +341,22 @@ def v2_holdings_us():
             seen_names.add(p.name)
 
             symbol, market, supported = _infer_symbol(p.ticker or '', p.currency or 'CNY')
+
+            # 如果 ticker 推断失败，尝试 EntityRegistry 按名称匹配
+            if not symbol:
+                from research_v2.symbol import get_registry
+                registry = get_registry()
+                for entity in registry.all_entities():
+                    if (entity.display_name_cn in p.name or p.name in entity.display_name_cn
+                            or (entity.display_name_en and entity.display_name_en.lower() in (p.name or '').lower())):
+                        for s in entity.symbols:
+                            if s.market in ("US", "HK"):
+                                symbol = str(s)
+                                market = s.market
+                                supported = True
+                                break
+                        break
+
             weight = round(p.market_value_cny / total_mv, 4)
 
             result.append({
