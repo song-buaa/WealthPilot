@@ -46,6 +46,8 @@ def _load_prompt(source_type: SourceType) -> str:
     """根据 source_type 加载对应的 prompt 模板。"""
     if source_type == SourceType.USER_UPLOAD:
         filename = "user_upload.txt"
+    elif source_type in (SourceType.AKSHARE_NEWS, SourceType.AKSHARE_FUNDAMENTAL, SourceType.AKSHARE_HIST):
+        filename = "akshare.txt"
     else:
         filename = "alpha_vantage.txt"
     path = os.path.join(_PROMPTS_DIR, filename)

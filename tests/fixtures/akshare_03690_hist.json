@@ -1,0 +1,9 @@
+{
+  "records": [
+    {"date": "2026-04-22", "open": 83.60, "close": 82.80, "high": 84.10, "low": 82.20, "volume": 38500000, "change_pct": -0.72},
+    {"date": "2026-04-23", "open": 82.90, "close": 83.00, "high": 83.50, "low": 82.10, "volume": 35200000, "change_pct": 0.24},
+    {"date": "2026-04-24", "open": 83.00, "close": 82.45, "high": 83.50, "low": 81.70, "volume": 36155043, "change_pct": -0.66},
+    {"date": "2026-04-25", "open": 82.50, "close": 82.00, "high": 82.80, "low": 81.50, "volume": 33100000, "change_pct": -0.55},
+    {"date": "2026-04-28", "open": 80.85, "close": 80.45, "high": 81.65, "low": 80.25, "volume": 19880449, "change_pct": -1.89}
+  ]
+}
