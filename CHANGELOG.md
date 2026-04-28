@@ -4,6 +4,50 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.5.1] - 2026-04-28 - A 股支持 · 观点库分页 · 体验优化
+
+### Added
+
+**A 股数据拉取**
+- `AKShareAdapter` 新增 A 股子能力（`_fetch_a_news` / `_fetch_a_fundamental`），复用 `AKSHARE_NEWS` / `AKSHARE_FUNDAMENTAL` SourceType
+- `InfoRouter` 扩展：SH/SZ 市场路由到 AKShareAdapter
+- holdings 接口 A 股标的标记 `supported=true`（贵州茅台 600519:SH、宁德时代 300750:SZ）
+- A 股 fixture 补充（茅台/宁德时代真实数据）
+
+**观点库分页**
+- 每页 20 条，底部分页控件（上一页/下一页 + 页码 + 总数）
+- 过滤条件变化时自动回到第 1 页
+- "全选本页"只选当前页的卡，不跨页
+
+**观点库标的下拉筛选**
+- 标的筛选从文本输入框改为下拉选择器
+- 选项从 v2Cards 动态提取，显示中文名（从 holdings 映射）
+- 按字母排序，"全部标的"始终在第一位
+
+**投研观点保鲜机制**
+- 决策 prompt 新增时效性引用规则（7天/30天/90天分级处理）
+- Processor 自动设置 `expires_at`（news=14天 / fundamental=90天 / hist=7天 / user_upload=不过期）
+- `query_for_decision` 新增第 5 条过滤：过期卡不进决策
+- 观点库显示过期状态（橙色 badge）+ 审核弹窗支持手动延期
+
+### Fixed
+
+- 港股 symbol 推断错误（02015.HK 不再错误映射为 LI:US）
+- A 股拉取 endpoint 判断（SH/SZ 走 AKShare 而非 Alpha Vantage）
+- ETF 类标的标记不支持自动拉取（QQQ/SHY 等）
+- 查询上限从 50 提升到 500
+
+### Changed
+
+- holdings 接口支持跨市场分组（entity_id + sibling_symbols）
+- 前端持仓列表同一公司多市场合并显示（理想汽车 = LI:US + 2015:HK）
+- 决策检索持仓选择器同步支持跨市场合并
+- 来源标签新增港股类型（港股新闻/港股概况/港股行情）
+- 按钮文案优化（刷新已选 → 拉取资讯）
+- 支持范围文案更新（美股 → 美股、港股和A股）
+
+---
+
 ## [2.5.0] - 2026-04-28 - 投研观点模块 v2 — 三层架构 · 多数据源 · 自动拉取
 
 ### 架构重构（v2.0 MVP，M0-M5）
