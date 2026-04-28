@@ -637,10 +637,11 @@ export default function Research() {
     let totalCards = 0; let totalErrors = 0
     for (let i = 0; i < allSymbols.length; i++) {
       const sym = allSymbols[i]
-      const source = sym.endsWith(':HK') ? 'AKShare' : 'Alpha Vantage'
+      const isAkShare = sym.endsWith(':HK') || sym.endsWith(':SH') || sym.endsWith(':SZ')
+      const source = isAkShare ? 'AKShare' : 'Alpha Vantage'
       setV2FetchProgress(`处理中 (${i + 1}/${allSymbols.length}) — 正在拉取 ${sym} (${source})...`)
       try {
-        const res = sym.endsWith(':HK')
+        const res = isAkShare
           ? await researchV2Api.ingestAkshare(sym)
           : await researchV2Api.ingestAlphaVantage(sym)
         totalCards += res.cards?.length ?? 0
