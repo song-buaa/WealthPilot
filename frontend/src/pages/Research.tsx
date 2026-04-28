@@ -1288,7 +1288,7 @@ export default function Research() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button style={{ ...S.btnPrimary, opacity: v2Fetching || (v2Selected.size === 0 && !v2ManualSym.trim()) ? 0.6 : 1 }}
                 disabled={v2Fetching || (v2Selected.size === 0 && !v2ManualSym.trim())} onClick={handleV2Fetch}>
-                {v2Fetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 刷新已选
+                {v2Fetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 拉取资讯
               </button>
               {(v2Selected.size > 0 || v2ManualSym.trim()) && !v2Fetching && (
                 <span style={{ fontSize: 11, color: '#9CA3AF' }}>
