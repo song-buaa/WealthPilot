@@ -615,9 +615,24 @@ export default function Research() {
     const matchV = filterValidity === 'all' || c.judgment.validity_status === filterValidity
     const matchS = filterStance === 'all' || c.judgment.stance === filterStance
     const matchH = filterHorizon === 'all' || c.judgment.horizon === filterHorizon
-    const matchO = !filterObject || symbol.toLowerCase().includes(filterObject.toLowerCase())
+    const matchO = !filterObject || filterObject === 'all' || symbol === filterObject
     return matchQ && matchV && matchS && matchH && matchO
   })
+
+  // 标的下拉选项（从 v2Cards 动态提取 + holdings 取中文名）
+  const v2SymbolOptions = React.useMemo(() => {
+    const syms = v2Cards.map(c => c.facts.primary_symbol).filter(Boolean) as string[]
+    return Array.from(new Set(syms)).sort()
+  }, [v2Cards])
+
+  const v2SymbolNameMap = React.useMemo(() => {
+    const m: Record<string, string> = {}
+    v2Holdings.forEach(h => {
+      if (h.symbol) m[h.symbol] = h.asset_name.split(' (')[0]
+      ;(h.sibling_symbols ?? []).forEach(s => { if (!m[s]) m[s] = h.asset_name.split(' (')[0] })
+    })
+    return m
+  }, [v2Holdings])
 
   // 过滤变化时重置分页
   useEffect(() => { setV2LibPage(1) }, [query, filterValidity, filterStance, filterHorizon, filterObject])
@@ -1417,8 +1432,12 @@ export default function Research() {
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索标题、标的、论点…"
                 style={{ border: 'none', outline: 'none', flex: 1, fontSize: 12, color: '#374151', background: 'transparent', fontFamily: 'inherit' }} />
             </div>
-            <input value={filterObject} onChange={e => setFilterObject(e.target.value)} placeholder="标的 symbol"
-              style={{ ...S.select, width: 100 }} />
+            <select value={filterObject || 'all'} onChange={e => setFilterObject(e.target.value === 'all' ? '' : e.target.value)} style={S.select}>
+              <option value="all">全部标的</option>
+              {v2SymbolOptions.map(sym => (
+                <option key={sym} value={sym}>{v2SymbolNameMap[sym] ? `${sym}（${v2SymbolNameMap[sym]}）` : sym}</option>
+              ))}
+            </select>
             <select value={filterHorizon} onChange={e => setFilterHorizon(e.target.value)} style={S.select}>
               <option value="all">全部维度</option>
               <option value="short">短期</option><option value="medium">中期</option><option value="long">长期</option>
