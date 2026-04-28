@@ -1531,15 +1531,30 @@ export default function Research() {
             <div style={{ marginBottom: 12 }}>
               <label style={S.label}>选择持仓标的（当前支持美股和港股）</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
-                {v2Holdings.filter(h => h.supported).map(h => (
-                  <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>
-                    <input type="radio" name="v2search_holding" checked={v2SearchSymbol === h.symbol}
-                      onChange={() => setV2SearchSymbol(h.symbol!)} />
-                    <span style={{ flex: 1 }}>{h.asset_name}</span>
-                    <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>
-                    <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
-                  </label>
-                ))}
+                {(() => {
+                  const supported = v2Holdings.filter(h => h.supported)
+                  const seen = new Set<string>()
+                  const merged: typeof supported = []
+                  for (const h of supported) {
+                    if (h.entity_id && seen.has(h.entity_id)) continue
+                    if (h.entity_id) seen.add(h.entity_id)
+                    merged.push(h)
+                  }
+                  return merged.map(h => {
+                    const siblings = (h.sibling_symbols ?? []).filter(s => v2Holdings.some(x => x.symbol === s && x.supported))
+                    const totalWeight = h.weight + siblings.reduce((sum, s) => sum + (v2Holdings.find(x => x.symbol === s)?.weight ?? 0), 0)
+                    const allSyms = [h.symbol!, ...siblings]
+                    return (
+                      <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>
+                        <input type="radio" name="v2search_holding" checked={v2SearchSymbol === h.symbol}
+                          onChange={() => setV2SearchSymbol(h.symbol!)} />
+                        <span style={{ flex: 1 }}>{h.asset_name.split(' (')[0]}</span>
+                        <span style={{ color: '#9CA3AF', fontSize: 11 }}>{allSyms.join(' + ')}</span>
+                        <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(totalWeight * 100).toFixed(1)}%</span>
+                      </label>
+                    )
+                  })
+                })()}
               </div>
             </div>
           )}
