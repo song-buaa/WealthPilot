@@ -185,7 +185,14 @@ chat_answer 输出格式：
 - 不得对没有URL的内容伪造链接或省略来源标注
 - 每条引用数据最多附一个链接
 - [用户资料]标注的内容不附链接
-- 日期标注（如[2026-03]）不要出现在chat_answer正文中"""
+- 日期标注（如[2026-03]）不要出现在chat_answer正文中
+
+时效性引用规则（基于每条观点末尾的"数据截至 YYYY-MM-DD"标注，对照 current_date 字段判断）：
+- 7天内的数据：正常引用，无需额外说明
+- 8-30天的数据：引用时在该句末尾注明"（据 YYYY-MM-DD 数据）"，提醒用户数据时效
+- 30天以上的数据：只引用其中的长期逻辑和结构性判断，不引用具体数字和短期判断
+- 超过90天的[第三方数据]来源新闻类数据：忽略不引用
+- [用户资料]来源的数据不受以上时效规则限制"""
 
 # ── chat_answer 格式模板（按对话轮次动态选择）────────────────────────────────
 
@@ -809,8 +816,10 @@ def _build_payload(
             "platforms": tp.platforms if tp.platforms else [],
         }
 
+    from datetime import datetime as _dt
     return {
         "user_query": user_query,
+        "current_date": _dt.now().strftime("%Y-%m-%d"),
         "intent": {
             "asset": intent.asset,
             "action_type": intent.action_type,
@@ -1067,8 +1076,10 @@ def _build_portfolio_payload(user_query: str, data: LoadedData) -> dict:
     for c in cats.values():
         c["pct"] = round(c["market_value"] / total_mv * 100, 1)
 
+    from datetime import datetime as _dt
     return {
         "user_query": user_query,
+        "current_date": _dt.now().strftime("%Y-%m-%d"),
         "portfolio": {
             "total_assets_cny": f"¥{data.total_assets:,.0f}",
             "holding_count": len(data.positions),
