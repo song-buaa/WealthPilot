@@ -667,6 +667,7 @@ export default function Research() {
       horizon: card.judgment.horizon,
       trigger_conditions: card.judgment.trigger_conditions ?? '',
       invalidation_conditions: card.judgment.invalidation_conditions ?? '',
+      expires_at: card.judgment.expires_at ?? '',
     })
   }
 
@@ -1455,9 +1456,13 @@ export default function Research() {
                 const SOURCE_SHORT: Record<string, string> = {
                   user_upload: '用户上传', alpha_vantage_news: '公开新闻',
                   alpha_vantage_fundamental: '基本面', alpha_vantage_earnings: '财报',
+                  akshare_news: '港股新闻', akshare_fundamental: '港股概况', akshare_hist: '港股行情',
                   perplexity_search: '联网', hybrid: '混合',
                 }
-                const vBadge = VALIDITY_CN[j.validity_status] ?? VALIDITY_CN.active
+                const isExpiredByTime = j.expires_at && new Date(j.expires_at) < new Date()
+                const vBadge = isExpiredByTime
+                  ? { label: '已过期', bg: '#FEF3C7', color: '#D97706' }
+                  : (VALIDITY_CN[j.validity_status] ?? VALIDITY_CN.active)
                 return (
                   <div key={card.card_id}
                     style={{
@@ -1663,6 +1668,13 @@ export default function Research() {
                     <option value="short">短期(&lt;1月)</option><option value="medium">中期(1-6月)</option><option value="long">长期(&gt;6月)</option>
                   </select>
                 </div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={S.label}>过期时间（可选，只能往后延期）</label>
+                <input type="date" style={{ ...S.input, maxWidth: 200 }}
+                  value={v2JudgEdit.expires_at ? v2JudgEdit.expires_at.slice(0, 10) : ''}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setV2JudgEdit(p => ({ ...p, expires_at: e.target.value ? e.target.value + 'T23:59:59' : '' }))} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div>
