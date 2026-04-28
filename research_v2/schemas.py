@@ -23,6 +23,9 @@ class SourceType(str, enum.Enum):
     ALPHA_VANTAGE_FUNDAMENTAL = "alpha_vantage_fundamental"
     ALPHA_VANTAGE_EARNINGS = "alpha_vantage_earnings"
     PERPLEXITY_SEARCH = "perplexity_search"
+    AKSHARE_NEWS = "akshare_news"
+    AKSHARE_FUNDAMENTAL = "akshare_fundamental"
+    AKSHARE_HIST = "akshare_hist"
     HYBRID = "hybrid"
 
 

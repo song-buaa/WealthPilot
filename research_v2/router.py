@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from research_v2.adapters.akshare_adapter import AKShareAdapter
 from research_v2.adapters.alpha_vantage import AlphaVantageAdapter
 from research_v2.adapters.base import AdapterQuotaError, InfoAdapter, RawFact
 from research_v2.adapters.user_upload import UserUploadAdapter
@@ -24,6 +25,7 @@ class InfoRouter:
 
     def __init__(self) -> None:
         self._av_adapter = AlphaVantageAdapter()
+        self._akshare_adapter = AKShareAdapter()
         self._upload_adapter = UserUploadAdapter()
 
     def get_auto_adapters(self, symbol: Symbol) -> list[InfoAdapter]:
@@ -31,9 +33,11 @@ class InfoRouter:
         adapters: list[InfoAdapter] = []
         if symbol.market == "US":
             adapters.append(self._av_adapter)
-        elif symbol.market in ("HK", "SH", "SZ"):
+        elif symbol.market == "HK":
+            adapters.append(self._akshare_adapter)
+        elif symbol.market in ("SH", "SZ"):
             logger.info(
-                "%s 市场暂无专属 Adapter（v2 不覆盖），仅支持 UserUpload",
+                "%s 市场暂无专属 Adapter，仅支持 UserUpload",
                 symbol.market,
             )
         return adapters
