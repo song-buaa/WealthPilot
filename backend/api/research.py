@@ -304,7 +304,12 @@ def v2_holdings_us():
     from app.models import Position
     from app.state import portfolio_id as default_pid
 
-    def _infer_symbol(ticker: str, currency: str) -> tuple:
+    _ETF_TICKERS = {
+        "QQQ", "SPY", "IWM", "GLD", "SLV", "TLT", "IEF", "SHY",
+        "HYG", "LQD", "VXX", "UVXY", "SQQQ", "TQQQ", "DIA", "VOO",
+    }
+
+    def _infer_symbol(ticker: str, currency: str, name: str = "") -> tuple:
         """从 ticker + currency 推断 (symbol, market, supported)。"""
         if not ticker or not ticker.strip():
             return None, None, False
@@ -337,9 +342,11 @@ def v2_holdings_us():
 
         # 美股：纯字母 + USD
         if re.match(r"^[A-Z]{1,5}$", t) and c == "USD":
-            return f"{t}:US", "US", True
+            is_etf = t in _ETF_TICKERS or "ETF" in name.upper()
+            return f"{t}:US", "US", not is_etf
         if re.match(r"^[A-Z]{1,5}$", t):
-            return f"{t}:US", "US", True
+            is_etf = t in _ETF_TICKERS or "ETF" in name.upper()
+            return f"{t}:US", "US", not is_etf
 
         return None, None, False
 
@@ -358,7 +365,7 @@ def v2_holdings_us():
         # 按 symbol 去重（同名不同平台合并市值）
         sym_map: dict[str, dict] = {}
         for p in positions:
-            symbol, market, supported = _infer_symbol(p.ticker or "", p.currency or "CNY")
+            symbol, market, supported = _infer_symbol(p.ticker or "", p.currency or "CNY", p.name or "")
             if not symbol:
                 continue
             if symbol in sym_map:
@@ -403,7 +410,7 @@ def v2_holdings_us():
         seen_names = set()
         unsupported = []
         for p in positions:
-            symbol, _, _ = _infer_symbol(p.ticker or "", p.currency or "CNY")
+            symbol, _, _ = _infer_symbol(p.ticker or "", p.currency or "CNY", p.name or "")
             if symbol and symbol in sym_map:
                 continue
             if p.name in seen_names:
