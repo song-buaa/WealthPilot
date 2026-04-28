@@ -1223,28 +1223,22 @@ export default function Research() {
 
             {v2Holdings.length > 0 && (
               <div style={{ marginBottom: 10 }}>
-                <label style={S.label}>选择持仓标的（可多选）</label>
+                <label style={S.label}>选择持仓标的（可多选，当前支持美股）</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
-                  {v2Holdings.map((h, idx) => {
-                    const key = h.symbol ?? `unsupported-${idx}`
-                    return (
-                      <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: h.supported ? '#374151' : '#9CA3AF', cursor: h.supported ? 'pointer' : 'default' }}
-                        title={h.supported ? undefined : '港股/A股暂不支持自动拉取，可手动上传研报'}>
-                        <input type="checkbox" disabled={!h.supported}
-                          checked={h.symbol ? v2Selected.has(h.symbol) : false}
-                          onChange={e => {
-                            if (!h.symbol) return
-                            const next = new Set(v2Selected)
-                            e.target.checked ? next.add(h.symbol) : next.delete(h.symbol)
-                            setV2Selected(next)
-                          }} />
-                        <span style={{ flex: 1 }}>{h.asset_name}</span>
-                        {h.symbol && <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>}
-                        <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
-                        {!h.supported && <span style={{ fontSize: 9, background: '#F3F4F6', color: '#9CA3AF', padding: '0 4px', borderRadius: 3 }}>暂不支持</span>}
-                      </label>
-                    )
-                  })}
+                  {v2Holdings.filter(h => h.supported).map(h => (
+                    <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
+                      <input type="checkbox"
+                        checked={v2Selected.has(h.symbol!)}
+                        onChange={e => {
+                          const next = new Set(v2Selected)
+                          e.target.checked ? next.add(h.symbol!) : next.delete(h.symbol!)
+                          setV2Selected(next)
+                        }} />
+                      <span style={{ flex: 1 }}>{h.asset_name}</span>
+                      <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>
+                      <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
+                    </label>
+                  ))}
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
@@ -1501,22 +1495,17 @@ export default function Research() {
           {/* 持仓单选列表 */}
           {v2Holdings.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>选择持仓标的</label>
+              <label style={S.label}>选择持仓标的（当前支持美股）</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
-                {v2Holdings.map((h, idx) => {
-                  const sym = h.symbol
-                  const key = sym ?? `h-${idx}`
-                  return (
-                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>
-                      <input type="radio" name="v2search_holding" checked={v2SearchSymbol === (sym ?? '')}
-                        onChange={() => { if (sym) { setV2SearchSymbol(sym); /* auto-trigger below */ } }}
-                        disabled={!sym} />
-                      <span style={{ flex: 1, color: sym ? '#374151' : '#9CA3AF' }}>{h.asset_name}</span>
-                      {sym && <span style={{ color: '#9CA3AF', fontSize: 11 }}>{sym}</span>}
-                      <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
-                    </label>
-                  )
-                })}
+                {v2Holdings.filter(h => h.supported).map(h => (
+                  <label key={h.symbol!} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', cursor: 'pointer', padding: '2px 0' }}>
+                    <input type="radio" name="v2search_holding" checked={v2SearchSymbol === h.symbol}
+                      onChange={() => setV2SearchSymbol(h.symbol!)} />
+                    <span style={{ flex: 1 }}>{h.asset_name}</span>
+                    <span style={{ color: '#9CA3AF', fontSize: 11 }}>{h.symbol}</span>
+                    <span style={{ color: '#9CA3AF', fontSize: 11, minWidth: 40, textAlign: 'right' }}>{(h.weight * 100).toFixed(1)}%</span>
+                  </label>
+                ))}
               </div>
             </div>
           )}
