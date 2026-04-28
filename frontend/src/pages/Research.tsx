@@ -355,6 +355,8 @@ export default function Research() {
   const [v2LibSelectedIds, setV2LibSelectedIds] = useState<Set<string>>(new Set())
   const [v2LibBatchBusy,   setV2LibBatchBusy]   = useState(false)
   const [v2LibBatchMsg,    setV2LibBatchMsg]    = useState('')
+  const [v2LibPage,        setV2LibPage]        = useState(1)
+  const V2_PAGE_SIZE = 20
   // 文档详情弹窗
   const [docDetail,        setDocDetail]        = useState<ResearchDocument | null>(null)
   const [docEditFields,    setDocEditFields]    = useState<Record<string, string>>({})
@@ -616,6 +618,12 @@ export default function Research() {
     const matchO = !filterObject || symbol.toLowerCase().includes(filterObject.toLowerCase())
     return matchQ && matchV && matchS && matchH && matchO
   })
+
+  // 过滤变化时重置分页
+  useEffect(() => { setV2LibPage(1) }, [query, filterValidity, filterStance, filterHorizon, filterObject])
+
+  const v2TotalPages = Math.ceil(filteredV2.length / V2_PAGE_SIZE) || 1
+  const v2PagedCards = filteredV2.slice((v2LibPage - 1) * V2_PAGE_SIZE, v2LibPage * V2_PAGE_SIZE)
 
   // ── v2 handlers ──
   async function handleV2Fetch() {
@@ -1425,12 +1433,12 @@ export default function Research() {
             </select>
             <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filteredV2.length} 条</span>
             <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
-              onClick={() => setV2LibSelectedIds(new Set(filteredV2.map(c => c.card_id)))}>全选</button>
+              onClick={() => setV2LibSelectedIds(new Set(v2PagedCards.map(c => c.card_id)))}>全选本页</button>
             <button style={{ ...S.btnSecondary, fontSize: 11, padding: '3px 10px' }}
               onClick={() => setV2LibSelectedIds(new Set())}>清空</button>
           </div>
 
-          {filteredV2.length === 0 ? (
+          {v2PagedCards.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF', fontSize: 13 }}>
               {v2Cards.length === 0 ? '暂无 v2 观点卡，请在「资料导入」Tab 拉取或上传' : '没有符合条件的观点'}
             </div>
@@ -1444,7 +1452,7 @@ export default function Research() {
               }}>
                 <span></span><span>论点 / 标的</span><span>立场</span><span>维度</span><span>状态</span><span>来源</span><span>时间</span>
               </div>
-              {filteredV2.map(card => {
+              {v2PagedCards.map(card => {
                 const j = card.judgment
                 const isPending = j.is_ai_prefilled
                 const HORIZON_CN: Record<string, string> = { short: '短期', medium: '中期', long: '长期' }
@@ -1494,6 +1502,18 @@ export default function Research() {
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {/* 分页 */}
+          {v2TotalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 0', fontSize: 12, color: '#6B7280' }}>
+              <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
+                disabled={v2LibPage <= 1} onClick={() => setV2LibPage(p => p - 1)}>← 上一页</button>
+              <span>第 {v2LibPage} / {v2TotalPages} 页</span>
+              <button style={{ ...S.btnSecondary, fontSize: 11, padding: '4px 10px' }}
+                disabled={v2LibPage >= v2TotalPages} onClick={() => setV2LibPage(p => p + 1)}>下一页 →</button>
+              <span style={{ color: '#9CA3AF' }}>共 {filteredV2.length} 条</span>
             </div>
           )}
 
