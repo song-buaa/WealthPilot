@@ -4,6 +4,90 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [2.5.0] - 2026-04-28 - 投研观点模块 v2 — 三层架构 · 多数据源 · 自动拉取
+
+### 架构重构（v2.0 MVP，M0-M5）
+
+**三层 ViewpointCard Schema**
+- 事实层（FactsLayer）：机器填充，用户只读，保持原始数据可追溯
+- 叙事层（NarrativeLayer）：LLM 生成，用户可追加 annotation
+- 判断层（JudgmentLayer）：人类填写（LLM 预填），决策引擎消费核心
+- `is_ai_prefilled` 字段作为"用户是否确认"的唯一信号源
+- 15 项 event_type 枚举（含 fundamental_snapshot）
+
+**Symbol + Entity 两级标准化**
+- `<ticker>:<market>` 标准格式（LI:US / 3690:HK / 600519:SH）
+- EntityRegistry YAML 加载器，支持跨市场公司级视图（理想汽车 = LI:US + 2015:HK）
+- 查询时按 Entity 自动扩展 symbol 列表
+
+**InfoAdapter 架构（薄 Adapter + 厚 Processor）**
+- `AlphaVantageAdapter`：美股 NEWS_SENTIMENT + COMPANY_OVERVIEW + EARNINGS
+- `AKShareAdapter`：港股新闻 + 公司概况 + 历史行情（东方财富数据源）
+- `UserUploadAdapter`：包装现有 parse_text / parse_url / parse_pdf
+- `InfoRouter`：按 symbol 市场后缀分发到对应 Adapter
+
+**ViewpointProcessor**
+- LLM 加工 RawFact → 三层 ViewpointCard
+- 强制 override：is_ai_prefilled=True / confidence=low / confidence_score=0.3
+- guidance 字符串防御清洗
+- Pydantic 校验失败自动重试
+
+**ViewpointRepository**
+- CRUD + Entity 扩展查询
+- `query_for_decision`：5 条过滤规则（validity / endorsement / confidence / is_ai_prefilled / expires_at）
+- `query_for_decision_relaxed`：宽松版，含 pending 卡
+- 入库去重（url + as_of 联合判重）
+
+**Renderer**
+- ViewpointCard → 决策引擎可消费字符串
+- 三级标签：[用户资料] / [第三方数据] / [联网参考]
+- 每行追加 `(数据截至 YYYY-MM-DD)` 时间标注
+
+### 决策模块改造（M3）
+
+- `_load_research` 改为 confirmed 卡 + AV 实时数据互补（不再互斥）
+- `_resolve_symbol`：positions.ticker + EntityRegistry 双路径解析
+- `_distill_research_cards` 删除（v2 替代）
+- `_search_research_online` 文档化为永久联网 fallback
+- 后台异步拉取：首次问某标的时自动触发 AV/AKShare 拉取，不阻塞决策（60s 冷却）
+- 决策 prompt 新增 [第三方数据] 引用规则 + 时效性引用规则
+
+### 前端（M4）
+
+**投研观点页三 Tab 全面改造**
+- Tab 1（资料导入）：自动拉取资讯区块 + 持仓多选 + 批量 confirm/丢弃 + 进度反馈
+- Tab 2（观点库）：改用 v2 endpoint + 批量操作 + 行点击审核弹窗
+- Tab 3（决策检索）：持仓选择器 + 自动触发检索 + 精确文案（N 张卡 / M 段文本）
+
+**三区审核弹窗**
+- 事实层只读 · 叙事层只读 · 判断层可编辑
+- pending 卡：[丢弃] [仅作参考] [确认并入库]
+- confirmed 卡：[丢弃] [撤回确认] [保存修改]
+- 丢弃后 Toast 撤销（5 秒内可恢复）
+
+**跨市场支持**
+- 持仓列表从 ticker+currency 直接推断 symbol（不依赖 EntityRegistry）
+- 同一公司多市场合并显示（理想汽车 = LI:US + 2015:HK = 29.5%）
+- 勾选合并行时双数据源拉取（AV + AKShare 串行）
+- ETF 类标的标记不支持自动拉取
+
+### 数据质量保障
+
+- Processor confidence 硬 override（LLM 不可绕过）
+- AV news 相关性过滤（relevance >= 0.6 + primary ticker 检查）
+- 入库去重（url + as_of 分钟桶 / 日级别）
+- ViewpointCard 自动设 expires_at（news=14天 / fundamental=90天 / hist=7天）
+- query_for_decision 过期过滤
+- AI 解析同步生成 v2 卡 + 认可操作同步 confirm
+
+### 回归验证（M5）
+
+- 18 个预设决策用例端到端全绿（18/18）
+- Tab 3 vs 决策实际消费一致性验证通过
+- v2 数据纯净度验证通过（全部标准 symbol 格式）
+
+---
+
 ## [2.4.0] - 2026-04-10 - 决策对话策略优化 Phase 2
 
 ### Added
