@@ -165,6 +165,49 @@ def _get_candidate_positions(user_input: str, positions: list) -> tuple[list, st
     return cands, ft
 
 
+def _select_or_candidates(
+    candidates: list,
+    feature_type: str,
+) -> tuple[object | None, list]:
+    """
+    判断候选集是否有显著的 Top-1。
+
+    返回：(selected, remaining_candidates)
+      - 如果 Top-1 显著 → selected = Top-1 Position, remaining_candidates = []
+      - 如果 Top-1 不显著 → selected = None, remaining_candidates = candidates（Top-3）
+
+    显著性阈值：
+      - feature_type == "gain": Top-1 vs Top-2 的 pl_rate 差 >= 0.15（15pp）
+      - feature_type == "loss": Top-1 vs Top-2 的 pl_rate 差绝对值 >= 0.15
+      - feature_type == "heavy" / "default": Top-1 vs Top-2 的 weight 差 >= 0.05（5pp）
+    """
+    if not candidates:
+        return None, []
+    if len(candidates) == 1:
+        return candidates[0], []
+
+    top1 = candidates[0]
+    top2 = candidates[1]
+
+    if feature_type == "gain":
+        gap = abs(getattr(top1, "pl_rate", 0) - getattr(top2, "pl_rate", 0))
+        threshold = 0.15
+    elif feature_type == "loss":
+        gap = abs(getattr(top1, "pl_rate", 0) - getattr(top2, "pl_rate", 0))
+        threshold = 0.15
+    elif feature_type in ("heavy", "default"):
+        gap = abs(getattr(top1, "weight", 0) - getattr(top2, "weight", 0))
+        threshold = 0.05
+    else:
+        gap = 0
+        threshold = 0.15
+
+    if gap >= threshold:
+        return top1, []
+    else:
+        return None, candidates
+
+
 def _build_clarification_reply(user_input: str, candidates: list, feature_type: str) -> str:
     """生成澄清回复文本。"""
     if feature_type == "gain":
@@ -351,27 +394,31 @@ async def run_chat_stream(
             else:
                 _asset_clear = True  # 澄清流程已确认标的，直接通过
             if len(multi) < 2 and not _asset_clear:
-                # 标的不明确，进入澄清流程
+                # 标的不明确，尝试直选或走澄清
                 candidates, feature_type = _get_candidate_positions(message, all_positions)
                 if candidates:
-                    reply = _build_clarification_reply(message, candidates, feature_type)
-                    # 保存澄清上下文
-                    _CLARIFICATION_CTX[session_id] = {
-                        "original_question": message,
-                        "candidates": [p.name for p in candidates],
-                        "pending_clarification": True,
-                    }
-                    # 保存到对话历史
-                    try:
-                        await asyncio.to_thread(
-                            save_conversation_turn, session_id, message, reply,
-                            "PositionDecision", None,
-                        )
-                    except Exception:
-                        pass
-                    yield _sse("text", {"delta": reply})
-                    yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
-                    return
+                    selected, remaining = _select_or_candidates(candidates, feature_type)
+                    if selected:
+                        # Top-1 显著，注入 asset 继续走决策链路
+                        payload.entities.asset = selected.name
+                    else:
+                        # Top-1 不显著，走澄清
+                        reply = _build_clarification_reply(message, remaining, feature_type)
+                        _CLARIFICATION_CTX[session_id] = {
+                            "original_question": message,
+                            "candidates": [p.name for p in remaining],
+                            "pending_clarification": True,
+                        }
+                        try:
+                            await asyncio.to_thread(
+                                save_conversation_turn, session_id, message, reply,
+                                "PositionDecision", None,
+                            )
+                        except Exception:
+                            pass
+                        yield _sse("text", {"delta": reply})
+                        yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+                        return
 
             if len(multi) >= 2:
                 # 多标的：依次处理，合并回答
@@ -398,30 +445,41 @@ async def run_chat_stream(
                 yield event
 
         else:
-            # GeneralChat / Education — 但如果含操作动词+模糊标的，走澄清
-            # 注意：Education 意图高置信度时跳过此检查（行为偏差/方法论类问题不走澄清）
+            # GeneralChat / Education — 如果含操作动词+模糊标的，尝试直选或走澄清
+            # M1.1 修复：不再因 is_education=True 跳过，"加仓+模糊标的"始终尝试推断
             _OP_KEYWORDS = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
-            is_education = payload.primary_intent == "Education" and payload.confidence >= 0.8
             has_op = any(k in message for k in _OP_KEYWORDS)
             has_vague = any(v in message for v in VAGUE_ASSET_WORDS)
-            if not is_education and has_op and has_vague and all_positions:
+            if has_op and has_vague and all_positions:
                 candidates, feature_type = _get_candidate_positions(message, all_positions)
                 if candidates:
-                    reply = _build_clarification_reply(message, candidates, feature_type)
-                    _CLARIFICATION_CTX[session_id] = {
-                        "original_question": message,
-                        "candidates": [p.name for p in candidates],
-                        "pending_clarification": True,
-                    }
-                    try:
-                        await asyncio.to_thread(
-                            save_conversation_turn, session_id, message, reply, "PositionDecision", None,
-                        )
-                    except Exception:
-                        pass
-                    yield _sse("text", {"delta": reply})
-                    yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
-                    return
+                    selected, remaining = _select_or_candidates(candidates, feature_type)
+                    if selected:
+                        # Top-1 显著，注入 asset 转为 PositionDecision 走决策链路
+                        payload.primary_intent = "PositionDecision"
+                        payload.entities.asset = selected.name
+                        intent_result = _payload_to_intent_result(payload, ctx)
+                        async for event in _stream_position_decision(
+                            intent_result, message, session_id, portfolio_id, history or []
+                        ):
+                            yield event
+                        return
+                    else:
+                        reply = _build_clarification_reply(message, remaining, feature_type)
+                        _CLARIFICATION_CTX[session_id] = {
+                            "original_question": message,
+                            "candidates": [p.name for p in remaining],
+                            "pending_clarification": True,
+                        }
+                        try:
+                            await asyncio.to_thread(
+                                save_conversation_turn, session_id, message, reply, "PositionDecision", None,
+                            )
+                        except Exception:
+                            pass
+                        yield _sse("text", {"delta": reply})
+                        yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+                        return
             async for event in _stream_general_chat(message, session_id):
                 yield event
 
