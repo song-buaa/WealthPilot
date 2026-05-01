@@ -170,61 +170,30 @@ def _select_or_candidates(
     feature_type: str,
 ) -> tuple[object | None, list]:
     """
-    判断候选集是否有显著的 Top-1。
+    v1.1 修订：取消直选逻辑，所有模糊输入一律返回候选清单。
 
-    返回：(selected, remaining_candidates)
-      - 如果 Top-1 显著 → selected = Top-1 Position, remaining_candidates = []
-      - 如果 Top-1 不显著 → selected = None, remaining_candidates = candidates（Top-3）
-
-    显著性阈值：
-      - feature_type == "gain": Top-1 vs Top-2 的 pl_rate 差 >= 0.15（15pp）
-      - feature_type == "loss": Top-1 vs Top-2 的 pl_rate 差绝对值 >= 0.15
-      - feature_type == "heavy" / "default": Top-1 vs Top-2 的 weight 差 >= 0.05（5pp）
+    返回：(None, candidates)  ← selected 永远是 None
     """
-    if not candidates:
-        return None, []
-    if len(candidates) == 1:
-        return candidates[0], []
-
-    top1 = candidates[0]
-    top2 = candidates[1]
-
-    if feature_type == "gain":
-        gap = abs(getattr(top1, "pl_rate", 0) - getattr(top2, "pl_rate", 0))
-        threshold = 0.15
-    elif feature_type == "loss":
-        gap = abs(getattr(top1, "pl_rate", 0) - getattr(top2, "pl_rate", 0))
-        threshold = 0.15
-    elif feature_type in ("heavy", "default"):
-        gap = abs(getattr(top1, "weight", 0) - getattr(top2, "weight", 0))
-        threshold = 0.05
-    else:
-        gap = 0
-        threshold = 0.15
-
-    if gap >= threshold:
-        return top1, []
-    else:
-        return None, candidates
+    return None, candidates
 
 
 def _build_clarification_reply(user_input: str, candidates: list, feature_type: str) -> str:
-    """生成澄清回复文本。"""
+    """生成澄清回复文本，告诉用户筛选依据。"""
     if feature_type == "gain":
-        intro = "您持仓中目前涨幅较大的有："
+        intro = "根据您持仓的盈利情况，帮您筛出涨幅较大的标的："
         suffix = "请问您说的是哪一只？或者直接告诉我标的名称也可以。"
         items = [f"• {p.name}（+{p.pl_rate:.1f}%）" for p in candidates]
     elif feature_type == "loss":
-        intro = "您持仓中目前处于浮亏的有："
+        intro = "根据您持仓的亏损情况，帮您筛出浮亏较大的标的："
         suffix = "请问您说的是哪一只？"
         items = [f"• {p.name}（{p.pl_rate:.1f}%）" for p in candidates]
     elif feature_type == "heavy":
-        intro = "您持仓中仓位较重的标的有："
+        intro = "根据您的持仓占比，帮您筛出仓位较重的标的："
         suffix = "请问您想分析的是哪一只？或者直接告诉我标的名称也可以。"
         items = [f"• {p.name}（占比 {p.weight * 100:.1f}%）" for p in candidates]
     else:
-        intro = "请问您指的是哪个标的？您当前持仓中包括："
-        suffix = "直接告诉我标的名称，我来帮您分析。"
+        intro = "根据您的持仓情况，帮您筛出以下标的："
+        suffix = "请问您说的是哪一只？直接告诉我标的名称也可以。"
         items = [f"• {p.name}（占比 {p.weight * 100:.1f}%）" for p in candidates]
     return f"{intro}\n" + "\n".join(items) + f"\n\n{suffix}"
 
