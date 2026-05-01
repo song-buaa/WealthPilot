@@ -198,6 +198,25 @@ def _build_clarification_reply(user_input: str, candidates: list, feature_type: 
     return f"{intro}\n" + "\n".join(items) + f"\n\n{suffix}"
 
 
+def _build_candidates_payload(candidates: list, feature_type: str) -> list[dict]:
+    """构建结构化候选数据，供前端渲染点选按钮。"""
+    result = []
+    for p in candidates:
+        if feature_type == "gain":
+            metric_label = f"+{p.pl_rate * 100:.1f}%"
+        elif feature_type == "loss":
+            metric_label = f"{p.pl_rate * 100:.1f}%"
+        else:
+            metric_label = f"{p.weight * 100:.1f}%"
+        result.append({
+            "name": p.name,
+            "symbol": getattr(p, "ticker", "") or "",
+            "metric_label": metric_label,
+            "metric_type": feature_type,
+        })
+    return result
+
+
 def _try_resolve_clarification(session_id: str, user_input: str, positions: list) -> str | None:
     """
     尝试从澄清上下文中解析用户的回复。
@@ -385,6 +404,7 @@ async def run_chat_stream(
                             )
                         except Exception:
                             pass
+                        yield _sse("candidates", {"items": _build_candidates_payload(remaining, feature_type)})
                         yield _sse("text", {"delta": reply})
                         yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
                         return
@@ -446,6 +466,7 @@ async def run_chat_stream(
                             )
                         except Exception:
                             pass
+                        yield _sse("candidates", {"items": _build_candidates_payload(remaining, feature_type)})
                         yield _sse("text", {"delta": reply})
                         yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
                         return

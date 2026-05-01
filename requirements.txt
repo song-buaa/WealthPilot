@@ -16,3 +16,4 @@ python-dotenv>=1.0.0     # 从 .env 文件加载环境变量
 pypdf>=4.0.0            # PDF 文字提取
 requests>=2.31.0        # URL 抓取
 beautifulsoup4>=4.12.0  # HTML 解析
+langgraph>=0.2.0

@@ -23,6 +23,7 @@ interface Message {
   intent?: Record<string, unknown>
   stages?: StageInfo[]
   conclusion?: { verdict: string; summary: string }
+  candidates?: Array<{ name: string; symbol: string; metric_label: string; metric_type: string }>
 }
 
 interface StageInfo {
@@ -266,6 +267,10 @@ export default function Decision() {
           const delta = (ev.data.delta as string) ?? ''
           updateAi(m => ({ ...m, content: m.content + delta }))
 
+        } else if (ev.type === 'candidates') {
+          const items = (ev.data.items ?? []) as Message['candidates']
+          updateAi(m => ({ ...m, candidates: items }))
+
         } else if (ev.type === 'intent') {
           updateAi(m => ({ ...m, intent: ev.data }))
 
@@ -483,7 +488,7 @@ export default function Decision() {
             msg.role === 'user' ? (
               <UserMessage key={msg.id} msg={msg} />
             ) : (
-              <AiMessage key={msg.id} msg={msg} />
+              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} />
             )
           ))}
           <div ref={messagesEnd} />
@@ -608,7 +613,7 @@ function UserMessage({ msg }: { msg: Message }) {
 }
 
 // ── AI 消息 ───────────────────────────────────────────────────
-function AiMessage({ msg }: { msg: Message }) {
+function AiMessage({ msg, onSelectCandidate }: { msg: Message; onSelectCandidate?: (name: string) => void }) {
   // loading 态：无内容且正在流式输出
   if (msg.streaming && !msg.content) {
     return (
@@ -660,6 +665,26 @@ function AiMessage({ msg }: { msg: Message }) {
                 {msg.streaming ? msg.content + '▊' : msg.content}
               </ReactMarkdown>
             )}
+          </div>
+        )}
+
+        {/* 候选标的点选按钮 */}
+        {msg.candidates && msg.candidates.length > 0 && !msg.streaming && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {msg.candidates.map(c => (
+              <button key={c.symbol || c.name} onClick={() => onSelectCandidate?.(c.name)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', fontSize: 13, borderRadius: 20,
+                  border: '1px solid #93C5FD', background: '#EFF6FF', color: '#1D4ED8',
+                  cursor: 'pointer', transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#DBEAFE')}
+                onMouseLeave={e => (e.currentTarget.style.background = '#EFF6FF')}>
+                {c.name}
+                <span style={{ fontSize: 11, color: '#60A5FA' }}>{c.metric_label}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>

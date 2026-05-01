@@ -1,3 +1,5 @@
+# M1.2: LangGraph DecisionState 已定义，见 backend/graph/decision_graph.py
+# M1.3: 将迁移 run_chat_stream 到 StateGraph
 """
 WealthPilot — FastAPI 入口
 
