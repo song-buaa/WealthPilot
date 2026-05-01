@@ -1,0 +1,16 @@
+case_id: PR_002
+category: PortfolioReview
+description: 组合整体状态评估
+schema_version: "0.1"
+input:
+  user_query: "我的组合调整过几次了，现在整体是什么状态？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PortfolioReview
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 150

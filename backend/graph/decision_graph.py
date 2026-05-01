@@ -164,10 +164,17 @@ def orchestrator_node(state: DecisionState) -> dict:
         route = _intent_to_route_fallback(intent, asset, asset_clear, multi_assets)
         rationale = f"Planner 调用失败（{e}），降级到规则路由"
 
-    # 后置校验：Education/GeneralChat + 操作关键词 + 模糊标的 → 重路由到 clarify
-    if route == "general":
+    # 后置校验：操作关键词 + 模糊标的 → 重路由到 clarify
+    # 豁免 1：Education 且无明确标的（纯语义描述行为习惯，不触发）
+    # 豁免 2：组合级意图（PortfolioReview/PerformanceAnalysis/AssetAllocation）完全跳过
+    if route == "general" and intent not in (
+        "PortfolioReview", "PerformanceAnalysis", "AssetAllocation"
+    ):
         _OP_KW = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
-        if any(k in user_query for k in _OP_KW) and any(v in user_query for v in _VAGUE_WORDS):
+        has_op = any(k in user_query for k in _OP_KW)
+        has_vague = any(v in user_query for v in _VAGUE_WORDS)
+        # Education 无明确标的时跳过（用户在描述行为习惯，不需要澄清）
+        if has_op and has_vague and not (intent == "Education" and not asset):
             route = "clarify"
             rationale += "（含操作关键词+模糊标的，重路由到澄清）"
 

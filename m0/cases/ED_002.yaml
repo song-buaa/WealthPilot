@@ -1,0 +1,16 @@
+case_id: ED_002
+category: Education
+description: 再平衡时机和方法
+schema_version: "0.1"
+input:
+  user_query: "我听说要定期做再平衡，但不知道什么情况下该做、怎么做？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: Education
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80

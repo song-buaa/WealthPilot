@@ -1,0 +1,17 @@
+case_id: AA_001
+category: AssetAllocation
+description: 100万从零开始配置
+schema_version: "0.1"
+input:
+  user_query: "我有100万准备开始投资，应该怎么分配？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: AssetAllocation
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 150
+    must_not_contain: ["基于您当前持仓", "您现有的"]

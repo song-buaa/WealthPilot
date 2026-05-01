@@ -1,0 +1,18 @@
+case_id: PD_003
+category: PositionDecision
+description: 重仓标的能否加仓（asset 模糊→候选清单或教育回答）
+source: "Decision.tsx preset"
+schema_version: "0.1"
+input:
+  user_query: "我看好一个标的想加仓，但它在我组合里已经不轻了，怎么判断能不能加？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PositionDecision
+    skip_intent_check: true
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80
+notes: "IntentRecognizer 识别为 Education（方法论问题），行为正确。也可能走 clarify 显示候选清单。两种行为均可接受"

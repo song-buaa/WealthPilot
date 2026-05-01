@@ -1,0 +1,16 @@
+case_id: GE_003
+category: Education
+description: 通用兜底：主动vs指数基金
+schema_version: "0.1"
+input:
+  user_query: "同样是买基金，主动型和指数型怎么选？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: Education
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80

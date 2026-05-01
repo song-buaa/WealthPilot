@@ -1,0 +1,16 @@
+case_id: PA_002
+category: PerformanceAnalysis
+description: 单标盈利但整体不好看
+schema_version: "0.1"
+input:
+  user_query: "我有几笔投资一直是正收益，但整体算下来并不好看，哪里出了问题？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PerformanceAnalysis
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 100

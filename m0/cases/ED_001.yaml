@@ -1,0 +1,18 @@
+case_id: ED_001
+category: Education
+description: 追涨杀跌心理破解
+schema_version: "0.1"
+input:
+  user_query: "我总是在股票涨了之后才后悔没多买，跌了又舍不得止损，怎么破？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: Education
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80
+    must_not_contain: ["建议买入", "建议卖出"]
+notes: "用户在描述投资心理问题，'止损'是用户原话概念，回答中自然会提及，不应列入黑名单"

@@ -1,0 +1,16 @@
+case_id: GE_002
+category: Education
+description: 通用兜底：股债比例
+schema_version: "0.1"
+input:
+  user_query: "稳健型投资者应该怎么理解股债的仓位比例？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: Education
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80

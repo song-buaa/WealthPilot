@@ -1,0 +1,16 @@
+case_id: PA_003
+category: PerformanceAnalysis
+description: 拖累标的识别
+schema_version: "0.1"
+input:
+  user_query: "从我现在的持仓来看，哪些标的在拖累整体表现？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PerformanceAnalysis
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80
+notes: "Planner 可能路由到 clarify（让用户选标的）或 portfolio（直接分析），两种行为均可接受。不检查 needs_clarification"

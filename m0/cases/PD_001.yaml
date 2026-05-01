@@ -1,0 +1,18 @@
+case_id: PD_001
+category: PositionDecision
+description: 涨幅后落袋为安（asset 模糊→候选清单）
+source: "Decision.tsx preset"
+schema_version: "0.1"
+input:
+  user_query: "我有一只股票最近涨了不少，该不该趁现在落袋为安？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PositionDecision
+    needs_clarification: true
+  L2:
+    must_reach_stage: intent
+    must_not_abort: true
+    expect_candidates: true
+  L3: {}
+notes: "asset 模糊，期望返回候选清单而非直接决策"

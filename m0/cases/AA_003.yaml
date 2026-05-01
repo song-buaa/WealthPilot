@@ -1,0 +1,17 @@
+case_id: AA_003
+category: AssetAllocation
+description: 调整为更稳健结构
+schema_version: "0.1"
+input:
+  user_query: "我想把组合调整到更稳健的结构，固收应该加多少？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: AssetAllocation
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 150
+    must_cite_terms: ["固收"]

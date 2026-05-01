@@ -1,0 +1,16 @@
+case_id: PA_001
+category: PerformanceAnalysis
+description: 跑输大盘归因分析
+schema_version: "0.1"
+input:
+  user_query: "这段时间大盘还行，但我的组合收益明显跑输了，为什么？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PerformanceAnalysis
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 100

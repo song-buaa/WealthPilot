@@ -1,0 +1,16 @@
+case_id: AA_002
+category: AssetAllocation
+description: 30万到期理财再配置
+schema_version: "0.1"
+input:
+  user_query: "我准备把一笔即将到期的30万理财重新配置，不知道怎么分？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: AssetAllocation
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 150

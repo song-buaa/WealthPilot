@@ -1,0 +1,16 @@
+case_id: ED_003
+category: Education
+description: 分散投资vs集中持仓
+schema_version: "0.1"
+input:
+  user_query: "分散投资和集中持仓我一直没想清楚，对我来说哪种更适合？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: Education
+    needs_clarification: false
+  L2:
+    must_reach_stage: done
+    must_not_abort: true
+  L3:
+    chat_answer_min_chars: 80

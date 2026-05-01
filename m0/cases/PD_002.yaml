@@ -1,0 +1,18 @@
+case_id: PD_002
+category: PositionDecision
+description: 持续亏损止损还是持有（asset 模糊→候选清单）
+source: "Decision.tsx preset"
+schema_version: "0.1"
+input:
+  user_query: "我有一只基金持续亏损，现在止损出来还是继续持有？"
+  portfolio_id: 1
+expected:
+  L1:
+    intent_category: PositionDecision
+    needs_clarification: true
+  L2:
+    must_reach_stage: intent
+    must_not_abort: true
+    expect_candidates: true
+  L3: {}
+notes: "asset 模糊，期望返回候选清单"
