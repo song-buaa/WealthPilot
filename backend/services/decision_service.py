@@ -203,9 +203,9 @@ def _build_candidates_payload(candidates: list, feature_type: str) -> list[dict]
     result = []
     for p in candidates:
         if feature_type == "gain":
-            metric_label = f"+{p.pl_rate * 100:.1f}%"
+            metric_label = f"+{p.pl_rate:.1f}%"
         elif feature_type == "loss":
-            metric_label = f"{p.pl_rate * 100:.1f}%"
+            metric_label = f"{p.pl_rate:.1f}%"
         else:
             metric_label = f"{p.weight * 100:.1f}%"
         result.append({
