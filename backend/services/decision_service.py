@@ -433,40 +433,157 @@ async def run_chat_stream(
             yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
             return
 
+        from backend.graph.decision_validator import (
+            validate_decision_output, make_fallback_result
+        )
+
+        # ── 构建 handler 参数 ──
+        intent_type = graph_result.get("intent_payload", {}).get("primary_intent", "")
+
         if sse_handler == "_stream_position_decision":
             intent_result = _payload_to_intent_result(payload, ctx)
             effective_history = [] if clarification_resolved else history
-            async for event in _stream_position_decision(
-                intent_result, sse_kwargs["user_input"],
-                sse_kwargs["session_id"], sse_kwargs["portfolio_id"],
-                effective_history,
-            ):
-                yield event
-
+            handler_fn = _stream_position_decision
+            handler_kwargs = {
+                "intent_result": intent_result,
+                "user_input": sse_kwargs["user_input"],
+                "session_id": sse_kwargs["session_id"],
+                "portfolio_id": sse_kwargs["portfolio_id"],
+                "conversation_history": effective_history,
+            }
         elif sse_handler == "_stream_multi_asset":
-            async for event in _stream_multi_asset(
-                payload, ctx, sse_kwargs["user_input"],
-                sse_kwargs["multi_assets"], sse_kwargs["session_id"],
-                sse_kwargs["portfolio_id"],
-            ):
-                yield event
-
+            handler_fn = _stream_multi_asset
+            handler_kwargs = {
+                "payload": payload, "ctx": ctx,
+                "user_input": sse_kwargs["user_input"],
+                "multi_assets": sse_kwargs["multi_assets"],
+                "session_id": sse_kwargs["session_id"],
+                "portfolio_id": sse_kwargs["portfolio_id"],
+            }
         elif sse_handler == "_stream_portfolio_intent":
-            async for event in _stream_portfolio_intent(
-                payload, sse_kwargs["user_input"],
-                sse_kwargs["session_id"], sse_kwargs["portfolio_id"],
-            ):
-                yield event
-
+            handler_fn = _stream_portfolio_intent
+            handler_kwargs = {
+                "payload": payload,
+                "user_input": sse_kwargs["user_input"],
+                "session_id": sse_kwargs["session_id"],
+                "portfolio_id": sse_kwargs["portfolio_id"],
+            }
         elif sse_handler == "_stream_general_chat":
+            # general_chat：不做 Validator，直接透传
             async for event in _stream_general_chat(
                 sse_kwargs["user_input"], sse_kwargs.get("session_id", ""),
             ):
                 yield event
-
+            return
         else:
             async for event in _stream_general_chat(message, session_id):
                 yield event
+            return
+
+        # ── 透传非 done 事件，拦截 done 事件做校验 ──
+        collected_done_data = None
+        accumulated_text = ""
+
+        async for raw_event in handler_fn(**handler_kwargs):
+            # 解析 event type
+            event_type = None
+            for line in raw_event.split("\n"):
+                if line.startswith("event:"):
+                    event_type = line.replace("event:", "").strip()
+                    break
+
+            if event_type != "done":
+                if event_type == "text":
+                    try:
+                        for line in raw_event.split("\n"):
+                            if line.startswith("data:"):
+                                d = json.loads(line[5:].strip())
+                                accumulated_text += d.get("delta", "")
+                                break
+                    except Exception:
+                        pass
+                yield raw_event
+                continue
+
+            # done 事件：拦截，解析 data
+            for line in raw_event.split("\n"):
+                if line.startswith("data:"):
+                    try:
+                        collected_done_data = json.loads(line[5:].strip())
+                    except Exception:
+                        collected_done_data = {}
+                    break
+
+        # ── 校验 ──
+        if collected_done_data is None:
+            return
+
+        llm_result_for_validator = None
+        validator_result = None
+
+        if sse_handler == "_stream_position_decision":
+            # 从 _DECISION_STORE 取完整 LLMResult 对象
+            decision_id = collected_done_data.get("decision_id")
+            if decision_id:
+                stored = _DECISION_STORE.get(session_id, {}).get(decision_id)
+                if stored and stored.llm:
+                    llm_result_for_validator = stored.llm
+
+            if llm_result_for_validator:
+                validator_result = validate_decision_output(
+                    llm_result_for_validator,
+                    intent_type=intent_type,
+                )
+
+        elif sse_handler in ("_stream_portfolio_intent", "_stream_multi_asset"):
+            # 从 done event 的 dict + 累积文本做通用层校验
+            portfolio_result = (
+                collected_done_data.get("portfolioResult")
+                or collected_done_data.get("allocationResult")
+                or collected_done_data.get("performanceResult")
+                or {}
+            )
+            chat_answer = (
+                portfolio_result.get("chat_answer", "")
+                or accumulated_text
+            )
+
+            class _MinimalResult:
+                def __init__(self, ca):
+                    self.chat_answer = ca
+                    self.error = None
+                @property
+                def is_fallback(self):
+                    return self.error is not None
+
+            llm_result_for_validator = _MinimalResult(chat_answer)
+            validator_result = validate_decision_output(
+                llm_result_for_validator,
+                intent_type=intent_type,
+            )
+
+        # ── 把 validator 结果附加到 done event，然后 yield ──
+        if validator_result:
+            collected_done_data["validator"] = {
+                "passed": validator_result.passed,
+                "action": validator_result.action,
+                "failures": [
+                    {"rule": f.rule, "message": f.message, "severity": f.severity}
+                    for f in validator_result.failures
+                ],
+            }
+
+        yield _sse("done", collected_done_data)
+
+        # ── 如果需要重试，yield 一个 validator_warning 事件 ──
+        if validator_result and validator_result.action == "retry":
+            yield _sse("validator_warning", {
+                "message": "决策结果未通过校验，建议重新提问获取更完整的分析",
+                "failed_rules": [
+                    f.rule for f in validator_result.failures
+                    if f.severity == "hard"
+                ],
+            })
 
     except Exception as e:
         yield _sse("error", {"code": "internal_error", "message": str(e)})
