@@ -352,124 +352,119 @@ async def run_chat_stream(
             context_manager.build_context, session_id, payload, portfolio_id
         )
 
-        # 低置信度 → 澄清问题（不走决策管道）
-        if clarification and payload.confidence < 0.5:
-            yield _sse("intent", {
-                "primary_intent": payload.primary_intent,
-                "confidence": payload.confidence,
-                "needs_clarification": True,
-            })
-            yield _sse("text", {"delta": clarification})
+        # ── M1.3 Step 2：通过 LangGraph decision_graph 路由 ──────────────
+        from backend.graph.decision_graph import decision_graph
+
+        initial_state = {
+            "user_query": message,
+            "session_id": session_id,
+            "conversation_history": history or [],
+            "portfolio_id": portfolio_id,
+            "all_positions": all_positions,
+            "route": "",
+            "intent_payload": {},
+            "multi_assets": [],
+            "sse_handler": "",
+            "sse_kwargs": {},
+            "research_cards": [],
+            "discipline_violations": [],
+            "allocation_deviation": None,
+            "decision_result": None,
+            "validation_result": None,
+            "validation_log": [],
+            "agents_invoked": [],
+            "tool_calls": [],
+            "planner_rationale": "",
+            "target_symbols": [],
+            "needs_clarification": False,
+            "candidate_holdings": [],
+        }
+
+        graph_result = await asyncio.to_thread(decision_graph.invoke, initial_state)
+
+        route = graph_result.get("route", "general")
+        sse_handler = graph_result.get("sse_handler", "_stream_general_chat")
+        sse_kwargs = graph_result.get("sse_kwargs", {})
+        planner_rationale = graph_result.get("planner_rationale", "")
+
+        # 更新 intent 缓存
+        intent_payload = graph_result.get("intent_payload", {})
+        _PRIMARY_INTENT_CACHE[session_id] = intent_payload.get("primary_intent", "")
+
+        # 发送 intent SSE 事件（含 Planner rationale）
+        yield _sse("intent", {
+            "primary_intent": intent_payload.get("primary_intent", ""),
+            "asset":          payload.entities.asset if payload.entities else None,
+            "action":         payload.actions[0] if payload.actions else None,
+            "confidence":     intent_payload.get("confidence", 0),
+            "needs_clarification": route == "low_confidence",
+            "planner_route":     route,
+            "planner_rationale": planner_rationale,
+        })
+
+        # ── 根据 sse_handler 调用对应子函数 ─────────────────────────────
+        if sse_handler == "low_confidence":
+            clarify_q = sse_kwargs.get("clarify_question", "请问您想了解什么？")
+            yield _sse("text", {"delta": clarify_q})
             yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
             return
 
-        _PRIMARY_INTENT_CACHE[session_id] = payload.primary_intent
-        yield _sse("intent", {
-            "primary_intent":    payload.primary_intent,
-            "asset":             payload.entities.asset,
-            "action":            payload.actions[0] if payload.actions else None,
-            "confidence":        payload.confidence,
-            "needs_clarification": False,
-        })
+        if sse_handler == "_build_clarification_reply":
+            user_input = sse_kwargs.get("user_input", message)
+            feature_type = sse_kwargs.get("feature_type", "default")
+            candidates, ft = _get_candidate_positions(user_input, all_positions)
+            if candidates:
+                cand_payload = _build_candidates_payload(candidates, ft)
+                yield _sse("candidates", {"items": cand_payload})
+            reply = _build_clarification_reply(user_input, candidates, ft)
+            _CLARIFICATION_CTX[session_id] = {
+                "original_question": message,
+                "candidates": [p.name for p in candidates],
+                "pending_clarification": True,
+            }
+            try:
+                await asyncio.to_thread(
+                    save_conversation_turn, session_id, message, reply,
+                    "PositionDecision", None,
+                )
+            except Exception:
+                pass
+            yield _sse("text", {"delta": reply})
+            yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
+            return
 
-        # ── 路由分发 ─────────────────────────────────────────────────────────
-        if payload.primary_intent == "PositionDecision":
-            multi = list(payload.entities.multi_assets or [])
+        if sse_handler == "_stream_position_decision":
+            intent_result = _payload_to_intent_result(payload, ctx)
+            effective_history = [] if clarification_resolved else history
+            async for event in _stream_position_decision(
+                intent_result, sse_kwargs["user_input"],
+                sse_kwargs["session_id"], sse_kwargs["portfolio_id"],
+                effective_history,
+            ):
+                yield event
 
-            # ── 标的明确性校验（单标的场景，澄清已解决时跳过）─────────────
-            if not clarification_resolved:
-                _asset_clear = _is_asset_clear(payload.entities.asset, all_positions)
-            else:
-                _asset_clear = True  # 澄清流程已确认标的，直接通过
-            if len(multi) < 2 and not _asset_clear:
-                # 标的不明确，尝试直选或走澄清
-                candidates, feature_type = _get_candidate_positions(message, all_positions)
-                if candidates:
-                    selected, remaining = _select_or_candidates(candidates, feature_type)
-                    if selected:
-                        # Top-1 显著，注入 asset 继续走决策链路
-                        payload.entities.asset = selected.name
-                    else:
-                        # Top-1 不显著，走澄清
-                        reply = _build_clarification_reply(message, remaining, feature_type)
-                        _CLARIFICATION_CTX[session_id] = {
-                            "original_question": message,
-                            "candidates": [p.name for p in remaining],
-                            "pending_clarification": True,
-                        }
-                        try:
-                            await asyncio.to_thread(
-                                save_conversation_turn, session_id, message, reply,
-                                "PositionDecision", None,
-                            )
-                        except Exception:
-                            pass
-                        yield _sse("candidates", {"items": _build_candidates_payload(remaining, feature_type)})
-                        yield _sse("text", {"delta": reply})
-                        yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
-                        return
+        elif sse_handler == "_stream_multi_asset":
+            async for event in _stream_multi_asset(
+                payload, ctx, sse_kwargs["user_input"],
+                sse_kwargs["multi_assets"], sse_kwargs["session_id"],
+                sse_kwargs["portfolio_id"],
+            ):
+                yield event
 
-            if len(multi) >= 2:
-                # 多标的：依次处理，合并回答
-                async for event in _stream_multi_asset(
-                    payload, ctx, message, multi, session_id, portfolio_id
-                ):
-                    yield event
-            else:
-                # 单标的：完整 6 步管道
-                intent_result = _payload_to_intent_result(payload, ctx)
-                # 澄清确认后视为新的第一轮，传空历史以获得完整标题格式
-                effective_history = [] if clarification_resolved else history
-                async for event in _stream_position_decision(
-                    intent_result, message, session_id, portfolio_id, effective_history
-                ):
-                    yield event
-
-        elif payload.primary_intent in (
-            "PortfolioReview", "AssetAllocation", "PerformanceAnalysis"
-        ):
+        elif sse_handler == "_stream_portfolio_intent":
             async for event in _stream_portfolio_intent(
-                payload, message, session_id, portfolio_id
+                payload, sse_kwargs["user_input"],
+                sse_kwargs["session_id"], sse_kwargs["portfolio_id"],
+            ):
+                yield event
+
+        elif sse_handler == "_stream_general_chat":
+            async for event in _stream_general_chat(
+                sse_kwargs["user_input"], sse_kwargs.get("session_id", ""),
             ):
                 yield event
 
         else:
-            # GeneralChat / Education — 如果含操作动词+模糊标的，尝试直选或走澄清
-            # M1.1 修复：不再因 is_education=True 跳过，"加仓+模糊标的"始终尝试推断
-            _OP_KEYWORDS = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
-            has_op = any(k in message for k in _OP_KEYWORDS)
-            has_vague = any(v in message for v in VAGUE_ASSET_WORDS)
-            if has_op and has_vague and all_positions:
-                candidates, feature_type = _get_candidate_positions(message, all_positions)
-                if candidates:
-                    selected, remaining = _select_or_candidates(candidates, feature_type)
-                    if selected:
-                        # Top-1 显著，注入 asset 转为 PositionDecision 走决策链路
-                        payload.primary_intent = "PositionDecision"
-                        payload.entities.asset = selected.name
-                        intent_result = _payload_to_intent_result(payload, ctx)
-                        async for event in _stream_position_decision(
-                            intent_result, message, session_id, portfolio_id, history or []
-                        ):
-                            yield event
-                        return
-                    else:
-                        reply = _build_clarification_reply(message, remaining, feature_type)
-                        _CLARIFICATION_CTX[session_id] = {
-                            "original_question": message,
-                            "candidates": [p.name for p in remaining],
-                            "pending_clarification": True,
-                        }
-                        try:
-                            await asyncio.to_thread(
-                                save_conversation_turn, session_id, message, reply, "PositionDecision", None,
-                            )
-                        except Exception:
-                            pass
-                        yield _sse("candidates", {"items": _build_candidates_payload(remaining, feature_type)})
-                        yield _sse("text", {"delta": reply})
-                        yield _sse("done", {"decision_id": None, "conclusion_level": None, "conclusion_label": None})
-                        return
             async for event in _stream_general_chat(message, session_id):
                 yield event
 

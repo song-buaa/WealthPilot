@@ -1,15 +1,16 @@
 """
-WealthPilot Decision Graph (v2.6 M1.3 Step 1)
+WealthPilot Decision Graph (v2.6 M1.3 Step 2)
 
-StateGraph 实现：把 decision_service.py 的 6 条分支映射为固定路由。
-节点内部不直接调用 _stream_* 子函数（它们是 async generator），
-而是填充 sse_handler + sse_kwargs，供外层 SSE 层消费。
+StateGraph 实现：LLM Planner 路由 + SSE handler 映射。
+orchestrator_node 做两次调用：
+1. IntentRecognizer：意图识别
+2. LLM Planner：生成 RoutingPlan（含 rationale）
 
-M1.3 Step 2 将加入 LLM Planner 和动态路由。
+Planner 失败时降级到规则路由（与 Step 1 逻辑一致）。
 """
 
-from typing import TypedDict, Optional, Annotated
-from langgraph.graph import StateGraph, END, add_messages
+from typing import TypedDict, Optional
+from langgraph.graph import StateGraph, END
 
 from intent_engine import intent_recognizer
 from backend.services.decision_service import (
@@ -17,13 +18,19 @@ from backend.services.decision_service import (
     _is_asset_clear,
 )
 
+# 模糊标的词（与 decision_service.VAGUE_ASSET_WORDS 保持一致）
+_VAGUE_WORDS = [
+    "股票", "基金", "标的", "持仓", "资产", "仓位",
+    "这只", "那只", "某只", "一只", "一个", "这个", "那个",
+]
+
 
 class DecisionState(TypedDict):
     """LangGraph StateGraph 的全局状态定义。"""
     # ── 输入 ──
     user_query: str
     session_id: str
-    conversation_history: Annotated[list, add_messages]
+    conversation_history: list
 
     # ── OrchestratorAgent 填充 ──
     intent: str
@@ -58,6 +65,7 @@ class DecisionState(TypedDict):
     intent_payload: Optional[dict]
     multi_assets: list[str]
     portfolio_id: int
+    all_positions: list   # AggregatedPosition 对象列表
 
     # ── 执行结果（供外层 SSE 层消费）──
     sse_handler: str
@@ -67,126 +75,172 @@ class DecisionState(TypedDict):
 # ── 节点 ──────────────────────────────────────────────────────────────────
 
 
-def _payload_to_dict(payload) -> dict:
-    """安全地把 IntentPayload dataclass 转成 dict。"""
-    if hasattr(payload, "__dict__"):
-        d = {}
-        d["primary_intent"] = payload.primary_intent
-        d["confidence"] = payload.confidence
-        d["actions"] = payload.actions
-        if payload.entities:
-            d["asset"] = payload.entities.asset
-            d["multi_assets"] = payload.entities.multi_assets
-            d["time_horizon"] = payload.entities.time_horizon
-        return d
-    return {}
-
-
 def orchestrator_node(state: DecisionState) -> dict:
     """
-    OrchestratorNode：意图识别 + 路由决策。
-    对应 decision_service.py 的 Stage 0-1 + 路由分发逻辑。
+    OrchestratorNode（LLM Planner 版本）。
+
+    先用 IntentRecognizer 做意图识别（已有能力），
+    再做一次轻量 LLM call 生成 RoutingPlan（含 rationale），
+    最后根据 plan 决定路由。
+
+    为什么不只用 IntentRecognizer？
+    IntentRecognizer 输出 intent 类别，但不给出"为什么选这条路"的理由。
+    LLM Planner 的 rationale 字段是 Eval L2 评测和可解释性的关键。
     """
+    import json
+    from intent_engine._llm_client import get_client, MODEL_MAIN
+
     user_query = state["user_query"]
     session_id = state["session_id"]
     conversation_history = state.get("conversation_history", [])
     portfolio_id = state.get("portfolio_id", 1)
+    all_positions = state.get("all_positions", [])
 
-    # 意图识别
-    payload, clarify_question = intent_recognizer.recognize(
+    # Step 1: 意图识别
+    position_names = [p.name for p in all_positions] if all_positions else []
+    payload, clarification = intent_recognizer.recognize(
         user_query,
         conversation_history=conversation_history or None,
-        position_names=None,
+        position_names=position_names or None,
     )
 
     intent = payload.primary_intent
     confidence = payload.confidence
-    asset = payload.entities.asset if payload.entities else None
-    multi_assets = list(payload.entities.multi_assets) if payload.entities else []
-    payload_dict = _payload_to_dict(payload)
+    entities = payload.entities
+    asset = entities.asset if entities else None
+    multi_assets = list(entities.multi_assets or []) if entities else []
 
-    # 低置信度 → 直接澄清
+    # 低置信度直接走澄清，不需要 LLM Planner
     if confidence < 0.5:
         return {
             "route": "low_confidence",
-            "intent": intent,
-            "intent_payload": payload_dict,
+            "intent_payload": {"primary_intent": intent, "confidence": confidence},
             "sse_handler": "low_confidence",
-            "sse_kwargs": {"clarify_question": clarify_question},
+            "sse_kwargs": {"clarify_question": clarification},
+            "planner_rationale": f"置信度 {confidence} < 0.5，直接走澄清路径",
+            "agents_invoked": ["orchestrator"],
         }
 
-    # PositionDecision 路由
+    # Step 2: LLM Planner call（生成 RoutingPlan + rationale）
+    asset_clear = _is_asset_clear(asset, all_positions)
+
+    planner_prompt = f"""你是 WealthPilot 决策系统的编排者（Planner）。
+根据用户输入和意图识别结果，决定本次请求应该走哪条处理路径。
+
+用户输入：{user_query}
+意图识别结果：{intent}（置信度 {confidence:.2f}）
+识别到的标的：{asset or "未识别"}
+标的是否明确：{asset_clear}
+多标的：{multi_assets if multi_assets else "无"}
+
+可选路径：
+- position_single：单标的决策（标的明确的 PositionDecision）
+- position_multi：多标的对比决策
+- clarify：标的不明确，需要展示候选清单让用户选择
+- portfolio：组合级分析（PortfolioReview / AssetAllocation / PerformanceAnalysis）
+- general：通用教育/对话（Education / GeneralChat）
+
+请输出 JSON，格式如下（只输出 JSON，不要有其他文字）：
+{{
+  "route": "<路径名>",
+  "rationale": "<用一句话说明为什么选这条路径，要基于用户输入的具体内容>"
+}}"""
+
+    try:
+        client = get_client()
+        response = client.chat.completions.create(
+            model=MODEL_MAIN,
+            messages=[{"role": "user", "content": planner_prompt}],
+            temperature=0,
+            max_tokens=200,
+            timeout=10,
+        )
+        raw = response.choices[0].message.content.strip()
+        plan = json.loads(raw)
+        route = plan.get("route", "general")
+        rationale = plan.get("rationale", "")
+    except Exception as e:
+        # Planner 失败时降级到规则路由
+        route = _intent_to_route_fallback(intent, asset, asset_clear, multi_assets)
+        rationale = f"Planner 调用失败（{e}），降级到规则路由"
+
+    # 后置校验：Education/GeneralChat + 操作关键词 + 模糊标的 → 重路由到 clarify
+    if route == "general":
+        _OP_KW = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
+        if any(k in user_query for k in _OP_KW) and any(v in user_query for v in _VAGUE_WORDS):
+            route = "clarify"
+            rationale += "（含操作关键词+模糊标的，重路由到澄清）"
+
+    # 根据 route 构建 sse_kwargs
+    sse_handler, sse_kwargs = _build_sse_kwargs(
+        route, user_query, session_id, portfolio_id, multi_assets
+    )
+
+    return {
+        "route": route,
+        "intent_payload": {"primary_intent": intent, "confidence": confidence},
+        "multi_assets": multi_assets,
+        "sse_handler": sse_handler,
+        "sse_kwargs": sse_kwargs,
+        "planner_rationale": rationale,
+        "agents_invoked": ["orchestrator"],
+    }
+
+
+def _intent_to_route_fallback(
+    intent: str, asset: str | None, asset_clear: bool, multi_assets: list
+) -> str:
+    """Planner 失败时的规则降级路由。"""
     if intent == "PositionDecision":
         if multi_assets and len(multi_assets) >= 2:
-            return {
-                "route": "position_multi",
-                "intent": intent,
-                "intent_payload": payload_dict,
-                "multi_assets": multi_assets,
-                "sse_handler": "_stream_multi_asset",
-                "sse_kwargs": {
-                    "user_input": user_query,
-                    "multi_assets": multi_assets,
-                    "session_id": session_id,
-                    "portfolio_id": portfolio_id,
-                },
-            }
-
-        # asset 明确性检查（positions 列表暂简化为空，Step 2 完善）
-        if asset and not any(
-            v == asset.strip() for v in [
-                "股票", "基金", "标的", "持仓", "资产", "仓位",
-                "这只", "那只", "某只", "一只", "一个", "这个", "那个",
-            ]
-        ):
-            return {
-                "route": "position_single",
-                "intent": intent,
-                "intent_payload": payload_dict,
-                "sse_handler": "_stream_position_decision",
-                "sse_kwargs": {
-                    "user_input": user_query,
-                    "session_id": session_id,
-                    "portfolio_id": portfolio_id,
-                },
-            }
-
-        # asset 不明确 → 候选清单
-        return {
-            "route": "clarify",
-            "intent": intent,
-            "intent_payload": payload_dict,
-            "sse_handler": "_build_clarification_reply",
-            "sse_kwargs": {
-                "user_input": user_query,
-                "feature_type": _detect_feature_type(user_query),
-            },
-        }
-
-    # 组合级意图
+            return "position_multi"
+        if asset_clear:
+            return "position_single"
+        # 兜底：非模糊词的 asset 视为明确（兼容无持仓数据场景）
+        if asset and asset.strip() not in _VAGUE_WORDS:
+            return "position_single"
+        return "clarify"
     if intent in ("PortfolioReview", "AssetAllocation", "PerformanceAnalysis"):
-        return {
-            "route": "portfolio",
-            "intent": intent,
-            "intent_payload": payload_dict,
-            "sse_handler": "_stream_portfolio_intent",
-            "sse_kwargs": {
-                "user_input": user_query,
-                "session_id": session_id,
-                "portfolio_id": portfolio_id,
-            },
-        }
+        return "portfolio"
+    return "general"
 
-    # Education / GeneralChat
-    return {
-        "route": "general",
-        "intent": intent,
-        "intent_payload": payload_dict,
-        "sse_handler": "_stream_general_chat",
-        "sse_kwargs": {
-            "user_input": user_query,
+
+def _build_sse_kwargs(
+    route: str,
+    user_input: str,
+    session_id: str,
+    portfolio_id: int,
+    multi_assets: list,
+) -> tuple[str, dict]:
+    """根据 route 返回 (sse_handler, sse_kwargs)。"""
+    if route == "position_single":
+        return "_stream_position_decision", {
+            "user_input": user_input,
             "session_id": session_id,
-        },
+            "portfolio_id": portfolio_id,
+        }
+    if route == "position_multi":
+        return "_stream_multi_asset", {
+            "user_input": user_input,
+            "multi_assets": multi_assets,
+            "session_id": session_id,
+            "portfolio_id": portfolio_id,
+        }
+    if route == "portfolio":
+        return "_stream_portfolio_intent", {
+            "user_input": user_input,
+            "session_id": session_id,
+            "portfolio_id": portfolio_id,
+        }
+    if route == "clarify":
+        return "_build_clarification_reply", {
+            "user_input": user_input,
+            "feature_type": _detect_feature_type(user_input),
+        }
+    # general / 兜底
+    return "_stream_general_chat", {
+        "user_input": user_input,
+        "session_id": session_id,
     }
 
 
