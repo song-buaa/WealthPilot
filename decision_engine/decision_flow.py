@@ -132,7 +132,7 @@ def _run_pipeline(
 
     # ── Step 2: 数据加载 ─────────────────────────────────────────────────────
     try:
-        loaded = data_loader.load(asset_name=intent.asset, pid=pid)
+        loaded = data_loader.load(asset_name=intent.asset, pid=pid, user_query=user_input)
         result.data = loaded
         result.stage = FlowStage.LOADED
     except ValueError as e:

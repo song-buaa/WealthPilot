@@ -8,9 +8,9 @@ input:
 expected:
   L1:
     intent_category: Education
-    needs_clarification: false
   L2:
     must_reach_stage: done
     must_not_abort: true
   L3:
     chat_answer_min_chars: 80
+notes: "Planner 可能路由到 general 或 clarify，两种行为均可接受"

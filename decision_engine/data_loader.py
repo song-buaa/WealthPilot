@@ -528,7 +528,7 @@ def get_position_names(pid: int = default_portfolio_id) -> list[str]:
 
 # ── 核心函数 ───────────────────────────────────────────────────────────────────
 
-def load(asset_name: Optional[str], pid: int = default_portfolio_id) -> LoadedData:
+def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query: str = "") -> LoadedData:
     """
     加载决策所需的全部数据。
 
@@ -611,6 +611,49 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id) -> LoadedDa
 
         # ── 8. 用户画像（MVP mock）──────────────────────────────────────────
         profile = UserProfile()
+
+        # ── 9. 盈米 MCP 数据注入（v2.6 M7）──────────────────────────────
+        _is_fund = False
+        try:
+            from backend.services.fund_classifier import (
+                is_likely_fund, fetch_fund_research_text,
+            )
+            _is_fund, _fund_reason = is_likely_fund(
+                asset_name=asset_name,
+                holdings=agg_positions,
+                user_query=user_query,
+            )
+            if _is_fund:
+                print(f"[YingmiMCP] 识别为基金 ({_fund_reason})，调用盈米 MCP", flush=True)
+                fund_research = fetch_fund_research_text(asset_name)
+                if fund_research:
+                    research = (research or []) + fund_research
+                    print(f"[YingmiMCP] 注入 {len(fund_research)} 条基金研究文本", flush=True)
+                else:
+                    print(f"[YingmiMCP] 盈米 MCP 未返回数据", flush=True)
+        except Exception as e:
+            print(f"[YingmiMCP] 数据注入失败: {e}", flush=True)
+
+        # 基金标的不在持仓时，构造虚拟 target 让决策流程能正常走完
+        if _is_fund and target_position is None and research:
+            _fund_research_injected = any("盈米" in r for r in research)
+            if _fund_research_injected:
+                target_position = PositionInfo(
+                    name=asset_name,
+                    ticker=asset_name,
+                    asset_class="权益",
+                    weight=0.0,
+                    market_value_cny=0.0,
+                    cost_price=0.0,
+                    current_price=0.0,
+                    profit_loss_rate=0.0,
+                    platforms=[],
+                )
+                warnings.append(DataWarning(
+                    level="warning",
+                    message=f"{asset_name} 不在您的持仓中，以下分析基于盈米基金数据，仅供参考。",
+                ))
+                print(f"[YingmiMCP] 构造虚拟 target_position（{asset_name} 不在持仓）", flush=True)
 
         return LoadedData(
             profile=profile,
