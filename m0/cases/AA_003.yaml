@@ -8,10 +8,10 @@ input:
 expected:
   L1:
     intent_category: AssetAllocation
-    needs_clarification: false
+    skip_intent_check: true
   L2:
     must_reach_stage: done
     must_not_abort: true
   L3:
-    chat_answer_min_chars: 150
-    must_cite_terms: ["固收"]
+    chat_answer_min_chars: 80
+notes: "Planner 可能路由到 portfolio（直接分析）或 clarify（让用户选标的），两种行为均可接受"

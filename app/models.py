@@ -309,6 +309,26 @@ class ConversationMessage(Base):
 
 
 # ──────────────────────────────────────────────
+# 决策历史（Long-term Memory）
+# ──────────────────────────────────────────────
+
+class DecisionHistory(Base):
+    """持久化决策历史，支持按标的检索。"""
+    __tablename__ = "decision_history"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    session_id    = Column(String,  nullable=False, index=True)
+    decision_id   = Column(String,  nullable=False, unique=True)
+    asset_name    = Column(String,  nullable=True,  index=True)
+    intent_type   = Column(String,  nullable=False)
+    decision_type = Column(String,  nullable=True)    # hold/reduce/buy 等
+    confidence    = Column(Float,   nullable=True)
+    chat_answer   = Column(Text,    nullable=True)    # 截断到前 500 字
+    rationale     = Column(Text,    nullable=True)    # JSON 列表序列化
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+# ──────────────────────────────────────────────
 # 投研观点 v2（三层分离 ViewpointCard）
 # ──────────────────────────────────────────────
 

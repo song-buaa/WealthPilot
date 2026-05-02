@@ -282,7 +282,19 @@ def build_decision_graph():
         },
     )
 
-    return graph.compile()
+    import os
+    import sqlite3
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    _ckpt_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "data", "checkpoints.db",
+    )
+    os.makedirs(os.path.dirname(_ckpt_path), exist_ok=True)
+    _conn = sqlite3.connect(_ckpt_path, check_same_thread=False)
+    checkpointer = SqliteSaver(_conn)
+
+    return graph.compile(checkpointer=checkpointer)
 
 
 # 模块级单例

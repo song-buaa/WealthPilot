@@ -380,7 +380,10 @@ async def run_chat_stream(
             "candidate_holdings": [],
         }
 
-        graph_result = await asyncio.to_thread(decision_graph.invoke, initial_state)
+        config = {"configurable": {"thread_id": session_id}}
+        graph_result = await asyncio.to_thread(
+            decision_graph.invoke, initial_state, config
+        )
 
         route = graph_result.get("route", "general")
         sse_handler = graph_result.get("sse_handler", "_stream_general_chat")
@@ -572,6 +575,34 @@ async def run_chat_stream(
                     for f in validator_result.failures
                 ],
             }
+
+        # ── 持久化决策历史（仅 PositionDecision 且有完整 decisionResult）──
+        if sse_handler == "_stream_position_decision" and collected_done_data:
+            dr = collected_done_data.get("decisionResult") or {}
+            if dr:
+                try:
+                    from app.database import get_session as _get_db
+                    from app.models import DecisionHistory
+                    rationale_json = json.dumps(
+                        dr.get("rationale", []), ensure_ascii=False
+                    )
+                    _db = _get_db()
+                    try:
+                        _db.add(DecisionHistory(
+                            session_id=session_id,
+                            decision_id=collected_done_data.get("decision_id", ""),
+                            asset_name=payload.entities.asset if payload.entities else "",
+                            intent_type="PositionDecision",
+                            decision_type=dr.get("decisionType", ""),
+                            confidence=dr.get("confidence"),
+                            chat_answer=(dr.get("chat_answer") or "")[:500],
+                            rationale=rationale_json,
+                        ))
+                        _db.commit()
+                    finally:
+                        _db.close()
+                except Exception:
+                    pass  # 写入失败不影响主流程
 
         yield _sse("done", collected_done_data)
 
