@@ -10,11 +10,15 @@ M7 Spike：盈米 MCP 连通性测试
 import asyncio
 import os
 import json
+
+from dotenv import load_dotenv
+load_dotenv()
+
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-YINGMI_URL = "https://stargate.yingmi.com/mcp/v2"
-YINGMI_API_KEY = os.environ.get("YINGMI_API_KEY", "8TiRdtPwvewqeP_ckn5KsQ")
+YINGMI_URL = os.environ.get("YINGMI_MCP_URL", "https://stargate.yingmi.com/mcp/v2")
+YINGMI_API_KEY = os.environ.get("YINGMI_API_KEY")
 
 TARGET_TOOLS = [
     "BatchGetFundsDetail",

@@ -18,12 +18,8 @@ from typing import Any, Optional
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-YINGMI_URL = os.environ.get(
-    "YINGMI_MCP_URL", "https://stargate.yingmi.com/mcp/v2"
-)
-YINGMI_API_KEY = os.environ.get(
-    "YINGMI_API_KEY", "8TiRdtPwvewqeP_ckn5KsQ"
-)
+YINGMI_URL = os.environ.get("YINGMI_MCP_URL")
+YINGMI_API_KEY = os.environ.get("YINGMI_API_KEY")
 
 
 class YingmiMCPClient:
@@ -71,6 +67,11 @@ class YingmiMCPClient:
             return {"success": False, "error": f"调用异常: {e}"}
 
     async def _call_tool_async(self, tool_name: str, arguments: dict) -> dict:
+        if not YINGMI_API_KEY or not YINGMI_URL:
+            return {
+                "success": False,
+                "error": "盈米 API Key 或 URL 未配置（请检查 .env 里的 YINGMI_API_KEY 和 YINGMI_MCP_URL）",
+            }
         headers = {
             "x-api-key": YINGMI_API_KEY,
             "Accept": "application/json, text/event-stream",

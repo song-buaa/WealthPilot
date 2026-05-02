@@ -3,6 +3,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 os.environ.setdefault("AV_DEV_MOCK", "1")
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def test_import():
     from backend.graph.tools import (
