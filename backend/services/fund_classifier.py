@@ -74,6 +74,33 @@ def is_likely_fund(
     return False, "未匹配任何基金特征"
 
 
+# asset_name 里粘连的类型词后缀
+ASSET_TYPE_SUFFIXES = (
+    "这只基金", "这支基金", "这只股票", "这支股票",
+    "基金", "股票", "ETF", "联接",
+)
+
+
+def normalize_asset_name(asset_name: str) -> str:
+    """
+    去掉 asset_name 末尾粘连的资产类型词。
+    例：'000001这只基金' → '000001'
+        '茅台股票' → '茅台'
+    """
+    if not asset_name:
+        return asset_name
+    cleaned = asset_name.strip()
+    changed = True
+    while changed:
+        changed = False
+        for suffix in ASSET_TYPE_SUFFIXES:
+            if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+                cleaned = cleaned[:-len(suffix)].strip()
+                changed = True
+                break
+    return cleaned or asset_name
+
+
 def fetch_fund_research_text(asset_name: str, max_chars: int = 6000) -> list[str]:
     """
     调用盈米 MCP 拿基金研究文本，返回 list[str] 直接 append 到 LoadedData.research。

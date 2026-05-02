@@ -110,6 +110,16 @@ def orchestrator_node(state: DecisionState) -> dict:
     asset = entities.asset if entities else None
     multi_assets = list(entities.multi_assets or []) if entities else []
 
+    # M7: asset 清洗（去掉粘连的类型词后缀，如 "000001基金" → "000001"）
+    if asset:
+        from backend.services.fund_classifier import normalize_asset_name
+        original_asset = asset
+        asset = normalize_asset_name(original_asset)
+        if asset != original_asset:
+            if entities:
+                entities.asset = asset
+            print(f"[M7] asset 清洗: '{original_asset}' → '{asset}'", flush=True)
+
     # 低置信度直接走澄清，不需要 LLM Planner
     if confidence < 0.5:
         return {
@@ -177,6 +187,17 @@ def orchestrator_node(state: DecisionState) -> dict:
         if has_op and has_vague and not (intent == "Education" and not asset):
             route = "clarify"
             rationale += "（含操作关键词+模糊标的，重路由到澄清）"
+
+    # M7 守门：用户明确说基金 + asset 是 6 位代码 → 强制 position_single
+    if (route == "clarify"
+        and intent == "PositionDecision"
+        and asset and asset.isdigit() and len(asset) == 6):
+        from backend.services.fund_classifier import is_likely_fund
+        _is_fund, _fund_reason = is_likely_fund(asset, all_positions, user_query)
+        if _is_fund:
+            route = "position_single"
+            rationale += f" | M7 守门：{_fund_reason}，强制走单标决策"
+            print(f"[M7] Planner 守门生效: {asset} → position_single", flush=True)
 
     # 根据 route 构建 sse_kwargs
     sse_handler, sse_kwargs = _build_sse_kwargs(

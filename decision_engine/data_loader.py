@@ -606,14 +606,10 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
             max_leverage_ratio=_dr["leverage_limits"]["leverage_ratio_warning_max"],
         )
 
-        # ── 7. 投研观点 ──────────────────────────────────────────────────────
-        research = _load_research(session, pid, asset_name)
-
-        # ── 8. 用户画像（MVP mock）──────────────────────────────────────────
-        profile = UserProfile()
-
-        # ── 9. 盈米 MCP 数据注入（v2.6 M7）──────────────────────────────
+        # ── 7. 投研观点（基金走盈米独占，股票走通用联网搜索）─────────────
+        research = []
         _is_fund = False
+
         try:
             from backend.services.fund_classifier import (
                 is_likely_fund, fetch_fund_research_text,
@@ -623,24 +619,35 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                 holdings=agg_positions,
                 user_query=user_query,
             )
-            if _is_fund:
-                print(f"[YingmiMCP] 识别为基金 ({_fund_reason})，调用盈米 MCP", flush=True)
-                fund_research = fetch_fund_research_text(asset_name)
-                if fund_research:
-                    research = (research or []) + fund_research
-                    print(f"[YingmiMCP] 注入 {len(fund_research)} 条基金研究文本", flush=True)
-                else:
-                    print(f"[YingmiMCP] 盈米 MCP 未返回数据", flush=True)
-        except Exception as e:
-            print(f"[YingmiMCP] 数据注入失败: {e}", flush=True)
+        except Exception:
+            _is_fund = False
 
-        # 基金标的不在持仓时，构造虚拟 target 让决策流程能正常走完
-        if _is_fund and target_position is None and research:
-            _fund_research_injected = any("盈米" in r for r in research)
-            if _fund_research_injected:
+        if _is_fund:
+            # ── 基金场景：独占盈米数据，不调用通用联网搜索 ──
+            _asset_for_yingmi = asset_name
+            # Layer 1（持仓内基金）用 ticker 调 MCP
+            if target_position and target_position.ticker:
+                _asset_for_yingmi = target_position.ticker
+
+            print(f"[M7] 盈米独占模式: asset={_asset_for_yingmi}, reason={_fund_reason}", flush=True)
+            fund_research = fetch_fund_research_text(_asset_for_yingmi)
+
+            _fund_real_name = ""
+            if fund_research:
+                _fund_real_name = _extract_fund_name(fund_research[0])
+                if _fund_real_name:
+                    research.append(
+                        f"[基金标识] 用户咨询的基金代码 {_asset_for_yingmi} "
+                        f"对应基金为：{_fund_real_name}。后续分析请使用基金中文名称。"
+                    )
+                research.extend(fund_research)
+                print(f"[M7] 注入 {len(fund_research)} 条盈米数据, name={_fund_real_name}", flush=True)
+
+            # Layer 2：持仓外基金 → 构造虚拟 target
+            if target_position is None and research:
                 target_position = PositionInfo(
-                    name=asset_name,
-                    ticker=asset_name,
+                    name=_fund_real_name or asset_name,
+                    ticker=_asset_for_yingmi,
                     asset_class="权益",
                     weight=0.0,
                     market_value_cny=0.0,
@@ -651,9 +658,29 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                 )
                 warnings.append(DataWarning(
                     level="warning",
-                    message=f"{asset_name} 不在您的持仓中，以下分析基于盈米基金数据，仅供参考。",
+                    message=f"{_fund_real_name or asset_name} 不在您的持仓中，以下分析基于盈米基金数据，仅供参考。",
                 ))
-                print(f"[YingmiMCP] 构造虚拟 target_position（{asset_name} 不在持仓）", flush=True)
+                print(f"[M7] 构造虚拟 target（{_fund_real_name or asset_name}）", flush=True)
+
+            # 同步真实基金名到 target_position（Layer 1 + Layer 2）
+            if _fund_real_name and target_position and target_position.name == _asset_for_yingmi:
+                target_position = PositionInfo(
+                    name=_fund_real_name,
+                    ticker=target_position.ticker,
+                    asset_class=target_position.asset_class,
+                    weight=target_position.weight,
+                    market_value_cny=target_position.market_value_cny,
+                    cost_price=target_position.cost_price,
+                    current_price=target_position.current_price,
+                    profit_loss_rate=target_position.profit_loss_rate,
+                    platforms=target_position.platforms,
+                )
+        else:
+            # ── 非基金场景：保持原有通用联网搜索 ──
+            research = _load_research(session, pid, asset_name)
+
+        # ── 8. 用户画像（MVP mock）──────────────────────────────────────────
+        profile = UserProfile()
 
         return LoadedData(
             profile=profile,
@@ -984,3 +1011,10 @@ class _MockPortfolio:
 
 def _mock_portfolio() -> _MockPortfolio:
     return _MockPortfolio()
+
+
+def _extract_fund_name(yingmi_text: str) -> str:
+    """从盈米诊断报告原始文本里提取基金中文名（fundName 字段）。"""
+    import re
+    match = re.search(r'"fundName"\s*:\s*"([^"]+)"', yingmi_text)
+    return match.group(1) if match else ""
