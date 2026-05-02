@@ -435,6 +435,270 @@ def execute_web_search(query: str, asset_name: str = "") -> WebSearchOutput:
 
 
 # ══════════════════════════════════════════════════════════════════
+# 盈米 MCP Tools（v2.6 M7）
+# ══════════════════════════════════════════════════════════════════
+# 6 个 v2.1 范围的工具，通过 MCP 协议调用盈米基金数据平台
+# 设计原则：薄包装，把 MCP 返回的 raw_text 透传给上层，
+#          让 LLM 直接消费盈米的结构化文本输出
+# ══════════════════════════════════════════════════════════════════
+
+from backend.mcp_client import call_yingmi_tool
+
+
+# ─── Tool 8：fetch_fund_detail ─────────────────────────────────────
+
+class FetchFundDetailInput(BaseModel):
+    fund_codes: list[str]
+
+class FetchFundDetailOutput(BaseModel):
+    success: bool
+    raw_text: str
+    fund_count: int
+    error: Optional[str] = None
+
+FETCH_FUND_DETAIL_SCHEMA = {
+    "name": "fetch_fund_detail",
+    "description": "获取基金的基础资料：名称、类型、风险等级、规模、基金经理、近期业绩等。"
+                   "用于用户提到具体基金代码或名称时，作为分析的起点。"
+                   "数据源：盈米 MCP。最多支持 20 只基金一次查询。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fund_codes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "6 位基金代码列表，如 ['000001', '110011']",
+            }
+        },
+        "required": ["fund_codes"],
+    },
+}
+
+def execute_fetch_fund_detail(fund_codes: list[str]) -> FetchFundDetailOutput:
+    result = call_yingmi_tool("BatchGetFundsDetail", {"fundCodes": fund_codes})
+    return FetchFundDetailOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:5000],
+        fund_count=len(fund_codes),
+        error=result.get("error"),
+    )
+
+
+# ─── Tool 9：fetch_fund_nav_history ────────────────────────────────
+
+class FetchFundNavHistoryInput(BaseModel):
+    fund_codes: list[str]
+    is_desc: bool = True
+    dimension_type: str = "DAILY"
+
+class FetchFundNavHistoryOutput(BaseModel):
+    success: bool
+    raw_text: str
+    error: Optional[str] = None
+
+FETCH_FUND_NAV_HISTORY_SCHEMA = {
+    "name": "fetch_fund_nav_history",
+    "description": "获取基金的历史净值序列。用于绘制净值曲线、计算最大回撤、分析波动率等场景。"
+                   "数据源：盈米 MCP。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fund_codes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "6 位基金代码列表",
+            },
+            "is_desc": {
+                "type": "boolean",
+                "description": "是否按时间倒序，默认 True",
+                "default": True,
+            },
+            "dimension_type": {
+                "type": "string",
+                "description": "DAILY / WEEKLY / MONTHLY，默认 DAILY",
+                "default": "DAILY",
+            },
+        },
+        "required": ["fund_codes"],
+    },
+}
+
+def execute_fetch_fund_nav_history(
+    fund_codes: list[str],
+    is_desc: bool = True,
+    dimension_type: str = "DAILY",
+) -> FetchFundNavHistoryOutput:
+    result = call_yingmi_tool("BatchGetFundNavHistory", {
+        "fundCodes": fund_codes,
+        "isDesc": is_desc,
+        "dimensionType": dimension_type,
+    })
+    return FetchFundNavHistoryOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:5000],
+        error=result.get("error"),
+    )
+
+
+# ─── Tool 10：fetch_fund_performance ───────────────────────────────
+
+class FetchFundPerformanceInput(BaseModel):
+    fund_codes: list[str]
+
+class FetchFundPerformanceOutput(BaseModel):
+    success: bool
+    raw_text: str
+    error: Optional[str] = None
+
+FETCH_FUND_PERFORMANCE_SCHEMA = {
+    "name": "fetch_fund_performance",
+    "description": "获取基金的多时段业绩指标：收益率（近1月/3月/1年/3年/成立以来）、波动率、夏普比率等。"
+                   "用于业绩归因、对比分析。数据源：盈米 MCP。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fund_codes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "6 位基金代码列表",
+            }
+        },
+        "required": ["fund_codes"],
+    },
+}
+
+def execute_fetch_fund_performance(fund_codes: list[str]) -> FetchFundPerformanceOutput:
+    result = call_yingmi_tool("GetBatchFundPerformance", {"fundCodes": fund_codes})
+    return FetchFundPerformanceOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:5000],
+        error=result.get("error"),
+    )
+
+
+# ─── Tool 11：diagnose_fund ────────────────────────────────────────
+
+class DiagnoseFundInput(BaseModel):
+    fund_name_or_code: str
+
+class DiagnoseFundOutput(BaseModel):
+    success: bool
+    raw_text: str
+    error: Optional[str] = None
+
+DIAGNOSE_FUND_SCHEMA = {
+    "name": "diagnose_fund",
+    "description": "对单只基金进行全维度诊断：业绩、风险、持仓集中度、基金经理、规模变化、同类排名等。"
+                   "WealthPilot 基金侧最强工具，等同于专业基金分析师的 1 页诊断报告。"
+                   "数据源：盈米 MCP。支持基金代码或基金名称作为输入。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fund_name_or_code": {
+                "type": "string",
+                "description": "基金名称或 6 位代码，如 '华夏成长' 或 '000001'",
+            }
+        },
+        "required": ["fund_name_or_code"],
+    },
+}
+
+def execute_diagnose_fund(fund_name_or_code: str) -> DiagnoseFundOutput:
+    result = call_yingmi_tool("GetFundDiagnosis", {
+        "fundNameOrCode": fund_name_or_code,
+    })
+    return DiagnoseFundOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:8000],
+        error=result.get("error"),
+    )
+
+
+# ─── Tool 12：search_financial_news ────────────────────────────────
+
+class SearchFinancialNewsInput(BaseModel):
+    keyword: str
+    page: int = 1
+    page_size: int = 10
+
+class SearchFinancialNewsOutput(BaseModel):
+    success: bool
+    raw_text: str
+    error: Optional[str] = None
+
+SEARCH_FINANCIAL_NEWS_SCHEMA = {
+    "name": "search_financial_news",
+    "description": "搜索财经资讯。用于在用户问及具体行业、板块、热点事件时补充时事背景。"
+                   "数据源：盈米 MCP。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "搜索关键词，如 '半导体'、'美联储加息'",
+            },
+            "page": {"type": "integer", "default": 1},
+            "page_size": {"type": "integer", "default": 10},
+        },
+        "required": ["keyword"],
+    },
+}
+
+def execute_search_financial_news(
+    keyword: str, page: int = 1, page_size: int = 10
+) -> SearchFinancialNewsOutput:
+    result = call_yingmi_tool("SearchFinancialNews", {
+        "keyword": keyword,
+        "page": page,
+        "pageSize": page_size,
+    })
+    return SearchFinancialNewsOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:5000],
+        error=result.get("error"),
+    )
+
+
+# ─── Tool 13：get_latest_quotations ────────────────────────────────
+
+class GetLatestQuotationsInput(BaseModel):
+    cal_date: str = ""
+
+class GetLatestQuotationsOutput(BaseModel):
+    success: bool
+    raw_text: str
+    error: Optional[str] = None
+
+GET_LATEST_QUOTATIONS_SCHEMA = {
+    "name": "get_latest_quotations",
+    "description": "获取市场最新行情：A股/港股/美股主要指数、基金市场温度、市场情绪指标等。"
+                   "用于决策前对市场环境做整体感知。数据源：盈米 MCP。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "cal_date": {
+                "type": "string",
+                "description": "可选。指定交易日，格式 YYYY-MM-DD。不传则取最新交易日。",
+                "default": "",
+            }
+        },
+        "required": [],
+    },
+}
+
+def execute_get_latest_quotations(cal_date: str = "") -> GetLatestQuotationsOutput:
+    args = {}
+    if cal_date:
+        args["calDate"] = cal_date
+    result = call_yingmi_tool("GetLatestQuotations", args)
+    return GetLatestQuotationsOutput(
+        success=result.get("success", False),
+        raw_text=result.get("raw_text", "")[:5000],
+        error=result.get("error"),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Tool 注册表（统一入口）
 # ══════════════════════════════════════════════════════════════════
 
@@ -446,6 +710,12 @@ TOOL_SCHEMAS = [
     QUERY_VIEWPOINT_SCHEMA,
     FETCH_REALTIME_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    FETCH_FUND_DETAIL_SCHEMA,
+    FETCH_FUND_NAV_HISTORY_SCHEMA,
+    FETCH_FUND_PERFORMANCE_SCHEMA,
+    DIAGNOSE_FUND_SCHEMA,
+    SEARCH_FINANCIAL_NEWS_SCHEMA,
+    GET_LATEST_QUOTATIONS_SCHEMA,
 ]
 
 TOOL_EXECUTORS = {
@@ -456,6 +726,12 @@ TOOL_EXECUTORS = {
     "query_viewpoint_cards":      execute_query_viewpoint,
     "fetch_realtime_research":    execute_fetch_realtime,
     "web_search":                 execute_web_search,
+    "fetch_fund_detail":          execute_fetch_fund_detail,
+    "fetch_fund_nav_history":     execute_fetch_fund_nav_history,
+    "fetch_fund_performance":     execute_fetch_fund_performance,
+    "diagnose_fund":              execute_diagnose_fund,
+    "search_financial_news":      execute_search_financial_news,
+    "get_latest_quotations":      execute_get_latest_quotations,
 }
 
 
