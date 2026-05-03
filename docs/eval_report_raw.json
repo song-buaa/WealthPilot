@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "GE_001",
+    "category": "Education",
+    "query": "如果我准备开始配置权益资产，第一步应该怎么做？",
+    "overall_pass": false,
+    "L1": {
+      "pass": false,
+      "details": {
+        "intent_match": {
+          "expected": "Education",
+          "actual": "Education",
+          "pass": true
+        },
+        "clarification_match": {
+          "expected": false,
+          "actual": true,
+          "pass": false
+        }
+      }
+    },
+    "L2": {
+      "pass": true,
+      "details": {
+        "stage_reached": {
+          "required": "done",
+          "actual_stages": [
+            "intent",
+            "done"
+          ],
+          "pass": true
+        },
+        "not_aborted": {
+          "pass": true,
+          "error": null
+        }
+      }
+    },
+    "L3": {
+      "pass": true,
+      "details": {
+        "chat_answer_length": {
+          "min": 80,
+          "actual": 109,
+          "pass": true
+        }
+      },
+      "rubric_score": null
+    },
+    "duration_seconds": 3.36,
+    "raw": {
+      "intent": {
+        "primary_intent": "Education",
+        "asset": null,
+        "action": "ANALYZE",
+        "confidence": 0.85,
+        "needs_clarification": false,
+        "planner_route": "clarify",
+        "planner_rationale": "用户提到要配置权益资产，但未明确具体标的，需要先展示候选权益资产清单供用户选择。"
+      },
+      "stages": [
+        "intent"
+      ],
+      "candidates_count": 3,
+      "validator": {},
+      "done_conclusion": null,
+      "text_length": 109
+    }
+  }
+]

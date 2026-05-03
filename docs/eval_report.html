@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>WealthPilot Eval Report</title>
+<style>
+  body { font-family: -apple-system, sans-serif; margin: 32px; color: #1a1a1a; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .subtitle { color: #666; margin-bottom: 32px; font-size: 14px; }
+  .summary { display: flex; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
+  .card { background: #f5f5f5; border-radius: 8px; padding: 16px 24px; min-width: 120px; }
+  .card .num { font-size: 32px; font-weight: bold; }
+  .card .label { font-size: 12px; color: #666; }
+  .card.green .num { color: #16a34a; }
+  .card.red .num { color: #dc2626; }
+  .card.blue .num { color: #2563eb; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 32px; font-size: 13px; }
+  th { background: #f0f0f0; padding: 8px 12px; text-align: left; border-bottom: 2px solid #ddd; }
+  td { padding: 7px 12px; border-bottom: 1px solid #eee; }
+  .pass-row { background: #f0fdf4; }
+  .fail-row { background: #fff1f2; }
+  .query-cell { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .failure-cell { color: #dc2626; font-size: 12px; }
+  h2 { font-size: 16px; margin-top: 32px; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+</style>
+</head>
+<body>
+<h1>WealthPilot Eval Report</h1>
+<div class="subtitle">生成时间：2026-05-02 14:57:19 &nbsp;|&nbsp; 用例数：1</div>
+
+<div class="summary">
+  <div class="card red">
+    <div class="num">0/1</div>
+    <div class="label">整体通过</div>
+  </div>
+  <div class="card blue">
+    <div class="num">0/1</div>
+    <div class="label">L1 意图识别</div>
+  </div>
+  <div class="card blue">
+    <div class="num">1/1</div>
+    <div class="label">L2 流程链路</div>
+  </div>
+  <div class="card blue">
+    <div class="num">1/1</div>
+    <div class="label">L3 决策质量</div>
+  </div>
+</div>
+
+<h2>按意图类别</h2>
+<table>
+  <tr><th>类别</th><th>通过</th><th>通过率</th></tr>
+  <tr><td>Education</td><td>0/1</td><td>0%</td></tr>
+</table>
+
+<h2>用例详情</h2>
+<table>
+  <tr>
+    <th>用例</th><th>类别</th><th>问题</th>
+    <th>整体</th><th>L1</th><th>L2</th><th>L3</th>
+    <th>决策结果</th><th>耗时</th><th>失败项</th>
+  </tr>
+  
+        <tr class="fail-row">
+            <td>GE_001</td>
+            <td>Education</td>
+            <td class="query-cell">如果我准备开始配置权益资产，第一步应该怎么做？...</td>
+            <td>❌</td>
+            <td>❌</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>None</td>
+            <td>3.36s</td>
+            <td class="failure-cell">L1.clarification_match</td>
+        </tr>
+</table>
+</body>
+</html>

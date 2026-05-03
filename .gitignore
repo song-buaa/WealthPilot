@@ -37,3 +37,18 @@ htmlcov/
 *.swp
 *.swo
 .env
+
+# Claude Code 本地配置
+.claude/
+.claire/
+
+# 根目录数据库（已有 data/*.db 规则，但根目录数据库需单独覆盖）
+/wealthpilot.db
+/*.db
+
+# 编辑器/工具产生的空文件
+**/Untitled
+
+# Claude Code 终端会话日志（如果以后又生成）
+WeathPilot.txt
+WealthPilot.txt

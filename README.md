@@ -267,6 +267,6 @@ pytest
 - **v2.1.0**（2026-04-04）：用户画像模块重构 — 单页双模态 · 图片解析 · 本地冲突校验
 - **v2.0.0**（2026-04-04）：全栈重写，React+FastAPI，四核心模块完整落地
 
-## 许可证
+## License
 
-AGPL-3.0 License
+本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE) 文件。
