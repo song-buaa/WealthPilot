@@ -523,6 +523,81 @@ def execute_generate_signals(
 
 
 # ══════════════════════════════════════════════════════════════════
+# Tool 9：load_decision_context（组合 Skill，v3.0）
+# ══════════════════════════════════════════════════════════════════
+
+class LoadDecisionContextOutput(BaseModel):
+    """load_decision_context Tool 的结构化输出。"""
+    loaded_data: Optional[object] = None   # decision_engine.data_loader.LoadedData
+    has_required_data: bool = False
+    has_data_errors: bool = True
+    has_ambiguous_matches: bool = False
+    target_position_found: bool = False
+    error: Optional[str] = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+LOAD_DECISION_CONTEXT_SCHEMA = {
+    "name": "load_decision_context",
+    "description": "加载完整决策上下文（组合 Skill）。封装持仓+画像+纪律+target查找+投研(含M7)+告警。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "asset_name": {
+                "type": "string",
+                "description": "标的名称（可选，组合级评估时为空）",
+                "default": "",
+            },
+            "portfolio_id": {
+                "type": "integer",
+                "default": 1,
+            },
+            "user_query": {
+                "type": "string",
+                "description": "用户原始问句（M7 三层判别需要）",
+                "default": "",
+            },
+        },
+        "required": [],
+    },
+}
+
+def execute_load_decision_context(
+    asset_name: Optional[str] = None,
+    portfolio_id: int = 1,
+    user_query: str = "",
+) -> LoadDecisionContextOutput:
+    """加载完整决策上下文。内部调用 data_loader.load()。"""
+    try:
+        from decision_engine import data_loader
+
+        loaded = data_loader.load(
+            asset_name=asset_name or None,
+            pid=portfolio_id,
+            user_query=user_query,
+        )
+
+        return LoadDecisionContextOutput(
+            loaded_data=loaded,
+            has_required_data=loaded.has_required_data,
+            has_data_errors=loaded.has_data_errors,
+            has_ambiguous_matches=bool(loaded.ambiguous_matches),
+            target_position_found=loaded.target_position is not None,
+        )
+
+    except Exception as e:
+        return LoadDecisionContextOutput(
+            loaded_data=None,
+            has_required_data=False,
+            has_data_errors=True,
+            has_ambiguous_matches=False,
+            target_position_found=False,
+            error=str(e),
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
 # 盈米 MCP Tools（v2.6 M7）
 # ══════════════════════════════════════════════════════════════════
 # 6 个 v2.1 范围的工具，通过 MCP 协议调用盈米基金数据平台
@@ -799,6 +874,7 @@ TOOL_SCHEMAS = [
     FETCH_REALTIME_SCHEMA,
     WEB_SEARCH_SCHEMA,
     GENERATE_SIGNALS_SCHEMA,
+    LOAD_DECISION_CONTEXT_SCHEMA,
     FETCH_FUND_DETAIL_SCHEMA,
     FETCH_FUND_NAV_HISTORY_SCHEMA,
     FETCH_FUND_PERFORMANCE_SCHEMA,
@@ -816,6 +892,7 @@ TOOL_EXECUTORS = {
     "fetch_realtime_research":    execute_fetch_realtime,
     "web_search":                 execute_web_search,
     "generate_signals":           execute_generate_signals,
+    "load_decision_context":      execute_load_decision_context,
     "fetch_fund_detail":          execute_fetch_fund_detail,
     "fetch_fund_nav_history":     execute_fetch_fund_nav_history,
     "fetch_fund_performance":     execute_fetch_fund_performance,
