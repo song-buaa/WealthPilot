@@ -22,7 +22,10 @@ from backend.agents.contracts import (
     AgentTaskStatus,
 )
 from backend.skills import invoke_skill
-from backend.agents.adapters import discipline_output_to_rule_result
+from backend.agents.adapters import (
+    discipline_output_to_rule_result,
+    signals_output_to_signal_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -205,10 +208,22 @@ class ExecutingAgent:
             "current_weight": rule_result.current_weight,
         }
 
-        # ── Step 5: 信号生成 ──
+        # ── Step 5: 信号生成（v3.0：通过 invoke_skill + Adapter）──
         out.invoked_skills.append("wp-generate-signals")
         try:
-            signal_result = signal_engine.generate(loaded, intent_obj, rule_result)
+            signals_output = invoke_skill(
+                "wp-generate-signals",
+                asset_name=asset_name,
+                portfolio_id=portfolio_id,
+                action_type=intent_obj.action_type or "持有评估",
+            )
+
+            if signals_output.error:
+                out.mark_failed(f"信号生成异常: {signals_output.error}")
+                return
+
+            signal_result = signals_output_to_signal_result(signals_output)
+
         except Exception as e:
             out.mark_failed(f"信号生成异常: {e}")
             return
