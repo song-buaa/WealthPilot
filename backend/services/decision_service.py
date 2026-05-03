@@ -316,6 +316,15 @@ async def run_chat_stream(
     投资决策 SSE 流式接口核心逻辑。
     每次 yield 一条格式化的 SSE 字符串（已含 "data: ...\n\n"）。
     """
+    # v3.0 feature flag 切换
+    import os as _os
+    if _os.getenv("USE_V3_AGENTS") == "1":
+        from backend.services.decision_service_v3 import run_chat_stream_v3
+        async for event in run_chat_stream_v3(message, session_id, portfolio_id):
+            yield event
+        return
+
+    # ── 以下是 v2.6 完整逻辑（不动）──
     try:
         # ── Stage 0: 读取对话历史 + 持仓数据 ────────────────────────────────
         history = await asyncio.to_thread(get_conversation_history, session_id, 6)
