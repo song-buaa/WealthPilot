@@ -17,6 +17,7 @@ from .contracts import (
 )
 from .planning_agent import PlanningAgent, get_planning_agent
 from .executing_agent import ExecutingAgent, get_executing_agent
+from .expressing_agent import ExpressingAgent, get_expressing_agent
 
 __all__ = [
     "AgentTaskStatus",
@@ -28,4 +29,6 @@ __all__ = [
     "get_planning_agent",
     "ExecutingAgent",
     "get_executing_agent",
+    "ExpressingAgent",
+    "get_expressing_agent",
 ]
