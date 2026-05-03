@@ -4,6 +4,136 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [3.0.0] - 2026-05-03
+
+### 架构升级
+
+完成 Multi-Agent + Skills 协议重构，参考蚂蚁 agentUniverse PEER 模式与 Anthropic Skills 开放标准。
+通过 feature flag 渐进切换（USE_V3_AGENTS=1 启用），v2.6 与 v3.0 双轨并行，m5 评测全程 18/18 不退化。
+
+### Added
+
+#### Multi-Agent 框架（PEER 4 角色）
+- `backend/agents/contracts.py`：4 个 dataclass 数据契约（PlanningOutput / ExecutionOutput / ExpressionOutput / ReviewOutput），字段对齐 Google A2A 协议（task_id / status / started_at / completed_at），未来跨进程协作零成本演进
+- `backend/agents/planning_agent.py`：意图识别 + Skill 选择 + 路由决策
+- `backend/agents/executing_agent.py`：数据加载 + 信号生成 + 纪律校验（通过 invoke_skill 驱动）
+- `backend/agents/expressing_agent.py`：LLM 流式输出（4 Agent 中唯一 AsyncGenerator）
+- `backend/agents/reviewing_agent.py`：输出审查（硬校验优先 + LLM 评分兜底，0-1 评分 + retry/fallback 决策）
+
+#### Skills 协议层（10 个 SKILL.md）
+- 原子 Skill（9 个）：
+  - 数据获取：`wp-fetch-holdings` / `wp-fetch-research` / `wp-check-discipline`
+  - 计算分析：`wp-calc-allocation-deviation` / `wp-generate-signals` / `wp-propose-allocation`
+  - LLM 推理：`wp-reasoning`（参数化 prompt 模板，对应 5 种意图）
+  - 输出规范：`wp-citation-rules` / `wp-output-validator`
+- 组合 Skill（1 个）：
+  - `wp-load-context`（composite=true）：封装 data_loader.load() 168 行装配逻辑，含 M7 三层判别 + target_position 3 级查找 + InvestmentRules 加载
+
+#### SkillsLoader 升级
+- `backend/skills/loader.py` 新增 invoke 方法，支持 4 种 Skill 类型分发：
+  - `function_call`：通过 M2 Tool Layer 的 call_tool 调用
+  - `llm_dispatch`：调用 wp-reasoning（v3.0 阶段抛 NotImplementedError，v3.1 演进）
+  - `prompt_inject`：返回 SKILL.md body 文本供调用方注入
+  - `validation`：动态加载 entry_point 函数调用
+- `backend/skills/__init__.py` 暴露 `invoke_skill()` 快捷函数
+
+#### Adapter 层
+- `backend/agents/adapters.py`：M2 Tool Output → 业务对象类型映射
+  - `discipline_output_to_rule_result`：DisciplineCheckOutput → RuleResult（6 字段直接复制）
+  - `signals_output_to_signal_result`：GenerateSignalsOutput → SignalResult（含 EventSignal 嵌套构造）
+
+#### LLM Skill Selector
+- 启发式触发（5 信号）+ LLM 增补（gpt-4.1-mini）+ 静态映射兜底
+- 99% 标准场景零延迟（直接走静态映射）
+- 1% 边界场景（宏观关键词 / 跨意图组合 / 多标的连接词 / 低置信度 / 需澄清）触发 LLM 增补
+- LLM 调用失败时回退静态 bundle，不影响产品体验
+- `_LLM_SELECTABLE_EXTRA_SKILLS` 配置项：未来加新 Skill 改这里，不改 PlanningAgent 代码
+
+#### 新增 M2 Tool（2 个）
+- `execute_generate_signals`：内部串行调用 data_loader.load + rule_engine.check + signal_engine.generate，对外暴露简单参数（asset_name + portfolio_id + action_type）
+- `execute_load_decision_context`：wp-load-context 的 entry_point，包装 data_loader.load() 完整装配逻辑
+
+#### v3.0 决策服务
+- `backend/services/decision_service_v3.py`：`run_chat_stream_v3` 入口，4 Agent 协作链路
+- `backend/services/decision_service.py`：USE_V3_AGENTS 环境变量切换 v2.6/v3.0 路径
+
+### Changed
+- ExecutingAgent 内部数据/规则/信号 3 个核心步骤全部通过 `invoke_skill()` 驱动，不再硬编码调用 `data_loader.load()` / `rule_engine.check()` / `signal_engine.generate()`
+- M2 Tool Layer 现有 7 个 Tool 自然成为 Skills 协议的 entry_point 实施层（M2 阶段的工程投资在 v3.0 自动产生价值）
+
+### Performance
+- v2.6 m5 e2e 18/18 PASS（默认走 v2.6，硬底线守住）
+- v3.0 m5 e2e 18/18 PASS（USE_V3_AGENTS=1 启用，行为完全等价 v2.6）
+- 单元测试 50+ 个全部通过（contracts / 4 个 Agent / Adapter / SkillsLoader）
+
+### Architecture
+- PEER 模式（Planning / Executing / Expressing / Reviewing）对标 agentUniverse 蚂小财
+- Skills 协议对标 Anthropic agentskills.io 开放标准（2025-12-18 发布，Microsoft / OpenAI / GitHub / Cursor 已接入）
+- A2A 协议字段对齐（同进程协作不强依赖，但跨进程演进零成本）
+- 渐进式重构（strangler fig pattern）：feature flag 切换 + Adapter 模式 + 双轨并行
+
+---
+
+## [2.6.0] - 2026-04-30
+
+### Added
+
+#### M1.1 候选清单交互
+- 模糊标的歧义匹配场景下，前端展示智能候选清单点选组件
+- 解决 PD_003 Education 退化问题
+
+#### M1.2 LangGraph DecisionState 骨架
+- 引入 LangGraph 作为决策流编排框架
+- 候选清单点选组件含涨跌幅显示
+
+#### M1.3 LangGraph StateGraph + LLM Planner
+- StateGraph 完整骨架 + 路由单元测试
+- LLM Planner 接入 SSE 主链路
+
+#### M1.4 DecisionValidator 运行时门禁
+- 输出硬校验：决策档位枚举 / 列表非空 / 纪律一致性 / chat_answer 长度
+- 校验失败决策 retry / fallback 动作
+
+#### M2 Tool Layer
+- 7 个核心 Tool 定义（fetch_holdings / query_viewpoint_cards / fetch_realtime_research / check_discipline_rules / calc_allocation_deviation / propose_increment_plan / web_search）
+- 统一入口 `call_tool(tool_name, **kwargs)` + TOOL_EXECUTORS 字典分派
+- 每个 Tool 独立可调用、不依赖 LangGraph 上下文
+
+#### M3 Eval Harness
+- 18 个 yaml 评测用例（覆盖 5 种意图 + 边界场景）
+- L1（意图识别准确率）/ L2（流程链路正确性）/ L3（决策质量）三层评测
+- HTML 评测报告生成
+
+#### M5 Memory
+- LangGraph checkpointer 支持多轮对话状态持久化
+- DecisionHistory 模型记录决策上下文
+
+#### M7 盈米 MCP 集成
+- 盈米基金诊断 MCP 客户端 + 6 个基金 Tool（BatchGetFundsDetail / BatchGetFundNavHistory / GetBatchFundPerformance / GetFundDiagnosis / SearchFinancialNews / GetLatestQuotations）
+- 三层判别逻辑（基金 vs 股票分流）：
+  - Layer 1：持仓内基金 → 用 ticker 调盈米 MCP
+  - Layer 2：持仓外基金 + 用户明确说"基金" → 用 asset_name 调盈米
+  - Layer 3：歧义场景 → 走通用联网搜索
+- 基金独占数据源（避免 "000001 → 平安银行" 误匹配）
+- 盈米 API Key 通过 .env 读取
+
+#### M8 Skills 包装第一阶段
+- 引入 Anthropic Skills 协议作为能力描述层
+- 实现 `wealthpilot-position-decision` 意图级 SKILL.md
+- 基础 SkillsLoader（discover / get_skill / list_skill_names）
+- v3.0 阶段重构为原子 Skill + 组合 Skill 模式
+
+### Changed
+- 决策流编排从纯 SSE 主链路升级为 LangGraph StateGraph
+- 数据加载 / 规则校验 / 信号生成统一为 Tool 形式，LLM 可声明式调用
+- 投研数据来源支持本地投研卡 + 联网搜索 + 盈米 MCP 三种渠道
+
+### Performance
+- m5 e2e 评测从 16/18 提升至 18/18
+- M3 评测体系建立后，每次重构强制 18/18 不退化作为硬底线
+
+---
+
 ## [2.5.1] - 2026-04-28 - A 股支持 · 观点库分页 · 体验优化
 
 ### Added
