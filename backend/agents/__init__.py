@@ -19,6 +19,10 @@ from .planning_agent import PlanningAgent, get_planning_agent
 from .executing_agent import ExecutingAgent, get_executing_agent
 from .expressing_agent import ExpressingAgent, get_expressing_agent
 from .reviewing_agent import ReviewingAgent, get_reviewing_agent
+from .adapters import (
+    discipline_output_to_rule_result,
+    signals_output_to_signal_result,
+)
 
 __all__ = [
     "AgentTaskStatus",
@@ -34,4 +38,6 @@ __all__ = [
     "get_expressing_agent",
     "ReviewingAgent",
     "get_reviewing_agent",
+    "discipline_output_to_rule_result",
+    "signals_output_to_signal_result",
 ]

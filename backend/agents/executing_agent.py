@@ -22,6 +22,7 @@ from backend.agents.contracts import (
     AgentTaskStatus,
 )
 from backend.skills import invoke_skill
+from backend.agents.adapters import discipline_output_to_rule_result
 
 logger = logging.getLogger(__name__)
 
@@ -174,10 +175,16 @@ class ExecutingAgent:
             out.mark_failed(f"前置校验异常: {e}")
             return
 
-        # ── Step 4: 规则校验 ──
+        # ── Step 4: 规则校验（v3.0：通过 invoke_skill + Adapter）──
         out.invoked_skills.append("wp-check-discipline")
         try:
-            rule_result = rule_engine.check(loaded, intent_obj)
+            discipline_output = invoke_skill(
+                "wp-check-discipline",
+                asset_name=asset_name,
+                portfolio_id=portfolio_id,
+                action_type="HOLD",
+            )
+            rule_result = discipline_output_to_rule_result(discipline_output)
         except Exception as e:
             out.mark_failed(f"规则校验异常: {e}")
             return
