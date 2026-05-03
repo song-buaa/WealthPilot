@@ -435,6 +435,94 @@ def execute_web_search(query: str, asset_name: str = "") -> WebSearchOutput:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Tool 8：generate_signals（静态，v3.0 补充）
+# ══════════════════════════════════════════════════════════════════
+
+class GenerateSignalsInput(BaseModel):
+    asset_name: str
+    portfolio_id: int = 1
+    action_type: str = "持有评估"
+
+class GenerateSignalsOutput(BaseModel):
+    asset_name: str
+    position_signal: str        # 偏高 / 合理 / 偏低
+    fundamental_signal: str     # 正面 / 中性 / 负面 / N/A
+    sentiment_signal: str       # 中性
+    event_uncertainty: str
+    event_direction: str
+    error: Optional[str] = None
+
+GENERATE_SIGNALS_SCHEMA = {
+    "name": "generate_signals",
+    "description": "生成 4 维度市场信号（仓位/基本面/事件/情绪），作为 LLM 推理的环境因子。"
+                   "内部自动加载持仓数据和纪律校验结果。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "asset_name": {
+                "type": "string",
+                "description": "标的名称，如'贵州茅台'",
+            },
+            "portfolio_id": {
+                "type": "integer",
+                "description": "Portfolio ID，默认为 1",
+                "default": 1,
+            },
+            "action_type": {
+                "type": "string",
+                "description": "操作类型：持有评估 / 加仓判断 / 减仓判断 / 买入判断 / 卖出判断",
+                "default": "持有评估",
+            },
+        },
+        "required": ["asset_name"],
+    },
+}
+
+def execute_generate_signals(
+    asset_name: str,
+    portfolio_id: int = 1,
+    action_type: str = "持有评估",
+) -> GenerateSignalsOutput:
+    """生成 4 维度市场信号。内部组装 LoadedData + IntentResult + RuleResult。"""
+    try:
+        from decision_engine import data_loader, rule_engine, signal_engine
+        from decision_engine.types import IntentResult
+
+        loaded = data_loader.load(asset_name=asset_name, pid=portfolio_id)
+
+        intent = IntentResult(
+            asset=asset_name,
+            action_type=action_type,
+            time_horizon="未知",
+            trigger=None,
+            confidence_score=1.0,
+        )
+
+        rule_result = rule_engine.check(loaded, intent)
+        signal_result = signal_engine.generate(loaded, intent, rule_result)
+
+        return GenerateSignalsOutput(
+            asset_name=asset_name,
+            position_signal=signal_result.position_signal,
+            fundamental_signal=signal_result.fundamental_signal,
+            sentiment_signal=signal_result.sentiment_signal,
+            event_uncertainty=signal_result.event_signal.uncertainty if signal_result.event_signal else "未知",
+            event_direction=signal_result.event_signal.direction if signal_result.event_signal else "未知",
+        )
+
+    except Exception as e:
+        return GenerateSignalsOutput(
+            asset_name=asset_name,
+            position_signal="未知",
+            fundamental_signal="N/A",
+            sentiment_signal="中性",
+            event_uncertainty="未知",
+            event_direction="未知",
+            error=str(e),
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
 # 盈米 MCP Tools（v2.6 M7）
 # ══════════════════════════════════════════════════════════════════
 # 6 个 v2.1 范围的工具，通过 MCP 协议调用盈米基金数据平台
@@ -710,6 +798,7 @@ TOOL_SCHEMAS = [
     QUERY_VIEWPOINT_SCHEMA,
     FETCH_REALTIME_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    GENERATE_SIGNALS_SCHEMA,
     FETCH_FUND_DETAIL_SCHEMA,
     FETCH_FUND_NAV_HISTORY_SCHEMA,
     FETCH_FUND_PERFORMANCE_SCHEMA,
@@ -726,6 +815,7 @@ TOOL_EXECUTORS = {
     "query_viewpoint_cards":      execute_query_viewpoint,
     "fetch_realtime_research":    execute_fetch_realtime,
     "web_search":                 execute_web_search,
+    "generate_signals":           execute_generate_signals,
     "fetch_fund_detail":          execute_fetch_fund_detail,
     "fetch_fund_nav_history":     execute_fetch_fund_nav_history,
     "fetch_fund_performance":     execute_fetch_fund_performance,
