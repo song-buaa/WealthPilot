@@ -106,10 +106,79 @@ def test_planning_agent_a2a_alignment():
     print(f"✅ A2A 字段全部正确：task_id={out.task_id} duration={out.duration_ms}ms")
 
 
+# ════════════════════════════════════════════════
+# Step 9：Skill Selector 测试
+# ════════════════════════════════════════════════
+
+def test_is_edge_case_standard_query():
+    """标准场景：不是边界。"""
+    from backend.agents.planning_agent import _is_edge_case
+
+    intent = {"primary_intent": "PositionDecision", "confidence": 0.9}
+    is_edge, reason = _is_edge_case("茅台还能拿吗", intent)
+    assert is_edge is False, f"标准场景误判为边界: {reason}"
+    print(f"✅ 标准场景正确识别（非边界）")
+
+
+def test_is_edge_case_macro():
+    """宏观关键词触发边界。"""
+    from backend.agents.planning_agent import _is_edge_case
+
+    intent = {"primary_intent": "PortfolioReview", "confidence": 0.9}
+    is_edge, reason = _is_edge_case("美联储加息对我组合有什么影响", intent)
+    assert is_edge is True
+    assert "美联储" in reason or "macro" in reason
+    print(f"✅ 宏观关键词触发边界: {reason}")
+
+
+def test_is_edge_case_low_confidence():
+    """低置信度触发边界。"""
+    from backend.agents.planning_agent import _is_edge_case
+
+    intent = {"primary_intent": "PositionDecision", "confidence": 0.5}
+    is_edge, reason = _is_edge_case("这个怎么样", intent)
+    assert is_edge is True
+    assert "confidence" in reason
+    print(f"✅ 低置信度触发边界: {reason}")
+
+
+def test_is_edge_case_multi_asset():
+    """多标的连接词触发边界。"""
+    from backend.agents.planning_agent import _is_edge_case
+
+    intent = {"primary_intent": "PositionDecision", "confidence": 0.85}
+    is_edge, reason = _is_edge_case("茅台还能拿吗，顺便看看纳指 ETF", intent)
+    assert is_edge is True
+    assert "顺便" in reason or "multi_asset" in reason
+    print(f"✅ 多标的连接词触发边界: {reason}")
+
+
+def test_planning_agent_with_edge_case():
+    """端到端：边界场景 PlanningAgent 行为。"""
+    from backend.agents import get_planning_agent
+
+    agent = get_planning_agent()
+    out = agent.run(
+        user_query="美联储加息对我组合有什么影响",
+        session_id="test_edge_macro",
+    )
+
+    print(f"   route: {out.route}")
+    print(f"   skills: {out.selected_skills}")
+    print(f"   rationale: {out.rationale[:120]}")
+    print(f"✅ 边界场景端到端测试完成")
+
+
 if __name__ == "__main__":
     test_planning_agent_position_single()
     test_planning_agent_general_chat()
     test_planning_agent_portfolio()
     test_planning_agent_skill_bundle_consistency()
     test_planning_agent_a2a_alignment()
-    print("\n🎉 PlanningAgent 5/5 测试通过")
+    # Step 9 新增
+    test_is_edge_case_standard_query()
+    test_is_edge_case_macro()
+    test_is_edge_case_low_confidence()
+    test_is_edge_case_multi_asset()
+    test_planning_agent_with_edge_case()
+    print("\n🎉 PlanningAgent 10/10 测试通过")

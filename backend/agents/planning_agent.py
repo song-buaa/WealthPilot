@@ -15,7 +15,9 @@ PlanningAgent - PEER 4 Agent 之 Planning 角色。
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 from typing import Optional
 
 from backend.agents.contracts import PlanningOutput, AgentTaskStatus
@@ -73,11 +75,158 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
 
 
 def _select_skills_for_route(route: str) -> list[str]:
-    """
-    根据路由决策选择 Skill 组合。
-    v3.0 占位实现，明天 Step 7 替换为 LLM Skill Selector。
-    """
+    """根据路由决策选择 Skill 组合（静态映射，99% 场景）。"""
     return _SKILL_BUNDLES_BY_ROUTE.get(route, [])
+
+
+# ════════════════════════════════════════════════
+# v3.0 Step 9：LLM Skill Selector 配置
+# ════════════════════════════════════════════════
+
+_CROSS_INTENT_KEYWORD_PAIRS = [
+    ("加仓", "配置"),
+    ("止损", "调整"),
+    ("健康", "重点"),
+    ("买入", "卖出"),
+]
+
+_MULTI_ASSET_CONNECTORS = ["顺便", "另外", "还有", "和", "或者比较"]
+
+_MACRO_KEYWORDS = [
+    "美联储", "加息", "降息", "央行", "通胀", "通缩",
+    "贸易战", "汇率", "GDP", "经济周期",
+]
+
+_LLM_SELECTABLE_EXTRA_SKILLS = {
+    "wp-fetch-research": "宏观研究模式 - 涉及政策/经济周期等系统性问题时增补",
+    "wp-propose-allocation": "配置方案生成 - 涉及资金分配决策时增补",
+    "wp-calc-allocation-deviation": "偏离度计算 - 涉及组合再平衡判断时增补",
+}
+
+
+def _is_edge_case(user_query: str, intent_result) -> tuple[bool, str]:
+    """
+    检测用户问题是否为"边界场景"（需要 LLM Selector 增补 Skill）。
+
+    5 个信号：低置信度 / 需要澄清 / 跨意图关键词 / 多标的连接词 / 宏观关键词。
+    """
+    if intent_result is None:
+        return False, ""
+
+    # 信号 1：低置信度（intent 可能是 dict）
+    if isinstance(intent_result, dict):
+        conf = intent_result.get("confidence", 1.0)
+    elif hasattr(intent_result, "confidence_score"):
+        conf = intent_result.confidence_score
+    else:
+        conf = 1.0
+    if conf < 0.7:
+        return True, f"low_confidence={conf:.2f}"
+
+    # 信号 2：需要澄清
+    if isinstance(intent_result, dict):
+        needs_c = intent_result.get("needs_clarification", False)
+    elif hasattr(intent_result, "needs_clarification"):
+        needs_c = intent_result.needs_clarification
+    else:
+        needs_c = False
+    if needs_c:
+        return True, "needs_clarification"
+
+    query = user_query or ""
+
+    # 信号 3：跨意图关键词组合
+    for kw_a, kw_b in _CROSS_INTENT_KEYWORD_PAIRS:
+        if kw_a in query and kw_b in query:
+            return True, f"cross_intent_keywords={kw_a}+{kw_b}"
+
+    # 信号 4：多标的连接词
+    for connector in _MULTI_ASSET_CONNECTORS:
+        if connector in query:
+            return True, f"multi_asset_connector={connector}"
+
+    # 信号 5：宏观关键词
+    for kw in _MACRO_KEYWORDS:
+        if kw in query:
+            return True, f"macro_keyword={kw}"
+
+    return False, ""
+
+
+def _llm_augment_skills(
+    user_query: str,
+    intent_type: str,
+    base_bundle: list[str],
+) -> list[str]:
+    """
+    边界场景：让 LLM 在 base_bundle 基础上"做加法"。
+    失败兜底：返回空列表。
+    """
+    try:
+        import openai
+    except ImportError:
+        return []
+
+    candidates = []
+    for skill_name, desc in _LLM_SELECTABLE_EXTRA_SKILLS.items():
+        if skill_name not in base_bundle:
+            candidates.append(f"- {skill_name}: {desc}")
+
+    if not candidates:
+        return []
+
+    candidates_text = "\n".join(candidates)
+
+    prompt = f"""用户问题包含超出标准工作流的诉求，需要在标准 Skill 组合基础上追加额外能力。
+
+【用户问题】
+{user_query}
+
+【当前意图】
+{intent_type}
+
+【已包含的标准 Skill】
+{', '.join(base_bundle) if base_bundle else '(无)'}
+
+【可追加的额外 Skill】
+{candidates_text}
+
+请判断需要追加哪些 Skill。规则：
+- 只追加确实需要的 Skill，不要为了使用而使用
+- 如果标准 Skill 已经够用，返回空列表
+- 不能选不在【可追加的额外 Skill】列表里的 Skill 名
+
+输出严格 JSON 格式：
+{{"extra_skills": ["wp-...", ...], "rationale": "简短理由（不超过 30 字）"}}
+"""
+
+    try:
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            timeout=10,
+        )
+
+        raw = response.choices[0].message.content or "{}"
+        data = json.loads(raw)
+        extra = data.get("extra_skills", [])
+
+        valid_extra = [
+            s for s in extra
+            if s in _LLM_SELECTABLE_EXTRA_SKILLS and s not in base_bundle
+        ]
+
+        rationale = data.get("rationale", "")
+        if valid_extra:
+            print(f"[PlanningAgent] LLM 增补 Skills: {valid_extra}, 理由: {rationale}", flush=True)
+
+        return valid_extra
+
+    except Exception as e:
+        print(f"[PlanningAgent] LLM Selector 异常（兜底走静态 bundle）: {e}", flush=True)
+        return []
 
 
 # ════════════════════════════════════════════════════════════
@@ -139,12 +288,36 @@ class PlanningAgent:
             out.needs_clarification = raw_result.get("needs_clarification", False)
             out.candidate_holdings = raw_result.get("candidate_holdings", [])
 
-            # v3.0 新增：选择 Skill 组合
-            out.selected_skills = _select_skills_for_route(out.route)
+            # ── v3.0 Step 9：Skill Selector（静态映射 + LLM 增补兜底）──
+            base_bundle = _select_skills_for_route(out.route)
+
+            is_edge, edge_reason = _is_edge_case(user_query, out.intent)
+
+            if not is_edge:
+                out.selected_skills = base_bundle
+            else:
+                logger.info(
+                    f"[PlanningAgent] 边界场景: {edge_reason}, 调 LLM Selector"
+                )
+                intent_type = ""
+                if isinstance(out.intent, dict):
+                    intent_type = out.intent.get("primary_intent", "")
+                extra_skills = _llm_augment_skills(
+                    user_query=user_query,
+                    intent_type=intent_type,
+                    base_bundle=base_bundle,
+                )
+                merged = list(base_bundle)
+                for s in extra_skills:
+                    if s not in merged:
+                        merged.append(s)
+                out.selected_skills = merged
+                if extra_skills:
+                    out.rationale += f" | LLM Selector 增补: {extra_skills}"
 
             logger.info(
                 f"[PlanningAgent] task={out.task_id} route={out.route} "
-                f"skills={len(out.selected_skills)} duration_planning={out.duration_ms}ms"
+                f"skills={len(out.selected_skills)} edge={is_edge}"
             )
 
             out.mark_completed()
