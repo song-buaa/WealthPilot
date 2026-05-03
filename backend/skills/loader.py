@@ -1,18 +1,14 @@
 """
-WealthPilot Skills Loader (v2.6 M8)
+WealthPilot Skills Loader (v3.0)
 
 按 Anthropic Agent Skills 开放标准加载本地 SKILL.md 文件夹。
 
-设计原则：
-  - 启动时扫描 skills/ 目录，发现所有 SKILL.md
-  - 解析 YAML frontmatter 得到 metadata（name / description / intent_binding 等）
-  - 单例缓存，避免重复加载
-  - 提供两个核心接口：
-      get_skill_metadatas()：用于 LLM Selector 的渐进式披露
-      load_skill_body()：用于实际执行时加载完整 body
+v2.6 能力：discover / load_skill_body / get_skill / get_skill_metadatas / list_skill_names
+v3.0 新增：invoke（根据 type 字段分发到 function_call / llm_dispatch / prompt_inject / validation）
 """
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import threading
@@ -37,6 +33,22 @@ class SkillMeta:
     intent_binding: Optional[str] = None
     file_path: str = ""
     body: str = ""
+
+    # v3.0 扩展字段
+    type: str = "function_call"   # function_call / llm_dispatch / prompt_inject / validation
+    entry_point: Optional[str] = None  # 函数引用，如 "module.path:func_name"
+    tool_name: Optional[str] = None    # function_call 类型对应的 M2 Tool 名
+    inputs: dict = field(default_factory=dict)
+    outputs: dict = field(default_factory=dict)
+
+    # llm_dispatch 类型专用
+    prompt_templates_dir: Optional[str] = None
+
+    # prompt_inject 类型专用
+    injection_target: Optional[str] = None
+
+    # function_call 类型可能引用其他 Tool
+    related_tools: list[str] = field(default_factory=list)
 
 
 class SkillsLoader:
@@ -97,6 +109,15 @@ class SkillsLoader:
             intent_binding=fm.get("intent_binding"),
             file_path=str(path),
             body=body,
+            # v3.0 扩展字段
+            type=fm.get("type", "function_call"),
+            entry_point=fm.get("entry_point"),
+            tool_name=fm.get("tool_name"),
+            inputs=fm.get("inputs", {}) or {},
+            outputs=fm.get("outputs", {}) or {},
+            prompt_templates_dir=fm.get("prompt_templates_dir"),
+            injection_target=fm.get("injection_target"),
+            related_tools=fm.get("related_tools", []) or [],
         )
 
     def get_skill_metadatas(self) -> list[SkillMeta]:
@@ -119,6 +140,77 @@ class SkillsLoader:
         """列出所有 Skill 名称。"""
         self.discover()
         return list(self._skills.keys())
+
+    # ════════════════════════════════════════════════
+    # v3.0 Step 7c：Skill invoke 统一入口
+    # ════════════════════════════════════════════════
+
+    def invoke(self, skill_name: str, **params) -> object:
+        """
+        调用 Skill。根据 SKILL.md 的 type 字段分发到不同 invoke 方法。
+
+        4 种 type：
+        - function_call：通过 M2 Tool Layer 调用
+        - llm_dispatch：v3.0 阶段不支持直接 invoke
+        - prompt_inject：返回 SKILL.md 的 body 文本
+        - validation：调用 entry_point 指向的校验函数
+        """
+        self.discover()
+        meta = self._skills.get(skill_name)
+        if not meta:
+            raise ValueError(f"Skill 不存在: {skill_name}")
+
+        if meta.type == "function_call":
+            return self._invoke_function_call(meta, **params)
+        elif meta.type == "llm_dispatch":
+            return self._invoke_llm_dispatch(meta, **params)
+        elif meta.type == "prompt_inject":
+            return self._invoke_prompt_inject(meta, **params)
+        elif meta.type == "validation":
+            return self._invoke_validation(meta, **params)
+        else:
+            raise ValueError(f"未知 Skill 类型: {meta.type} (skill={skill_name})")
+
+    def _invoke_function_call(self, meta: SkillMeta, **params) -> object:
+        """function_call 类型：通过 M2 Tool Layer 的 call_tool 调用。"""
+        if not meta.tool_name:
+            raise ValueError(
+                f"function_call Skill 缺少 tool_name 字段: {meta.name}"
+            )
+        from backend.graph.tools import call_tool
+        return call_tool(meta.tool_name, **params)
+
+    def _invoke_llm_dispatch(self, meta: SkillMeta, **params) -> object:
+        """llm_dispatch 类型：v3.0 阶段暂不支持直接 invoke。"""
+        raise NotImplementedError(
+            f"llm_dispatch Skill 暂不支持直接 invoke: {meta.name}。"
+            f"v3.0 阶段请通过 ExpressingAgent 调用。"
+        )
+
+    def _invoke_prompt_inject(self, meta: SkillMeta, **params) -> str:
+        """prompt_inject 类型：返回 SKILL.md 的 body 文本。"""
+        return meta.body
+
+    def _invoke_validation(self, meta: SkillMeta, **params) -> object:
+        """validation 类型：调用 entry_point 指向的校验函数。"""
+        if not meta.entry_point:
+            raise ValueError(
+                f"validation Skill 缺少 entry_point 字段: {meta.name}"
+            )
+        if ":" not in meta.entry_point:
+            raise ValueError(
+                f"entry_point 格式错误（期望 'module:func_name'）: {meta.entry_point}"
+            )
+
+        module_path, func_name = meta.entry_point.split(":", 1)
+        module = importlib.import_module(module_path)
+        func = getattr(module, func_name, None)
+
+        if not callable(func):
+            raise ValueError(
+                f"entry_point 函数不存在: {meta.entry_point}"
+            )
+        return func(**params)
 
 
 # 全局单例
