@@ -21,6 +21,7 @@ from backend.agents.contracts import (
     ExecutionOutput,
     AgentTaskStatus,
 )
+from backend.skills import invoke_skill
 
 logger = logging.getLogger(__name__)
 
@@ -113,15 +114,25 @@ class ExecutingAgent:
             confidence_score=intent_dict.get("confidence", 0.9) if isinstance(intent_dict, dict) else 0.9,
         )
 
-        # ── Step 2: 数据加载 ──
-        out.invoked_skills.append("wp-fetch-holdings")
-        out.invoked_skills.append("wp-fetch-research")
+        # ── Step 2: 数据加载（v3.0：通过 wp-load-context 组合 Skill）──
+        out.invoked_skills.append("wp-load-context")
         try:
-            loaded = data_loader.load(
-                asset_name=asset_name or None,
-                pid=portfolio_id,
+            ctx_output = invoke_skill(
+                "wp-load-context",
+                asset_name=asset_name,
+                portfolio_id=portfolio_id,
                 user_query=user_query,
             )
+
+            if ctx_output.error:
+                out.mark_failed(f"数据加载失败: {ctx_output.error}")
+                return
+
+            loaded = ctx_output.loaded_data
+            if loaded is None:
+                out.mark_failed("数据加载失败: loaded_data 为 None")
+                return
+
         except Exception as e:
             out.mark_failed(f"数据加载失败: {e}")
             return
@@ -228,10 +239,25 @@ class ExecutingAgent:
         intent_dict = planning_output.intent or {}
         primary_intent = intent_dict.get("primary_intent", "") if isinstance(intent_dict, dict) else ""
 
-        # ── 数据加载 ──
-        out.invoked_skills.append("wp-fetch-holdings")
+        # ── 数据加载（v3.0：通过 wp-load-context 组合 Skill）──
+        out.invoked_skills.append("wp-load-context")
         try:
-            loaded = data_loader.load(asset_name=None, pid=portfolio_id)
+            ctx_output = invoke_skill(
+                "wp-load-context",
+                asset_name=None,
+                portfolio_id=portfolio_id,
+                user_query=user_query,
+            )
+
+            if ctx_output.error:
+                out.mark_failed(f"组合数据加载失败: {ctx_output.error}")
+                return
+
+            loaded = ctx_output.loaded_data
+            if loaded is None:
+                out.mark_failed("组合数据加载失败: loaded_data 为 None")
+                return
+
         except Exception as e:
             out.mark_failed(f"组合数据加载失败: {e}")
             return

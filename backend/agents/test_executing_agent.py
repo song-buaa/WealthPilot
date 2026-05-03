@@ -42,7 +42,7 @@ def test_executing_agent_position_route():
         assert exec_out.loaded_data is not None, "loaded_data 缺失"
         assert exec_out.rule_result is not None, "rule_result 缺失"
         assert exec_out.signal_result is not None, "signal_result 缺失"
-        assert "wp-fetch-holdings" in exec_out.invoked_skills
+        assert "wp-load-context" in exec_out.invoked_skills
         assert "wp-check-discipline" in exec_out.invoked_skills
         assert "wp-generate-signals" in exec_out.invoked_skills
 
@@ -112,7 +112,7 @@ def test_executing_agent_portfolio_route():
         f"ExecutingAgent 失败：{exec_out.error}"
     if not exec_out.aborted:
         assert exec_out.loaded_data is not None
-        assert "wp-fetch-holdings" in exec_out.invoked_skills
+        assert "wp-load-context" in exec_out.invoked_skills
     print(f"✅ ExecutingAgent 组合评估路径正确")
 
 
