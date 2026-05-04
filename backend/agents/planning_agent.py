@@ -257,15 +257,14 @@ class PlanningAgent:
         session_id: str = "",
         portfolio_id: int = 1,
         conversation_history: Optional[list[dict]] = None,
+        all_positions: Optional[list] = None,
     ) -> PlanningOutput:
         """
         执行 Planning 阶段。
 
-        步骤：
-        1. 创建 PlanningOutput（task_id 自动生成）
-        2. 调用现有 orchestrator_node 逻辑得到 route + intent + sse_handler
-        3. 根据 route 选择 Skill 组合
-        4. 填充 PlanningOutput 并返回
+        Args:
+            all_positions: 预加载的持仓列表。传入后 orchestrator 的 _is_asset_clear
+                能正确匹配标的名→持仓名，避免明确标的被误判为模糊。
         """
         out = PlanningOutput()
         out.status = AgentTaskStatus.IN_PROGRESS
@@ -278,6 +277,7 @@ class PlanningAgent:
                 session_id=session_id,
                 portfolio_id=portfolio_id,
                 conversation_history=conversation_history or [],
+                all_positions=all_positions,
             )
 
             out.intent = raw_result.get("intent_payload")
@@ -334,6 +334,7 @@ class PlanningAgent:
         session_id: str,
         portfolio_id: int,
         conversation_history: list[dict],
+        all_positions: Optional[list] = None,
     ) -> dict:
         """
         调用现有 LangGraph 编排逻辑得到路由决策。
@@ -365,7 +366,7 @@ class PlanningAgent:
             "route": "",
             "intent_payload": None,
             "multi_assets": [],
-            "all_positions": [],
+            "all_positions": all_positions or [],
             "sse_handler": "",
             "sse_kwargs": {},
         }

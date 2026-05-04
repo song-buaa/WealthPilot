@@ -44,6 +44,34 @@ async def run_chat_stream_v3(
     decision_id = f"decision_{uuid.uuid4().hex[:12]}"
 
     try:
+        # ── Stage 0.5: 加载 all_positions + 多轮澄清解析（v2.6 兼容）──
+        all_positions = []
+        try:
+            from app.utils.position_aggregator import aggregate_investment_positions
+            all_positions, _ = await asyncio.to_thread(
+                aggregate_investment_positions, portfolio_id,
+            )
+        except Exception as e:
+            logger.warning(f"[v3] Stage 0.5 加载 all_positions 失败: {e}")
+
+        # 多轮澄清解析
+        try:
+            from backend.services.decision_service import _try_resolve_clarification
+
+            resolved_input = await asyncio.to_thread(
+                _try_resolve_clarification,
+                session_id, user_input, all_positions,
+            )
+
+            if resolved_input:
+                logger.info(
+                    f"[v3] Stage 0.5: 澄清解析命中 - "
+                    f"'{user_input}' → '{resolved_input[:60]}...'"
+                )
+                user_input = resolved_input
+        except Exception as e:
+            logger.warning(f"[v3] Stage 0.5 澄清解析异常: {e}")
+
         # ── Stage 1: PlanningAgent ──
         yield _sse("stage", {"stage": "intent", "label": "意图识别中..."})
 
@@ -51,6 +79,7 @@ async def run_chat_stream_v3(
         plan_out = await asyncio.to_thread(
             planning.run,
             user_input, session_id, portfolio_id, conversation_history,
+            all_positions,
         )
 
         if plan_out.status == AgentTaskStatus.FAILED:

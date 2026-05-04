@@ -124,7 +124,13 @@ def orchestrator_node(state: DecisionState) -> dict:
     if confidence < 0.5:
         return {
             "route": "low_confidence",
-            "intent_payload": {"primary_intent": intent, "confidence": confidence},
+            "intent_payload": {
+                "primary_intent": intent,
+                "confidence": confidence,
+                "asset": asset,
+                "action_type": payload.actions[0] if payload.actions else None,
+                "actions": list(payload.actions) if payload.actions else [],
+            },
             "sse_handler": "low_confidence",
             "sse_kwargs": {"clarify_question": clarification},
             "planner_rationale": f"置信度 {confidence} < 0.5，直接走澄清路径",
@@ -206,7 +212,13 @@ def orchestrator_node(state: DecisionState) -> dict:
 
     return {
         "route": route,
-        "intent_payload": {"primary_intent": intent, "confidence": confidence},
+        "intent_payload": {
+            "primary_intent": intent,
+            "confidence": confidence,
+            "asset": asset,
+            "action_type": payload.actions[0] if payload.actions else None,
+            "actions": list(payload.actions) if payload.actions else [],
+        },
         "multi_assets": multi_assets,
         "sse_handler": sse_handler,
         "sse_kwargs": sse_kwargs,

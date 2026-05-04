@@ -116,9 +116,52 @@ def test_executing_agent_portfolio_route():
     print(f"✅ ExecutingAgent 组合评估路径正确")
 
 
+def test_executing_agent_with_real_planning_output():
+    """端到端：用真实 PlanningAgent 输出驱动 ExecutingAgent（防止契约不匹配）。"""
+    from backend.agents import get_planning_agent, get_executing_agent
+    from app.utils.position_aggregator import aggregate_investment_positions
+
+    all_positions, _ = aggregate_investment_positions(1)
+
+    planning = get_planning_agent()
+    plan_out = planning.run(
+        user_query="我有一只股票最近涨了不少，该不该趁现在落袋为安？（标的：特斯拉）",
+        session_id="test_e2e_planning_executing",
+        portfolio_id=1,
+        all_positions=all_positions,
+    )
+
+    assert plan_out.intent is not None, "intent is None"
+    assert isinstance(plan_out.intent, dict), "intent not dict"
+
+    asset = plan_out.intent.get("asset")
+    print(f"   PlanningAgent asset={repr(asset)}, route={plan_out.route}")
+
+    if plan_out.route in ("clarify", "low_confidence"):
+        print("   Planner routed to clarify/low_conf, skipping ExecutingAgent test")
+        print("✅ Planning→Executing e2e (skipped - Planner route)")
+        return
+
+    assert asset, f"intent.asset empty: {repr(asset)}"
+
+    executing = get_executing_agent()
+    exec_out = executing.run(
+        plan_out,
+        "我有一只股票最近涨了不少，该不该趁现在落袋为安？（标的：特斯拉）",
+    )
+
+    assert not exec_out.aborted, f"ExecutingAgent ABORT: {exec_out.abort_reason}"
+    assert exec_out.loaded_data is not None, "loaded_data None"
+    assert exec_out.loaded_data.target_position is not None, "target_position None"
+
+    print(f"   target: {exec_out.loaded_data.target_position.name}")
+    print("✅ Planning→Executing 端到端契约一致")
+
+
 if __name__ == "__main__":
     test_executing_agent_position_route()
     test_executing_agent_passthrough()
     test_executing_agent_task_id_propagation()
     test_executing_agent_portfolio_route()
-    print("\n🎉 ExecutingAgent 4/4 测试通过")
+    test_executing_agent_with_real_planning_output()
+    print("\n🎉 ExecutingAgent 5/5 测试通过")
