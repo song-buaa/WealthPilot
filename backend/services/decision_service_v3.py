@@ -44,6 +44,17 @@ async def run_chat_stream_v3(
     decision_id = f"decision_{uuid.uuid4().hex[:12]}"
 
     try:
+        # ── Stage 0: 加载对话历史 ──
+        if conversation_history is None:
+            try:
+                from backend.services.decision_service import get_conversation_history
+                conversation_history = await asyncio.to_thread(
+                    get_conversation_history, session_id, 6,
+                )
+            except Exception as e:
+                logger.warning(f"[v3] Stage 0 加载 history 失败: {e}")
+                conversation_history = []
+
         # ── Stage 0.5: 加载 all_positions + 多轮澄清解析（v2.6 兼容）──
         all_positions = []
         try:
@@ -55,6 +66,7 @@ async def run_chat_stream_v3(
             logger.warning(f"[v3] Stage 0.5 加载 all_positions 失败: {e}")
 
         # 多轮澄清解析
+        clarification_resolved = False
         try:
             from backend.services.decision_service import _try_resolve_clarification
 
@@ -69,6 +81,7 @@ async def run_chat_stream_v3(
                     f"'{user_input}' → '{resolved_input[:60]}...'"
                 )
                 user_input = resolved_input
+                clarification_resolved = True
         except Exception as e:
             logger.warning(f"[v3] Stage 0.5 澄清解析异常: {e}")
 
@@ -151,6 +164,18 @@ async def run_chat_stream_v3(
                 from backend.agents.expressing_agent import _emit_text_chunks
                 async for chunk in _emit_text_chunks(exec_out.abort_chat_answer):
                     yield _sse("text", {"delta": chunk})
+            # R2 修复：ABORT 也保存对话历史
+            try:
+                from backend.services.decision_service import save_conversation_turn
+                abort_text = exec_out.abort_chat_answer or exec_out.abort_reason or ""
+                intent_dict = plan_out.intent if isinstance(plan_out.intent, dict) else {}
+                await asyncio.to_thread(
+                    save_conversation_turn, session_id, user_input, abort_text,
+                    intent_dict.get("primary_intent", "Unknown"),
+                    intent_dict.get("asset"),
+                )
+            except Exception as e:
+                logger.warning(f"[v3] ABORT save_conversation_turn 失败: {e}")
             yield _sse("done", {
                 "decision_id": decision_id,
                 "conclusion_level": None,
@@ -163,8 +188,10 @@ async def run_chat_stream_v3(
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
 
         expressing = get_expressing_agent()
+        # 澄清解析成功后清空 history，让 LLM 用首轮结构化格式输出（对齐 v2.6 L457）
+        effective_history = [] if clarification_resolved else conversation_history
         async for chunk in expressing.run_streaming(
-            plan_out, exec_out, user_input, conversation_history,
+            plan_out, exec_out, user_input, effective_history,
         ):
             yield _sse("text", {"delta": chunk})
 
@@ -189,7 +216,11 @@ async def run_chat_stream_v3(
                 "failed_rules": review_out.failed_rules,
             })
 
-        # ── Stage 5: done 事件 ──
+        # ── Stage 5: 写入 store + 保存对话历史 + done 事件 ──
+        await _write_stores_v3(
+            session_id, decision_id, plan_out, exec_out, expr_out,
+            user_input=user_input,
+        )
         done_payload = _build_done_payload(plan_out, expr_out, review_out, decision_id)
         yield _sse("done", done_payload)
 
@@ -269,6 +300,128 @@ async def _handle_clarify(
         "conclusion_level": None,
         "conclusion_label": None,
     })
+
+
+async def _write_stores_v3(
+    session_id: str,
+    decision_id: str,
+    plan_out,
+    exec_out,
+    expr_out,
+    user_input: str = "",
+) -> None:
+    """
+    v3 决策完成后写入 _DECISION_STORE / _ALLOC_EXPLAIN_STORE / _PRIMARY_INTENT_CACHE
+    + save_conversation_turn（R2 修复）。
+    """
+    try:
+        from decision_engine.decision_flow import DecisionResult, FlowStage
+        from decision_engine.types import IntentResult
+        from backend.services.decision_service import (
+            _DECISION_STORE, _PRIMARY_INTENT_CACHE, _ALLOC_EXPLAIN_STORE,
+            _calc_asset_breakdown, save_conversation_turn,
+        )
+
+        intent_dict = plan_out.intent if isinstance(plan_out.intent, dict) else {}
+        primary_intent = intent_dict.get("primary_intent", "")
+
+        # _PRIMARY_INTENT_CACHE（D2 顺手修）
+        _PRIMARY_INTENT_CACHE[session_id] = primary_intent
+
+        route = plan_out.route
+
+        # ── PositionDecision → _DECISION_STORE ──
+        if route in ("position_single", "position_multi"):
+            intent_obj = IntentResult(
+                asset=intent_dict.get("asset", ""),
+                action_type=intent_dict.get("action_type") or "持有评估",
+                time_horizon="未知",
+                trigger=None,
+                confidence_score=intent_dict.get("confidence", 0.9),
+            )
+            dr = DecisionResult(
+                decision_id=decision_id,
+                stage=FlowStage.DONE,
+                intent=intent_obj,
+                data=getattr(exec_out, "loaded_data", None),
+                pre_check=getattr(exec_out, "pre_check_result", None),
+                rules=getattr(exec_out, "rule_result", None),
+                signals=getattr(exec_out, "signal_result", None),
+                llm=getattr(expr_out, "llm_result", None) if expr_out else None,
+            )
+            _DECISION_STORE.setdefault(session_id, {})[decision_id] = dr
+
+        # ── Portfolio 类 → _ALLOC_EXPLAIN_STORE ──
+        elif route == "portfolio" and expr_out:
+            loaded = getattr(exec_out, "loaded_data", None)
+            generic_llm = getattr(expr_out, "llm_result", None)
+            portfolio_result = expr_out.structured_payload or {}
+
+            asset_breakdown = None
+            if loaded and loaded.positions:
+                try:
+                    asset_breakdown = _calc_asset_breakdown(loaded.positions)
+                except Exception:
+                    pass
+
+            _intent_config = {
+                "PortfolioReview": "portfolio_review",
+                "AssetAllocation": "asset_allocation",
+                "PerformanceAnalysis": "performance_analysis",
+            }
+            intent_type_key = _intent_config.get(primary_intent, "portfolio_review")
+
+            explain_data = {
+                "decision_id": decision_id,
+                "stage": "done",
+                "was_aborted": False,
+                "aborted_reason": None,
+                "intent": {
+                    "primary_intent": primary_intent,
+                    "asset": None,
+                    "action": portfolio_result.get("conclusion_type") or intent_type_key,
+                    "time_context": None,
+                    "confidence": intent_dict.get("confidence", 0.9),
+                    "intent_type": intent_type_key,
+                    "is_inherited": False,
+                },
+                "data": {
+                    "total_assets": loaded.total_assets if loaded else None,
+                    "asset_breakdown": asset_breakdown,
+                    "position_count": len(loaded.positions) if loaded else 0,
+                    "research": list(loaded.research) if loaded and loaded.research else [],
+                },
+                "rules": None,
+                "signals": None,
+                "pre_check": None,
+                "llm": {"reasoning": portfolio_result.get("key_findings", [])}
+                       if generic_llm and not getattr(generic_llm, "is_fallback", False)
+                       else None,
+                "generic_llm": {
+                    "chat_answer": getattr(generic_llm, "chat_answer", "") if generic_llm else "",
+                    "is_fallback": getattr(generic_llm, "is_fallback", False) if generic_llm else False,
+                    "error": getattr(generic_llm, "error", None) if generic_llm else None,
+                },
+                "portfolioResult": portfolio_result,
+            }
+            _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = explain_data
+
+        # ── R2 修复：保存对话历史 ──
+        chat_answer = getattr(expr_out, "chat_answer", "") if expr_out else ""
+        if not chat_answer:
+            chat_answer = "(无回复内容)"
+        asset = intent_dict.get("asset") if intent_dict else None
+        try:
+            await asyncio.to_thread(
+                save_conversation_turn,
+                session_id, user_input, chat_answer,
+                primary_intent, asset,
+            )
+        except Exception as e:
+            logger.warning(f"[v3] save_conversation_turn 失败: {e}")
+
+    except Exception as e:
+        logger.warning(f"[v3] store 写入失败（不阻断主流程）: {e}")
 
 
 def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dict:

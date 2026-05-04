@@ -171,6 +171,7 @@ class ExecutingAgent:
         # ── Step 3: 前置校验 ──
         try:
             pre = pre_check.check(loaded)
+            out.pre_check_result = pre  # 存到 output 供 _DECISION_STORE 使用
             if not pre.passed:
                 out.mark_aborted("pre_check_failed", pre.message or "前置校验未通过")
                 return

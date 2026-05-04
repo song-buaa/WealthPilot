@@ -157,6 +157,7 @@ class ExecutionOutput:
 
     # === 核心结构化产出（供 ExpressingAgent 消费）===
     loaded_data: Optional[object] = None      # decision_engine.data_loader.LoadedData
+    pre_check_result: Optional[object] = None # decision_engine.pre_check.PreCheckResult
     rule_result: Optional[object] = None      # decision_engine.rule_engine.RuleResult
     signal_result: Optional[object] = None    # decision_engine.signal_engine.SignalResult
 
