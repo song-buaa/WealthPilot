@@ -96,16 +96,10 @@ async def run_chat_stream_v3(
             return
 
         if plan_out.route == "clarify":
-            # v3 clarify: 走 v2.6 的澄清逻辑（候选清单）
-            # 简化处理：直接返回文本提示
-            yield _sse("text", {
-                "delta": "请问您具体想分析哪个标的？可以告诉我标的名称或代码。"
-            })
-            yield _sse("done", {
-                "decision_id": None,
-                "conclusion_level": None,
-                "conclusion_label": None,
-            })
+            async for event in _handle_clarify(
+                plan_out, decision_id, user_input, session_id, portfolio_id,
+            ):
+                yield event
             return
 
         # ── Stage 2: ExecutingAgent ──
@@ -173,6 +167,79 @@ async def run_chat_stream_v3(
     except Exception as e:
         logger.exception(f"[v3] run_chat_stream_v3 异常: {e}")
         yield _sse("error", {"code": "internal_error", "message": str(e)})
+
+
+async def _handle_clarify(
+    plan_out,
+    decision_id: str,
+    user_input: str,
+    session_id: str,
+    portfolio_id: int,
+) -> AsyncGenerator[str, None]:
+    """
+    Clarify 路由：完整移植 v2.6 的候选清单交互（M1.1）。
+
+    流程：
+    1. 加载持仓数据（aggregate_investment_positions）
+    2. 调 _get_candidate_positions 筛 top 3 候选
+    3. yield candidates SSE 事件
+    4. 调 _build_clarification_reply 生成澄清文本
+    5. 写入 _CLARIFICATION_CTX（让用户下一轮点选/输入能关联回原始问题）
+    6. save_conversation_turn 持久化
+    7. yield text + done 事件
+    """
+    from app.utils.position_aggregator import aggregate_investment_positions
+    from backend.services.decision_service import (
+        _get_candidate_positions,
+        _build_candidates_payload,
+        _build_clarification_reply,
+        _CLARIFICATION_CTX,
+        save_conversation_turn,
+    )
+
+    # 1. 加载所有持仓
+    try:
+        all_positions, _ = await asyncio.to_thread(
+            aggregate_investment_positions, portfolio_id,
+        )
+    except Exception as e:
+        logger.warning(f"[v3] clarify 加载持仓失败: {e}")
+        all_positions = []
+
+    # 2. 筛候选
+    candidates, feature_type = _get_candidate_positions(user_input, all_positions)
+
+    # 3. yield candidates SSE 事件
+    if candidates:
+        cand_payload = _build_candidates_payload(candidates, feature_type)
+        yield _sse("candidates", {"items": cand_payload})
+
+    # 4. 生成澄清回复文本
+    reply = _build_clarification_reply(user_input, candidates, feature_type)
+
+    # 5. 写入澄清上下文（关键！多轮澄清依赖这个）
+    _CLARIFICATION_CTX[session_id] = {
+        "original_question": user_input,
+        "candidates": [p.name for p in candidates],
+        "pending_clarification": True,
+    }
+
+    # 6. 持久化对话（best effort）
+    try:
+        await asyncio.to_thread(
+            save_conversation_turn,
+            session_id, user_input, reply, "PositionDecision", None,
+        )
+    except Exception as e:
+        logger.debug(f"[v3] save_conversation_turn 失败（可忽略）: {e}")
+
+    # 7. yield text + done
+    yield _sse("text", {"delta": reply})
+    yield _sse("done", {
+        "decision_id": None,
+        "conclusion_level": None,
+        "conclusion_label": None,
+    })
 
 
 def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dict:
