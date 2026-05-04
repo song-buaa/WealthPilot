@@ -193,12 +193,25 @@ class ExecutingAgent:
             out.mark_failed(f"规则校验异常: {e}")
             return
 
-        # 未持仓 + 非买入 → ABORT
+        # 未持仓 + 非买入 → ABORT（调 LLM 生成智能引导文本，对齐 v2 decision_flow.py）
         _buy_actions = ("买入判断", "加仓判断")
         if loaded.target_position is None and intent_obj.action_type not in _buy_actions:
+            try:
+                from decision_engine import llm_engine
+                chat_answer = llm_engine.respond_not_in_portfolio(
+                    user_query=user_query,
+                    asset_name=asset_name or "该标的",
+                )
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] respond_not_in_portfolio 失败: {e}")
+                chat_answer = (
+                    f"您当前的投资账户中没有「{asset_name}」的持仓记录。"
+                    f"如需分析此标的，建议先在投资账户中录入相关信息，"
+                    f"或告诉我您持仓的其他标的，我可以帮您分析。"
+                )
             out.mark_aborted(
-                "not_in_portfolio_non_buy",
-                f"未持有 {asset_name}，且意图不是买入/加仓",
+                reason="not_in_portfolio_non_buy",
+                chat_answer=chat_answer,
             )
             return
 

@@ -178,8 +178,8 @@ async def run_chat_stream_v3(
                 logger.warning(f"[v3] ABORT save_conversation_turn 失败: {e}")
             yield _sse("done", {
                 "decision_id": decision_id,
-                "conclusion_level": None,
-                "conclusion_label": exec_out.abort_reason,
+                "conclusion_level": "aborted",
+                "conclusion_label": "分析中断",
             })
             return
 
