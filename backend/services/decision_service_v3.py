@@ -201,6 +201,18 @@ async def run_chat_stream_v3(
         if getattr(exec_out, "signal_result", None):
             yield _sse("stage", {"stage": "signals", "label": "信号分析完成"})
 
+        # R-M7 修复：用 target_position.name 回写 intent.asset（对齐 v2 _payload_to_intent_result）
+        # 场景: 基金代码 "004928" → 产品全名 "易方达稳鑫30天滚动持有短债A"
+        try:
+            if (exec_out.loaded_data
+                    and exec_out.loaded_data.target_position
+                    and isinstance(plan_out.intent, dict)):
+                target_name = getattr(exec_out.loaded_data.target_position, "name", None)
+                if target_name:
+                    plan_out.intent["asset"] = target_name
+        except Exception as e:
+            logger.warning(f"[v3] R-M7 asset 回写失败: {e}")
+
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
