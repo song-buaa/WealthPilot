@@ -127,9 +127,12 @@ async def run_chat_stream_v3(
 
         # ── 特殊路由直通 ──
         if plan_out.route == "low_confidence":
-            yield _sse("text", {
-                "delta": "您的问题我没太理解清楚，能再具体描述一下吗？"
-            })
+            # 用 IntentRecognizer 的 clarify_question（对齐 v2 行为）
+            clarify_text = (
+                plan_out.clarify_question
+                or "您能描述一下您想分析哪个标的，以及想做什么操作（买入、卖出、还是持有判断）吗？"
+            )
+            yield _sse("text", {"delta": clarify_text})
             yield _sse("done", {
                 "decision_id": None,
                 "conclusion_level": None,
@@ -140,6 +143,15 @@ async def run_chat_stream_v3(
         if plan_out.route == "clarify":
             async for event in _handle_clarify(
                 plan_out, decision_id, user_input, session_id, portfolio_id,
+            ):
+                yield event
+            return
+
+        # ── position_multi 路由：循环分发（对齐 v2 _stream_multi_asset）──
+        if plan_out.route == "position_multi" and plan_out.multi_assets:
+            async for event in _handle_position_multi(
+                plan_out, plan_out.multi_assets, user_input,
+                session_id, portfolio_id, decision_id,
             ):
                 yield event
             return
@@ -299,6 +311,131 @@ async def _handle_clarify(
         "decision_id": None,
         "conclusion_level": None,
         "conclusion_label": None,
+    })
+
+
+async def _handle_position_multi(
+    plan_out,
+    multi_assets: list[str],
+    user_input: str,
+    session_id: str,
+    portfolio_id: int,
+    decision_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Position multi 路由：循环分析多个标的，拼接结果。
+    对齐 v2.6 _stream_multi_asset 行为。
+    """
+    from copy import copy
+    from decision_engine.decision_flow import DecisionResult, FlowStage
+    from decision_engine.types import IntentResult
+    from backend.services.decision_service import (
+        _build_multi_asset_answer, _DECISION_STORE, save_conversation_turn,
+    )
+    from backend.agents.expressing_agent import _emit_text_chunks
+
+    yield _sse("stage", {"stage": "loading", "label": f"分析 {len(multi_assets)} 个标的..."})
+
+    executing = get_executing_agent()
+    expressing = get_expressing_agent()
+
+    results: list[tuple[str, DecisionResult | None]] = []
+    intent_base = plan_out.intent if isinstance(plan_out.intent, dict) else {}
+
+    for asset_name in multi_assets:
+        yield _sse("stage", {"stage": "reasoning", "label": f"分析 {asset_name} 中..."})
+
+        # 构造单标 PlanningOutput（强制 PositionDecision 让 ExpressingAgent 走 reason 路径）
+        single_plan = copy(plan_out)
+        single_plan.route = "position_single"
+        single_plan.intent = dict(
+            intent_base, asset=asset_name, multi_assets=[],
+            primary_intent="PositionDecision",
+        )
+
+        try:
+            exec_out = await asyncio.to_thread(executing.run, single_plan, user_input)
+
+            if exec_out.aborted:
+                # 单标 ABORT：构造 aborted DecisionResult
+                dr = DecisionResult(
+                    decision_id=f"{decision_id}_{asset_name}",
+                    stage=FlowStage.ABORTED,
+                    intent=IntentResult(
+                        asset=asset_name,
+                        action_type=intent_base.get("action_type", "持有评估"),
+                        time_horizon="未知", trigger=None, confidence_score=0.9,
+                    ),
+                )
+                dr.aborted_reason = exec_out.abort_chat_answer or exec_out.abort_reason or "分析中断"
+                results.append((asset_name, dr))
+                continue
+
+            # 调 ExpressingAgent（消费全部 chunk，只取 last_output）
+            async for _ in expressing.run_streaming(
+                single_plan, exec_out, user_input, [],
+            ):
+                pass
+            expr_out = expressing.last_output
+
+            llm_result = getattr(expr_out, "llm_result", None) if expr_out else None
+
+            dr = DecisionResult(
+                decision_id=f"{decision_id}_{asset_name}",
+                stage=FlowStage.DONE,
+                intent=IntentResult(
+                    asset=asset_name,
+                    action_type=intent_base.get("action_type", "持有评估"),
+                    time_horizon="未知", trigger=None, confidence_score=0.9,
+                ),
+                data=getattr(exec_out, "loaded_data", None),
+                pre_check=getattr(exec_out, "pre_check_result", None),
+                rules=getattr(exec_out, "rule_result", None),
+                signals=getattr(exec_out, "signal_result", None),
+                llm=llm_result,
+            )
+            results.append((asset_name, dr))
+            _DECISION_STORE.setdefault(session_id, {})[dr.decision_id] = dr
+
+        except Exception as e:
+            logger.warning(f"[v3] position_multi 分析 {asset_name} 失败: {e}")
+            results.append((asset_name, None))
+
+    # 拼接多标文本（复用 v2 函数）
+    valid_results = [(a, r) for a, r in results if r is not None]
+    if valid_results:
+        try:
+            answer = _build_multi_asset_answer(valid_results, user_input)
+        except Exception as e:
+            logger.warning(f"[v3] _build_multi_asset_answer 失败: {e}")
+            parts = []
+            for a, r in valid_results:
+                ca = getattr(r.llm, "chat_answer", "") if r and r.llm else ""
+                parts.append(f"**{a}**\n\n{ca}" if ca else f"**{a}**：分析完成")
+            answer = "\n\n---\n\n".join(parts)
+    else:
+        answer = "未能成功分析任何标的，建议您逐个标的单独询问。"
+
+    # 流式发送
+    async for chunk in _emit_text_chunks(answer):
+        yield _sse("text", {"delta": chunk})
+
+    # 保存对话历史
+    try:
+        await asyncio.to_thread(
+            save_conversation_turn,
+            session_id, user_input, answer,
+            "PositionDecision", ", ".join(multi_assets),
+        )
+    except Exception as e:
+        logger.warning(f"[v3] position_multi save_conversation_turn 失败: {e}")
+
+    # done 事件
+    last_did = valid_results[-1][1].decision_id if valid_results else None
+    yield _sse("done", {
+        "decision_id": last_did,
+        "conclusion_level": "multi_asset",
+        "conclusion_label": f"已分析 {len(valid_results)} 个标的",
     })
 
 
