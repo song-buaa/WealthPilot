@@ -24,5 +24,13 @@ class Settings:
         default_factory=lambda: os.environ.get("TIGER_READ_ONLY_MODE", "true").lower() == "true"
     )
 
+    # Futu Brokers OpenAPI
+    futu_account: str | None = field(default_factory=lambda: os.environ.get("FUTU_ACCOUNT"))
+    futu_opend_host: str = field(default_factory=lambda: os.environ.get("FUTU_OPEND_HOST", "127.0.0.1"))
+    futu_opend_port: int = field(default_factory=lambda: int(os.environ.get("FUTU_OPEND_PORT", "11111")))
+    futu_read_only_mode: bool = field(
+        default_factory=lambda: os.environ.get("FUTU_READ_ONLY_MODE", "true").lower() == "true"
+    )
+
 
 settings = Settings()
