@@ -100,6 +100,7 @@ class PlanningOutput:
     multi_assets: list[str] = field(default_factory=list)
     needs_clarification: bool = False
     candidate_holdings: list[dict] = field(default_factory=list)
+    clarify_question: str = ""
 
     # === 调试与评测 trace ===
     memory_context: list[dict] = field(default_factory=list)

@@ -98,6 +98,14 @@ class ReviewingAgent:
 
         Layer 1：DecisionValidator 硬校验（毫秒级）
         Layer 2：LLM 评分（仅硬校验失败时触发）
+
+        Note (Step 5 决策, 2026-05-04):
+        v3 当前在 action="retry" 时只发 warning（不真实重跑），
+        与 v2.6 decision_service.py L618-626 行为完全等价。
+
+        真实 retry 循环（jump_step="expressing"/"executing" + retry_count 上限）
+        是 ReviewingAgent 预留的增量能力，记入 v3.1 路线图。
+        实施时需在 v3 入口（decision_service_v3.py）加 retry 循环 + 超限 fallback HOLD。
         """
         out = ReviewOutput(task_id=planning_output.task_id)
         out.status = AgentTaskStatus.IN_PROGRESS

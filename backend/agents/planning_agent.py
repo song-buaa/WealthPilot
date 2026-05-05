@@ -287,6 +287,9 @@ class PlanningAgent:
             out.multi_assets = raw_result.get("multi_assets", [])
             out.needs_clarification = raw_result.get("needs_clarification", False)
             out.candidate_holdings = raw_result.get("candidate_holdings", [])
+            # low_confidence 路由时透传 IntentRecognizer 的 clarify_question
+            sse_kw = raw_result.get("sse_kwargs") or {}
+            out.clarify_question = sse_kw.get("clarify_question", "")
 
             # ── v3.0 Step 9：Skill Selector（静态映射 + LLM 增补兜底）──
             base_bundle = _select_skills_for_route(out.route)
@@ -382,6 +385,7 @@ class PlanningAgent:
             "multi_assets": result_state.get("multi_assets", []),
             "needs_clarification": result_state.get("needs_clarification", False),
             "candidate_holdings": result_state.get("candidate_holdings", []),
+            "sse_kwargs": result_state.get("sse_kwargs", {}),
         }
 
 
