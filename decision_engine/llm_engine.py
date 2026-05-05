@@ -1291,6 +1291,124 @@ def analyze_performance(user_query: str, data: LoadedData) -> GenericLLMResult:
     return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload)
 
 
+# ── 多标的横向对比（P2 新增）─────────────────────────────────────────────────
+
+_MULTI_ASSET_COMPARE_PROMPT = """你是专业投资顾问,正在为客户撰写多标的横向对比报告。
+
+【你的任务】
+基于客户提供的多个标的的初步分析数据,生成一份专业的横向对比决策报告。
+**核心要求: 这是一份"对比"报告,不是"汇总"报告。**
+
+【输出结构】
+
+## 综合判断
+
+(以 200 字以内段落形式给出)
+
+包含 3 个核心要素:
+1. **排序结论**: 直接回答客户问题,明确给出标的优先级排序及理由
+2. **资金分配建议**: 如果客户有可投资金,建议按什么比例配置(如 6:4 或 5:3:2)
+3. **核心理由**: 为什么这样排序? 一句话点明各标的之间的"差异化定位"或"互补关系"
+
+## 维度对比
+
+(从 3-5 个**对比维度**展开,每个维度独立小节,每节都要含一个 markdown 表格)
+
+**重要原则**:
+- **维度由你根据具体标的特点自由选择**,不预设固定维度
+- 每个维度的对比表格必须包含: 第一列是"维度"(或具体子项),后续每列对应一个标的
+- 表格至少 3 行(子项),避免过于简陋
+- 表格行内容要**直接对比**,不能用"详见上文"等回避表述
+- 选择的维度应**直接支撑你在'综合判断'中给出的排序结论**
+
+**维度选择参考**(不限于此,你应根据标的特点灵活选择):
+- 仓位/估值类: 当前仓位、距离上限、估值水平、加仓空间
+- 基本面类: 营收/利润增长、行业地位、护城河、业务可见度
+- 风险类: 主要风险、风险性质、对冲难度、不确定性
+- 操作类: 加仓方式、触发节点、止损纪律
+- 时机类: 当前买入时机、催化剂、关键监控点
+- 配置类: 与组合现有持仓的相关性、对组合贡献
+
+## 风险提示
+
+仅供参考,不构成投资建议。投资有风险,入市需谨慎。
+
+【关键约束】
+1. 必须使用 markdown 表格做对比,不能用纯文字罗列
+2. 必须先给排序结论再展开对比维度
+3. 资金分配建议要具体(给出比例),不能笼统说"均衡配置"
+4. 对比维度的子项要有数据支撑,直接引用客户提供的标的数据
+5. 不允许复制"独立分析"中的整段内容——必须重新组织为对比形式
+6. 表格列数 = 标的数量(2 标 2 列, 3 标 3 列, 不含"维度"列)
+7. **纪律上限统一性**: 单一标的仓位上限/权益类上限等纪律值是全局统一的,对所有标的相同。**严禁在对比表中为不同标的显示不同的纪律上限值**(这是事实错误)。如果要展示纪律,只展示 **当前仓位 vs 全局纪律上限** 的对比维度。
+8. **数据引用**: 对比维度的具体数据(EPS / 营收 / 增长率等)优先从 summaries 的 research 字段中提取,research 是一个文本列表,包含真实的财务和投研数据。如果某个维度数据缺失,使用 reasoning 中的自然语言描述代替,**严禁写"未提供数据"/"暂无数据"等表述**(用户体验差)。
+9. **不发明事实**: 不要发明 summaries 和 global_rules 中未明确提供的数值。特别是不要发明任何投资纪律值,只使用前置信息块中明确告知的数值。
+"""
+
+
+def compare_multi_assets(
+    user_query: str,
+    summaries: list[dict],
+    global_rules: dict | None = None,
+) -> str:
+    """
+    多标的横向对比 LLM 调用。
+
+    Args:
+        user_query: 用户原始问句
+        summaries: 标的摘要列表,每个元素 dict 含 name/weight_pct/pnl_rate_pct/decision/reasoning/risk/signals/research
+        global_rules: 全局投资纪律(从 data.rules 单一数据源取,不硬编码 default)
+
+    Returns:
+        综合对比报告(markdown 格式)
+    """
+    global_rules = global_rules or {}
+
+    # 构造纪律前置信息块(只展示真实存在的纪律,不发明 default)
+    global_info_lines = []
+    if global_rules.get("max_single_position_pct") is not None:
+        global_info_lines.append(
+            f"- 单一标的最大仓位上限: {global_rules['max_single_position_pct']}%"
+            f"(硬性纪律,对所有标的统一适用)"
+        )
+    if global_rules.get("max_equity_pct") is not None:
+        global_info_lines.append(
+            f"- 权益类资产上限: {global_rules['max_equity_pct']}%"
+        )
+    if global_rules.get("min_cash_pct") is not None:
+        global_info_lines.append(
+            f"- 现金最低比例: {global_rules['min_cash_pct']}%"
+        )
+
+    if global_info_lines:
+        global_info = (
+            "\n【全局投资纪律(对所有标的统一适用,不要在对比表中显示不同的纪律值)】\n"
+            + "\n".join(global_info_lines) + "\n"
+        )
+    else:
+        global_info = ""
+
+    summaries_text = json.dumps(summaries, ensure_ascii=False, indent=2)
+    user_prompt = f"客户问题: {user_query}\n{global_info}\n需要对比的标的数据:\n{summaries_text}\n\n请按系统提示词的格式生成横向对比报告。"
+
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            max_tokens=2048,
+            timeout=30,
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": _BASE_PROMPT + "\n\n" + _MULTI_ASSET_COMPARE_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[llm_engine] compare_multi_assets 失败: {e}", flush=True)
+        raise
+
+
 def _fallback_generic(intent_type: str, error_msg: str) -> GenericLLMResult:
     """组合级别意图的降级结果。"""
     return GenericLLMResult(

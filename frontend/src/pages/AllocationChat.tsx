@@ -29,6 +29,12 @@ const MD_COMPONENTS = {
   h3:     ({ children }: { children?: React.ReactNode }) => <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 6px' }}>{children}</h3>,
   hr:     () => <hr style={{ border: 'none', borderTop: '1px solid #E5E7EB', margin: '10px 0' }} />,
   code:   ({ children }: { children?: React.ReactNode }) => <code style={{ background: '#F3F4F6', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
+  table:  ({ children }: { children?: React.ReactNode }) => <table style={{ borderCollapse: 'collapse' as const, width: '100%', margin: '12px 0', fontSize: 13, border: '1px solid #E5E7EB' }}>{children}</table>,
+  thead:  ({ children }: { children?: React.ReactNode }) => <thead style={{ background: '#F9FAFB' }}>{children}</thead>,
+  tbody:  ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
+  tr:     ({ children }: { children?: React.ReactNode }) => <tr style={{ borderBottom: '1px solid #E5E7EB' }}>{children}</tr>,
+  th:     ({ children }: { children?: React.ReactNode }) => <th style={{ padding: '8px 12px', textAlign: 'left' as const, fontWeight: 600, fontSize: 12, color: '#374151', borderRight: '1px solid #E5E7EB' }}>{children}</th>,
+  td:     ({ children }: { children?: React.ReactNode }) => <td style={{ padding: '8px 12px', fontSize: 12, color: '#1F2937', borderRight: '1px solid #E5E7EB', verticalAlign: 'top' as const }}>{children}</td>,
 }
 
 export default function AllocationChat() {

@@ -419,18 +419,73 @@ async def _handle_position_multi(
             logger.warning(f"[v3] position_multi 分析 {asset_name} 失败: {e}")
             results.append((asset_name, None))
 
-    # 拼接多标文本（复用 v2 函数）
+    # P2 修复：调综合 LLM 生成横向对比报告（替代机械拼接）
     valid_results = [(a, r) for a, r in results if r is not None]
     if valid_results:
         try:
-            answer = _build_multi_asset_answer(valid_results, user_input)
+            from decision_engine import llm_engine as _llm
+
+            # 提取全局纪律（从第一个结果的 data.rules，单一数据源，不硬编码 default）
+            global_rules: dict = {}
+            first_data = valid_results[0][1].data if valid_results[0][1] else None
+            if first_data:
+                data_rules = getattr(first_data, "rules", None)
+                if data_rules:
+                    max_pos = getattr(data_rules, "max_single_position", None)
+                    max_eq = getattr(data_rules, "max_equity_pct", None)
+                    min_cash = getattr(data_rules, "min_cash_pct", None)
+                    if max_pos is not None:
+                        global_rules["max_single_position_pct"] = round(max_pos * 100, 1)
+                    if max_eq is not None:
+                        global_rules["max_equity_pct"] = round(max_eq * 100, 1)
+                    if min_cash is not None:
+                        global_rules["min_cash_pct"] = round(min_cash * 100, 1)
+                else:
+                    logger.warning("[v3] data.rules 不存在, global_rules 将为空")
+
+            summaries = []
+            for asset_name, r in valid_results:
+                s: dict = {"name": asset_name}
+                if r.data and r.data.target_position:
+                    tp = r.data.target_position
+                    s["weight_pct"] = round(getattr(tp, "weight", 0) * 100, 2)
+                    s["pnl_rate_pct"] = round(getattr(tp, "profit_loss_rate", 0) * 100, 2)
+                    s["market_value_cny"] = getattr(tp, "market_value_cny", 0)
+                    s["asset_class"] = getattr(tp, "asset_class", "")
+                # 信号
+                if r.signals:
+                    s["signals"] = {
+                        "fundamental": getattr(r.signals, "fundamental_signal", None),
+                        "position": getattr(r.signals, "position_signal", None),
+                        "sentiment": getattr(r.signals, "sentiment_signal", None),
+                    }
+                # 投研数据（含 AV 数据）
+                if r.data and getattr(r.data, "research", None):
+                    s["research"] = [str(item)[:200] for item in list(r.data.research)[:3]]
+                # LLM 分析摘要
+                if r.llm:
+                    s["decision"] = getattr(r.llm, "decision_cn", "") or getattr(r.llm, "decision", "")
+                    s["reasoning"] = list(getattr(r.llm, "reasoning", []) or [])[:5]
+                    s["risk"] = list(getattr(r.llm, "risk", []) or [])[:3]
+                    if r.llm.structured_result:
+                        s["confidence"] = r.llm.structured_result.get("confidence")
+                summaries.append(s)
+
+            yield _sse("stage", {"stage": "reasoning", "label": "生成横向对比报告..."})
+            answer = await asyncio.to_thread(
+                _llm.compare_multi_assets, user_input, summaries,
+                global_rules=global_rules,
+            )
+            logger.info(f"[v3] P2 综合对比报告生成成功, 长度={len(answer)}")
         except Exception as e:
-            logger.warning(f"[v3] _build_multi_asset_answer 失败: {e}")
-            parts = []
-            for a, r in valid_results:
-                ca = getattr(r.llm, "chat_answer", "") if r and r.llm else ""
-                parts.append(f"**{a}**\n\n{ca}" if ca else f"**{a}**：分析完成")
-            answer = "\n\n---\n\n".join(parts)
+            logger.warning(f"[v3] compare_multi_assets 失败, 降级到拼接: {e}")
+            try:
+                answer = _build_multi_asset_answer(valid_results, user_input)
+            except Exception:
+                answer = "\n\n---\n\n".join(
+                    f"**{a}**\n\n{getattr(r.llm, 'chat_answer', '') if r and r.llm else '分析完成'}"
+                    for a, r in valid_results
+                )
     else:
         answer = "未能成功分析任何标的，建议您逐个标的单独询问。"
 

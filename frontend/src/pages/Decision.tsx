@@ -660,6 +660,12 @@ function AiMessage({ msg, onSelectCandidate }: { msg: Message; onSelectCandidate
                   hr:     () => <hr style={{ border: 'none', borderTop: '1px solid #E5E7EB', margin: '10px 0' }} />,
                   code:   ({ children }) => <code style={{ background: '#F3F4F6', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
                   a:      ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#3B82F6', textDecoration: 'none', borderBottom: '1px solid transparent', transition: 'border-color 0.15s' }} onMouseEnter={e => (e.currentTarget.style.borderBottomColor = '#3B82F6')} onMouseLeave={e => (e.currentTarget.style.borderBottomColor = 'transparent')}>{children}</a>,
+                  table:  ({ children }) => <table style={{ borderCollapse: 'collapse', width: '100%', margin: '12px 0', fontSize: 13, border: '1px solid #E5E7EB' }}>{children}</table>,
+                  thead:  ({ children }) => <thead style={{ background: '#F9FAFB' }}>{children}</thead>,
+                  tbody:  ({ children }) => <tbody>{children}</tbody>,
+                  tr:     ({ children }) => <tr style={{ borderBottom: '1px solid #E5E7EB' }}>{children}</tr>,
+                  th:     ({ children }) => <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 12, color: '#374151', borderRight: '1px solid #E5E7EB' }}>{children}</th>,
+                  td:     ({ children }) => <td style={{ padding: '8px 12px', fontSize: 12, color: '#1F2937', borderRight: '1px solid #E5E7EB', verticalAlign: 'top' }}>{children}</td>,
                 }}
               >
                 {msg.streaming ? msg.content + '▊' : msg.content}
