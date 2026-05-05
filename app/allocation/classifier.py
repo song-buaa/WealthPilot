@@ -17,13 +17,21 @@ KEYWORD_CLASSIFICATION = {
     "货币基金": AllocAssetClass.CASH,
     "余额宝": AllocAssetClass.CASH,
     "零钱通": AllocAssetClass.CASH,
+    "MONEY MARKET": AllocAssetClass.CASH,
     # FIXED_INCOME
     "纯债": AllocAssetClass.FIXED,
     "短债": AllocAssetClass.FIXED,
     "债券ETF": AllocAssetClass.FIXED,
+    "债券基金": AllocAssetClass.FIXED,
+    "债券": AllocAssetClass.FIXED,
     "美债": AllocAssetClass.FIXED,
     "国债": AllocAssetClass.FIXED,
     "可转债": AllocAssetClass.FIXED,  # V1 归固收
+    "同业存单": AllocAssetClass.FIXED,
+    "BOND": AllocAssetClass.FIXED,
+    "CREDIT": AllocAssetClass.FIXED,
+    "FIXED INCOME": AllocAssetClass.FIXED,
+    "TREASURY": AllocAssetClass.FIXED,
     # EQUITY
     "股票": AllocAssetClass.EQUITY,
     "权益基金": AllocAssetClass.EQUITY,
@@ -34,6 +42,9 @@ KEYWORD_CLASSIFICATION = {
     "REITs": AllocAssetClass.ALT,
     "大宗商品": AllocAssetClass.ALT,
     "原油": AllocAssetClass.ALT,
+    "GOLD": AllocAssetClass.ALT,
+    "COMMODITY": AllocAssetClass.ALT,
+    "REIT": AllocAssetClass.ALT,
     # DERIVATIVE
     "期权": AllocAssetClass.DERIV,
     "期货": AllocAssetClass.DERIV,
@@ -62,17 +73,19 @@ def classify_by_name_or_tag(name: str, tags: str = "") -> AllocAssetClass:
     """
     备用路径：根据资产名称或标签关键词匹配归类。
     用于 asset_class 缺失或不标准的情况。
+    大小写不敏感（支持英文基金名称如 "CREDIT OPPORTUNITIES"）。
     """
     combined = f"{name} {tags}"
+    combined_upper = combined.upper()
 
     # 先检查混合基金标签
     for label, cls in MIXED_FUND_MAP.items():
         if label in combined:
             return cls
 
-    # 关键词匹配
+    # 关键词匹配（大小写不敏感）
     for keyword, cls in KEYWORD_CLASSIFICATION.items():
-        if keyword in combined:
+        if keyword.upper() in combined_upper:
             return cls
 
     return AllocAssetClass.UNCLASSIFIED

@@ -66,7 +66,14 @@ class TigerSyncService:
     def fetch_positions(self) -> list[Position]:
         """拉取持仓 → 转换为统一 Position 列表。"""
         snapshot_time = datetime.now(timezone.utc)
-        sdk_positions = self._trade_client.get_positions(account=self.account_id)
+        # 老虎 SDK 默认 sec_type=STK,基金需要单独查询(API 不支持 sec_type=ALL)
+        stk_positions = self._trade_client.get_positions(
+            account=self.account_id, sec_type="STK"
+        ) or []
+        fund_positions = self._trade_client.get_positions(
+            account=self.account_id, sec_type="FUND"
+        ) or []
+        sdk_positions = list(stk_positions) + list(fund_positions)
 
         if not sdk_positions:
             return []
@@ -120,6 +127,20 @@ class TigerSyncService:
                     positions=positions,
                     total_market_value_cnh=None,
                 )
+
+                # 同步到 Position 业务表
+                from services.broker_sync.position_upsert_service import PositionUpsertService
+                from services.broker_sync.models import PositionSnapshot
+
+                snapshots = db_session.query(PositionSnapshot).filter_by(run_id=run.id).all()
+                upsert_service = PositionUpsertService(db_session)
+                upsert_report = upsert_service.upsert_from_snapshots(snapshots)
+
+                if upsert_report["errors"]:
+                    raise RuntimeError(
+                        f"业务表同步失败: {upsert_report['errors']}"
+                    )
+
                 return run.id
 
             except (ApiException, ConnectionError, TimeoutError, OSError) as e:

@@ -89,6 +89,10 @@ class TigerAdapter:
         currency = contract.currency
         raw_symbol = contract.symbol.lstrip("'") if hasattr(contract, "symbol") else ""
 
+        # market: 优先用 SDK 返回的,SDK 没给时用 currency 推断
+        sdk_market = getattr(contract, "market", None)
+        market = sdk_market if sdk_market else CURRENCY_TO_MARKET.get(currency, "US")
+
         quantity = Decimal(str(sdk_position.quantity))
         avg_cost = Decimal(str(sdk_position.average_cost))
 
@@ -100,7 +104,7 @@ class TigerAdapter:
             name=getattr(contract, "name", None) or raw_symbol,
             name_en=None,
             asset_class=self.map_asset_class(contract.sec_type),
-            market=CURRENCY_TO_MARKET.get(currency, "US"),
+            market=market,
             quantity=quantity,
             available_quantity=None,
             avg_cost=avg_cost,
