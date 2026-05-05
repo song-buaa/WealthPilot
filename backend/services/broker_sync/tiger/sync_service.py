@@ -1,7 +1,10 @@
-"""老虎证券持仓同步服务（只读,不写库）。"""
+"""老虎证券持仓同步服务。"""
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
+from pydantic import ValidationError
 from tigeropen.tiger_open_config import TigerOpenClientConfig
 from tigeropen.common.util.signature_utils import read_private_key
 from tigeropen.common.consts import Language
@@ -77,3 +80,70 @@ class TigerSyncService:
             "raw": str(assets),
             "snapshot_time": datetime.now(timezone.utc).isoformat(),
         }
+
+    # ── 持久化同步（写库）─────────────────────────────────────────
+
+    MAX_RETRIES = 2
+    RETRY_DELAY_SECONDS = 5
+
+    def sync_and_persist(
+        self,
+        db_session,
+        triggered_by: str = "manual",
+    ) -> int:
+        """
+        同步持仓并写入数据库。
+
+        重试策略:
+        - 网络/API 错误:重试最多 MAX_RETRIES 次
+        - 数据格式错误:立即失败,不重试
+
+        返回 run_id。失败时抛出最后一次的异常。
+        """
+        from tigeropen.common.exceptions import ApiException
+        from services.broker_sync.repository import PositionSnapshotRepository
+
+        repo = PositionSnapshotRepository(db_session)
+        run = repo.create_run(
+            broker="tiger",
+            account_id=self.account_id,
+            sync_source="api",
+            triggered_by=triggered_by,
+        )
+
+        last_exception: Optional[Exception] = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                positions = self.fetch_positions()
+                repo.persist_positions(
+                    run_id=run.id,
+                    positions=positions,
+                    total_market_value_cnh=None,
+                )
+                return run.id
+
+            except (ApiException, ConnectionError, TimeoutError, OSError) as e:
+                last_exception = e
+                if attempt < self.MAX_RETRIES:
+                    time.sleep(self.RETRY_DELAY_SECONDS)
+                    continue
+                db_session.rollback()
+                repo.mark_run_failed(
+                    run_id=run.id,
+                    error_message=f"网络错误,重试 {self.MAX_RETRIES} 次后仍失败: {type(e).__name__}: {e}",
+                    retry_count=attempt,
+                )
+                raise
+
+            except (ValidationError, KeyError, AttributeError, ValueError) as e:
+                db_session.rollback()
+                repo.mark_run_failed(
+                    run_id=run.id,
+                    error_message=f"数据格式错误(不重试): {type(e).__name__}: {e}",
+                    retry_count=attempt,
+                )
+                raise
+
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("sync_and_persist 内部逻辑错误")
