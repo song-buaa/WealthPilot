@@ -13,7 +13,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, Sparkles, ImageIcon } from 'lucide-react'
+import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, Sparkles, ImageIcon, RefreshCw } from 'lucide-react'
+import { BrokerSyncTab } from '@/components/BrokerSyncTab'
 import {
   portfolioApi, decisionApi,
   streamDecisionChat,
@@ -511,7 +512,7 @@ const SS_HINTS: Record<SSPlatform, string> = {
 
 /** 资产导入/导出 折叠面板（通用 CSV + broker CSV + 截图识别）*/
 function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle: () => void; onRefresh: () => void }) {
-  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot'>('csv')
+  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync'>('csv')
 
   // 通用 CSV tab
   const [csvLoading, setCsvLoading] = useState(false)
@@ -625,6 +626,9 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
             <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ImageIcon size={11} /> 截图识别（按平台替换）</span>
             </button>
+            <button style={tabStyle(activeTab === 'api-sync')} onClick={() => setActiveTab('api-sync')}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} /> API 同步</span>
+            </button>
           </div>
 
           {/* ── 通用 CSV ── */}
@@ -705,6 +709,11 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
               )}
               {ssMsg && <MsgBanner msg={ssMsg} style={{ marginTop: 12 }} />}
             </div>
+          )}
+
+          {/* ── API 同步 ── */}
+          {activeTab === 'api-sync' && (
+            <BrokerSyncTab onRefresh={onRefresh} />
           )}
         </div>
       )}

@@ -54,5 +54,4 @@ def init_db():
     """创建所有表（幂等操作，可安全多次调用）。"""
     # 延迟 import 避免循环依赖：database ← models ← database
     from app import models  # noqa: F401  触发所有 Model 类的注册
-    from services.broker_sync import models as _broker_sync_models  # noqa: F401
     Base.metadata.create_all(get_engine())
