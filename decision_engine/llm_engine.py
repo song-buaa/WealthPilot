@@ -1261,10 +1261,17 @@ def _call_generic_llm(
         return _fallback_generic(intent_type, f"未知错误：{type(e).__name__}：{e}")
 
 
-def review_portfolio(user_query: str, data: LoadedData) -> GenericLLMResult:
+def review_portfolio(
+    user_query: str,
+    data: LoadedData,
+    extra_instruction: str = "",
+) -> GenericLLMResult:
     """组合评估 LLM 推理（PortfolioReview）"""
     payload = _build_portfolio_payload(user_query, data)
-    return _call_generic_llm("portfolio_review", _PORTFOLIO_REVIEW_PROMPT, payload)
+    prompt = _PORTFOLIO_REVIEW_PROMPT
+    if extra_instruction:
+        prompt = _PORTFOLIO_REVIEW_PROMPT + "\n\n" + extra_instruction
+    return _call_generic_llm("portfolio_review", prompt, payload)
 
 
 def analyze_allocation(

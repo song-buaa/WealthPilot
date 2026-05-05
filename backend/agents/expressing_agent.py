@@ -29,6 +29,24 @@ from backend.agents.contracts import (
 
 logger = logging.getLogger(__name__)
 
+# 宏观关键词（与 PlanningAgent._MACRO_KEYWORDS 保持一致）
+_MACRO_KEYWORDS = [
+    "美联储", "加息", "降息", "央行", "通胀", "通缩",
+    "贸易战", "汇率", "GDP", "经济周期",
+]
+
+_MACRO_ANALYSIS_INSTRUCTION = """
+重要补充指令——用户问题涉及宏观经济事件:
+请在你的分析中,优先围绕用户提到的具体宏观事件展开:
+1. **事件影响传导**: 该宏观事件如何具体影响用户当前持仓的不同资产类别(权益/固收/另类等),给出具体的影响方向和幅度估计
+2. **历史参照**: 类似宏观事件历史上对类似配置组合产生过什么影响（如有数据支撑则引用）
+3. **针对性调整**: 给出针对此宏观事件的具体调整建议,精确到资产类别比例或具体持仓的增减,不要给笼统的"再平衡"建议
+4. **不可替代性**: 你的分析必须围绕用户问的宏观事件,不能用通用组合评估模板敷衍
+
+回答时仍按"组合现状/结构分析/市场背景/主要风险/调整建议"5 段结构,
+但每一段都要紧扣用户问的宏观事件,而不是泛泛而谈。
+"""
+
 
 # ════════════════════════════════════════════════════════════
 # 流式分块辅助
@@ -256,8 +274,14 @@ class ExpressingAgent:
 
         try:
             if intent_type == "PortfolioReview":
+                # P1 修复: 检测宏观问句，注入针对性分析指令
+                extra_instruction = ""
+                if any(kw in user_query for kw in _MACRO_KEYWORDS):
+                    extra_instruction = _MACRO_ANALYSIS_INSTRUCTION
+                    logger.info(f"[ExpressingAgent] 检测到宏观问句，注入分析指令")
                 generic = await asyncio.to_thread(
                     llm_engine.review_portfolio, user_query, loaded,
+                    extra_instruction=extra_instruction,
                 )
             elif intent_type == "AssetAllocation":
                 capital_amount = self._extract_capital_amount(user_query, planning_output)
