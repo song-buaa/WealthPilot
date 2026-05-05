@@ -52,3 +52,11 @@ htmlcov/
 # Claude Code 终端会话日志（如果以后又生成）
 WeathPilot.txt
 WealthPilot.txt
+
+# Broker API credentials
+.env.local
+backend/.env
+backend/secrets/
+*.pem
+tiger_openapi_config.properties
+tiger_openapi_token.properties
