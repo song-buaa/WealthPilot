@@ -195,6 +195,12 @@ async def run_chat_stream_v3(
             })
             return
 
+        # D3 修复：补发 rules/signals stage 事件（对齐 v2 视觉粒度）
+        if getattr(exec_out, "rule_result", None):
+            yield _sse("stage", {"stage": "rules", "label": "规则校验完成"})
+        if getattr(exec_out, "signal_result", None):
+            yield _sse("stage", {"stage": "signals", "label": "信号分析完成"})
+
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
