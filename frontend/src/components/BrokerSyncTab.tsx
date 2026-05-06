@@ -36,16 +36,44 @@ export function BrokerSyncTab({ onRefresh }: Props) {
   const handleSync = async (broker: 'tiger' | 'futu' | 'all') => {
     setSyncing(broker)
     setMessage(null)
+
+    // 记录触发前的时间戳,用于检测是否有新 run
+    const brokersToCheck = broker === 'all' ? ['tiger', 'futu'] : [broker]
+    const prevTimes = Object.fromEntries(
+      brokersToCheck.map(b => [b, status.find(s => s.broker === b)?.last_sync_time])
+    )
+
     try {
-      const res = await triggerSync(broker)
-      setMessage(`✅ ${res.message}`)
-      setTimeout(async () => {
-        await fetchStatus()
-        onRefresh()
-        setSyncing(null)
-      }, 5000)
+      await triggerSync(broker)
+      setMessage('⏳ 同步中...')
+
+      // 轮询最多 30 秒,每 2 秒检查一次
+      let attempts = 0
+      const maxAttempts = 15
+      while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 2000))
+        attempts++
+        const newStatus = await getSyncStatus()
+        setStatus(newStatus.brokers)
+
+        const allUpdated = brokersToCheck.every(b => {
+          const item = newStatus.brokers.find(s => s.broker === b)
+          return item && item.last_sync_time !== prevTimes[b]
+        })
+
+        if (allUpdated) {
+          setMessage('✅ 同步完成')
+          onRefresh()
+          break
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        setMessage('⚠️ 同步可能仍在进行中,请稍后刷新查看')
+      }
     } catch (e: any) {
       setMessage(`❌ 触发失败: ${e.message}`)
+    } finally {
       setSyncing(null)
     }
   }

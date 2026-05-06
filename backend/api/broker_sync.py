@@ -5,14 +5,26 @@ WealthPilot 券商同步 API 路由。
 - GET  /api/broker-sync/status       查询各 broker 最近同步状态
 - POST /api/broker-sync/trigger      手动触发同步(指定 broker 或全部)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
+import pytz
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import desc
 
 from app.database import get_session
+
+_BEIJING_TZ = pytz.timezone("Asia/Shanghai")
+
+
+def _format_beijing_time(dt) -> Optional[str]:
+    """UTC datetime → 北京时间字符串。"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 router = APIRouter()
 
@@ -79,7 +91,7 @@ def get_sync_status():
                 brokers.append(SyncStatusItem(
                     broker=broker,
                     platform=platform,
-                    last_sync_time=run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else None,
+                    last_sync_time=_format_beijing_time(run.started_at),
                     last_sync_status=run.status,
                     last_position_count=run.position_count,
                     error_message=run.error_message,
