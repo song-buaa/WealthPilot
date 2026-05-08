@@ -163,6 +163,15 @@ chat_answer 输出格式：
 
 数据引用规则（严格遵守）：
 
+关于 realtime_market_data 字段（优先级最高）：
+- 当 payload 中包含 realtime_market_data 时，其中的数字来自富途实时行情和 Alpha Vantage 结构化数据
+- **优先使用 realtime_market_data 里的数字**，而非 research 里的文本描述
+- 行情数据（现价/PE/PB/52周高低/涨跌幅）来源标注"（实时行情）"
+- 财报数据（营收增速/净利增速/ROE/毛利率）来源标注"（AV 财报数据）"
+- 分析师数据（目标价/评级/覆盖人数）来源标注"（AV 分析师数据）"
+- 如果 research 中有与 realtime_market_data 冲突的数字，以 realtime_market_data 为准
+- _unavailable_fields 列出的字段不可用，分析时不要提及或编造
+
 关于纪律数据：
 - 纪律校验结果中的"上限"是风险控制的硬性边界，不是建议仓位
 - 如果当前仓位未超过纪律上限，不得说"超过上限"
@@ -697,12 +706,8 @@ def reason(
     Returns:
         LLMResult
     """
-    # 构建输入 payload
-    payload = _build_payload(user_query, data, intent, rule_result, signals)
-
-    # M1-b: 注入市场数据（如果有）
-    if market_data and hasattr(market_data, "to_snapshot_dict"):
-        payload["market_data_snapshot"] = market_data.to_snapshot_dict()
+    # 构建输入 payload（含市场数据）
+    payload = _build_payload(user_query, data, intent, rule_result, signals, market_data=market_data)
 
     # 根据对话轮次选择 chat_answer 格式
     is_followup = bool(conversation_history)
@@ -795,6 +800,7 @@ def _build_payload(
     intent: IntentResult,
     rule_result: RuleResult,
     signals: SignalResult,
+    market_data: object | None = None,
 ) -> dict:
     """拼接送给 LLM 的结构化 payload（PRD 指定格式）。"""
 
@@ -846,6 +852,12 @@ def _build_payload(
             },
         },
         "signals": signals.to_dict(),
+        "realtime_market_data": (
+            {k: v for k, v in market_data.to_snapshot_dict().items()
+             if v is not None and k != "missingFields"}
+            | ({"_unavailable_fields": market_data.to_snapshot_dict().get("missingFields", [])}
+               if market_data and market_data.to_snapshot_dict().get("missingFields") else {})
+        ) if market_data and hasattr(market_data, "to_snapshot_dict") else None,
         "research": data.research,
         "user_profile": {
             "risk_level": data.profile.risk_level,
