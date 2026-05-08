@@ -26,6 +26,7 @@ SALES_CHANNEL_TO_PLATFORM = {
     "农业银行": "农业银行",
     "交通银行": "交通银行",
     "平安银行": "平安银行",
+    "京东肯特瑞基金销售": "京东金融",
 }
 
 DOMESTIC_FUND_PLATFORMS = set(SALES_CHANNEL_TO_PLATFORM.values())

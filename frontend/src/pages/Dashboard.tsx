@@ -267,8 +267,8 @@ export default function Dashboard() {
         {/* Tab 切换 */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
           {([
-            { key: 'overseas' as const, label: '境外证券', count: overseasCount },
-            { key: 'domestic_stock' as const, label: '境内证券', count: domesticStockCount },
+            { key: 'overseas' as const, label: '境外券商', count: overseasCount },
+            { key: 'domestic_stock' as const, label: '境内券商', count: domesticStockCount },
             { key: 'domestic_fund' as const, label: '境内基金', count: domesticFundCount },
           ]).map(tab => (
             <button key={tab.key} onClick={() => setPosTab(tab.key)}
@@ -287,25 +287,27 @@ export default function Dashboard() {
         ) : (
           <div style={{ maxHeight: 494, overflowY: 'auto', borderRadius: 6 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
-              {posTab === 'domestic_fund' ? (
-              <colgroup>
-                <col style={{ width: 72 }} /><col style={{ width: 160 }} /><col style={{ width: 64 }} />
-                <col style={{ width: 60 }} /><col style={{ width: 72 }} /><col style={{ width: 100 }} />
-                <col style={{ width: 52 }} /><col style={{ width: 80 }} /><col style={{ width: 56 }} />
-              </colgroup>
-              ) : (
+              {posTab === 'overseas' ? (
               <colgroup>
                 <col style={{ width: 72 }} /><col style={{ width: 120 }} /><col style={{ width: 64 }} />
                 <col style={{ width: 60 }} /><col style={{ width: 56 }} /><col style={{ width: 84 }} />
                 <col style={{ width: 84 }} /><col style={{ width: 92 }} /><col style={{ width: 52 }} />
                 <col style={{ width: 92 }} /><col style={{ width: 56 }} />
               </colgroup>
+              ) : (
+              <colgroup>
+                <col style={{ width: 72 }} /><col style={{ width: 160 }} /><col style={{ width: 64 }} />
+                <col style={{ width: 60 }} /><col style={{ width: 72 }} /><col style={{ width: 100 }} />
+                <col style={{ width: 52 }} /><col style={{ width: 80 }} /><col style={{ width: 56 }} />
+              </colgroup>
               )}
               <thead>
                 <tr>
-                  {(posTab === 'domestic_fund'
+                  {(posTab === 'overseas'
+                    ? ['平台','资产名称','资产代码','资产大类','头寸','市值(美元)','市值(港币)','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
+                    : posTab === 'domestic_fund'
                     ? ['平台','基金名称','基金代码','资产大类','份额','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
-                    : ['平台','资产名称','资产代码','资产大类','头寸','市值(美元)','市值(港币)','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
+                    : ['平台','资产名称','资产代码','资产大类','头寸','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
                   ).map((h, i) => (
                     <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap', background: '#fff', position: 'sticky', top: 0, zIndex: 1, textAlign: i >= 4 ? 'right' : 'left' }}>
                       {h}
@@ -330,7 +332,7 @@ export default function Dashboard() {
                       <td style={{ ...td, color: '#6B7280', fontSize: 12 }}>{p.ticker || '—'}</td>
                       <td style={{ ...td, textAlign: 'center' }}><span style={tag('#F3F4F6','#374151')}>{p.asset_class}</span></td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtQty(p.quantity)}</td>
-                      {posTab !== 'domestic_fund' && <>
+                      {posTab === 'overseas' && <>
                         <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? fmtFx(p.original_value,'USD') : '—'}</td>
                         <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isHKD ? fmtFx(p.original_value,'HKD') : '—'}</td>
                       </>}
