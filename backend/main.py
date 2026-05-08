@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Shanghai"))
     scheduler.add_job(
-        lambda: [broker_sync_api._run_sync(b, "cron") for b in ["tiger", "futu"]],
+        lambda: [broker_sync_api._run_sync(b, "cron") for b in ["tiger", "futu", "snowball"]],
         trigger=CronTrigger(hour=22, minute=0),
         id="daily_broker_sync",
         replace_existing=True,

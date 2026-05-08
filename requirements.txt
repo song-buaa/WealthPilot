@@ -22,3 +22,4 @@ langgraph>=0.2.0
 tigeropen
 futu-api
 apscheduler
+snbpy

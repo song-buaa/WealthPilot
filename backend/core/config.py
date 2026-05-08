@@ -32,5 +32,21 @@ class Settings:
         default_factory=lambda: os.environ.get("FUTU_READ_ONLY_MODE", "true").lower() == "true"
     )
 
+    # Snowball Securities (雪盈) OpenAPI
+    snowball_account: str | None = field(
+        default_factory=lambda: os.environ.get("SNOWBALL_ACCOUNT")
+    )
+    snowball_secret_key: str | None = field(
+        default_factory=lambda: os.environ.get("SNOWBALL_SECRET_KEY")
+    )
+    snowball_env: str = field(
+        default_factory=lambda: os.environ.get("SNOWBALL_ENV", "prod")
+    )
+    snowball_read_only_mode: bool = field(
+        default_factory=lambda: os.environ.get(
+            "SNOWBALL_READ_ONLY_MODE", "true"
+        ).lower() == "true"
+    )
+
 
 settings = Settings()

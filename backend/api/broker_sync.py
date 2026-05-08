@@ -43,7 +43,7 @@ class SyncStatusResponse(BaseModel):
 
 
 class TriggerRequest(BaseModel):
-    broker: Literal["tiger", "futu", "all"] = "all"
+    broker: Literal["tiger", "futu", "snowball", "all"] = "all"
     triggered_by: str = "manual"
 
 
@@ -55,6 +55,7 @@ class TriggerResponse(BaseModel):
 BROKER_PLATFORM_MAP = {
     "tiger": "老虎证券",
     "futu": "富途证券",
+    "snowball": "雪盈证券",
 }
 
 
@@ -127,6 +128,10 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
             service = FutuSyncService()
             service.sync_and_persist(db, triggered_by=triggered_by)
             service.close()
+        elif broker == "snowball":
+            from services.broker_sync.snowball.sync_service import SnowballSyncService  # noqa: E402
+            service = SnowballSyncService()
+            service.sync_and_persist(db, triggered_by=triggered_by)
         print(f"[broker-sync] {broker} 同步完成 @ {datetime.now()}", flush=True)
     except Exception as e:
         import traceback
@@ -139,7 +144,7 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
 @router.post("/trigger", response_model=TriggerResponse)
 def trigger_sync(req: TriggerRequest, background_tasks: BackgroundTasks):
     """手动触发同步。异步执行,立即返回。"""
-    brokers_to_run = ["tiger", "futu"] if req.broker == "all" else [req.broker]
+    brokers_to_run = ["tiger", "futu", "snowball"] if req.broker == "all" else [req.broker]
 
     for broker in brokers_to_run:
         background_tasks.add_task(_run_sync, broker, req.triggered_by)
