@@ -33,12 +33,12 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  const handleSync = async (broker: 'tiger' | 'futu' | 'all') => {
+  const handleSync = async (broker: 'tiger' | 'futu' | 'snowball' | 'all') => {
     setSyncing(broker)
     setMessage(null)
 
     // 记录触发前的时间戳,用于检测是否有新 run
-    const brokersToCheck = broker === 'all' ? ['tiger', 'futu'] : [broker]
+    const brokersToCheck = broker === 'all' ? ['tiger', 'futu', 'snowball'] : [broker]
     const prevTimes = Object.fromEntries(
       brokersToCheck.map(b => [b, status.find(s => s.broker === b)?.last_sync_time])
     )
@@ -125,7 +125,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                 )}
               </div>
               <button
-                onClick={() => handleSync(item.broker as 'tiger' | 'futu')}
+                onClick={() => handleSync(item.broker as 'tiger' | 'futu' | 'snowball')}
                 disabled={isSyncing || syncing === 'all'}
                 style={{ ...btnSync, ...(isSyncing || syncing === 'all' ? btnDisabled : {}) }}
               >
