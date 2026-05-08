@@ -275,6 +275,7 @@ cp .env.example .env
 #   TIGER_TIGER_ID        — 老虎证券持仓同步（可选）
 #   TIGER_PRIVATE_KEY     — 老虎证券私钥（可选）
 #   FUTU_HOST / FUTU_PORT — 富途 OpenD 连接配置（可选）
+#   SNOWBALL_ACCOUNT      — 雪盈证券持仓同步（可选）
 source .env
 ```
 

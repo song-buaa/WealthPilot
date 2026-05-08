@@ -4,6 +4,29 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [3.0.1] - 2026-05-08
+
+### Added
+- 老虎证券 OpenAPI 持仓自动同步（tigeropen SDK，支持股票/ETF/场外基金）
+- 富途证券 OpenAPI 持仓自动同步（futu-api SDK，支持港美股）
+- 雪盈证券 OpenAPI 持仓自动同步（snbpy SDK，HTTP REST）
+- Pydantic Position schema（broker-agnostic，Decimal 精度，frozen model）
+- 多券商持仓时序表（position_snapshot_runs / position_snapshots）
+- PositionUpsertService：snapshot → Position 业务表同步，含汇率换算（Frankfurter API）
+- 跨平台持仓聚合验证（同 ticker 多券商自动合并，如 LI 老虎+雪盈=2800股）
+- APScheduler 定时同步（每天北京时间 22:00 自动触发三家券商）
+- 前端"API 同步" tab：实时同步状态 + 手动触发按钮 + 轮询等待完成
+- asset_class 5 大类穿透分类（classify_position + KEYWORD_CLASSIFICATION 英文扩展）
+- 34 个单元测试覆盖三家 adapter + repository + upsert + asset_class
+
+### Fixed
+- asset_class 统一为中文 5 大类（权益/固收/货币/另类/衍生），修复英文枚举混存问题
+- 境外基金英文名称关键词识别（BOND/CREDIT/TREASURY → 固收）
+- API 同步状态时间显示修复（UTC → 北京时间）
+- 同步后轮询刷新替代固定等待
+
+---
+
 ## [3.0.0] - 2026-05-03
 
 ### 架构升级
