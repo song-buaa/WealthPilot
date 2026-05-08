@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom'
 import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, Sparkles, ImageIcon, RefreshCw } from 'lucide-react'
 import { BrokerSyncTab } from '@/components/BrokerSyncTab'
+import { FundEImportTab } from '@/components/FundEImportTab'
 import {
   portfolioApi, decisionApi,
   streamDecisionChat,
@@ -77,6 +78,9 @@ export default function Dashboard() {
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
   const [cashRange, setCashRange]   = useState<{ min: number; max: number } | undefined>(undefined)
+
+  // 资产明细 Tab
+  const [posTab, setPosTab] = useState<'overseas' | 'domestic_stock' | 'domestic_fund'>('overseas')
 
   // 导入/导出展开状态
   const [importOpen, setImportOpen]         = useState(false)
@@ -165,6 +169,19 @@ export default function Dashboard() {
     (a, b) => (platTotals[b.platform] ?? 0) - (platTotals[a.platform] ?? 0) || b.market_value_cny - a.market_value_cny
   )
 
+  // 资产明细 Tab 过滤
+  const OVERSEAS_PLATFORMS = new Set(['老虎证券', '富途证券', '雪盈证券'])
+  const DOMESTIC_STOCK_PLATFORMS = new Set(['中信证券'])
+  const tabFilteredPos = sortedPos.filter(p => {
+    const plat = p.platform ?? ''
+    if (posTab === 'overseas') return OVERSEAS_PLATFORMS.has(plat)
+    if (posTab === 'domestic_stock') return DOMESTIC_STOCK_PLATFORMS.has(plat)
+    return !OVERSEAS_PLATFORMS.has(plat) && !DOMESTIC_STOCK_PLATFORMS.has(plat)
+  })
+  const overseasCount = sortedPos.filter(p => OVERSEAS_PLATFORMS.has(p.platform ?? '')).length
+  const domesticStockCount = sortedPos.filter(p => DOMESTIC_STOCK_PLATFORMS.has(p.platform ?? '')).length
+  const domesticFundCount = sortedPos.length - overseasCount - domesticStockCount
+
   // 负债汇总
   const liabTotal = liabilities.reduce((s, l) => s + (l.amount ?? 0), 0)
 
@@ -247,20 +264,49 @@ export default function Dashboard() {
           📋 资产明细
           <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 400, color: '#9CA3AF' }}>{positions.length} 只持仓</span>
         </div>
-        {sortedPos.length === 0 ? (
+        {/* Tab 切换 */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          {([
+            { key: 'overseas' as const, label: '境外证券', count: overseasCount },
+            { key: 'domestic_stock' as const, label: '境内证券', count: domesticStockCount },
+            { key: 'domestic_fund' as const, label: '境内基金', count: domesticFundCount },
+          ]).map(tab => (
+            <button key={tab.key} onClick={() => setPosTab(tab.key)}
+              style={{
+                padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer',
+                transition: 'all 0.15s',
+                background: posTab === tab.key ? '#3B82F6' : '#F3F4F6',
+                color: posTab === tab.key ? '#fff' : '#6B7280',
+              }}>
+              {tab.label} <span style={{ opacity: 0.7, marginLeft: 3 }}>({tab.count})</span>
+            </button>
+          ))}
+        </div>
+        {tabFilteredPos.length === 0 ? (
           <EmptyState icon={Upload} title="暂无持仓" desc="请先导入 CSV" />
         ) : (
           <div style={{ maxHeight: 494, overflowY: 'auto', borderRadius: 6 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+              {posTab === 'domestic_fund' ? (
+              <colgroup>
+                <col style={{ width: 72 }} /><col style={{ width: 160 }} /><col style={{ width: 64 }} />
+                <col style={{ width: 60 }} /><col style={{ width: 72 }} /><col style={{ width: 100 }} />
+                <col style={{ width: 52 }} /><col style={{ width: 80 }} /><col style={{ width: 56 }} />
+              </colgroup>
+              ) : (
               <colgroup>
                 <col style={{ width: 72 }} /><col style={{ width: 120 }} /><col style={{ width: 64 }} />
                 <col style={{ width: 60 }} /><col style={{ width: 56 }} /><col style={{ width: 84 }} />
                 <col style={{ width: 84 }} /><col style={{ width: 92 }} /><col style={{ width: 52 }} />
                 <col style={{ width: 92 }} /><col style={{ width: 56 }} />
               </colgroup>
+              )}
               <thead>
                 <tr>
-                  {['平台','资产名称','资产代码','资产大类','头寸','市值(美元)','市值(港币)','市值(人民币)','占比%','盈亏(人民币)','盈亏%'].map((h, i) => (
+                  {(posTab === 'domestic_fund'
+                    ? ['平台','基金名称','基金代码','资产大类','份额','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
+                    : ['平台','资产名称','资产代码','资产大类','头寸','市值(美元)','市值(港币)','市值(人民币)','占比%','盈亏(人民币)','盈亏%']
+                  ).map((h, i) => (
                     <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap', background: '#fff', position: 'sticky', top: 0, zIndex: 1, textAlign: i >= 4 ? 'right' : 'left' }}>
                       {h}
                     </th>
@@ -268,7 +314,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {sortedPos.map(p => {
+                {tabFilteredPos.map(p => {
                   const pnlV = p.profit_loss_value ?? 0
                   const costV = (p.market_value_cny ?? 0) - pnlV
                   const rate = costV > 0 ? (pnlV / costV) * 100 : 0
@@ -284,15 +330,17 @@ export default function Dashboard() {
                       <td style={{ ...td, color: '#6B7280', fontSize: 12 }}>{p.ticker || '—'}</td>
                       <td style={{ ...td, textAlign: 'center' }}><span style={tag('#F3F4F6','#374151')}>{p.asset_class}</span></td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtQty(p.quantity)}</td>
-                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? fmtFx(p.original_value,'USD') : '—'}</td>
-                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isHKD ? fmtFx(p.original_value,'HKD') : '—'}</td>
+                      {posTab !== 'domestic_fund' && <>
+                        <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? fmtFx(p.original_value,'USD') : '—'}</td>
+                        <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isHKD ? fmtFx(p.original_value,'HKD') : '—'}</td>
+                      </>}
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(p.market_value_cny)}</td>
                       <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#6B7280', fontSize: 12 }}>{pct.toFixed(2)}%</td>
-                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: pnlV > 0 ? '#DC2626' : pnlV < 0 ? '#16A34A' : '#9CA3AF' }}>
-                        {pnlV === 0 ? '¥0' : pnlV > 0 ? `+${fmtCny(pnlV)}` : `-${fmtCny(-pnlV)}`}
+                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: posTab === 'domestic_fund' ? '#9CA3AF' : pnlV > 0 ? '#DC2626' : pnlV < 0 ? '#16A34A' : '#9CA3AF' }}>
+                        {posTab === 'domestic_fund' ? '—' : pnlV === 0 ? '¥0' : pnlV > 0 ? `+${fmtCny(pnlV)}` : `-${fmtCny(-pnlV)}`}
                       </td>
-                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: rate > 0 ? '#DC2626' : rate < 0 ? '#16A34A' : '#9CA3AF' }}>
-                        {rate === 0 ? '0.00%' : fmtDelta(rate)}
+                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: posTab === 'domestic_fund' ? '#9CA3AF' : rate > 0 ? '#DC2626' : rate < 0 ? '#16A34A' : '#9CA3AF' }}>
+                        {posTab === 'domestic_fund' ? '—' : rate === 0 ? '0.00%' : fmtDelta(rate)}
                       </td>
                     </tr>
                   )
@@ -512,7 +560,7 @@ const SS_HINTS: Record<SSPlatform, string> = {
 
 /** 资产导入/导出 折叠面板（通用 CSV + broker CSV + 截图识别）*/
 function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle: () => void; onRefresh: () => void }) {
-  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync'>('csv')
+  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync' | 'fund-e'>('csv')
 
   // 通用 CSV tab
   const [csvLoading, setCsvLoading] = useState(false)
@@ -629,6 +677,9 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
             <button style={tabStyle(activeTab === 'api-sync')} onClick={() => setActiveTab('api-sync')}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} /> API 同步</span>
             </button>
+            <button style={tabStyle(activeTab === 'fund-e')} onClick={() => setActiveTab('fund-e')}>
+              📊 基金E账户
+            </button>
           </div>
 
           {/* ── 通用 CSV ── */}
@@ -714,6 +765,11 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
           {/* ── API 同步 ── */}
           {activeTab === 'api-sync' && (
             <BrokerSyncTab onRefresh={onRefresh} />
+          )}
+
+          {/* ── 基金E账户 ── */}
+          {activeTab === 'fund-e' && (
+            <FundEImportTab onRefresh={onRefresh} />
           )}
         </div>
       )}

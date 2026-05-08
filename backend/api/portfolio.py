@@ -147,3 +147,46 @@ def position_template():
 def liability_template():
     """下载负债 CSV 模板"""
     return _csv_response(svc.get_liability_csv_template(), "liabilities_template.csv")
+
+
+@router.post("/import/fund-e-excel")
+async def import_fund_e_excel(file: UploadFile = File(...)):
+    """
+    导入基金E账户App导出的Excel(.xlsx)。
+    按销售机构(platform)分组替换持仓,不影响境外券商和中信证券。
+    """
+    import tempfile, os
+    from app.fund_e_account_importer import parse_fund_e_excel
+
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        platform_positions = parse_fund_e_excel(tmp_path)
+    except Exception as e:
+        os.unlink(tmp_path)
+        raise HTTPException(status_code=400, detail=f"文件解析失败: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    if not platform_positions:
+        raise HTTPException(status_code=400, detail="未解析到任何持仓数据")
+
+    portfolio_id = _pid()
+    total = 0
+    platform_counts = {}
+
+    for platform, positions in platform_positions.items():
+        svc._replace_positions_by_platform(portfolio_id, platform, positions)
+        platform_counts[platform] = len(positions)
+        total += len(positions)
+
+    return {
+        "success": True,
+        "total": total,
+        "platforms": platform_counts,
+        "message": f"成功导入 {total} 条基金持仓",
+    }
