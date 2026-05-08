@@ -230,6 +230,7 @@ class ExpressingAgent:
                 rule_result,
                 signal_result,
                 conversation_history or [],
+                getattr(execution_output, "market_data", None),
             )
         except Exception as e:
             out.mark_failed(f"LLM 调用失败: {e}")

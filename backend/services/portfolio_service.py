@@ -353,7 +353,7 @@ def _upsert_positions_by_name(
                     currency="CNY",
                     original_currency="CNY",
                     segment="投资",
-                    **d,
+                    **{k: v for k, v in d.items() if k not in ("platform", "portfolio_id", "segment", "currency", "original_currency")},
                 )
                 session.add(new_pos)
         session.commit()

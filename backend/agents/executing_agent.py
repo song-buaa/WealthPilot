@@ -256,6 +256,61 @@ class ExecutingAgent:
         out.signal_result = signal_result
         out.skill_results["wp-generate-signals"] = signal_result.to_dict()
 
+        # ── Step 6: 市场数据加载（M1-b 新增,失败不阻塞）──
+        if asset_name:
+            try:
+                import sys, os as _os
+                _bd = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+                if _bd not in sys.path:
+                    sys.path.insert(0, _bd)
+                from services.market_data.futu_quote_service import fetch_quote
+                from services.market_data.av_fundamentals_service import fetch_fundamentals
+                from services.market_data.schema import MarketDataBundle
+                from datetime import datetime, timezone
+
+                # 构造 WP 内部 symbol（asset_name 可能是"特斯拉"而非 ticker）
+                wp_symbol = None
+                if loaded.target_position:
+                    tp = loaded.target_position
+                    ticker = getattr(tp, "ticker", "") or ""
+                    if ticker:
+                        # 推断市场后缀
+                        ac = getattr(tp, "asset_class", "")
+                        platforms = getattr(tp, "platforms", []) or []
+                        if any("老虎" in p or "富途" in p or "雪盈" in p for p in platforms):
+                            # 从已有 symbol 推断 .US / .HK
+                            if ticker.isdigit() and len(ticker) >= 4:
+                                wp_symbol = f"{ticker}.HK"
+                            else:
+                                wp_symbol = f"{ticker}.US"
+
+                if wp_symbol:
+                    out.invoked_skills.append("wp-fetch-realtime-quote")
+                    quote = fetch_quote(wp_symbol)
+
+                    out.invoked_skills.append("wp-fetch-fundamentals")
+                    fundamentals = fetch_fundamentals(wp_symbol)
+
+                    out.market_data = MarketDataBundle(
+                        symbol=wp_symbol,
+                        quote=quote,
+                        fundamentals=fundamentals,
+                        fetched_at=datetime.now(timezone.utc),
+                    )
+                    out.skill_results["wp-fetch-realtime-quote"] = {
+                        "available": quote is not None,
+                    }
+                    out.skill_results["wp-fetch-fundamentals"] = {
+                        "available": fundamentals is not None,
+                    }
+                    logger.info(
+                        f"[ExecutingAgent] 市场数据: {wp_symbol} "
+                        f"quote={'✅' if quote else '❌'} "
+                        f"fundamentals={'✅' if fundamentals else '❌'}"
+                    )
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] 市场数据加载失败(不阻塞): {e}")
+
     # ────────────────────────────────────────────────────────
     # 组合级路径
     # ────────────────────────────────────────────────────────

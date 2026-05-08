@@ -93,7 +93,12 @@ class TigerAdapter:
         sdk_market = getattr(contract, "market", None)
         market = sdk_market if sdk_market else CURRENCY_TO_MARKET.get(currency, "US")
 
-        quantity = Decimal(str(sdk_position.quantity))
+        # 老虎 SDK quantity 是整数编码(position_scale 表示小数位数)
+        # position_qty 是真实份额(小数),基金等小数份额场景必须用 position_qty
+        raw_qty = getattr(sdk_position, "position_qty", None)
+        if raw_qty is None or raw_qty == 0:
+            raw_qty = sdk_position.quantity
+        quantity = Decimal(str(raw_qty))
         avg_cost = Decimal(str(sdk_position.average_cost))
 
         return Position(

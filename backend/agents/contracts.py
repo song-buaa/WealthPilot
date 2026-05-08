@@ -161,6 +161,7 @@ class ExecutionOutput:
     pre_check_result: Optional[object] = None # decision_engine.pre_check.PreCheckResult
     rule_result: Optional[object] = None      # decision_engine.rule_engine.RuleResult
     signal_result: Optional[object] = None    # decision_engine.signal_engine.SignalResult
+    market_data: Optional[object] = None      # services.market_data.schema.MarketDataBundle
 
     # === Stage 中断标记（数据加载失败 / 前置校验失败时）===
     aborted: bool = False

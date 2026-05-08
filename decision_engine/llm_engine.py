@@ -681,6 +681,7 @@ def reason(
     rule_result: RuleResult,
     signals: SignalResult,
     conversation_history: list[dict] | None = None,
+    market_data: object | None = None,
 ) -> LLMResult:
     """
     调用 LLM 进行投资推理。
@@ -698,6 +699,10 @@ def reason(
     """
     # 构建输入 payload
     payload = _build_payload(user_query, data, intent, rule_result, signals)
+
+    # M1-b: 注入市场数据（如果有）
+    if market_data and hasattr(market_data, "to_snapshot_dict"):
+        payload["market_data_snapshot"] = market_data.to_snapshot_dict()
 
     # 根据对话轮次选择 chat_answer 格式
     is_followup = bool(conversation_history)

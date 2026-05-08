@@ -171,7 +171,7 @@ export default function Dashboard() {
 
   // 资产明细 Tab 过滤
   const OVERSEAS_PLATFORMS = new Set(['老虎证券', '富途证券', '雪盈证券'])
-  const DOMESTIC_STOCK_PLATFORMS = new Set(['中信证券'])
+  const DOMESTIC_STOCK_PLATFORMS = new Set(['中信证券', '国金证券'])
   const tabFilteredPos = sortedPos.filter(p => {
     const plat = p.platform ?? ''
     if (posTab === 'overseas') return OVERSEAS_PLATFORMS.has(plat)
