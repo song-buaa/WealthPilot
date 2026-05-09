@@ -229,11 +229,29 @@ chat_answer 用户可见的输出里。
 - [[来源]](https://...) — 网页链接（Markdown 链接语法）
 - （AV 数据 + 富途行情）— 多源融合时
 
-不允许出现任何 payload 内部字段名、"据公开数据"等虚指、或编造的来源。"""
+不允许出现任何 payload 内部字段名、"据公开数据"等虚指、或编造的来源。
+
+**数据缺失时的规范表述**：
+当某个维度的数据不可用时（如 AV 限频、港股不支持等），
+不允许用模糊语言填充，必须明确说明数据不可用：
+
+错误示范（禁止）：
+- "分析师评级普遍观望（据公开信息）" ❌
+- "市场情绪偏谨慎（综合多方信息）" ❌
+- "据市场普遍预期，估值偏高" ❌
+
+正确示范：
+- "情绪面：（AV 分析师数据暂不可用）" ✅
+- "估值面：🟡 PE 73.96（富途行情），分析师数据暂缺" ✅
+- 直接跳过该评级项，不输出这一行 ✅
+
+原则：宁可少说一项，不用模糊语言填充。"""
 
 # ── chat_answer 格式模板（按对话轮次动态选择）────────────────────────────────
 
 _CHAT_FORMAT_FIRST_TURN = """
+{scenario_instruction}
+
 请按以下六段式深度分析框架输出 chat_answer（Markdown 格式）。
 每段都必须有真实数据支撑，不允许出现"据公开数据"等虚指。
 深度优先，不要为了简洁牺牲信息量。
@@ -322,9 +340,19 @@ _CHAT_FORMAT_FOLLOWUP = """
 自主决定回答的结构、深度和长度。不要预设六段式框架，
 也不要刻意追求简洁——长度由问题本身决定。
 
+**严禁重复首轮内容**：
+- 不要重新输出市场快照、多维度诊断、压力测试、组合检查等段落标题
+- 不要把首轮已经给出的数字、结论、评级重新罗列一遍
+- 追问是在首轮基础上深入，不是重新分析一遍
+- 如需引用首轮的某个数字，直接引用即可，不要重新展开那个维度的完整分析
+
+**不要重复前面已说过的结论**：
+- 不要在回答末尾加"综上所述""总之"类的重复总结
+- 如果核心建议首轮已经给出，追问里直接给增量信息（更具体的价位/时机/条件）
+
 唯一的硬约束：
 - 涉及具体数字必须引用 realtime_market_data，并标注来源（富途行情/AV 数据）
-- 不允许"据公开数据"等虚指
+- 不允许"据公开数据""市场普遍预期"等虚指
 - 不允许编造 realtime_market_data 中没有的数字
 - 跨平台持仓数据必须基于 position_context
 
@@ -809,6 +837,12 @@ def reason(
     # 根据对话轮次选择 chat_answer 格式
     is_followup = bool(conversation_history)
     chat_format = _CHAT_FORMAT_FOLLOWUP if is_followup else _CHAT_FORMAT_FIRST_TURN
+    # 注入场景化指令（仅首轮）
+    if not is_followup:
+        chat_format = chat_format.replace(
+            "{scenario_instruction}",
+            payload.get("scenario_instruction", ""),
+        )
     position_prompt = _POSITION_DECISION_PROMPT.replace("{chat_format_block}", chat_format)
 
     # Phase 2: 构建 DecisionContext 并注入 system prompt
@@ -971,6 +1005,79 @@ def calculate_stress_test(
         return {"data_available": False}
 
 
+def determine_scenario(
+    position_signal: str,
+    fundamental_signal: str,
+    profit_loss_rate: float | None,
+    rule_violated: bool = False,
+) -> str:
+    """
+    根据四维信号判断当前分析场景，返回对应的侧重指令字符串。
+    注入到 _CHAT_FORMAT_FIRST_TURN 的 {scenario_instruction} 占位符。
+
+    优先级：重仓减仓 > 浮亏止损 > 加仓 > 长期持有（默认）
+    """
+    plr = profit_loss_rate or 0.0
+
+    # 场景1：重仓减仓
+    if position_signal == "偏高" and plr > -0.15:
+        return """
+**本次分析场景：重仓减仓**
+用户核心关切是"如何安全减仓"，请按以下侧重点展开：
+- 一、市场快照：简短（2-3句），快速交代现价和估值区间即可
+- 三、组合与纪律检查：重点展示当前仓位距纪律上限的距离，强调集中度风险
+- 五、操作策略：**本场景最重要的段落**，必须包含：
+  * 目标仓位（具体百分比）
+  * 分几批执行（2-3批）
+  * 每批减仓的触发条件（价格区间或时间节点）
+  * 减出来的资金建议去向（再平衡方向）
+- 六、风险与跟踪：简短，聚焦"减仓过程中"的风险（踏空风险/流动性风险）
+"""
+
+    # 场景2：浮亏止损
+    if plr < -0.20:
+        return """
+**本次分析场景：浮亏评估**
+用户核心关切是"这个亏损还能回来吗，什么时候止损"，请按以下侧重点展开：
+- 二、多维度诊断：**本场景最重要的段落**，重点判断基本面有无改善迹象：
+  * 基本面是否有转机信号（营收/利润趋势）
+  * 估值面在当前价位是否已经合理
+  * 情绪面分析师是否还在覆盖/是否下调目标价
+- 四、压力测试：重点段，帮用户直观感受"如果继续持有继续跌"的最大损失
+- 五、操作策略：必须包含：
+  * 明确的止损位（什么价格/什么信号出现时离场）
+  * 继续持有的前提条件（基本面需要满足什么条件）
+  * 机会成本分析（持有这个浮亏标的 vs 换仓其他标的）
+- 一、市场快照：简短，快速交代现价在52周区间的位置即可
+"""
+
+    # 场景3：加仓
+    if position_signal == "偏低" and fundamental_signal in ("正面", "中性", "N/A"):
+        return """
+**本次分析场景：加仓评估**
+用户核心关切是"现在是不是好的买入时机，加多少合适"，请按以下侧重点展开：
+- 二、多维度诊断：重点判断当前买入时机：
+  * 估值面是否处于合理/低估区间（PE/PB历史分位）
+  * 基本面增长趋势是否持续
+  * 情绪面分析师目标价相对现价的上行空间
+- 三、组合与纪律检查：重点展示还有多少加仓空间（距纪律上限的余量）
+- 五、操作策略：**本场景最重要的段落**，必须包含：
+  * 建议加仓的目标仓位（从当前X%到Y%）
+  * 分批计划（几批、间隔多久、每批触发条件）
+  * 建议的资金来源（新增资金 vs 内部调仓）
+- 四、压力测试：展示加仓后如果继续下跌的风险，帮用户评估风险承受度
+"""
+
+    # 默认场景：持有评估
+    return """
+**本次分析场景：持有评估**
+用户核心关切是"当前持仓是否值得继续拿"，请均衡展开六段式分析：
+- 各段均衡，不特别侧重某一段
+- 六、风险与跟踪：稍作强调，给出明确的长期观察指标和下次评估时点
+- 操作策略：如无明显操作信号，"继续持有+设置观察条件"也是有效建议
+"""
+
+
 def _build_payload(
     user_query: str,
     data: LoadedData,
@@ -1041,6 +1148,15 @@ def _build_payload(
             "goal": data.profile.goal,
         },
     }
+
+    # 场景判断（用于动态调整六段式侧重点）
+    _plr = data.target_position.profit_loss_rate if data.target_position else None
+    payload["scenario_instruction"] = determine_scenario(
+        position_signal=signals.position_signal if signals else "合理",
+        fundamental_signal=signals.fundamental_signal if signals else "中性",
+        profit_loss_rate=_plr,
+        rule_violated=rule_result.violation if rule_result else False,
+    )
 
     # 压力测试（后端预计算，不让 LLM 自己算）
     if market_data and hasattr(market_data, 'has_quote') and market_data.has_quote:
