@@ -278,10 +278,20 @@ WealthPilot 独家视角，必须包含：
 
 ### 四、压力测试
 
-基于现价和当前持仓数量，量化以下场景的损益（用具体金额）：
+**重要**：payload 中已包含 stress_test 字段，里面有后端预计算好的损益数字。
+直接引用 stress_test 里的数字，不要自己计算，不要估算。
+
+**必须用 bullet list 格式**，每个场景独立一行：
 - 若股价跌 10%：亏损 X 元（占组合 Y%）
-- 若股价跌至 52 周低点：亏损 X 元
-- 若涨至分析师目标价：盈利 X 元
+- 若跌至 52 周低点 X.XX 美元/港元：亏损 X 元（占组合 Y%）
+- 若涨至分析师目标价 X.XX 美元/港元：盈利 X 元（占组合 Y%）
+
+若 stress_test.rise_to_target 不存在：直接跳过第三行，不输出任何文字。
+若 stress_test.rise_to_target.gain_cny 为 None 且 below_current=True：
+  输出"若涨至分析师目标价 {price} 美元/港元：当前价格已超过分析师目标价"
+若 stress_test.rise_to_target 存在且 gain_cny 有值：正常输出盈利金额。
+若 stress_test.drop_to_52w_low.loss_cny 为 None：该行简短说明原因即可。
+若 stress_test 字段完全不存在，跳过整段不输出。
 
 ### 五、操作策略
 
@@ -304,7 +314,7 @@ WealthPilot 独家视角，必须包含：
 - 必须引用 realtime_market_data 中的具体数字，不允许虚指
 - 数字来源标注：行情类标注（富途行情）；财报/分析师标注（AV 数据）；新闻类标注链接
 - 跨平台持仓合并必须基于 position_context 中的真实数据
-- 压力测试基于持仓数量和现价计算，不允许编造
+- 压力测试必须引用 stress_test 字段的预计算数字，不允许自己计算或编造
 """
 
 _CHAT_FORMAT_FOLLOWUP = """
@@ -792,8 +802,9 @@ def reason(
     Returns:
         LLMResult
     """
-    # 构建输入 payload（含市场数据）
+    # 构建输入 payload（含市场数据 + 压力测试预计算）
     payload = _build_payload(user_query, data, intent, rule_result, signals, market_data=market_data)
+    _stress_test_data = payload.get("stress_test")  # 保存供注入 structured_result
 
     # 根据对话轮次选择 chat_answer 格式
     is_followup = bool(conversation_history)
@@ -884,6 +895,82 @@ def reason(
 
 # ── 辅助函数 ───────────────────────────────────────────────────────────────────
 
+def calculate_stress_test(
+    market_value_cny: float,
+    total_assets_cny: float,
+    current_price: float,
+    low_52w: float | None,
+    analyst_target_price: float | None,
+    currency: str = "USD",
+) -> dict:
+    """
+    后端计算压力测试结果，返回结构化数字供 LLM 直接引用。
+    所有金额单位为人民币（CNY）。
+    价格比值计算时单位自然抵消，不需要汇率转换。
+    """
+    try:
+        if not market_value_cny or market_value_cny <= 0 or not current_price or current_price <= 0:
+            return {"data_available": False}
+
+        result: dict = {
+            "data_available": True,
+            "position_value_cny": round(market_value_cny, 0),
+            "currency": currency,
+        }
+
+        # 场景1：跌10%
+        loss_10pct = market_value_cny * 0.10
+        result["drop_10pct"] = {
+            "loss_cny": round(loss_10pct, 0),
+            "portfolio_pct": round(loss_10pct / total_assets_cny * 100, 2)
+            if total_assets_cny > 0 else None,
+        }
+
+        # 场景2：跌至52周低点
+        if low_52w and low_52w > 0 and low_52w < current_price:
+            drop_ratio = (current_price - low_52w) / current_price
+            loss_52w = market_value_cny * drop_ratio
+            result["drop_to_52w_low"] = {
+                "loss_cny": round(loss_52w, 0),
+                "portfolio_pct": round(loss_52w / total_assets_cny * 100, 2)
+                if total_assets_cny > 0 else None,
+                "price": low_52w,
+                "drop_pct": round(drop_ratio * 100, 1),
+            }
+        else:
+            result["drop_to_52w_low"] = {"loss_cny": None, "note": "当前价格已接近或低于52周低点"}
+
+        # 场景3：涨至分析师目标价
+        if analyst_target_price and analyst_target_price > current_price:
+            upside_ratio = (analyst_target_price - current_price) / current_price
+            gain_target = market_value_cny * upside_ratio
+            result["rise_to_target"] = {
+                "gain_cny": round(gain_target, 0),
+                "portfolio_pct": round(gain_target / total_assets_cny * 100, 2)
+                if total_assets_cny > 0 else None,
+                "price": analyst_target_price,
+                "upside_pct": round(upside_ratio * 100, 1),
+            }
+        else:
+            if analyst_target_price and analyst_target_price <= current_price:
+                # 目标价低于或等于现价
+                result["rise_to_target"] = {
+                    "gain_cny": None,
+                    "price": analyst_target_price,
+                    "below_current": True,
+                }
+            elif not analyst_target_price:
+                # 无目标价数据时不设置 rise_to_target，prompt 检查到字段缺失直接跳过
+                pass
+            else:
+                pass  # 其他异常情况也静默跳过
+
+        return result
+
+    except Exception:
+        return {"data_available": False}
+
+
 def _build_payload(
     user_query: str,
     data: LoadedData,
@@ -919,7 +1006,7 @@ def _build_payload(
         }
 
     from datetime import datetime as _dt
-    return {
+    payload = {
         "user_query": user_query,
         "current_date": _dt.now().strftime("%Y-%m-%d"),
         "intent": {
@@ -954,6 +1041,27 @@ def _build_payload(
             "goal": data.profile.goal,
         },
     }
+
+    # 压力测试（后端预计算，不让 LLM 自己算）
+    if market_data and hasattr(market_data, 'has_quote') and market_data.has_quote:
+        q = market_data.quote
+        f = getattr(market_data, 'fundamentals', None)
+        a = getattr(f, 'analyst', None) if f else None
+        tp = data.target_position
+
+        if tp and tp.market_value_cny > 0 and data.total_assets > 0:
+            st = calculate_stress_test(
+                market_value_cny=tp.market_value_cny,
+                total_assets_cny=data.total_assets,
+                current_price=q.current_price,
+                low_52w=q.low_52w,
+                analyst_target_price=a.target_price_avg if a else None,
+                currency=getattr(q, 'currency', 'USD'),
+            )
+            if st.get("data_available"):
+                payload["stress_test"] = st
+
+    return payload
 
 
 def _sanitize_json_strings(text: str) -> str:
