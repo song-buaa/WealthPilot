@@ -4,6 +4,69 @@ All notable changes to the WealthPilot project will be documented in this file.
 
 ---
 
+## [3.1.0] - 2026-05-09
+
+### Added
+
+#### M1: 实时市场数据接入
+- `backend/services/market_data/` 数据适配层：
+  - `futu_quote_service.py`：富途 OpenD snapshot 实时行情（现价/PE/PB/EPS/52周高低/换手率等）
+  - `av_fundamentals_service.py`：Alpha Vantage 财报（营收/净利/ROE/毛利率）+ 分析师评级（目标价/评级分布）
+  - `schema.py`：QuoteData / FundamentalsData / AnalystData / MarketDataBundle 统一数据模型
+  - `cache.py`：TTL 缓存（行情 5 分钟，财报 24 小时）
+- ExecutingAgent Step 6：market_data 注入决策上下文，`_build_payload` 生成 `realtime_market_data` 段
+- prompt 优先级指令：`realtime_market_data` 优先于 research 文本描述
+
+#### M2: 六段式深度分析框架
+- `_CHAT_FORMAT_FIRST_TURN` 重构为六段式：市场快照 / 多维度诊断 / 组合与纪律检查 / 压力测试 / 操作策略 / 风险与跟踪
+- 多维度诊断引入红黄绿灯评级（基本面 / 估值面 / 情绪面 / 事件面 / 资金面）
+- `_CHAT_FORMAT_FOLLOWUP` 改为极简自主版，LLM 自主决定结构和长度
+
+#### M2.5: 追问场景修复（双保险）
+- 方案 B（架构守门）：`_check_followup_continuation()` 在 orchestrator 层拦截，上一轮 PositionDecision 且当前消息提到同一标的时强制继承路由，confidence 设为 0.85
+- 方案 C（messages 数组）：IntentRecognizer 的 conversation_history 从 sys_prompt 文本拼接改为 messages 数组多轮传递
+- assistant 历史截断 100→500 字（前 300 + 后 200，保留首尾）
+
+#### M2.6: 视觉重构
+- `.decision-md` CSS 类：H3 段落标题加蓝色左侧竖条 + 渐变背景 + 加大间距
+- ReactMarkdown 简化：删除 18 个 inline style components，改由 CSS 类控制
+- `p` 组件兜底：LLM 未加 `###` 前缀时，识别"一、X"等中文序号自动渲染为 H3
+
+#### #4: 压力测试后端预计算
+- `calculate_stress_test()` 函数：跌 10% / 跌至 52 周低点 / 涨至分析师目标价，基于 market_value_cny 按比例计算
+- `_build_payload` 注入 `stress_test` 字段，LLM 直接引用预计算数字
+- 数据缺失时静默跳过（如 AV 限频无分析师目标价），不输出废话
+
+#### #6: 场景化分析模板
+- `determine_scenario()` 函数：根据 position_signal + profit_loss_rate + fundamental_signal 判断场景
+  - 重仓减仓（position=偏高 且 浮亏<15%）→ 操作策略段最详细
+  - 浮亏评估（profit_loss_rate < -20%）→ 多维度诊断段最详细
+  - 加仓评估（position=偏低 且 fundamental 非负面）→ 操作策略段侧重
+  - 持有评估（默认）→ 六段均衡
+- `_CHAT_FORMAT_FIRST_TURN` 加 `{scenario_instruction}` 占位符动态注入
+
+#### M3-a: 资金流向接入
+- `CapitalFlowData` 数据类（super/big/mid/small/main 五档净流入）
+- `futu_capital_flow_service.py`：fetch_capital_flow（取当日汇总行，60min TTL）
+- `_interpret_capital_flow()` 以超大单+大单（聪明钱）为主信号判断方向，输出含金额的自然语言
+- 多维度诊断加第五维：资金面评级
+
+#### M3-b: K线技术指标接入
+- `TechnicalData` 数据类（MA5/MA20/RSI14/MACD/均线位置/趋势信号）
+- `tiger_kline_service.py`：老虎日线 K 线 + pandas 手写 RSI/MACD/MA（不依赖 TA-Lib）
+- `_interpret_technical()` 自然语言解读（均线位置/RSI 区间/MACD 金死叉）
+- 技术面摘要融入估值面段落末尾
+
+### Fixed
+- 追问路由误判：IntentRecognizer 把追问判为 Education confidence=0.30（根因：conversation_history 拼入 sys_prompt 文本，LLM 未利用）
+- prompt 15% 幻觉：_POSITION_DECISION_PROMPT 示例"建议降至 15%"被 LLM 当真实纪律值引用
+- 字段名泄漏：chat_answer 出现 position_context / research / discipline 等 payload 内部标识符
+- 数据缺失虚指："据公开信息""市场普遍预期"等模糊语言替代为明确标注"数据暂不可用"
+- followup 重复：追问时 LLM 重走六段式结构，加严禁重复首轮内容禁令
+- assistant 历史截断：llm_engine 200 字 + intent_recognizer 100 字双重截断导致追问上下文丢失
+
+---
+
 ## [3.0.1] - 2026-05-08
 
 ### Added
