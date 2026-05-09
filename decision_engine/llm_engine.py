@@ -275,7 +275,7 @@ _CHAT_FORMAT_FIRST_TURN = """
 ### 二、多维度诊断
 
 用 🟢（健康）/ 🟡（关注）/ 🔴（警告）分别评级，每项 1-2 句数据支撑。
-**重要格式要求**：基本面/估值面/情绪面/事件面四个评级**必须每个独立成段**，
+**重要格式要求**：基本面/估值面/情绪面/事件面/资金面各评级**必须每个独立成段**，
 即每个评级前后用空行隔开，不允许压缩在同一行或同一段内。
 
 **基本面**: [评级 emoji] [理由，引用营收/利润同比、毛利率、ROE]
@@ -285,6 +285,10 @@ _CHAT_FORMAT_FIRST_TURN = """
 **情绪面**: [评级 emoji] [理由，引用分析师评级分布、目标价上行空间]
 
 **事件面**: [评级 emoji] [理由，引用近期重大事件：财报、监管、行业]
+
+**资金面**: [评级 emoji] [引用 realtime_market_data.capitalFlow.interpretation，
+用1句话表达资金流向信号，如"今日超大单净流出，散户接盘机构出货，资金面偏空"]
+（若 capitalFlow 字段不存在或 dataAsOf 为空，跳过此项不输出）
 
 ### 三、组合与纪律检查
 
@@ -1078,6 +1082,54 @@ def determine_scenario(
 """
 
 
+def _interpret_capital_flow(cf) -> str:
+    """
+    资金流向解读：以超大单+大单（聪明钱）为主信号判断资金面方向。
+    小单（散户）作为辅助参考，不影响主方向判断。
+    """
+    if cf is None:
+        return "数据不足"
+
+    # 计算主力方向（超大单+大单合计）
+    smart_money = 0.0
+    if cf.super_net is not None:
+        smart_money += cf.super_net
+    if cf.big_net is not None:
+        smart_money += cf.big_net
+
+    signals = []
+
+    if cf.super_net is not None:
+        if cf.super_net < -50000:
+            signals.append(f"超大单净流出 {cf.super_net/10000:.1f}万（机构出逃）")
+        elif cf.super_net > 50000:
+            signals.append(f"超大单净流入 +{cf.super_net/10000:.1f}万（机构建仓）")
+
+    if cf.big_net is not None:
+        if cf.big_net < -20000:
+            signals.append(f"大单净流出 {cf.big_net/10000:.1f}万")
+        elif cf.big_net > 20000:
+            signals.append(f"大单净流入 +{cf.big_net/10000:.1f}万")
+
+    if cf.small_net is not None and cf.super_net is not None:
+        if cf.small_net > 50000 and cf.super_net < -50000:
+            signals.append("散户接盘、机构出货")
+        elif cf.small_net < -50000 and cf.super_net > 50000:
+            signals.append("散户出逃、机构抄底")
+
+    # 主方向判断（以聪明钱为准）
+    if smart_money < -100000:
+        overall = "资金面偏空"
+    elif smart_money > 100000:
+        overall = "资金面偏多"
+    else:
+        overall = "资金面中性"
+
+    if signals:
+        return "、".join(signals) + f"，{overall}"
+    return overall
+
+
 def _build_payload(
     user_query: str,
     data: LoadedData,
@@ -1148,6 +1200,14 @@ def _build_payload(
             "goal": data.profile.goal,
         },
     }
+
+    # 资金流向解读注入
+    if (market_data and hasattr(market_data, 'capital_flow')
+            and market_data.capital_flow
+            and payload.get("realtime_market_data")
+            and payload["realtime_market_data"].get("capitalFlow")):
+        payload["realtime_market_data"]["capitalFlow"]["interpretation"] = \
+            _interpret_capital_flow(market_data.capital_flow)
 
     # 场景判断（用于动态调整六段式侧重点）
     _plr = data.target_position.profit_loss_rate if data.target_position else None

@@ -265,6 +265,7 @@ class ExecutingAgent:
                     sys.path.insert(0, _bd)
                 from services.market_data.futu_quote_service import fetch_quote
                 from services.market_data.av_fundamentals_service import fetch_fundamentals
+                from services.market_data.futu_capital_flow_service import fetch_capital_flow
                 from services.market_data.schema import MarketDataBundle
                 from datetime import datetime, timezone
 
@@ -291,10 +292,14 @@ class ExecutingAgent:
                     out.invoked_skills.append("wp-fetch-fundamentals")
                     fundamentals = fetch_fundamentals(wp_symbol)
 
+                    out.invoked_skills.append("wp-fetch-capital-flow")
+                    capital_flow = fetch_capital_flow(wp_symbol)
+
                     out.market_data = MarketDataBundle(
                         symbol=wp_symbol,
                         quote=quote,
                         fundamentals=fundamentals,
+                        capital_flow=capital_flow,
                         fetched_at=datetime.now(timezone.utc),
                     )
                     out.skill_results["wp-fetch-realtime-quote"] = {
@@ -303,10 +308,14 @@ class ExecutingAgent:
                     out.skill_results["wp-fetch-fundamentals"] = {
                         "available": fundamentals is not None,
                     }
+                    out.skill_results["wp-fetch-capital-flow"] = {
+                        "available": capital_flow is not None,
+                    }
                     logger.info(
                         f"[ExecutingAgent] 市场数据: {wp_symbol} "
                         f"quote={'✅' if quote else '❌'} "
-                        f"fundamentals={'✅' if fundamentals else '❌'}"
+                        f"fundamentals={'✅' if fundamentals else '❌'} "
+                        f"capital_flow={'✅' if capital_flow else '❌'}"
                     )
             except Exception as e:
                 logger.warning(f"[ExecutingAgent] 市场数据加载失败(不阻塞): {e}")

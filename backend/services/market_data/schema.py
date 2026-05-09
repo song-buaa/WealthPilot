@@ -72,11 +72,27 @@ class FundamentalsData:
 
 
 @dataclass
+class CapitalFlowData:
+    """富途 get_capital_flow 资金流向数据（日度汇总）。"""
+    symbol: str
+    net_inflow: float = 0.0           # 今日总净流入（正=流入，负=流出）
+    super_net: Optional[float] = None  # 超大单净流入（机构行为信号）
+    big_net: Optional[float] = None    # 大单净流入
+    mid_net: Optional[float] = None    # 中单净流入
+    small_net: Optional[float] = None  # 小单净流入（散户行为）
+    main_net: Optional[float] = None   # 主力净流入（港股专用，美股为 None）
+    data_as_of: str = ""               # 数据日期，如 "2026-05-09"
+    source: str = "futu"
+    update_frequency: str = "daily"
+
+
+@dataclass
 class MarketDataBundle:
     """wp-fetch-realtime-quote + wp-fetch-fundamentals 的合并输出。"""
     symbol: str
     quote: Optional[QuoteData] = None
     fundamentals: Optional[FundamentalsData] = None
+    capital_flow: Optional[CapitalFlowData] = None
     fetched_at: Optional[datetime] = None
 
     @property
@@ -93,7 +109,7 @@ class MarketDataBundle:
         f = self.fundamentals
         a = f.analyst if f else None
 
-        return {
+        result = {
             "currentPrice": q.current_price if q else None,
             "changePct": q.change_pct if q else None,
             "currency": q.currency if q else "USD",
@@ -127,3 +143,17 @@ class MarketDataBundle:
                 (f.missing_fields if f else [])
             )),
         }
+
+        cf = self.capital_flow
+        if cf:
+            result["capitalFlow"] = {
+                "netInflow": cf.net_inflow,
+                "superNet": cf.super_net,
+                "bigNet": cf.big_net,
+                "midNet": cf.mid_net,
+                "smallNet": cf.small_net,
+                "mainNet": cf.main_net,
+                "dataAsOf": cf.data_as_of,
+            }
+
+        return result
