@@ -270,21 +270,28 @@ def recognize(
             "\n- 如果用户提到的标的不在持仓列表中，可能是询问新建仓，仍可判断为 PositionDecision"
         )
 
+    # 方案 C（M2.5）：对话历史作为 messages 数组传入，而非拼入 system prompt
     if conversation_history:
-        history_lines = []
+        sys_prompt += """
+
+## 多轮对话指令（重要）
+当 messages 中包含历史对话时：
+- 如果用户当前消息延续上一轮的标的或话题，继承上一轮的 asset 和 intent
+- 这种情况下 confidence 应 ≥ 0.8
+- 不要因为追问的措辞偏陈述/叙事而误判为 Education
+- 追问中提到上一轮讨论过的标的名称时，必须识别为 PositionDecision
+"""
+
+    # 构建 messages 数组
+    messages = [{"role": "system", "content": sys_prompt}]
+    if conversation_history:
         for turn in conversation_history:
-            role_tag = "[User]" if turn["role"] == "user" else "[Assistant]"
-            text = turn["content"]
-            if turn["role"] == "assistant" and len(text) > 100:
-                text = text[:100] + "…"
-            history_lines.append(f"{role_tag}: {text}")
-        sys_prompt += (
-            "\n\n## 对话历史（最近几轮，供意图判断参考）\n"
-            + "\n".join(history_lines)
-            + "\n\n请基于对话历史理解当前用户输入的上下文。"
-            "如果用户的追问明显是延续上一轮的标的或话题，"
-            "应继承上一轮的 asset 和 intent，confidence 应 ≥ 0.8。"
-        )
+            if turn.get("role") in ("user", "assistant"):
+                content = turn["content"]
+                if turn["role"] == "assistant" and len(content) > 500:
+                    content = content[:300] + "\n…（中间分析省略）…\n" + content[-200:]
+                messages.append({"role": turn["role"], "content": content})
+    messages.append({"role": "user", "content": user_input})
 
     last_error: Optional[Exception] = None
 
@@ -295,10 +302,7 @@ def recognize(
                 model=MODEL_MAIN,
                 max_tokens=512,
                 timeout=10,
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_input},
-                ],
+                messages=messages,
             )
             raw = response.choices[0].message.content.strip()
             data = _extract_json(raw)

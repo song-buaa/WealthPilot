@@ -9,10 +9,13 @@ orchestrator_node 做两次调用：
 Planner 失败时降级到规则路由（与 Step 1 逻辑一致）。
 """
 
+import logging
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
 from intent_engine import intent_recognizer
+
+logger = logging.getLogger(__name__)
 from backend.services.decision_service import (
     _detect_feature_type,
     _is_asset_clear,
@@ -72,6 +75,48 @@ class DecisionState(TypedDict):
     sse_kwargs: dict
 
 
+# ── M2.5 方案 B：追问守门函数 ──────────────────────────────────────────
+
+
+def _check_followup_continuation(
+    conversation_history: list[dict],
+    current_query: str,
+    position_names: list[str],
+) -> str | None:
+    """
+    检测当前消息是否是对上一轮讨论标的的追问。
+
+    返回 None = 不继承；返回 asset 名称 = 应继承为 PositionDecision。
+    优先用真实持仓列表（position_names），兜底用硬编码关键词。
+    """
+    # 找上一轮 user 消息
+    last_user_content = ""
+    for turn in reversed(conversation_history):
+        if turn.get("role") == "user":
+            last_user_content = turn.get("content", "")
+            break
+
+    if not last_user_content:
+        return None
+
+    # 候选标的列表：优先用真实持仓名
+    candidates = list(position_names) if position_names else []
+    # 兜底：常见中英文标的名（仅在 position_names 为空时使用）
+    if not candidates:
+        candidates = [
+            "微软", "MSFT", "理想", "LI", "Coinbase", "COIN",
+            "腾讯", "00700", "美团", "03690", "谷歌", "GOOGL",
+            "苹果", "AAPL", "英伟达", "NVDA", "特斯拉", "TSLA",
+        ]
+
+    # 上一轮和当前都提到的标的 → 追问
+    for name in candidates:
+        if name in last_user_content and name in current_query:
+            return name
+
+    return None
+
+
 # ── 节点 ──────────────────────────────────────────────────────────────────
 
 
@@ -119,6 +164,25 @@ def orchestrator_node(state: DecisionState) -> dict:
             if entities:
                 entities.asset = asset
             print(f"[M7] asset 清洗: '{original_asset}' → '{asset}'", flush=True)
+
+    # === M2.5 方案 B：追问守门 ===
+    # 防止 IntentRecognizer 把追问误判为低置信度 Education
+    # 如果有对话历史 + 当前问句提到了上一轮讨论的标的 → 强制继承路由
+    if confidence < 0.5 and conversation_history and len(conversation_history) >= 2:
+        inherited = _check_followup_continuation(
+            conversation_history, user_query, position_names,
+        )
+        if inherited:
+            inherited_asset = inherited
+            intent = "PositionDecision"
+            confidence = 0.85
+            asset = inherited_asset
+            if entities:
+                entities.asset = inherited_asset
+            logger.info(
+                f"[intent.followup_guard] 追问守门触发: "
+                f"继承 intent=PositionDecision, asset={inherited_asset}, confidence=0.85"
+            )
 
     # 低置信度直接走澄清，不需要 LLM Planner
     if confidence < 0.5:
