@@ -1099,23 +1099,32 @@ def _interpret_capital_flow(cf) -> str:
 
     signals = []
 
+    # 货币单位
+    currency = "港元" if ".HK" in (cf.symbol or "") else "美元"
+
+    def fmt(val):
+        return f"{abs(val) / 10000:.1f}万{currency}"
+
+    # 机构资金信号（超大单）
     if cf.super_net is not None:
         if cf.super_net < -50000:
-            signals.append(f"超大单净流出 {cf.super_net/10000:.1f}万（机构出逃）")
+            signals.append(f"今日机构资金净卖出约 {fmt(cf.super_net)}")
         elif cf.super_net > 50000:
-            signals.append(f"超大单净流入 +{cf.super_net/10000:.1f}万（机构建仓）")
+            signals.append(f"今日机构资金净买入约 {fmt(cf.super_net)}")
 
-    if cf.big_net is not None:
-        if cf.big_net < -20000:
-            signals.append(f"大单净流出 {cf.big_net/10000:.1f}万")
-        elif cf.big_net > 20000:
-            signals.append(f"大单净流入 +{cf.big_net/10000:.1f}万")
+    # 散户资金信号（小单）
+    if cf.small_net is not None:
+        if cf.small_net > 50000:
+            signals.append(f"散户资金净买入约 {fmt(cf.small_net)}")
+        elif cf.small_net < -50000:
+            signals.append(f"散户资金净卖出约 {fmt(cf.small_net)}")
 
+    # 背离特征
     if cf.small_net is not None and cf.super_net is not None:
         if cf.small_net > 50000 and cf.super_net < -50000:
-            signals.append("散户接盘、机构出货")
+            signals.append("呈现散户接盘、机构出货特征")
         elif cf.small_net < -50000 and cf.super_net > 50000:
-            signals.append("散户出逃、机构抄底")
+            signals.append("呈现散户出逃、机构抄底特征")
 
     # 主方向判断（以聪明钱为准）
     if smart_money < -100000:
