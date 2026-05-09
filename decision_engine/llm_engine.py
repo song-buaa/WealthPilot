@@ -281,6 +281,8 @@ _CHAT_FORMAT_FIRST_TURN = """
 **基本面**: [评级 emoji] [理由，引用营收/利润同比、毛利率、ROE]
 
 **估值面**: [评级 emoji] [理由，引用 PE/PEG、与历史和同业对比]
+（若 realtime_market_data.technical 存在，在估值面末尾追加一句技术面摘要，
+如"技术面：股价处于均线下方，MACD死叉，RSI=38，偏空"，不单独成段）
 
 **情绪面**: [评级 emoji] [理由，引用分析师评级分布、目标价上行空间]
 
@@ -1139,6 +1141,44 @@ def _interpret_capital_flow(cf) -> str:
     return overall
 
 
+def _interpret_technical(td) -> str:
+    """
+    把技术指标解读为自然语言，供 LLM 直接引用。
+    """
+    if td is None:
+        return "数据不足"
+
+    parts = []
+
+    if td.ma_position == "above_both":
+        parts.append(f"股价({td.current_price})处于MA5({td.ma5})/MA20({td.ma20})上方")
+    elif td.ma_position == "below_both":
+        parts.append(f"股价({td.current_price})处于MA5({td.ma5})/MA20({td.ma20})下方")
+    elif td.ma_position == "between":
+        parts.append(f"股价({td.current_price})处于MA5({td.ma5})与MA20({td.ma20})之间")
+
+    if td.rsi14 is not None:
+        if td.rsi14 > 70:
+            parts.append(f"RSI={td.rsi14}(超买区间)")
+        elif td.rsi14 < 30:
+            parts.append(f"RSI={td.rsi14}(超卖区间)")
+        else:
+            parts.append(f"RSI={td.rsi14}(中性)")
+
+    if td.macd_hist is not None:
+        if td.macd_hist > 0:
+            parts.append("MACD金叉")
+        else:
+            parts.append("MACD死叉")
+
+    trend_map = {"bullish": "技术面偏多", "bearish": "技术面偏空", "neutral": "技术面中性"}
+    summary = trend_map.get(td.trend_signal, "技术面中性")
+
+    if parts:
+        return "、".join(parts) + f"，{summary}"
+    return summary
+
+
 def _build_payload(
     user_query: str,
     data: LoadedData,
@@ -1217,6 +1257,22 @@ def _build_payload(
             and payload["realtime_market_data"].get("capitalFlow")):
         payload["realtime_market_data"]["capitalFlow"]["interpretation"] = \
             _interpret_capital_flow(market_data.capital_flow)
+
+    # 技术面解读注入
+    if (market_data and hasattr(market_data, 'technical')
+            and market_data.technical
+            and payload.get("realtime_market_data")):
+        td = market_data.technical
+        payload["realtime_market_data"]["technical"] = {
+            "ma5": td.ma5,
+            "ma20": td.ma20,
+            "rsi14": td.rsi14,
+            "macdHist": td.macd_hist,
+            "maPosition": td.ma_position,
+            "trendSignal": td.trend_signal,
+            "interpretation": _interpret_technical(td),
+            "dataAsOf": td.data_as_of,
+        }
 
     # 场景判断（用于动态调整六段式侧重点）
     _plr = data.target_position.profit_loss_rate if data.target_position else None

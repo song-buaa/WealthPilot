@@ -87,12 +87,31 @@ class CapitalFlowData:
 
 
 @dataclass
+class TechnicalData:
+    """K线技术指标（基于老虎日线数据，pandas 计算）。"""
+    symbol: str
+    current_price: float = 0.0
+    ma5: Optional[float] = None
+    ma20: Optional[float] = None
+    rsi14: Optional[float] = None
+    macd: Optional[float] = None
+    macd_signal: Optional[float] = None
+    macd_hist: Optional[float] = None
+    ma_position: str = "N/A"       # above_both / between / below_both / N/A
+    trend_signal: str = "neutral"  # bullish / neutral / bearish
+    data_as_of: str = ""
+    bars_count: int = 0
+    source: str = "tiger"
+
+
+@dataclass
 class MarketDataBundle:
     """wp-fetch-realtime-quote + wp-fetch-fundamentals 的合并输出。"""
     symbol: str
     quote: Optional[QuoteData] = None
     fundamentals: Optional[FundamentalsData] = None
     capital_flow: Optional[CapitalFlowData] = None
+    technical: Optional[TechnicalData] = None
     fetched_at: Optional[datetime] = None
 
     @property
@@ -154,6 +173,18 @@ class MarketDataBundle:
                 "smallNet": cf.small_net,
                 "mainNet": cf.main_net,
                 "dataAsOf": cf.data_as_of,
+            }
+
+        td = self.technical
+        if td:
+            result["technical"] = {
+                "ma5": td.ma5,
+                "ma20": td.ma20,
+                "rsi14": round(td.rsi14, 1) if td.rsi14 is not None else None,
+                "macdHist": round(td.macd_hist, 4) if td.macd_hist is not None else None,
+                "maPosition": td.ma_position,
+                "trendSignal": td.trend_signal,
+                "dataAsOf": td.data_as_of,
             }
 
         return result
