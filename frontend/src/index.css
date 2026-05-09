@@ -83,3 +83,58 @@ body {
 .handbook-md td { padding: 6px 10px; border: 1px solid #E5E7EB; vertical-align: top; line-height: 1.6; }
 .handbook-md tr:nth-child(even) td { background: #FAFAFA; }
 .handbook-md hr { border: none; border-top: 1px solid #E5E7EB; margin: 16px 0; }
+
+/* ══════════════════════════════════════════════════════
+   投资决策对话 Markdown 渲染样式
+   用于 AiMessage 组件中的 ReactMarkdown 输出
+   设计语言参考 .handbook-md，但段落视觉层级更强
+══════════════════════════════════════════════════════ */
+.decision-md { font-size: 14px; line-height: 1.7; color: #374151; }
+.decision-md p { margin: 0 0 12px; line-height: 1.7; }
+.decision-md p:last-child { margin-bottom: 0; }
+
+/* 段落标题视觉锚点 */
+.decision-md h1,
+.decision-md h2,
+.decision-md h3 {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: #1B2A4A !important;
+  margin: 28px 0 10px !important;
+  padding: 6px 0 6px 12px;
+  border-left: 3px solid #3B82F6;
+  background: linear-gradient(90deg, #EFF6FF 0%, transparent 100%);
+  border-radius: 0 4px 4px 0;
+  line-height: 1.4;
+}
+.decision-md > h1:first-child,
+.decision-md > h2:first-child,
+.decision-md > h3:first-child { margin-top: 4px !important; }
+
+.decision-md strong { font-weight: 700 !important; color: #1B2A4A !important; }
+
+/* 列表 */
+.decision-md ul, .decision-md ol { margin: 0 0 12px; padding-left: 1.5rem; }
+.decision-md ul { list-style-type: disc; }
+.decision-md ol { list-style-type: decimal; }
+.decision-md li { margin-bottom: 6px; line-height: 1.7; display: list-item; }
+.decision-md li:last-child { margin-bottom: 0; }
+
+/* 链接 */
+.decision-md a { color: #2563EB; text-decoration: underline; text-decoration-color: rgba(37, 99, 235, 0.4); transition: color 0.15s; }
+.decision-md a:hover { color: #1D4ED8; text-decoration-color: #1D4ED8; }
+
+/* 分隔线 */
+.decision-md hr { border: none; border-top: 1px solid #E5E7EB; margin: 16px 0; }
+
+/* 行内代码 */
+.decision-md code { background: #F3F4F6; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; color: #1F2937; }
+
+/* 表格 */
+.decision-md table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.decision-md thead th { background: #F4F6FA; font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 2px solid #E5E7EB; }
+.decision-md tbody td { padding: 8px 12px; border-bottom: 1px solid #F3F4F6; }
+.decision-md tbody tr:nth-child(even) { background: #FAFBFC; }
+
+/* blockquote */
+.decision-md blockquote { margin: 12px 0; padding: 8px 16px; background: #F4F6FA; border-left: 3px solid #94A3B8; color: #475569; font-size: 13px; }
