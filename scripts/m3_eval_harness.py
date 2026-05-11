@@ -27,7 +27,7 @@ import yaml
 os.environ.setdefault("AV_DEV_MOCK", "1")
 
 BASE = "http://127.0.0.1:8000/api"
-CASES_DIR = Path(__file__).parent.parent / "m0" / "cases"
+CASES_DIR = Path(__file__).parent.parent / "eval_cases" / "cases"
 
 # L1 意图映射（SSE intent event 的 primary_intent → yaml expected 的 intent_category）
 INTENT_NORMALIZE = {

@@ -31,7 +31,7 @@ M1-Step1: 产品哲学假设验证 — asset 模糊输入的实际路径
   AV_DEV_MOCK=1 python scripts/m1_path_verification.py
 
   注意：脚本需要后端服务运行在 http://127.0.0.1:8000，且默认 portfolio
-  含至少 1 只浮盈持仓 + 1 只浮亏持仓（建议先按 m0/schema/fixtures_v0.1.md
+  含至少 1 只浮盈持仓 + 1 只浮亏持仓（建议先按 eval_cases/schema/fixtures_v0.1.md
   布置 fixture 数据，否则推断结果会受真实持仓干扰）。
 """
 
@@ -54,7 +54,7 @@ import requests
 BASE = "http://127.0.0.1:8000/api"
 
 # ──────────────────────────────────────────────────────────────────
-# 测试用例：与 m0/cases/PD_001-003.yaml 对应，覆盖 3 种模糊场景
+# 测试用例：与 eval_cases/cases/PD_001-003.yaml 对应，覆盖 3 种模糊场景
 # ──────────────────────────────────────────────────────────────────
 
 VERIFICATION_CASES = [
