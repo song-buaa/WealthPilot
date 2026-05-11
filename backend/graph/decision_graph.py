@@ -21,6 +21,12 @@ from backend.services.decision_service import (
     _is_asset_clear,
 )
 
+# 组合级意图集合：这些意图分析的是整个组合而非单个标的，
+# 不需要标的消歧（clarify），不应被对话历史中的个股上下文污染路由。
+# 根因参考：v3.2 诊断发现 Decision 入口的对话历史会让 LLM Planner
+# 把 AssetAllocation 误路由到 clarify/position_single。
+PORTFOLIO_LEVEL_INTENTS = {"AssetAllocation", "PortfolioReview", "PerformanceAnalysis"}
+
 # 模糊标的词（与 decision_service.VAGUE_ASSET_WORDS 保持一致）
 _VAGUE_WORDS = [
     "股票", "基金", "标的", "持仓", "资产", "仓位",
@@ -247,9 +253,7 @@ def orchestrator_node(state: DecisionState) -> dict:
     # 后置校验：操作关键词 + 模糊标的 → 重路由到 clarify
     # 豁免 1：Education 且无明确标的（纯语义描述行为习惯，不触发）
     # 豁免 2：组合级意图（PortfolioReview/PerformanceAnalysis/AssetAllocation）完全跳过
-    if route == "general" and intent not in (
-        "PortfolioReview", "PerformanceAnalysis", "AssetAllocation"
-    ):
+    if route == "general" and intent not in PORTFOLIO_LEVEL_INTENTS:
         _OP_KW = ["加仓", "减仓", "买入", "卖出", "止损", "止盈", "落袋", "清仓", "建仓"]
         has_op = any(k in user_query for k in _OP_KW)
         has_vague = any(v in user_query for v in _VAGUE_WORDS)
@@ -257,6 +261,15 @@ def orchestrator_node(state: DecisionState) -> dict:
         if has_op and has_vague and not (intent == "Education" and not asset):
             route = "clarify"
             rationale += "（含操作关键词+模糊标的，重路由到澄清）"
+
+    # 组合级意图守门：AssetAllocation / PortfolioReview / PerformanceAnalysis
+    # 强制走 portfolio 路由，不允许被 LLM Planner 或对话历史误路由到个股路径。
+    # 根因：Decision 入口复用 session 时，对话历史中的个股上下文会让 LLM Planner
+    # 把 AssetAllocation 误判为 clarify 或 position_single。
+    if intent in PORTFOLIO_LEVEL_INTENTS and route not in ("portfolio", "general"):
+        original_route = route
+        route = "portfolio"
+        rationale += f"（{intent} 是组合级意图，强制走 portfolio 路由，原 LLM 推荐 {original_route}）"
 
     # M7 守门：用户明确说基金 + asset 是 6 位代码 → 强制 position_single
     if (route == "clarify"

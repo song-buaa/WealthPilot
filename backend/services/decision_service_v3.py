@@ -64,6 +64,9 @@ async def run_chat_stream_v3(
             logger.warning(f"[v3] Stage 0.5 加载 all_positions 失败: {e}")
 
         # 多轮澄清解析
+        # 注意：澄清解析只对个股消歧有意义（上一轮 clarify 让用户选标的，本轮匹配结果）。
+        # 组合级意图（AssetAllocation 等）不需要标的消歧，但此处无法提前知道意图，
+        # 所以仍然执行解析。后续 PlanningAgent 的路由守门会确保组合级意图不被误路由。
         clarification_resolved = False
         try:
             from backend.services.decision_service import _try_resolve_clarification
