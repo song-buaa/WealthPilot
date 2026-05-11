@@ -253,7 +253,7 @@ class ResearchViewpoint(Base):
 # ──────────────────────────────────────────────
 
 class UserProfile(Base):
-    """用户画像与投资目标（全局单条记录，upsert 语义）"""
+    """用户画像（全局单条记录，upsert 语义）"""
     __tablename__ = "user_profiles"
 
     id      = Column(Integer, primary_key=True, index=True)

@@ -1,5 +1,5 @@
 """
-Profile API 路由 — 用户画像与投资目标
+Profile API 路由 — 用户画像
 """
 
 from typing import Optional

@@ -29,7 +29,7 @@ const NAV_GROUPS: NavGroupDef[] = [
     icon: '📈',
     title: '投资规划',
     items: [
-      { label: '用户画像和投资目标', to: '/profile' },
+      { label: '用户画像', to: '/profile' },
       { label: '投资账户总览',       to: '/dashboard' },
       { label: '投资纪律',           to: '/discipline' },
       { label: '投研观点',           to: '/research' },

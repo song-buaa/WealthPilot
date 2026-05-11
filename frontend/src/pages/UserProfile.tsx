@@ -1,5 +1,5 @@
 /**
- * UserProfile — 用户画像与投资目标
+ * UserProfile — 用户画像
  * 两个状态：无画像 → 填写页；已有画像 → 结果页
  */
 import React, { useEffect, useState } from 'react'
@@ -42,7 +42,7 @@ export default function UserProfile() {
           <User size={18} color="#fff" />
         </div>
         <div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>用户画像与投资目标</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>用户画像</div>
           <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>风险评估 · 投资目标 · 画像生成</div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 """
-Profile Service — 用户画像与投资目标业务逻辑
+Profile Service — 用户画像业务逻辑
 """
 from __future__ import annotations
 
