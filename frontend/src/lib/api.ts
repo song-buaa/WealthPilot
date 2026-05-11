@@ -337,6 +337,221 @@ export const decisionApi = {
     request<{ message: string }>(`/decision/session/${sessionId}`, { method: 'DELETE' }),
 }
 
+// ── 投资行动 API ──────────────────────────────────────────
+
+export interface SymbolStrategyDraft {
+  symbol: string
+  side: string
+  quantity: number | null
+  quantity_pct: number | null
+  order_type: string
+  trigger_price: number | null
+  limit_price: number | null
+  parent_intent_index: number | null
+  value_sources: Record<string, string> | null  // v0.6: 推算依据
+}
+
+export interface MissingField {
+  target_type: string     // "symbol_strategy" / "allocation_intent"
+  target_index: number
+  field: string           // 字段名
+  description: string     // 给用户看的文案
+}
+
+export interface AllocationIntentDraft {
+  title: string
+  target_allocation: Record<string, number>
+}
+
+export interface ActionDraftResponse {
+  id: string
+  conversation_id: string
+  decision_summary: string
+  payload: {
+    symbol_strategies: SymbolStrategyDraft[]
+    allocation_intents: AllocationIntentDraft[]
+    risk_notes: string[]
+    missing_fields: MissingField[]
+  } | null
+  status: string
+  created_at: string | null
+  updated_at: string | null
+  confirmed_at: string | null
+  discarded_at: string | null
+  risk_notes?: string[]
+  missing_fields?: MissingField[]
+}
+
+export interface RiskCheckResponse {
+  passed: boolean
+  requires_confirmation: boolean
+  warnings: Array<{
+    rule: string
+    severity: string
+    message: string
+    detail: Record<string, unknown>
+  }>
+  portfolio_total_value: number
+  confirmation_text_required: string | null
+}
+
+export const actionApi = {
+  generateDraft: (params: {
+    conversation_id: string
+    conversation_context: Array<{ role: string; content: string }>
+    expressing_output: Record<string, unknown>
+  }) =>
+    request<ActionDraftResponse>('/action/drafts/generate', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  getDraft: (draftId: string) =>
+    request<ActionDraftResponse>(`/action/drafts/${draftId}`),
+
+  updateDraft: (draftId: string, payload: Record<string, unknown>) =>
+    request<ActionDraftResponse>(`/action/drafts/${draftId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  confirmDraft: (draftId: string) =>
+    request<{ draft_id: string; status: string; created_entities: number }>(
+      `/action/drafts/${draftId}/confirm`,
+      { method: 'POST' },
+    ),
+
+  discardDraft: (draftId: string) =>
+    request<ActionDraftResponse>(`/action/drafts/${draftId}`, {
+      method: 'DELETE',
+    }),
+
+  listDrafts: (status?: string) =>
+    request<{ items: ActionDraftResponse[] }>(
+      `/action/drafts${status ? `?status=${status}` : ''}`,
+    ),
+
+  listIntents: (status?: string) =>
+    request<{ items: AllocationIntentResponse[] }>(
+      `/action/intents${status ? `?status=${status}` : ''}`,
+    ),
+
+  discardIntent: (intentId: string) =>
+    request<AllocationIntentResponse>(`/action/intents/${intentId}/discard`, {
+      method: 'POST',
+    }),
+
+  updateIntent: (intentId: string, updates: Record<string, unknown>) =>
+    request<AllocationIntentResponse>(`/action/intents/${intentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
+
+  listStrategies: (params?: { status?: string; parent_intent_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.status) qs.set('status', params.status)
+    if (params?.parent_intent_id) qs.set('parent_intent_id', params.parent_intent_id)
+    const q = qs.toString()
+    return request<{ items: SymbolStrategyResponse[] }>(`/action/strategies${q ? `?${q}` : ''}`)
+  },
+
+  listOrders: (params?: { strategy_id?: string; status?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.strategy_id) qs.set('strategy_id', params.strategy_id)
+    if (params?.status) qs.set('status', params.status)
+    const q = qs.toString()
+    return request<{ items: OrderResponse[] }>(`/action/orders${q ? `?${q}` : ''}`)
+  },
+
+  cancelOrder: (orderId: string) =>
+    request<OrderResponse>(`/action/orders/${orderId}/cancel`, { method: 'POST' }),
+
+  pauseStrategy: (strategyId: string) =>
+    request<SymbolStrategyResponse>(`/action/strategies/${strategyId}/pause`, { method: 'POST' }),
+
+  resumeStrategy: (strategyId: string) =>
+    request<SymbolStrategyResponse>(`/action/strategies/${strategyId}/resume`, { method: 'POST' }),
+
+  discardStrategy: (strategyId: string) =>
+    request<SymbolStrategyResponse>(`/action/strategies/${strategyId}/discard`, { method: 'POST' }),
+
+  getTimeline: (limit: number = 50) =>
+    request<{ items: TimelineEvent[]; total: number }>(`/action/timeline?limit=${limit}`),
+
+  checkRisk: (strategyId: string, params: { quantity: number; limit_price: number }) =>
+    request<RiskCheckResponse>(`/action/strategies/${strategyId}/check_risk`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  placeOrder: (strategyId: string, params: { quantity: number; limit_price: number; confirmation_text: string }) =>
+    request<OrderResponse>(`/action/strategies/${strategyId}/place_order`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+}
+
+export interface TimelineEvent {
+  id: number
+  event_type: string
+  timestamp: string | null
+  payload: Record<string, unknown>
+  trace: {
+    order?: { id: string; symbol: string; side: string; quantity: number; status: string; limit_price: number | null }
+    strategy?: { id: string; symbol: string; side: string; target_quantity: number | null; limit_price: number | null; related_conversation_id: string | null }
+    draft?: { id: string; decision_summary: string; conversation_id: string | null }
+  }
+}
+
+export interface AllocationIntentResponse {
+  id: string
+  source_draft_id: string | null
+  title: string
+  target_allocation: Record<string, number> | null
+  status: string
+  related_conversation_id: string | null
+  decision_basis: string | null
+  related_strategies_count: number
+  created_at: string | null
+  updated_at: string | null
+  completed_at: string | null
+}
+
+export interface SymbolStrategyResponse {
+  id: string
+  source_draft_id: string | null
+  parent_intent_id: string | null
+  symbol: string
+  side: string
+  target_quantity: number | null
+  target_quantity_pct: number | null
+  cumulative_filled_quantity: number
+  order_type: string
+  trigger_price: number | null
+  limit_price: number | null
+  status: string
+  decision_basis: string | null
+  is_held: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface OrderResponse {
+  id: string
+  strategy_id: string
+  broker_name: string
+  broker_order_id: string | null
+  symbol: string
+  side: string
+  quantity: number
+  filled_quantity: number
+  order_type: string
+  limit_price: number | null
+  avg_filled_price: number | null
+  status: string
+  created_at: string | null
+}
+
 // ── 类型定义 ─────────────────────────────────────────────
 
 export interface PortfolioSummary {

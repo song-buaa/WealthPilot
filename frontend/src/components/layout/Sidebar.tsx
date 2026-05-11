@@ -35,7 +35,7 @@ const NAV_GROUPS: NavGroupDef[] = [
       { label: '投资纪律',           to: '/discipline' },
       { label: '投研观点',           to: '/research' },
       { label: '投资决策',           to: '/decision' },
-      { label: '投资记录',           to: '/placeholder/投资记录' },
+      { label: '投资行动',           to: '/action' },
       { label: '收益分析',           to: '/placeholder/收益分析' },
     ],
   },

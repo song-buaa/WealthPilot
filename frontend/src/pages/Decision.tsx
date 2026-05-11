@@ -9,7 +9,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, Sparkles, SquarePen, User, Lightbulb } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, type ExplainData, type Position } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, actionApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
+import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
+import ActionDraftCard from '@/components/ActionDraftCard'
 
 // ── 消息类型 ─────────────────────────────────────────────────
 interface Message {
@@ -24,6 +26,10 @@ interface Message {
   stages?: StageInfo[]
   conclusion?: { verdict: string; summary: string }
   candidates?: Array<{ name: string; symbol: string; metric_label: string; metric_type: string }>
+  // v3.2 actionable
+  actionable?: boolean
+  actionable_hint?: string | null
+  actionDraftStatus?: 'idle' | 'loading' | 'completed'
 }
 
 interface StageInfo {
@@ -200,6 +206,11 @@ export default function Decision() {
   const [recSuggestions, setRecSuggestions] = useState<string[]>([])
   const [recMode, setRecMode] = useState<'personalized' | 'generic'>('generic')
 
+  // v3.2 行动清单
+  const [draftCardOpen, setDraftCardOpen] = useState(false)
+  const [currentDraft, setCurrentDraft] = useState<ActionDraftResponse | null>(null)
+  const [actionMsgId, setActionMsgId] = useState<number | null>(null)
+
   // B区：拉取持仓数据，生成个性化推荐
   useEffect(() => {
     Promise.all([portfolioApi.getPositions(), portfolioApi.getSummary()])
@@ -311,6 +322,9 @@ export default function Decision() {
             ...(conclusionLevel ? {
               conclusion: { verdict: conclusionLabel ?? conclusionLevel, summary: '' },
             } : {}),
+            // v3.2 actionable
+            actionable: (ev.data.actionable as boolean) ?? false,
+            actionable_hint: (ev.data.actionable_hint as string) ?? null,
           }))
 
         } else if (ev.type === 'error') {
@@ -350,6 +364,83 @@ export default function Decision() {
     setExplainData(null)
     setInput('')
     setStreaming(false)
+  }
+
+  // v3.2 行动清单生成
+  async function handleGenerateAction(msgId: number) {
+    // 已完成的直接跳转
+    const msg = messages.find(m => m.id === msgId)
+    if (msg?.actionDraftStatus === 'completed') {
+      // TODO: 跳转到投资行动页面
+      return
+    }
+
+    // 设置 loading 状态
+    setActionMsgId(msgId)
+    setMessages(prev => prev.map(m =>
+      m.id === msgId ? { ...m, actionDraftStatus: 'loading' as const } : m
+    ))
+
+    try {
+      // 构建对话上下文
+      const context = messages
+        .filter(m => m.content)
+        .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }))
+
+      // 获取 expressing_output（intent + explainData 的持仓信息）
+      const aiMsg = messages.find(m => m.id === msgId)
+      const expressingOutput: Record<string, unknown> = {}
+      if (aiMsg?.intent) {
+        expressingOutput.decisionType = (aiMsg.intent as Record<string, unknown>).action
+        expressingOutput.confidence = (aiMsg.intent as Record<string, unknown>).confidence
+        expressingOutput.asset = (aiMsg.intent as Record<string, unknown>).asset
+      }
+      // 注入持仓数据供 ActionPlanner 推算（含 estimated_shares / current_price）
+      if (explainData?.data) {
+        const d = explainData.data as Record<string, unknown>
+        if (d.target_position) expressingOutput.target_position = d.target_position
+        if (d.total_assets) expressingOutput.total_assets = d.total_assets
+      }
+
+      const draft = await actionApi.generateDraft({
+        conversation_id: sessionId.current,
+        conversation_context: context,
+        expressing_output: expressingOutput,
+      })
+
+      setCurrentDraft(draft)
+      setDraftCardOpen(true)
+    } catch (e: unknown) {
+      console.error('[ActionDraft] generate failed:', e)
+      // 恢复按钮状态
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? { ...m, actionDraftStatus: undefined } : m
+      ))
+      alert(`行动清单生成失败: ${(e as Error).message}`)
+    }
+  }
+
+  function handleDraftConfirmed() {
+    setDraftCardOpen(false)
+    setCurrentDraft(null)
+    // 更新按钮为完成态
+    if (actionMsgId !== null) {
+      setMessages(prev => prev.map(m =>
+        m.id === actionMsgId ? { ...m, actionDraftStatus: 'completed' as const } : m
+      ))
+    }
+  }
+
+  function handleDraftClose() {
+    setDraftCardOpen(false)
+    // 恢复按钮状态（未确认 → 恢复为 idle）
+    if (actionMsgId !== null) {
+      setMessages(prev => prev.map(m =>
+        m.id === actionMsgId && m.actionDraftStatus === 'loading'
+          ? { ...m, actionDraftStatus: undefined }
+          : m
+      ))
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -488,7 +579,7 @@ export default function Decision() {
             msg.role === 'user' ? (
               <UserMessage key={msg.id} msg={msg} />
             ) : (
-              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} />
+              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} onGenerateAction={handleGenerateAction} />
             )
           ))}
           <div ref={messagesEnd} />
@@ -579,6 +670,14 @@ export default function Decision() {
           })()}
         </div>
       </div>
+
+      {/* v3.2 行动清单弹层 */}
+      <ActionDraftCard
+        open={draftCardOpen}
+        onClose={handleDraftClose}
+        draft={currentDraft}
+        onConfirmed={handleDraftConfirmed}
+      />
     </div>
   )
 }
@@ -613,7 +712,11 @@ function UserMessage({ msg }: { msg: Message }) {
 }
 
 // ── AI 消息 ───────────────────────────────────────────────────
-function AiMessage({ msg, onSelectCandidate }: { msg: Message; onSelectCandidate?: (name: string) => void }) {
+function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
+  msg: Message
+  onSelectCandidate?: (name: string) => void
+  onGenerateAction?: (msgId: number) => void
+}) {
   // loading 态：无内容且正在流式输出
   if (msg.streaming && !msg.content) {
     return (
@@ -690,6 +793,21 @@ function AiMessage({ msg, onSelectCandidate }: { msg: Message; onSelectCandidate
                 <span style={{ fontSize: 11, color: '#60A5FA' }}>{c.metric_label}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* v3.2 行动清单按钮 — 仅 actionable 或已生成时显示 */}
+        {!msg.streaming && msg.content && (msg.actionable || msg.actionDraftStatus === 'completed' || msg.actionDraftStatus === 'loading') && (
+          <div style={{ marginTop: 8 }}>
+            <ActionListGenerateButton
+              state={
+                msg.actionDraftStatus === 'completed' ? 'completed' :
+                msg.actionDraftStatus === 'loading' ? 'loading' :
+                'highlighted'
+              }
+              actionable_hint={msg.actionable_hint}
+              onClick={() => onGenerateAction?.(msg.id)}
+            />
           </div>
         )}
       </div>

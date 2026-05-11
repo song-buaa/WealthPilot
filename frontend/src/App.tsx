@@ -10,12 +10,15 @@ import Discipline  from '@/pages/Discipline'
 import Research    from '@/pages/Research'
 import Decision    from '@/pages/Decision'
 import Placeholder from '@/pages/Placeholder'
+import Action      from '@/pages/Action'
+import { ToastProvider } from '@/components/Toast'
 import UserProfile from '@/pages/UserProfile'
 import Allocation from '@/pages/Allocation'
 import AllocationChat from '@/pages/AllocationChat'
 
 export default function App() {
   return (
+    <ToastProvider>
     <HashRouter>
       <Routes>
         <Route element={<AppLayout />}>
@@ -30,6 +33,7 @@ export default function App() {
           <Route path="/profile"    element={<RouteErrorBoundary><UserProfile /></RouteErrorBoundary>} />
           <Route path="/allocation"      element={<RouteErrorBoundary><Allocation /></RouteErrorBoundary>} />
           <Route path="/allocation/chat" element={<RouteErrorBoundary><AllocationChat /></RouteErrorBoundary>} />
+          <Route path="/action"        element={<RouteErrorBoundary><Action /></RouteErrorBoundary>} />
 
           {/* 所有未实现功能统一走 Placeholder */}
           <Route path="/placeholder/:name" element={<Placeholder />} />
@@ -39,5 +43,6 @@ export default function App() {
         </Route>
       </Routes>
     </HashRouter>
+    </ToastProvider>
   )
 }
