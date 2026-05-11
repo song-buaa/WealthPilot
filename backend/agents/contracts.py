@@ -247,6 +247,13 @@ class ExpressionOutput:
     raw_text: str = ""
     """LLM 原始输出文本，用于调试。"""
 
+    # === v3.2 投资行动模块（actionable 信号）===
+    actionable: bool = False
+    """本次回复是否包含可执行的投资决策（买入/卖出/调仓建议）。"""
+
+    actionable_hint: Optional[str] = None
+    """可读提示，如"识别到加仓建议"。前端用于高亮"生成行动清单"按钮。"""
+
     def mark_completed(self) -> None:
         self.status = AgentTaskStatus.COMPLETED
         self.completed_at = time.time()

@@ -49,6 +49,42 @@ _MACRO_ANALYSIS_INSTRUCTION = """
 
 
 # ════════════════════════════════════════════════════════════
+# v3.2 actionable 硬规则判断
+# ════════════════════════════════════════════════════════════
+
+# 这些 decisionType 代表明确的交易操作建议，适合生成行动清单
+_ACTIONABLE_DECISION_TYPES = {"buy_init", "buy_more", "trim", "exit"}
+
+_ACTIONABLE_HINTS = {
+    "buy_init": "识别到建仓建议",
+    "buy_more": "识别到加仓建议",
+    "trim": "识别到减仓建议",
+    "exit": "识别到清仓建议",
+}
+
+
+def _is_actionable(expr_output) -> tuple[bool, str | None]:
+    """
+    基于 ExpressionOutput 的 structured_payload 判断是否可生成行动清单。
+
+    硬规则实现（不调 LLM）：
+    - 从 structured_payload 中提取 decisionType
+    - 若 decisionType ∈ _ACTIONABLE_DECISION_TYPES → (True, hint)
+    - 否则 → (False, None)
+    """
+    payload = getattr(expr_output, "structured_payload", None)
+    if not payload or not isinstance(payload, dict):
+        return False, None
+
+    decision_type = payload.get("decisionType", "")
+    if decision_type in _ACTIONABLE_DECISION_TYPES:
+        hint = _ACTIONABLE_HINTS.get(decision_type, "识别到可执行建议")
+        return True, hint
+
+    return False, None
+
+
+# ════════════════════════════════════════════════════════════
 # 流式分块辅助
 # ════════════════════════════════════════════════════════════
 
@@ -172,10 +208,14 @@ class ExpressingAgent:
             if out.status == AgentTaskStatus.IN_PROGRESS:
                 out.mark_completed()
 
+            # v3.2: actionable 硬规则判断
+            out.actionable, out.actionable_hint = _is_actionable(out)
+
             logger.info(
                 f"[ExpressingAgent] task={out.task_id} intent={intent_type} "
                 f"template={out.prompt_template_id} mode={out.mode} "
-                f"chat_len={len(out.chat_answer)} duration={out.duration_ms}ms"
+                f"chat_len={len(out.chat_answer)} actionable={out.actionable} "
+                f"duration={out.duration_ms}ms"
             )
 
         except Exception as e:

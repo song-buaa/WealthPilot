@@ -30,6 +30,16 @@ from backend.agents.adapters import (
 logger = logging.getLogger(__name__)
 
 
+def _is_futu_opend_available(host: str = "127.0.0.1", port: int = 11111, timeout: float = 0.5) -> bool:
+    """预检 Futu OpenD 是否可达（快速 socket 探测，不触发 SDK 重试）。"""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, OSError):
+        return False
+
+
 class ExecutingAgent:
     """
     PEER 4 Agent 之 Executing 角色。
@@ -263,9 +273,18 @@ class ExecutingAgent:
                 _bd = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
                 if _bd not in sys.path:
                     sys.path.insert(0, _bd)
-                from services.market_data.futu_quote_service import fetch_quote
+
+                # 预检 Futu OpenD 是否可达（0.5s 超时，不可达则跳过 Futu 数据源）
+                _futu_available = _is_futu_opend_available()
+                if _futu_available:
+                    from services.market_data.futu_quote_service import fetch_quote
+                    from services.market_data.futu_capital_flow_service import fetch_capital_flow
+                else:
+                    fetch_quote = lambda *a, **kw: None  # noqa: E731
+                    fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
+                    logger.info("[ExecutingAgent] Futu OpenD 未运行（127.0.0.1:11111 不可达），跳过 Futu 数据源")
+
                 from services.market_data.av_fundamentals_service import fetch_fundamentals
-                from services.market_data.futu_capital_flow_service import fetch_capital_flow
                 from services.market_data.tiger_kline_service import fetch_kline
                 from services.market_data.schema import MarketDataBundle
                 from datetime import datetime, timezone

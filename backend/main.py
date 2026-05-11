@@ -21,12 +21,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.state import startup
 from backend.api import portfolio, discipline, research, decision, tasks, profile, allocation
 from backend.api import broker_sync as broker_sync_api
+from backend.api import action as action_api
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 初始化数据库 + 确保默认 portfolio 存在
     startup()
+
+    # MockBrokerAdapter 全局单例初始化
+    from backend.services.action.brokers.mock import get_mock_adapter
+    get_mock_adapter()
 
     # APScheduler: 每天北京时间 22:00 自动同步券商持仓
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,6 +53,9 @@ async def lifespan(app: FastAPI):
 
     scheduler.shutdown()
     print("[scheduler] 定时同步已停止")
+
+    from backend.services.action.brokers.mock import shutdown_mock_adapter
+    shutdown_mock_adapter()
 
 
 app = FastAPI(
@@ -74,6 +82,7 @@ app.include_router(tasks.router,      prefix="/api/tasks",      tags=["tasks"])
 app.include_router(profile.router,    prefix="/api/profile",    tags=["profile"])
 app.include_router(allocation.router, prefix="/api/allocation", tags=["allocation"])
 app.include_router(broker_sync_api.router, prefix="/api/broker-sync", tags=["broker-sync"])
+app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 
 
 @app.get("/api/health")
