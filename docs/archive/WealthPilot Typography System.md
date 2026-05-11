@@ -1,5 +1,7 @@
 # WealthPilot Typography System
 
+> **已过时：本文件引用的 Streamlit `ui_components.py` 已删除，请参考 `WealthPilot_UI设计规范_Phase2_4.md`**
+
 > 本文档定义了 WealthPilot 项目的全局字体层级规范（Typography System）。
 > 所有页面、模块、组件的文字渲染均需严格遵循此规范，不再使用硬编码的字号和颜色。
 

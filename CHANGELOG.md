@@ -1,6 +1,59 @@
 # Changelog
 
 All notable changes to the WealthPilot project will be documented in this file.
+Format based on [Keep a Changelog](https://keepachangelog.com/).
+
+---
+
+## [3.2.0] - 2026-05-11
+
+### Added
+- 投资行动模块完整实现（M1-M7，7 个里程碑）
+- PEER Agents 成为默认决策路径（Planning / Executing / Expressing / Reviewing）
+- ActionPlanner Skill：从对话上下文智能推算行动清单（数量 + 限价积极推算）
+- BrokerAdapter ABC + MockBrokerAdapter（异步成交模拟）
+- 投资行动页面：行动清单 + 行动记录两 Tab 信息架构
+- 行动清单按 AllocationIntent 分组展示关联 SymbolStrategy
+- ConfirmOrderDialog 人工确认弹窗（checkbox + 文字确认双条件防误触）
+- RiskEngine 三条风控规则：单笔金额 >5% / 集中度 >40%（卖出跳过）/ 纪律违反
+- 完整审计日志：ip_address / user_agent / payload 字段补全
+- 全流程追溯链路：订单 → 策略 → 草稿 → 对话
+- Futu OpenD 数据源 graceful degradation（0.5s 预检，不可达自动跳过）
+- PageHeader 公共组件（统一页面标题视觉）
+- Toast 通知组件（success / error / info 三态 + 左侧语义色边线）
+- ActionPlanner limit_price 防复发单元测试（4 个场景）
+- 时间轴事件展示层去重（order_placed_manual_confirm 合并 order_submitted / order_created）
+- 时间轴圆点颜色语义化（成交绿 / 拒单红 / 暂停黄 / 确认蓝 / 默认灰）
+- 进度条颜色语义化（BUY 蓝 / SELL 暖橙 / paused 灰）
+
+### Changed
+- 决策路径从 v2.6 → v3.0 PEER Agents 唯一路径（v2.6 SSE 流代码已删除）
+- `decision_service.py` 从 1354 行精简至 547 行（删除 807 行 v2.6 流逻辑）
+- ActionPlanner prompt 改为"积极推算"模式（limit_price 用 current_price 兜底）
+- 投资行动从 3 Tab（资产配置 / 标的策略 / 行动记录）重构为 2 Tab（行动清单 / 行动记录）
+- 投资行动页面视觉对齐 WealthPilot 设计规范（PageHeader / 卡片 / 间距 / 字体层级）
+- Action.tsx 回归 AppLayout 统一布局（`padding: 28px 64px` 与其他页面一致）
+- 副标题从"资产配置 · 标的策略 · 行动记录"改为"决策落地 · 全流程追溯"
+
+### Removed
+- v2.6 SSE 流代码（`_stream_position_decision` 等 5 个函数 + 辅助函数）
+- `USE_V3_AGENTS` 环境变量开关（v3 是唯一路径）
+- Streamlit 阶段代码（`streamlit_app.py` / `ui_components.py` / `app_pages/` 整个目录）
+- `.env.bak`（含历史泄露 API Key）
+- `requirements.txt` 中 `streamlit>=1.32.0` 依赖
+- KPI Hero Card（视觉冗余，被 Tab 徽章替代）
+- 黄色全局待办提示条（被 Tab 红色数字徽章替代）
+- `test_decision_service_v3.py` 中的 feature flag 测试（不再需要）
+
+### Fixed
+- "生成行动清单"按钮不出现：根因是 `USE_V3_AGENTS` 未设置导致走 v2.6 路径，v2.6 不输出 actionable 字段
+- ActionDraftCard 限价不预填：ActionPlanner prompt 对 limit_price 采取消极策略 + current_price 未注入
+- Futu OpenD 不可达阻断 SSE 流 6+ 分钟：增加 0.5s socket 预检 + try/except 兜底
+- 时间轴同一订单显示重复事件：前端展示层去重，后端审计日志完整保留（合规）
+- 投资行动页面与其他页面布局不对齐：去掉自定义容器，回归 AppLayout 统一 padding
+- 风控引擎币种不一致（limit_price USD vs total_value CNY）：增加 fx_rate_to_cny 汇率转换
+- 空 AllocationIntent 显示在"已执行中"区：前端过滤无关联策略的 intent
+- 草稿卡片 decision_summary 文案撑爆：CSS line-clamp 2 行截断
 
 ---
 
