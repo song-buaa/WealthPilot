@@ -5,6 +5,52 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.3.0] - 2026-05-12
+
+本版本聚焦**模块层架构收敛**。主题一：将"资产配置"独立模块融合到投资决策入口，
+AssetAllocation 意图的四段式输出、增量分配算法、纪律校验等能力完整保留，
+仅下线冗余的前端入口与页面。主题二：用户画像导航名简化。
+关键修复：Decision 入口下 AssetAllocation 意图在污染 session 中被误路由的 bug，
+采用路由层硬约束 + 澄清解析跳过的纵深防御设计。
+导航更简洁、维护成本下降、能力不减反增。
+
+### Added
+- PlanningAgent 组合级意图集合 PORTFOLIO_LEVEL_INTENTS（AssetAllocation / PortfolioReview / PerformanceAnalysis）
+- PlanningAgent orchestrator_node 后置路由守门：组合级意图强制走 portfolio 路由
+- Stage 0.5 澄清解析对组合级意图跳过的兼容性逻辑
+- llm_engine.chat()（Education 意图，general 路由）的 system prompt 注入 WealthPilot 自有资产配置理念（WEALTHPILOT_ALLOCATION_PRINCIPLES 常量，包含多元资产配置 / 目标区间管理 / 动态再平衡三段产品语言）
+
+### Changed
+- AssetAllocation 意图统一在投资决策入口承载，原"资产配置"独立导航菜单下线，能力完整保留
+- 用户画像模块导航名："用户画像和投资目标" → "用户画像"，功能不变
+
+### Removed
+- 前端 /allocation 和 /allocation/chat 两条路由
+- 前端页面文件：Allocation.tsx、AllocationChat.tsx
+- 前端 store：allocationStore.ts
+- 前端孤立组件：EmptyStateGuide.tsx
+- 侧边导航"资产配置"菜单项
+- backend/services/allocation_ai.py（v2.x 时代的资产配置对话处理模块，v1.5 后端 API 统一为 /api/decision/chat 之后已无任何引用）
+
+### Fixed
+- 投资决策入口下 AssetAllocation 意图被 LLM Planner 或澄清解析误路由到 position_single 或 clarify 的 bug（典型触发场景：同一 session 中先讨论个股、再问配置类问题）。修复采用路由层硬约束 + 澄清解析跳过的纵深防御设计
+
+### 决策说明
+
+**资产配置模块融合：**
+- 旧"资产配置"独立模块的第一层页面与 Dashboard 的"大类资产配置"卡片完全冗余（共用同一个 AssetAllocationCard 组件）
+- 第二层对话页 100% 复用 Decision 的后端 + ExplainPanel，独立存在的唯一价值是入口直达，代价是需要维护两套前端逻辑且会出现意图识别行为不一致
+- 融合后 AssetAllocation 意图的四段式输出模板、增量分配算法、纪律校验全部继续工作
+- 保留 allocation_service 计算逻辑 + /api/allocation/* 共 8 个数据端点（Dashboard 和投资行动模块仍在使用，这些是数据/计算层而非业务模块层）
+
+**路由守门设计：**
+- 根因定位发现 bug 不在代码分支差异，而在运行时对话历史污染
+- AllocationChat 独立 session 自动隔离了污染源所以表现正常；Decision 入口共享 session 在污染场景下出错
+- 修复采用方案 A（路由层硬约束）+ 方案 B（澄清解析跳过）的纵深防御
+- 方案 C（LLM Planner prompt 加规则）未采用，避免冗余增加 LLM 不确定性
+
+---
+
 ## [3.2.0] - 2026-05-11
 
 ### Added
