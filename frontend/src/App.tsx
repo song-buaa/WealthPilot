@@ -13,8 +13,6 @@ import Placeholder from '@/pages/Placeholder'
 import Action      from '@/pages/Action'
 import { ToastProvider } from '@/components/Toast'
 import UserProfile from '@/pages/UserProfile'
-import Allocation from '@/pages/Allocation'
-import AllocationChat from '@/pages/AllocationChat'
 
 export default function App() {
   return (
@@ -31,8 +29,6 @@ export default function App() {
           <Route path="/research"   element={<RouteErrorBoundary><Research /></RouteErrorBoundary>} />
           <Route path="/decision"   element={<RouteErrorBoundary><Decision /></RouteErrorBoundary>} />
           <Route path="/profile"    element={<RouteErrorBoundary><UserProfile /></RouteErrorBoundary>} />
-          <Route path="/allocation"      element={<RouteErrorBoundary><Allocation /></RouteErrorBoundary>} />
-          <Route path="/allocation/chat" element={<RouteErrorBoundary><AllocationChat /></RouteErrorBoundary>} />
           <Route path="/action"        element={<RouteErrorBoundary><Action /></RouteErrorBoundary>} />
 
           {/* 所有未实现功能统一走 Placeholder */}
