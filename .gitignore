@@ -31,6 +31,14 @@ env/
 htmlcov/
 .pytest_cache/
 
+# 备份 / 归档文件
+*.bak
+*.archived_*
+
+# 运行日志（保留 .gitkeep）
+logs/*
+!logs/.gitkeep
+
 # IDE
 .idea/
 .vscode/
