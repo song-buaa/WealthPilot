@@ -1,10 +1,8 @@
 """
-v3.0 决策服务 - 4 Agent 协作链路。
-
-通过环境变量 USE_V3_AGENTS=1 启用。
-默认情况下 decision_service.py 仍走 v2.6 _stream_* 函数链。
+v3.0 决策服务 - PEER 4 Agent 协作链路。
 
 核心入口：run_chat_stream_v3()
+由 decision_service.run_chat_stream() 委托调用。
 """
 from __future__ import annotations
 
@@ -559,6 +557,8 @@ async def _write_stores_v3(
                 signals=getattr(exec_out, "signal_result", None),
                 llm=getattr(expr_out, "llm_result", None) if expr_out else None,
             )
+            # 附加 market_data 供 explain 序列化时反算持仓股数
+            dr._market_data = getattr(exec_out, "market_data", None)
             _DECISION_STORE.setdefault(session_id, {})[decision_id] = dr
 
         # ── Portfolio 类 → _ALLOC_EXPLAIN_STORE ──
@@ -648,6 +648,12 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
     intent = plan_out.intent or {}
     primary_intent = intent.get("primary_intent", "") if isinstance(intent, dict) else ""
 
+    # v3.2 actionable 字段（所有路由共用）
+    actionable_fields = {
+        "actionable": getattr(expr_out, "actionable", False),
+        "actionable_hint": getattr(expr_out, "actionable_hint", None),
+    }
+
     # PositionDecision
     if plan_out.route in ("position_single", "position_multi"):
         from decision_engine.llm_engine import LLMResult
@@ -662,6 +668,7 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
                 "decisionResult": expr_out.structured_payload,
                 "rawText": expr_out.raw_text,
                 "validator": validator_payload,
+                **actionable_fields,
             }
         return {
             "decision_id": decision_id,
@@ -671,6 +678,7 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
             "decisionResult": None,
             "rawText": expr_out.raw_text,
             "validator": validator_payload,
+            **actionable_fields,
         }
 
     # Portfolio 类
@@ -689,6 +697,7 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
             "conclusion_label": label,
             result_key: expr_out.structured_payload,
             "validator": validator_payload,
+            **actionable_fields,
         }
         return payload
 
@@ -697,4 +706,5 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
         "decision_id": None,
         "conclusion_level": "general_chat",
         "conclusion_label": "普通对话",
+        **actionable_fields,
     }
