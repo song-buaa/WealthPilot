@@ -1469,6 +1469,24 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
 
 # _GENERAL_CHAT_PROMPT 已在上方意图专属 Prompt 区统一定义
 
+# WealthPilot 资产配置理念（原 Allocation.tsx 前端"配置原则说明"卡片内容）
+# 资产配置模块下线后，这段内容作为 Education 意图的固定背景知识注入 system prompt。
+# 未来接入 RAG 时，可迁移到知识库作为可检索文档。
+WEALTHPILOT_ALLOCATION_PRINCIPLES = """
+## WealthPilot 资产配置理念
+
+**多元资产配置**：货币保流动性，固收稳底盘，权益求增长，另类分散风险，衍生作战术工具，不同资产解决不同问题。
+
+**目标区间管理**：每类资产都有自己的目标区间，资产配置的重点不是判断短期涨跌，而是让整体结构长期保持在合理范围内。
+
+**动态再平衡**：当配置出现偏离时，优先通过新增资金自然修正，减少不必要的卖出操作，只有偏离明显时才考虑主动调整。
+"""
+
+_ALLOCATION_PRINCIPLES_GUIDE = (
+    "当用户问及资产配置相关概念（如多元资产配置、目标区间管理、动态再平衡）时，"
+    "请优先采用以下 WealthPilot 自有定义来回答，保持产品语言一致性。"
+)
+
 
 def chat(user_query: str, context: Optional[list] = None) -> str:
     """
@@ -1496,7 +1514,11 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
             model="gpt-4.1-mini",
             max_tokens=512,
             timeout=20,
-            messages=[{"role": "system", "content": _BASE_PROMPT + "\n\n" + _GENERAL_CHAT_PROMPT}] + messages,
+            messages=[{"role": "system", "content": (
+                _BASE_PROMPT + "\n\n" + _GENERAL_CHAT_PROMPT
+                + "\n\n" + _ALLOCATION_PRINCIPLES_GUIDE
+                + "\n\n" + WEALTHPILOT_ALLOCATION_PRINCIPLES
+            )}] + messages,
         )
         return response.choices[0].message.content.strip()
     except EnvironmentError:
