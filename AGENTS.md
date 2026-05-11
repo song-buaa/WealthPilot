@@ -235,6 +235,7 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 | 集中度风控买入场景未验证 | RiskEngine 集中度规则对卖出跳过已验证，买入触发未实测 | v3.3 补集成测试 |
 | ActionPlanner LLM 异常兜底文案偏技术性 | 失败时显示"AI 生成失败，请手动填写: {error}" | v3.3 优化用户文案 |
 | Futu 数据源无超时上限 | 预检 0.5s 够快，但 SDK 内部仍可能慢 | v3.3 加 asyncio.wait_for |
+| tests/test_analyzer.py 失败 | v3.2 数据清理后 analyzer 对老 Portfolio 模型的测试断言失败 | v3.3 更新 analyzer 测试 |
 
 ## 演进路径
 

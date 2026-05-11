@@ -1,24 +1,28 @@
-# ── 原有依赖（保留，Streamlit 版本仍可运行）────────────────────────────────
+# ── 核心依赖（数据库 / LLM / HTTP）─────────────────────────────────────────
 sqlalchemy>=2.0.0
 pandas>=2.0.0
 openai>=1.20.0
+pydantic>=2.0.0          # 数据契约（FastAPI / Agents contracts）
 httpx[socks]>=0.24.0
 plotly>=5.20.0
+PyYAML>=6.0              # 评测用例解析（m0/cases/*.yaml）
 
-# ── Phase 1 新增：FastAPI 后端 ───────────────────────────────────────────────
+# ── FastAPI 后端 ─────────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-multipart>=0.0.9  # FastAPI 文件上传必需
 python-dotenv>=1.0.0     # 从 .env 文件加载环境变量
 
-# ── 投研观点模块可选依赖 ─────────────────────────────────────────────────────
-pypdf>=4.0.0            # PDF 文字提取
-requests>=2.31.0        # URL 抓取
-beautifulsoup4>=4.12.0  # HTML 解析
+# ── 投研观点 / MCP 集成 ─────────────────────────────────────────────────────
+pypdf>=4.0.0             # PDF 文字提取
+requests>=2.31.0         # URL 抓取
+beautifulsoup4>=4.12.0   # HTML 解析
 langgraph>=0.2.0
+mcp>=1.0.0               # 盈米基金诊断 MCP 客户端
 
 # ── 券商 OpenAPI ─────────────────────────────────────────────────────────────
 tigeropen
 futu-api
 apscheduler
+pytz>=2024.1             # 时区处理（apscheduler 定时任务）
 snbpy
