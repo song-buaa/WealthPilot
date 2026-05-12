@@ -336,22 +336,22 @@ def task_5_error_scenarios(adapter, provider):
 # Cleanup
 # ============================================================
 def cleanup(adapter):
-    _banner("Cleanup: 撤销残留挂单")
+    """脚本结束清理: 只撤本脚本挂的单。
+
+    WARNING: 严禁调用 list_open_orders + 全部撤单的兜底逻辑。
+    Tiger 账户里可能有用户在 Tiger App 手动挂的订单,
+    list_open_orders 会返回所有未成交订单(包括用户的),
+    全部撤单 = 误伤用户订单。
+
+    见 docs/v3.4/M6_事故记录.md。
+    """
+    _banner("Cleanup: 撤销本脚本挂的单")
     for oid in _order_ids:
         try:
             adapter.cancel_order(oid)
             print(f"  撤单: {oid}")
         except Exception:
             pass
-
-    open_orders = adapter.list_open_orders()
-    if open_orders:
-        for o in open_orders:
-            try:
-                adapter.cancel_order(o.broker_order_id)
-                print(f"  撤残留: {o.broker_order_id}")
-            except Exception:
-                pass
     print(f"  清理完成,共追踪 {len(_order_ids)} 笔订单")
 
 

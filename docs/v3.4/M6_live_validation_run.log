@@ -1,0 +1,61 @@
+============================================================
+  M6 实盘小额验证 — 众安在线 06060
+============================================================
+Adapter: broker=tiger, is_paper=False
+authenticate: True
+
+06060 最新: price=11.83 bid=11.83 ask=11.84
+BUY LIMIT:  12.08
+SELL LIMIT: 11.58
+
+============================================================
+  STEP 3: BUY 100 股 06060
+============================================================
+strategy_buy.id: a25c582d-50ea-47c5-9bb4-5444c7effbaf
+buy_order.id: f5f8947b-d625-4247-a79a-beeff29d66ec
+buy_order.status: submitted_to_broker
+buy_order.broker_order_id: 43210210796503040
+  [5s] status=filled filled=100
+
+BUY 成交! avg_price=11.8400 filled=100
+
+============================================================
+  STEP 5: SELL 100 股 06060
+============================================================
+最新市价: 11.83, SELL LIMIT: 11.58
+sell_order.id: a228d8e9-333d-42bc-b8ff-268c3b9e8999
+sell_order.status: submitted_to_broker
+sell_order.broker_order_id: 43210211501935616
+  [5s] status=filled filled=100
+
+SELL 成交! avg_price=11.8300 filled=100
+
+============================================================
+  M6 执行结果
+============================================================
+BUY:  filled=True avg_price=11.8400 broker_id=43210210796503040
+SELL: filled=True avg_price=11.8300 broker_id=43210211501935616
+P&L (不含手续费): HKD -1.00
+BUY  broker_order_id: 43210210796503040
+SELL broker_order_id: 43210211501935616
+
+最近 15 条审计日志:
+  order_synced: fx=- amt=-
+  strategy_auto_completed: fx=- amt=-
+  order_submitted: fx=0.92 amt=1065.36
+  order_created: fx=- amt=-
+  draft_confirmed: fx=- amt=-
+  draft_created: fx=- amt=-
+  order_synced: fx=- amt=-
+  strategy_auto_completed: fx=- amt=-
+  order_submitted: fx=0.92 amt=1111.36
+  order_created: fx=- amt=-
+  draft_confirmed: fx=- amt=-
+  draft_created: fx=- amt=-
+  sync_network_error: fx=- amt=-
+  sync_network_error: fx=- amt=-
+  sync_network_error: fx=- amt=-
+
+清理 5 笔残留挂单...
+
+脚本结束

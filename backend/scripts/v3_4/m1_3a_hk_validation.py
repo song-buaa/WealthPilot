@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=_project_root / ".env")
 
 from backend.services.action.brokers.base import OrderRequest
+from backend.services.action.brokers.credentials import InMemoryCredentialProvider
 from backend.services.action.brokers.tiger import (
     TigerBrokerAdapter,
     OrphanOrderError,
@@ -35,7 +36,7 @@ from backend.services.action.brokers.tiger import (
 
 # ── 常量 ──────────────────────────────────────────────────────
 TIGER_ID = "20159046"
-PK_PATH = str(_project_root / "backend" / "secrets" / "tiger_private_key.pem")
+PK_PATH = _project_root / "backend" / "secrets" / "tiger_private_key.pem"
 # 00700.HK 2026-05-12 市价约 HKD 464.8
 HK_SYMBOL = "HK.00700"
 HK_FAR_LIMIT = 250.0   # 远低于市价,保证不成交
@@ -265,9 +266,17 @@ def scenario_7_market_whitelist(adapter):
 # Cleanup
 # ============================================================
 def cleanup(adapter):
-    _banner("Cleanup: 撤销所有残留挂单")
+    """脚本结束清理: 只撤本脚本挂的单。
 
-    # 先撤追踪到的
+    WARNING: 严禁调用 list_open_orders + 全部撤单的兜底逻辑。
+    Tiger 账户里可能有用户在 Tiger App 手动挂的订单,
+    list_open_orders 会返回所有未成交订单(包括用户的),
+    全部撤单 = 误伤用户订单。
+
+    见 docs/v3.4/M6_事故记录.md。
+    """
+    _banner("Cleanup: 撤销本脚本挂的单")
+
     for oid in _all_order_ids:
         try:
             adapter.cancel_order(oid)
@@ -275,20 +284,7 @@ def cleanup(adapter):
         except Exception:
             pass
 
-    # 再查一遍 open orders 确保干净
-    open_orders = adapter.list_open_orders()
-    if open_orders:
-        print(f"\n  仍有 {len(open_orders)} 个挂单,逐一撤...")
-        for o in open_orders:
-            try:
-                adapter.cancel_order(o.broker_order_id)
-                print(f"  撤单: {o.broker_order_id}")
-            except Exception:
-                pass
-    else:
-        print("  无残留挂单")
-
-    print(f"\n脚本产生的 broker_order_id 列表:")
+    print(f"\n本脚本产生的 broker_order_id 列表 ({len(_all_order_ids)} 笔):")
     for oid in _all_order_ids:
         print(f"  {oid}")
 
@@ -307,12 +303,17 @@ if __name__ == "__main__":
     confirm = input("确认仅在模拟盘操作? 输入 YES_PAPER_ONLY 继续: ")
     assert confirm == "YES_PAPER_ONLY", "未确认,退出"
 
-    # 初始化 Adapter
+    # 初始化 Adapter (M2: CredentialProvider)
     print("\n初始化 TigerBrokerAdapter...")
+    _provider = InMemoryCredentialProvider()
+    _provider.save("tiger.paper", {
+        "tiger_id": TIGER_ID,
+        "account_id": TIGER_PAPER_ACCOUNT,
+        "private_key_pem": PK_PATH.read_text().strip(),
+    })
     adapter = TigerBrokerAdapter(
-        tiger_id=TIGER_ID,
-        account_id=TIGER_PAPER_ACCOUNT,
-        private_key_path=PK_PATH,
+        credential_provider=_provider,
+        broker_key="tiger.paper",
     )
     print(f"  broker_name: {adapter.broker_name}")
     print(f"  is_paper: {adapter._is_paper}")
