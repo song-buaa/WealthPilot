@@ -5,6 +5,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.5.0] - 2026-05-12
+
+本版本实现**多会话管理与消息持久化**，投资决策页从单次对话升级为 ChatGPT 式的
+多会话体验。对话历史存储到数据库，刷新或重启后端不丢失；切换会话时自动恢复
+intent_engine 上下文，跨会话上下文完全隔离。UI 全面重构为扁平列表风格。
+
+### Added
+- 多会话管理：侧边栏展示历史对话列表，支持新建、切换、重命名、删除
+- 消息持久化：对话历史存储到 conversations + conversation_messages 两张表
+- 会话恢复：切换会话时自动从数据库重建 intent_engine 上下文（Turn 历史 + inherited_fields）
+- LLM 自动生成会话标题：首条消息后异步调用 gpt-4.1-mini，不阻塞主流程，fallback 到前 20 字截断
+- 空状态欢迎页：新会话展示 WealthPilot 投资决策引导 + 3 个快捷入口（分析持仓 / 评估新标的 / 投资教育）
+- Action 页面会话跳转：从行动记录一键跳转回对应决策会话（`?conversation_id=xxx` URL 参数）
+- 5 个 Conversations CRUD API：`GET/POST /api/conversations`、`PATCH/DELETE /api/conversations/{id}`、`GET /api/conversations/{id}/messages`
+
+### Changed
+- 投资决策页 UI 重构：参考 ChatGPT/Claude.ai 扁平列表风格，整体视觉清爽
+- 分析过程面板默认折叠，状态持久化到 localStorage，固定宽度 320px，折叠/展开按钮统一在左侧边缘
+- 消息内容区 max-width 880px 居中显示，消息间距 24px
+- session_id → conversation_id 全链路统一命名（后端 + 前端 + intent_engine，约 100 处）
+- 删除冗余的"AI推理模块"（ReasoningPanel 组件 + 两处引用）
+- 时间戳序列化统一加 Z 后缀（conversations API 的 7 处 isoformat 调用）
+- 页面初始态：不自动选中会话，进入时左侧无高亮 + 右侧显示欢迎页
+
+### Fixed
+- save_conversation_turn() 首条消息判断逻辑：从 `conv is None` 改为基于消息数量（修复 M3 流程下 LLM 标题永远不触发）
+- 会话时间显示差 8 小时：后端 isoformat 缺 Z 后缀导致前端 `new Date()` 误判为本地时间
+- 初始态左右状态错位：进入页面时左边高亮第一个会话但右边显示空状态
+
+### Known Issues
+- 其他 22 处 `.isoformat()` 调用同样缺 Z 后缀，待后续全局排查修复
+- 单标的决策外的其他意图分析过程内容质量待打磨（面板默认折叠后优先级降低）
+
+---
+
 ## [3.4.0] - 2026-05-12
 
 本版本把投资行动模块从 Mock 券商升级为真实 Tiger 老虎证券 API,

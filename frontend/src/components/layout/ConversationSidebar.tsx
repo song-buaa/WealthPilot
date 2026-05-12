@@ -1,7 +1,7 @@
 /**
  * ConversationSidebar — 会话历史列表（投资决策页内嵌）
  *
- * 结构：[+ 新对话] 按钮 + 会话列表（按 updated_at 倒序）
+ * 浅色系设计，背景 #F0F2F5 与大导航栏自然过渡。
  * 交互：点击切换、双击重命名、hover 删除
  */
 import React, { useState, useRef } from 'react'
@@ -65,22 +65,22 @@ export default function ConversationSidebar({ onSwitch, onNew }: Props) {
   return (
     <div style={{
       width: 220, flexShrink: 0,
-      background: '#F9FAFB', borderRight: '1px solid #E5E7EB',
+      background: '#F7F8FA',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
       {/* 新对话按钮 */}
-      <div style={{ padding: '12px 10px 8px' }}>
+      <div style={{ padding: '8px 10px 4px' }}>
         <button
           onClick={onNew}
           style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            padding: '8px 0', fontSize: 13, fontWeight: 500,
-            color: '#3B82F6', background: '#EFF6FF',
-            border: '1px solid #BFDBFE', borderRadius: 8,
+            width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+            padding: '7px 12px', fontSize: 13, fontWeight: 500,
+            color: '#374151', background: 'transparent',
+            border: 'none', borderRadius: 8,
             cursor: 'pointer', transition: 'background 0.15s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#DBEAFE')}
-          onMouseLeave={e => (e.currentTarget.style.background = '#EFF6FF')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.04)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
           <Plus size={14} /> 新对话
         </button>
@@ -107,10 +107,10 @@ export default function ConversationSidebar({ onSwitch, onNew }: Props) {
               onDoubleClick={() => handleStartRename(conv.id, conv.title ?? '')}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 10px', marginBottom: 2, borderRadius: 8,
+                padding: '10px 10px', marginBottom: 4, borderRadius: 8,
                 cursor: isEditing ? 'text' : 'pointer',
-                background: isActive ? '#EFF6FF' : isHover ? '#F3F4F6' : 'transparent',
-                border: isActive ? '1px solid #BFDBFE' : '1px solid transparent',
+                background: isActive ? 'rgba(0,0,0,0.08)' : isHover ? 'rgba(0,0,0,0.04)' : 'transparent',
+                border: 'none',
                 transition: 'background 0.12s',
               }}
             >
@@ -137,12 +137,12 @@ export default function ConversationSidebar({ onSwitch, onNew }: Props) {
                   <>
                     <div style={{
                       fontSize: 12, fontWeight: isActive ? 600 : 400,
-                      color: isActive ? '#1B2A4A' : '#374151',
+                      color: isActive ? '#111827' : '#1F2937',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
                       {conv.title || '新对话'}
                     </div>
-                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                    <div style={{ fontSize: 10, color: '#6B7280', marginTop: 1 }}>
                       {relativeTime(conv.updated_at)}
                     </div>
                   </>
@@ -158,7 +158,7 @@ export default function ConversationSidebar({ onSwitch, onNew }: Props) {
                     cursor: 'pointer', padding: 2, borderRadius: 4,
                     color: '#9CA3AF', display: 'flex',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#EF4444')}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#4B5563')}
                   onMouseLeave={e => (e.currentTarget.style.color = '#9CA3AF')}
                   title="删除对话"
                 >

@@ -239,13 +239,11 @@ export default function Decision() {
     const urlConvId = searchParams.get('conversation_id')
     ;(async () => {
       await fetchConversations()
-      const state = useDecisionStore.getState()
 
       if (urlConvId) {
         // 从 Action 页面跳转过来，激活指定会话
         switchConversation(urlConvId)
-        setSearchParams({}, { replace: true })  // 清除 URL 参数
-        // 加载该会话的历史消息
+        setSearchParams({}, { replace: true })
         try {
           const history = await conversationsApi.getMessages(urlConvId)
           const loaded: Message[] = history.map((m, i) => ({
@@ -259,11 +257,9 @@ export default function Decision() {
         } catch (e) {
           console.error('[init] load messages from URL param failed:', e)
         }
-      } else if (state.conversations.length === 0) {
-        await createConversation()
-      } else if (!state.activeConversationId) {
-        switchConversation(state.conversations[0].id)
       }
+      // 无 URL 参数时：不自动选中任何会话，保持 activeConversationId = null
+      // 用户点击会话或 "+ 新对话" 后才激活
     })()
   }, [])
 
@@ -308,6 +304,12 @@ export default function Decision() {
     if (!text || streaming) return
     setInput('')
 
+    // 无激活会话时自动创建（用户在欢迎页直接输入发送）
+    let convId = activeConversationId
+    if (!convId) {
+      convId = await createConversation()
+    }
+
     const userId = ++msgIdRef.current
     const aiId   = ++msgIdRef.current
 
@@ -329,7 +331,7 @@ export default function Decision() {
     try {
       let lastDecisionId: string | null = null
 
-      for await (const ev of streamDecisionChat(text, activeConversationId!, controller.signal)) {
+      for await (const ev of streamDecisionChat(text, convId, controller.signal)) {
         if (ev.type === 'text') {
           const delta = (ev.data.delta as string) ?? ''
           updateAi(m => ({ ...m, content: m.content + delta }))
@@ -391,8 +393,8 @@ export default function Decision() {
       // 拉取完整 explain 数据供右侧面板展示
       if (lastDecisionId) {
         try {
-          console.log('[getExplain] calling with decisionId=', lastDecisionId, 'conversationId=', activeConversationId)
-          const explain = await decisionApi.getExplain(lastDecisionId, activeConversationId!)
+          console.log('[getExplain] calling with decisionId=', lastDecisionId, 'conversationId=', convId)
+          const explain = await decisionApi.getExplain(lastDecisionId, convId)
           console.log('[getExplain] success:', explain)
           setExplainData(explain)
         } catch (err) {
@@ -403,8 +405,8 @@ export default function Decision() {
       }
 
       // 首条消息：先用截断标题立即显示，2 秒后刷新（等 LLM 生成完成）
-      if (messages.length === 0 && activeConversationId) {
-        updateConversationTitle(activeConversationId, text.slice(0, 20))
+      if (messages.length === 0 && convId) {
+        updateConversationTitle(convId, text.slice(0, 20))
         setTimeout(() => fetchConversations(), 2000)
       }
 
@@ -547,31 +549,27 @@ export default function Decision() {
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
   }
 
-  // 无 activeConversationId 时不渲染（等初始化完成）
-  if (!activeConversationId) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}>加载中...</div>
-  }
-
   return (
-    <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
-      {/* ── 会话侧边栏 ── */}
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F7F8FA' }}>
+      {/* ── 标题区 ── */}
+      <div style={{ flexShrink: 0, padding: '22px 28px 0', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 10, background: 'linear-gradient(135deg, #1B2A4A, #2D4A7A)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>💡</div>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: '-0.3px' }}>投资决策</div>
+          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>AI 辅助 · 纪律守护 · 多轮对话</div>
+        </div>
+      </div>
+
+      {/* ── 三栏区 ── */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* ── 会话列表 ── */}
       <ConversationSidebar onSwitch={handleSwitchConversation} onNew={handleNewConversation} />
 
-      {/* ── 中栏：对话区 ── */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #E5E7EB', overflow: 'hidden' }}>
-        {/* 顶部标题 */}
-        <div style={{ flexShrink: 0, padding: '18px 24px 14px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 12, background: '#1e3a5f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 20, lineHeight: 1 }}>💡</span>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>投资决策</div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>AI 辅助 · 纪律守护 · 多轮对话</div>
-          </div>
-        </div>
-
+      {/* ── 聊天主区 ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F7F8FA' }}>
         {/* 消息列表 */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ width: '100%', maxWidth: 880, padding: '0 32px', display: 'flex', flexDirection: 'column', gap: 24 }}>
           {messages.length === 0 && (
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
               <div style={{ width: '100%', maxWidth: 600, padding: '16px 0 12px' }}>
@@ -697,10 +695,12 @@ export default function Decision() {
             )
           ))}
           <div ref={messagesEnd} />
+          </div>{/* 居中容器结束 */}
         </div>
 
         {/* 输入框 */}
-        <div style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid #E5E7EB', background: '#fff' }}>
+        <div style={{ flexShrink: 0, padding: '14px 0', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ width: '100%', maxWidth: 880, padding: '0 32px' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
             <textarea
               ref={textareaRef}
@@ -744,65 +744,59 @@ export default function Decision() {
                 : <Send size={16} />}
             </button>
           </div>
+          </div>{/* 输入框居中容器结束 */}
         </div>
       </div>
 
-      {/* ── 右栏：决策依据面板（可折叠）── */}
-      {panelOpen ? (
-        <div style={{ flex: '0 0 30%', minWidth: 0, background: '#FAFAFA', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* 头部标题 */}
-          <div style={{ flexShrink: 0, padding: '18px 20px 14px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Sparkles size={18} color="#3B82F6" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>分析过程</div>
-              <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>本次分析的关键数据与推理依据</div>
-            </div>
-            <button onClick={togglePanel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }} title="折叠面板">
-              <ChevronRight size={16} />
-            </button>
-          </div>
-
-          {/* 生成中提示条 */}
-          {streaming && (
-            <div style={{ flexShrink: 0, padding: '8px 20px', borderBottom: '1px solid #DBEAFE', display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF' }}>
-              <Loader2 size={13} className="animate-spin" style={{ color: '#3B82F6' }} />
-              <span style={{ fontSize: 12, color: '#3B82F6' }}>正在生成本次分析…</span>
-            </div>
-          )}
-
-          {/* 内容区 */}
-          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            {(() => {
-              if (explainData) return <ExplainPanel data={explainData} />
-              const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
-              if (!lastDone) return <ExplainEmpty />
-              const fallback: ExplainData = {
-                decision_id: String(lastDone.id),
-                intent: lastDone.intent as ExplainData['intent'],
-                stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
-                conclusion: lastDone.conclusion,
-              }
-              return <ExplainPanel data={fallback} />
-            })()}
-          </div>
-        </div>
-      ) : (
-        /* 折叠态：窄条 + 展开箭头 */
+      {/* ── 分析面板（可折叠）── */}
+      <div style={{ display: 'flex', flexShrink: 0 }}>
+        {/* 左侧边缘按钮（始终同一位置）*/}
         <div
           onClick={togglePanel}
           style={{
-            width: 36, flexShrink: 0, background: '#FAFAFA', borderLeft: '1px solid #E5E7EB',
+            width: 24, flexShrink: 0, background: 'transparent',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', gap: 8,
+            cursor: 'pointer',
           }}
-          title="展开分析面板"
+          title={panelOpen ? '折叠面板' : '展开面板'}
         >
-          <ChevronLeft size={16} style={{ color: '#9CA3AF' }} />
-          <span style={{ writingMode: 'vertical-rl', fontSize: 11, color: '#9CA3AF', letterSpacing: 2 }}>分析过程</span>
+          {panelOpen
+            ? <ChevronRight size={14} style={{ color: '#9CA3AF' }} />
+            : <ChevronLeft size={14} style={{ color: '#9CA3AF' }} />
+          }
         </div>
-      )}
+
+        {/* 面板内容（展开时显示）*/}
+        {panelOpen && (
+          <div style={{ width: 320, flexShrink: 0, background: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* 生成中提示条 */}
+            {streaming && (
+              <div style={{ flexShrink: 0, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', borderRadius: 8, margin: '8px 12px' }}>
+                <Loader2 size={13} className="animate-spin" style={{ color: '#3B82F6' }} />
+                <span style={{ fontSize: 12, color: '#3B82F6' }}>正在生成本次分析…</span>
+              </div>
+            )}
+
+            {/* 内容区 */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              {(() => {
+                if (explainData) return <ExplainPanel data={explainData} />
+                const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
+                if (!lastDone) return <ExplainEmpty />
+                const fallback: ExplainData = {
+                  decision_id: String(lastDone.id),
+                  intent: lastDone.intent as ExplainData['intent'],
+                  stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
+                  conclusion: lastDone.conclusion,
+                }
+                return <ExplainPanel data={fallback} />
+              })()}
+            </div>
+          </div>
+        )}
+      </div>
+
+      </div>{/* 三栏区结束 */}
 
       {/* v3.2 行动清单弹层 */}
       <ActionDraftCard
