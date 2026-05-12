@@ -1,0 +1,107 @@
+======================================================================
+  WealthPilot v3.4 M4 — 端到端沙箱联调
+======================================================================
+确认仅在模拟盘操作? 输入 YES_PAPER_ONLY 继续: 
+======================================================================
+  Task 1: 凭证绑定验证
+======================================================================
+  tiger.paper 未绑定!
+  请先运行: python backend/scripts/v3_4/bind_tiger_credentials.py bind \
+    --from-file backend/secrets/tiger_private_key.pem
+
+  发现私钥文件 /Users/songbin/Documents/GitHub/WealthPilot/backend/secrets/tiger_private_key.pem,使用 InMemoryCredentialProvider 继续...
+
+======================================================================
+  Task 2: Adapter 初始化 + authenticate
+======================================================================
+  broker_name: tiger
+  is_paper: True
+  authenticate: True
+
+======================================================================
+  Task 3: 端到端下单全链路 (OrderManager → Tiger)
+======================================================================
+
+--- 3.1 创建 Draft ---
+  draft.id: c4ec4290-c715-401b-862e-2af70aa0d51d
+  draft.status: draft
+
+--- 3.2 确认 Draft ---
+  创建 1 个实体
+  strategy.id: dc18cdd4-62e4-4a2d-b29f-447b33bc4ff4
+  strategy.symbol: 00700:HK
+  strategy.status: active
+
+--- 3.3 place_order (触发真实 Tiger API) ---
+  order.id: 167870da-334b-4535-82a4-f65c86eaf18c
+  order.status: submitted_to_broker
+  order.broker_order_id: 43208748167086080
+  order.broker_name: tiger
+
+--- 3.4 查单 (3 秒后) ---
+  order.status: broker_pending
+  order.filled_quantity: 0
+  raw_response.tiger_status: OrderStatus.HELD
+  raw_response.mapped_status: broker_pending
+
+--- 3.5 撤单 ---
+  adapter.cancel_order: True
+  同步后 order.status: cancelled
+
+--- 审计日志检查 ---
+  order_synced: fx_rate=N
+  order_synced: fx_rate=N
+  order_submitted: fx_rate=Y
+  order_created: fx_rate=N
+  draft_confirmed: fx_rate=N
+  draft_created: fx_rate=N
+  draft_confirmed: fx_rate=N
+  draft_created: fx_rate=N
+  order_rejected: fx_rate=Y
+  order_created: fx_rate=N
+
+======================================================================
+  Task 4: 轮询 Worker 验证
+======================================================================
+
+--- 挂一笔远价单 ---
+  order.id: 1a4946dd-692a-44df-8752-6babb7a9e6ce, status: submitted_to_broker
+
+--- 模拟 poll_once (3 秒后) ---
+  同步后 status: broker_pending
+  撤单后 status: cancelled
+
+======================================================================
+  Task 5: 异常场景验证
+======================================================================
+
+--- 5.1 凭证缺失 ---
+  PASS: 未绑定凭证: tiger.paper。请运行 `python backend/scripts/v3_4/bind_tiger_credentials.py` 绑定。
+
+--- 5.2 A 股拦截 ---
+  order.status: rejected
+  broker_order_id: None
+  reason: v3.4 Tiger Adapter 不支持市场 SH(symbol=600519:SH)。A 股交易请使用国金 QMT(v3.5+)。
+  PASS: status=rejected
+
+--- 5.3 中文名保护 ---
+  PASS: symbol 包含中文,不是标的代码: 理想汽车
+
+--- 5.4 孤儿订单扫描 ---
+  发现 0 笔孤儿订单
+
+======================================================================
+  Cleanup: 撤销残留挂单
+======================================================================
+  撤单: 43208748167086080
+  撤单: 43208748957846528
+  清理完成,共追踪 2 笔订单
+
+======================================================================
+  M4 联调结果汇总
+======================================================================
+  Task1: PASS
+  Task2: PASS
+  Task3: PASS
+  Task4: PASS
+  Task5: PASS

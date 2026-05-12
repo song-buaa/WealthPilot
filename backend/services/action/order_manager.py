@@ -1,5 +1,5 @@
 """
-WealthPilot v3.2 投资行动模块 — OrderManager。
+WealthPilot v3.2/v3.4 投资行动模块 — OrderManager。
 
 职责：
 - 草稿 CRUD + 确认/丢弃
@@ -10,6 +10,11 @@ WealthPilot v3.2 投资行动模块 — OrderManager。
 - AllocationIntent 不能调用 place_order（在 API 层校验拒绝）
 - 超额下单禁止：创建 Order 前校验 cumulative_filled_quantity + 本次 quantity ≤ target_quantity
 - 所有关键操作写 AuditLog
+
+v3.4 M3 改造：
+- place_order 前增加 symbol 中文名保护（InvalidSymbolError）
+- audit_log 币种补全（fx_rate_to_cny / amount_cny_equivalent，护栏 §4.2）
+- BrokerAdapter 通过依赖注入（工厂函数在 api/action.py 和 lifespan 中调用）
 """
 from __future__ import annotations
 
@@ -369,6 +374,12 @@ class OrderManager:
         if strategy.status != StrategyStatus.ACTIVE:
             raise ValueError(f"策略状态为 {strategy.status}，不可下单")
 
+        # v3.4 M3: symbol 中文名保护
+        if strategy.symbol and strategy.symbol[0] >= "\u4e00" and strategy.symbol[0] <= "\u9fff":
+            raise InvalidSymbolError(
+                f"symbol 包含中文,不是标的代码: {strategy.symbol}"
+            )
+
         quantity = order_params.get("quantity", 0)
         if strategy.target_quantity is not None and quantity > 0:
             remaining = strategy.target_quantity - strategy.cumulative_filled_quantity
@@ -432,17 +443,17 @@ class OrderManager:
 
                 if update.status == "rejected":
                     order.status = OrderStatus.REJECTED
-                    self._audit("order_rejected", {
+                    self._audit("order_rejected", self._enrich_audit_payload({
                         "order_id": order.id,
                         "reason": update.raw_response.get("reason", ""),
-                    })
+                    }, update.raw_response, order))
                 else:
                     order.status = OrderStatus.SUBMITTED_TO_BROKER
                     order.submitted_at = datetime.now(timezone.utc)
-                    self._audit("order_submitted", {
+                    self._audit("order_submitted", self._enrich_audit_payload({
                         "order_id": order.id,
                         "broker_order_id": update.broker_order_id,
-                    })
+                    }, update.raw_response, order))
 
             except (ConnectionError, TimeoutError) as e:
                 order.status = OrderStatus.UNKNOWN
@@ -548,3 +559,40 @@ class OrderManager:
 
         self.session.flush()
         return order
+
+    # ─── v3.4 M3: 审计 payload 币种补全 ──────────────────────────
+
+    @staticmethod
+    def _enrich_audit_payload(
+        base_payload: dict,
+        raw_response: dict,
+        order=None,
+    ) -> dict:
+        """护栏 §4.2: 业务层补充 fx_rate_to_cny / amount_cny_equivalent。
+
+        Adapter 只产出原币种事实(currency + limit_price),
+        业务层根据 currency 查汇率并补充到审计 payload。
+        """
+        try:
+            from app.fx_service import FALLBACK_RATES
+        except ImportError:
+            FALLBACK_RATES = {"USD": 6.90, "HKD": 0.92}
+
+        currency = raw_response.get("currency", "USD")
+        fx_rate = FALLBACK_RATES.get(currency, 1.0)
+
+        payload = {**base_payload}
+        payload["fx_rate_to_cny"] = fx_rate
+
+        limit_price = raw_response.get("limit_price")
+        quantity = raw_response.get("quantity")
+        if limit_price is not None and quantity is not None:
+            payload["amount_cny_equivalent"] = round(
+                float(limit_price) * int(quantity) * fx_rate, 2,
+            )
+
+        return payload
+
+
+class InvalidSymbolError(ValueError):
+    """Symbol 格式异常（如包含中文名而非标的代码）。"""

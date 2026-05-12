@@ -1,0 +1,223 @@
+Traceback (most recent call last):
+  File "/Users/songbin/Documents/GitHub/WealthPilot/backend/scripts/v3_4/tiger_explore.py", line 468, in _run_step
+    fn(*args)
+  File "/Users/songbin/Documents/GitHub/WealthPilot/backend/scripts/v3_4/tiger_explore.py", line 358, in step_5_error_scenarios
+    result_b = _trade_client.place_order(order_b)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/songbin/opt/anaconda3/envs/wealthpilot/lib/python3.11/site-packages/tigeropen/trade/trade_client.py", line 979, in place_order
+    raise ApiException(response.code, response.message)
+tigeropen.common.exceptions.ApiException: code=1200 msg=standard account response error(bad_request:合约不正确)
+============================================================
+WealthPilot v3.4 M0 -- Tiger SDK 沙箱探索
+============================================================
+WARNING: 当前模式: SANDBOX
+WARNING: 模拟盘账号: 21995161433588262
+WARNING: 严禁使用实盘账号: 4472659
+
+模拟盘账号校验通过,自动执行模式启动
+
+============================================================
+环境自检
+============================================================
+Python 可执行文件: /Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python
+Python 版本: 3.11.13 (main, Jun  5 2025, 08:14:07) [Clang 14.0.6 ]
+工作目录: /Users/songbin/Documents/GitHub/WealthPilot
+Python 环境正确
+
+tigeropen 版本: 3.5.8
+
+============================================================
+Step 0: SDK 初始化
+============================================================
+私钥路径: /Users/songbin/Documents/GitHub/WealthPilot/backend/secrets/tiger_private_key.pem
+私钥指纹(前16字符): MIICXQIBAAKBgQC8...
+私钥格式: PKCS#1
+
+ClientConfig:
+  tiger_id: 20159046
+  account: 21995161433588262
+  is_paper: True
+
+TradeClient 创建成功
+  type: <class 'tigeropen.trade.trade_client.TradeClient'>
+
+=== Step 0 完成,继续 ===
+
+============================================================
+Step 1: 账户查询
+============================================================
+
+--- 1a. get_managed_accounts() ---
+type: <class 'list'>
+[AccountProfile({'account': '4472659', 'capability': 'RegTMargin', 'status': 'Funded', 'account_type': 'STANDARD'}),
+ AccountProfile({'account': '21995161433588262', 'capability': 'RegTMargin', 'status': 'Funded', 'account_type': 'PAPER'})]
+
+模拟盘 21995161433588262 在列表中: True
+
+--- 1b. get_assets() ---
+type: <class 'list'>
+[PortfolioAccount({'account': '21995161433588262', 'summary': Account({'accrued_cash': inf, 'accrued_dividend': inf, 'available_funds': inf, 'buying_power': 4000000.0, 'cash': 1000000.0, 'currency': 'USD', 'cushion': inf, 'day_trades_remaining': inf, 'equity_with_loan': inf, 'excess_liquidity': inf, 'gross_position_value': inf, 'initial_margin_requirement': inf, 'maintenance_margin_requirement': inf, 'net_liquidation': 1000000.0, 'realized_pnl': 0.0, 'regt_equity': inf, 'regt_margin': inf, 'sma': inf, 'timestamp': None, 'unrealized_pnl': 0.0}), 'segments': defaultdict(<class 'tigeropen.trade.domain.account.Account'>, {'S': SecuritySegment({'accrued_cash': 0.0, 'accrued_dividend': 0.0, 'available_funds': 998621.03, 'cash': 1000000.0, 'equity_with_loan': 1000000.0, 'excess_liquidity': 1000000.0, 'gross_position_value': 0.0, 'initial_margin_requirement': 0.0, 'leverage': 0.0, 'maintenance_margin_requirement': 0.0, 'net_liquidation': 1000000.0, 'regt_equity': inf, 'regt_margin': inf, 'sma': inf, 'timestamp': None, 'account': '21995161433588262', 'category': 'S', 'title': 'US Securities'}), 'C': CommoditySegment({'accrued_cash': 0.0, 'accrued_dividend': 0.0, 'available_funds': 0.0, 'cash': 0.0, 'equity_with_loan': 0.0, 'excess_liquidity': 0.0, 'initial_margin_requirement': 0.0, 'maintenance_margin_requirement': 0.0, 'net_liquidation': 0.0, 'gross_position_value': 0.0, 'timestamp': None, 'account': '21995161433588262', 'category': 'C', 'title': 'US Commodities', 'leverage': 0.0})}), 'market_values': defaultdict(<class 'tigeropen.trade.domain.account.MarketValue'>, {})})]
+
+--- 1c. get_positions() ---
+type: <class 'list'>
+持仓数量: 0
+
+=== Step 1 完成,继续 ===
+
+============================================================
+Step 2: 最小买单 (1 股 SPY, LIMIT)
+============================================================
+
+下单参数:
+  symbol: SPY
+  side: BUY
+  quantity: 1
+  order_type: LIMIT
+  limit_price: 370.0
+  account: 21995161433588262
+
+订单对象 (下单前):
+  type: <class 'tigeropen.trade.domain.order.Order'>
+Order({'account': '21995161433588262', 'id': None, 'order_id': None, 'parent_id': None, 'order_time': None, 'reason': None, 'trade_time': None, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0, 'commission': None, 'realized_pnl': None, 'trail_stop_price': None, 'limit_price': 370.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': None, 'order_legs': None, 'algo_params': None, 'algo_strategy': None, 'secret_key': None, 'liquidation': None, 'discount': None, 'attr_desc': None, 'source': None, 'adjust_limit': None, 'sub_ids': None, 'user_mark': None, 'update_time': None, 'expire_time': None, 'can_modify': None, 'external_id': None, 'combo_type': None, 'combo_type_desc': None, 'is_open': None, 'contract_legs': None, 'filled_scale': None, 'total_cash_amount': None, 'filled_cash_amount': None, 'refund_cash_amount': None, 'attr_list': None, 'latest_price': None, 'orders': None, 'gst': None, 'quantity_scale': None, 'trading_session_type': None, 'charges': None, 'contract': SPY/STK/USD, 'status': 'NEW', 'remaining': 1})
+
+--- place_order() ---
+
+place_order 返回值:
+  type: <class 'int'>
+43207668465158144
+
+--- 提取 broker_order_id ---
+  place_order() 返回值 (int): 43207668465158144
+  order.order_id = 7 (本地自增序号,不是 broker ID)
+  order.id = 43207668465158144 (= place_order 返回值,这才是 broker_order_id)
+
+记录的 broker_order_id: 43207668465158144
+
+=== Step 2 完成,继续 ===
+
+============================================================
+Step 3: 查单 (broker_order_id=43207668465158144)
+============================================================
+
+--- 第 1 次查询 (累计等待 0s) ---
+type: <class 'tigeropen.trade.domain.order.Order'>
+Order({'account': '21995161433588262', 'id': 43207668465158144, 'order_id': 7, 'parent_id': None, 'order_time': 1778547549000, 'reason': '', 'trade_time': 1778547550000, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 370.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547549000, 'expire_time': None, 'can_modify': True, 'external_id': '7', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'HELD', 'remaining': 1})
+
+  >>> status = OrderStatus.HELD (type: <enum 'OrderStatus'>)
+
+等待 3 秒...
+
+--- 第 2 次查询 (累计等待 3s) ---
+type: <class 'tigeropen.trade.domain.order.Order'>
+Order({'account': '21995161433588262', 'id': 43207668465158144, 'order_id': 7, 'parent_id': None, 'order_time': 1778547549000, 'reason': '', 'trade_time': 1778547550000, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 370.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547549000, 'expire_time': None, 'can_modify': True, 'external_id': '7', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'HELD', 'remaining': 1})
+
+  >>> status = OrderStatus.HELD (type: <enum 'OrderStatus'>)
+
+等待 10 秒...
+
+--- 第 3 次查询 (累计等待 10s) ---
+type: <class 'tigeropen.trade.domain.order.Order'>
+Order({'account': '21995161433588262', 'id': 43207668465158144, 'order_id': 7, 'parent_id': None, 'order_time': 1778547549000, 'reason': '', 'trade_time': 1778547550000, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 370.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547549000, 'expire_time': None, 'can_modify': True, 'external_id': '7', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'HELD', 'remaining': 1})
+
+  >>> status = OrderStatus.HELD (type: <enum 'OrderStatus'>)
+
+--- Tiger SDK OrderStatus 枚举 ---
+  PENDING_NEW = PendingNew
+  NEW = Initial
+  HELD = Submitted
+  PARTIALLY_FILLED = PartiallyFilled
+  FILLED = Filled
+  CANCELLED = Cancelled
+  PENDING_CANCEL = PendingCancel
+  REJECTED = Inactive
+  EXPIRED = Invalid
+
+=== Step 3 完成,继续 ===
+
+============================================================
+Step 4: 撤单
+============================================================
+
+挂新买单: SPY @ 350.0 x 1
+新订单 broker_order_id: 43207670790111232
+
+等待 2 秒...
+
+--- 撤单前查单 ---
+status = OrderStatus.HELD
+Order({'account': '21995161433588262', 'id': 43207670790111232, 'order_id': 8, 'parent_id': None, 'order_time': 1778547567000, 'reason': '', 'trade_time': 1778547567000, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 350.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547567000, 'expire_time': None, 'can_modify': True, 'external_id': '8', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'HELD', 'remaining': 1})
+
+--- cancel_order() ---
+cancel_order 返回值:
+  type: <class 'int'>
+43207670790111232
+
+--- 撤单后立即查单 ---
+status = OrderStatus.CANCELLED
+
+等待 3 秒...
+
+--- 撤单后 3 秒查单 ---
+status = OrderStatus.CANCELLED
+Order({'account': '21995161433588262', 'id': 43207670790111232, 'order_id': 8, 'parent_id': None, 'order_time': 1778547567000, 'reason': None, 'trade_time': 1778547571000, 'action': 'BUY', 'quantity': 1, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 350.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547570000, 'expire_time': None, 'can_modify': False, 'external_id': '8', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'CANCELLED', 'remaining': 1})
+
+=== Step 4 完成,继续 ===
+
+============================================================
+Step 5: 错误场景探测
+============================================================
+
+--- 5a. 超出购买力 (10000股 SPY @ 730) ---
+type: <class 'int'>
+43207671957178368
+order.id (broker_order_id) = 43207671957178368
+order.status = OrderStatus.NEW
+
+--- 5a 续: 查超额单状态 ---
+Order({'account': '21995161433588262', 'id': 43207671957178368, 'order_id': 9, 'parent_id': None, 'order_time': 1778547576000, 'reason': '您的可用资金或者可用购买力不足', 'trade_time': 1778547576000, 'action': 'BUY', 'quantity': 10000, 'filled': 0, 'avg_fill_price': 0.0, 'commission': 0.0, 'realized_pnl': 0.0, 'trail_stop_price': None, 'limit_price': 730.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': True, 'order_legs': None, 'algo_params': None, 'algo_strategy': 'LMT', 'secret_key': '', 'liquidation': False, 'discount': 0, 'attr_desc': None, 'source': 'openapi', 'adjust_limit': None, 'sub_ids': None, 'user_mark': '', 'update_time': 1778547576000, 'expire_time': None, 'can_modify': False, 'external_id': '9', 'combo_type': None, 'combo_type_desc': None, 'is_open': True, 'contract_legs': None, 'filled_scale': 0, 'total_cash_amount': None, 'filled_cash_amount': 0.0, 'refund_cash_amount': None, 'attr_list': [], 'latest_price': 739.28, 'orders': None, 'gst': 0.0, 'quantity_scale': 0, 'trading_session_type': 'PRE_RTH_POST', 'charges': None, 'contract': SPY/STK/USD, 'status': 'EXPIRED', 'remaining': 10000})
+status = OrderStatus.EXPIRED
+已撤超额单
+
+--- 5b. 不存在的 symbol (FAKESYMBOL123) ---
+
+!!! Step Step 5 异常: ApiException: code=1200 msg=standard account response error(bad_request:合约不正确)
+
+=== Step 5 完成,继续 ===
+
+============================================================
+Step 6: 港股最小调用 (00700 腾讯)
+============================================================
+
+下单参数:
+Order({'account': '21995161433588262', 'id': None, 'order_id': None, 'parent_id': None, 'order_time': None, 'reason': None, 'trade_time': None, 'action': 'BUY', 'quantity': 100, 'filled': 0, 'avg_fill_price': 0, 'commission': None, 'realized_pnl': None, 'trail_stop_price': None, 'limit_price': 300.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': None, 'order_legs': None, 'algo_params': None, 'algo_strategy': None, 'secret_key': None, 'liquidation': None, 'discount': None, 'attr_desc': None, 'source': None, 'adjust_limit': None, 'sub_ids': None, 'user_mark': None, 'update_time': None, 'expire_time': None, 'can_modify': None, 'external_id': None, 'combo_type': None, 'combo_type_desc': None, 'is_open': None, 'contract_legs': None, 'filled_scale': None, 'total_cash_amount': None, 'filled_cash_amount': None, 'refund_cash_amount': None, 'attr_list': None, 'latest_price': None, 'orders': None, 'gst': None, 'quantity_scale': None, 'trading_session_type': None, 'charges': None, 'contract': 00700/STK/HKD, 'status': 'NEW', 'remaining': 100})
+
+place_order 返回值:
+  type: <class 'int'>
+43207672576360448
+
+港股订单 broker_order_id: 43207672576360448
+status = OrderStatus.HELD
+已撤单
+
+=== Step 6 (港股) 完成,继续 ===
+
+============================================================
+Step 7: A 股最小调用 (600519 贵州茅台)
+============================================================
+
+下单参数:
+Order({'account': '21995161433588262', 'id': None, 'order_id': None, 'parent_id': None, 'order_time': None, 'reason': None, 'trade_time': None, 'action': 'BUY', 'quantity': 100, 'filled': 0, 'avg_fill_price': 0, 'commission': None, 'realized_pnl': None, 'trail_stop_price': None, 'limit_price': 1000.0, 'aux_price': None, 'trailing_percent': None, 'percent_offset': None, 'order_type': 'LMT', 'time_in_force': 'DAY', 'outside_rth': None, 'order_legs': None, 'algo_params': None, 'algo_strategy': None, 'secret_key': None, 'liquidation': None, 'discount': None, 'attr_desc': None, 'source': None, 'adjust_limit': None, 'sub_ids': None, 'user_mark': None, 'update_time': None, 'expire_time': None, 'can_modify': None, 'external_id': None, 'combo_type': None, 'combo_type_desc': None, 'is_open': None, 'contract_legs': None, 'filled_scale': None, 'total_cash_amount': None, 'filled_cash_amount': None, 'refund_cash_amount': None, 'attr_list': None, 'latest_price': None, 'orders': None, 'gst': None, 'quantity_scale': None, 'trading_session_type': None, 'charges': None, 'contract': 600519/STK/CNH, 'status': 'NEW', 'remaining': 100})
+
+place_order 返回值:
+  type: <class 'int'>
+43207673169330176
+
+A 股订单 broker_order_id: 43207673169330176
+status = OrderStatus.EXPIRED
+已撤单
+
+=== Step 7 (A 股) 完成,继续 ===
+
+============================================================
+全部 Step 完成!
+============================================================

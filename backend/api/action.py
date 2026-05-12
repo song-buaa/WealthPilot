@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.database import get_session
 from backend.services.action.order_manager import OrderManager
-from backend.services.action.brokers.mock import get_mock_adapter
+from backend.services.action.brokers.factory import get_broker_adapter
 from backend.services.action.risk_engine import (
     check_order_risk, validate_confirmation, CONFIRMATION_TEXT,
 )
@@ -36,10 +36,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+import os as _action_os
+
+_BROKER_MODE = _action_os.getenv("BROKER_MODE", "mock")
+
+
 def _get_manager():
-    """获取 OrderManager 实例（每次请求新建 session + 注入 broker_adapter）。"""
+    """获取 OrderManager 实例（每次请求新建 session + 注入 broker_adapter）。
+
+    v3.4 M3: 通过 BROKER_MODE 环境变量切换 mock / tiger.paper / tiger.live。
+    默认 "mock"(向后兼容 v3.2 行为)。
+    """
     session = get_session()
-    adapter = get_mock_adapter()
+    adapter = get_broker_adapter(
+        broker_name="tiger" if "tiger" in _BROKER_MODE else "mock",
+        mode=_BROKER_MODE.split(".")[-1] if "." in _BROKER_MODE else _BROKER_MODE,
+    )
     return OrderManager(session, broker_adapter=adapter), session
 
 

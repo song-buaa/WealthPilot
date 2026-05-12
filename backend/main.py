@@ -29,9 +29,36 @@ async def lifespan(app: FastAPI):
     # 初始化数据库 + 确保默认 portfolio 存在
     startup()
 
-    # MockBrokerAdapter 全局单例初始化
-    from backend.services.action.brokers.mock import get_mock_adapter
-    get_mock_adapter()
+    # v3.4 M3: Broker Adapter 初始化(通过 BROKER_MODE 环境变量切换)
+    _broker_mode = _os.getenv("BROKER_MODE", "mock")
+    if _broker_mode == "mock":
+        from backend.services.action.brokers.mock import get_mock_adapter
+        get_mock_adapter()
+    else:
+        # tiger.paper / tiger.live — 工厂函数按需创建,不需要全局单例
+        pass
+
+    # v3.4 M3: 孤儿订单启动扫描 + 轮询 worker
+    from backend.services.action.order_poller import OrderPoller, scan_orphan_orders
+    from backend.services.action.brokers.factory import get_broker_adapter
+    from app.state import get_session
+
+    def _get_adapter():
+        _bm = _os.getenv("BROKER_MODE", "mock")
+        return get_broker_adapter(
+            broker_name="tiger" if "tiger" in _bm else "mock",
+            mode=_bm.split(".")[-1] if "." in _bm else _bm,
+        )
+
+    orphan_count = scan_orphan_orders(get_session, _get_adapter)
+    if orphan_count:
+        print(f"[lifespan] 发现并处理 {orphan_count} 笔孤儿订单")
+
+    order_poller = OrderPoller(
+        get_session=get_session,
+        get_broker_adapter=_get_adapter,
+    )
+    await order_poller.start()
 
     # APScheduler: 每天北京时间 22:00 自动同步券商持仓
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -51,11 +78,15 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # shutdown
+    await order_poller.stop()
+
     scheduler.shutdown()
     print("[scheduler] 定时同步已停止")
 
-    from backend.services.action.brokers.mock import shutdown_mock_adapter
-    shutdown_mock_adapter()
+    if _broker_mode == "mock":
+        from backend.services.action.brokers.mock import shutdown_mock_adapter
+        shutdown_mock_adapter()
 
 
 app = FastAPI(

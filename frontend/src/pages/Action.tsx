@@ -144,7 +144,7 @@ function ActionListTab({
       const [intentRes, stratRes, orderRes] = await Promise.all([
         actionApi.listIntents('active'),
         actionApi.listStrategies({ status: 'active' }),
-        actionApi.listOrders({ status: 'broker_pending' }),
+        actionApi.listOrders({}),  // v3.4 M5: 显示所有订单,不仅 broker_pending
       ])
       setIntents(intentRes.items)
       setStrategies(stratRes.items)
@@ -303,27 +303,7 @@ function ActionListTab({
           <SectionTitle>已挂单</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {orders.map(o => (
-              <div key={o.id} style={{
-                background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
-                padding: '12px 18px',
-                boxShadow: '0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04)',
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A' }}>
-                    {o.symbol} {o.side === 'BUY' ? '买入' : '卖出'} {o.quantity}股
-                    {o.limit_price ? ` @$${o.limit_price}` : ''}
-                  </span>
-                  <span style={{ fontSize: 11, color: '#9CA3AF', marginLeft: 8 }}>
-                    ({o.broker_name}) · {o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN') : ''}
-                  </span>
-                </div>
-                <button onClick={() => handleCancelOrder(o.id)} style={{
-                  fontSize: 11, padding: '4px 10px', borderRadius: 6,
-                  border: '1px solid #E5E7EB', background: '#fff', color: '#9CA3AF', cursor: 'pointer',
-                }}>取消</button>
-              </div>
+              <OrderCard key={o.id} order={o} onCancel={handleCancelOrder} />
             ))}
           </div>
         </>
@@ -672,6 +652,111 @@ function TimelineTab() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+
+// ── 订单卡片(v3.4 M5) ────────────────────────────────────────
+
+const STATUS_DISPLAY: Record<string, { label: string; color: string; dotColor: string }> = {
+  submitted_to_broker: { label: '提交中', color: '#6B7280', dotColor: '#3B82F6' },
+  broker_pending:      { label: '已挂单', color: '#1B2A4A', dotColor: '#F59E0B' },
+  partially_filled:    { label: '部分成交', color: '#1B2A4A', dotColor: '#10B981' },
+  filled:              { label: '已成交', color: '#16A34A', dotColor: '#10B981' },
+  cancelled:           { label: '已撤单', color: '#9CA3AF', dotColor: '#9CA3AF' },
+  rejected:            { label: '被拒绝', color: '#DC2626', dotColor: '#DC2626' },
+  expired:             { label: '已过期', color: '#9CA3AF', dotColor: '#9CA3AF' },
+  unknown:             { label: '状态未知', color: '#D97706', dotColor: '#D97706' },
+}
+
+const TERMINAL_STATUSES = new Set(['filled', 'cancelled', 'rejected', 'expired'])
+
+function OrderCard({ order: o, onCancel }: {
+  order: OrderResponse
+  onCancel: (id: string) => void
+}) {
+  const [confirmCancel, setConfirmCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+
+  const cfg = STATUS_DISPLAY[o.status] || STATUS_DISPLAY.unknown
+  const isTerminal = TERMINAL_STATUSES.has(o.status)
+  const isPartial = o.status === 'partially_filled'
+  const canCancel = !isTerminal && o.status !== 'unknown'
+
+  async function handleCancel() {
+    if (!confirmCancel) {
+      setConfirmCancel(true)
+      setTimeout(() => setConfirmCancel(false), 3000)
+      return
+    }
+    setCancelling(true)
+    try {
+      await onCancel(o.id)
+    } finally {
+      setCancelling(false)
+      setConfirmCancel(false)
+    }
+  }
+
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
+      padding: '12px 18px',
+      boxShadow: '0 1px 3px rgba(15,30,53,0.07), 0 1px 2px rgba(15,30,53,0.04)',
+      opacity: isTerminal ? 0.7 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: cfg.dotColor, flexShrink: 0,
+        }} />
+        <div style={{ flex: 1 }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A' }}>
+              {o.symbol} {o.side === 'BUY' ? '买入' : '卖出'} {o.quantity}股
+              {o.limit_price ? ` @$${o.limit_price}` : ''}
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 500, marginLeft: 8,
+              padding: '1px 6px', borderRadius: 4,
+              background: `${cfg.dotColor}18`, color: cfg.color,
+            }}>{cfg.label}</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+            ({o.broker_name}) · {o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN') : ''}
+          </div>
+        </div>
+        {canCancel && (
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            style={{
+              fontSize: 11, padding: '4px 10px', borderRadius: 6,
+              border: `1px solid ${confirmCancel ? '#EF4444' : '#E5E7EB'}`,
+              background: confirmCancel ? '#FEF2F2' : '#fff',
+              color: confirmCancel ? '#DC2626' : '#9CA3AF',
+              cursor: cancelling ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {cancelling ? '撤单中...' : confirmCancel ? '确认撤单?' : '撤单'}
+          </button>
+        )}
+      </div>
+
+      {/* 部分成交详情 */}
+      {isPartial && (
+        <div style={{
+          marginTop: 8, padding: '8px 12px', background: '#F0FDF4',
+          borderRadius: 6, fontSize: 12, color: '#16A34A',
+        }}>
+          已成交: {o.filled_quantity}股
+          {o.avg_filled_price ? ` @ $${o.avg_filled_price} 均价` : ''}
+          <span style={{ color: '#6B7280', marginLeft: 8 }}>
+            待成交: {(o.quantity || 0) - (o.filled_quantity || 0)}股
+          </span>
+        </div>
+      )}
     </div>
   )
 }

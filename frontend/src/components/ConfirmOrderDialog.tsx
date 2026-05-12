@@ -93,16 +93,34 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
     setSubmitting(true)
     setSubmitError(null)
 
+    // v3.4 M5: 超时提示
+    const timeoutWarning = setTimeout(() => {
+      setSubmitError('正在等待券商确认，请稍候...')
+    }, 15000)
+    const timeoutCritical = setTimeout(() => {
+      setSubmitError('响应较慢，可能是网络问题，建议登录券商 App 核实')
+    }, 30000)
+
     try {
-      await actionApi.placeOrder(strategy.id, {
+      const result = await actionApi.placeOrder(strategy.id, {
         quantity,
         limit_price: limitPrice,
         confirmation_text: needsConfirmation ? confirmText : '',
       })
-      showToast('success', '订单已提交至 Mock 券商，等待成交')
+      clearTimeout(timeoutWarning)
+      clearTimeout(timeoutCritical)
+
+      // v3.4 M5: 根据返回状态显示不同提示
+      if (result?.status === 'rejected') {
+        showToast('error', '订单被券商拒绝，请检查标的代码和下单参数')
+      } else {
+        showToast('success', '订单已提交至券商，等待成交')
+      }
       onOrderPlaced()
       onClose()
     } catch (err: unknown) {
+      clearTimeout(timeoutWarning)
+      clearTimeout(timeoutCritical)
       const msg = err instanceof Error ? err.message : '下单失败'
       setSubmitError(msg)
     } finally {

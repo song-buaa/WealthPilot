@@ -1,0 +1,284 @@
+======================================================================
+  WealthPilot v3.4 M1.3a — 港股 + 错误场景沙箱验证
+======================================================================
+  模拟盘账号: 21995161433588262
+  严禁使用实盘账号: 4472659
+
+确认仅在模拟盘操作? 输入 YES_PAPER_ONLY 继续: [TigerBrokerAdapter] place_order ApiException: code=1200 msg=standard account response error(bad_request:合约不正确)
+[TigerBrokerAdapter] get_order_status ApiException: code=1010 msg=biz param error(failed to parse parameters in 'biz_content')
+
+初始化 TigerBrokerAdapter...
+  broker_name: tiger
+  is_paper: True
+  authenticate: True
+
+======================================================================
+  场景 1: 港股 LIMIT BUY 挂单 -> HELD
+======================================================================
+
+下单: HK.00700 BUY 100 @ 250.0
+
+place_order 返回:
+  status:           submitted_to_broker
+  broker_order_id:  43208121682380800
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551007319
+  local_order_id:   m13a-scenario1
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'place_order',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208121682380800',
+ 'currency': 'HKD',
+ 'limit_price': 250.0,
+ 'mapped_status': 'submitted_to_broker',
+ 'market': 'HK',
+ 'order_type': 'LIMIT',
+ 'outside_rth': False,
+ 'quantity': 100,
+ 'reason': None,
+ 'side': 'BUY',
+ 'symbol': 'HK.00700',
+ 'tiger_status': 'OrderStatus.NEW'}
+
+等待 3 秒后查单...
+
+get_order_status 返回 (3s后):
+  status:           broker_pending
+  broker_order_id:  43208121682380800
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551007000
+  local_order_id:   
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208121682380800',
+ 'mapped_status': 'broker_pending',
+ 'outside_rth': False,
+ 'reason': '',
+ 'tiger_status': 'OrderStatus.HELD'}
+
+验证: status == 'broker_pending' ? True
+
+======================================================================
+  场景 2: 港股 LIMIT BUY 撤单 -> CANCELLED
+======================================================================
+
+撤单: broker_order_id=43208121682380800
+cancel_order 返回: True
+
+立即查单...
+
+撤单后立即查:
+  status:           cancelled
+  broker_order_id:  43208121682380800
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551013000
+  local_order_id:   
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208121682380800',
+ 'mapped_status': 'cancelled',
+ 'outside_rth': False,
+ 'reason': None,
+ 'tiger_status': 'OrderStatus.CANCELLED'}
+
+等待 3 秒后再查...
+
+撤单后 3 秒查:
+  status:           cancelled
+  broker_order_id:  43208121682380800
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551013000
+  local_order_id:   
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208121682380800',
+ 'mapped_status': 'cancelled',
+ 'outside_rth': False,
+ 'reason': None,
+ 'tiger_status': 'OrderStatus.CANCELLED'}
+
+验证: cancel_ok == True ? True
+验证: 立即查 status == 'cancelled' ? True
+验证: 3 秒后 status == 'cancelled' ? True
+
+======================================================================
+  场景 3: 港股超额下单 -> EXPIRED -> rejected 映射
+======================================================================
+
+下单: HK.00700 BUY 100000 @ 460.0 (超出购买力)
+
+place_order 返回:
+  status:           submitted_to_broker
+  broker_order_id:  43208123113423872
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551018229
+  local_order_id:   m13a-scenario3
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'place_order',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208123113423872',
+ 'currency': 'HKD',
+ 'limit_price': 460.0,
+ 'mapped_status': 'submitted_to_broker',
+ 'market': 'HK',
+ 'order_type': 'LIMIT',
+ 'outside_rth': False,
+ 'quantity': 100000,
+ 'reason': None,
+ 'side': 'BUY',
+ 'symbol': 'HK.00700',
+ 'tiger_status': 'OrderStatus.NEW'}
+
+place_order status: submitted_to_broker
+
+等待 5 秒让 Tiger 处理超额检查...
+
+get_order_status 返回 (5s后):
+  status:           rejected
+  broker_order_id:  43208123113423872
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551018000
+  local_order_id:   
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status',
+ 'broker': 'tiger',
+ 'broker_order_id': '43208123113423872',
+ 'expired_resolved_as': 'rejected',
+ 'mapped_status': 'rejected',
+ 'outside_rth': False,
+ 'reason': '您的可用资金或者可用购买力不足',
+ 'tiger_status': 'OrderStatus.EXPIRED'}
+
+验证: status == 'rejected' (EXPIRED+购买力) ? True
+验证: expired_resolved_as 字段: rejected
+验证: reason 字段: 您的可用资金或者可用购买力不足
+
+======================================================================
+  场景 4: 不存在 symbol -> ApiException -> rejected
+======================================================================
+
+下单: HK.99999 BUY 100 @ 1.0
+
+place_order 返回:
+  status:           rejected
+  broker_order_id:  None
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551025831
+  local_order_id:   m13a-scenario4
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'place_order_api_error',
+ 'broker': 'tiger',
+ 'outside_rth': False,
+ 'raw_error_code': 1200,
+ 'raw_error_message': 'code=1200 msg=standard account response error(bad_request:合约不正确)',
+ 'reason': 'code=1200 msg=standard account response error(bad_request:合约不正确)',
+ 'symbol': 'HK.99999'}
+
+验证: status == 'rejected' ? True
+验证: raw_error_code: 1200
+验证: raw_error_message: code=1200 msg=standard account response error(bad_request:合约不正确)
+
+======================================================================
+  场景 5: not_found -> 指数退避重试 -> OrphanOrderError
+======================================================================
+
+get_order_status('9999999999999999999') — 预期重试 2 次后抛 OrphanOrderError
+
+意外: 没有抛异常,返回了 status=unknown
+raw_response: {'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status_error',
+ 'broker': 'tiger',
+ 'outside_rth': False,
+ 'raw_error_code': 1010,
+ 'raw_error_message': 'code=1010 msg=biz param error(failed to parse '
+                      "parameters in 'biz_content')"}
+
+======================================================================
+  场景 6: paper-only 闸门拦截实盘账号
+======================================================================
+
+捕获 AssertionError: 实盘交易未开启(ENABLE_TIGER_LIVE_TRADING=false),拒绝使用账号 4472659。模拟盘账号: 21995161433588262
+
+验证: paper-only 闸门正常拦截 ? True
+
+======================================================================
+  场景 7: market 白名单拦截 A 股
+======================================================================
+
+下单: 600519 (A 股) BUY 100 @ 1000
+
+place_order 返回:
+  status:           rejected
+  broker_order_id:  None
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778551027998
+  local_order_id:   m13a-scenario7
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'place_order_blocked_unsupported_market',
+ 'broker': 'tiger',
+ 'outside_rth': False,
+ 'reason': 'v3.4 Tiger Adapter 不支持市场 CN(symbol=600519)。A 股交易请使用国金 QMT(v3.5+)。',
+ 'symbol': '600519'}
+
+验证: status == 'rejected' ? True
+验证: reason 含 '不支持市场 CN' ? True
+验证: broker_order_id 为 None (未触达 Tiger) ? True
+
+======================================================================
+  Cleanup: 撤销所有残留挂单
+======================================================================
+  撤单: 43208121682380800
+  撤单: 43208123113423872
+  无残留挂单
+
+脚本产生的 broker_order_id 列表:
+  43208121682380800
+  43208123113423872
+
+======================================================================
+  M1.3a 执行结果汇总
+======================================================================
+  场景1: PASS
+  场景2: PASS
+  场景3: PASS
+  场景4: PASS
+  场景5: PASS
+  场景6: PASS
+  场景7: PASS
+
