@@ -23,7 +23,7 @@ def _pid() -> int:
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str
+    conversation_id: str
     portfolio_id: Optional[int] = None  # 不传则用默认 portfolio
 
 
@@ -51,13 +51,13 @@ async def chat(req: ChatRequest):
     """
     if not req.message.strip():
         raise HTTPException(status_code=422, detail="message 不能为空")
-    if not req.session_id.strip():
-        raise HTTPException(status_code=422, detail="session_id 不能为空")
+    if not req.conversation_id.strip():
+        raise HTTPException(status_code=422, detail="conversation_id 不能为空")
 
     pid = req.portfolio_id if req.portfolio_id is not None else _pid()
 
     async def event_stream():
-        async for chunk in svc.run_chat_stream(req.message, req.session_id, pid):
+        async for chunk in svc.run_chat_stream(req.message, req.conversation_id, pid):
             yield chunk
 
     return StreamingResponse(
@@ -74,17 +74,17 @@ async def chat(req: ChatRequest):
 # ── Explain Panel 数据 ────────────────────────────────────────────────────────
 
 @router.get("/explain/{decision_id}")
-def get_explain(decision_id: str, session_id: str):
+def get_explain(decision_id: str, conversation_id: str):
     """
     获取某次决策的完整分析链路数据，供 Explain Panel 渲染。
 
-    Query 参数：session_id — 与发起对话时一致
+    Query 参数：conversation_id — 与发起对话时一致
 
     返回结构包含：
       intent, data, pre_check, rules, signals, llm（各阶段详情）
     """
     try:
-        result = svc.get_decision_explain(session_id, decision_id)
+        result = svc.get_decision_explain(conversation_id, decision_id)
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[get_explain ERROR] decision_id={decision_id}\n{tb}")
@@ -92,18 +92,18 @@ def get_explain(decision_id: str, session_id: str):
     if result is None:
         raise HTTPException(
             status_code=404,
-            detail=f"decision {decision_id} not found in session {session_id}"
+            detail=f"decision {decision_id} not found in conversation {conversation_id}"
         )
     return result
 
 
 # ── 会话管理 ──────────────────────────────────────────────────────────────────
 
-@router.delete("/session/{session_id}")
-def clear_session(session_id: str):
+@router.delete("/conversation/{conversation_id}")
+def clear_session(conversation_id: str):
     """
     清除服务端会话（前端点击「清空对话」时调用）。
     清除 intent_engine 的多轮上下文和 decision_map 缓存。
     """
-    svc.clear_session(session_id)
-    return {"message": f"session {session_id} cleared"}
+    svc.clear_session(conversation_id)
+    return {"message": f"conversation {conversation_id} cleared"}

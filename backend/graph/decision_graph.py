@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 from backend.services.decision_service import (
     _detect_feature_type,
     _is_asset_clear,
+    _is_asset_unambiguous,
+    _is_asset_in_portfolio,
 )
 
 # 组合级意图集合：这些意图分析的是整个组合而非单个标的，
@@ -38,7 +40,7 @@ class DecisionState(TypedDict):
     """LangGraph StateGraph 的全局状态定义。"""
     # ── 输入 ──
     user_query: str
-    session_id: str
+    conversation_id: str
     conversation_history: list
 
     # ── OrchestratorAgent 填充 ──
@@ -142,7 +144,7 @@ def orchestrator_node(state: DecisionState) -> dict:
     from intent_engine._llm_client import get_client, MODEL_MAIN
 
     user_query = state["user_query"]
-    session_id = state["session_id"]
+    conversation_id = state["conversation_id"]
     conversation_history = state.get("conversation_history", [])
     portfolio_id = state.get("portfolio_id", 1)
     all_positions = state.get("all_positions", [])
@@ -208,7 +210,8 @@ def orchestrator_node(state: DecisionState) -> dict:
         }
 
     # Step 2: LLM Planner call（生成 RoutingPlan + rationale）
-    asset_clear = _is_asset_clear(asset, all_positions)
+    asset_unambiguous = _is_asset_unambiguous(asset)
+    asset_in_portfolio = _is_asset_in_portfolio(asset, all_positions)
 
     planner_prompt = f"""你是 WealthPilot 决策系统的编排者（Planner）。
 根据用户输入和意图识别结果，决定本次请求应该走哪条处理路径。
@@ -216,15 +219,23 @@ def orchestrator_node(state: DecisionState) -> dict:
 用户输入：{user_query}
 意图识别结果：{intent}（置信度 {confidence:.2f}）
 识别到的标的：{asset or "未识别"}
-标的是否明确：{asset_clear}
+标的名称是否明确：{asset_unambiguous}
+标的是否在持仓中：{asset_in_portfolio}
 多标的：{multi_assets if multi_assets else "无"}
 
 可选路径：
-- position_single：单标的决策（标的明确的 PositionDecision）
+- position_single：单标的决策（标的明确的 PositionDecision，包括已持仓的加减仓和非持仓的新建仓评估）
 - position_multi：多标的对比决策
-- clarify：标的不明确，需要展示候选清单让用户选择
+- clarify：标的不明确（用户说的是模糊指代如"那只股票"），需要展示候选清单让用户选择
 - portfolio：组合级分析（PortfolioReview / AssetAllocation / PerformanceAnalysis）
 - general：通用教育/对话（Education / GeneralChat）
+
+判断要点：
+- "标的名称是否明确"用于判断用户的描述是否清晰（避免"那只股票"这种模糊指代）
+- "标的是否在持仓中"用于判断是已有持仓决策还是新建仓评估
+- 名称明确 + 在持仓中 → position_single（已持仓的加减仓决策）
+- 名称明确 + 不在持仓中 → position_single（新建仓评估）
+- 名称不明确 → clarify（让用户澄清）
 
 请输出 JSON，格式如下（只输出 JSON，不要有其他文字）：
 {{
@@ -247,7 +258,7 @@ def orchestrator_node(state: DecisionState) -> dict:
         rationale = plan.get("rationale", "")
     except Exception as e:
         # Planner 失败时降级到规则路由
-        route = _intent_to_route_fallback(intent, asset, asset_clear, multi_assets)
+        route = _intent_to_route_fallback(intent, asset, asset_unambiguous, multi_assets)
         rationale = f"Planner 调用失败（{e}），降级到规则路由"
 
     # 后置校验：操作关键词 + 模糊标的 → 重路由到 clarify
@@ -284,7 +295,7 @@ def orchestrator_node(state: DecisionState) -> dict:
 
     # 根据 route 构建 sse_kwargs
     sse_handler, sse_kwargs = _build_sse_kwargs(
-        route, user_query, session_id, portfolio_id, multi_assets
+        route, user_query, conversation_id, portfolio_id, multi_assets
     )
 
     return {
@@ -305,16 +316,17 @@ def orchestrator_node(state: DecisionState) -> dict:
 
 
 def _intent_to_route_fallback(
-    intent: str, asset: str | None, asset_clear: bool, multi_assets: list
+    intent: str, asset: str | None, asset_unambiguous: bool, multi_assets: list
 ) -> str:
-    """Planner 失败时的规则降级路由。"""
+    """Planner 失败时的规则降级路由。
+
+    v3.4 M8.1: 参数从 asset_clear 改为 asset_unambiguous。
+    只要标的名称明确(无论是否在持仓),就走 position_single。
+    """
     if intent == "PositionDecision":
         if multi_assets and len(multi_assets) >= 2:
             return "position_multi"
-        if asset_clear:
-            return "position_single"
-        # 兜底：非模糊词的 asset 视为明确（兼容无持仓数据场景）
-        if asset and asset.strip() not in _VAGUE_WORDS:
+        if asset_unambiguous:
             return "position_single"
         return "clarify"
     if intent in ("PortfolioReview", "AssetAllocation", "PerformanceAnalysis"):
@@ -325,7 +337,7 @@ def _intent_to_route_fallback(
 def _build_sse_kwargs(
     route: str,
     user_input: str,
-    session_id: str,
+    conversation_id: str,
     portfolio_id: int,
     multi_assets: list,
 ) -> tuple[str, dict]:
@@ -333,20 +345,20 @@ def _build_sse_kwargs(
     if route == "position_single":
         return "_stream_position_decision", {
             "user_input": user_input,
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "portfolio_id": portfolio_id,
         }
     if route == "position_multi":
         return "_stream_multi_asset", {
             "user_input": user_input,
             "multi_assets": multi_assets,
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "portfolio_id": portfolio_id,
         }
     if route == "portfolio":
         return "_stream_portfolio_intent", {
             "user_input": user_input,
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "portfolio_id": portfolio_id,
         }
     if route == "clarify":
@@ -357,7 +369,7 @@ def _build_sse_kwargs(
     # general / 兜底
     return "_stream_general_chat", {
         "user_input": user_input,
-        "session_id": session_id,
+        "conversation_id": conversation_id,
     }
 
 

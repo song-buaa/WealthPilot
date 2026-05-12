@@ -96,7 +96,7 @@ class UserProfile:
 @dataclass
 class ExecutionContext:
     """执行上下文（PRD §2.2），由 ContextManager 生成，注入 Orchestrator"""
-    session_id: str
+    conversation_id: str
     turn_index: int
     intent_payload: IntentPayload
     inherited_fields: InheritedFields

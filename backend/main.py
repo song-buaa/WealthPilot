@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.state import startup
 from backend.api import portfolio, discipline, research, decision, tasks, profile, allocation
+from backend.api import conversations as conversations_api
 from backend.api import broker_sync as broker_sync_api
 from backend.api import action as action_api
 
@@ -112,6 +113,7 @@ app.include_router(decision.router,   prefix="/api/decision",   tags=["decision"
 app.include_router(tasks.router,      prefix="/api/tasks",      tags=["tasks"])
 app.include_router(profile.router,    prefix="/api/profile",    tags=["profile"])
 app.include_router(allocation.router, prefix="/api/allocation", tags=["allocation"])
+app.include_router(conversations_api.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(broker_sync_api.router, prefix="/api/broker-sync", tags=["broker-sync"])
 app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 

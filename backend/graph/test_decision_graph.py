@@ -96,7 +96,7 @@ class TestDecisionGraph(unittest.TestCase):
         _set_planner_response("position_single", "用户问理想汽车能不能买，标的明确")
         result = self.graph.invoke({
             "user_query": "理想汽车能买吗",
-            "session_id": "test-001",
+            "conversation_id": "test-001",
             "conversation_history": [],
         })
         self.assertEqual(result["route"], "position_single")
@@ -112,7 +112,7 @@ class TestDecisionGraph(unittest.TestCase):
         _set_planner_response("portfolio", "用户要看持仓")
         result = self.graph.invoke({
             "user_query": "帮我看看持仓",
-            "session_id": "test-002",
+            "conversation_id": "test-002",
             "conversation_history": [],
         })
         self.assertEqual(result["route"], "portfolio")
@@ -127,7 +127,7 @@ class TestDecisionGraph(unittest.TestCase):
         _set_planner_response("clarify", "标的不明确")
         result = self.graph.invoke({
             "user_query": "我想买一只股票",
-            "session_id": "test-003",
+            "conversation_id": "test-003",
             "conversation_history": [],
         })
         self.assertEqual(result["route"], "clarify")
@@ -142,7 +142,7 @@ class TestDecisionGraph(unittest.TestCase):
         # Planner 不会被调用（低置信度直接返回）
         result = self.graph.invoke({
             "user_query": "嗯",
-            "session_id": "test-004",
+            "conversation_id": "test-004",
             "conversation_history": [],
         })
         self.assertEqual(result["route"], "low_confidence")
@@ -159,7 +159,7 @@ class TestDecisionGraph(unittest.TestCase):
         _mock_llm_client.get_client.return_value.chat.completions.create.side_effect = Exception("timeout")
         result = self.graph.invoke({
             "user_query": "帮我看看持仓",
-            "session_id": "test-005",
+            "conversation_id": "test-005",
             "conversation_history": [],
         })
         self.assertEqual(result["route"], "portfolio")

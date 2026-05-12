@@ -281,13 +281,13 @@ export const researchV2Api = {
  */
 export async function* streamDecisionChat(
   message: string,
-  sessionId: string,
+  conversationId: string,
   signal?: AbortSignal
 ): AsyncGenerator<SSEEvent> {
   const res = await fetch(`${BASE}/decision/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, conversation_id: conversationId }),
     signal,
   })
   if (!res.ok || !res.body) {
@@ -331,10 +331,49 @@ function parseSSEEvent(raw: string): SSEEvent | null {
 }
 
 export const decisionApi = {
-  getExplain: (decisionId: string, sessionId: string) =>
-    request<ExplainData>(`/decision/explain/${decisionId}?session_id=${sessionId}`),
-  clearSession: (sessionId: string) =>
-    request<{ message: string }>(`/decision/session/${sessionId}`, { method: 'DELETE' }),
+  getExplain: (decisionId: string, conversationId: string) =>
+    request<ExplainData>(`/decision/explain/${decisionId}?conversation_id=${conversationId}`),
+  clearSession: (conversationId: string) =>
+    request<{ message: string }>(`/decision/conversation/${conversationId}`, { method: 'DELETE' }),
+}
+
+// ── Conversations API ────────────────────────────────────
+
+export interface Conversation {
+  id: string
+  title: string | null
+  portfolio_id: number | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationMessageDTO {
+  id: number
+  role: string
+  content: string
+  intent: string | null
+  asset: string | null
+  created_at: string
+}
+
+export const conversationsApi = {
+  list: () =>
+    request<Conversation[]>('/conversations'),
+  create: (portfolioId?: number) =>
+    request<Conversation>('/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ portfolio_id: portfolioId ?? null }),
+    }),
+  rename: (id: string, title: string) =>
+    request<Conversation>(`/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+  remove: (id: string) =>
+    request<{ message: string }>(`/conversations/${id}`, { method: 'DELETE' }),
+  getMessages: (id: string) =>
+    request<ConversationMessageDTO[]>(`/conversations/${id}/messages`),
 }
 
 // ── 投资行动 API ──────────────────────────────────────────

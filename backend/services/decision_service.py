@@ -30,24 +30,24 @@ from app.allocation.types import (
 )
 
 
-# ── 进程内 decision 缓存（{session_id: {decision_id: DecisionResult}}）────────
+# ── 进程内 decision 缓存（{conversation_id: {decision_id: DecisionResult}}）────────
 # 服务重启后清空是预期行为，无需持久化
 _DECISION_STORE: dict[str, dict[str, DecisionResult]] = {}
 
 # ── primary_intent 缓存（intent_engine 输出，decision_engine 不存储）───────────
-# key: session_id，value: 该 session 最近一次的 primary_intent 字符串
+# key: conversation_id，value: 该 session 最近一次的 primary_intent 字符串
 _PRIMARY_INTENT_CACHE: dict[str, str] = {}
 
 # ── AssetAllocation 意图的 sessionContext 缓存 ─────────────────────────────────
 _ALLOC_SESSION_CTX: dict[str, AllocationSessionContext] = {}
 
-# ── AssetAllocation ExplainData 缓存（{session_id:decision_id: dict}）──────────
+# ── AssetAllocation ExplainData 缓存（{conversation_id:decision_id: dict}）──────────
 _ALLOC_EXPLAIN_STORE: dict[str, dict] = {}
 
 
 # ── 多轮对话历史（持久化） ────────────────────────────────────────────────────
 
-def get_conversation_history(session_id: str, limit: int = 6) -> list[dict]:
+def get_conversation_history(conversation_id: str, limit: int = 6) -> list[dict]:
     """读取该 session 最近 limit 条记录，按 created_at 升序返回。"""
     from app.database import get_session as get_db_session
     from app.models import ConversationMessage
@@ -56,7 +56,7 @@ def get_conversation_history(session_id: str, limit: int = 6) -> list[dict]:
     try:
         rows = (
             db.query(ConversationMessage)
-            .filter(ConversationMessage.session_id == session_id)
+            .filter(ConversationMessage.conversation_id == conversation_id)
             .order_by(ConversationMessage.created_at.desc())
             .limit(limit)
             .all()
@@ -75,30 +75,187 @@ def get_conversation_history(session_id: str, limit: int = 6) -> list[dict]:
         db.close()
 
 
+def generate_conversation_title(first_message: str) -> str:
+    """用 LLM 根据首条消息生成简洁的中文标题（不超过 12 字）。
+    失败时 fallback 到前 20 字截断。
+    """
+    fallback = first_message[:20] if first_message else "新对话"
+    try:
+        from intent_engine._llm_client import get_client
+        client = get_client()
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": (
+                    "你是一个对话标题生成助手，根据用户的第一条消息，"
+                    "用不超过12个字生成一个简洁的中文标题，只返回标题文字，不加引号标点"
+                )},
+                {"role": "user", "content": first_message},
+            ],
+            max_tokens=30,
+            temperature=0,
+            timeout=5,
+        )
+        title = (resp.choices[0].message.content or "").strip()
+        return title if title else fallback
+    except Exception:
+        return fallback
+
+
+def _update_conversation_title_async(conversation_id: str, first_message: str) -> None:
+    """在后台线程中用 LLM 生成标题并写入 DB，不阻塞主流程。"""
+    import threading
+
+    def _worker():
+        title = generate_conversation_title(first_message)
+        from app.database import get_session as get_db_session
+        from app.models import Conversation
+        db = get_db_session()
+        try:
+            conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if conv:
+                conv.title = title
+                db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def save_conversation_turn(
-    session_id: str,
+    conversation_id: str,
     user_input: str,
     chat_answer: str,
     intent: str | None = None,
     asset: str | None = None,
 ) -> None:
-    """写入本轮的 user 消息和 assistant 消息，共两条记录。"""
+    """写入本轮的 user 消息和 assistant 消息，共两条记录。
+    同时确保 conversations 主表有对应记录（首条消息自动创建）。
+    """
+    from app.database import get_session as get_db_session
+    from app.models import Conversation, ConversationMessage
+
+    db = get_db_session()
+    try:
+        # 确保 conversations 主表有记录
+        conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if conv is None:
+            title = user_input[:20] if user_input else None
+            conv = Conversation(id=conversation_id, title=title)
+            db.add(conv)
+
+        # 首条消息判断：基于消息数量（而非 conv 是否存在）
+        # M3 流程下前端先创建空会话再发消息，conv 在发消息前就已存在
+        existing_msg_count = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conversation_id
+        ).count()
+        is_first_message = (existing_msg_count == 0)
+
+        from datetime import datetime
+        conv.updated_at = datetime.utcnow()
+        # 首条消息且 title 为空时，先写截断标题兜底
+        if is_first_message and not conv.title and user_input:
+            conv.title = user_input[:20]
+
+        db.add(ConversationMessage(
+            conversation_id=conversation_id, role="user", content=user_input,
+        ))
+        db.add(ConversationMessage(
+            conversation_id=conversation_id, role="assistant", content=chat_answer,
+            intent=intent, asset=asset,
+        ))
+        db.commit()
+
+        # 首条消息写入成功后，在后台异步用 LLM 生成更好的标题
+        if is_first_message and user_input:
+            _update_conversation_title_async(conversation_id, user_input)
+
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ── 会话上下文恢复（重启 / 切换会话后从 DB 重建 intent_engine 内存状态）────
+
+def restore_conversation_context(conversation_id: str) -> None:
+    """
+    从 DB 读取历史消息，重建 intent_engine context_manager 的内存状态。
+
+    调用时机：chat 请求到达时，若 _SESSIONS 中无该 conversation_id。
+    恢复内容：
+    - turn_index（基于 user 消息数量）
+    - conversation_history（最近 5 轮 Turn 摘要）
+    - inherited_fields.asset（最后一条含 asset 的 assistant 消息）
+    """
+    from intent_engine.context_manager import _SESSIONS, _SessionState, MAX_HISTORY_TURNS
+    from intent_engine.types import Turn, InheritedFields
+
+    # 已有状态，不重复恢复
+    if conversation_id in _SESSIONS:
+        return
+
     from app.database import get_session as get_db_session
     from app.models import ConversationMessage
 
     db = get_db_session()
     try:
-        db.add(ConversationMessage(
-            session_id=session_id, role="user", content=user_input,
-        ))
-        db.add(ConversationMessage(
-            session_id=session_id, role="assistant", content=chat_answer,
-            intent=intent, asset=asset,
-        ))
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+        rows = (
+            db.query(ConversationMessage)
+            .filter(ConversationMessage.conversation_id == conversation_id)
+            .order_by(ConversationMessage.created_at.asc())
+            .limit(20)  # 最多读 20 条（10 轮对话）
+            .all()
+        )
+        if not rows:
+            return  # 空会话，不需要恢复
+
+        # 按轮次配对：(user, assistant)
+        turns: list[Turn] = []
+        last_asset: str | None = None
+        last_intent: str | None = None
+        user_count = 0
+
+        for r in rows:
+            if r.role == "user":
+                user_count += 1
+                # 用 assistant 消息补全上一轮的 Turn
+                # 这里先记录 user 内容，等下一条 assistant 时配对
+            elif r.role == "assistant":
+                # 构建 Turn 摘要
+                summary = (r.content or "")[:100]
+                entities_snapshot: dict[str, str] = {}
+                if r.asset:
+                    entities_snapshot["asset"] = r.asset
+                    last_asset = r.asset
+                if r.intent:
+                    last_intent = r.intent
+
+                turns.append(Turn(
+                    turn_index=user_count,
+                    intent=r.intent or "Unknown",
+                    entities_snapshot=entities_snapshot,
+                    summary=summary,
+                ))
+
+        # 只保留最近 MAX_HISTORY_TURNS 轮
+        recent_turns = turns[-MAX_HISTORY_TURNS:]
+
+        # 构建 _SessionState
+        state = _SessionState(
+            turn_index=user_count,
+            conversation_history=recent_turns,
+        )
+
+        # 恢复 inherited_fields（最后的 asset）
+        if last_asset:
+            state.inherited_fields = InheritedFields(asset=last_asset)
+
+        _SESSIONS[conversation_id] = state
+
     finally:
         db.close()
 
@@ -110,26 +267,53 @@ VAGUE_ASSET_WORDS = [
     "这只", "那只", "某只", "一只", "一个", "这个", "那个",
 ]
 
-# 进程内澄清上下文缓存 {session_id: {...}}
+# 进程内澄清上下文缓存 {conversation_id: {...}}
 _CLARIFICATION_CTX: dict[str, dict] = {}
 
 
-def _is_asset_clear(asset: str | None, positions: list) -> bool:
-    """判断意图识别出的标的是否明确可匹配到持仓。"""
+def _is_asset_unambiguous(asset: str | None) -> bool:
+    """判断标的名称是否明确(无歧义),不涉及持仓。
+
+    仅检查用户说的标的名称是否清晰可辨——"小米集团"明确,"那只股票"不明确。
+    """
     if not asset:
         return False
     stripped = asset.strip()
-    if len(stripped) <= 3 and any(vague == stripped for vague in VAGUE_ASSET_WORDS):
+    if not stripped:
         return False
     if stripped in VAGUE_ASSET_WORDS:
         return False
-    asset_lower = stripped.lower()
+    # 检查是否包含模糊词作为子串(如"那只股票"含"那只")
+    if any(vague in stripped for vague in VAGUE_ASSET_WORDS):
+        return False
+    return True
+
+
+def _is_asset_in_portfolio(asset: str | None, positions: list) -> bool:
+    """判断标的是否在用户当前持仓中。
+
+    匹配规则(沿用原逻辑):
+    - asset 与 position.name 双向 substring 匹配
+    - asset 与 position.ticker 精确或 substring 匹配
+    """
+    if not asset:
+        return False
+    asset_lower = asset.strip().lower()
     for p in positions:
         if asset_lower in p.name.lower() or p.name.lower() in asset_lower:
             return True
         if p.ticker and (asset_lower == p.ticker.lower() or asset_lower in p.ticker.lower()):
             return True
     return False
+
+
+def _is_asset_clear(asset: str | None, positions: list) -> bool:
+    """已废弃。保留向后兼容,内部调用 _is_asset_unambiguous + _is_asset_in_portfolio。
+
+    新代码应直接使用 _is_asset_unambiguous() 和 _is_asset_in_portfolio()。
+    语义偷换 bug 见 M8.0 诊断报告。
+    """
+    return _is_asset_unambiguous(asset) and _is_asset_in_portfolio(asset, positions)
 
 
 def _detect_feature_type(user_input: str) -> str:
@@ -208,12 +392,12 @@ def _build_candidates_payload(candidates: list, feature_type: str) -> list[dict]
     return result
 
 
-def _try_resolve_clarification(session_id: str, user_input: str, positions: list) -> str | None:
+def _try_resolve_clarification(conversation_id: str, user_input: str, positions: list) -> str | None:
     """
     尝试从澄清上下文中解析用户的回复。
     如果用户输入能匹配到候选标的之一，返回合并后的问题；否则返回 None。
     """
-    ctx = _CLARIFICATION_CTX.get(session_id)
+    ctx = _CLARIFICATION_CTX.get(conversation_id)
     if not ctx or not ctx.get("pending_clarification"):
         return None
 
@@ -236,7 +420,7 @@ def _try_resolve_clarification(session_id: str, user_input: str, positions: list
 
     if matched_asset:
         original = ctx.get("original_question", user_input)
-        _CLARIFICATION_CTX.pop(session_id, None)
+        _CLARIFICATION_CTX.pop(conversation_id, None)
         return f"{original}（标的：{matched_asset}）"
 
     return None
@@ -298,7 +482,7 @@ def _calc_asset_breakdown(positions: list) -> dict:
 
 async def run_chat_stream(
     message: str,
-    session_id: str,
+    conversation_id: str,
     portfolio_id: int,
 ) -> AsyncGenerator[str, None]:
     """
@@ -306,37 +490,37 @@ async def run_chat_stream(
     委托给 v3 PEER Agents 路径实现。
     """
     from backend.services.decision_service_v3 import run_chat_stream_v3
-    async for event in run_chat_stream_v3(message, session_id, portfolio_id):
+    async for event in run_chat_stream_v3(message, conversation_id, portfolio_id):
         yield event
 
 
-def get_decision_explain(session_id: str, decision_id: str) -> Optional[dict]:
+def get_decision_explain(conversation_id: str, decision_id: str) -> Optional[dict]:
     """获取某次决策的完整 DecisionResult（序列化为 dict）"""
-    alloc_key = f"{session_id}:{decision_id}"
+    alloc_key = f"{conversation_id}:{decision_id}"
     alloc_explain = _ALLOC_EXPLAIN_STORE.get(alloc_key)
     if alloc_explain is not None:
         return alloc_explain
 
-    session_store = _DECISION_STORE.get(session_id, {})
+    session_store = _DECISION_STORE.get(conversation_id, {})
     result = session_store.get(decision_id)
     if result is None:
         return None
     d = _serialize_decision_result(result)
-    primary_intent = _PRIMARY_INTENT_CACHE.get(session_id)
+    primary_intent = _PRIMARY_INTENT_CACHE.get(conversation_id)
     if primary_intent and "intent" in d:
         d["intent"]["primary_intent"] = primary_intent
     return d
 
 
-def clear_session(session_id: str) -> None:
+def clear_session(conversation_id: str) -> None:
     """清除服务端会话（对话重置时调用）"""
-    _DECISION_STORE.pop(session_id, None)
-    _PRIMARY_INTENT_CACHE.pop(session_id, None)
-    _ALLOC_SESSION_CTX.pop(session_id, None)
-    keys_to_remove = [k for k in _ALLOC_EXPLAIN_STORE if k.startswith(f"{session_id}:")]
+    _DECISION_STORE.pop(conversation_id, None)
+    _PRIMARY_INTENT_CACHE.pop(conversation_id, None)
+    _ALLOC_SESSION_CTX.pop(conversation_id, None)
+    keys_to_remove = [k for k in _ALLOC_EXPLAIN_STORE if k.startswith(f"{conversation_id}:")]
     for k in keys_to_remove:
         _ALLOC_EXPLAIN_STORE.pop(k, None)
-    context_manager.clear_session(session_id)
+    context_manager.clear_session(conversation_id)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -376,10 +560,10 @@ def _extract_conclusion(result: DecisionResult) -> tuple[Optional[str], Optional
     return None, None
 
 
-def _store_result(session_id: str, result: DecisionResult) -> None:
-    if session_id not in _DECISION_STORE:
-        _DECISION_STORE[session_id] = {}
-    _DECISION_STORE[session_id][result.decision_id] = result
+def _store_result(conversation_id: str, result: DecisionResult) -> None:
+    if conversation_id not in _DECISION_STORE:
+        _DECISION_STORE[conversation_id] = {}
+    _DECISION_STORE[conversation_id][result.decision_id] = result
 
 
 def _serialize_target_position(ld, result) -> dict:

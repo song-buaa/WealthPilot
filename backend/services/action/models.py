@@ -57,7 +57,7 @@ class ActionDraft(Base):
 
     id = Column(String(36), primary_key=True, default=_uuid)
     user_id = Column(String(36), nullable=True)  # 单用户版暂为 NULL
-    conversation_id = Column(String(36), nullable=True)  # 关联的对话 session_id
+    conversation_id = Column(String(36), nullable=True)  # 关联的对话 conversation_id
 
     decision_summary = Column(Text, nullable=True)  # AI 生成的决策摘要
     payload = Column(Text, nullable=True)  # JSON: 完整的行动清单结构化数据

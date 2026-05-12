@@ -18,6 +18,33 @@ logger = logging.getLogger(__name__)
 
 AV_BASE = "https://www.alphavantage.co/query"
 
+# ── 多 Key 轮换(v3.4) ────────────────────────────────────────
+import itertools as _itertools
+
+def _load_av_keys() -> list[str]:
+    """从环境变量加载所有 AV API Key。
+
+    优先读 AV_API_KEY_1 ~ AV_API_KEY_4(多 key 轮换),
+    fallback 到旧的 ALPHA_VANTAGE_API_KEY(单 key 兼容)。
+    """
+    keys = []
+    for i in range(1, 5):
+        k = os.environ.get(f"AV_API_KEY_{i}")
+        if k:
+            keys.append(k)
+    if not keys:
+        legacy = os.environ.get("ALPHA_VANTAGE_API_KEY")
+        if legacy:
+            keys.append(legacy)
+    return keys or ["demo"]
+
+_AV_KEYS = _load_av_keys()
+_av_key_cycle = _itertools.cycle(_AV_KEYS)
+
+def get_next_av_key() -> str:
+    """Round-Robin 获取下一个 AV API Key。"""
+    return next(_av_key_cycle)
+
 
 def _wp_symbol_to_av_ticker(wp_symbol: str) -> Optional[str]:
     """LI:US → LI, 0700:HK → None（AV 无港股）。兼容旧格式 LI.US。"""
@@ -74,7 +101,7 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
     if cached is not None:
         return cached
 
-    api_key = os.environ.get("ALPHA_VANTAGE_API_KEY", "demo")
+    api_key = get_next_av_key()
 
     # --- OVERVIEW ---
     overview = _av_get("OVERVIEW", ticker, api_key)

@@ -5,6 +5,45 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.4.0] - 2026-05-12
+
+本版本把投资行动模块从 Mock 券商升级为真实 Tiger 老虎证券 API,
+同时完成 Symbol 标准化(全系统统一 TICKER:MARKET 格式)和美股新建仓评估能力。
+v3.4 是 WealthPilot 第一次实现真实券商下单。
+
+### Added
+- TigerBrokerAdapter 实现 BrokerAdapter 协议(美股+港股 LIMIT 单)
+- 凭证管理 CredentialProvider 抽象层 + KeyringCredentialProvider
+- Broker 工厂函数 get_broker_adapter(mock/tiger.paper/tiger.live 三模式)
+- paper-only / market 白名单 / outside_rth=False / MARKET 单拒绝 4 个安全闸门
+- EXPIRED 二义性映射(rejected_keywords/expired_keywords/unknown_terminal)
+- not_found 指数退避重试 + OrphanOrderError(继承 ConnectionError)
+- 订单状态轮询 OrderPoller(3-5s 间隔,非终态订单自动同步)
+- 孤儿订单启动期扫描 scan_orphan_orders
+- audit_log 币种补全(fx_rate_to_cny / amount_cny_equivalent,业务层补充)
+- Symbol 标准化: 统一格式 TICKER:MARKET,港股 zfill(4),全系统 7 个模块对齐
+- 路由层 _is_asset_unambiguous + _is_asset_in_portfolio 拆分(修复 v3.3 路由 bug)
+- data_loader 美股无持仓加载(Alpha Vantage 24h 缓存 + 中文公司名映射表)
+- ExecutingAgent 新建仓分支(跳过 signal_engine,保留部分 rule_engine)
+- ExpressingAgent 新建仓 prompt 模板(_CHAT_FORMAT_NEW_ENTRY)
+- 投资纪律新建仓视图函数 build_new_entry_discipline_summary
+- Alpha Vantage 多 Key 轮换(4 key Round-Robin,100 次/天)
+- 前端: 订单等待态(15s/30s 超时提示) + 撤单按钮(二次确认) + 部分成交展示
+- CLI 凭证绑定工具 bind_tiger_credentials.py
+
+### Changed
+- OrderManager 通过 BROKER_MODE 环境变量切换 mock/tiger.paper/tiger.live
+- _is_asset_clear 标记 deprecated,内部调用两个新函数
+- Planner prompt 从单字段"标的是否明确"拆为"标的名称是否明确"+"标的是否在持仓中"
+- ConfirmOrderDialog toast 文案从硬编码"Mock"改为动态
+
+### Fixed
+- positions 表港股/美股 currency 字段错误存为 CNY,修复为原币种(HKD/USD)
+- v3.3 非持仓明确标的被路由到 clarify/general 兜底(M8.1 路由层拆函数修复)
+- 验证脚本 cleanup 盲撤用户手动挂单(M6 事故,改为只撤本脚本挂的单)
+
+---
+
 ## [3.3.0] - 2026-05-12
 
 本版本聚焦**模块层架构收敛**。主题一：将"资产配置"独立模块融合到投资决策入口，

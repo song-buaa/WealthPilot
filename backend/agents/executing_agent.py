@@ -111,6 +111,10 @@ class ExecutingAgent:
         单标决策：data_loader.load → pre_check → rule_engine.check → signal_engine.generate
 
         复用 v2.6 decision_flow._run_pipeline 步骤 2-5 的实现逻辑。
+
+        v3.4 M8.2: 新建仓分支——当 loaded.is_new_entry=True 时:
+        - 港股/未识别标的 → abort + 友好消息
+        - 美股 → 跳过 signal_engine,跳过 weight_mismatch,保留 rule_engine 部分校验
         """
         from decision_engine import data_loader, rule_engine, signal_engine, pre_check
         from decision_engine.types import IntentResult
@@ -177,6 +181,19 @@ class ExecutingAgent:
         out.skill_results["wp-fetch-research"] = {
             "items_count": len(loaded.research or []),
         }
+
+        # ── M8.2: 新建仓分支(港股拦截 / 未识别标的) ──────────────
+        if loaded.is_new_entry and loaded.market_not_supported_message:
+            out.mark_aborted(
+                reason="new_entry_market_not_supported",
+                chat_answer=loaded.market_not_supported_message,
+            )
+            return
+
+        # ── M8.2: 新建仓分支(美股新建仓评估) ─────────────────────
+        if loaded.is_new_entry:
+            self._execute_new_entry(out, loaded, asset_name, portfolio_id)
+            return
 
         # ── Step 3: 前置校验 ──
         try:
@@ -252,8 +269,9 @@ class ExecutingAgent:
             out.mark_failed(f"信号生成异常: {e}")
             return
 
-        # 仓位口径一致性检查
-        if loaded.target_position is not None:
+        # 仓位口径一致性检查(仅对真实持仓,虚拟持仓跳过)
+        if (loaded.target_position is not None
+                and not getattr(loaded.target_position, "is_virtual", False)):
             tp_weight = loaded.target_position.weight
             rule_weight = rule_result.current_weight
             if abs(tp_weight - rule_weight) > 1e-6:
@@ -341,6 +359,105 @@ class ExecutingAgent:
                     )
             except Exception as e:
                 logger.warning(f"[ExecutingAgent] 市场数据加载失败(不阻塞): {e}")
+
+    # ────────────────────────────────────────────────────────
+    # 新建仓路径（v3.4 M8.2）
+    # ────────────────────────────────────────────────────────
+
+    def _execute_new_entry(
+        self,
+        out: ExecutionOutput,
+        loaded,
+        asset_name: str,
+        portfolio_id: int,
+    ) -> None:
+        """美股新建仓评估分支。
+
+        与持仓分析的差异:
+        - 跳过 pre_check(持仓数据校验对新建仓无意义)
+        - 跳过 signal_engine(无历史持仓,无买卖信号)
+        - 跳过 weight_mismatch 检查(虚拟持仓 weight=0)
+        - 保留 rule_engine 的"组合熔断"部分(熔断时禁止新建仓)
+        - av_fundamentals 已由 data_loader M8.3 加载,直接传递给 ExpressingAgent
+
+        跳过项审计依据:
+        - signal_engine: 需要 K 线历史数据,新建仓标的无持仓无 K 线,signal 无意义
+        - pre_check: 校验"三要素齐全(画像+持仓+纪律)"对新建仓不适用(目标标的不在持仓)
+        - weight_mismatch: 虚拟持仓 weight=0 vs rule_engine 的 current_weight=0 恒等,无需校验
+        - M8.5 会接通完整的投资纪律 RAG 适配
+        """
+        logger.info(
+            "[ExecutingAgent] 新建仓分支: asset=%s av_fundamentals=%s",
+            asset_name,
+            "available" if loaded.av_fundamentals else "unavailable",
+        )
+
+        # 标记新建仓特有的 skill 调用
+        out.invoked_skills.append("m8-new-entry-analysis")
+
+        # 部分 rule_engine: 仅检查组合熔断(M8.2 简版)
+        # 完整纪律 RAG 适配留给 M8.5
+        out.invoked_skills.append("wp-check-discipline-partial")
+        try:
+            discipline_output = invoke_skill(
+                "wp-check-discipline",
+                asset_name=asset_name,
+                portfolio_id=portfolio_id,
+                action_type="BUY",
+            )
+            rule_result = discipline_output_to_rule_result(discipline_output)
+            out.rule_result = rule_result
+            out.skill_results["wp-check-discipline"] = {
+                "violation": rule_result.violation,
+                "warning": rule_result.warning,
+                "current_weight": 0,
+                "is_new_entry": True,
+            }
+        except Exception as e:
+            logger.warning("[ExecutingAgent] 新建仓 rule_engine 部分校验失败(不阻塞): %s", e)
+            out.rule_result = None
+
+        # signal_engine 显式跳过(不构造空 SignalResult,让下游知道"无 signal")
+        out.signal_result = None
+        out.skill_results["wp-generate-signals"] = {
+            "skipped": True,
+            "reason": "新建仓场景,无历史持仓数据,跳过信号生成",
+        }
+
+        # 市场数据: 对新建仓标的,AV fundamentals 已在 data_loader 加载
+        # 尝试补充实时行情(如果 infer_symbol 能推断出 wp_symbol)
+        if asset_name and loaded.target_position:
+            tp = loaded.target_position
+            ticker = getattr(tp, "ticker", "") or ""
+            if ticker:
+                try:
+                    import sys, os as _os
+                    _bd = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+                    if _bd not in sys.path:
+                        sys.path.insert(0, _bd)
+
+                    from services.market_data.av_fundamentals_service import fetch_fundamentals
+                    from services.market_data.schema import MarketDataBundle
+                    from datetime import datetime, timezone
+                    from utils.symbol import infer_symbol_from_ticker
+
+                    wp_symbol = infer_symbol_from_ticker(ticker, "USD")
+                    if wp_symbol:
+                        fundamentals = loaded.av_fundamentals or fetch_fundamentals(wp_symbol)
+                        out.market_data = MarketDataBundle(
+                            symbol=wp_symbol,
+                            quote=None,
+                            fundamentals=fundamentals,
+                            capital_flow=None,
+                            technical=None,
+                            fetched_at=datetime.now(timezone.utc),
+                        )
+                        out.skill_results["wp-fetch-fundamentals"] = {
+                            "available": fundamentals is not None,
+                            "is_new_entry": True,
+                        }
+                except Exception as e:
+                    logger.warning("[ExecutingAgent] 新建仓市场数据加载失败(不阻塞): %s", e)
 
     # ────────────────────────────────────────────────────────
     # 组合级路径

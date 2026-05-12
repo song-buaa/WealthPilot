@@ -412,7 +412,7 @@ export default function Dashboard() {
       {alerts.length > 0 && <AlertsSection alerts={alerts} />}
 
       {/* ── AI 综合分析报告 ── */}
-      <AIReportSection sessionId={crypto.randomUUID()} />
+      <AIReportSection conversationId={crypto.randomUUID()} />
     </div>
   )
 }
@@ -860,7 +860,7 @@ function MsgBanner({ msg, style }: { msg: string; style?: React.CSSProperties })
 }
 
 /** AI 综合分析报告区块 */
-function AIReportSection({ sessionId }: { sessionId: string }) {
+function AIReportSection({ conversationId }: { conversationId: string }) {
   const [report, setReport]     = useState<string | null>(null)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
@@ -875,7 +875,7 @@ function AIReportSection({ sessionId }: { sessionId: string }) {
     let text = ''
 
     try {
-      for await (const evt of streamDecisionChat(QUERY, sessionId, abortRef.current.signal)) {
+      for await (const evt of streamDecisionChat(QUERY, conversationId, abortRef.current.signal)) {
         if (evt.type === 'text') {
           text += (evt.data.delta as string) ?? ''
           setReport(text)
@@ -893,7 +893,7 @@ function AIReportSection({ sessionId }: { sessionId: string }) {
     } finally {
       setLoading(false)
       // 清理 session
-      decisionApi.clearSession(sessionId).catch(() => {})
+      decisionApi.clearSession(conversationId).catch(() => {})
     }
   }
 

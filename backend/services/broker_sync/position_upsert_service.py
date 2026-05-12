@@ -146,7 +146,7 @@ class PositionUpsertService:
                 name=snap.name,
                 asset_class=resolved_asset_class,
                 segment="投资",
-                currency="CNY",
+                currency=snap.currency,  # v3.4 修复: 存原币种(USD/HKD),不是 CNY
                 quantity=float(snap.quantity),
                 cost_price=float(snap.avg_cost),
                 current_price=float(snap.current_price),
@@ -174,7 +174,7 @@ class PositionUpsertService:
             existing.profit_loss_value = pnl_cny
             existing.profit_loss_rate = pnl_pct
             existing.profit_loss_original_value = pnl_original
-            existing.currency = "CNY"
+            existing.currency = snap.currency  # v3.4 修复: 存原币种(USD/HKD)
             # name / asset_class / segment 受保护,不覆盖
             # 但如果 asset_class 是非法值(如英文 'equity'),强制修正
             if existing.asset_class not in LEGAL_CN_CLASSES:

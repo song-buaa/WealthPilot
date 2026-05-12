@@ -77,7 +77,7 @@ class EngineResult:
 
 def run(
     user_input: str,
-    session_id: str,
+    conversation_id: str,
     user_id: str = "default",
     portfolio_id: Optional[int] = None,
 ) -> EngineResult:
@@ -85,10 +85,10 @@ def run(
     意图体系完整执行流程（PRD §1.2 整体数据流）。
 
     Args:
-        user_input:   用户自然语言输入
-        session_id:   会话唯一标识（多轮对话使用同一 session_id）
-        user_id:      用户 ID（预留，目前未使用）
-        portfolio_id: 用户组合 ID（传入 SubtaskRunner 的数据加载）
+        user_input:      用户自然语言输入
+        conversation_id: 会话唯一标识（多轮对话使用同一 conversation_id）
+        user_id:         用户 ID（预留，目前未使用）
+        portfolio_id:    用户组合 ID（传入 SubtaskRunner 的数据加载）
 
     Returns:
         EngineResult，包含意图、计划、各步骤结果和最终输出
@@ -129,7 +129,7 @@ def run(
 
     # ── Step 2: ContextManager（PRD §3.2）───────────────────────────────────
     ctx = context_manager.build_context(
-        session_id=session_id,
+        conversation_id=conversation_id,
         intent_payload=payload,
         portfolio_id=portfolio_id,
     )
@@ -158,7 +158,7 @@ def run(
         },
         summary=_summarize_output(final_output),
     )
-    context_manager.save_turn(session_id, turn)
+    context_manager.save_turn(conversation_id, turn)
 
     return EngineResult(
         intent_payload=payload,

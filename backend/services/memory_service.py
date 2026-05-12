@@ -11,13 +11,13 @@ from typing import Optional
 
 def get_decision_history(
     asset_name: str = "",
-    session_id: str = "",
+    conversation_id: str = "",
     limit: int = 5,
 ) -> list[dict]:
     """
     查询历史决策记录。
     - 按标的名称查：asset_name="茅台"
-    - 按 session 查：session_id="xxx"
+    - 按 session 查：conversation_id="xxx"
     - 两者都传：AND 条件
     """
     from app.database import get_session
@@ -31,9 +31,9 @@ def get_decision_history(
             query = query.filter(
                 DecisionHistory.asset_name.contains(asset_name)
             )
-        if session_id:
+        if conversation_id:
             query = query.filter(
-                DecisionHistory.session_id == session_id
+                DecisionHistory.conversation_id == conversation_id
             )
         records = query.order_by(desc(DecisionHistory.created_at)) \
                        .limit(limit).all()

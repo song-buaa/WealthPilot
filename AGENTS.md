@@ -25,8 +25,8 @@ WealthPilot v3.2 是 Multi-Agent + Skills 协议架构，参考蚂蚁 agentUnive
 | Agent | 职责 | 关键代码 |
 |-------|------|---------|
 | PlanningAgent | 意图识别 + Skill 选择 + 路由（position_single / position_multi / portfolio / general） | `backend/agents/planning_agent.py` |
-| ExecutingAgent | 数据加载（持仓/纪律/投研/市场行情）+ 信号生成 + 市场数据多源 fallback（Futu/AV/Tiger） | `backend/agents/executing_agent.py` |
-| ExpressingAgent | LLM 流式输出（唯一 AsyncGenerator）+ actionable 硬规则判断（决定"生成行动清单"按钮是否出现） | `backend/agents/expressing_agent.py` |
+| ExecutingAgent | 数据加载（持仓/纪律/投研/市场行情）+ 信号生成 + 市场数据多源 fallback（Futu/AV/Tiger）+ 新建仓分支（v3.4 M8,target_position=None+买入意图） | `backend/agents/executing_agent.py` |
+| ExpressingAgent | LLM 流式输出（唯一 AsyncGenerator）+ actionable 硬规则判断 + 新建仓 prompt 模板（v3.4 M8,_CHAT_FORMAT_NEW_ENTRY） | `backend/agents/expressing_agent.py` |
 | ReviewingAgent | 硬校验（必填字段/格式）+ LLM 评分（0-1）+ retry/fallback 决策 | `backend/agents/reviewing_agent.py` |
 
 数据契约：`backend/agents/contracts.py`（PlanningOutput / ExecutionOutput / ExpressionOutput / ReviewOutput）
@@ -86,7 +86,10 @@ AllocationIntent（组合级调整意图）
 | OrderManager | 草稿 CRUD + 策略暂停/恢复/作废 + 订单创建/提交/状态同步 | `backend/services/action/order_manager.py` |
 | RiskEngine | 下单前风控检查（3 条规则） | `backend/services/action/risk_engine.py` |
 | BrokerAdapter | 券商抽象接口（place_order / get_order_status） | `backend/services/action/brokers/base.py` |
+| TigerBrokerAdapter | Tiger 老虎证券（美股+港股 LIMIT 单,v3.4） | `backend/services/action/brokers/tiger.py` |
 | MockBrokerAdapter | Mock 券商（异步 5s 成交，用于开发/演示） | `backend/services/action/brokers/mock.py` |
+| CredentialProvider | 凭证管理抽象层（Keyring / InMemory,v3.4） | `backend/services/action/brokers/credentials.py` |
+| OrderPoller | 订单状态后台轮询（3-5s 间隔,v3.4） | `backend/services/action/order_poller.py` |
 | StateMachine | 状态流转校验（draft/strategy/order 三层独立） | `backend/services/action/state_machine.py` |
 | AuditLog | 审计日志（append-only，含 ip_address / user_agent） | `backend/services/action/models.py` |
 
@@ -239,18 +242,28 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 
 ## 演进路径
 
-### v3.2（当前版本）✅
+### v3.2 ✅
 - 投资行动模块完整实现（M1-M7）
 - v2.6 死代码清理 + Streamlit 代码删除
 - `USE_V3_AGENTS` feature flag 移除
 - 视觉对齐设计规范 + 信息架构重构
-- limit_price 防复发单元测试
 
-### v3.3（近期）
-- 接入 Tiger 真实券商（BrokerAdapter 实现）
-- 数据模型重构：AllocationIntent 通用化（支持 single_symbol / rebalance 等类型）
-- symbol 字段规范化（统一使用 ticker + display_name）
-- 集中度风控买入场景验证
+### v3.3 ✅
+- 资产配置模块融合到投资决策
+- 用户画像导航名简化
+- 组合级意图路由守门
+
+### v3.4（当前版本）✅
+- Tiger 老虎证券真实接入（TigerBrokerAdapter,美股+港股 LIMIT 单）
+- Symbol 标准化（全系统统一 TICKER:MARKET 格式）
+- 新建仓评估能力（美股,Alpha Vantage 数据驱动）
+- 凭证管理 keyring 集成
+- 订单状态轮询 + 孤儿订单扫描
+- 前端：订单等待态 + 撤单按钮 + 部分成交展示
+
+### v3.5（近期）
+- A 股交易接入（国金 QMT）
+- 港股新建仓评估（接入 Tiger 行情）
 - ReviewingAgent 真实重试（当前只发警告）
 - prompt 抽离到 `prompts/*.md`
 - 工程鲁棒性补强（LLM API 超时、数据库连接池）

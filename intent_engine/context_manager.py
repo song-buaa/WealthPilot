@@ -55,7 +55,7 @@ _SESSIONS: Dict[str, _SessionState] = {}
 # ── 公开接口 ──────────────────────────────────────────────────────────────────
 
 def build_context(
-    session_id: str,
+    conversation_id: str,
     intent_payload: IntentPayload,
     portfolio_id: Optional[int] = None,
 ) -> ExecutionContext:
@@ -63,14 +63,14 @@ def build_context(
     核心入口：根据本轮 IntentPayload 和历史状态，生成 ExecutionContext。
 
     Args:
-        session_id:      会话唯一标识
+        conversation_id: 会话唯一标识
         intent_payload:  本轮 IntentRecognizer 输出
         portfolio_id:    用户当前组合 ID（可为 None）
 
     Returns:
         ExecutionContext，供 Orchestrator 使用
     """
-    session = _get_or_create_session(session_id)
+    session = _get_or_create_session(conversation_id)
     session.turn_index += 1
 
     # 计算本轮继承字段
@@ -81,7 +81,7 @@ def build_context(
     session.last_intent = intent_payload
 
     ctx = ExecutionContext(
-        session_id=session_id,
+        conversation_id=conversation_id,
         turn_index=session.turn_index,
         intent_payload=intent_payload,
         inherited_fields=inherited,
@@ -91,35 +91,35 @@ def build_context(
     return ctx
 
 
-def save_turn(session_id: str, turn: Turn) -> None:
+def save_turn(conversation_id: str, turn: Turn) -> None:
     """
     每轮结束后，将本轮摘要写入会话历史（PRD §3.2 会话历史维护）。
     由 engine.py 在输出生成完成后调用。
     """
-    session = _get_or_create_session(session_id)
+    session = _get_or_create_session(conversation_id)
     session.conversation_history.append(turn)
     # 只保留最近 MAX_HISTORY_TURNS 轮
     if len(session.conversation_history) > MAX_HISTORY_TURNS:
         session.conversation_history = session.conversation_history[-MAX_HISTORY_TURNS:]
 
 
-def update_user_profile(session_id: str, profile: UserProfile) -> None:
+def update_user_profile(conversation_id: str, profile: UserProfile) -> None:
     """更新长期用户画像（从用户系统读取后调用）。"""
-    session = _get_or_create_session(session_id)
+    session = _get_or_create_session(conversation_id)
     session.user_profile = profile
 
 
-def clear_session(session_id: str) -> None:
+def clear_session(conversation_id: str) -> None:
     """清除会话（测试用）。"""
-    _SESSIONS.pop(session_id, None)
+    _SESSIONS.pop(conversation_id, None)
 
 
 # ── 内部逻辑 ──────────────────────────────────────────────────────────────────
 
-def _get_or_create_session(session_id: str) -> _SessionState:
-    if session_id not in _SESSIONS:
-        _SESSIONS[session_id] = _SessionState()
-    return _SESSIONS[session_id]
+def _get_or_create_session(conversation_id: str) -> _SessionState:
+    if conversation_id not in _SESSIONS:
+        _SESSIONS[conversation_id] = _SessionState()
+    return _SESSIONS[conversation_id]
 
 
 def _compute_inheritance(

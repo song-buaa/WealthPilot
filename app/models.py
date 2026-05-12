@@ -7,6 +7,7 @@ WealthPilot - 数据库模型定义
 
 import enum
 from datetime import datetime
+from uuid import uuid4
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 
@@ -293,6 +294,27 @@ class UserProfile(Base):
 
 
 # ──────────────────────────────────────────────
+# 会话管理
+# ──────────────────────────────────────────────
+
+class Conversation(Base):
+    """会话（多轮对话容器，类似 ChatGPT 的一个对话窗口）"""
+    __tablename__ = "conversations"
+
+    id           = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    title        = Column(String(200), nullable=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=True)
+    status       = Column(String(20), default="active")   # active / archived
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    messages = relationship(
+        "ConversationMessage", back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
+
+
+# ──────────────────────────────────────────────
 # 多轮对话历史（持久化存储）
 # ──────────────────────────────────────────────
 
@@ -300,12 +322,14 @@ class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
 
     id         = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String,  nullable=False, index=True)
+    conversation_id = Column(String(36), ForeignKey("conversations.id"), nullable=True, index=True)
     role       = Column(String,  nullable=False)   # "user" | "assistant"
     content    = Column(Text,    nullable=False)   # user原文 / assistant的chat_answer
     intent     = Column(String,  nullable=True)    # 仅assistant轮，如"PositionDecision"
     asset      = Column(String,  nullable=True)    # 仅assistant轮，如"理想汽车"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    conversation = relationship("Conversation", back_populates="messages")
 
 
 # ──────────────────────────────────────────────
@@ -317,7 +341,7 @@ class DecisionHistory(Base):
     __tablename__ = "decision_history"
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
-    session_id    = Column(String,  nullable=False, index=True)
+    conversation_id = Column(String,  nullable=False, index=True)
     decision_id   = Column(String,  nullable=False, unique=True)
     asset_name    = Column(String,  nullable=True,  index=True)
     intent_type   = Column(String,  nullable=False)

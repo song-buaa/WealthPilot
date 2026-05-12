@@ -30,7 +30,7 @@ def _sse(event_type: str, data: dict) -> str:
 
 async def run_chat_stream_v3(
     user_input: str,
-    session_id: str,
+    conversation_id: str,
     portfolio_id: int = 1,
     conversation_history: Optional[list[dict]] = None,
 ) -> AsyncGenerator[str, None]:
@@ -47,13 +47,20 @@ async def run_chat_stream_v3(
             try:
                 from backend.services.decision_service import get_conversation_history
                 conversation_history = await asyncio.to_thread(
-                    get_conversation_history, session_id, 6,
+                    get_conversation_history, conversation_id, 6,
                 )
             except Exception as e:
                 logger.warning(f"[v3] Stage 0 加载 history 失败: {e}")
                 conversation_history = []
 
-        # ── Stage 0.5: 加载 all_positions + 多轮澄清解析（v2.6 兼容）──
+        # ── Stage 0.5a: 恢复 intent_engine 上下文（重启/切换会话后）──
+        try:
+            from backend.services.decision_service import restore_conversation_context
+            await asyncio.to_thread(restore_conversation_context, conversation_id)
+        except Exception as e:
+            logger.warning(f"[v3] Stage 0.5a restore_conversation_context 失败: {e}")
+
+        # ── Stage 0.5b: 加载 all_positions + 多轮澄清解析（v2.6 兼容）──
         all_positions = []
         try:
             from app.utils.position_aggregator import aggregate_investment_positions
@@ -73,7 +80,7 @@ async def run_chat_stream_v3(
 
             resolved_input = await asyncio.to_thread(
                 _try_resolve_clarification,
-                session_id, user_input, all_positions,
+                conversation_id, user_input, all_positions,
             )
 
             if resolved_input:
@@ -92,7 +99,7 @@ async def run_chat_stream_v3(
         planning = get_planning_agent()
         plan_out = await asyncio.to_thread(
             planning.run,
-            user_input, session_id, portfolio_id, conversation_history,
+            user_input, conversation_id, portfolio_id, conversation_history,
             all_positions,
         )
 
@@ -143,7 +150,7 @@ async def run_chat_stream_v3(
 
         if plan_out.route == "clarify":
             async for event in _handle_clarify(
-                plan_out, decision_id, user_input, session_id, portfolio_id,
+                plan_out, decision_id, user_input, conversation_id, portfolio_id,
             ):
                 yield event
             return
@@ -152,7 +159,7 @@ async def run_chat_stream_v3(
         if plan_out.route == "position_multi" and plan_out.multi_assets:
             async for event in _handle_position_multi(
                 plan_out, plan_out.multi_assets, user_input,
-                session_id, portfolio_id, decision_id,
+                conversation_id, portfolio_id, decision_id,
             ):
                 yield event
             return
@@ -183,7 +190,7 @@ async def run_chat_stream_v3(
                 abort_text = exec_out.abort_chat_answer or exec_out.abort_reason or ""
                 intent_dict = plan_out.intent if isinstance(plan_out.intent, dict) else {}
                 await asyncio.to_thread(
-                    save_conversation_turn, session_id, user_input, abort_text,
+                    save_conversation_turn, conversation_id, user_input, abort_text,
                     intent_dict.get("primary_intent", "Unknown"),
                     intent_dict.get("asset"),
                 )
@@ -249,7 +256,7 @@ async def run_chat_stream_v3(
 
         # ── Stage 5: 写入 store + 保存对话历史 + done 事件 ──
         await _write_stores_v3(
-            session_id, decision_id, plan_out, exec_out, expr_out,
+            conversation_id, decision_id, plan_out, exec_out, expr_out,
             user_input=user_input,
         )
         done_payload = _build_done_payload(plan_out, expr_out, review_out, decision_id)
@@ -264,7 +271,7 @@ async def _handle_clarify(
     plan_out,
     decision_id: str,
     user_input: str,
-    session_id: str,
+    conversation_id: str,
     portfolio_id: int,
 ) -> AsyncGenerator[str, None]:
     """
@@ -309,7 +316,7 @@ async def _handle_clarify(
     reply = _build_clarification_reply(user_input, candidates, feature_type)
 
     # 5. 写入澄清上下文（关键！多轮澄清依赖这个）
-    _CLARIFICATION_CTX[session_id] = {
+    _CLARIFICATION_CTX[conversation_id] = {
         "original_question": user_input,
         "candidates": [p.name for p in candidates],
         "pending_clarification": True,
@@ -319,7 +326,7 @@ async def _handle_clarify(
     try:
         await asyncio.to_thread(
             save_conversation_turn,
-            session_id, user_input, reply, "PositionDecision", None,
+            conversation_id, user_input, reply, "PositionDecision", None,
         )
     except Exception as e:
         logger.debug(f"[v3] save_conversation_turn 失败（可忽略）: {e}")
@@ -337,7 +344,7 @@ async def _handle_position_multi(
     plan_out,
     multi_assets: list[str],
     user_input: str,
-    session_id: str,
+    conversation_id: str,
     portfolio_id: int,
     decision_id: str,
 ) -> AsyncGenerator[str, None]:
@@ -414,7 +421,7 @@ async def _handle_position_multi(
                 llm=llm_result,
             )
             results.append((asset_name, dr))
-            _DECISION_STORE.setdefault(session_id, {})[dr.decision_id] = dr
+            _DECISION_STORE.setdefault(conversation_id, {})[dr.decision_id] = dr
 
         except Exception as e:
             logger.warning(f"[v3] position_multi 分析 {asset_name} 失败: {e}")
@@ -498,7 +505,7 @@ async def _handle_position_multi(
     try:
         await asyncio.to_thread(
             save_conversation_turn,
-            session_id, user_input, answer,
+            conversation_id, user_input, answer,
             "PositionDecision", ", ".join(multi_assets),
         )
     except Exception as e:
@@ -514,7 +521,7 @@ async def _handle_position_multi(
 
 
 async def _write_stores_v3(
-    session_id: str,
+    conversation_id: str,
     decision_id: str,
     plan_out,
     exec_out,
@@ -537,7 +544,7 @@ async def _write_stores_v3(
         primary_intent = intent_dict.get("primary_intent", "")
 
         # _PRIMARY_INTENT_CACHE（D2 顺手修）
-        _PRIMARY_INTENT_CACHE[session_id] = primary_intent
+        _PRIMARY_INTENT_CACHE[conversation_id] = primary_intent
 
         route = plan_out.route
 
@@ -562,7 +569,7 @@ async def _write_stores_v3(
             )
             # 附加 market_data 供 explain 序列化时反算持仓股数
             dr._market_data = getattr(exec_out, "market_data", None)
-            _DECISION_STORE.setdefault(session_id, {})[decision_id] = dr
+            _DECISION_STORE.setdefault(conversation_id, {})[decision_id] = dr
 
         # ── Portfolio 类 → _ALLOC_EXPLAIN_STORE ──
         elif route == "portfolio" and expr_out:
@@ -617,7 +624,7 @@ async def _write_stores_v3(
                 },
                 "portfolioResult": portfolio_result,
             }
-            _ALLOC_EXPLAIN_STORE[f"{session_id}:{decision_id}"] = explain_data
+            _ALLOC_EXPLAIN_STORE[f"{conversation_id}:{decision_id}"] = explain_data
 
         # ── R2 修复：保存对话历史 ──
         chat_answer = getattr(expr_out, "chat_answer", "") if expr_out else ""
@@ -627,7 +634,7 @@ async def _write_stores_v3(
         try:
             await asyncio.to_thread(
                 save_conversation_turn,
-                session_id, user_input, chat_answer,
+                conversation_id, user_input, chat_answer,
                 primary_intent, asset,
             )
         except Exception as e:

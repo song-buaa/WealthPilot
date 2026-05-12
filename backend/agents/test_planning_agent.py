@@ -15,7 +15,7 @@ def test_planning_agent_position_single():
     agent = get_planning_agent()
     out = agent.run(
         user_query="茅台还能拿吗",
-        session_id="test_session_001",
+        conversation_id="test_session_001",
         portfolio_id=1,
         conversation_history=[],
     )
@@ -44,7 +44,7 @@ def test_planning_agent_general_chat():
     agent = get_planning_agent()
     out = agent.run(
         user_query="什么是夏普比率？",
-        session_id="test_session_002",
+        conversation_id="test_session_002",
     )
 
     print(f"   route: {out.route}")
@@ -59,7 +59,7 @@ def test_planning_agent_portfolio():
     agent = get_planning_agent()
     out = agent.run(
         user_query="我的组合现在健康吗？",
-        session_id="test_session_003",
+        conversation_id="test_session_003",
     )
 
     print(f"   route: {out.route}")
@@ -95,7 +95,7 @@ def test_planning_agent_a2a_alignment():
     from backend.agents.contracts import AgentTaskStatus
 
     agent = get_planning_agent()
-    out = agent.run(user_query="测试", session_id="test_a2a")
+    out = agent.run(user_query="测试", conversation_id="test_a2a")
 
     assert out.task_id and out.task_id.startswith("task_")
     assert out.status in (AgentTaskStatus.COMPLETED, AgentTaskStatus.FAILED)
@@ -160,7 +160,7 @@ def test_planning_agent_with_edge_case():
     agent = get_planning_agent()
     out = agent.run(
         user_query="美联储加息对我组合有什么影响",
-        session_id="test_edge_macro",
+        conversation_id="test_edge_macro",
     )
 
     print(f"   route: {out.route}")

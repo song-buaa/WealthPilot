@@ -241,7 +241,7 @@ class PlanningAgent:
         agent = PlanningAgent()
         plan_out = agent.run(
             user_query="茅台还能拿吗",
-            session_id="xxx",
+            conversation_id="xxx",
             portfolio_id=1,
             conversation_history=[],
         )
@@ -254,7 +254,7 @@ class PlanningAgent:
     def run(
         self,
         user_query: str,
-        session_id: str = "",
+        conversation_id: str = "",
         portfolio_id: int = 1,
         conversation_history: Optional[list[dict]] = None,
         all_positions: Optional[list] = None,
@@ -274,7 +274,7 @@ class PlanningAgent:
         try:
             raw_result = self._invoke_orchestrator(
                 user_query=user_query,
-                session_id=session_id,
+                conversation_id=conversation_id,
                 portfolio_id=portfolio_id,
                 conversation_history=conversation_history or [],
                 all_positions=all_positions,
@@ -334,7 +334,7 @@ class PlanningAgent:
     def _invoke_orchestrator(
         self,
         user_query: str,
-        session_id: str,
+        conversation_id: str,
         portfolio_id: int,
         conversation_history: list[dict],
         all_positions: Optional[list] = None,
@@ -349,7 +349,7 @@ class PlanningAgent:
 
         initial_state = {
             "user_query": user_query,
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "conversation_history": conversation_history or [],
             "portfolio_id": portfolio_id,
             "intent": "",
@@ -374,7 +374,7 @@ class PlanningAgent:
             "sse_kwargs": {},
         }
 
-        config = {"configurable": {"thread_id": session_id}}
+        config = {"configurable": {"thread_id": conversation_id}}
         result_state = decision_graph.invoke(initial_state, config)
 
         return {

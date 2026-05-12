@@ -10,7 +10,7 @@ Phase 1 实现（工程PRD §7 Phase 1）：
 
 主入口：
     from intent_engine.engine import run
-    result = run("理想汽车要不要卖？", session_id="s1")
+    result = run("理想汽车要不要卖？", conversation_id="s1")
 """
 from .engine import EngineResult, run
 

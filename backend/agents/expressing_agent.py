@@ -140,6 +140,161 @@ def _resolve_intent_type(planning_output: PlanningOutput) -> str:
 
 
 # ════════════════════════════════════════════════════════════
+# v3.4 M8.4 新建仓 prompt 模板
+# ════════════════════════════════════════════════════════════
+
+_NEW_ENTRY_SYSTEM_PROMPT = """你是 WealthPilot 投资分析助手。用户正在评估一个**尚未持有**的标的，考虑是否建仓。
+请基于提供的基本面数据给出专业、客观的新建仓评估。
+
+重要规则:
+- 不要展示"当前仓位"或"持仓盈亏"——用户尚未建仓
+- 不要承诺收益,只提供分析
+- 如果纪律约束已阻止(如组合熔断),明确拒绝并说明原因
+- 输出使用 Markdown 格式"""
+
+_CHAT_FORMAT_NEW_ENTRY = """【标的信息】
+- 标的: {asset_name} ({ticker})
+
+【基本面数据】
+- PE (TTM): {pe_ttm}
+- PB: {pb}
+- EPS (TTM): {eps_ttm}
+- 52 周区间: {low_52w} - {high_52w}
+- 分析师目标价: {analyst_target}
+- 分析师评级: {analyst_ratings}
+- 营收增速(YoY): {revenue_yoy}
+- 净利增速(YoY): {net_income_yoy}
+- ROE: {roe}
+- 毛利率: {gross_margin}
+
+【用户组合上下文】
+- 总资产: {total_assets}
+
+【纪律约束】
+{rule_summary}
+
+【任务】
+请按以下结构输出新建仓评估(Markdown 格式):
+
+## 建仓建议
+核心结论一句话: 是否建议建仓 / 建议谨慎观察 / 不建议建仓
+
+## 基本面解读
+2-3 句概括估值水平(PE/PB/EPS) + 52 周价格位置 + 成长性(营收/净利增速)
+
+## 建仓价区间
+基于当前估值和 52 周区间,给出"理想建仓价"和"可接受建仓价"区间
+
+## 仓位建议
+建议首次建仓占总资产的百分比(一般建议 5-10%,首次建仓不超过 10%)
+
+## 风险提示
+1-2 句该标的的主要风险"""
+
+
+def _fmt(val, prefix="", suffix="", default="数据暂缺"):
+    """格式化可能为 None 的数值。"""
+    if val is None:
+        return default
+    if isinstance(val, float):
+        return f"{prefix}{val:.2f}{suffix}"
+    return f"{prefix}{val}{suffix}"
+
+
+def _fmt_pct(val, default="数据暂缺"):
+    if val is None:
+        return default
+    return f"{val:.1f}%"
+
+
+def _build_new_entry_payload(
+    asset_name: str,
+    ticker: str,
+    av_data,
+    total_assets: float,
+    rule_result,
+    full_discipline_rules: dict | None = None,
+) -> dict:
+    """构造新建仓 prompt payload,鲁棒处理 None 字段。
+
+    不包含任何持仓字段(weight/market_value/profit_loss),
+    避免 LLM 被误导生成"当前仓位"话术。
+
+    v3.4 M8.5: rule_summary 从简版升级为完整纪律摘要。
+    """
+    # AV fundamentals 字段提取
+    pe = getattr(av_data, "pe_ttm", None) if av_data else None
+    eps = getattr(av_data, "eps_ttm", None) if av_data else None
+    high_52 = getattr(av_data, "high_52w", None) if av_data else None
+    low_52 = getattr(av_data, "low_52w", None) if av_data else None
+    roe = getattr(av_data, "roe", None) if av_data else None
+    gm = getattr(av_data, "gross_margin", None) if av_data else None
+    rev_yoy = getattr(av_data, "revenue_yoy", None) if av_data else None
+    ni_yoy = getattr(av_data, "net_income_yoy", None) if av_data else None
+
+    # 分析师数据
+    analyst = getattr(av_data, "analyst", None) if av_data else None
+    target_price = getattr(analyst, "target_price_avg", None) if analyst else None
+    consensus = getattr(analyst, "consensus", None) if analyst else None
+
+    ratings_str = "暂无数据"
+    if analyst:
+        parts = []
+        for label, field_name in [
+            ("强买", "strong_buy"), ("买入", "buy"), ("持有", "hold"),
+            ("卖出", "sell"), ("强卖", "strong_sell"),
+        ]:
+            v = getattr(analyst, field_name, None)
+            if v is not None:
+                parts.append(f"{label}:{v}")
+        if parts:
+            ratings_str = " / ".join(parts)
+            if consensus:
+                ratings_str += f" (共识: {consensus})"
+
+    # PB: AV OVERVIEW 没有直接的 PB 字段,用 market_cap / book_value 计算(如有)
+    # M8.4 简化: 如果 av_data 没有 pb, 用 "数据暂缺"
+    pb = getattr(av_data, "pb", None) if av_data else None
+    # AV 的 PriceToBookRatio 在 OVERVIEW 里
+    if pb is None and av_data:
+        pb = getattr(av_data, "peg_ratio", None)  # fallback: 用 PEG 代替 PB 显示
+
+    # M8.5: 完整纪律摘要(替代 M8.4 简版)
+    if full_discipline_rules:
+        from app.discipline.new_entry_view import build_new_entry_discipline_summary
+        rule_summary = build_new_entry_discipline_summary(full_discipline_rules)
+    else:
+        rule_summary = "【适用纪律(新建仓场景)】\n- 纪律配置暂缺"
+
+    # 追加 rule_engine 实际校验结果(如有 blocker)
+    if rule_result:
+        violation = getattr(rule_result, "violation", False) if not isinstance(rule_result, dict) else rule_result.get("violation", False)
+        warning = getattr(rule_result, "warning", False) if not isinstance(rule_result, dict) else rule_result.get("warning", False)
+        if violation:
+            rule_summary += "\n\n⛔ 硬约束触发: 纪律校验存在违规,建议暂缓建仓"
+        elif warning:
+            rule_summary += "\n\n⚠️ 纪律校验存在警告,建议谨慎评估"
+
+    return {
+        "asset_name": asset_name,
+        "ticker": ticker,
+        "pe_ttm": _fmt(pe),
+        "pb": _fmt(pb),
+        "eps_ttm": _fmt(eps, prefix="$"),
+        "high_52w": _fmt(high_52, prefix="$"),
+        "low_52w": _fmt(low_52, prefix="$"),
+        "analyst_target": _fmt(target_price, prefix="$"),
+        "analyst_ratings": ratings_str,
+        "revenue_yoy": _fmt_pct(rev_yoy),
+        "net_income_yoy": _fmt_pct(ni_yoy),
+        "roe": _fmt_pct(roe),
+        "gross_margin": _fmt_pct(gm),
+        "total_assets": f"¥{total_assets:,.0f}" if total_assets else "数据暂缺",
+        "rule_summary": rule_summary,
+    }
+
+
+# ════════════════════════════════════════════════════════════
 # ExpressingAgent 主类
 # ════════════════════════════════════════════════════════════
 
@@ -238,7 +393,11 @@ class ExpressingAgent:
         user_query: str,
         conversation_history: Optional[list[dict]],
     ) -> AsyncGenerator[str, None]:
-        """单标决策的表达：调用 llm_engine.reason()。"""
+        """单标决策的表达：调用 llm_engine.reason()。
+
+        v3.4 M8.4: 新建仓场景(is_new_entry=True)走独立 prompt 模板,
+        不复用持仓分析的 _CHAT_FORMAT_FIRST_TURN。
+        """
         from decision_engine import llm_engine
 
         if execution_output.loaded_data is None:
@@ -247,6 +406,15 @@ class ExpressingAgent:
             return
 
         loaded = execution_output.loaded_data
+
+        # M8.4: 新建仓分支
+        if getattr(loaded, "is_new_entry", False):
+            async for chunk in self._express_new_entry(
+                out, execution_output, user_query,
+            ):
+                yield chunk
+            return
+
         rule_result = execution_output.rule_result
         signal_result = execution_output.signal_result
 
@@ -289,6 +457,74 @@ class ExpressingAgent:
         out.mode = "fallback" if llm_result.is_fallback else "structured"
 
         async for chunk in _emit_text_chunks(out.chat_answer):
+            yield chunk
+
+    # ────────────────────────────────────────────────────────
+    # 新建仓路径（v3.4 M8.4）
+    # ────────────────────────────────────────────────────────
+
+    async def _express_new_entry(
+        self,
+        out: ExpressionOutput,
+        execution_output: ExecutionOutput,
+        user_query: str,
+    ) -> AsyncGenerator[str, None]:
+        """新建仓评估表达(M8.4)。
+
+        使用独立 prompt 模板,不复用持仓分析模板,避免输出
+        "当前仓位 0%"等误导话术。
+        """
+        loaded = execution_output.loaded_data
+        virtual_pos = loaded.target_position
+        av_data = loaded.av_fundamentals
+
+        payload = _build_new_entry_payload(
+            asset_name=getattr(virtual_pos, "name", "未知标的"),
+            ticker=getattr(virtual_pos, "ticker", ""),
+            av_data=av_data,
+            total_assets=loaded.total_assets,
+            rule_result=execution_output.rule_result,
+            full_discipline_rules=getattr(loaded, "full_discipline_rules", None),
+        )
+
+        prompt = _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload)
+
+        try:
+            from intent_engine._llm_client import get_client, MODEL_MAIN
+            client = get_client()
+            response = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model=MODEL_MAIN,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_query},
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000,
+                    timeout=30,
+                ),
+            )
+            chat_answer = response.choices[0].message.content or ""
+        except Exception as e:
+            logger.error("[ExpressingAgent] 新建仓 LLM 调用失败: %s", e)
+            out.mark_failed(f"LLM 调用失败: {e}")
+            yield "抱歉,新建仓分析过程出现异常。"
+            return
+
+        out.chat_answer = chat_answer
+        out.raw_text = chat_answer
+        out.mode = "structured"
+        out.prompt_template_id = "new_entry_evaluation"
+
+        # 强制 decisionType = buy_init
+        out.structured_payload = {
+            "decisionType": "buy_init",
+            "is_new_entry": True,
+            "asset_name": getattr(virtual_pos, "name", ""),
+            "ticker": getattr(virtual_pos, "ticker", ""),
+        }
+
+        async for chunk in _emit_text_chunks(chat_answer):
             yield chunk
 
     # ────────────────────────────────────────────────────────

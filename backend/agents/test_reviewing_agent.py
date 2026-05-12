@@ -103,7 +103,7 @@ def test_reviewing_agent_full_chain():
 
     async def _run():
         planning = get_planning_agent()
-        plan_out = planning.run("什么是夏普比率？", session_id="test_full_chain")
+        plan_out = planning.run("什么是夏普比率？", conversation_id="test_full_chain")
 
         if plan_out.route != "general":
             print(f"   Planner 路由到 {plan_out.route}（不是 general），跳过此测试")

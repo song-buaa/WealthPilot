@@ -1,0 +1,137 @@
+Traceback (most recent call last):
+  File "/Users/songbin/Documents/GitHub/WealthPilot/backend/scripts/v3_4/m1_3b_us_validation.py", line 318, in <module>
+    sell_order = scenario_3_us_sell_fill(adapter)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: scenario_3_us_sell_fill() missing 1 required positional argument: 'buy_order'
+======================================================================
+  WealthPilot v3.4 M1.3b -- 美股沙箱验证
+======================================================================
+  模拟盘: 21995161433588262, is_paper=True
+
+======================================================================
+  场景 1: 美股 LIMIT BUY 挂单 -> HELD (远价,不成交)
+======================================================================
+
+下单: QQQ BUY 1 @ $350 (远低于市价)
+
+place_order:
+  status:           submitted_to_broker
+  broker_order_id:  43213710163723264
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778593644048
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'place_order',
+ 'broker': 'tiger',
+ 'broker_order_id': '43213710163723264',
+ 'currency': 'USD',
+ 'limit_price': 350.0,
+ 'mapped_status': 'submitted_to_broker',
+ 'market': 'US',
+ 'order_type': 'LIMIT',
+ 'outside_rth': False,
+ 'quantity': 1,
+ 'reason': None,
+ 'side': 'BUY',
+ 'symbol': 'QQQ:US',
+ 'tiger_status': 'OrderStatus.NEW'}
+
+等待 3 秒后查单...
+
+get_order_status (3s):
+  status:           broker_pending
+  broker_order_id:  43213710163723264
+  filled_quantity:  0
+  avg_filled_price: None
+  timestamp:        1778593644000
+
+raw_response:
+{'account_id_masked': '***88262',
+ 'account_type': 'paper',
+ 'action': 'get_order_status',
+ 'broker': 'tiger',
+ 'broker_order_id': '43213710163723264',
+ 'mapped_status': 'broker_pending',
+ 'outside_rth': False,
+ 'reason': '',
+ 'tiger_status': 'OrderStatus.HELD'}
+
+验证: status == 'broker_pending' ? True
+
+======================================================================
+  场景 2: 美股 LIMIT BUY 成交全链路
+======================================================================
+  order.id: f2aacfbc-218d-410c-ad2c-8dae3a0958ba
+  order.status: submitted_to_broker
+  order.broker_order_id: 43213710876491776
+  [3s] status=filled filled=1
+
+  BUY 成交! avg_price=708.7000
+
+审计日志:
+  order_synced: fx_rate=-
+  strategy_auto_completed: fx_rate=-
+  order_submitted: fx_rate=6.9
+  order_created: fx_rate=-
+  draft_confirmed: fx_rate=-
+
+======================================================================
+  场景 4: 撤已成交单 -> False 不报错
+======================================================================
+  cancel_order 返回: True
+  验证: result == False ? False
+
+======================================================================
+  场景 5: not_found 补测
+======================================================================
+  已撤场景 1 订单: 43213710163723264
+
+  get_order_status(43213710163723264) — 已撤单,观察是否触发 not_found
+  未触发 not_found,返回 status=cancelled (耗时 0.4s)
+  记录: Tiger 可查到已撤订单的历史状态
+
+======================================================================
+  场景 6: 部分成交观察 (可选)
+======================================================================
+
+下单: QQQ BUY 10 @ $710 (接近市价,观察部分成交)
+  broker_order_id: 43213712485533696
+  [3s] status=filled filled=10
+
+  未观察到 partially_filled 状态
+  已撤单
+
+======================================================================
+  Cleanup: 撤销本脚本挂的单
+======================================================================
+  撤单: 43213710163723264
+  撤单: 43213710876491776
+  撤单: 43213712485533696
+  本脚本产生的 broker_order_id 列表 (3 笔):
+    43213710163723264
+    43213710876491776
+    43213712485533696
+
+======================================================================
+  M1.3b 执行结果汇总
+======================================================================
+  场景1: PASS
+  场景2: PASS
+  场景3: FAIL: scenario_3_us_sell_fill() missing 1 required positional argument: 'buy_order'
+  场景4: PASS
+  场景5: PASS
+  场景6: PASS
+=== 场景 3 补跑: 美股 SELL QQQ ===
+  order.status: submitted_to_broker
+  order.broker_order_id: 43213719582952448
+  [3s] status=filled filled=1
+  SELL 成交! avg_price=708.2399
+审计日志:
+  order_synced: fx_rate=-
+  strategy_auto_completed: fx_rate=-
+  order_submitted: fx_rate=6.9
+  order_created: fx_rate=-
+  draft_confirmed: fx_rate=-

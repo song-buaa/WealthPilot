@@ -15,7 +15,7 @@ def test_executing_agent_position_route():
     planning = get_planning_agent()
     plan_out = planning.run(
         user_query="广发纳指100ETF联接(QDII)C 还能拿吗",
-        session_id="test_exec_001",
+        conversation_id="test_exec_001",
         portfolio_id=1,
     )
 
@@ -57,7 +57,7 @@ def test_executing_agent_passthrough():
     planning = get_planning_agent()
     plan_out = planning.run(
         user_query="什么是夏普比率？",
-        session_id="test_exec_002",
+        conversation_id="test_exec_002",
     )
 
     if plan_out.route != "general":
@@ -79,7 +79,7 @@ def test_executing_agent_task_id_propagation():
     from backend.agents import get_planning_agent, get_executing_agent
 
     planning = get_planning_agent()
-    plan_out = planning.run(user_query="测试", session_id="test_exec_003")
+    plan_out = planning.run(user_query="测试", conversation_id="test_exec_003")
 
     executing = get_executing_agent()
     exec_out = executing.run(plan_out, user_query="测试")
@@ -97,7 +97,7 @@ def test_executing_agent_portfolio_route():
     planning = get_planning_agent()
     plan_out = planning.run(
         user_query="我的组合现在健康吗？",
-        session_id="test_exec_004",
+        conversation_id="test_exec_004",
     )
 
     if plan_out.route != "portfolio":
@@ -126,7 +126,7 @@ def test_executing_agent_with_real_planning_output():
     planning = get_planning_agent()
     plan_out = planning.run(
         user_query="我有一只股票最近涨了不少，该不该趁现在落袋为安？（标的：特斯拉）",
-        session_id="test_e2e_planning_executing",
+        conversation_id="test_e2e_planning_executing",
         portfolio_id=1,
         all_positions=all_positions,
     )

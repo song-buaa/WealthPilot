@@ -6,12 +6,15 @@
  * 注意：AppLayout 对此路由特殊处理 — height:100% overflow:hidden
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, Sparkles, SquarePen, User, Lightbulb } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, actionApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
 import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
 import ActionDraftCard from '@/components/ActionDraftCard'
+import ConversationSidebar from '@/components/layout/ConversationSidebar'
+import { useDecisionStore } from '@/store/decisionStore'
 
 // ── 消息类型 ─────────────────────────────────────────────────
 interface Message {
@@ -192,7 +195,12 @@ const INTENT_CATEGORIES = [
 
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Decision() {
-  const sessionId   = useRef<string>(crypto.randomUUID())
+  const {
+    conversations, activeConversationId, fetchConversations,
+    createConversation, switchConversation, updateConversationTitle,
+  } = useDecisionStore()
+
+  const [searchParams, setSearchParams] = useSearchParams()
   const messagesEnd = useRef<HTMLDivElement>(null)
   const abortRef    = useRef<AbortController | null>(null)
   const msgIdRef    = useRef<number>(0)
@@ -206,10 +214,58 @@ export default function Decision() {
   const [recSuggestions, setRecSuggestions] = useState<string[]>([])
   const [recMode, setRecMode] = useState<'personalized' | 'generic'>('generic')
 
+  // 分析面板折叠状态（localStorage 持久化，默认折叠）
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try { return localStorage.getItem('wp_analysis_panel_open') === 'true' } catch { return false }
+  })
+  function togglePanel() {
+    setPanelOpen(prev => {
+      const next = !prev
+      try { localStorage.setItem('wp_analysis_panel_open', String(next)) } catch {}
+      return next
+    })
+  }
+
   // v3.2 行动清单
   const [draftCardOpen, setDraftCardOpen] = useState(false)
   const [currentDraft, setCurrentDraft] = useState<ActionDraftResponse | null>(null)
   const [actionMsgId, setActionMsgId] = useState<number | null>(null)
+
+  // ── 初始化：加载会话列表 + URL 参数处理 ──
+  const initDone = useRef(false)
+  useEffect(() => {
+    if (initDone.current) return
+    initDone.current = true
+    const urlConvId = searchParams.get('conversation_id')
+    ;(async () => {
+      await fetchConversations()
+      const state = useDecisionStore.getState()
+
+      if (urlConvId) {
+        // 从 Action 页面跳转过来，激活指定会话
+        switchConversation(urlConvId)
+        setSearchParams({}, { replace: true })  // 清除 URL 参数
+        // 加载该会话的历史消息
+        try {
+          const history = await conversationsApi.getMessages(urlConvId)
+          const loaded: Message[] = history.map((m, i) => ({
+            id: i + 1,
+            role: m.role === 'assistant' ? 'ai' as const : 'user' as const,
+            content: m.content,
+            intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
+          }))
+          msgIdRef.current = loaded.length
+          setMessages(loaded)
+        } catch (e) {
+          console.error('[init] load messages from URL param failed:', e)
+        }
+      } else if (state.conversations.length === 0) {
+        await createConversation()
+      } else if (!state.activeConversationId) {
+        switchConversation(state.conversations[0].id)
+      }
+    })()
+  }, [])
 
   // B区：拉取持仓数据，生成个性化推荐
   useEffect(() => {
@@ -273,7 +329,7 @@ export default function Decision() {
     try {
       let lastDecisionId: string | null = null
 
-      for await (const ev of streamDecisionChat(text, sessionId.current, controller.signal)) {
+      for await (const ev of streamDecisionChat(text, activeConversationId!, controller.signal)) {
         if (ev.type === 'text') {
           const delta = (ev.data.delta as string) ?? ''
           updateAi(m => ({ ...m, content: m.content + delta }))
@@ -335,8 +391,8 @@ export default function Decision() {
       // 拉取完整 explain 数据供右侧面板展示
       if (lastDecisionId) {
         try {
-          console.log('[getExplain] calling with decisionId=', lastDecisionId, 'sessionId=', sessionId.current)
-          const explain = await decisionApi.getExplain(lastDecisionId, sessionId.current)
+          console.log('[getExplain] calling with decisionId=', lastDecisionId, 'conversationId=', activeConversationId)
+          const explain = await decisionApi.getExplain(lastDecisionId, activeConversationId!)
           console.log('[getExplain] success:', explain)
           setExplainData(explain)
         } catch (err) {
@@ -344,6 +400,12 @@ export default function Decision() {
         }
       } else {
         console.warn('[getExplain] skipped: lastDecisionId is null')
+      }
+
+      // 首条消息：先用截断标题立即显示，2 秒后刷新（等 LLM 生成完成）
+      if (messages.length === 0 && activeConversationId) {
+        updateConversationTitle(activeConversationId, text.slice(0, 20))
+        setTimeout(() => fetchConversations(), 2000)
       }
 
     } catch (e: unknown) {
@@ -354,16 +416,44 @@ export default function Decision() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming])
+  }, [input, streaming, activeConversationId, messages.length])
 
-  function handleClear() {
+  // ── 会话切换处理 ──
+  async function handleSwitchConversation(id: string) {
+    if (id === activeConversationId) return
     abortRef.current?.abort()
-    decisionApi.clearSession(sessionId.current).catch(() => {})
-    sessionId.current = crypto.randomUUID()
+    setStreaming(false)
+    switchConversation(id)
     setMessages([])
     setExplainData(null)
     setInput('')
+    // 从 API 加载历史消息
+    try {
+      const history = await conversationsApi.getMessages(id)
+      const loaded: Message[] = history.map((m, i) => ({
+        id: i + 1,
+        role: m.role === 'assistant' ? 'ai' as const : 'user' as const,
+        content: m.content,
+        intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
+      }))
+      msgIdRef.current = loaded.length
+      setMessages(loaded)
+    } catch (e) {
+      console.error('[switchConversation] load messages failed:', e)
+    }
+  }
+
+  async function handleNewConversation() {
+    abortRef.current?.abort()
     setStreaming(false)
+    const newId = await createConversation()
+    setMessages([])
+    setExplainData(null)
+    setInput('')
+  }
+
+  function handleClear() {
+    handleNewConversation()
   }
 
   // v3.2 行动清单生成
@@ -403,7 +493,7 @@ export default function Decision() {
       }
 
       const draft = await actionApi.generateDraft({
-        conversation_id: sessionId.current,
+        conversation_id: activeConversationId!,
         conversation_context: context,
         expressing_output: expressingOutput,
       })
@@ -457,10 +547,18 @@ export default function Decision() {
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
   }
 
+  // 无 activeConversationId 时不渲染（等初始化完成）
+  if (!activeConversationId) {
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}>加载中...</div>
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
-      {/* ── 左栏：对话区 ── */}
-      <div style={{ flex: '0 0 70%', minWidth: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #E5E7EB', overflow: 'hidden' }}>
+      {/* ── 会话侧边栏 ── */}
+      <ConversationSidebar onSwitch={handleSwitchConversation} onNew={handleNewConversation} />
+
+      {/* ── 中栏：对话区 ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #E5E7EB', overflow: 'hidden' }}>
         {/* 顶部标题 */}
         <div style={{ flexShrink: 0, padding: '18px 24px 14px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 12, background: '#1e3a5f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -470,14 +568,6 @@ export default function Decision() {
             <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>投资决策</div>
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>AI 辅助 · 纪律守护 · 多轮对话</div>
           </div>
-          {messages.length > 0 && (
-            <button
-              style={{ background: 'none', border: '1px solid #E5E7EB', borderRadius: 8, padding: '5px 10px', fontSize: 11, color: '#9CA3AF', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-              onClick={handleClear}
-            >
-              <SquarePen size={11} /> 新会话
-            </button>
-          )}
         </div>
 
         {/* 消息列表 */}
@@ -486,16 +576,40 @@ export default function Decision() {
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
               <div style={{ width: '100%', maxWidth: 600, padding: '16px 0 12px' }}>
 
-                {/* A区：图标 + 主标题 + 副标题 */}
+                {/* A区：欢迎 + 快捷入口 */}
                 <div style={{ textAlign: 'center', marginBottom: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
                     <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#3B82F6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <Sparkles size={22} color="white" />
                     </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>AI投资决策</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>WealthPilot 投资决策</div>
                   </div>
                   <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.7 }}>
-                    告诉我你的投资想法，我会结合持仓、风险、纪律和已有观点，<br />为你做一次结构化评估。
+                    让投资决策从凭感觉变成体系化
+                  </div>
+                  {/* 快捷入口 */}
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 14 }}>
+                    {[
+                      { icon: <BarChart3 size={14} />, label: '分析持仓', prompt: '帮我分析一下当前持仓情况' },
+                      { icon: <Search size={14} />,    label: '评估新标的', prompt: '我想评估一个新标的' },
+                      { icon: <BookOpen size={14} />,  label: '投资教育', prompt: '给我讲讲投资相关知识' },
+                    ].map(item => (
+                      <button
+                        key={item.label}
+                        onClick={() => handleSelectQuestion(item.prompt)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '8px 16px', fontSize: 12, fontWeight: 500,
+                          color: '#374151', background: '#fff',
+                          border: '1px solid #E5E7EB', borderRadius: 20,
+                          cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#EFF6FF'; e.currentTarget.style.borderColor = '#93C5FD' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#E5E7EB' }}
+                      >
+                        {item.icon} {item.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -633,43 +747,62 @@ export default function Decision() {
         </div>
       </div>
 
-      {/* ── 右栏：决策依据面板 ── */}
-      <div style={{ flex: '0 0 30%', minWidth: 0, background: '#FAFAFA', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* 头部标题 */}
-        <div style={{ flexShrink: 0, padding: '18px 20px 14px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Sparkles size={18} color="#3B82F6" />
+      {/* ── 右栏：决策依据面板（可折叠）── */}
+      {panelOpen ? (
+        <div style={{ flex: '0 0 30%', minWidth: 0, background: '#FAFAFA', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* 头部标题 */}
+          <div style={{ flexShrink: 0, padding: '18px 20px 14px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Sparkles size={18} color="#3B82F6" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>分析过程</div>
+              <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>本次分析的关键数据与推理依据</div>
+            </div>
+            <button onClick={togglePanel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }} title="折叠面板">
+              <ChevronRight size={16} />
+            </button>
           </div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>分析过程</div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>本次分析的关键数据与推理依据</div>
+
+          {/* 生成中提示条 */}
+          {streaming && (
+            <div style={{ flexShrink: 0, padding: '8px 20px', borderBottom: '1px solid #DBEAFE', display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF' }}>
+              <Loader2 size={13} className="animate-spin" style={{ color: '#3B82F6' }} />
+              <span style={{ fontSize: 12, color: '#3B82F6' }}>正在生成本次分析…</span>
+            </div>
+          )}
+
+          {/* 内容区 */}
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            {(() => {
+              if (explainData) return <ExplainPanel data={explainData} />
+              const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
+              if (!lastDone) return <ExplainEmpty />
+              const fallback: ExplainData = {
+                decision_id: String(lastDone.id),
+                intent: lastDone.intent as ExplainData['intent'],
+                stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
+                conclusion: lastDone.conclusion,
+              }
+              return <ExplainPanel data={fallback} />
+            })()}
           </div>
         </div>
-
-        {/* 生成中提示条 */}
-        {streaming && (
-          <div style={{ flexShrink: 0, padding: '8px 20px', borderBottom: '1px solid #DBEAFE', display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF' }}>
-            <Loader2 size={13} className="animate-spin" style={{ color: '#3B82F6' }} />
-            <span style={{ fontSize: 12, color: '#3B82F6' }}>正在生成本次分析…</span>
-          </div>
-        )}
-
-        {/* 内容区：explainData 优先；其次用最后一条完成的 AI 消息的 stages/intent 作 fallback */}
-        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          {(() => {
-            if (explainData) return <ExplainPanel data={explainData} />
-            const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
-            if (!lastDone) return <ExplainEmpty />
-            const fallback: ExplainData = {
-              decision_id: String(lastDone.id),
-              intent: lastDone.intent as ExplainData['intent'],
-              stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
-              conclusion: lastDone.conclusion,
-            }
-            return <ExplainPanel data={fallback} />
-          })()}
+      ) : (
+        /* 折叠态：窄条 + 展开箭头 */
+        <div
+          onClick={togglePanel}
+          style={{
+            width: 36, flexShrink: 0, background: '#FAFAFA', borderLeft: '1px solid #E5E7EB',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', gap: 8,
+          }}
+          title="展开分析面板"
+        >
+          <ChevronLeft size={16} style={{ color: '#9CA3AF' }} />
+          <span style={{ writingMode: 'vertical-rl', fontSize: 11, color: '#9CA3AF', letterSpacing: 2 }}>分析过程</span>
         </div>
-      </div>
+      )}
 
       {/* v3.2 行动清单弹层 */}
       <ActionDraftCard
@@ -848,35 +981,6 @@ const ANALYSIS_STEPS = [
   { n: 4, title: '分析市场信号', desc: '结合投研观点与风险信号进行综合评估' },
   { n: 5, title: '生成结论',     desc: '输出判断依据与建议方向' },
 ]
-
-// ── AI 推理过程折叠面板 ──────────────────────────────────────
-function ReasoningPanel({ reasoning }: { reasoning: string[] | string }) {
-  // 防御性处理：reasoning 可能是字符串（AssetAllocation 意图）或数组
-  const items = Array.isArray(reasoning) ? reasoning : reasoning ? [reasoning] : []
-  if (items.length === 0) return null
-  const [open, setOpen] = React.useState(false)
-  return (
-    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '10px 14px' }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-      >
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>AI 推理过程</span>
-        <ChevronDown size={14} style={{ color: '#9CA3AF', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
-      </button>
-      {open && (
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {items.map((item, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <span style={{ flexShrink: 0, width: 5, height: 5, borderRadius: '50%', background: '#9CA3AF', marginTop: 6 }} />
-              <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{item}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 export function ExplainEmpty() {
   return (
@@ -1350,11 +1454,6 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 5b. AI 推理过程（折叠，默认收起） ── */}
-      {data.llm?.reasoning && data.llm.reasoning.length > 0 && (
-        <ReasoningPanel reasoning={data.llm.reasoning} />
-      )}
-
       {/* ── 5b. 组合评估结论（PortfolioReview 专用）── */}
       {data.portfolioResult && (() => {
         const pr = data.portfolioResult as Record<string, unknown>
@@ -1616,11 +1715,6 @@ function AllocationExplainView({ data }: { data: ExplainData }) {
             <div key={i} style={{ fontSize: 11, color: '#D97706', marginTop: 4 }}>{v.message}</div>
           ))}
         </div>
-      )}
-
-      {/* ── 核心判断 ── */}
-      {reasoning && reasoning.length > 0 && (
-        <ReasoningPanel reasoning={reasoning} />
       )}
 
       {/* 免责声明 */}

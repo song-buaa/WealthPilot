@@ -26,7 +26,7 @@ def test_expressing_agent_general_chat():
 
     async def _run():
         planning = get_planning_agent()
-        plan_out = planning.run(user_query="什么是夏普比率？", session_id="test_expr_001")
+        plan_out = planning.run(user_query="什么是夏普比率？", conversation_id="test_expr_001")
 
         if plan_out.route != "general":
             print(f"   Planner 路由到 {plan_out.route}（不是 general），跳过此测试")
@@ -129,7 +129,7 @@ def test_expressing_agent_task_id_propagation():
 
     async def _run():
         planning = get_planning_agent()
-        plan_out = planning.run(user_query="什么是 PE 估值", session_id="test_expr_005")
+        plan_out = planning.run(user_query="什么是 PE 估值", conversation_id="test_expr_005")
 
         if plan_out.route != "general":
             print(f"   Planner 路由到 {plan_out.route}（不是 general），跳过此测试")

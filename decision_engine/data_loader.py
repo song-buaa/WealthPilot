@@ -61,6 +61,7 @@ class PositionInfo:
     current_price: float       # 当前价格（聚合持仓中首条，参考用）
     profit_loss_rate: float    # 加权盈亏率（小数）
     platforms: list[str] = field(default_factory=list)  # 持仓平台列表
+    is_virtual: bool = False  # v3.4 M8.3: True = 新建仓虚拟持仓,非真实持仓
 
     @classmethod
     def from_aggregated(cls, agg: AggregatedPosition) -> "PositionInfo":
@@ -112,6 +113,14 @@ class LoadedData:
 
     # 数据质量告警
     data_warnings: list[DataWarning] = field(default_factory=list)
+
+    # v3.4 M8.3: 新建仓标志位 + Alpha Vantage 基础面数据
+    is_new_entry: bool = False
+    av_fundamentals: Optional[object] = None  # FundamentalsData from market_data schema
+    market_not_supported_message: Optional[str] = None  # 非美股新建仓时的友好提示
+
+    # v3.4 M8.5: 完整纪律配置 dict(供 ExpressingAgent 新建仓 prompt 注入)
+    full_discipline_rules: Optional[dict] = None
 
     @property
     def has_required_data(self) -> bool:
@@ -592,6 +601,25 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                 if inferred:
                     target_position = PositionInfo.from_aggregated(inferred)
 
+        # ── 5b. 新建仓路径(v3.4 M8.3) ─────────────────────────────────────
+        # target_position 仍为 None → 标的不在持仓中 → 尝试加载美股基础面数据
+        is_new_entry = False
+        av_fundamentals = None
+        market_not_supported_message = None
+
+        if target_position is None and asset_name and not ambiguous_matches:
+            new_entry_result = _try_load_new_entry(asset_name, positions)
+            if new_entry_result:
+                target_position = new_entry_result["virtual_position"]
+                is_new_entry = True
+                av_fundamentals = new_entry_result.get("av_fundamentals")
+                market_not_supported_message = new_entry_result.get("market_not_supported_message")
+                if new_entry_result.get("warning"):
+                    warnings.append(DataWarning(
+                        level="warning",
+                        message=new_entry_result["warning"],
+                    ))
+
         # ── 6. 投资纪律规则 ──────────────────────────────────────────────────
         # 全部来自 discipline/config.py 的 get_rules()，与「投资纪律」页面同源，确保口径一致：
         #   max_single_position  ← single_asset_limits.max_position_pct       = 0.40
@@ -692,10 +720,163 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
             raw_portfolio=portfolio,
             ambiguous_matches=ambiguous_matches,
             data_warnings=warnings,
+            is_new_entry=is_new_entry,
+            av_fundamentals=av_fundamentals,
+            market_not_supported_message=market_not_supported_message,
+            full_discipline_rules=_dr,  # M8.5: 完整 dict 供新建仓 prompt 注入
         )
 
     finally:
         session.close()
+
+
+# ── v3.4 M8.3 新建仓数据加载 ───────────────────────────────────────────────────
+
+# 中文知名公司 → TICKER:MARKET 映射(M8 范围,覆盖头部美股+部分港股)
+_CN_NAME_TO_SYMBOL = {
+    # 美股
+    "苹果": "AAPL:US", "苹果公司": "AAPL:US",
+    "谷歌": "GOOG:US", "谷歌公司": "GOOG:US", "alphabet": "GOOG:US",
+    "微软": "MSFT:US", "微软公司": "MSFT:US",
+    "特斯拉": "TSLA:US",
+    "英伟达": "NVDA:US",
+    "亚马逊": "AMZN:US",
+    "Meta": "META:US", "meta": "META:US", "脸书": "META:US",
+    "网飞": "NFLX:US", "奈飞": "NFLX:US",
+    "台积电": "TSM:US",
+    "拼多多": "PDD:US",
+    "阿里巴巴": "BABA:US", "阿里": "BABA:US",
+    "京东": "JD:US",
+    "百度": "BIDU:US",
+    "哔哩哔哩": "BILI:US", "B站": "BILI:US", "b站": "BILI:US",
+    "蔚来": "NIO:US", "蔚来汽车": "NIO:US",
+    "理想": "LI:US", "理想汽车": "LI:US",
+    "小鹏": "XPEV:US", "小鹏汽车": "XPEV:US",
+    "唯品会": "VIPS:US",
+    "波音": "BA:US",
+    "迪士尼": "DIS:US",
+    "可口可乐": "KO:US",
+    "辉瑞": "PFE:US",
+    "星巴克": "SBUX:US",
+    "英特尔": "INTC:US",
+    "高通": "QCOM:US",
+    "AMD": "AMD:US", "amd": "AMD:US",
+    "超微半导体": "AMD:US",
+    # 港股(用于港股拦截提示)
+    "腾讯": "0700:HK", "腾讯控股": "0700:HK",
+    "小米": "1810:HK", "小米集团": "1810:HK",
+    "美团": "3690:HK",
+    "快手": "1024:HK",
+    "网易": "9999:HK",
+    "百威亚太": "1876:HK",
+    "中国平安": "2318:HK",
+}
+
+
+def _infer_symbol_for_new_entry(asset_name: str) -> Optional[str]:
+    """从中文名或代码推断 TICKER:MARKET。
+
+    M8 范围: 优先查中文映射表,然后尝试 parse_symbol 和 infer_symbol_from_ticker。
+    Returns None 时上层给友好消息。
+    """
+    import re
+
+    name = asset_name.strip()
+
+    # 1. 中文映射表(大小写不敏感)
+    mapped = _CN_NAME_TO_SYMBOL.get(name) or _CN_NAME_TO_SYMBOL.get(name.lower())
+    if mapped:
+        return mapped
+
+    # 2. 已经是 TICKER:MARKET 格式
+    if ":" in name or "." in name:
+        try:
+            from backend.utils.symbol import parse_symbol
+            ticker, market = parse_symbol(name)
+            return f"{ticker}:{market}"
+        except ValueError:
+            pass
+
+    # 3. 纯英文字母 → 假定美股 ticker
+    if re.match(r"^[A-Za-z]{1,5}$", name):
+        return f"{name.upper()}:US"
+
+    return None
+
+
+def _try_load_new_entry(asset_name: str, existing_positions: list) -> Optional[dict]:
+    """尝试加载非持仓标的的美股基础面数据(v3.4 M8.3)。
+
+    Returns:
+        dict with keys: virtual_position, av_fundamentals, market_not_supported_message, warning
+        or None if symbol cannot be inferred
+    """
+    symbol = _infer_symbol_for_new_entry(asset_name)
+    if not symbol:
+        return {
+            "virtual_position": PositionInfo(
+                name=asset_name, ticker="", asset_class="unknown",
+                weight=0, market_value_cny=0, cost_price=0,
+                current_price=0, profit_loss_rate=0, is_virtual=True,
+            ),
+            "av_fundamentals": None,
+            "market_not_supported_message": None,
+            "warning": f"无法识别标的 '{asset_name}',请提供更具体的名称或代码",
+        }
+
+    try:
+        from backend.utils.symbol import parse_symbol
+        ticker, market = parse_symbol(symbol)
+    except ValueError:
+        return None
+
+    # 非美股 → 友好拦截
+    if market != "US":
+        market_label = {"HK": "港股", "SH": "A股", "SZ": "A股"}.get(market, market)
+        return {
+            "virtual_position": PositionInfo(
+                name=asset_name, ticker=ticker, asset_class="equity",
+                weight=0, market_value_cny=0, cost_price=0,
+                current_price=0, profit_loss_rate=0, is_virtual=True,
+            ),
+            "av_fundamentals": None,
+            "market_not_supported_message": (
+                f"{asset_name}({market_label})新建仓评估将在 v3.5 接入 Tiger 行情后支持。"
+                f"当前 v3.4 仅支持美股新建仓评估。"
+            ),
+            "warning": None,
+        }
+
+    # 美股 → 加载 Alpha Vantage 基础面
+    av_data = None
+    current_price = 0.0
+    try:
+        import sys
+        sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..", "backend")))
+        from services.market_data.av_fundamentals_service import fetch_fundamentals
+        av_data = fetch_fundamentals(symbol)
+        if av_data and av_data.high_52w and av_data.low_52w:
+            # 用 50 日均线近似当前价(AV OVERVIEW 的 50DayMovingAverage)
+            current_price = (av_data.high_52w + av_data.low_52w) / 2
+    except Exception as e:
+        print(f"[M8.3] AV 加载失败({symbol}): {e}", flush=True)
+
+    return {
+        "virtual_position": PositionInfo(
+            name=asset_name,
+            ticker=ticker,
+            asset_class="equity",
+            weight=0,
+            market_value_cny=0,
+            cost_price=0,
+            current_price=current_price,
+            profit_loss_rate=0,
+            is_virtual=True,
+        ),
+        "av_fundamentals": av_data,
+        "market_not_supported_message": None,
+        "warning": f"'{asset_name}'不在您的持仓中,以下为新建仓评估",
+    }
 
 
 # ── 辅助函数 ───────────────────────────────────────────────────────────────────
