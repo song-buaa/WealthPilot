@@ -19,7 +19,7 @@ from typing import Optional
 @dataclass
 class OrderRequest:
     """统一下单请求契约。"""
-    symbol: str                         # US.LI / HK.03690 / CN.601318
+    symbol: str                         # LI:US / 0700:HK / 600519:SH (TICKER:MARKET)
     side: str                           # BUY / SELL
     quantity: int
     order_type: str                     # LIMIT / CONDITIONAL_LIMIT

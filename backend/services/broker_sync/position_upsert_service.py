@@ -183,7 +183,9 @@ class PositionUpsertService:
 
     @staticmethod
     def _denormalize_ticker(symbol: str) -> str:
-        """AAPL.US → AAPL,00068.HK → 00068。"""
+        """AAPL:US → AAPL, 0068:HK → 0068。兼容旧格式 AAPL.US。"""
+        if ":" in symbol:
+            return symbol.split(":")[0]
         if "." in symbol:
             return symbol.split(".")[0]
         return symbol

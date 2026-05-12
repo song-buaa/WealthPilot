@@ -318,10 +318,10 @@ def v2_holdings_us():
 
         # 港股：带 .HK 后缀 或 HKD currency + 纯数字
         if t.endswith(".HK"):
-            code = t.replace(".HK", "").lstrip("0") or "0"
+            code = (t.replace(".HK", "").lstrip("0") or "0").zfill(4)
             return f"{code}:HK", "HK", True
         if c == "HKD" and re.match(r"^\d{4,5}$", t):
-            code = t.lstrip("0") or "0"
+            code = (t.lstrip("0") or "0").zfill(4)
             return f"{code}:HK", "HK", True
 
         # A 股：数字.SH / 数字.SZ

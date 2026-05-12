@@ -31,7 +31,7 @@ def make_mock_position(symbol, currency, sec_type, quantity, avg_cost, market_pr
 
 
 def test_us_equity_normalization():
-    """美股代码归一化: AAPL + USD → AAPL.US"""
+    """美股代码归一化: AAPL + USD → AAPL:US"""
     adapter = TigerAdapter(account_id="4472659")
     sdk_pos = make_mock_position(
         symbol="AAPL", currency="USD", sec_type="STK",
@@ -43,7 +43,7 @@ def test_us_equity_normalization():
         name="苹果",
     )
     result = adapter.to_position(sdk_pos)
-    assert result.symbol == "AAPL.US"
+    assert result.symbol == "AAPL:US"
     assert result.market == "US"
     assert result.asset_class == "equity"
     assert result.broker == "tiger"
@@ -51,7 +51,7 @@ def test_us_equity_normalization():
 
 
 def test_hk_equity_zero_padding():
-    """港股代码补零到 5 位: 00068 + HKD → 00068.HK"""
+    """港股代码补零到 4 位: 00068 + HKD → 0068:HK"""
     adapter = TigerAdapter(account_id="4472659")
     sdk_pos = make_mock_position(
         symbol="00068", currency="HKD", sec_type="STK",
@@ -63,13 +63,13 @@ def test_hk_equity_zero_padding():
         name="MANYCORE TECH",
     )
     result = adapter.to_position(sdk_pos)
-    assert result.symbol == "00068.HK"
+    assert result.symbol == "0068:HK"
     assert result.market == "HK"
     assert result.currency == "HKD"
 
 
 def test_leading_quote_stripped():
-    """前导单引号必须去掉: 'AAPL → AAPL.US"""
+    """前导单引号必须去掉: 'AAPL → AAPL:US"""
     adapter = TigerAdapter(account_id="4472659")
     sdk_pos = make_mock_position(
         symbol="'AAPL", currency="USD", sec_type="STK",
@@ -81,4 +81,4 @@ def test_leading_quote_stripped():
     )
     result = adapter.to_position(sdk_pos)
     assert result.raw_symbol == "AAPL"
-    assert result.symbol == "AAPL.US"
+    assert result.symbol == "AAPL:US"

@@ -1,6 +1,6 @@
 """
 Alpha Vantage 财报 + 分析师数据 adapter。
-输入: WP symbol（如 LI.US / MSFT.US）
+输入: WP symbol（如 LI:US / MSFT:US，兼容旧格式 LI.US）
 输出: FundamentalsData（失败时返回 None）
 """
 import os
@@ -20,13 +20,9 @@ AV_BASE = "https://www.alphavantage.co/query"
 
 
 def _wp_symbol_to_av_ticker(wp_symbol: str) -> Optional[str]:
-    """LI.US → LI, 02015.HK → None（AV 无港股）"""
-    if "." in wp_symbol:
-        raw, market = wp_symbol.rsplit(".", 1)
-        if market.upper() == "HK":
-            return None
-        return raw
-    return wp_symbol
+    """LI:US → LI, 0700:HK → None（AV 无港股）。兼容旧格式 LI.US。"""
+    from utils.symbol import symbol_to_av_ticker
+    return symbol_to_av_ticker(wp_symbol)
 
 
 def _av_get(function: str, symbol: str, api_key: str) -> Optional[dict]:

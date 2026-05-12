@@ -54,12 +54,10 @@ class SnowballAdapter:
         self.account_id = account_id
 
     def normalize_symbol(self, raw_symbol: str, exchange: str) -> str:
-        """LI + USEX → LI.US, 700 + HKEX → 00700.HK"""
+        """LI + USEX → LI:US, 700 + HKEX → 0700:HK"""
+        from utils.symbol import normalize_symbol as _normalize
         market = EXCHANGE_TO_MARKET.get(exchange, "US")
-        clean = raw_symbol.strip()
-        if market == "HK":
-            clean = clean.zfill(5)
-        return f"{clean}.{market}"
+        return _normalize(raw_symbol.strip(), market)
 
     def _safe_decimal(self, value: Any, default: str = "0") -> Decimal:
         if value is None:

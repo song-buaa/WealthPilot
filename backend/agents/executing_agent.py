@@ -295,15 +295,9 @@ class ExecutingAgent:
                     tp = loaded.target_position
                     ticker = getattr(tp, "ticker", "") or ""
                     if ticker:
-                        # 推断市场后缀
-                        ac = getattr(tp, "asset_class", "")
-                        platforms = getattr(tp, "platforms", []) or []
-                        if any("老虎" in p or "富途" in p or "雪盈" in p for p in platforms):
-                            # 从已有 symbol 推断 .US / .HK
-                            if ticker.isdigit() and len(ticker) >= 4:
-                                wp_symbol = f"{ticker}.HK"
-                            else:
-                                wp_symbol = f"{ticker}.US"
+                        from utils.symbol import infer_symbol_from_ticker
+                        currency = getattr(tp, "currency", "USD") or "USD"
+                        wp_symbol = infer_symbol_from_ticker(ticker, currency)
 
                 if wp_symbol:
                     out.invoked_skills.append("wp-fetch-realtime-quote")

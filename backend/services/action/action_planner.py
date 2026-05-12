@@ -124,7 +124,7 @@ _ACTION_PLANNER_PROMPT = """\
   "decision_summary": "200字内的决策依据摘要",
   "symbol_strategies": [
     {
-      "symbol": "标的代码",
+      "symbol": "标的代码，格式为 TICKER:MARKET（如 LI:US、0700:HK、600519:SH）。不要输出中文名。",
       "side": "BUY 或 SELL",
       "quantity": null 或整数,
       "quantity_pct": null 或小数,
@@ -267,8 +267,21 @@ def plan_actions(
     )
 
     for s in data.get("symbol_strategies", []):
+        raw_symbol = s.get("symbol", "")
+        # symbol 格式校验/修正: 期望 TICKER:MARKET, 拒绝中文名
+        if raw_symbol and ":" not in raw_symbol:
+            import re as _re
+            if _re.search(r"[\u4e00-\u9fff]", raw_symbol):
+                logger.warning(
+                    f"[ActionPlanner] LLM 输出中文 symbol '{raw_symbol}'，跳过该策略"
+                )
+                continue
+            logger.warning(
+                f"[ActionPlanner] symbol '{raw_symbol}' 缺少 :MARKET 后缀，"
+                f"请在下次 prompt 中明确格式要求"
+            )
         draft.symbol_strategies.append(SymbolStrategyDraft(
-            symbol=s.get("symbol", ""),
+            symbol=raw_symbol,
             side=s.get("side", "BUY"),
             quantity=s.get("quantity"),
             quantity_pct=s.get("quantity_pct"),

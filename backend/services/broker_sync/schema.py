@@ -31,7 +31,7 @@ class Position(BaseModel):
     # ===== 标识 =====
     broker: Literal["tiger", "futu", "snowball"]
     account_id: str
-    symbol: str  # 归一化代码: AAPL.US / 00068.HK
+    symbol: str  # 归一化代码: AAPL:US / 0068:HK (TICKER:MARKET 格式)
     raw_symbol: str  # 券商原始代码,去掉前导 ' 后的形态
     name: str  # 中文名优先
     name_en: str | None = None

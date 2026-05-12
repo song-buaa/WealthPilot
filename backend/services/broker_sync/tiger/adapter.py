@@ -36,19 +36,11 @@ class TigerAdapter:
         self.account_id = account_id
 
     def normalize_symbol(self, raw_symbol: str, currency: str) -> str:
-        """券商代码 → WealthPilot 归一化代码。"""
+        """券商代码 → WealthPilot 归一化代码 (TICKER:MARKET)。"""
+        from utils.symbol import normalize_symbol as _normalize
         clean = raw_symbol.lstrip("'")
         market = CURRENCY_TO_MARKET.get(currency, "US")
-
-        if market == "HK":
-            clean = clean.zfill(5)
-            return f"{clean}.HK"
-        elif market == "US":
-            return f"{clean}.US"
-        elif market == "CN":
-            return f"{clean}.CN"
-        else:
-            return clean
+        return _normalize(clean, market)
 
     def map_asset_class(self, sec_type: str) -> str:
         return SEC_TYPE_TO_ASSET_CLASS.get(sec_type, "equity")

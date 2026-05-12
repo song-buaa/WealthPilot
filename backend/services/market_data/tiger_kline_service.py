@@ -1,6 +1,6 @@
 """
 老虎 QuoteClient K线数据 + 技术指标计算 adapter。
-输入: WP 内部 symbol（如 MSFT.US / 02015.HK）
+输入: WP 内部 symbol（如 MSFT:US / 0700:HK，兼容旧格式 MSFT.US）
 输出: TechnicalData（失败时返回 None）
 
 技术指标用 pandas 手写，不依赖 TA-Lib：
@@ -28,11 +28,9 @@ KLINE_TTL = 4 * 60 * 60  # 4 小时
 
 
 def _to_tiger_symbol(wp_symbol: str) -> str:
-    """MSFT.US → MSFT, 02015.HK → 02015"""
-    if "." not in wp_symbol:
-        return wp_symbol
-    raw, _ = wp_symbol.rsplit(".", 1)
-    return raw
+    """MSFT:US → MSFT, 0700:HK → 0700。兼容旧格式 MSFT.US。"""
+    from utils.symbol import symbol_to_tiger_ticker
+    return symbol_to_tiger_ticker(wp_symbol)
 
 
 def _calc_rsi(closes: pd.Series, period: int = 14) -> Optional[float]:

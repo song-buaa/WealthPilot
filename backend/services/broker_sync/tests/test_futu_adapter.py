@@ -38,21 +38,21 @@ def make_mock_row(
 
 
 def test_us_symbol_normalization():
-    """US.QQQ → QQQ.US"""
+    """US.QQQ → QQQ:US"""
     adapter = FutuAdapter(account_id="6169")
     row = make_mock_row(code="US.QQQ")
     pos = adapter.row_to_position(row)
-    assert pos.symbol == "QQQ.US"
+    assert pos.symbol == "QQQ:US"
     assert pos.market == "US"
     assert pos.raw_symbol == "QQQ"
 
 
 def test_hk_symbol_zero_padding():
-    """HK.68 → 00068.HK（补零到 5 位）"""
+    """HK.68 → 0068:HK（补零到 4 位）"""
     adapter = FutuAdapter(account_id="6169")
     row = make_mock_row(code="HK.68", currency="HKD")
     pos = adapter.row_to_position(row)
-    assert pos.symbol == "00068.HK"
+    assert pos.symbol == "0068:HK"
     assert pos.market == "HK"
 
 

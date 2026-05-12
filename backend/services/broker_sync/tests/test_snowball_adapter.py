@@ -30,19 +30,19 @@ def make_item(
 
 
 def test_us_symbol_normalization():
-    """LI + USEX → LI.US"""
+    """LI + USEX → LI:US"""
     adapter = SnowballAdapter(account_id="U3831209")
     pos = adapter.item_to_position(make_item(symbol="LI", exchange="USEX"))
-    assert pos.symbol == "LI.US"
+    assert pos.symbol == "LI:US"
     assert pos.market == "US"
     assert pos.currency == "USD"
 
 
 def test_hk_symbol_zero_padding():
-    """700 + HKEX → 00700.HK"""
+    """700 + HKEX → 0700:HK"""
     adapter = SnowballAdapter(account_id="U3831209")
     pos = adapter.item_to_position(make_item(symbol="700", exchange="HKEX"))
-    assert pos.symbol == "00700.HK"
+    assert pos.symbol == "0700:HK"
     assert pos.currency == "HKD"
 
 

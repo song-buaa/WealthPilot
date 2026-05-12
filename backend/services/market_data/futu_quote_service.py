@@ -1,6 +1,6 @@
 """
 富途 OpenD snapshot adapter。
-输入: WP 内部 symbol（如 LI.US / 02015.HK）
+输入: WP 内部 symbol（如 LI:US / 0700:HK，兼容旧格式 LI.US）
 输出: QuoteData（失败时返回 None）
 """
 import math
@@ -15,11 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 def _to_futu_code(wp_symbol: str) -> str:
-    """LI.US → US.LI, 02015.HK → HK.02015"""
-    if "." not in wp_symbol:
-        return wp_symbol
-    raw, market = wp_symbol.rsplit(".", 1)
-    return f"{market.upper()}.{raw}"
+    """LI:US → US.LI, 0700:HK → HK.0700。兼容旧格式 LI.US。"""
+    from utils.symbol import symbol_to_futu
+    return symbol_to_futu(wp_symbol)
 
 
 def _safe(value, default=None):

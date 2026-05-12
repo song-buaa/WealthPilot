@@ -29,19 +29,15 @@ class FutuAdapter:
 
     def normalize_symbol(self, futu_code: str) -> str:
         """
-        富途代码 → WealthPilot 归一化代码。
-        "US.QQQ" → "QQQ.US", "HK.00068" → "00068.HK"
+        富途代码 → WealthPilot 归一化代码 (TICKER:MARKET)。
+        "US.QQQ" → "QQQ:US", "HK.00068" → "0068:HK"
         """
+        from utils.symbol import normalize_symbol as _normalize
         if "." not in futu_code:
             return futu_code
 
         market_prefix, raw_code = futu_code.split(".", 1)
-        market_prefix = market_prefix.upper()
-
-        if market_prefix == "HK":
-            raw_code = raw_code.zfill(5)
-
-        return f"{raw_code}.{market_prefix}"
+        return _normalize(raw_code, market_prefix)
 
     def get_raw_symbol(self, futu_code: str) -> str:
         """从富途代码提取裸 symbol。"""
