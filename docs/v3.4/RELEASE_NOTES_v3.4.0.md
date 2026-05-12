@@ -29,6 +29,7 @@ WealthPilot 第一次实现真实券商下单。从 Mock 到真实 Tiger 老虎�
 
 - 183 单元测试全绿
 - 13/15 端到端验收项真实验证通过
+- 2 笔实盘成交: 港股众安 06060 (RMB 41) + 美股 LI 理想汽车 (RMB 14)
 - 27 条 positions 数据迁移(currency 字段修复)
 - 30+ 中文公司名 -> TICKER:MARKET 映射表
 

@@ -1,0 +1,51 @@
+============================================================
+  M6.5 美股实盘验证 — LI 理想汽车
+============================================================
+Adapter: broker=tiger, is_paper=False
+
+LI 市价(Yahoo): $18.72, BUY LIMIT: $19.10, SELL LIMIT: $18.34
+当前 LI 持仓: 2500 股
+
+============================================================
+  BUY 1 股 LI @ $19.10
+============================================================
+order.id: 2ff597f9-fae5-401b-9543-da99efe28a6c
+status: submitted_to_broker
+broker_order_id: 43213988423274496
+  [5s] status=filled filled=1
+
+BUY 成交! avg=18.7150
+
+============================================================
+  SELL 1 股 LI @ $18.34
+============================================================
+最新市价: $18.72, SELL LIMIT: $18.34
+broker_order_id: 43213989201838080
+  [5s] status=filled filled=1
+
+SELL 成交! avg=18.7100
+
+============================================================
+  M6.5 结果
+============================================================
+BUY:  filled=True price=$18.715 id=43213988423274496
+SELL: filled=True price=$18.71 id=43213989201838080
+P&L: $-0.0050
+
+LI 持仓: 2500 -> 2500
+
+审计日志:
+  order_synced: fx=- amt=-
+  strategy_auto_completed: fx=- amt=-
+  order_submitted: fx=6.9 amt=126.55
+  order_created: fx=- amt=-
+  draft_confirmed: fx=- amt=-
+  draft_created: fx=- amt=-
+  order_synced: fx=- amt=-
+  strategy_auto_completed: fx=- amt=-
+  order_submitted: fx=6.9 amt=131.79
+  order_created: fx=- amt=-
+  draft_confirmed: fx=- amt=-
+  draft_created: fx=- amt=-
+
+脚本结束
