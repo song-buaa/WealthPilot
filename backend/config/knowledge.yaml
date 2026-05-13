@@ -1,6 +1,6 @@
 knowledge_base:
-  root_dir: "backend/knowledge_base"
-  index_dir: "backend/knowledge_base/_index"
+  root_dir: "knowledge_base"
+  index_dir: "knowledge_base/_index"
   chroma_collection: "wealthpilot_knowledge"
   enabled: true
 

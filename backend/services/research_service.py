@@ -628,7 +628,7 @@ def _create_card_from_data(document_id: int, card_data: dict) -> ResearchCard:
 import logging as _logging_m
 _kb_logger = _logging_m.getLogger(__name__ + ".knowledge_base")
 
-_KNOWLEDGE_BASE_ROOT = Path(__file__).parent.parent / "knowledge_base"
+_KNOWLEDGE_BASE_ROOT = Path(__file__).parent.parent.parent / "knowledge_base"
 
 
 def _persist_to_knowledge_base(

@@ -19,8 +19,8 @@ from app.discipline.models import (
 )
 from app.discipline.engine_runner import evaluate_action
 
-_OFFICIAL_HANDBOOK_FILE = Path("backend/knowledge_base/investment_principles/handbook_official.md")
-_CUSTOM_HANDBOOK_FILE   = Path("backend/knowledge_base/investment_principles/handbook_custom.md")
+_OFFICIAL_HANDBOOK_FILE = Path("knowledge_base/investment_principles/handbook_official.md")
+_CUSTOM_HANDBOOK_FILE   = Path("knowledge_base/investment_principles/handbook_custom.md")
 
 _LEVERAGE_ETF_KEYWORDS = ["杠杆", "TQQQ", "SOXL", "UPRO", "TECL", "LABU", "FNGU"]
 _OPTIONS_KEYWORDS = ["期权", "认购", "认沽", "call", "put"]
@@ -331,7 +331,7 @@ def _parse_trade_intent(text: str, raw: list[dict], total_assets: float) -> dict
 def _load_official_handbook() -> str:
     if _OFFICIAL_HANDBOOK_FILE.exists():
         return _OFFICIAL_HANDBOOK_FILE.read_text(encoding="utf-8")
-    return "# 投资纪律手册\n\n官方手册文件未找到（backend/knowledge_base/investment_principles/handbook_official.md）。"
+    return "# 投资纪律手册\n\n官方手册文件未找到（knowledge_base/investment_principles/handbook_official.md）。"
 
 
 def _load_custom_handbook() -> Optional[str]:

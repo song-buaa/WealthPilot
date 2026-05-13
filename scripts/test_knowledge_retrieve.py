@@ -46,7 +46,7 @@ def main():
     from backend.knowledge.status_tracker import StatusTracker
 
     # 初始化
-    kb_root = ROOT / "backend" / "knowledge_base"
+    kb_root = ROOT / "knowledge_base"
     index_dir = kb_root / "_index"
     index_dir.mkdir(parents=True, exist_ok=True)
 

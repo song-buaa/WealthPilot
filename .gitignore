@@ -70,4 +70,4 @@ tiger_openapi_config.properties
 tiger_openapi_token.properties
 
 # v3.6 知识层索引（可重建，不提交）
-backend/knowledge_base/_index/
+knowledge_base/_index/

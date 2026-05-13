@@ -64,7 +64,7 @@ class KnowledgeStore:
             import chromadb
             from chromadb.config import Settings
 
-            index_dir = kb_config.get("index_dir", "backend/knowledge_base/_index")
+            index_dir = kb_config.get("index_dir", "knowledge_base/_index")
             chroma_path = Path(index_dir) / "chroma_db"
             chroma_path.mkdir(parents=True, exist_ok=True)
 
