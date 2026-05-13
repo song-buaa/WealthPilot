@@ -81,10 +81,15 @@ class PositionUpsertService:
         """
         把 snapshots 同步到 Position 业务表。
 
+        逻辑：
+        1. upsert 本次 snapshot 中的所有持仓
+        2. 删除该 platform 中本次 snapshot 不再包含的持仓（已卖出清仓）
+
         返回报告字典:
         {
             "inserted": int,
             "updated": int,
+            "removed": int,
             "errors": list,
         }
         """
@@ -92,7 +97,9 @@ class PositionUpsertService:
         updated = 0
         errors = []
 
-        for snap in snapshots:
+        snap_list = list(snapshots)
+
+        for snap in snap_list:
             try:
                 if self._upsert_single(snap):
                     inserted += 1
@@ -106,10 +113,42 @@ class PositionUpsertService:
 
         if errors:
             self.session.rollback()
-            return {"inserted": 0, "updated": 0, "errors": errors}
+            return {"inserted": 0, "updated": 0, "removed": 0, "errors": errors}
+
+        # 删除已清仓的持仓：本次 snapshot 覆盖的 platform 中，
+        # ticker 不在本次 snapshot 里的记录应被删除
+        removed = self._remove_stale_positions(snap_list)
 
         self.session.commit()
-        return {"inserted": inserted, "updated": updated, "errors": []}
+        return {"inserted": inserted, "updated": updated, "removed": removed, "errors": []}
+
+    def _remove_stale_positions(self, snap_list: list) -> int:
+        """删除本次 snapshot 不再包含的持仓（已卖出/清仓）。
+
+        按 platform 分组：对于本次同步涉及的每个 platform，
+        找出 Position 表中属于该 platform 但 ticker 不在本次 snapshot 中的记录并删除。
+        """
+        from collections import defaultdict
+
+        # 按 platform 分组，收集本次 snapshot 的所有 ticker
+        platform_tickers: dict[str, set[str]] = defaultdict(set)
+        for snap in snap_list:
+            platform = BROKER_TO_PLATFORM.get(snap.broker)
+            if platform:
+                ticker = self._denormalize_ticker(snap.symbol)
+                platform_tickers[platform].add(ticker)
+
+        removed = 0
+        for platform, current_tickers in platform_tickers.items():
+            stale = self.session.query(BusinessPosition).filter(
+                BusinessPosition.platform == platform,
+                ~BusinessPosition.ticker.in_(current_tickers),
+            ).all()
+            for pos in stale:
+                self.session.delete(pos)
+                removed += 1
+
+        return removed
 
     def _upsert_single(self, snap: PositionSnapshot) -> bool:
         """单条 upsert。返回 True 表示新增,False 表示更新。"""
