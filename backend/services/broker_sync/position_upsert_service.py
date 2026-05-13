@@ -181,11 +181,30 @@ class PositionUpsertService:
                 existing.asset_class = resolved_asset_class
             return False
 
+    _KNOWN_MARKETS = {"US", "HK", "SH", "SZ"}
+
     @staticmethod
     def _denormalize_ticker(symbol: str) -> str:
-        """AAPL:US → AAPL, 0068:HK → 0068。兼容旧格式 AAPL.US。"""
+        """从 normalize 后的 symbol 还原纯 ticker。
+
+        支持新旧格式 + 兼容 ticker 自身含点的特殊标的（BRK.B 等）：
+          "AAPL:US"          → "AAPL"
+          "BRK.B:US"         → "BRK.B"
+          "AAPL.US"          → "AAPL"          (旧格式)
+          "BRK.B.US"         → "BRK.B"         (旧格式,保护 .B)
+          "LU2416422678.USD" → "LU2416422678.USD"  (USD 不是市场,保留)
+        """
+        if not symbol:
+            return symbol
+
+        # 新格式优先：TICKER:MARKET
         if ":" in symbol:
-            return symbol.split(":")[0]
+            return symbol.split(":", 1)[0]
+
+        # 旧格式：仅当最后一段是 KNOWN_MARKET 才剥离
         if "." in symbol:
-            return symbol.split(".")[0]
+            parts = symbol.rsplit(".", 1)
+            if len(parts) == 2 and parts[1].upper() in PositionUpsertService._KNOWN_MARKETS:
+                return parts[0]
+
         return symbol
