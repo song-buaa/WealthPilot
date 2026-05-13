@@ -1469,9 +1469,9 @@ def _build_result(parsed: dict, raw: str) -> LLMResult:
 
 # _GENERAL_CHAT_PROMPT 已在上方意图专属 Prompt 区统一定义
 
-# WealthPilot 资产配置理念（原 Allocation.tsx 前端"配置原则说明"卡片内容）
-# 资产配置模块下线后，这段内容作为 Education 意图的固定背景知识注入 system prompt。
-# 未来接入 RAG 时，可迁移到知识库作为可检索文档。
+# WealthPilot 资产配置理念（v3.6 fallback 常量）
+# 知识库就绪时优先使用 RAG 召回内容，否则 fallback 到此常量。
+# v3.6.1+ 知识库稳定运行后可删除此常量。
 WEALTHPILOT_ALLOCATION_PRINCIPLES = """
 ## WealthPilot 资产配置理念
 
@@ -1488,13 +1488,36 @@ _ALLOCATION_PRINCIPLES_GUIDE = (
 )
 
 
-def chat(user_query: str, context: Optional[list] = None) -> str:
+def _get_allocation_principles_text(principles_override: Optional[str] = None) -> str:
+    """
+    获取资产配置原则文本（v3.6 fallback 模式）。
+
+    优先使用知识库 RAG 召回内容（principles_override），
+    fallback 到硬编码常量 WEALTHPILOT_ALLOCATION_PRINCIPLES。
+
+    Args:
+        principles_override: 从知识库召回的原则文本（M5 阶段由 ExpressingAgent 传入）
+
+    Returns:
+        配置原则文本，用于注入 system prompt
+    """
+    if principles_override:
+        return principles_override
+    return WEALTHPILOT_ALLOCATION_PRINCIPLES
+
+
+def chat(
+    user_query: str,
+    context: Optional[list] = None,
+    principles_override: Optional[str] = None,
+) -> str:
     """
     普通对话模式（intent_type=general_chat），不进入决策流程，不输出结构化结论。
 
     Args:
         user_query: 用户当前输入
         context:    最近 1 轮对话记录（[{"role": "user", "content": ...}, {"role": "assistant", ...}]）
+        principles_override: v3.6 知识库召回的配置原则文本（可选，None 时 fallback 到常量）
 
     Returns:
         纯文本回复
@@ -1508,6 +1531,8 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
                 messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": user_query})
 
+    allocation_text = _get_allocation_principles_text(principles_override)
+
     try:
         client = _get_client()
         response = client.chat.completions.create(
@@ -1517,7 +1542,7 @@ def chat(user_query: str, context: Optional[list] = None) -> str:
             messages=[{"role": "system", "content": (
                 _BASE_PROMPT + "\n\n" + _GENERAL_CHAT_PROMPT
                 + "\n\n" + _ALLOCATION_PRINCIPLES_GUIDE
-                + "\n\n" + WEALTHPILOT_ALLOCATION_PRINCIPLES
+                + "\n\n" + allocation_text
             )}] + messages,
         )
         return response.choices[0].message.content.strip()
