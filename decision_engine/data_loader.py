@@ -126,6 +126,9 @@ class LoadedData:
     retrieved_research_views: list = field(default_factory=list)
     """知识库中投研观点原文的语义召回，list[RetrievedChunk]。"""
 
+    retrieved_principles: list = field(default_factory=list)
+    """wp-retrieve-principles 召回的原则类知识，list[RetrievedChunk]。"""
+
     @property
     def has_required_data(self) -> bool:
         """前置校验用：三要素是否齐全"""
@@ -732,6 +735,30 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                     f"投研 RAG 检索失败（不阻断）: {_rag_err}"
                 )
 
+        # ── 7b. 用户原则 RAG（v3.6 新增）──────────────────────────────────
+        # 从知识库召回投资纪律/投资风格/资产配置原则的定性内容。
+        # 失败不阻塞主流程。
+        retrieved_principles = []
+        try:
+            from backend.knowledge.store import KnowledgeStore as _KS_7b
+            _ks_7b = _KS_7b.get_instance()
+            if _ks_7b.is_ready():
+                retrieved_principles = _ks_7b.retrieve(
+                    query=user_query or asset_name or "投资决策",
+                    source_types=[
+                        "investment_principles",
+                        "investment_style",
+                        "allocation_principles",
+                    ],
+                    top_k=5,
+                    apply_decay=False,
+                )
+        except Exception as _pr_err:
+            import logging as _pr_log
+            _pr_log.getLogger(__name__).warning(
+                f"原则 RAG 检索失败（不阻断）: {_pr_err}"
+            )
+
         # ── 8. 用户画像（MVP mock）──────────────────────────────────────────
         profile = UserProfile()
 
@@ -750,6 +777,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
             market_not_supported_message=market_not_supported_message,
             full_discipline_rules=_dr,  # M8.5: 完整 dict 供新建仓 prompt 注入
             retrieved_research_views=retrieved_research_views,  # v3.6: 投研 RAG
+            retrieved_principles=retrieved_principles,          # v3.6: 原则 RAG
         )
 
     finally:

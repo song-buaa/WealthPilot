@@ -37,6 +37,7 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
     "position_single": [
         "wp-fetch-holdings",
         "wp-fetch-research",
+        "wp-retrieve-principles",    # v3.6 新增：原则类知识检索
         "wp-check-discipline",
         "wp-generate-signals",
         "wp-reasoning",
@@ -47,6 +48,7 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
     "position_multi": [
         "wp-fetch-holdings",
         "wp-fetch-research",
+        "wp-retrieve-principles",    # v3.6 新增
         "wp-check-discipline",
         "wp-generate-signals",
         "wp-reasoning",
@@ -57,13 +59,14 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
     "portfolio": [
         "wp-fetch-holdings",
         "wp-fetch-research",
+        "wp-retrieve-principles",    # v3.6 新增
         "wp-calc-allocation-deviation",
         "wp-propose-allocation",
         "wp-reasoning",
         "wp-citation-rules",
         "wp-output-validator",
     ],
-    # GeneralChat：极简流程
+    # GeneralChat：极简流程（M5b 才加 wp-retrieve-principles）
     "general": [
         "wp-reasoning",
     ],
