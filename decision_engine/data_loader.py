@@ -101,9 +101,9 @@ class LoadedData:
     profile: UserProfile
     positions: list[PositionInfo]           # 所有持仓（聚合后，每标的唯一一条）
     target_position: Optional[PositionInfo] # 被决策标的（聚合后）
-    rules: InvestmentRules
-    research: list[str]                     # 投研观点文本列表
-    total_assets: float                     # 总投资性资产（人民币，与 discipline 同口径）
+    rules: Optional[InvestmentRules] = None  # v3.6: Optional 化，general 路由传 None
+    research: list[str] = field(default_factory=list)  # 投研观点文本列表
+    total_assets: float = 0.0              # 总投资性资产（人民币，与 discipline 同口径）
 
     # 原始数据（供 UI 展示用）
     raw_portfolio: Optional[object] = None

@@ -75,7 +75,9 @@ class ExecutingAgent:
                 self._execute_position(out, planning_output, user_query)
             elif route == "portfolio":
                 self._execute_portfolio(out, planning_output, user_query)
-            elif route in ("general", "clarify", "low_confidence"):
+            elif route == "general":
+                self._execute_general(out, planning_output)
+            elif route in ("clarify", "low_confidence"):
                 self._execute_passthrough(out, planning_output)
             else:
                 logger.warning(f"[ExecutingAgent] 未知路由: {route}")
@@ -531,6 +533,89 @@ class ExecutingAgent:
             "positions_count": len(loaded.positions),
             "total_assets": loaded.total_assets,
         }
+
+    # ────────────────────────────────────────────────────────
+    # General 路径（v3.6 新增）
+    # ────────────────────────────────────────────────────────
+
+    # 投资相关关键词（用于子意图判断，避免闲聊被知识污染）
+    _INVESTMENT_KEYWORDS = [
+        "资产配置", "再平衡", "配置原则", "五大类", "资产类别",
+        "投资纪律", "投资风格", "杠杆", "止损", "仓位",
+        "建仓", "加仓", "减仓", "组合", "持仓",
+        "权益", "固收", "另类", "衍生", "货币",
+    ]
+
+    def _execute_general(
+        self,
+        out: ExecutionOutput,
+        planning_output: PlanningOutput,
+    ) -> None:
+        """
+        v3.6 新增：general 路由的轻量执行。
+
+        不调用 wp-load-context（不需要持仓/纪律），
+        仅在 query 命中投资关键词时召回 allocation_principles。
+        构造轻量 LoadedData（rules=None）。
+        """
+        from decision_engine.data_loader import LoadedData, UserProfile
+
+        # 提取 user_query
+        user_query = ""
+        if planning_output and hasattr(planning_output, "intent"):
+            intent = planning_output.intent
+            if isinstance(intent, dict):
+                user_query = intent.get("user_query", "")
+
+        retrieved_principles = []
+
+        if self._should_retrieve_principles(user_query):
+            out.invoked_skills.append("wp-retrieve-principles")
+            try:
+                from backend.knowledge.store import KnowledgeStore
+                store = KnowledgeStore.get_instance()
+                if store.is_ready():
+                    results = store.retrieve(
+                        query=user_query,
+                        source_types=["allocation_principles"],
+                        top_k=3,
+                    )
+                    retrieved_principles = results
+                    out.skill_results["wp-retrieve-principles"] = {
+                        "chunks_count": len(results),
+                        "source_types": ["allocation_principles"],
+                        "triggered_by": "investment_keyword_match",
+                    }
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] general 路由知识检索失败（不阻断）: {e}")
+                out.skill_results["wp-retrieve-principles"] = {"error": str(e)}
+        else:
+            out.skill_results["wp-retrieve-principles"] = {
+                "skipped": True,
+                "reason": "non_investment_query",
+            }
+
+        out.loaded_data = LoadedData(
+            profile=UserProfile(),
+            positions=[],
+            target_position=None,
+            rules=None,
+            research=[],
+            total_assets=0.0,
+            retrieved_principles=retrieved_principles,
+            retrieved_research_views=[],
+        )
+        out.mark_completed()
+
+    @staticmethod
+    def _should_retrieve_principles(user_query: str) -> bool:
+        """判断 general 路由下是否需要召回原则知识。"""
+        if not user_query or len(user_query) < 2:
+            return False
+        return any(
+            kw in user_query
+            for kw in ExecutingAgent._INVESTMENT_KEYWORDS
+        )
 
     # ────────────────────────────────────────────────────────
     # 直通路径
