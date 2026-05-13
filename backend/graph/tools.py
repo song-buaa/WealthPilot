@@ -862,6 +862,80 @@ def execute_get_latest_quotations(cal_date: str = "") -> GetLatestQuotationsOutp
 
 
 # ══════════════════════════════════════════════════════════════════
+# v3.6: wp-retrieve-principles Tool
+# ══════════════════════════════════════════════════════════════════
+
+def execute_retrieve_principles(
+    query: str = "",
+    source_types: list[str] | None = None,
+    top_k: int = 5,
+) -> dict:
+    """v3.6: wp-retrieve-principles Tool — 从知识库检索用户原则类知识。"""
+    import logging as _rp_log
+    _rp_logger = _rp_log.getLogger("tools.retrieve_principles")
+
+    if not query or not query.strip():
+        return {"chunks": [], "total_retrieved": 0}
+
+    if source_types is None:
+        source_types = [
+            "investment_principles",
+            "investment_style",
+            "allocation_principles",
+        ]
+
+    try:
+        from backend.knowledge.store import KnowledgeStore
+        store = KnowledgeStore.get_instance()
+        if not store.is_ready():
+            _rp_logger.warning("KnowledgeStore 未就绪，返回空结果")
+            return {"chunks": [], "total_retrieved": 0, "warning": "knowledge_store_not_ready"}
+
+        chunks = store.retrieve(
+            query=query,
+            source_types=source_types,
+            top_k=top_k,
+            apply_decay=False,
+        )
+        for c in chunks:
+            c.source_channel = "local_principles"
+
+        return {
+            "chunks": [c.model_dump() for c in chunks],
+            "total_retrieved": len(chunks),
+        }
+    except Exception as e:
+        _rp_logger.exception("retrieve_principles 调用失败")
+        return {"chunks": [], "total_retrieved": 0, "error": str(e)}
+
+
+RETRIEVE_PRINCIPLES_SCHEMA = {
+    "name": "retrieve_principles",
+    "description": "从知识库检索用户原则类知识（投资纪律、投资风格、资产配置原则）。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "检索 query",
+            },
+            "source_types": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "知识类型过滤",
+            },
+            "top_k": {
+                "type": "integer",
+                "description": "返回结果数量",
+                "default": 5,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+# ══════════════════════════════════════════════════════════════════
 # Tool 注册表（统一入口）
 # ══════════════════════════════════════════════════════════════════
 
@@ -881,6 +955,7 @@ TOOL_SCHEMAS = [
     DIAGNOSE_FUND_SCHEMA,
     SEARCH_FINANCIAL_NEWS_SCHEMA,
     GET_LATEST_QUOTATIONS_SCHEMA,
+    RETRIEVE_PRINCIPLES_SCHEMA,
 ]
 
 TOOL_EXECUTORS = {
@@ -899,6 +974,7 @@ TOOL_EXECUTORS = {
     "diagnose_fund":              execute_diagnose_fund,
     "search_financial_news":      execute_search_financial_news,
     "get_latest_quotations":      execute_get_latest_quotations,
+    "retrieve_principles":        execute_retrieve_principles,
 }
 
 
