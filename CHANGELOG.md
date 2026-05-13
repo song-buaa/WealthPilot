@@ -5,6 +5,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.5.1] - 2026-05-13
+
+### Fixed
+- 全局时区显示问题：22 处 `.isoformat()` 缺 Z 后缀导致前端时间差 8 小时，
+  覆盖投资行动（11 处）、投研观点（5 处）、用户画像（3 处）、决策历史（1 处）、行情数据（1 处）五大模块
+
+### Refactor
+- 抽取 `backend/utils/datetime_utils.py` 公共工具函数 `utc_iso()`，
+  统一替换 6 个文件中散落的 `.isoformat()` 调用（含 v3.5.0 的 conversations.py）
+
+---
+
 ## [3.5.0] - 2026-05-12
 
 本版本实现**多会话管理与消息持久化**，投资决策页从单次对话升级为 ChatGPT 式的

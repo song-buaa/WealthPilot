@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Literal
 
+from backend.utils.datetime_utils import utc_iso
+
 
 @dataclass
 class QuoteData:
@@ -153,7 +155,7 @@ class MarketDataBundle:
                 "strongSell": a.strong_sell,
             } if a else None,
             "dataSource": "futu+alphavantage",
-            "quoteDataAsOf": q.data_as_of.isoformat() if q and q.data_as_of else None,
+            "quoteDataAsOf": utc_iso(q.data_as_of) if q else None,
             "fundamentalsDataAsOf": f.data_as_of if f else None,
             "quoteUpdateFrequency": "realtime",
             "fundamentalsUpdateFrequency": "daily",

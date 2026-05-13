@@ -30,6 +30,7 @@ from backend.services.action.brokers.factory import get_broker_adapter
 from backend.services.action.risk_engine import (
     check_order_risk, validate_confirmation, CONFIRMATION_TEXT,
 )
+from backend.utils.datetime_utils import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +63,10 @@ def _serialize_draft(draft) -> dict:
         "decision_summary": draft.decision_summary,
         "payload": json.loads(draft.payload) if draft.payload else None,
         "status": draft.status,
-        "created_at": draft.created_at.isoformat() if draft.created_at else None,
-        "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
-        "confirmed_at": draft.confirmed_at.isoformat() if draft.confirmed_at else None,
-        "discarded_at": draft.discarded_at.isoformat() if draft.discarded_at else None,
+        "created_at": utc_iso(draft.created_at),
+        "updated_at": utc_iso(draft.updated_at),
+        "confirmed_at": utc_iso(draft.confirmed_at),
+        "discarded_at": utc_iso(draft.discarded_at),
     }
 
 
@@ -84,8 +85,8 @@ def _serialize_strategy(s) -> dict:
         "limit_price": float(s.limit_price) if s.limit_price else None,
         "status": s.status,
         "decision_basis": s.decision_basis,
-        "created_at": s.created_at.isoformat() if s.created_at else None,
-        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        "created_at": utc_iso(s.created_at),
+        "updated_at": utc_iso(s.updated_at),
     }
 
 
@@ -103,7 +104,7 @@ def _serialize_order(o) -> dict:
         "limit_price": float(o.limit_price) if o.limit_price else None,
         "avg_filled_price": float(o.avg_filled_price) if o.avg_filled_price else None,
         "status": o.status,
-        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "created_at": utc_iso(o.created_at),
     }
 
 
@@ -429,7 +430,7 @@ def get_timeline(limit: int = Query(50, le=200)):
             item = {
                 "id": log.id,
                 "event_type": log.event_type,
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "timestamp": utc_iso(log.timestamp),
                 "payload": p,
             }
 
@@ -511,9 +512,9 @@ def _serialize_intent(i, strategies_count: int = 0) -> dict:
         "related_conversation_id": i.related_conversation_id,
         "decision_basis": i.decision_basis,
         "related_strategies_count": strategies_count,
-        "created_at": i.created_at.isoformat() if i.created_at else None,
-        "updated_at": i.updated_at.isoformat() if i.updated_at else None,
-        "completed_at": i.completed_at.isoformat() if i.completed_at else None,
+        "created_at": utc_iso(i.created_at),
+        "updated_at": utc_iso(i.updated_at),
+        "completed_at": utc_iso(i.completed_at),
     }
 
 

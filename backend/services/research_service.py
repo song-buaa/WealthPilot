@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.ai_advisor import generate_research_card, generate_research_card_full
 from app.research import retrieve_research_context, _parse_json_list
+from backend.utils.datetime_utils import utc_iso
 
 try:
     import pypdf as _pypdf
@@ -532,8 +533,8 @@ def _viewpoint_to_dict(v: ResearchViewpoint) -> dict:
         "validity_status":       v.validity_status,
         "source_card_id":        v.source_card_id,
         "source_document_id":    v.source_document_id,
-        "created_at":            v.created_at.isoformat() if v.created_at else None,
-        "updated_at":            v.updated_at.isoformat() if v.updated_at else None,
+        "created_at":            utc_iso(v.created_at),
+        "updated_at":            utc_iso(v.updated_at),
     }
 
 
@@ -550,7 +551,7 @@ def _document_to_dict(d: ResearchDocument) -> dict:
         "tags":         _parse_json_list(d.tags),
         "parse_status": d.parse_status,
         "notes":        d.notes,
-        "uploaded_at":  d.uploaded_at.isoformat() if d.uploaded_at else None,
+        "uploaded_at":  utc_iso(d.uploaded_at),
     }
 
 
@@ -572,7 +573,7 @@ def _card_to_dict(card: ResearchCard, include_doc: bool = False) -> dict:
         "suggested_tags":        _parse_json_list(card.suggested_tags),
         "is_approved":           card.viewpoint is not None,
         "viewpoint_id":          card.viewpoint.id if card.viewpoint else None,
-        "created_at":            card.created_at.isoformat() if card.created_at else None,
+        "created_at":            utc_iso(card.created_at),
     }
     if include_doc and card.document:
         d["document_title"] = card.document.title
@@ -720,7 +721,7 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
                     "source_type": rf.source_type.value if hasattr(rf.source_type, 'value') else str(rf.source_type),
                     "raw_fact_summary": {
                         "affected_symbols": [str(s) for s in rf.affected_symbols],
-                        "as_of": rf.as_of.isoformat() if rf.as_of else None,
+                        "as_of": utc_iso(rf.as_of),
                     },
                     "error_type": type(e).__name__,
                     "error_message": str(e)[:500],

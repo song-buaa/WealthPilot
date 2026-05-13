@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from backend.utils.datetime_utils import utc_iso
+
 
 def get_decision_history(
     asset_name: str = "",
@@ -44,7 +46,7 @@ def get_decision_history(
                 "decision_type": r.decision_type,
                 "confidence": r.confidence,
                 "chat_answer_preview": (r.chat_answer or "")[:100],
-                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "created_at": utc_iso(r.created_at) or "",
             }
             for r in records
         ]

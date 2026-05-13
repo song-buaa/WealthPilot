@@ -11,6 +11,7 @@ from typing import Optional
 import openai
 
 from app.models import UserProfile, get_session
+from backend.utils.datetime_utils import utc_iso
 
 
 # ── openai 懒加载（与 decision_engine/llm_engine.py 保持一致）────────────────
@@ -371,14 +372,14 @@ def _profile_to_dict(profile: UserProfile) -> dict:
     return {
         "id":                    profile.id,
         "version":               profile.version,
-        "created_at":            profile.created_at.isoformat() if profile.created_at else None,
-        "updated_at":            profile.updated_at.isoformat() if profile.updated_at else None,
+        "created_at":            utc_iso(profile.created_at),
+        "updated_at":            utc_iso(profile.updated_at),
         "risk_source":           profile.risk_source,
         "risk_provider":         profile.risk_provider,
         "risk_original_level":   profile.risk_original_level,
         "risk_normalized_level": profile.risk_normalized_level,
         "risk_type":             profile.risk_type,
-        "risk_assessed_at":      profile.risk_assessed_at.isoformat() if profile.risk_assessed_at else None,
+        "risk_assessed_at":      utc_iso(profile.risk_assessed_at),
         "income_level":          profile.income_level,
         "income_stability":      profile.income_stability,
         "total_assets":          profile.total_assets,

@@ -9,12 +9,9 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.utils.datetime_utils import utc_iso as _utc_iso
+
 router = APIRouter()
-
-
-def _utc_iso(dt: datetime | None) -> str | None:
-    """将 UTC datetime 序列化为带 Z 后缀的 ISO 字符串。"""
-    return dt.isoformat() + "Z" if dt else None
 
 
 # ── 请求/响应模型 ──────────────────────────────────────────────────────────
