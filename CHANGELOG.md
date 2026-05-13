@@ -5,6 +5,37 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.6.0] - 2026-05-13
+
+本版本引入**私有知识库与 RAG 语义检索**，让系统从"只用结构化字段"升级为"结构化字段 + 知识语义"双轨决策。采用 File-as-Source-of-Truth 架构：Markdown 文件是知识真相源，Chroma 向量库是可重建的索引层。
+
+### Added
+- `backend/knowledge_base/` 目录：投研观点、投资纪律、投资风格、资产配置原则均以 Markdown 文件存储
+- `backend/knowledge/` 模块：KnowledgeStore（Chroma + OpenAI Embedding）、KnowledgeIndexer（增量同步）、KnowledgeChunker（切片）、FrontmatterParser（YAML + HTML JSON 双格式）、StatusTracker（index_status 状态机）
+- `wp-retrieve-principles` Skill：从知识库语义检索用户原则类知识（投资纪律/投资风格/资产配置原则），与 `wp-fetch-research`（标的相关投研）形成语义二分法
+- 投研观点 MD 落盘：`research_service.parse_text()` 追加原文写入 `knowledge_base/research_views/{asset_slug}/` + 自动索引
+- 决策输出附引用来源：`📚 参考来源` 区块显示知识来源文件路径和日期
+- LLM prompt 新增 `time_sensitivity` 字段：permanent / slow_decay / medium_decay / fast_decay 四档内容时效类型
+- `_execute_general()` 方法：general/Education 路由支持知识库 RAG 召回（子意图关键词判断，闲聊不触发）
+- `backend/config/knowledge.yaml`：知识层全局配置（Embedding 模型 / 切片参数 / 检索参数 / 衰减配置）
+- 44 个新增测试（31 知识层单元测试 + 13 Skill 测试）
+
+### Changed
+- 投资纪律手册从 `data/handbook_*.md` 迁移到 `backend/knowledge_base/investment_principles/`（原文件暂保留）
+- 资产配置原则从 `WEALTHPILOT_ALLOCATION_PRINCIPLES` 硬编码常量改为 fallback 模式（知识库优先，常量兜底）
+- `LoadedData` 新增 `retrieved_research_views` 和 `retrieved_principles` 字段
+- `LoadedData.rules` 改为 `Optional[InvestmentRules]`（general 路由传 None）
+- `_SKILL_BUNDLES_BY_ROUTE` 四个路由（position_single/multi/portfolio/general）加入 `wp-retrieve-principles`
+- general 路由从 `_execute_passthrough`（SKIP）拆出独立的 `_execute_general()`
+
+### Technical
+- Chroma 向量库（chromadb）+ OpenAI text-embedding-3-small 接入
+- `index_status` 机制：indexed / pending / failed / stale 四态，支持增量同步和全量重建
+- `_index/file_index.json` 维护每个 MD 文件的 content_hash / status / last_indexed_at
+- 依赖新增：chromadb / python-frontmatter / langchain-text-splitters / pypinyin
+
+---
+
 ## [3.5.2] - 2026-05-13
 
 本版本实现**长对话记忆压缩**，解决对话超过 3 轮后 LLM 丢失上下文的问题。

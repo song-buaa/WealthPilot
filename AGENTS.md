@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前版本：v3.2.0 | 最后更新：2026-05-11
+> 当前版本：v3.6.0 | 最后更新：2026-05-13
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
@@ -38,19 +38,27 @@ ExpressingAgent 在流式输出完成后，基于 `structured_payload.decisionTy
 - `decisionType ∈ {buy_init, buy_more, trim, exit}` → `actionable=true`，前端显示"生成行动清单"按钮
 - 其他 decisionType → `actionable=false`，按钮不出现
 
-### 12 个 Skill
+### 13 个 Skill
 
 原子 Skill（10 个）：
 - 数据获取：`wp-fetch-holdings` / `wp-fetch-research` / `wp-check-discipline`
+- 知识检索：`wp-retrieve-principles`（v3.6 新增，检索投资纪律/风格/配置原则）
 - 计算分析：`wp-calc-allocation-deviation` / `wp-generate-signals` / `wp-propose-allocation`
 - LLM 推理：`wp-reasoning`（参数化 prompt 模板）/ `wealthpilot-position-decision`
 - 输出规范：`wp-citation-rules` / `wp-output-validator`
 
 组合 Skill（1 个）：
-- `wp-load-context`（封装 data_loader.load 168 行装配逻辑）
+- `wp-load-context`（封装 data_loader.load 装配逻辑，含 v3.6 RAG 第 7a/7b 步）
 
 旁路 Skill（1 个）：
 - `wp-action-planner`（不在 PEER 主链路上，由用户点击"生成行动清单"按钮触发）
+
+#### 知识检索 Skill 语义二分法（v3.6）
+
+| Skill | 语义边界 | 数据源 |
+|-------|---------|--------|
+| `wp-fetch-research` | 标的相关投研（"这个标的怎么样"） | 联网搜索 + 盈米 MCP + 本地投研卡 + 知识库 RAG |
+| `wp-retrieve-principles` | 用户原则（"我的约束是什么"） | 知识库 RAG（纪律 + 风格 + 配置原则） |
 
 代码位置：`skills/wp-*/SKILL.md`
 
@@ -240,6 +248,31 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 | Futu 数据源无超时上限 | 预检 0.5s 够快，但 SDK 内部仍可能慢 | v3.3 加 asyncio.wait_for |
 | tests/test_analyzer.py 失败 | v3.2 数据清理后 analyzer 对老 Portfolio 模型的测试断言失败 | v3.3 更新 analyzer 测试 |
 
+## 知识层（v3.6 新增）
+
+WealthPilot 从 v3.6 起引入私有知识库，采用 **File-as-Source-of-Truth** 架构：Markdown 文件是知识真相源，Chroma 向量库是索引层（可随时从 MD 文件重建），Git 管理知识演进。
+
+### knowledge_base/ 目录结构
+
+```
+backend/knowledge_base/
+├── investment_principles/    投资纪律手册（MD + RULES_CONFIG 双载体）
+├── investment_style/         投资风格（价值主张、红线、偏好）
+├── allocation_principles/    资产配置原则（多元配置、再平衡、目标区间）
+├── research_views/           投研观点（按标的子目录，MD 落盘）
+└── _index/                   系统生成（Chroma 持久化 + file_index.json）
+```
+
+### RAG 检索流程
+
+决策时通过 `data_loader.load()` 的两步 RAG 注入知识上下文：
+- **第 7a 步**：`wp-fetch-research` 内部 RAG（`source_types=["research_views"]`，按标的过滤）
+- **第 7b 步**：`wp-retrieve-principles`（`source_types=["investment_principles", "investment_style", "allocation_principles"]`）
+
+general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-principles`（仅 allocation_principles），子意图关键词判断防止闲聊被知识污染。
+
+知识库不可用时 graceful degrade：RAG 返回空列表，Education 走 `WEALTHPILOT_ALLOCATION_PRINCIPLES` 常量 fallback，决策流程不崩。
+
 ## 演进路径
 
 ### v3.2 ✅
@@ -253,7 +286,7 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 - 用户画像导航名简化
 - 组合级意图路由守门
 
-### v3.4（当前版本）✅
+### v3.4 ✅
 - Tiger 老虎证券真实接入（TigerBrokerAdapter,美股+港股 LIMIT 单）
 - Symbol 标准化（全系统统一 TICKER:MARKET 格式）
 - 新建仓评估能力（美股,Alpha Vantage 数据驱动）
@@ -261,12 +294,23 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 - 订单状态轮询 + 孤儿订单扫描
 - 前端：订单等待态 + 撤单按钮 + 部分成交展示
 
-### v3.5（近期）
-- A 股交易接入（国金 QMT）
-- 港股新建仓评估（接入 Tiger 行情）
-- ReviewingAgent 真实重试（当前只发警告）
-- prompt 抽离到 `prompts/*.md`
-- 工程鲁棒性补强（LLM API 超时、数据库连接池）
+### v3.5 ✅
+- 多会话管理与消息持久化
+- 长对话记忆压缩（短期窗口 + 中期摘要）
+
+### v3.6（当前版本）✅
+- 知识层基础设施：Markdown 文件 + Chroma 向量库 + OpenAI Embedding
+- `wp-retrieve-principles` Skill（原则类知识检索）
+- 投研观点 MD 落盘 + RAG 语义召回
+- 投资纪律手册迁移到 knowledge_base/
+- 资产配置原则从硬编码迁移到知识库
+- Education 意图支持 RAG 召回
+- 决策输出附引用来源
+
+### v3.6.1（近期）
+- 投资风格 UI 输入框
+- 时效类型标签 UI
+- LLM rerank（召回质量优化）
 
 ### v4.0（中期）
 - 高级 Memory（Mem0 用户偏好 / 知识图谱标的关系）
