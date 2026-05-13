@@ -113,10 +113,10 @@ class TestBundleConfiguration:
         from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
         assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["portfolio"]
 
-    def test_general_not_included_yet(self):
-        """general 路由 M5b 才加。"""
+    def test_general_included(self):
+        """general 路由已包含 wp-retrieve-principles（M5b）。"""
         from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" not in _SKILL_BUNDLES_BY_ROUTE["general"]
+        assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["general"]
 
     def test_clarify_not_included(self):
         from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE

@@ -66,8 +66,9 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
         "wp-citation-rules",
         "wp-output-validator",
     ],
-    # GeneralChat：极简流程（M5b 才加 wp-retrieve-principles）
+    # GeneralChat：v3.6 知识库检索 + LLM 推理
     "general": [
+        "wp-retrieve-principles",    # v3.6 新增
         "wp-reasoning",
     ],
     # Clarify：不进 Executing/Expressing，由 SSE 层直接返回

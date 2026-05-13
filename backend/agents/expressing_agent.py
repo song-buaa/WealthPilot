@@ -107,6 +107,62 @@ async def _emit_text_chunks(
 
 
 # ════════════════════════════════════════════════════════════
+# v3.6: 引用来源区块生成
+# ════════════════════════════════════════════════════════════
+
+_SOURCE_TYPE_LABELS = {
+    "investment_principles": "投资纪律",
+    "investment_style": "投资风格",
+    "allocation_principles": "资产配置",
+    "research_views": "投研观点",
+}
+
+
+def _build_citation_block(execution_output) -> str:
+    """
+    从 execution_output 中提取 retrieved_principles 和 retrieved_research_views，
+    生成引用来源区块。无内容时返回空字符串。
+    """
+    if not execution_output or not execution_output.loaded_data:
+        return ""
+
+    loaded = execution_output.loaded_data
+    principles = getattr(loaded, "retrieved_principles", [])
+    research_views = getattr(loaded, "retrieved_research_views", [])
+
+    all_chunks = list(principles) + list(research_views)
+    if not all_chunks:
+        return ""
+
+    # 按文件去重（同一文件多 chunks 只展示一次）
+    seen_paths: set[str] = set()
+    lines: list[str] = []
+
+    for chunk in all_chunks:
+        path = getattr(chunk, "parent_doc_path", "")
+        if not path or path in seen_paths:
+            continue
+        seen_paths.add(path)
+
+        source_type = getattr(chunk, "source_type", "")
+        label = _SOURCE_TYPE_LABELS.get(source_type, source_type)
+        date = getattr(chunk, "date", "") or ""
+        date_str = f"（{date}）" if date else ""
+
+        # 只展示相对路径中有意义的部分
+        short_path = path
+        if "knowledge_base/" in path:
+            short_path = path.split("knowledge_base/", 1)[-1]
+
+        lines.append(f"  [{label}] {short_path}{date_str}")
+
+    if not lines:
+        return ""
+
+    return "---\n📚 参考来源\n" + "\n".join(lines)
+
+
+# ════════════════════════════════════════════════════════════
 # Intent → LLM Function 映射
 # ════════════════════════════════════════════════════════════
 
@@ -354,6 +410,7 @@ class ExpressingAgent:
             elif intent_type in ("GeneralChat", "Education"):
                 async for chunk in self._express_general_chat(
                     out, user_query, conversation_history,
+                    execution_output=execution_output,  # v3.6: 透传知识库召回
                 ):
                     yield chunk
             else:
@@ -457,6 +514,11 @@ class ExpressingAgent:
             out.structured_payload = structured
 
         out.mode = "fallback" if llm_result.is_fallback else "structured"
+
+        # v3.6: 追加引用来源
+        citation = _build_citation_block(execution_output)
+        if citation:
+            out.chat_answer += "\n\n" + citation
 
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk
@@ -594,6 +656,11 @@ class ExpressingAgent:
         out.structured_payload.pop("chat_answer", None)
         out.mode = "fallback" if generic.is_fallback else "structured"
 
+        # v3.6: 追加引用来源
+        citation = _build_citation_block(execution_output)
+        if citation:
+            out.chat_answer += "\n\n" + citation
+
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk
 
@@ -606,18 +673,34 @@ class ExpressingAgent:
         out: ExpressionOutput,
         user_query: str,
         conversation_history: Optional[list[dict]] = None,
+        execution_output: Optional[ExecutionOutput] = None,
     ) -> AsyncGenerator[str, None]:
-        """通用对话：调用 llm_engine.chat()。"""
+        """通用对话：调用 llm_engine.chat()。v3.6 新增知识库原则注入。"""
         from decision_engine import llm_engine
+
+        # v3.6: 从 execution_output 提取知识库原则
+        principles_text = ""
+        if execution_output and execution_output.loaded_data:
+            chunks = getattr(execution_output.loaded_data, "retrieved_principles", [])
+            if chunks:
+                principles_text = "\n\n".join(
+                    getattr(c, "content", str(c)) for c in chunks
+                )
 
         try:
             chat_text = await asyncio.to_thread(
                 llm_engine.chat, user_query, conversation_history,
+                principles_text or None,  # v3.6: fallback 到常量
             )
         except Exception as e:
             out.mark_failed(f"LLM chat 失败: {e}")
             yield "对话生成异常。"
             return
+
+        # v3.6: 追加引用来源区块
+        citation_block = _build_citation_block(execution_output)
+        if citation_block:
+            chat_text = (chat_text or "") + "\n\n" + citation_block
 
         out.chat_answer = chat_text or ""
         out.raw_text = chat_text or ""
