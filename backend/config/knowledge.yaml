@@ -1,0 +1,31 @@
+knowledge_base:
+  root_dir: "backend/knowledge_base"
+  index_dir: "backend/knowledge_base/_index"
+  chroma_collection: "wealthpilot_knowledge"
+  enabled: true
+
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimension: 1536
+  batch_size: 100
+  cache_enabled: true
+  timeout_seconds: 10
+  retry_max: 2
+
+chunking:
+  default_chunk_size: 600
+  default_chunk_overlap: 100
+
+retrieval:
+  default_top_k: 5
+  enable_rerank: false
+  enable_small_to_big: false
+
+decay:
+  enabled: false
+  half_life_months:
+    permanent: 99999
+    slow_decay: 12
+    medium_decay: 3
+    fast_decay: 1
