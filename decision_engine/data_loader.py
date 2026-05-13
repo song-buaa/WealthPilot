@@ -122,6 +122,10 @@ class LoadedData:
     # v3.4 M8.5: 完整纪律配置 dict(供 ExpressingAgent 新建仓 prompt 注入)
     full_discipline_rules: Optional[dict] = None
 
+    # v3.6: 知识层 RAG 召回结果
+    retrieved_research_views: list = field(default_factory=list)
+    """知识库中投研观点原文的语义召回，list[RetrievedChunk]。"""
+
     @property
     def has_required_data(self) -> bool:
         """前置校验用：三要素是否齐全"""
@@ -707,6 +711,27 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
             # ── 非基金场景：保持原有通用联网搜索 ──
             research = _load_research(session, pid, asset_name)
 
+        # ── 7a. 投研观点 RAG 补充（v3.6 新增）──────────────────────────────
+        # 从知识库召回该标的的历史投研原文，作为 research 字段的语义补充。
+        # 失败不阻塞主流程（graceful degrade）。
+        retrieved_research_views = []
+        if asset_name:
+            try:
+                from backend.knowledge.store import KnowledgeStore
+                _ks = KnowledgeStore.get_instance()
+                if _ks.is_ready():
+                    retrieved_research_views = _ks.retrieve(
+                        query=user_query or asset_name,
+                        source_types=["research_views"],
+                        top_k=5,
+                        filters={"asset": asset_name},
+                    )
+            except Exception as _rag_err:
+                import logging as _rag_log
+                _rag_log.getLogger(__name__).warning(
+                    f"投研 RAG 检索失败（不阻断）: {_rag_err}"
+                )
+
         # ── 8. 用户画像（MVP mock）──────────────────────────────────────────
         profile = UserProfile()
 
@@ -724,6 +749,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
             av_fundamentals=av_fundamentals,
             market_not_supported_message=market_not_supported_message,
             full_discipline_rules=_dr,  # M8.5: 完整 dict 供新建仓 prompt 注入
+            retrieved_research_views=retrieved_research_views,  # v3.6: 投研 RAG
         )
 
     finally:

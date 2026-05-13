@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import joinedload
@@ -290,6 +291,9 @@ def parse_text(content: str, title: str, source_url: Optional[str] = None) -> di
 
         # v2 副作用：同步生成 ViewpointCard（失败不阻断 v1 流程）
         _try_generate_v2_card(content, resolved_title, source_url, card_data.get("object_name"))
+
+        # v3.6: 原文落盘到知识库 MD 文件 + 触发索引（失败不阻断主流程）
+        _persist_to_knowledge_base(content, card_data, resolved_title)
 
         return result
     except Exception:
@@ -617,6 +621,85 @@ def _create_card_from_data(document_id: int, card_data: dict) -> ResearchCard:
         invalidation_conditions=card_data.get("invalidation_conditions"),
         suggested_tags=_jl("suggested_tags"),
     )
+
+
+# ── 内部：v3.6 知识库落盘 ─────────────────────────────────────────────────────
+
+import logging as _logging_m
+_kb_logger = _logging_m.getLogger(__name__ + ".knowledge_base")
+
+_KNOWLEDGE_BASE_ROOT = Path(__file__).parent.parent / "knowledge_base"
+
+
+def _persist_to_knowledge_base(
+    original_content: str,
+    card_data: dict,
+    resolved_title: str,
+) -> None:
+    """
+    v3.6: 将投研观点原文落盘为 MD 文件并触发知识库索引。
+
+    失败不阻断主流程——try/except 包住，只记录日志。
+    """
+    try:
+        from backend.knowledge.slug import (
+            get_asset_slug, generate_title_slug, ensure_unique_path,
+        )
+
+        asset_name = card_data.get("object_name") or "general"
+        asset_slug = get_asset_slug(asset_name)
+        title_slug = generate_title_slug(resolved_title)
+        date_str = datetime.today().strftime("%Y-%m-%d")
+
+        # 构建文件路径
+        target_dir = _KNOWLEDGE_BASE_ROOT / "research_views" / asset_slug
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = target_dir / f"{date_str}_{title_slug}.md"
+        file_path = ensure_unique_path(file_path)
+
+        # 构建 YAML frontmatter
+        fm = {
+            "source": card_data.get("author") or "自己",
+            "asset": asset_name,
+            "market": card_data.get("market_name") or "",
+            "date": date_str,
+            "time_sensitivity": card_data.get("time_sensitivity") or "medium_decay",
+            "tags": card_data.get("suggested_tags") or [],
+        }
+
+        # 写入 MD 文件
+        import frontmatter as _fm
+        post = _fm.Post(original_content, **fm)
+        file_path.write_text(_fm.dumps(post), encoding="utf-8")
+
+        _kb_logger.info(f"投研观点落盘成功: {file_path}")
+
+        # 触发知识库索引
+        try:
+            from backend.knowledge.store import KnowledgeStore
+            store = KnowledgeStore.get_instance()
+            if store.is_ready():
+                from backend.knowledge.indexer import KnowledgeIndexer
+                from backend.knowledge.chunker import KnowledgeChunker
+                from backend.knowledge.status_tracker import StatusTracker
+
+                tracker = StatusTracker(
+                    _KNOWLEDGE_BASE_ROOT / "_index" / "file_index.json"
+                )
+                chunker = KnowledgeChunker()
+                indexer = KnowledgeIndexer(
+                    knowledge_root=_KNOWLEDGE_BASE_ROOT,
+                    store=store,
+                    chunker=chunker,
+                    status_tracker=tracker,
+                )
+                indexer.on_file_write(file_path)
+                _kb_logger.info(f"投研观点索引成功: {file_path}")
+        except Exception as idx_err:
+            _kb_logger.warning(f"投研观点索引失败（不阻断）: {idx_err}")
+
+    except Exception as e:
+        _kb_logger.warning(f"投研观点落盘失败（不阻断主流程）: {e}")
 
 
 # ── 内部：内容抓取 ────────────────────────────────────────────────────────────

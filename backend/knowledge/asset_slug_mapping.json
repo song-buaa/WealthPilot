@@ -1,1 +1,13 @@
-{}
+{
+  "理想汽车": "li_auto",
+  "美团": "meituan",
+  "比亚迪": "byd",
+  "腾讯": "tencent",
+  "阿里巴巴": "alibaba",
+  "苹果": "apple",
+  "特斯拉": "tesla",
+  "英伟达": "nvidia",
+  "微软": "microsoft",
+  "谷歌": "google",
+  "小鹏汽车": "xiaopengqiche"
+}
