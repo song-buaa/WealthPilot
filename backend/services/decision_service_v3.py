@@ -47,7 +47,7 @@ async def run_chat_stream_v3(
             try:
                 from backend.services.decision_service import get_conversation_history
                 conversation_history = await asyncio.to_thread(
-                    get_conversation_history, conversation_id, 6,
+                    get_conversation_history, conversation_id,
                 )
             except Exception as e:
                 logger.warning(f"[v3] Stage 0 加载 history 失败: {e}")
@@ -104,10 +104,20 @@ async def run_chat_stream_v3(
         )
 
         if plan_out.status == AgentTaskStatus.FAILED:
+            error_msg = plan_out.error or "意图识别失败"
             yield _sse("error", {
                 "code": "planning_failed",
-                "message": plan_out.error or "意图识别失败",
+                "message": error_msg,
             })
+            # 保存对话历史（即使失败也记录）
+            try:
+                from backend.services.decision_service import save_conversation_turn
+                await asyncio.to_thread(
+                    save_conversation_turn, conversation_id, user_input, f"[系统错误] {error_msg}",
+                    "PlanningFailed", None,
+                )
+            except Exception as e:
+                logger.warning(f"[v3] planning_failed save_conversation_turn 失败: {e}")
             return
 
         # yield intent 事件（兼容 v2.6 协议）
@@ -141,6 +151,15 @@ async def run_chat_stream_v3(
                 or "您能描述一下您想分析哪个标的，以及想做什么操作（买入、卖出、还是持有判断）吗？"
             )
             yield _sse("text", {"delta": clarify_text})
+            # 保存对话历史
+            try:
+                from backend.services.decision_service import save_conversation_turn
+                await asyncio.to_thread(
+                    save_conversation_turn, conversation_id, user_input, clarify_text,
+                    "LowConfidence", None,
+                )
+            except Exception as e:
+                logger.warning(f"[v3] low_confidence save_conversation_turn 失败: {e}")
             yield _sse("done", {
                 "decision_id": None,
                 "conclusion_level": None,

@@ -8,7 +8,7 @@ WealthPilot - 数据库模型定义
 import enum
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -305,6 +305,7 @@ class Conversation(Base):
     title        = Column(String(200), nullable=True)
     portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=True)
     status       = Column(String(20), default="active")   # active / archived
+    context_summary = Column(Text, nullable=True)          # 中期摘要（长对话压缩）
     created_at   = Column(DateTime, default=datetime.utcnow)
     updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -327,6 +328,7 @@ class ConversationMessage(Base):
     content    = Column(Text,    nullable=False)   # user原文 / assistant的chat_answer
     intent     = Column(String,  nullable=True)    # 仅assistant轮，如"PositionDecision"
     asset      = Column(String,  nullable=True)    # 仅assistant轮，如"理想汽车"
+    is_summarized = Column(Boolean, default=False, nullable=False)  # 已纳入摘要
     created_at = Column(DateTime, default=datetime.utcnow)
 
     conversation = relationship("Conversation", back_populates="messages")

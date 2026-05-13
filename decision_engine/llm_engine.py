@@ -1707,18 +1707,26 @@ def _call_generic_llm(
     intent_type: str,
     prompt: str,
     payload: dict,
+    conversation_history: list[dict] | None = None,
 ) -> GenericLLMResult:
     """通用 LLM 调用，供组合级别意图共用。"""
     try:
         client = _get_client()
+        messages = [{"role": "system", "content": _BASE_PROMPT + "\n\n" + prompt}]
+        if conversation_history:
+            for turn in conversation_history:
+                if turn.get("role") in ("user", "assistant") and turn.get("content"):
+                    content = turn["content"]
+                    # 截断过长的 assistant 消息，避免 token 溢出
+                    if turn["role"] == "assistant" and len(content) > 500:
+                        content = content[:300] + "\n…（省略）…\n" + content[-200:]
+                    messages.append({"role": turn["role"], "content": content})
+        messages.append({"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)})
         response = client.chat.completions.create(
             model="gpt-4.1",
             max_tokens=2048,
             timeout=30,
-            messages=[
-                {"role": "system", "content": _BASE_PROMPT + "\n\n" + prompt},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
-            ],
+            messages=messages,
         )
         raw = response.choices[0].message.content.strip()
         parsed = _extract_json(raw)
@@ -1744,13 +1752,14 @@ def review_portfolio(
     user_query: str,
     data: LoadedData,
     extra_instruction: str = "",
+    conversation_history: list[dict] | None = None,
 ) -> GenericLLMResult:
     """组合评估 LLM 推理（PortfolioReview）"""
     payload = _build_portfolio_payload(user_query, data)
     prompt = _PORTFOLIO_REVIEW_PROMPT
     if extra_instruction:
         prompt = _PORTFOLIO_REVIEW_PROMPT + "\n\n" + extra_instruction
-    return _call_generic_llm("portfolio_review", prompt, payload)
+    return _call_generic_llm("portfolio_review", prompt, payload, conversation_history)
 
 
 def analyze_allocation(
@@ -1758,16 +1767,21 @@ def analyze_allocation(
     data: LoadedData,
     capital_amount: float | None = None,
     portfolio_id: int | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> GenericLLMResult:
     """资产配置 LLM 推理（AssetAllocation）"""
     payload = _build_allocation_payload(user_query, data, capital_amount, portfolio_id)
-    return _call_generic_llm("asset_allocation", _ASSET_ALLOCATION_PROMPT, payload)
+    return _call_generic_llm("asset_allocation", _ASSET_ALLOCATION_PROMPT, payload, conversation_history)
 
 
-def analyze_performance(user_query: str, data: LoadedData) -> GenericLLMResult:
+def analyze_performance(
+    user_query: str,
+    data: LoadedData,
+    conversation_history: list[dict] | None = None,
+) -> GenericLLMResult:
     """收益分析 LLM 推理（PerformanceAnalysis）"""
     payload = _build_portfolio_payload(user_query, data)
-    return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload)
+    return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload, conversation_history)
 
 
 # ── 多标的横向对比（P2 新增）─────────────────────────────────────────────────

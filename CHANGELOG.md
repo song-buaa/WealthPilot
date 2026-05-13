@@ -5,6 +5,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.5.2] - 2026-05-13
+
+本版本实现**长对话记忆压缩**，解决对话超过 3 轮后 LLM 丢失上下文的问题。
+采用"短期窗口 + 中期摘要"两层架构，支持无限长度对话。
+
+### Added
+- 长对话记忆压缩：超过 20 条消息时自动触发摘要压缩，摘要 + 最近 20 条原文一起传给 LLM
+- 投资场景定制摘要 prompt：保留标的名、价格区间、仓位比例、操作结论、纪律检查结果
+- Conversation 表新增 `context_summary` 字段（中期摘要文本）
+- ConversationMessage 表新增 `is_summarized` 字段（已纳入摘要标记）
+
+### Changed
+- 对话窗口从 3 轮（6 条）扩展到 10 轮（20 条），`get_conversation_history(limit=20)`
+- portfolio / general_chat / performance_analysis 路径补全 `conversation_history` 传递给 LLM
+- `_call_generic_llm()` 新增 `conversation_history` 参数，组合级意图也能感知上下文
+
+### Fixed
+- `planning_failed` 路径消息不入库（此前意图识别失败时对话在 DB 中无记录）
+- `low_confidence` 路径消息不入库（此前低置信度澄清回复不保存）
+
+---
+
 ## [3.5.1] - 2026-05-13
 
 ### Fixed

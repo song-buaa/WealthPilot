@@ -47,13 +47,21 @@ _ALLOC_EXPLAIN_STORE: dict[str, dict] = {}
 
 # ── 多轮对话历史（持久化） ────────────────────────────────────────────────────
 
-def get_conversation_history(conversation_id: str, limit: int = 6) -> list[dict]:
-    """读取该 session 最近 limit 条记录，按 created_at 升序返回。"""
+def get_conversation_history(conversation_id: str, limit: int = 20) -> list[dict]:
+    """返回用于 LLM 的对话历史（摘要 + 最近 N 条原文）。
+
+    如果该会话有 context_summary，在消息列表前插入 system 摘要消息。
+    """
     from app.database import get_session as get_db_session
-    from app.models import ConversationMessage
+    from app.models import Conversation, ConversationMessage
 
     db = get_db_session()
     try:
+        # 取摘要
+        conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        summary = conv.context_summary if conv else None
+
+        # 取最近 limit 条消息
         rows = (
             db.query(ConversationMessage)
             .filter(ConversationMessage.conversation_id == conversation_id)
@@ -61,16 +69,22 @@ def get_conversation_history(conversation_id: str, limit: int = 6) -> list[dict]
             .limit(limit)
             .all()
         )
-        rows.reverse()  # 升序
-        return [
-            {
+        rows.reverse()
+
+        result: list[dict] = []
+        if summary:
+            result.append({
+                "role": "system",
+                "content": f"以下是本次对话的历史摘要：\n{summary}",
+            })
+        for r in rows:
+            result.append({
                 "role": r.role,
                 "content": r.content,
                 "intent": r.intent,
                 "asset": r.asset,
-            }
-            for r in rows
-        ]
+            })
+        return result
     finally:
         db.close()
 
@@ -115,6 +129,106 @@ def _update_conversation_title_async(conversation_id: str, first_message: str) -
             conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
             if conv:
                 conv.title = title
+                db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+# ── 长对话记忆压缩 ────────────────────────────────────────────────────────
+
+_SUMMARY_PROMPT = """你是一个投资对话摘要助手。
+将以下对话历史压缩成简洁摘要，要求：
+- 保留所有提及的标的名称（如理想汽车、英伟达）
+- 保留关键数字（价格、仓位比例、盈亏比例）
+- 保留每个标的的操作结论（买入/减仓/持有/观望）
+- 保留纪律检查结果（通过/违规/提示）
+- 删除铺垫性的分析过程，只保留结论
+- 摘要控制在 500 字以内
+- 如果有旧摘要，将旧摘要和新对话合并压缩
+只输出摘要文字，不加前缀或标记。"""
+
+
+def generate_context_summary(
+    messages_to_compress: list[dict],
+    existing_summary: str | None = None,
+) -> str:
+    """将旧摘要 + 待压缩消息压缩成新摘要。失败时返回旧摘要。"""
+    fallback = existing_summary or ""
+    try:
+        from intent_engine._llm_client import get_client
+        client = get_client()
+
+        user_content_parts: list[str] = []
+        if existing_summary:
+            user_content_parts.append(f"【旧摘要】\n{existing_summary}\n")
+        user_content_parts.append("【新增对话】")
+        for m in messages_to_compress:
+            role_label = "用户" if m["role"] == "user" else "助手"
+            content = m["content"][:300]  # 截断超长单条消息
+            user_content_parts.append(f"{role_label}：{content}")
+
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": _SUMMARY_PROMPT},
+                {"role": "user", "content": "\n".join(user_content_parts)},
+            ],
+            max_tokens=600,
+            temperature=0,
+            timeout=15,
+        )
+        summary = (resp.choices[0].message.content or "").strip()
+        return summary if summary else fallback
+    except Exception:
+        return fallback
+
+
+def _compress_conversation_async(conversation_id: str) -> None:
+    """后台线程：压缩旧消息为摘要，不阻塞主流程。"""
+    import threading
+
+    def _worker():
+        from app.database import get_session as get_db_session
+        from app.models import Conversation, ConversationMessage
+
+        db = get_db_session()
+        try:
+            # 取所有未摘要的消息（升序）
+            unsummarized = (
+                db.query(ConversationMessage)
+                .filter(
+                    ConversationMessage.conversation_id == conversation_id,
+                    ConversationMessage.is_summarized == False,
+                )
+                .order_by(ConversationMessage.created_at.asc())
+                .all()
+            )
+
+            if len(unsummarized) <= 20:
+                return  # 不需要压缩
+
+            # 保留最新 10 条不压缩（短期窗口）
+            to_compress = unsummarized[:-10]
+            msgs_for_llm = [
+                {"role": m.role, "content": m.content}
+                for m in to_compress
+            ]
+
+            # 取旧摘要
+            conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            old_summary = conv.context_summary if conv else None
+
+            # 生成新摘要
+            new_summary = generate_context_summary(msgs_for_llm, old_summary)
+
+            if new_summary and conv:
+                conv.context_summary = new_summary
+                for m in to_compress:
+                    m.is_summarized = True
                 db.commit()
         except Exception:
             db.rollback()
@@ -171,6 +285,14 @@ def save_conversation_turn(
         # 首条消息写入成功后，在后台异步用 LLM 生成更好的标题
         if is_first_message and user_input:
             _update_conversation_title_async(conversation_id, user_input)
+
+        # 检查是否需要触发摘要压缩（未摘要消息 > 20 条）
+        unsummarized_count = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.is_summarized == False,
+        ).count()
+        if unsummarized_count > 20:
+            _compress_conversation_async(conversation_id)
 
     except Exception:
         db.rollback()

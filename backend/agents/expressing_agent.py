@@ -348,11 +348,13 @@ class ExpressingAgent:
             elif intent_type in ("PortfolioReview", "AssetAllocation", "PerformanceAnalysis"):
                 async for chunk in self._express_portfolio(
                     out, planning_output, execution_output,
-                    user_query, intent_type,
+                    user_query, intent_type, conversation_history,
                 ):
                     yield chunk
             elif intent_type in ("GeneralChat", "Education"):
-                async for chunk in self._express_general_chat(out, user_query):
+                async for chunk in self._express_general_chat(
+                    out, user_query, conversation_history,
+                ):
                     yield chunk
             else:
                 logger.warning(f"[ExpressingAgent] 未知意图: {intent_type}")
@@ -538,6 +540,7 @@ class ExpressingAgent:
         execution_output: ExecutionOutput,
         user_query: str,
         intent_type: str,
+        conversation_history: Optional[list[dict]] = None,
     ) -> AsyncGenerator[str, None]:
         """组合级表达：根据意图类型调用对应 LLM engine 函数。"""
         from decision_engine import llm_engine
@@ -559,6 +562,7 @@ class ExpressingAgent:
                 generic = await asyncio.to_thread(
                     llm_engine.review_portfolio, user_query, loaded,
                     extra_instruction=extra_instruction,
+                    conversation_history=conversation_history,
                 )
             elif intent_type == "AssetAllocation":
                 capital_amount = self._extract_capital_amount(user_query, planning_output)
@@ -567,10 +571,12 @@ class ExpressingAgent:
                     user_query, loaded,
                     capital_amount,
                     planning_output.portfolio_id,
+                    conversation_history=conversation_history,
                 )
             elif intent_type == "PerformanceAnalysis":
                 generic = await asyncio.to_thread(
                     llm_engine.analyze_performance, user_query, loaded,
+                    conversation_history=conversation_history,
                 )
             else:
                 out.mark_failed(f"未知组合意图: {intent_type}")
@@ -599,13 +605,14 @@ class ExpressingAgent:
         self,
         out: ExpressionOutput,
         user_query: str,
+        conversation_history: Optional[list[dict]] = None,
     ) -> AsyncGenerator[str, None]:
         """通用对话：调用 llm_engine.chat()。"""
         from decision_engine import llm_engine
 
         try:
             chat_text = await asyncio.to_thread(
-                llm_engine.chat, user_query, None,
+                llm_engine.chat, user_query, conversation_history,
             )
         except Exception as e:
             out.mark_failed(f"LLM chat 失败: {e}")
