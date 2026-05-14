@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.6.2] - 2026-05-14
+
+### Changed
+- 时效衰减打分正式启用（knowledge.yaml decay.enabled: true）
+- KnowledgeStore.retrieve() 的 apply_decay 参数改为从配置读取，data_loader.py 第 7a/7b 步和 wp-retrieve-principles Skill 同步更新
+- 衰减效果：permanent 不衰减 / slow_decay 3月后 0.84 / medium_decay 3月后 0.50 / fast_decay 1月后 0.13
+
+---
+
 ## [3.6.1] - 2026-05-13
 
 本版本重构分析过程面板，把联网数据与私有知识库引用分离展示，并清理 v3.6.0 的遗留技术债。
