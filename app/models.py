@@ -181,6 +181,7 @@ class ResearchDocument(Base):
     tags         = Column(Text, nullable=True)           # JSON 字符串列表
     parse_status = Column(String(20), default="pending")
     notes        = Column(Text, nullable=True)
+    time_sensitivity = Column(String(20), nullable=True)  # v3.6.3
 
     cards = relationship(
         "ResearchCard", back_populates="document", cascade="all, delete-orphan"
@@ -206,6 +207,7 @@ class ResearchCard(Base):
     action_suggestion     = Column(Text, nullable=True)
     invalidation_conditions = Column(Text, nullable=True)
     suggested_tags        = Column(Text, nullable=True)   # JSON 列表
+    time_sensitivity      = Column(String(20), nullable=True)  # v3.6.3
     created_at            = Column(DateTime, default=datetime.now)
 
     document  = relationship("ResearchDocument", back_populates="cards")
@@ -393,6 +395,9 @@ class ViewpointCardV2(Base):
 
     # ── 关系 JSON ──
     relations_json    = Column(Text, nullable=True)       # list[Relation] JSON
+
+    # ── 时效 ──
+    time_sensitivity  = Column(String(20), nullable=True)  # v3.6.3
 
     # ── 状态 ──
     status            = Column(String(20), nullable=False, default="pending_review")
