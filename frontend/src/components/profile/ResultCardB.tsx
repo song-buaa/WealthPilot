@@ -34,7 +34,7 @@ interface Props {
 }
 
 export default function ResultCardB({ profile, onSaved }: Props) {
-  const [open, setOpen]       = useState(false)
+  const [open, setOpen]       = useState(true)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft]     = useState<Partial<UserProfile>>({})
   const [saving, setSaving]   = useState(false)
