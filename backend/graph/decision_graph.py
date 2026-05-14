@@ -141,7 +141,7 @@ def orchestrator_node(state: DecisionState) -> dict:
     LLM Planner 的 rationale 字段是 Eval L2 评测和可解释性的关键。
     """
     import json
-    from intent_engine._llm_client import get_client, MODEL_MAIN
+    from intent_engine._llm_client import get_client, MODEL_MINI
 
     user_query = state["user_query"]
     conversation_id = state["conversation_id"]
@@ -246,7 +246,7 @@ def orchestrator_node(state: DecisionState) -> dict:
     try:
         client = get_client()
         response = client.chat.completions.create(
-            model=MODEL_MAIN,
+            model=MODEL_MINI,
             messages=[{"role": "user", "content": planner_prompt}],
             temperature=0,
             max_tokens=200,

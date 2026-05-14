@@ -844,14 +844,20 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
   onSelectCandidate?: (name: string) => void
   onGenerateAction?: (msgId: number) => void
 }) {
-  // loading 态：无内容且正在流式输出
+  // loading 态：无内容且正在流式输出 — 根据 stage 事件动态显示进度
   if (msg.streaming && !msg.content) {
+    const lastStage = (msg.stages ?? []).at(-1)
+    const stageName = lastStage?.name ?? ''
+    const isComplete = stageName === 'rules' || stageName === 'signals'
+    const label = lastStage?.summary ?? '意图识别中...'
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <AiAvatar />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9CA3AF', fontSize: 14 }}>
-          <Loader2 size={16} className="animate-spin" />
-          正在分析中...
+          {isComplete
+            ? <CheckCircle size={16} style={{ color: '#10B981' }} />
+            : <Loader2 size={16} className="animate-spin" />}
+          {label}
         </div>
       </div>
     )

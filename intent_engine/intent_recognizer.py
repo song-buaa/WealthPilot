@@ -44,7 +44,7 @@ from .types import (
     IntentEntities,
     IntentPayload,
 )
-from ._llm_client import MODEL_MAIN, get_client, reset_client
+from ._llm_client import MODEL_MAIN, MODEL_MINI, get_client, reset_client
 
 # ── 置信度阈值（PRD §5.1）────────────────────────────────────────────────────
 CONFIDENCE_EXECUTE = 0.75       # ≥ 此值：正常执行
@@ -299,7 +299,7 @@ def recognize(
         try:
             client = get_client()
             response = client.chat.completions.create(
-                model=MODEL_MAIN,
+                model=MODEL_MINI,
                 max_tokens=512,
                 timeout=10,
                 messages=messages,

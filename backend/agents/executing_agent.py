@@ -208,21 +208,123 @@ class ExecutingAgent:
             out.mark_failed(f"前置校验异常: {e}")
             return
 
-        # ── Step 4: 规则校验（v3.0：通过 invoke_skill + Adapter）──
-        out.invoked_skills.append("wp-check-discipline")
-        try:
-            discipline_output = invoke_skill(
-                "wp-check-discipline",
-                asset_name=asset_name,
-                portfolio_id=portfolio_id,
-                action_type="HOLD",
-            )
-            rule_result = discipline_output_to_rule_result(discipline_output)
-        except Exception as e:
-            out.mark_failed(f"规则校验异常: {e}")
-            return
+        # ── Steps 4-6: 并行执行规则校验 + 信号生成 + 市场数据加载 ──
+        # 这些步骤只读 Phase 1 输出（loaded / asset_name / wp_symbol），
+        # 彼此无数据依赖，用 ThreadPoolExecutor 并行化。
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import sys, os as _os
+        _bd = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        if _bd not in sys.path:
+            sys.path.insert(0, _bd)
 
-        # 未持仓 + 非买入 → ABORT（调 LLM 生成智能引导文本，对齐 v2 decision_flow.py）
+        # 准备市场数据参数
+        wp_symbol = None
+        if asset_name and loaded.target_position:
+            tp = loaded.target_position
+            ticker = getattr(tp, "ticker", "") or ""
+            if ticker:
+                from utils.symbol import infer_symbol_from_ticker
+                currency = getattr(tp, "currency", "USD") or "USD"
+                wp_symbol = infer_symbol_from_ticker(ticker, currency)
+
+        _futu_available = _is_futu_opend_available() if wp_symbol else False
+        if _futu_available:
+            from services.market_data.futu_quote_service import fetch_quote
+            from services.market_data.futu_capital_flow_service import fetch_capital_flow
+        else:
+            fetch_quote = lambda *a, **kw: None  # noqa: E731
+            fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
+            if wp_symbol:
+                logger.info("[ExecutingAgent] Futu OpenD 未运行，跳过 Futu 数据源")
+        from services.market_data.av_fundamentals_service import fetch_fundamentals
+        from services.market_data.tiger_kline_service import fetch_kline
+
+        # 定义并行任务
+        def _task_discipline():
+            return discipline_output_to_rule_result(invoke_skill(
+                "wp-check-discipline",
+                asset_name=asset_name, portfolio_id=portfolio_id, action_type="HOLD",
+            ))
+
+        def _task_signals():
+            so = invoke_skill(
+                "wp-generate-signals",
+                asset_name=asset_name, portfolio_id=portfolio_id,
+                action_type=intent_obj.action_type or "持有评估",
+            )
+            if so.error:
+                raise RuntimeError(f"信号生成异常: {so.error}")
+            return signals_output_to_signal_result(so)
+
+        def _task_quote():
+            return fetch_quote(wp_symbol) if wp_symbol else None
+
+        def _task_capital_flow():
+            return fetch_capital_flow(wp_symbol) if wp_symbol else None
+
+        def _task_fundamentals():
+            return fetch_fundamentals(wp_symbol) if wp_symbol else None
+
+        def _task_kline():
+            return fetch_kline(wp_symbol) if wp_symbol else None
+
+        # 提交并行任务
+        out.invoked_skills.extend(["wp-check-discipline", "wp-generate-signals"])
+        if wp_symbol:
+            out.invoked_skills.extend([
+                "wp-fetch-realtime-quote", "wp-fetch-fundamentals",
+                "wp-fetch-capital-flow", "wp-fetch-kline",
+            ])
+
+        rule_result = None
+        signal_result = None
+        quote = None
+        fundamentals = None
+        capital_flow = None
+        technical = None
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            fut_discipline = executor.submit(_task_discipline)
+            fut_signals = executor.submit(_task_signals)
+            fut_quote = executor.submit(_task_quote)
+            fut_capital_flow = executor.submit(_task_capital_flow)
+            fut_fundamentals = executor.submit(_task_fundamentals)
+            fut_kline = executor.submit(_task_kline)
+
+            # 收集结果（每个任务独立异常处理）
+            try:
+                rule_result = fut_discipline.result()
+            except Exception as e:
+                out.mark_failed(f"规则校验异常: {e}")
+                return
+
+            try:
+                signal_result = fut_signals.result()
+            except Exception as e:
+                out.mark_failed(f"信号生成异常: {e}")
+                return
+
+            # 市场数据：失败不阻塞
+            try:
+                quote = fut_quote.result()
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] Futu 行情失败(不阻塞): {wp_symbol}: {e}")
+            try:
+                fundamentals = fut_fundamentals.result()
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] AV 基本面失败(不阻塞): {wp_symbol}: {e}")
+            try:
+                capital_flow = fut_capital_flow.result()
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] Futu 资金流向失败(不阻塞): {wp_symbol}: {e}")
+            try:
+                technical = fut_kline.result()
+            except Exception as e:
+                logger.warning(f"[ExecutingAgent] Tiger K线失败(不阻塞): {wp_symbol}: {e}")
+
+        # ── 后置校验（依赖 rule_result）──
+
+        # 未持仓 + 非买入 → ABORT
         _buy_actions = ("买入判断", "加仓判断")
         if loaded.target_position is None and intent_obj.action_type not in _buy_actions:
             try:
@@ -238,42 +340,10 @@ class ExecutingAgent:
                     f"如需分析此标的，建议先在投资账户中录入相关信息，"
                     f"或告诉我您持仓的其他标的，我可以帮您分析。"
                 )
-            out.mark_aborted(
-                reason="not_in_portfolio_non_buy",
-                chat_answer=chat_answer,
-            )
+            out.mark_aborted(reason="not_in_portfolio_non_buy", chat_answer=chat_answer)
             return
 
-        out.rule_result = rule_result
-        out.skill_results["wp-check-discipline"] = {
-            "violation": rule_result.violation,
-            "warning": rule_result.warning,
-            "current_weight": rule_result.current_weight,
-        }
-
-        # ── Step 5: 信号生成（v3.0：通过 invoke_skill + Adapter）──
-        out.invoked_skills.append("wp-generate-signals")
-        try:
-            signals_output = invoke_skill(
-                "wp-generate-signals",
-                asset_name=asset_name,
-                portfolio_id=portfolio_id,
-                action_type=intent_obj.action_type or "持有评估",
-            )
-
-            if signals_output.error:
-                out.mark_failed(f"信号生成异常: {signals_output.error}")
-                return
-
-            signal_result = signals_output_to_signal_result(signals_output)
-
-        except Exception as e:
-            out.mark_failed(f"信号生成异常: {e}")
-            return
-
-        # 仓位口径一致性检查(仅对真实持仓,虚拟持仓跳过)
-        # 阈值 0.005 (0.5%): loaded 和 skill 分别查 DB,
-        # 期间 broker_sync 可能更新持仓导致微小差异,属正常浮点偏差
+        # 仓位口径一致性检查
         if (loaded.target_position is not None
                 and not getattr(loaded.target_position, "is_virtual", False)):
             tp_weight = loaded.target_position.weight
@@ -285,105 +355,35 @@ class ExecutingAgent:
                 )
                 return
 
+        # ── 写入结果 ──
+        out.rule_result = rule_result
+        out.skill_results["wp-check-discipline"] = {
+            "violation": rule_result.violation,
+            "warning": rule_result.warning,
+            "current_weight": rule_result.current_weight,
+        }
         out.signal_result = signal_result
         out.skill_results["wp-generate-signals"] = signal_result.to_dict()
 
-        # ── Step 6: 市场数据加载（M1-b 新增,失败不阻塞）──
-        if asset_name:
-            try:
-                import sys, os as _os
-                _bd = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-                if _bd not in sys.path:
-                    sys.path.insert(0, _bd)
-
-                # 预检 Futu OpenD 是否可达（0.5s 超时，不可达则跳过 Futu 数据源）
-                _futu_available = _is_futu_opend_available()
-                if _futu_available:
-                    from services.market_data.futu_quote_service import fetch_quote
-                    from services.market_data.futu_capital_flow_service import fetch_capital_flow
-                else:
-                    fetch_quote = lambda *a, **kw: None  # noqa: E731
-                    fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
-                    logger.info("[ExecutingAgent] Futu OpenD 未运行（127.0.0.1:11111 不可达），跳过 Futu 数据源")
-
-                from services.market_data.av_fundamentals_service import fetch_fundamentals
-                from services.market_data.tiger_kline_service import fetch_kline
-                from services.market_data.schema import MarketDataBundle
-                from datetime import datetime, timezone
-
-                # 构造 WP 内部 symbol（asset_name 可能是"特斯拉"而非 ticker）
-                wp_symbol = None
-                if loaded.target_position:
-                    tp = loaded.target_position
-                    ticker = getattr(tp, "ticker", "") or ""
-                    if ticker:
-                        from utils.symbol import infer_symbol_from_ticker
-                        currency = getattr(tp, "currency", "USD") or "USD"
-                        wp_symbol = infer_symbol_from_ticker(ticker, currency)
-
-                if not wp_symbol:
-                    logger.warning(
-                        f"[ExecutingAgent] 市场数据跳过：target_position.ticker 为空，asset={asset_name}"
-                    )
-                else:
-                    quote = None
-                    fundamentals = None
-                    capital_flow = None
-                    technical = None
-
-                    out.invoked_skills.append("wp-fetch-realtime-quote")
-                    try:
-                        quote = fetch_quote(wp_symbol)
-                    except Exception as e:
-                        logger.warning(f"[ExecutingAgent] Futu 行情失败(不阻塞): {wp_symbol}: {e}")
-
-                    out.invoked_skills.append("wp-fetch-fundamentals")
-                    try:
-                        fundamentals = fetch_fundamentals(wp_symbol)
-                    except Exception as e:
-                        logger.warning(f"[ExecutingAgent] AV 基本面失败(不阻塞): {wp_symbol}: {e}")
-
-                    out.invoked_skills.append("wp-fetch-capital-flow")
-                    try:
-                        capital_flow = fetch_capital_flow(wp_symbol)
-                    except Exception as e:
-                        logger.warning(f"[ExecutingAgent] Futu 资金流向失败(不阻塞): {wp_symbol}: {e}")
-
-                    out.invoked_skills.append("wp-fetch-kline")
-                    try:
-                        technical = fetch_kline(wp_symbol)
-                    except Exception as e:
-                        logger.warning(f"[ExecutingAgent] Tiger K线失败(不阻塞): {wp_symbol}: {e}")
-
-                    out.market_data = MarketDataBundle(
-                        symbol=wp_symbol,
-                        quote=quote,
-                        fundamentals=fundamentals,
-                        capital_flow=capital_flow,
-                        technical=technical,
-                        fetched_at=datetime.now(timezone.utc),
-                    )
-                    out.skill_results["wp-fetch-realtime-quote"] = {
-                        "available": quote is not None,
-                    }
-                    out.skill_results["wp-fetch-fundamentals"] = {
-                        "available": fundamentals is not None,
-                    }
-                    out.skill_results["wp-fetch-capital-flow"] = {
-                        "available": capital_flow is not None,
-                    }
-                    out.skill_results["wp-fetch-kline"] = {
-                        "available": technical is not None,
-                    }
-                    logger.info(
-                        f"[ExecutingAgent] 市场数据: {wp_symbol} "
-                        f"quote={'✅' if quote else '❌'} "
-                        f"fundamentals={'✅' if fundamentals else '❌'} "
-                        f"capital_flow={'✅' if capital_flow else '❌'} "
-                        f"kline={'✅' if technical else '❌'}"
-                    )
-            except Exception as e:
-                logger.warning(f"[ExecutingAgent] 市场数据初始化失败(不阻塞): {e}")
+        if wp_symbol:
+            from services.market_data.schema import MarketDataBundle
+            from datetime import datetime, timezone
+            out.market_data = MarketDataBundle(
+                symbol=wp_symbol, quote=quote, fundamentals=fundamentals,
+                capital_flow=capital_flow, technical=technical,
+                fetched_at=datetime.now(timezone.utc),
+            )
+            out.skill_results["wp-fetch-realtime-quote"] = {"available": quote is not None}
+            out.skill_results["wp-fetch-fundamentals"] = {"available": fundamentals is not None}
+            out.skill_results["wp-fetch-capital-flow"] = {"available": capital_flow is not None}
+            out.skill_results["wp-fetch-kline"] = {"available": technical is not None}
+            logger.info(
+                f"[ExecutingAgent] 市场数据: {wp_symbol} "
+                f"quote={'✅' if quote else '❌'} "
+                f"fundamentals={'✅' if fundamentals else '❌'} "
+                f"capital_flow={'✅' if capital_flow else '❌'} "
+                f"kline={'✅' if technical else '❌'}"
+            )
 
     # ────────────────────────────────────────────────────────
     # 新建仓路径（v3.4 M8.2）
