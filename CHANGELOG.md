@@ -5,6 +5,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.6.4] - 2026-05-14
+
+### Added
+- 用户画像页面新增"投资理念"板块：展示 investment_philosophy.md，支持下载 / 上传 / 恢复默认，accordion 折叠式展示 10 条原则
+- GET /api/philosophy、POST /api/philosophy、DELETE /api/philosophy 三个端点
+- philosophy_service.py：读取/写入/重置投资理念 MD 文件，写入后触发知识库重新索引
+
+### Fixed
+- 投资理念按钮风格与用户画像其他模块统一（去除图标库差异）
+- 投资理念前言下方多余分隔线和空白已移除
+
+---
+
 ## [3.6.3] - 2026-05-14
 
 本版本打通 time_sensitivity 的完整链路，让时效衰减打分真正可控。
