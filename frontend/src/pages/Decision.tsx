@@ -1209,14 +1209,18 @@ type CitationItem = {
   parentDocPath: string
 }
 
-function KnowledgeCitations({ data, onFileClick }: { data: ExplainData; onFileClick: (path: string) => void }) {
+function KnowledgeCitations({ data, viewpointCards = [], onFileClick }: {
+  data: ExplainData
+  viewpointCards?: string[]
+  onFileClick: (path: string) => void
+}) {
   const principles = data.data?.retrieved_principles || []
   const researchViews = data.data?.retrieved_research_views || []
   const allChunks = [...principles, ...researchViews]
 
-  if (allChunks.length === 0) return null
+  if (allChunks.length === 0 && viewpointCards.length === 0) return null
 
-  // 按 parent_doc_path 去重
+  // RAG chunks：按 parent_doc_path 去重
   const seen = new Set<string>()
   const items: CitationItem[] = []
   for (const c of allChunks) {
@@ -1231,6 +1235,14 @@ function KnowledgeCitations({ data, onFileClick }: { data: ExplainData; onFileCl
     })
   }
 
+  // 用户投研观点卡片（从 ld.research 分流过来的 [投研观点] 条目）
+  const vpItems = viewpointCards.map(raw => {
+    const { text } = parseResearchItem(raw)
+    // 截断到 80 字符
+    const truncated = text.length > 80 ? text.slice(0, 79) + '…' : text
+    return truncated
+  })
+
   const [open, setOpen] = React.useState(false)
 
   return (
@@ -1238,9 +1250,10 @@ function KnowledgeCitations({ data, onFileClick }: { data: ExplainData; onFileCl
       <CollapsibleHeader label="知识库引用" open={open} onToggle={() => setOpen(o => !o)} />
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* RAG 召回的知识文件（可点击预览） */}
           {items.map((item, i) => (
             <div
-              key={i}
+              key={`rag-${i}`}
               onClick={() => onFileClick(item.parentDocPath)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -1265,6 +1278,31 @@ function KnowledgeCitations({ data, onFileClick }: { data: ExplainData; onFileCl
                   {item.date}
                 </span>
               )}
+            </div>
+          ))}
+          {/* 用户投研观点卡片（结构化数据，不可点击预览） */}
+          {vpItems.map((text, i) => (
+            <div
+              key={`vp-${i}`}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                padding: '6px 8px', borderRadius: 6,
+              }}
+            >
+              <span style={{
+                flexShrink: 0, fontSize: 11, fontWeight: 500,
+                padding: '1px 6px', borderRadius: 4,
+                background: '#EFF6FF', color: '#3B82F6',
+              }}>
+                投研观点
+              </span>
+              <span style={{
+                flex: 1, fontSize: 12, color: '#374151', lineHeight: 1.5,
+                display: '-webkit-box', WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              }}>
+                {text}
+              </span>
             </div>
           ))}
         </div>
@@ -1362,8 +1400,13 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
   }
 
   const { stages, conclusion, rules, signals } = data
-  const research  = data.data?.research
+  const researchRaw  = data.data?.research || []
   const position  = data.data?.target_position
+
+  // v3.6.1: 分流——[投研观点] 前缀归知识库引用，其余归联网搜索
+  const webSearchItems = researchRaw.filter(r => !r.startsWith('[投研观点]') && !r.startsWith('[用户资料]'))
+  const viewpointCards = researchRaw.filter(r => r.startsWith('[投研观点]') || r.startsWith('[用户资料]'))
+
   const [chainOpen,    setChainOpen]    = React.useState(false)
   const [researchOpen, setResearchOpen] = React.useState(false)
   const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
@@ -1545,12 +1588,12 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
       )}
 
       {/* ── 3. 联网搜索（默认折叠，PerformanceAnalysis 不显示）── */}
-      {intent?.primary_intent !== 'PerformanceAnalysis' && research && research.length > 0 && (
+      {intent?.primary_intent !== 'PerformanceAnalysis' && webSearchItems.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <CollapsibleHeader label="联网搜索" open={researchOpen} onToggle={() => setResearchOpen(o => !o)} />
           {researchOpen && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {research.map((raw, i) => {
+              {webSearchItems.map((raw, i) => {
                 const { text, url, domain, sourceLabel, isUser } = parseResearchItem(raw)
                 return (
                   <div key={i} style={{
@@ -1590,7 +1633,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
       )}
 
       {/* ── 3b. 知识库引用（v3.6.1 新增）── */}
-      <KnowledgeCitations data={data} onFileClick={setPreviewPath} />
+      <KnowledgeCitations data={data} viewpointCards={viewpointCards} onFileClick={setPreviewPath} />
 
       {/* ── 4. 四维信号（Education 不显示）── */}
       {intent?.primary_intent !== 'Education' && signals && (
@@ -1801,7 +1844,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
       )}
 
       {/* stages 为空且无完整数据时的简单说明 */}
-      {!conclusion && !data.llm && !rules && !signals && !research?.length && (stages ?? []).length === 0 && (
+      {!conclusion && !data.llm && !rules && !signals && !researchRaw?.length && (stages ?? []).length === 0 && (
         <div style={{ fontSize: 11, color: '#C4C9D4', lineHeight: 1.7, paddingTop: 4 }}>
           分析链路详情待后端接入 stage 事件后展示。
         </div>
