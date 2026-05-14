@@ -352,6 +352,18 @@ export const knowledgeApi = {
     ),
 }
 
+// ── Philosophy API ────────────────────────────────────────
+
+export const philosophyApi = {
+  get: () => request<{ source: string; content: string }>('/philosophy'),
+  upload: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request<{ source: string; content: string }>('/philosophy', { method: 'POST', body: fd, raw: true })
+  },
+  reset: () => request<{ source: string; content: string }>('/philosophy', { method: 'DELETE' }),
+}
+
 // ── Conversations API ────────────────────────────────────
 
 export interface Conversation {

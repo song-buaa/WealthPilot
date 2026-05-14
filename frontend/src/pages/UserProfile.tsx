@@ -1,10 +1,13 @@
 /**
  * UserProfile — 用户画像
  * 两个状态：无画像 → 填写页；已有画像 → 结果页
+ * v3.6.3: 新增投资理念板块（MD 文档查阅/上传/下载）
  */
-import React, { useEffect, useState } from 'react'
-import { Loader2, User } from 'lucide-react'
-import { profileApi, type UserProfile as TUserProfile } from '@/lib/api'
+import React, { useEffect, useState, useRef } from 'react'
+import { Loader2, User, BookOpen, Download, Upload, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { profileApi, philosophyApi, type UserProfile as TUserProfile } from '@/lib/api'
 import ProfileForm from '@/components/profile/ProfileForm'
 import ProfileResult from '@/components/profile/ProfileResult'
 
@@ -12,14 +15,47 @@ export default function UserProfile() {
   const [profile, setProfile] = useState<TUserProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // 投资理念状态
+  const [philosophy, setPhilosophy] = useState<{ source: string; content: string } | null>(null)
+  const [philOpen, setPhilOpen] = useState(true)
+  const [philUploading, setPhilUploading] = useState(false)
+  const philFileRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
-    profileApi.get()
-      .then(data => {
+    Promise.all([
+      profileApi.get().then(data => {
         if (data && Object.keys(data).length > 0) setProfile(data as TUserProfile)
-      })
+      }),
+      philosophyApi.get().then(setPhilosophy),
+    ])
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
+
+  async function handlePhilUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhilUploading(true)
+    try {
+      const result = await philosophyApi.upload(file)
+      setPhilosophy(result)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '上传失败')
+    } finally {
+      setPhilUploading(false)
+      if (philFileRef.current) philFileRef.current.value = ''
+    }
+  }
+
+  async function handlePhilReset() {
+    if (!confirm('确定恢复默认投资理念？当前内容将丢失。')) return
+    try {
+      const result = await philosophyApi.reset()
+      setPhilosophy(result)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '恢复失败')
+    }
+  }
 
   if (loading) {
     return (
@@ -43,7 +79,7 @@ export default function UserProfile() {
         </div>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>用户画像</div>
-          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>风险评估 · 投资目标 · 画像生成</div>
+          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>风险评估 · 投资目标 · 投资理念</div>
         </div>
       </div>
 
@@ -51,6 +87,173 @@ export default function UserProfile() {
         ? <ProfileResult profile={profile} onUpdate={setProfile} />
         : <ProfileForm onProfileCreated={setProfile} />
       }
+
+      {/* ── 投资理念板块 ── */}
+      <div style={{
+        background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
+        boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginTop: 20,
+      }}>
+        {/* 折叠标题行 */}
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '16px 24px', cursor: 'pointer',
+            borderBottom: philOpen ? '1px solid #E5E7EB' : undefined,
+          }}
+          onClick={() => setPhilOpen(v => !v)}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <BookOpen size={15} style={{ color: '#3B82F6' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>投资理念</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <input ref={philFileRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handlePhilUpload} />
+            {/* 下载 */}
+            {philosophy && (
+              <button
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
+                  background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
+                  color: '#374151', cursor: 'pointer',
+                }}
+                onClick={() => {
+                  const blob = new Blob([philosophy.content], { type: 'text/markdown' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = 'investment_philosophy.md'
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+              >
+                <Download size={11} /> 下载
+              </button>
+            )}
+            {/* 上传 */}
+            <button
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
+                background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
+                color: '#374151', cursor: 'pointer',
+              }}
+              disabled={philUploading}
+              onClick={() => philFileRef.current?.click()}
+            >
+              {philUploading ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={11} />}
+              上传
+            </button>
+            {/* 恢复默认 */}
+            <button
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
+                background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
+                color: '#374151', cursor: 'pointer',
+              }}
+              onClick={handlePhilReset}
+            >
+              <RefreshCw size={11} /> 恢复默认
+            </button>
+            {philOpen ? <ChevronUp size={15} color="#9CA3AF" /> : <ChevronDown size={15} color="#9CA3AF" />}
+          </div>
+        </div>
+
+        {/* 内容 */}
+        {philOpen && philosophy && (
+          <div style={{ padding: '16px 24px 20px' }}>
+            <PhilosophyContent content={philosophy.content} />
+          </div>
+        )}
+      </div>
     </div>
   )
+}
+
+
+// ── 投资理念 MD 渲染（参照 Discipline.tsx 的 HandbookContent）──
+
+function PhilosophyContent({ content }: { content: string }) {
+  // 去掉 YAML frontmatter
+  const body = content.replace(/^---[\s\S]*?---\s*/, '').trim()
+
+  // 拆分为前言 + 按 ## 标题分段
+  const { preamble, sections } = parsePhilosophy(body)
+  const [openIdx, setOpenIdx] = useState<number | null>(null)
+
+  return (
+    <div>
+      {preamble && (
+        <div className="handbook-md" style={{ marginBottom: 16, paddingBottom: 14, borderBottom: '1px solid #F3F4F6' }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {sections.map((sec, i) => {
+          const isOpen = openIdx === i
+          return (
+            <div key={i} style={{ border: '1px solid #E5E7EB', borderRadius: 8, overflow: 'hidden' }}>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px', cursor: 'pointer',
+                  background: isOpen ? '#F0F7FF' : '#FAFAFA',
+                  transition: 'background 0.1s',
+                  borderBottom: isOpen ? '1px solid #E5E7EB' : undefined,
+                }}
+                onClick={() => setOpenIdx(isOpen ? null : i)}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2A4A', lineHeight: 1.4 }}>
+                  {sec.title}
+                </div>
+                {isOpen
+                  ? <ChevronUp size={14} color="#9CA3AF" style={{ flexShrink: 0 }} />
+                  : <ChevronDown size={14} color="#9CA3AF" style={{ flexShrink: 0 }} />}
+              </div>
+              {isOpen && (
+                <div style={{ padding: '14px 16px', background: '#fff' }}>
+                  <div className="handbook-md">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sec.body.trim()}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+
+function parsePhilosophy(md: string): { preamble: string; sections: Array<{ title: string; body: string }> } {
+  // 拆分标题行（## 开头）
+  const lines = md.split('\n')
+  const sections: Array<{ title: string; body: string }> = []
+  let preambleLines: string[] = []
+  let currentTitle = ''
+  let currentBody: string[] = []
+
+  for (const line of lines) {
+    if (line.match(/^##\s/)) {
+      if (currentTitle) {
+        sections.push({ title: currentTitle, body: currentBody.join('\n') })
+      }
+      currentTitle = line.replace(/^##\s+/, '').trim()
+      currentBody = []
+    } else if (currentTitle) {
+      currentBody.push(line)
+    } else {
+      preambleLines.push(line)
+    }
+  }
+  if (currentTitle) {
+    sections.push({ title: currentTitle, body: currentBody.join('\n') })
+  }
+
+  // 前言去掉 h1 标题行
+  const preamble = preambleLines.join('\n').replace(/^#\s[^\n]*\n?/, '').trim()
+
+  return { preamble, sections }
 }
