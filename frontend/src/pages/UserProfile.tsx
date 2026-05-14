@@ -104,57 +104,45 @@ export default function UserProfile() {
           <div>
             <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>投资理念</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
             <input ref={philFileRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handlePhilUpload} />
-            {/* 下载 */}
-            {philosophy && (
-              <button
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
-                  background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
-                  color: '#374151', cursor: 'pointer',
-                }}
-                onClick={() => {
-                  const blob = new Blob([philosophy.content], { type: 'text/markdown' })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = 'investment_philosophy.md'
-                  a.click()
-                  URL.revokeObjectURL(url)
-                }}
-              >
-                <Download size={11} /> 下载
-              </button>
+            {philOpen && (
+              <>
+                {/* 下载 */}
+                {philosophy && (
+                  <button
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer' }}
+                    onClick={() => {
+                      const blob = new Blob([philosophy.content], { type: 'text/markdown' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = 'investment_philosophy.md'
+                      a.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                  >
+                    <Download size={12} />下载
+                  </button>
+                )}
+                {/* 上传 */}
+                <button
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer' }}
+                  disabled={philUploading}
+                  onClick={() => philFileRef.current?.click()}
+                >
+                  {philUploading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={12} />}上传
+                </button>
+                {/* 恢复默认 */}
+                <button
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer' }}
+                  onClick={handlePhilReset}
+                >
+                  <RefreshCw size={12} />恢复默认
+                </button>
+              </>
             )}
-            {/* 上传 */}
-            <button
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
-                background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
-                color: '#374151', cursor: 'pointer',
-              }}
-              disabled={philUploading}
-              onClick={() => philFileRef.current?.click()}
-            >
-              {philUploading ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={11} />}
-              上传
-            </button>
-            {/* 恢复默认 */}
-            <button
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                fontSize: 11, padding: '5px 10px', whiteSpace: 'nowrap',
-                background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
-                color: '#374151', cursor: 'pointer',
-              }}
-              onClick={handlePhilReset}
-            >
-              <RefreshCw size={11} /> 恢复默认
-            </button>
-            {philOpen ? <ChevronUp size={15} color="#9CA3AF" /> : <ChevronDown size={15} color="#9CA3AF" />}
+            {philOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </div>
         </div>
 
@@ -183,7 +171,7 @@ function PhilosophyContent({ content }: { content: string }) {
   return (
     <div>
       {preamble && (
-        <div className="handbook-md" style={{ marginBottom: 16, paddingBottom: 14, borderBottom: '1px solid #F3F4F6' }}>
+        <div className="handbook-md" style={{ marginBottom: 12 }}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
         </div>
       )}
@@ -250,8 +238,11 @@ function parsePhilosophy(md: string): { preamble: string; sections: Array<{ titl
     sections.push({ title: currentTitle, body: currentBody.join('\n') })
   }
 
-  // 前言去掉 h1 标题行
-  const preamble = preambleLines.join('\n').replace(/^#\s[^\n]*\n?/, '').trim()
+  // 前言去掉 h1 标题行和水平分隔线（---）
+  const preamble = preambleLines.join('\n')
+    .replace(/^#\s[^\n]*\n?/, '')
+    .replace(/^---+\s*$/gm, '')
+    .trim()
 
   return { preamble, sections }
 }
