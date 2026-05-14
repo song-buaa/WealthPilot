@@ -272,11 +272,13 @@ class ExecutingAgent:
             return
 
         # 仓位口径一致性检查(仅对真实持仓,虚拟持仓跳过)
+        # 阈值 0.005 (0.5%): loaded 和 skill 分别查 DB,
+        # 期间 broker_sync 可能更新持仓导致微小差异,属正常浮点偏差
         if (loaded.target_position is not None
                 and not getattr(loaded.target_position, "is_virtual", False)):
             tp_weight = loaded.target_position.weight
             rule_weight = rule_result.current_weight
-            if abs(tp_weight - rule_weight) > 1e-6:
+            if abs(tp_weight - rule_weight) > 0.005:
                 out.mark_aborted(
                     "weight_mismatch",
                     f"仓位口径不一致：持仓={tp_weight:.2%} 规则={rule_weight:.2%}",
@@ -319,18 +321,39 @@ class ExecutingAgent:
                         currency = getattr(tp, "currency", "USD") or "USD"
                         wp_symbol = infer_symbol_from_ticker(ticker, currency)
 
-                if wp_symbol:
+                if not wp_symbol:
+                    logger.warning(
+                        f"[ExecutingAgent] 市场数据跳过：target_position.ticker 为空，asset={asset_name}"
+                    )
+                else:
+                    quote = None
+                    fundamentals = None
+                    capital_flow = None
+                    technical = None
+
                     out.invoked_skills.append("wp-fetch-realtime-quote")
-                    quote = fetch_quote(wp_symbol)
+                    try:
+                        quote = fetch_quote(wp_symbol)
+                    except Exception as e:
+                        logger.warning(f"[ExecutingAgent] Futu 行情失败(不阻塞): {wp_symbol}: {e}")
 
                     out.invoked_skills.append("wp-fetch-fundamentals")
-                    fundamentals = fetch_fundamentals(wp_symbol)
+                    try:
+                        fundamentals = fetch_fundamentals(wp_symbol)
+                    except Exception as e:
+                        logger.warning(f"[ExecutingAgent] AV 基本面失败(不阻塞): {wp_symbol}: {e}")
 
                     out.invoked_skills.append("wp-fetch-capital-flow")
-                    capital_flow = fetch_capital_flow(wp_symbol)
+                    try:
+                        capital_flow = fetch_capital_flow(wp_symbol)
+                    except Exception as e:
+                        logger.warning(f"[ExecutingAgent] Futu 资金流向失败(不阻塞): {wp_symbol}: {e}")
 
                     out.invoked_skills.append("wp-fetch-kline")
-                    technical = fetch_kline(wp_symbol)
+                    try:
+                        technical = fetch_kline(wp_symbol)
+                    except Exception as e:
+                        logger.warning(f"[ExecutingAgent] Tiger K线失败(不阻塞): {wp_symbol}: {e}")
 
                     out.market_data = MarketDataBundle(
                         symbol=wp_symbol,
@@ -360,7 +383,7 @@ class ExecutingAgent:
                         f"kline={'✅' if technical else '❌'}"
                     )
             except Exception as e:
-                logger.warning(f"[ExecutingAgent] 市场数据加载失败(不阻塞): {e}")
+                logger.warning(f"[ExecutingAgent] 市场数据初始化失败(不阻塞): {e}")
 
     # ────────────────────────────────────────────────────────
     # 新建仓路径（v3.4 M8.2）
