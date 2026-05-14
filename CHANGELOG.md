@@ -23,6 +23,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - data/handbook_official.md 旧路径文件（v3.6.0 迁移时保留的备份）
 
+### Fixed
+- executing_agent.py Step 6：wp_symbol 为 None 时补 warning 日志（含 asset_name），防止市场数据静默跳过无迹可查
+- 市场数据四个子数据源（Futu 行情 / AV 基本面 / Futu 资金流向 / Tiger K线）改为各自独立 try/except，日志可区分具体失败来源
+
 ### Deferred to v3.6.2
 - 时效类型标签可点击修改（需要 time_sensitivity 入库 + 数据库迁移，与 v3.6.2 的时效衰减打分一起做）
 
