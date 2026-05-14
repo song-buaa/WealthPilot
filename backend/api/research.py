@@ -291,14 +291,14 @@ def v2_update_time_sensitivity(card_id: str, req: dict):
     if ts not in ("permanent", "slow_decay", "medium_decay", "fast_decay"):
         raise HTTPException(status_code=400, detail=f"无效的 time_sensitivity: {ts}")
 
-    from app.models import ViewpointCardV2, get_session
+    from app.models import ViewpointCardV2, ResearchDocument, get_session
     session = get_session()
     try:
         row = session.query(ViewpointCardV2).filter_by(card_id=card_id).first()
         if not row:
             raise HTTPException(status_code=404, detail=f"card {card_id} not found")
 
-        # 1. 更新 DB
+        # 1. 更新 v2 卡片 DB
         row.time_sensitivity = ts
         session.commit()
         _logger.info(f"DB 更新: card_id={card_id}, time_sensitivity={ts}")
@@ -312,11 +312,39 @@ def v2_update_time_sensitivity(card_id: str, req: dict):
             from backend.knowledge.chunker import KnowledgeChunker
             from backend.knowledge.status_tracker import StatusTracker
 
-            kb_root = Path(__file__).parent.parent.parent / "knowledge_base"
-            # 搜索 research_views 下匹配的 MD 文件（简单按 card 的 symbol + 日期匹配）
-            # 由于没有直接的 card → MD 文件映射，这里跳过文件更新
-            # TODO: v3.6.4 建立 card_id → knowledge_file_path 映射后补全
-            _logger.info(f"MD 文件更新跳过（缺少 card→file 映射），仅 DB 更新")
+            # 查找关联的 ResearchDocument，获取 knowledge_file_path
+            # v2 卡片通过 ingested_at 时间窗口与 document 关联
+            kb_path = None
+            docs = session.query(ResearchDocument).filter(
+                ResearchDocument.knowledge_file_path.isnot(None),
+            ).order_by(ResearchDocument.uploaded_at.desc()).limit(50).all()
+            for doc in docs:
+                # 按 symbol 匹配
+                if row.primary_symbol and doc.object_name:
+                    if row.primary_symbol.split(":")[0].lower() in doc.object_name.lower() or \
+                       doc.object_name.lower() in (row.primary_symbol or "").lower():
+                        kb_path = doc.knowledge_file_path
+                        break
+
+            if kb_path:
+                project_root = Path(__file__).parent.parent.parent
+                md_file = project_root / kb_path
+                if md_file.exists():
+                    update_yaml(md_file, {"time_sensitivity": ts})
+                    _logger.info(f"MD frontmatter 更新: {kb_path}, time_sensitivity={ts}")
+
+                    # 触发重新索引
+                    kb_root = project_root / "knowledge_base"
+                    store = KnowledgeStore.get_instance()
+                    if store.is_ready():
+                        tracker = StatusTracker(kb_root / "_index" / "file_index.json")
+                        indexer = KnowledgeIndexer(kb_root, store, KnowledgeChunker(), tracker)
+                        indexer.on_file_write(md_file)
+                        _logger.info(f"Chroma 重新索引: {kb_path}")
+                else:
+                    _logger.warning(f"MD 文件不存在: {kb_path}，仅 DB 更新")
+            else:
+                _logger.info(f"无关联 knowledge_file_path（历史数据），仅 DB 更新")
         except Exception as e:
             _logger.warning(f"MD/Chroma 更新失败（不阻断）: {e}")
 

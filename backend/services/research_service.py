@@ -294,7 +294,15 @@ def parse_text(content: str, title: str, source_url: Optional[str] = None) -> di
         _try_generate_v2_card(content, resolved_title, source_url, card_data.get("object_name"))
 
         # v3.6: 原文落盘到知识库 MD 文件 + 触发索引（失败不阻断主流程）
-        _persist_to_knowledge_base(content, card_data, resolved_title)
+        kb_path = _persist_to_knowledge_base(content, card_data, resolved_title)
+
+        # v3.6.3: 回存知识库文件路径到 DB
+        if kb_path:
+            try:
+                doc.knowledge_file_path = kb_path
+                session.commit()
+            except Exception:
+                _kb_logger.warning(f"knowledge_file_path 回存失败（不阻断）")
 
         return result
     except Exception:
@@ -638,11 +646,14 @@ def _persist_to_knowledge_base(
     original_content: str,
     card_data: dict,
     resolved_title: str,
-) -> None:
+) -> Optional[str]:
     """
     v3.6: 将投研观点原文落盘为 MD 文件并触发知识库索引。
 
     失败不阻断主流程——try/except 包住，只记录日志。
+
+    Returns:
+        写入的 MD 文件相对路径（相对于项目根目录），失败时返回 None。
     """
     try:
         from backend.knowledge.slug import (
@@ -701,8 +712,15 @@ def _persist_to_knowledge_base(
         except Exception as idx_err:
             _kb_logger.warning(f"投研观点索引失败（不阻断）: {idx_err}")
 
+        # 返回相对路径
+        try:
+            return str(file_path.relative_to(Path(__file__).parent.parent.parent))
+        except ValueError:
+            return str(file_path)
+
     except Exception as e:
         _kb_logger.warning(f"投研观点落盘失败（不阻断主流程）: {e}")
+        return None
 
 
 # ── 内部：内容抓取 ────────────────────────────────────────────────────────────

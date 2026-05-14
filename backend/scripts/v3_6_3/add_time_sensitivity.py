@@ -41,6 +41,13 @@ def up(db_path: str = DB_PATH) -> None:
             cur.execute(f"ALTER TABLE {table} ADD COLUMN time_sensitivity VARCHAR(20)")
             print(f"[ok] {table}.time_sensitivity 已添加")
 
+    # knowledge_file_path（仅 research_documents）
+    if _has_column(cur, "research_documents", "knowledge_file_path"):
+        print("[skip] research_documents.knowledge_file_path 已存在")
+    else:
+        cur.execute("ALTER TABLE research_documents ADD COLUMN knowledge_file_path VARCHAR(500)")
+        print("[ok] research_documents.knowledge_file_path 已添加")
+
     conn.commit()
     conn.close()
     print("[done] migration up 完成")

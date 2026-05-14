@@ -182,6 +182,7 @@ class ResearchDocument(Base):
     parse_status = Column(String(20), default="pending")
     notes        = Column(Text, nullable=True)
     time_sensitivity = Column(String(20), nullable=True)  # v3.6.3
+    knowledge_file_path = Column(String(500), nullable=True)  # v3.6.3: 对应知识库 MD 文件路径
 
     cards = relationship(
         "ResearchCard", back_populates="document", cascade="all, delete-orphan"
