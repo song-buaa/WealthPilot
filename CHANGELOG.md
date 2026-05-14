@@ -5,6 +5,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.6.1] - 2026-05-13
+
+本版本重构分析过程面板，把联网数据与私有知识库引用分离展示，并清理 v3.6.0 的遗留技术债。
+
+### Added
+- 分析过程面板新增"知识库引用"区块（KnowledgeCitations 组件）：展示 RAG 召回的投资纪律、投资理念、资产配置原则、投研观点，显示名称而非文件路径，每条可点击弹出 MD 文件内容预览
+- GET /api/knowledge/file 端点：安全读取 knowledge_base/ 下任意 MD 文件内容，含路径穿越防护
+- KnowledgeFilePreview 弹窗组件：ReactMarkdown 渲染 MD 内容，显示元数据
+
+### Changed
+- 分析过程面板"投研观点"区块改名为"联网搜索"，来源标签精细化为具体 API 名称：[投研观点] / [Alpha Vantage] / [AKShare] / [Perplexity] / [gpt-4o]
+- research_v2/renderer.py _get_prefix()：source_type 枚举改为具体 API 名称前缀
+- expressing_agent.py：移除答复正文末尾的 📚 参考来源拼接
+- decision_service.py：序列化层新增 retrieved_principles / retrieved_research_views 字段
+
+### Removed
+- data/handbook_official.md 旧路径文件（v3.6.0 迁移时保留的备份）
+
+### Deferred to v3.6.2
+- 时效类型标签可点击修改（需要 time_sensitivity 入库 + 数据库迁移，与 v3.6.2 的时效衰减打分一起做）
+
+---
+
 ## [3.6.0] - 2026-05-13
 
 本版本引入**私有知识库与 RAG 语义检索**，是 WealthPilot 的知识层基础设施专项版本。
@@ -15,9 +38,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- `knowledge_base/` 目录（项目根目录）：投研观点、投资纪律、投资风格、资产配置原则均以 Markdown 文件存储，与 `backend/`、`docs/`、`frontend/` 并列
+- `knowledge_base/` 目录（项目根目录）：投研观点、投资纪律、投资理念、资产配置原则均以 Markdown 文件存储，与 `backend/`、`docs/`、`frontend/` 并列
   - `knowledge_base/investment_principles/`：投资纪律手册（handbook_official.md 从 `data/` 迁移）
-  - `knowledge_base/investment_style/`：投资风格（价值主张 / 红线 / 偏好赛道 / 持仓哲学）
+  - `knowledge_base/investment_style/`：投资理念（产业认知 / 安全边际 / 组合思维 / 决策框架）
   - `knowledge_base/allocation_principles/`：资产配置原则（多元配置 / 动态再平衡 / 目标区间管理，共 650-800 字 × 3 篇）
   - `knowledge_base/research_views/`：投研观点，按标的子目录（`li_auto/` / `meituan/` 等）存放 MD 文件
 - `backend/knowledge/` 模块（7 个文件）：
@@ -28,7 +51,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - `schemas.py`：RetrievedChunk / ChunkInput / FileStatus / SyncReport 等 Pydantic 模型，`source_type` × `source_channel` 正交维度设计
   - `status_tracker.py`：StatusTracker，`index_status` 四态状态机（indexed / pending / failed / stale），持久化到 `_index/file_index.json`
   - `slug.py`：asset_slug 生成工具，拼音转换 + `asset_slug_mapping.json` 自动积累
-- `wp-retrieve-principles` Skill（第 13 个 Skill）：从知识库语义检索用户原则类知识（投资纪律 / 投资风格 / 资产配置原则），与 `wp-fetch-research`（标的相关投研）形成**语义二分法**，Skill 总数 12→13
+- `wp-retrieve-principles` Skill（第 13 个 Skill）：从知识库语义检索用户原则类知识（投资纪律 / 投资理念 / 资产配置原则），与 `wp-fetch-research`（标的相关投研）形成**语义二分法**，Skill 总数 12→13
 - 投研观点 MD 落盘：`research_service.parse_text()` 末尾追加 `_persist_to_knowledge_base()`，原文写入 `knowledge_base/research_views/{asset_slug}/{date}_{title_slug}.md` + 触发增量索引，失败不阻塞主流程
 - `_execute_general()` 方法：general/Education 路由从 SKIP 升级为轻量 RAG 召回，内置 `_should_retrieve_principles()` 子意图判断（命中 20 个投资关键词才触发，防止闲聊被资产配置知识污染）
 - 决策输出附引用来源：`_build_citation_block()` 在答复末尾生成 `📚 参考来源` 区块，显示知识来源文件路径、类型标签和日期；position_decision / portfolio / general_chat 三条路径均已接入
@@ -68,7 +91,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Known Issues / v3.6.1 计划
 
 - 引用来源区块当前显示原始文件路径（`investment_principles/handbook_official.md`），v3.6.1 改为显示名称（"投资纪律手册"）
-- 投资风格 UI 输入框未开发（MVP Dev-friendly 阶段通过直接编辑 MD 文件），v3.6.1 补
+- 投资理念 UI 输入框未开发（MVP Dev-friendly 阶段通过直接编辑 MD 文件），v3.6.1 补
 - `time_sensitivity` 衰减打分未启用（字段已存，配置 `decay.enabled=false`），v3.6.2 启用
 - LLM rerank 未启用（配置 `enable_rerank=false`），v3.6.2 启用
 - `data/handbook_official.md` 旧路径文件仍保留，v3.6.1 确认稳定后删除
