@@ -326,16 +326,17 @@ def _search_research_online(asset_name: str) -> list[str]:
                 seen.add(key)
                 unique.append(line)
 
-        # 拼接前缀：[联网参考] 放在 [ref:url] 之后（如有）
+        # 拼接前缀：具体 API 名称放在 [ref:url] 之后（如有）
+        _search_prefix = "[Perplexity]" if perplexity_key else "[gpt-4o]"
         result = []
         url_count = 0
         for l in unique[:8]:
             if l.startswith("[ref:"):
                 bracket_end = l.index("] ", 1) + 2
-                result.append(f"[联网参考]{l[:bracket_end]}{l[bracket_end:]}")
+                result.append(f"{_search_prefix}{l[:bracket_end]}{l[bracket_end:]}")
                 url_count += 1
             else:
-                result.append(f"[联网参考] {l}")
+                result.append(f"{_search_prefix} {l}")
         print(f"[data_loader] 联网搜索完成 ({asset_name}): {len(result)} 条结果, {url_count} 条有URL", flush=True)
         print(f"[data_loader] 联网搜索完成 ({asset_name}): {len(result)} 条结果", flush=True)
 
@@ -454,15 +455,16 @@ def search_portfolio_research(positions: list) -> list[str]:
                 seen.add(key)
                 unique.append(line)
 
+        _macro_prefix = "[Perplexity]" if perplexity_key else "[gpt-4o]"
         result = []
         url_count = 0
         for l in unique[:8]:
             if l.startswith("[ref:"):
                 bracket_end = l.index("] ", 1) + 2
-                result.append(f"[联网参考]{l[:bracket_end]}{l[bracket_end:]}")
+                result.append(f"{_macro_prefix}{l[:bracket_end]}{l[bracket_end:]}")
                 url_count += 1
             else:
-                result.append(f"[联网参考] {l}")
+                result.append(f"{_macro_prefix} {l}")
 
         print(f"[data_loader] 组合宏观搜索完成: {len(result)} 条, {url_count} 条有URL", flush=True)
         if result:
@@ -736,7 +738,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                 )
 
         # ── 7b. 用户原则 RAG（v3.6 新增）──────────────────────────────────
-        # 从知识库召回投资纪律/投资风格/资产配置原则的定性内容。
+        # 从知识库召回投资纪律/投资理念/资产配置原则的定性内容。
         # 失败不阻塞主流程。
         retrieved_principles = []
         try:

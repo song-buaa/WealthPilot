@@ -19,29 +19,22 @@ from research_v2.schemas import (
 
 logger = logging.getLogger(__name__)
 
-_USER_SOURCES = {SourceType.USER_UPLOAD}
-_THIRD_PARTY_SOURCES = {
-    SourceType.ALPHA_VANTAGE_NEWS,
-    SourceType.ALPHA_VANTAGE_FUNDAMENTAL,
-    SourceType.ALPHA_VANTAGE_EARNINGS,
-    SourceType.AKSHARE_NEWS,
-    SourceType.AKSHARE_FUNDAMENTAL,
-    SourceType.AKSHARE_HIST,
-}
-_ONLINE_SOURCES = {
-    SourceType.PERPLEXITY_SEARCH,
+_SOURCE_PREFIX_MAP: dict[SourceType, str] = {
+    SourceType.USER_UPLOAD:              "[投研观点]",
+    SourceType.ALPHA_VANTAGE_NEWS:       "[Alpha Vantage]",
+    SourceType.ALPHA_VANTAGE_FUNDAMENTAL:"[Alpha Vantage]",
+    SourceType.ALPHA_VANTAGE_EARNINGS:   "[Alpha Vantage]",
+    SourceType.AKSHARE_NEWS:             "[AKShare]",
+    SourceType.AKSHARE_FUNDAMENTAL:      "[AKShare]",
+    SourceType.AKSHARE_HIST:             "[AKShare]",
+    SourceType.PERPLEXITY_SEARCH:        "[Perplexity]",
+    SourceType.HYBRID:                   "[数据源]",
 }
 
 
 def _get_prefix(source_type: SourceType) -> str:
-    """根据来源类型返回前缀标签。"""
-    if source_type in _USER_SOURCES:
-        return "[用户资料]"
-    if source_type in _THIRD_PARTY_SOURCES:
-        return "[第三方数据]"
-    if source_type in _ONLINE_SOURCES:
-        return "[联网参考]"
-    return "[第三方数据]"
+    """根据来源类型返回具体 API 名称前缀标签。"""
+    return _SOURCE_PREFIX_MAP.get(source_type, "[数据源]")
 
 
 def _extract_url(card: ViewpointCard) -> Optional[str]:

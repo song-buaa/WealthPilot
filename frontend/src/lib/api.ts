@@ -337,6 +337,14 @@ export const decisionApi = {
     request<{ message: string }>(`/decision/conversation/${conversationId}`, { method: 'DELETE' }),
 }
 
+// v3.6.1: 知识库 API
+export const knowledgeApi = {
+  getFile: (path: string) =>
+    request<{ path: string; frontmatter: Record<string, unknown>; content: string }>(
+      `/knowledge/file?path=${encodeURIComponent(path)}`,
+    ),
+}
+
 // ── Conversations API ────────────────────────────────────
 
 export interface Conversation {
@@ -860,6 +868,23 @@ export interface ExplainData {
       profit_loss_rate?: number
       platforms?: string[]
     }
+    // v3.6.1: 知识库引用
+    retrieved_principles?: Array<{
+      content: string
+      source_type: string
+      source_channel: string
+      parent_doc_path: string
+      date: string | null
+      semantic_score: number
+    }>
+    retrieved_research_views?: Array<{
+      content: string
+      source_type: string
+      source_channel: string
+      parent_doc_path: string
+      date: string | null
+      semantic_score: number
+    }>
   }
   rules?: {
     passed: boolean

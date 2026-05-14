@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
 import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
@@ -1090,19 +1090,43 @@ function signalColor(value: string): string {
   return '#9CA3AF'
 }
 
-// ── 投研观点条目解析 ─────────────────────────────────────────
-function parseResearchItem(raw: string): { type: 'user' | 'web' | 'thirdparty' | 'other'; text: string; url: string | null; domain: string | null } {
+// ── 来源标签颜色 ─────────────────────────────────────────────
+type SourceTag = { label: string; isUser: boolean }
+
+const SOURCE_PREFIX_MAP: Record<string, SourceTag> = {
+  '投研观点':       { label: '投研观点',       isUser: true },
+  'Alpha Vantage': { label: 'Alpha Vantage', isUser: false },
+  'AKShare':       { label: 'AKShare',       isUser: false },
+  'Perplexity':    { label: 'Perplexity',    isUser: false },
+  'gpt-4o':        { label: 'gpt-4o',        isUser: false },
+  '数据源':         { label: '数据源',         isUser: false },
+  // 兼容旧格式
+  '用户资料':       { label: '投研观点',       isUser: true },
+  '第三方数据':     { label: '数据源',         isUser: false },
+  '联网参考':       { label: '联网搜索',       isUser: false },
+}
+
+// ── 联网搜索条目解析 ─────────────────────────────────────────
+function parseResearchItem(raw: string): { type: 'user' | 'web' | 'thirdparty' | 'other'; text: string; url: string | null; domain: string | null; sourceLabel: string; isUser: boolean } {
   let type: 'user' | 'web' | 'thirdparty' | 'other' = 'other'
   let text = raw
   let refUrl: string | null = null
+  let sourceLabel = '数据源'
+  let isUser = false
 
-  // 三种来源前缀：[用户资料] / [第三方数据] / [联网参考]
-  const prefixMatch = text.match(/^\[(用户资料|第三方数据|联网参考)\]\s*/)
+  // 解析 [XXX] 前缀 — 支持新旧格式
+  const prefixMatch = text.match(/^\[([^\]]+)\]\s*/)
   if (prefixMatch) {
     const tag = prefixMatch[1]
-    if (tag === '用户资料') type = 'user'
-    else if (tag === '第三方数据') type = 'thirdparty'
-    else if (tag === '联网参考') type = 'web'
+    const mapped = SOURCE_PREFIX_MAP[tag]
+    if (mapped) {
+      sourceLabel = mapped.label
+      isUser = mapped.isUser
+      type = isUser ? 'user' : (tag === '联网参考' || tag === 'Perplexity' || tag === 'gpt-4o' ? 'web' : 'thirdparty')
+    } else {
+      sourceLabel = tag
+      type = 'thirdparty'
+    }
     text = text.slice(prefixMatch[0].length)
   }
 
@@ -1123,21 +1147,21 @@ function parseResearchItem(raw: string): { type: 'user' | 'web' | 'thirdparty' |
     const domainMatch = fullUrl.match(/^https?:\/\/([^/?#]+)/)
     const domain = domainMatch ? domainMatch[1].replace(/^www\./, '') : fullUrl
     text = text.slice(0, text.lastIndexOf(urlMatch[0])).trim()
-    return { type, text, url: fullUrl, domain }
+    return { type, text, url: fullUrl, domain, sourceLabel, isUser }
   }
 
   // 使用 ref 标记中的 URL
   if (refUrl) {
     const domainMatch = refUrl.match(/^https?:\/\/([^/?#]+)/)
     const domain = domainMatch ? domainMatch[1].replace(/^www\./, '') : null
-    return { type, text, url: refUrl, domain }
+    return { type, text, url: refUrl, domain, sourceLabel, isUser }
   }
 
   // 兼容旧格式：末尾只有裸域名
   const domainMatch = text.match(/\s*\(([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^)]*)\)\s*$/)
   const domain = domainMatch ? domainMatch[1] : null
   if (domainMatch) text = text.slice(0, text.lastIndexOf(domainMatch[0])).trim()
-  return { type, text, url: domain ? `https://${domain}` : null, domain }
+  return { type, text, url: domain ? `https://${domain}` : null, domain, sourceLabel, isUser }
 }
 
 // ── 公共区块标题（14px 600 #111827）───────────────────────────
@@ -1145,7 +1169,179 @@ function SectionLabel({ label }: { label: string }) {
   return <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 10 }}>{label}</div>
 }
 
-// ── 可折叠区块标题（用于投研观点）────────────────────────────
+// ── 知识库引用区块（v3.6.1 新增）────────────────────────────────
+
+const _CITE_SOURCE_LABELS: Record<string, string> = {
+  investment_principles: '投资纪律',
+  investment_style:      '投资理念',
+  allocation_principles: '资产配置',
+  research_views:        '投研观点',
+}
+
+const _CITE_FILE_NAMES: Record<string, string> = {
+  handbook_official:       '投资纪律手册',
+  handbook_custom:         '自定义纪律',
+  investment_philosophy:   '投资理念',
+  dynamic_rebalancing:     '动态再平衡原则',
+  multi_asset_allocation:  '多元资产配置',
+  target_range_management: '目标区间管理',
+}
+
+function _getFileDisplayName(path: string): string {
+  for (const [key, name] of Object.entries(_CITE_FILE_NAMES)) {
+    if (path.includes(key)) return name
+  }
+  if (path.includes('research_views/')) {
+    const parts = path.split('/')
+    const file = parts[parts.length - 1]?.replace('.md', '') || ''
+    const asset = parts[parts.length - 2] || ''
+    return `${asset} ${file}`
+  }
+  const base = path.split('/').pop()?.replace('.md', '') || path
+  return base
+}
+
+type CitationItem = {
+  sourceType: string
+  label: string
+  fileName: string
+  date: string | null
+  parentDocPath: string
+}
+
+function KnowledgeCitations({ data, onFileClick }: { data: ExplainData; onFileClick: (path: string) => void }) {
+  const principles = data.data?.retrieved_principles || []
+  const researchViews = data.data?.retrieved_research_views || []
+  const allChunks = [...principles, ...researchViews]
+
+  if (allChunks.length === 0) return null
+
+  // 按 parent_doc_path 去重
+  const seen = new Set<string>()
+  const items: CitationItem[] = []
+  for (const c of allChunks) {
+    if (seen.has(c.parent_doc_path)) continue
+    seen.add(c.parent_doc_path)
+    items.push({
+      sourceType: c.source_type,
+      label: _CITE_SOURCE_LABELS[c.source_type] || c.source_type,
+      fileName: _getFileDisplayName(c.parent_doc_path),
+      date: c.date,
+      parentDocPath: c.parent_doc_path,
+    })
+  }
+
+  const [open, setOpen] = React.useState(false)
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
+      <CollapsibleHeader label="知识库引用" open={open} onToggle={() => setOpen(o => !o)} />
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {items.map((item, i) => (
+            <div
+              key={i}
+              onClick={() => onFileClick(item.parentDocPath)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 8px', borderRadius: 6,
+                cursor: 'pointer', transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#F9FAFB')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span style={{
+                flexShrink: 0, fontSize: 11, fontWeight: 500,
+                padding: '1px 6px', borderRadius: 4,
+                background: '#F0F9FF', color: '#0369A1',
+              }}>
+                {item.label}
+              </span>
+              <span style={{ flex: 1, fontSize: 12, color: '#374151', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {item.fileName}
+              </span>
+              {item.date && (
+                <span style={{ flexShrink: 0, fontSize: 11, color: '#9CA3AF' }}>
+                  {item.date}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 知识库文件预览弹窗（v3.6.1 新增）────────────────────────
+
+const _SENSITIVITY_LABELS: Record<string, string> = {
+  permanent: '长期有效', slow_decay: '年级有效',
+  medium_decay: '季度有效', fast_decay: '月级有效',
+}
+
+function KnowledgeFilePreview({ path, onClose }: { path: string; onClose: () => void }) {
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+  const [fileData, setFileData] = React.useState<{ frontmatter: Record<string, unknown>; content: string } | null>(null)
+
+  React.useEffect(() => {
+    setLoading(true)
+    setError(null)
+    knowledgeApi.getFile(path)
+      .then(data => { setFileData(data); setLoading(false) })
+      .catch(e => { setError(String(e)); setLoading(false) })
+  }, [path])
+
+  const title = _getFileDisplayName(path)
+  const fm = fileData?.frontmatter || {}
+  const sensitivity = _SENSITIVITY_LABELS[fm.time_sensitivity as string] || ''
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} onClick={onClose} />
+      <div style={{
+        position: 'relative', background: '#fff', borderRadius: 12,
+        width: 'min(640px, 90vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+      }}>
+        {/* 标题栏 */}
+        <div style={{
+          padding: '14px 18px', borderBottom: '1px solid #E5E7EB',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>{title}</div>
+            <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 2, display: 'flex', gap: 8 }}>
+              {fm.source && <span>来源: {String(fm.source)}</span>}
+              {fm.date && <span>{String(fm.date)}</span>}
+              {sensitivity && <span>{sensitivity}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 18, color: '#9CA3AF', padding: 4,
+          }}>✕</button>
+        </div>
+        {/* 正文 */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px 18px' }}>
+          {loading && <div style={{ color: '#9CA3AF', fontSize: 13 }}>加载中...</div>}
+          {error && <div style={{ color: '#EF4444', fontSize: 13 }}>加载失败: {error}</div>}
+          {fileData && (
+            <div className="decision-md" style={{ fontSize: 13, lineHeight: 1.7, color: '#374151' }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{fileData.content}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 可折叠区块标题 ────────────────────────────────────────────
 function CollapsibleHeader({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
   return (
     <button
@@ -1170,6 +1366,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
   const position  = data.data?.target_position
   const [chainOpen,    setChainOpen]    = React.useState(false)
   const [researchOpen, setResearchOpen] = React.useState(false)
+  const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
 
   const intent    = data.intent
   const riskLevel = conclusion ? verdictToRiskLevel(conclusion.verdict) : 0
@@ -1347,15 +1544,14 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 3. 投研观点（默认折叠，PerformanceAnalysis 不显示）── */}
+      {/* ── 3. 联网搜索（默认折叠，PerformanceAnalysis 不显示）── */}
       {intent?.primary_intent !== 'PerformanceAnalysis' && research && research.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
-          <CollapsibleHeader label="投研观点" open={researchOpen} onToggle={() => setResearchOpen(o => !o)} />
+          <CollapsibleHeader label="联网搜索" open={researchOpen} onToggle={() => setResearchOpen(o => !o)} />
           {researchOpen && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {research.map((raw, i) => {
-                const { type, text, url, domain } = parseResearchItem(raw)
-                const isUser = type === 'user'
+                const { text, url, domain, sourceLabel, isUser } = parseResearchItem(raw)
                 return (
                   <div key={i} style={{
                     display: 'flex', gap: 8, alignItems: 'flex-start',
@@ -1383,7 +1579,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
                       background: isUser ? '#EFF6FF' : '#F3F4F6',
                       color: isUser ? '#3B82F6' : '#9CA3AF',
                     }}>
-                      {isUser ? '观点库' : '联网'}
+                      {sourceLabel}
                     </span>
                   </div>
                 )
@@ -1392,6 +1588,9 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
           )}
         </div>
       )}
+
+      {/* ── 3b. 知识库引用（v3.6.1 新增）── */}
+      <KnowledgeCitations data={data} onFileClick={setPreviewPath} />
 
       {/* ── 4. 四维信号（Education 不显示）── */}
       {intent?.primary_intent !== 'Education' && signals && (
@@ -1606,6 +1805,11 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         <div style={{ fontSize: 11, color: '#C4C9D4', lineHeight: 1.7, paddingTop: 4 }}>
           分析链路详情待后端接入 stage 事件后展示。
         </div>
+      )}
+
+      {/* ── 知识库文件预览弹窗 ── */}
+      {previewPath && (
+        <KnowledgeFilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
       )}
     </div>
   )

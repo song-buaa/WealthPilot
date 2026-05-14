@@ -742,6 +742,29 @@ def _serialize_decision_result(result: DecisionResult) -> dict:
             "research":        ld.research,
             "total_assets":    ld.total_assets,
             "target_position": _serialize_target_position(ld, result) if ld.target_position else None,
+            # v3.6.1: 知识库引用字段
+            "retrieved_principles": [
+                {
+                    "content": c.content,
+                    "source_type": c.source_type,
+                    "source_channel": getattr(c, "source_channel", "local_principles"),
+                    "parent_doc_path": c.parent_doc_path,
+                    "date": getattr(c, "date", None),
+                    "semantic_score": round(c.semantic_score, 3),
+                }
+                for c in (getattr(ld, "retrieved_principles", None) or [])
+            ],
+            "retrieved_research_views": [
+                {
+                    "content": c.content,
+                    "source_type": c.source_type,
+                    "source_channel": getattr(c, "source_channel", "local_rag"),
+                    "parent_doc_path": c.parent_doc_path,
+                    "date": getattr(c, "date", None),
+                    "semantic_score": round(c.semantic_score, 3),
+                }
+                for c in (getattr(ld, "retrieved_research_views", None) or [])
+            ],
         }
 
     if result.pre_check:

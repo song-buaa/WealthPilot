@@ -4,7 +4,7 @@
 WealthPilot — FastAPI 入口
 
 启动方式：
-    uvicorn backend.main:app --reload --port 8000
+    uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 """
 
 import os as _os
@@ -23,6 +23,7 @@ from backend.api import portfolio, discipline, research, decision, tasks, profil
 from backend.api import conversations as conversations_api
 from backend.api import broker_sync as broker_sync_api
 from backend.api import action as action_api
+from backend.api import knowledge as knowledge_api
 
 
 @asynccontextmanager
@@ -116,6 +117,7 @@ app.include_router(allocation.router, prefix="/api/allocation", tags=["allocatio
 app.include_router(conversations_api.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(broker_sync_api.router, prefix="/api/broker-sync", tags=["broker-sync"])
 app.include_router(action_api.router, prefix="/api/action", tags=["action"])
+app.include_router(knowledge_api.router, prefix="/api/knowledge", tags=["knowledge"])
 
 
 @app.get("/api/health")

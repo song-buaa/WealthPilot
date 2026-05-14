@@ -112,7 +112,7 @@ async def _emit_text_chunks(
 
 _SOURCE_TYPE_LABELS = {
     "investment_principles": "投资纪律",
-    "investment_style": "投资风格",
+    "investment_style": "投资理念",
     "allocation_principles": "资产配置",
     "research_views": "投研观点",
 }
@@ -515,11 +515,6 @@ class ExpressingAgent:
 
         out.mode = "fallback" if llm_result.is_fallback else "structured"
 
-        # v3.6: 追加引用来源
-        citation = _build_citation_block(execution_output)
-        if citation:
-            out.chat_answer += "\n\n" + citation
-
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk
 
@@ -656,11 +651,6 @@ class ExpressingAgent:
         out.structured_payload.pop("chat_answer", None)
         out.mode = "fallback" if generic.is_fallback else "structured"
 
-        # v3.6: 追加引用来源
-        citation = _build_citation_block(execution_output)
-        if citation:
-            out.chat_answer += "\n\n" + citation
-
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk
 
@@ -696,11 +686,6 @@ class ExpressingAgent:
             out.mark_failed(f"LLM chat 失败: {e}")
             yield "对话生成异常。"
             return
-
-        # v3.6: 追加引用来源区块
-        citation_block = _build_citation_block(execution_output)
-        if citation_block:
-            chat_text = (chat_text or "") + "\n\n" + citation_block
 
         out.chat_answer = chat_text or ""
         out.raw_text = chat_text or ""
