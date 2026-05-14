@@ -1464,12 +1464,12 @@ export default function Research() {
           ) : (
             <div>
               <div style={{
-                display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 80px 80px 90px',
+                display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 70px 80px 80px 90px',
                 gap: 8, padding: '6px 10px',
                 fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase',
                 borderBottom: '1px solid #F3F4F6',
               }}>
-                <span></span><span>论点 / 标的</span><span>立场</span><span>维度</span><span>状态</span><span>来源</span><span>时间</span>
+                <span></span><span>论点 / 标的</span><span>立场</span><span>维度</span><span>时效</span><span>状态</span><span>来源</span><span>时间</span>
               </div>
               {v2PagedCards.map(card => {
                 const j = card.judgment
@@ -1487,6 +1487,10 @@ export default function Research() {
                   akshare_news: '港股新闻', akshare_fundamental: '港股概况', akshare_hist: '港股行情',
                   perplexity_search: '联网', hybrid: '混合',
                 }
+                const TS_OPTIONS: Record<string, string> = {
+                  permanent: '长期有效', slow_decay: '年级有效',
+                  medium_decay: '季度有效', fast_decay: '月级有效',
+                }
                 const isExpiredByTime = j.expires_at && new Date(j.expires_at) < new Date()
                 const vBadge = isExpiredByTime
                   ? { label: '已过期', bg: '#FEF3C7', color: '#D97706' }
@@ -1494,7 +1498,7 @@ export default function Research() {
                 return (
                   <div key={card.card_id}
                     style={{
-                      display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 80px 80px 90px',
+                      display: 'grid', gridTemplateColumns: '28px 2fr 70px 60px 70px 80px 80px 90px',
                       gap: 8, padding: '8px 10px', alignItems: 'center',
                       borderBottom: '1px solid #F9FAFB',
                       border: v2LibSelectedIds.has(card.card_id) ? '2px solid #3B82F6' : undefined,
@@ -1516,6 +1520,21 @@ export default function Research() {
                     <span>{stanceBadge(j.stance)}</span>
                     <span style={{ fontSize: 11, color: '#6B7280' }}>{HORIZON_CN[j.horizon] ?? j.horizon}</span>
                     <span style={{ fontSize: 10, background: vBadge.bg, color: vBadge.color, padding: '1px 5px', borderRadius: 4, textAlign: 'center' }}>{vBadge.label}</span>
+                    <select
+                      value={card.time_sensitivity || 'medium_decay'}
+                      onChange={async (e) => {
+                        try {
+                          const result = await researchV2Api.updateTimeSensitivity(card.card_id, e.target.value)
+                          setV2Cards(prev => prev.map(c => c.card_id === card.card_id ? { ...c, time_sensitivity: result.card.time_sensitivity } : c))
+                        } catch (err) { console.error('时效更新失败', err) }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      style={{ fontSize: 10, color: '#6B7280', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 4, padding: '1px 2px', cursor: 'pointer' }}
+                    >
+                      {Object.entries(TS_OPTIONS).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
                     <span style={{ fontSize: 10, color: '#9CA3AF' }}>{SOURCE_SHORT[card.facts.source_type] ?? card.facts.source_type}</span>
                     <span style={{ fontSize: 10, color: '#9CA3AF' }}>{new Date(card.created_at).toLocaleDateString()}</span>
                   </div>

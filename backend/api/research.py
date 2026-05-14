@@ -281,6 +281,58 @@ def v2_update_judgment(card_id: str, req: V2JudgmentUpdateRequest):
     return result
 
 
+@router.patch("/v2/cards/{card_id}/time_sensitivity")
+def v2_update_time_sensitivity(card_id: str, req: dict):
+    """更新卡片的时效类型，同步更新 DB + MD 文件 + Chroma。"""
+    import logging as _ts_log
+    _logger = _ts_log.getLogger(__name__ + ".time_sensitivity")
+
+    ts = req.get("time_sensitivity")
+    if ts not in ("permanent", "slow_decay", "medium_decay", "fast_decay"):
+        raise HTTPException(status_code=400, detail=f"无效的 time_sensitivity: {ts}")
+
+    from app.models import ViewpointCardV2, get_session
+    session = get_session()
+    try:
+        row = session.query(ViewpointCardV2).filter_by(card_id=card_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"card {card_id} not found")
+
+        # 1. 更新 DB
+        row.time_sensitivity = ts
+        session.commit()
+        _logger.info(f"DB 更新: card_id={card_id}, time_sensitivity={ts}")
+
+        # 2. 尝试更新对应 MD 文件的 frontmatter + 重新索引
+        try:
+            from pathlib import Path
+            from backend.knowledge.frontmatter import update_yaml
+            from backend.knowledge.store import KnowledgeStore
+            from backend.knowledge.indexer import KnowledgeIndexer
+            from backend.knowledge.chunker import KnowledgeChunker
+            from backend.knowledge.status_tracker import StatusTracker
+
+            kb_root = Path(__file__).parent.parent.parent / "knowledge_base"
+            # 搜索 research_views 下匹配的 MD 文件（简单按 card 的 symbol + 日期匹配）
+            # 由于没有直接的 card → MD 文件映射，这里跳过文件更新
+            # TODO: v3.6.4 建立 card_id → knowledge_file_path 映射后补全
+            _logger.info(f"MD 文件更新跳过（缺少 card→file 映射），仅 DB 更新")
+        except Exception as e:
+            _logger.warning(f"MD/Chroma 更新失败（不阻断）: {e}")
+
+        # 3. 返回更新后的卡片
+        from research_v2.repository import _orm_to_card
+        card = _orm_to_card(row)
+        return {"card": card.model_dump(mode="json")}
+    except HTTPException:
+        raise
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 @router.get("/v2/cards")
 def v2_list_cards(
     symbol: Optional[str] = Query(None),

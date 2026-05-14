@@ -260,6 +260,12 @@ export const researchV2Api = {
       body: JSON.stringify({ judgment, confirm, action }),
     }),
 
+  updateTimeSensitivity: (cardId: string, timeSensitivity: string) =>
+    request<{ card: ViewpointCardV2 }>(`/research/v2/cards/${cardId}/time_sensitivity`, {
+      method: 'PATCH',
+      body: JSON.stringify({ time_sensitivity: timeSensitivity }),
+    }),
+
   queryCards: (params?: { symbol?: string; status?: string; event_type?: string; render?: boolean; top_k?: number }) => {
     const qs = new URLSearchParams()
     if (params?.symbol) qs.set('symbol', params.symbol)

@@ -71,6 +71,23 @@ def _strip_html_json_block(text: str) -> str:
     return _HTML_JSON_PATTERN.sub("", text)
 
 
+def update_yaml(file_path: Path, updates: dict) -> None:
+    """
+    更新 YAML frontmatter 中的指定字段，保留正文不变。
+
+    仅支持 YAML 格式的 MD 文件（--- 分隔）。
+    HTML 注释 JSON 格式的文件不支持更新。
+    """
+    raw = Path(file_path).read_text(encoding="utf-8")
+    if not raw.lstrip().startswith("---"):
+        raise ValueError(f"文件不是 YAML frontmatter 格式: {file_path}")
+
+    post = frontmatter.loads(raw)
+    for k, v in updates.items():
+        post.metadata[k] = v
+    Path(file_path).write_text(frontmatter.dumps(post), encoding="utf-8")
+
+
 def infer_source_type(file_path: Path, fm: dict) -> str:
     """
     从文件路径或 frontmatter 推断 source_type。
