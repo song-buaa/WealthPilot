@@ -5,6 +5,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.6.3] - 2026-05-14
+
+本版本打通 time_sensitivity 的完整链路，让时效衰减打分真正可控。
+
+### Added
+- ResearchDocument / ResearchCard / ViewpointCardV2 表新增 time_sensitivity 列
+- ResearchDocument 表新增 knowledge_file_path 列（card → MD 文件映射）
+- PATCH /api/research/v2/cards/{card_id}/time_sensitivity 端点：修改后 DB / MD frontmatter / Chroma metadata 三处同步
+- 前端投研观点卡片展示时效标签（长期有效 / 年级有效 / 季度有效 / 月级有效），可点击修改
+
+### Changed
+- research_service.py _persist_to_knowledge_base()：写入 MD 文件后返回相对路径，存入 ResearchDocument.knowledge_file_path
+- parse_text() 解析链路：LLM 解析的 time_sensitivity 现在存入 DB（原来只写 MD frontmatter，DB 无值）
+- 历史数据（knowledge_file_path 为空）修改时效标签只更新 DB，不报错
+
+---
+
 ## [3.6.2] - 2026-05-14
 
 ### Changed
