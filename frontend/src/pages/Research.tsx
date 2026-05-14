@@ -1488,8 +1488,8 @@ export default function Research() {
                   perplexity_search: '联网', hybrid: '混合',
                 }
                 const TS_OPTIONS: Record<string, string> = {
-                  permanent: '长期有效', slow_decay: '年级有效',
-                  medium_decay: '季度有效', fast_decay: '月级有效',
+                  permanent: '长期有效', slow_decay: '年度有效',
+                  medium_decay: '季度有效', fast_decay: '月度有效',
                 }
                 const isExpiredByTime = j.expires_at && new Date(j.expires_at) < new Date()
                 const vBadge = isExpiredByTime

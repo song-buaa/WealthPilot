@@ -1314,8 +1314,8 @@ function KnowledgeCitations({ data, viewpointCards = [], onFileClick }: {
 // ── 知识库文件预览弹窗（v3.6.1 新增）────────────────────────
 
 const _SENSITIVITY_LABELS: Record<string, string> = {
-  permanent: '长期有效', slow_decay: '年级有效',
-  medium_decay: '季度有效', fast_decay: '月级有效',
+  permanent: '长期有效', slow_decay: '年度有效',
+  medium_decay: '季度有效', fast_decay: '月度有效',
 }
 
 function KnowledgeFilePreview({ path, onClose }: { path: string; onClose: () => void }) {

@@ -244,7 +244,7 @@ def generate_research_card_full(raw_content: str) -> dict:
   "action_suggestion": "操作建议（如：加仓 / 减仓 / 持有观察，可为 null）",
   "invalidation_conditions": "观点失效条件（可为 null）",
   "suggested_tags": ["标签1", "标签2"],
-  "time_sensitivity": "permanent|slow_decay|medium_decay|fast_decay|null（内容时效类型：permanent=永恒价值判断如投资理念/商业模式分析；slow_decay=年级有效如行业格局/竞争优势；medium_decay=季度级有效如财报解读/估值判断/目标价；fast_decay=月级有效如新闻事件/短期催化剂/技术面）"
+  "time_sensitivity": "permanent|slow_decay|medium_decay|fast_decay|null（内容时效类型：permanent=永恒价值判断如投资理念/商业模式分析；slow_decay=年度有效如行业格局/竞争优势；medium_decay=季度级有效如财报解读/估值判断/目标价；fast_decay=月度有效如新闻事件/短期催化剂/技术面）"
 }}"""
 
     try:
