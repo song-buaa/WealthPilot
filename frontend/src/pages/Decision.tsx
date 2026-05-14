@@ -1587,7 +1587,10 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
         </div>
       )}
 
-      {/* ── 3. 联网搜索（默认折叠，PerformanceAnalysis 不显示）── */}
+      {/* ── 3. 知识库引用 ── */}
+      <KnowledgeCitations data={data} viewpointCards={viewpointCards} onFileClick={setPreviewPath} />
+
+      {/* ── 3b. 联网搜索（默认折叠，PerformanceAnalysis 不显示）── */}
       {intent?.primary_intent !== 'PerformanceAnalysis' && webSearchItems.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <CollapsibleHeader label="联网搜索" open={researchOpen} onToggle={() => setResearchOpen(o => !o)} />
@@ -1631,9 +1634,6 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
           )}
         </div>
       )}
-
-      {/* ── 3b. 知识库引用（v3.6.1 新增）── */}
-      <KnowledgeCitations data={data} viewpointCards={viewpointCards} onFileClick={setPreviewPath} />
 
       {/* ── 4. 四维信号（Education 不显示）── */}
       {intent?.primary_intent !== 'Education' && signals && (
