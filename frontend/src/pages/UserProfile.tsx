@@ -4,7 +4,7 @@
  * v3.6.3: 新增投资理念板块（MD 文档查阅/上传/下载）
  */
 import React, { useEffect, useState, useRef } from 'react'
-import { Loader2, User, BookOpen, Download, Upload, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { Loader2, User, Download, Upload, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { profileApi, philosophyApi, type UserProfile as TUserProfile } from '@/lib/api'
@@ -91,20 +91,18 @@ export default function UserProfile() {
       {/* ── 投资理念板块 ── */}
       <div style={{
         background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
-        boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginTop: 20,
+        overflow: 'hidden', marginTop: 20,
       }}>
         {/* 折叠标题行 */}
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '16px 24px', cursor: 'pointer',
-            borderBottom: philOpen ? '1px solid #E5E7EB' : undefined,
+            padding: '14px 18px', cursor: 'pointer',
           }}
           onClick={() => setPhilOpen(v => !v)}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <BookOpen size={15} style={{ color: '#3B82F6' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>投资理念</span>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>投资理念</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
             <input ref={philFileRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handlePhilUpload} />
