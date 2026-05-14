@@ -891,11 +891,12 @@ def execute_retrieve_principles(
             _rp_logger.warning("KnowledgeStore 未就绪，返回空结果")
             return {"chunks": [], "total_retrieved": 0, "warning": "knowledge_store_not_ready"}
 
+        _decay_on = store._config.get("decay", {}).get("enabled", False)
         chunks = store.retrieve(
             query=query,
             source_types=source_types,
             top_k=top_k,
-            apply_decay=False,
+            apply_decay=_decay_on,
         )
         for c in chunks:
             c.source_channel = "local_principles"
@@ -911,7 +912,7 @@ def execute_retrieve_principles(
 
 RETRIEVE_PRINCIPLES_SCHEMA = {
     "name": "retrieve_principles",
-    "description": "从知识库检索用户原则类知识（投资纪律、投资风格、资产配置原则）。",
+    "description": "从知识库检索用户原则类知识（投资纪律、投资理念、资产配置原则）。",
     "parameters": {
         "type": "object",
         "properties": {

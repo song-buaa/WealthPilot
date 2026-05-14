@@ -719,6 +719,14 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
         # ── 7a. 投研观点 RAG 补充（v3.6 新增）──────────────────────────────
         # 从知识库召回该标的的历史投研原文，作为 research 字段的语义补充。
         # 失败不阻塞主流程（graceful degrade）。
+        # 读取衰减配置（7a/7b 共用）
+        _decay_enabled = False
+        try:
+            from backend.knowledge.store import _load_config as _lc
+            _decay_enabled = _lc().get("decay", {}).get("enabled", False)
+        except Exception:
+            pass
+
         retrieved_research_views = []
         if asset_name:
             try:
@@ -730,6 +738,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                         source_types=["research_views"],
                         top_k=5,
                         filters={"asset": asset_name},
+                        apply_decay=_decay_enabled,
                     )
             except Exception as _rag_err:
                 import logging as _rag_log
@@ -753,7 +762,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                         "allocation_principles",
                     ],
                     top_k=5,
-                    apply_decay=False,
+                    apply_decay=_decay_enabled,
                 )
         except Exception as _pr_err:
             import logging as _pr_log

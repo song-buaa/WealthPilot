@@ -23,7 +23,7 @@ retrieval:
   enable_small_to_big: false
 
 decay:
-  enabled: false
+  enabled: true
   half_life_months:
     permanent: 99999
     slow_decay: 12
