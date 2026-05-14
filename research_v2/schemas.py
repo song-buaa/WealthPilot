@@ -251,6 +251,7 @@ class ViewpointCard(BaseModel):
     narrative: NarrativeLayer = Field(default_factory=NarrativeLayer)
     judgment: JudgmentLayer = Field(default_factory=JudgmentLayer)
     relations: list[Relation] = Field(default_factory=list)
+    time_sensitivity: Optional[str] = None  # v3.6.3
     status: str = "pending_review"  # pending_review / active / discarded
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

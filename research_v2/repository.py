@@ -46,6 +46,7 @@ def _orm_to_card(row: ViewpointCardV2) -> ViewpointCard:
         narrative=narrative,
         judgment=judgment,
         relations=relations,
+        time_sensitivity=getattr(row, "time_sensitivity", None),
         status=row.status,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -84,6 +85,7 @@ def _card_to_orm(card: ViewpointCard) -> ViewpointCardV2:
         action_type=card.judgment.action_type.value if card.judgment.action_type else None,
         event_type=card.narrative.event_type.value,
         relations_json=relations_json,
+        time_sensitivity=card.time_sensitivity,
         status=card.status,
     )
 

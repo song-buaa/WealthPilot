@@ -224,6 +224,7 @@ export interface ViewpointCardV2 {
   narrative: NarrativeLayerV2
   judgment: JudgmentLayerV2
   relations: unknown[]
+  time_sensitivity?: string | null  // v3.6.3
   status: string
   created_at: string
   updated_at: string

@@ -278,6 +278,7 @@ def parse_text(content: str, title: str, source_url: Optional[str] = None) -> di
             author=card_data.get("author"),
             publish_time=card_data.get("publish_time"),
             parse_status="parsed",
+            time_sensitivity=card_data.get("time_sensitivity", "medium_decay"),
         )
         session.add(doc)
         session.flush()
@@ -575,6 +576,7 @@ def _card_to_dict(card: ResearchCard, include_doc: bool = False) -> dict:
         "action_suggestion":     card.action_suggestion,
         "invalidation_conditions": card.invalidation_conditions,
         "suggested_tags":        _parse_json_list(card.suggested_tags),
+        "time_sensitivity":      card.time_sensitivity or "medium_decay",
         "is_approved":           card.viewpoint is not None,
         "viewpoint_id":          card.viewpoint.id if card.viewpoint else None,
         "created_at":            utc_iso(card.created_at),
@@ -620,6 +622,7 @@ def _create_card_from_data(document_id: int, card_data: dict) -> ResearchCard:
         action_suggestion=card_data.get("action_suggestion"),
         invalidation_conditions=card_data.get("invalidation_conditions"),
         suggested_tags=_jl("suggested_tags"),
+        time_sensitivity=card_data.get("time_sensitivity", "medium_decay"),
     )
 
 
