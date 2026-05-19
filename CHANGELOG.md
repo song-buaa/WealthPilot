@@ -5,6 +5,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.7.0] - 2026-05-19
+
+显性化清理 patch，无功能/行为/结构变更。
+
+### Changed
+- 归档并删除 `skills/wealthpilot-position-decision/` 意图编排文档（运行时零引用的死代码），归档至 `docs/archived/v3.0_position_decision_skill/`
+- 修正 AGENTS.md Skills 清单：移除 `wealthpilot-position-decision` 引用，对齐"12 个原子能力"
+- `_SKILL_BUNDLES_BY_ROUTE` 上方新增语义说明注释（明确当前配置不是 ExecutingAgent 执行契约）
+- portfolio 路由内 `wp-calc-allocation-deviation` / `wp-propose-allocation` 加 TODO(v3.8) 幽灵 Skill 标注
+
+### Added
+- LLM Selector 增补未生效显性化日志（仅在边界场景触发时 warning）
+- `_execute_position` / `_execute_portfolio` 中 `retrieved_principles` 半接通状态显性化日志
+- `docs/v3.6.5_patch_plan.md`: wp-retrieve-principles LLM 注入修复立项备忘
+- `docs/v3.8_plan.md`: 意图编排层契约治理立项备忘
+
+---
+
 ## [3.6.4] - 2026-05-14
 
 ### Added

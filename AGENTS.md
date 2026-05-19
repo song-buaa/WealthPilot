@@ -38,13 +38,13 @@ ExpressingAgent 在流式输出完成后，基于 `structured_payload.decisionTy
 - `decisionType ∈ {buy_init, buy_more, trim, exit}` → `actionable=true`，前端显示"生成行动清单"按钮
 - 其他 decisionType → `actionable=false`，按钮不出现
 
-### 13 个 Skill
+### 12 个原子能力 Skill
 
 原子 Skill（10 个）：
 - 数据获取：`wp-fetch-holdings` / `wp-fetch-research` / `wp-check-discipline`
 - 知识检索：`wp-retrieve-principles`（v3.6 新增，检索投资纪律/风格/配置原则）
 - 计算分析：`wp-calc-allocation-deviation` / `wp-generate-signals` / `wp-propose-allocation`
-- LLM 推理：`wp-reasoning`（参数化 prompt 模板）/ `wealthpilot-position-decision`
+- LLM 推理：`wp-reasoning`（参数化 prompt 模板）
 - 输出规范：`wp-citation-rules` / `wp-output-validator`
 
 组合 Skill（1 个）：
@@ -257,7 +257,7 @@ WealthPilot 从 v3.6 起引入私有知识库，采用 **File-as-Source-of-Truth
 ```
 backend/knowledge_base/
 ├── investment_principles/    投资纪律手册（MD + RULES_CONFIG 双载体）
-├── investment_style/         投资风格（价值主张、红线、偏好）
+├── investment_style/         投资理念（价值主张、决策框架、纪律哲学）
 ├── allocation_principles/    资产配置原则（多元配置、再平衡、目标区间）
 ├── research_views/           投研观点（按标的子目录，MD 落盘）
 └── _index/                   系统生成（Chroma 持久化 + file_index.json）
@@ -308,7 +308,7 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - 决策输出附引用来源
 
 ### v3.6.1（近期）
-- 投资风格 UI 输入框
+- 投资理念 UI 输入框
 - 时效类型标签 UI
 - LLM rerank（召回质量优化）
 

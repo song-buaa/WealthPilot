@@ -18,7 +18,8 @@ def test_discover():
     loader.discover()
     names = loader.list_skill_names()
     print(f"✅ 发现 {len(names)} 个 Skill: {sorted(names)}")
-    assert "wealthpilot-position-decision" in names
+    # v3.7: wealthpilot-position-decision 已归档删除，改用 wp-fetch-holdings 验证
+    assert "wp-fetch-holdings" in names
 
 
 def test_get_metadatas():
@@ -28,10 +29,10 @@ def test_get_metadatas():
     loader.discover()
     metas = loader.get_skill_metadatas()
     assert len(metas) >= 1
-    target = next((m for m in metas if m.name == "wealthpilot-position-decision"), None)
+    # v3.7: wealthpilot-position-decision 已归档删除，改用 wp-fetch-holdings 验证
+    target = next((m for m in metas if m.name == "wp-fetch-holdings"), None)
     assert target is not None
-    assert "单一持仓标的" in target.description
-    assert target.intent_binding == "PositionDecision"
+    assert "持仓" in target.description
     print(f"✅ Metadata 解析正确")
 
 
@@ -40,9 +41,10 @@ def test_load_body():
     loader = get_skills_loader()
     loader._loaded = False
     loader.discover()
-    body = loader.load_skill_body("wealthpilot-position-decision")
+    # v3.7: wealthpilot-position-decision 已归档删除，改用 wp-fetch-holdings 验证
+    body = loader.load_skill_body("wp-fetch-holdings")
     assert body is not None
-    assert len(body) > 500
+    assert len(body) > 100
     print(f"✅ body 加载正确，长度 {len(body)} 字符")
 
 
@@ -56,14 +58,15 @@ def test_load_nonexistent():
     print(f"✅ 不存在的 Skill 返回 None")
 
 
-def test_references_exist():
+def test_references_archived():
+    """v3.7: wealthpilot-position-decision 已归档至 docs/archived/，验证归档完整性。"""
     from pathlib import Path
-    refs_dir = Path(__file__).parent.parent.parent / \
-        "skills" / "wealthpilot-position-decision" / "references"
-    assert refs_dir.exists()
-    files = list(refs_dir.glob("*.md"))
+    archived_dir = Path(__file__).parent.parent.parent / \
+        "docs" / "archived" / "v3.0_position_decision_skill" / "references"
+    assert archived_dir.exists(), "归档目录不存在"
+    files = list(archived_dir.glob("*.md"))
     assert len(files) >= 2
-    print(f"✅ references/ 目录存在 {len(files)} 个文件")
+    print(f"✅ 归档 references/ 目录存在 {len(files)} 个文件")
 
 
 # ════════════════════════════════════════════════
@@ -182,7 +185,7 @@ if __name__ == "__main__":
     test_get_metadatas()
     test_load_body()
     test_load_nonexistent()
-    test_references_exist()
+    test_references_archived()
     # v3.0 Step 7c
     test_skill_meta_extended_fields()
     test_invoke_function_call()

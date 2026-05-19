@@ -25,12 +25,23 @@ from backend.agents.contracts import PlanningOutput, AgentTaskStatus
 logger = logging.getLogger(__name__)
 
 
-# ════════════════════════════════════════════════════════════
-# Skill 组合静态映射（v3.0 占位）
-# ════════════════════════════════════════════════════════════
-# 今天用静态映射建立 intent → Skills 组合的契约。
-# 明天 Step 7 升级为 LLM Skill Selector：
-#   读取 9 个 SKILL.md 的 description，让 LLM 动态选择组合。
+# ─────────────────────────────────────────────────────────────────────────
+# _SKILL_BUNDLES_BY_ROUTE 语义说明（v3.7 显性化）
+#
+# 当前语义：本配置不是 ExecutingAgent 的执行契约。
+#   - 仅用于 PlanningOutput.selected_skills 字段赋值（供日志和评测观测）
+#   - 仅用于 LLM Skill Selector 候选集白名单过滤
+#   - ExecutingAgent 通过硬编码 if/elif route 分支执行，不读取本配置
+#
+# v3.7 范围：保留现状结构（list[str]），不重构为分阶段 dict。
+#
+# 已知不一致（v3.8 统一处理）：
+#   1. wp-reasoning / wp-citation-rules / wp-output-validator 实际由
+#      ExpressingAgent / ReviewingAgent 调用，非 ExecutingAgent 阶段能力
+#   2. wp-retrieve-principles 在 position/portfolio 路由下由 data_loader
+#      内部触发，非 ExecutingAgent 显式 invoke_skill 调用
+#   3. 见下方 TODO(v3.8) 标注的幽灵 Skill
+# ─────────────────────────────────────────────────────────────────────────
 
 _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
     # PositionDecision 单标决策：完整流程
@@ -44,7 +55,8 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
         "wp-citation-rules",
         "wp-output-validator",
     ],
-    # 多标的决策：循环调用单标流程
+    # 多标的决策：与 position_single 完全相同；decision_service_v3 的
+    # _handle_position_multi 将 multi 拆解为多次 position_single 调用
     "position_multi": [
         "wp-fetch-holdings",
         "wp-fetch-research",
@@ -60,6 +72,10 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
         "wp-fetch-holdings",
         "wp-fetch-research",
         "wp-retrieve-principles",    # v3.6 新增
+        # TODO(v3.8): 以下两个为"幽灵 Skill"——存在于本配置和 LLM Selector
+        # 候选集中，但 ExecutingAgent 和 decision_service 任何路径都不调用。
+        # v3.8 统一决策：接通为真实资产配置能力，或从 bundle 与 selector 中移除。
+        # v3.7 保留现状，不做产品决策。
         "wp-calc-allocation-deviation",
         "wp-propose-allocation",
         "wp-reasoning",
@@ -321,6 +337,14 @@ class PlanningAgent:
                 out.selected_skills = merged
                 if extra_skills:
                     out.rationale += f" | LLM Selector 增补: {extra_skills}"
+                    # v3.7: 显性化日志 —— LLM Selector 增补未生效
+                    # 仅在 LLM Selector 实际增补了 skill 时触发，避免日志噪音
+                    logger.warning(
+                        f"[PlanningAgent] LLM Selector 增补了 {len(extra_skills)} 个 extra skills "
+                        f"但 ExecutingAgent 当前不消费 selected_skills，增补未实际生效。"
+                        f"route={out.route}, extra_skills={extra_skills}"
+                        f"（v3.8 将统一修复 Planning-Executing 契约）"
+                    )
 
             logger.info(
                 f"[PlanningAgent] task={out.task_id} route={out.route} "

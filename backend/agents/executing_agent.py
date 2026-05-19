@@ -184,6 +184,17 @@ class ExecutingAgent:
             "items_count": len(loaded.research or []),
         }
 
+        # v3.7: 显性化日志 —— wp-retrieve-principles v3.6 半接通状态
+        if loaded and getattr(loaded, "retrieved_principles", None):
+            principles_count = len(loaded.retrieved_principles)
+            if principles_count > 0:
+                logger.warning(
+                    f"[ExecutingAgent] retrieved_principles 已召回 {principles_count} 条，"
+                    f"但 position/portfolio 路由下 llm_engine.reason() 不消费此字段。"
+                    f"用户可在 KnowledgeCitations 看到引用卡片，但 LLM 推理不引用。"
+                    f"v3.6 半接通状态，v3.6.5 patch 单独修复。"
+                )
+
         # ── M8.2: 新建仓分支(港股拦截 / 未识别标的) ──────────────
         if loaded.is_new_entry and loaded.market_not_supported_message:
             out.mark_aborted(
@@ -556,6 +567,17 @@ class ExecutingAgent:
             "positions_count": len(loaded.positions),
             "total_assets": loaded.total_assets,
         }
+
+        # v3.7: 显性化日志 —— wp-retrieve-principles v3.6 半接通状态
+        if loaded and getattr(loaded, "retrieved_principles", None):
+            principles_count = len(loaded.retrieved_principles)
+            if principles_count > 0:
+                logger.warning(
+                    f"[ExecutingAgent] retrieved_principles 已召回 {principles_count} 条，"
+                    f"但 position/portfolio 路由下 llm_engine.reason() 不消费此字段。"
+                    f"用户可在 KnowledgeCitations 看到引用卡片，但 LLM 推理不引用。"
+                    f"v3.6 半接通状态，v3.6.5 patch 单独修复。"
+                )
 
     # ────────────────────────────────────────────────────────
     # General 路径（v3.6 新增）
