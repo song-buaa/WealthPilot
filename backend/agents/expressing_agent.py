@@ -107,62 +107,6 @@ async def _emit_text_chunks(
 
 
 # ════════════════════════════════════════════════════════════
-# v3.6: 引用来源区块生成
-# ════════════════════════════════════════════════════════════
-
-_SOURCE_TYPE_LABELS = {
-    "investment_principles": "投资纪律",
-    "investment_style": "投资理念",
-    "allocation_principles": "资产配置",
-    "research_views": "投研观点",
-}
-
-
-def _build_citation_block(execution_output) -> str:
-    """
-    从 execution_output 中提取 retrieved_principles 和 retrieved_research_views，
-    生成引用来源区块。无内容时返回空字符串。
-    """
-    if not execution_output or not execution_output.loaded_data:
-        return ""
-
-    loaded = execution_output.loaded_data
-    principles = getattr(loaded, "retrieved_principles", [])
-    research_views = getattr(loaded, "retrieved_research_views", [])
-
-    all_chunks = list(principles) + list(research_views)
-    if not all_chunks:
-        return ""
-
-    # 按文件去重（同一文件多 chunks 只展示一次）
-    seen_paths: set[str] = set()
-    lines: list[str] = []
-
-    for chunk in all_chunks:
-        path = getattr(chunk, "parent_doc_path", "")
-        if not path or path in seen_paths:
-            continue
-        seen_paths.add(path)
-
-        source_type = getattr(chunk, "source_type", "")
-        label = _SOURCE_TYPE_LABELS.get(source_type, source_type)
-        date = getattr(chunk, "date", "") or ""
-        date_str = f"（{date}）" if date else ""
-
-        # 只展示相对路径中有意义的部分
-        short_path = path
-        if "knowledge_base/" in path:
-            short_path = path.split("knowledge_base/", 1)[-1]
-
-        lines.append(f"  [{label}] {short_path}{date_str}")
-
-    if not lines:
-        return ""
-
-    return "---\n📚 参考来源\n" + "\n".join(lines)
-
-
-# ════════════════════════════════════════════════════════════
 # Intent → LLM Function 映射
 # ════════════════════════════════════════════════════════════
 

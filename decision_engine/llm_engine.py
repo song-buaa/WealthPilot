@@ -178,6 +178,7 @@ chat_answer 输出格式：
 - 目标仓位（如"建议降至 X%"）是AI建议值，必须说明推导依据（如"基于分散化原则"），禁止表述为"您设定的上限"
 - 引用纪律数据时，格式为："您的单标的纪律上限是X%，当前仓位Y%，[已超出/距上限还有Z个百分点]"
 - 【纪律值使用强约束】引用任何纪律数值（单标上限/权益上限/现金最低等）时，必须使用 rules 字段中的具体数值，严禁发明或引用此 prompt 模板中出现的任何示例百分比。若需AI建议的目标仓位（非纪律值），必须明确说"建议"二字且基于持仓数据推导
+- 【定性原则引用要求】上述约束只针对数值类纪律。对于用户的定性投资原则（投资理念、投资风格、资产配置原则等定性主张），不仅可以引用，而且应当显式引用——特别是当原则与当前决策相关时，要在分析中明确标注来源类别，例如："据您的投资理念，'有条件的长期主义'…"、"结合您的投资纪律…"、"对照您的资产配置原则…"
 
 关于基本面和投研信息：
 - research字段中有具体数字的，必须直接引用原始数字（如"净利润同比下降94%"），禁止替换为"大幅下滑"等模糊表述
@@ -634,6 +635,50 @@ _GENERAL_CHAT_PROMPT = """当前任务：通用问答（GeneralChat / Education�
 - 禁止用###标题把回答切割成模块化结构，保持对话自然流"""
 
 
+# v3.6.5: 用户个性化投资原则注入模板（reason() 专用）
+_PRINCIPLES_SOURCE_TYPE_LABELS = {
+    "investment_principles": "投资纪律",
+    "investment_style": "投资理念",
+    "allocation_principles": "资产配置原则",
+}
+
+_PRINCIPLES_PROMPT_TEMPLATE = """以下是用户的个性化投资原则（从知识库召回），请在推理中主动参考：
+
+{principles_text}
+
+要求：
+- 当用户原则与当前决策相关时，在分析中明确引用（如"根据您的投资纪律…"）
+- 当用户行为与自身原则矛盾时，温和提醒
+- 不要逐条复述原则，自然融入分析即可
+- 如果召回的原则与当前问题无关，忽略即可"""
+
+
+def _extract_principles_prompt(data) -> str:
+    """从 LoadedData 提取 retrieved_principles 并格式化为 prompt 段落。
+
+    返回完整的 principles_prompt（含 _PRINCIPLES_PROMPT_TEMPLATE 包装），
+    无 principles 时返回空字符串。
+    """
+    raw_principles = getattr(data, "retrieved_principles", None) or []
+    if not raw_principles:
+        return ""
+
+    lines = []
+    for chunk in raw_principles:
+        source_type = getattr(chunk, "source_type", "")
+        label = _PRINCIPLES_SOURCE_TYPE_LABELS.get(source_type, source_type)
+        content = getattr(chunk, "content", "")
+        if content:
+            lines.append(f"[{label}] {content}")
+
+    if not lines:
+        return ""
+
+    principles_text = "\n\n".join(lines)
+    print(f"[llm_engine] 注入 {len(raw_principles)} 条用户原则到 prompt", flush=True)
+    return _PRINCIPLES_PROMPT_TEMPLATE.replace("{principles_text}", principles_text)
+
+
 # ── 客户端（懒加载）──────────────────────────────────────────────────────────
 
 _client: Optional[openai.OpenAI] = None
@@ -851,16 +896,25 @@ def reason(
         )
     position_prompt = _POSITION_DECISION_PROMPT.replace("{chat_format_block}", chat_format)
 
+    # v3.6.5: 从 LoadedData 提取 retrieved_principles 并格式化为 prompt 段落
+    principles_prompt = _extract_principles_prompt(data)
+
     # Phase 2: 构建 DecisionContext 并注入 system prompt
     try:
         pid = data.raw_portfolio.id if data.raw_portfolio and hasattr(data.raw_portfolio, 'id') else 1
         decision_ctx = build_decision_context(user_query, data, portfolio_id=pid)
         context_prompt = format_context_prompt(decision_ctx)
-        system_prompt = _BASE_PROMPT + "\n\n" + context_prompt + "\n\n" + position_prompt
+        system_prompt = _BASE_PROMPT
+        if principles_prompt:
+            system_prompt += "\n\n" + principles_prompt
+        system_prompt += "\n\n" + context_prompt + "\n\n" + position_prompt
         print(f"[llm_engine] DecisionContext 注入成功，prompt 长度={len(system_prompt)} 字符, followup={is_followup}", flush=True)
     except Exception as e:
         print(f"[llm_engine] DecisionContext 构建失败，降级到无上下文: {e}", flush=True)
-        system_prompt = _BASE_PROMPT + "\n\n" + position_prompt
+        system_prompt = _BASE_PROMPT
+        if principles_prompt:
+            system_prompt += "\n\n" + principles_prompt
+        system_prompt += "\n\n" + position_prompt
 
     try:
         client = _get_client()
@@ -1733,11 +1787,16 @@ def _call_generic_llm(
     prompt: str,
     payload: dict,
     conversation_history: list[dict] | None = None,
+    principles_prompt: str = "",
 ) -> GenericLLMResult:
     """通用 LLM 调用，供组合级别意图共用。"""
     try:
         client = _get_client()
-        messages = [{"role": "system", "content": _BASE_PROMPT + "\n\n" + prompt}]
+        system_content = _BASE_PROMPT
+        if principles_prompt:
+            system_content += "\n\n" + principles_prompt
+        system_content += "\n\n" + prompt
+        messages = [{"role": "system", "content": system_content}]
         if conversation_history:
             for turn in conversation_history:
                 if turn.get("role") in ("user", "assistant") and turn.get("content"):
@@ -1784,7 +1843,8 @@ def review_portfolio(
     prompt = _PORTFOLIO_REVIEW_PROMPT
     if extra_instruction:
         prompt = _PORTFOLIO_REVIEW_PROMPT + "\n\n" + extra_instruction
-    return _call_generic_llm("portfolio_review", prompt, payload, conversation_history)
+    return _call_generic_llm("portfolio_review", prompt, payload, conversation_history,
+                             principles_prompt=_extract_principles_prompt(data))
 
 
 def analyze_allocation(
@@ -1796,7 +1856,8 @@ def analyze_allocation(
 ) -> GenericLLMResult:
     """资产配置 LLM 推理（AssetAllocation）"""
     payload = _build_allocation_payload(user_query, data, capital_amount, portfolio_id)
-    return _call_generic_llm("asset_allocation", _ASSET_ALLOCATION_PROMPT, payload, conversation_history)
+    return _call_generic_llm("asset_allocation", _ASSET_ALLOCATION_PROMPT, payload, conversation_history,
+                             principles_prompt=_extract_principles_prompt(data))
 
 
 def analyze_performance(
@@ -1806,7 +1867,8 @@ def analyze_performance(
 ) -> GenericLLMResult:
     """收益分析 LLM 推理（PerformanceAnalysis）"""
     payload = _build_portfolio_payload(user_query, data)
-    return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload, conversation_history)
+    return _call_generic_llm("performance_analysis", _PERFORMANCE_ANALYSIS_PROMPT, payload, conversation_history,
+                             principles_prompt=_extract_principles_prompt(data))
 
 
 # ── 多标的横向对比（P2 新增）─────────────────────────────────────────────────

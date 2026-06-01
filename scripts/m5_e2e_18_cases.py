@@ -52,7 +52,7 @@ CASES = [
 ]
 
 
-def run_case(idx: int, case: dict, session_id: str) -> dict:
+def run_case(idx: int, case: dict, conversation_id: str) -> dict:
     """调 SSE 接口并收集结果。"""
     result = {
         "idx": idx + 1,
@@ -69,10 +69,10 @@ def run_case(idx: int, case: dict, session_id: str) -> dict:
     try:
         resp = requests.post(
             f"{BASE}/decision/chat",
-            json={"message": case["q"], "session_id": session_id},
+            json={"message": case["q"], "conversation_id": conversation_id},
             headers={"Accept": "text/event-stream"},
             stream=True,
-            timeout=60,
+            timeout=180,
         )
 
         full_text = ""
@@ -116,10 +116,10 @@ def main():
 
     results = []
     for i, case in enumerate(CASES):
-        session_id = str(uuid.uuid4())
+        conversation_id = str(uuid.uuid4())
         print(f"\n[{i+1}/18] {case['q'][:40]}...")
 
-        result = run_case(i, case, session_id)
+        result = run_case(i, case, conversation_id)
         results.append(result)
 
         intent_ok = "✅" if result["actual_intent"] else "⚠️"

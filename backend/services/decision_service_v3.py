@@ -629,6 +629,28 @@ async def _write_stores_v3(
                     "asset_breakdown": asset_breakdown,
                     "position_count": len(loaded.positions) if loaded else 0,
                     "research": list(loaded.research) if loaded and loaded.research else [],
+                    "retrieved_principles": [
+                        {
+                            "content": c.content,
+                            "source_type": c.source_type,
+                            "source_channel": getattr(c, "source_channel", "local_principles"),
+                            "parent_doc_path": c.parent_doc_path,
+                            "date": getattr(c, "date", None),
+                            "semantic_score": round(c.semantic_score, 3),
+                        }
+                        for c in (getattr(loaded, "retrieved_principles", None) or [])
+                    ] if loaded else [],
+                    "retrieved_research_views": [
+                        {
+                            "content": c.content,
+                            "source_type": c.source_type,
+                            "source_channel": getattr(c, "source_channel", "local_rag"),
+                            "parent_doc_path": c.parent_doc_path,
+                            "date": getattr(c, "date", None),
+                            "semantic_score": round(c.semantic_score, 3),
+                        }
+                        for c in (getattr(loaded, "retrieved_research_views", None) or [])
+                    ] if loaded else [],
                 },
                 "rules": None,
                 "signals": None,
