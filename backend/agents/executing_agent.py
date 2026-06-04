@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 def _use_skill_retrieve_principles() -> bool:
-    """C2 双轨 flag：WP_USE_SKILL_RETRIEVE_PRINCIPLES=1 时走 invoke_skill，默认关。"""
-    return os.environ.get("WP_USE_SKILL_RETRIEVE_PRINCIPLES", "") == "1"
+    """C2 双轨 flag：默认开（走 invoke_skill），显式设 =0 切回老直连。"""
+    return os.environ.get("WP_USE_SKILL_RETRIEVE_PRINCIPLES", "1") != "0"
 
 
 def _adapt_retrieve_result(raw: dict) -> list:

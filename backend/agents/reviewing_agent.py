@@ -72,8 +72,8 @@ jump_step 规则：
 
 
 def _use_skill_output_validator() -> bool:
-    """C1 双轨 flag：WP_USE_SKILL_OUTPUT_VALIDATOR=1 时走 invoke_skill，默认关。"""
-    return os.environ.get("WP_USE_SKILL_OUTPUT_VALIDATOR", "") == "1"
+    """C1 双轨 flag：默认开（走 invoke_skill），显式设 =0 切回老直连。"""
+    return os.environ.get("WP_USE_SKILL_OUTPUT_VALIDATOR", "1") != "0"
 
 
 class ReviewingAgent:
