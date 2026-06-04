@@ -13,7 +13,9 @@ ExecutingAgent - PEER 4 Agent 之 Executing 角色。
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 from typing import Optional
 
 from backend.agents.contracts import (
@@ -26,8 +28,21 @@ from backend.agents.adapters import (
     discipline_output_to_rule_result,
     signals_output_to_signal_result,
 )
+from backend.agents.skill_reconcile import reconcile_executing_skills
 
 logger = logging.getLogger(__name__)
+
+
+def _use_skill_retrieve_principles() -> bool:
+    """C2 双轨 flag：WP_USE_SKILL_RETRIEVE_PRINCIPLES=1 时走 invoke_skill，默认关。"""
+    return os.environ.get("WP_USE_SKILL_RETRIEVE_PRINCIPLES", "") == "1"
+
+
+def _adapt_retrieve_result(raw: dict) -> list:
+    """将 invoke_skill("wp-retrieve-principles") 返回的 dict 转回 list[RetrievedChunk]。"""
+    from backend.knowledge.schemas import RetrievedChunk
+    chunks_data = raw.get("chunks", [])
+    return [RetrievedChunk.model_validate(c) for c in chunks_data]
 
 
 def _is_futu_opend_available(host: str = "127.0.0.1", port: int = 11111, timeout: float = 0.5) -> bool:
@@ -76,7 +91,7 @@ class ExecutingAgent:
             elif route == "portfolio":
                 self._execute_portfolio(out, planning_output, user_query)
             elif route == "general":
-                self._execute_general(out, planning_output)
+                self._execute_general(out, planning_output, user_query)
             elif route in ("clarify", "low_confidence"):
                 self._execute_passthrough(out, planning_output)
             else:
@@ -92,12 +107,50 @@ class ExecutingAgent:
                 f"invoked={out.invoked_skills} aborted={out.aborted} "
                 f"duration={out.duration_ms}ms"
             )
+
+            # v3.8.1: 对账层——只读 out.invoked_skills 和 planning_output，不写 out
+            self._reconcile_and_log(planning_output, out)
+
             return out
 
         except Exception as e:
             logger.exception(f"[ExecutingAgent] task={out.task_id} 异常: {e}")
             out.mark_failed(str(e))
             return out
+
+    # ────────────────────────────────────────────────────────
+    # v3.8.1 对账层（旁路观测，不改 out，异常不冒泡）
+    # ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _reconcile_and_log(planning_output: PlanningOutput, out: ExecutionOutput) -> None:
+        """对账层入口。只读 planning_output 和 out.invoked_skills，不写 out 任何字段。"""
+        try:
+            report = reconcile_executing_skills(
+                route=planning_output.route,
+                selected_skills=planning_output.selected_skills,
+                invoked_skills=out.invoked_skills,
+            )
+            payload = {
+                "route": report.route,
+                "declared_exec": report.declared_exec,
+                "invoked_exec": report.invoked_exec,
+                "matched": report.matched,
+                "declared_not_invoked": report.declared_not_invoked,
+                "invoked_not_declared": report.invoked_not_declared,
+                "pseudo_observed": report.pseudo_observed,
+                "unknown_declared": report.unknown_declared,
+                "unknown_invoked": report.unknown_invoked,
+                "is_consistent": report.is_consistent,
+                "has_unknown": report.has_unknown,
+            }
+            line = "[SKILL_RECONCILE] " + json.dumps(payload, ensure_ascii=False)
+            if report.is_consistent and not report.has_unknown:
+                logger.info(line)
+            else:
+                logger.warning(line)
+        except Exception:
+            logger.exception("[SKILL_RECONCILE_ERROR] reconciliation failed, ignored")
 
     # ────────────────────────────────────────────────────────
     # 单标决策路径（PositionDecision）
@@ -573,6 +626,7 @@ class ExecutingAgent:
         self,
         out: ExecutionOutput,
         planning_output: PlanningOutput,
+        user_query: str = "",
     ) -> None:
         """
         v3.6 新增：general 路由的轻量执行。
@@ -583,32 +637,36 @@ class ExecutingAgent:
         """
         from decision_engine.data_loader import LoadedData, UserProfile
 
-        # 提取 user_query
-        user_query = ""
-        if planning_output and hasattr(planning_output, "intent"):
-            intent = planning_output.intent
-            if isinstance(intent, dict):
-                user_query = intent.get("user_query", "")
-
         retrieved_principles = []
 
         if self._should_retrieve_principles(user_query):
             out.invoked_skills.append("wp-retrieve-principles")
             try:
-                from backend.knowledge.store import KnowledgeStore
-                store = KnowledgeStore.get_instance()
-                if store.is_ready():
-                    results = store.retrieve(
+                if _use_skill_retrieve_principles():
+                    raw = invoke_skill(
+                        "wp-retrieve-principles",
                         query=user_query,
                         source_types=["allocation_principles"],
                         top_k=3,
                     )
-                    retrieved_principles = results
-                    out.skill_results["wp-retrieve-principles"] = {
-                        "chunks_count": len(results),
-                        "source_types": ["allocation_principles"],
-                        "triggered_by": "investment_keyword_match",
-                    }
+                    results = _adapt_retrieve_result(raw)
+                else:
+                    from backend.knowledge.store import KnowledgeStore
+                    store = KnowledgeStore.get_instance()
+                    if store.is_ready():
+                        results = store.retrieve(
+                            query=user_query,
+                            source_types=["allocation_principles"],
+                            top_k=3,
+                        )
+                    else:
+                        results = []
+                retrieved_principles = results
+                out.skill_results["wp-retrieve-principles"] = {
+                    "chunks_count": len(results),
+                    "source_types": ["allocation_principles"],
+                    "triggered_by": "investment_keyword_match",
+                }
             except Exception as e:
                 logger.warning(f"[ExecutingAgent] general 路由知识检索失败（不阻断）: {e}")
                 out.skill_results["wp-retrieve-principles"] = {"error": str(e)}
