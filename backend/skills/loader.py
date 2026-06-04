@@ -180,12 +180,45 @@ class SkillsLoader:
         from backend.graph.tools import call_tool
         return call_tool(meta.tool_name, **params)
 
+    # C0: prompt_template_id → 模块内函数名 的白名单映射
+    # C0 仅放行 general_chat；reason 类待 C6 补齐
+    _LLM_DISPATCH_SUPPORTED: dict[str, str] = {
+        "general_chat": "chat",
+    }
+
     def _invoke_llm_dispatch(self, meta: SkillMeta, **params) -> object:
-        """llm_dispatch 类型：v3.0 阶段暂不支持直接 invoke。"""
-        raise NotImplementedError(
-            f"llm_dispatch Skill 暂不支持直接 invoke: {meta.name}。"
-            f"v3.0 阶段请通过 ExpressingAgent 调用。"
-        )
+        """
+        llm_dispatch 类型：按 prompt_template_id 分发到 entry_point 模块内的函数。
+
+        C0 阶段仅支持 general_chat → chat()；其余 template_id 抛 NotImplementedError。
+        """
+        if not meta.entry_point:
+            raise ValueError(
+                f"llm_dispatch Skill 缺少 entry_point 字段: {meta.name}"
+            )
+
+        template_id = params.pop("prompt_template_id", None)
+        if template_id is None:
+            raise ValueError(
+                f"llm_dispatch Skill 调用缺少 prompt_template_id 参数: {meta.name}"
+            )
+
+        func_name = self._LLM_DISPATCH_SUPPORTED.get(template_id)
+        if func_name is None:
+            raise NotImplementedError(
+                f"llm_dispatch template_id='{template_id}' 尚未支持直接 invoke "
+                f"(C0 仅支持 {list(self._LLM_DISPATCH_SUPPORTED.keys())}，"
+                f"reason / review_portfolio / analyze_allocation / analyze_performance 待 C6)。"
+            )
+
+        module = importlib.import_module(meta.entry_point)
+        func = getattr(module, func_name, None)
+        if not callable(func):
+            raise ValueError(
+                f"entry_point 模块 '{meta.entry_point}' 中找不到函数 '{func_name}'"
+            )
+
+        return func(**params)
 
     def _invoke_prompt_inject(self, meta: SkillMeta, **params) -> str:
         """prompt_inject 类型：返回 SKILL.md 的 body 文本。"""

@@ -157,14 +157,14 @@ def test_invoke_validation():
 
 
 def test_invoke_llm_dispatch_not_implemented():
-    """llm_dispatch 类型：v3.0 阶段抛 NotImplementedError。"""
+    """llm_dispatch 类型：未支持的 template_id 抛 NotImplementedError。"""
     from backend.skills import invoke_skill
 
     try:
         invoke_skill("wp-reasoning", prompt_template_id="position_decision")
         assert False, "应该抛 NotImplementedError"
     except NotImplementedError as e:
-        assert "ExpressingAgent" in str(e) or "wp-reasoning" in str(e)
+        assert "待 C6" in str(e) or "position_decision" in str(e)
         print(f"✅ wp-reasoning 正确抛 NotImplementedError")
 
 
