@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Optional
 
 from backend.agents.contracts import (
@@ -68,6 +69,11 @@ jump_step 规则：
 - 0.5 <= 评分 < 0.8 → "expressing"（表达问题，只重新生成）
 - 评分 >= 0.8 → null（无需重试）
 """
+
+
+def _use_skill_output_validator() -> bool:
+    """C1 双轨 flag：WP_USE_SKILL_OUTPUT_VALIDATOR=1 时走 invoke_skill，默认关。"""
+    return os.environ.get("WP_USE_SKILL_OUTPUT_VALIDATOR", "") == "1"
 
 
 class ReviewingAgent:
@@ -193,10 +199,18 @@ class ReviewingAgent:
             intent_type = ""
 
         try:
-            vr = validate_decision_output(
-                result=llm_result,
-                intent_type=intent_type,
-            )
+            if _use_skill_output_validator():
+                from backend.skills import invoke_skill
+                vr = invoke_skill(
+                    "wp-output-validator",
+                    result=llm_result,
+                    intent_type=intent_type,
+                )
+            else:
+                vr = validate_decision_output(
+                    result=llm_result,
+                    intent_type=intent_type,
+                )
         except Exception as e:
             logger.warning(f"[ReviewingAgent] 硬校验异常: {e}")
             out.hard_validation_passed = True  # 异常时放行
