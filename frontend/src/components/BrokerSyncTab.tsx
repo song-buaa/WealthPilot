@@ -6,6 +6,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react'
 import { getSyncStatus, triggerSync, type SyncStatusItem } from '@/lib/broker-sync-api'
 
+// 平台显示名映射（与 Dashboard.tsx 一致）
+const PLATFORM_DISPLAY: Record<string, string> = { '雪盈证券': '盈透证券' }
+function displayPlatform(p: string): string { return PLATFORM_DISPLAY[p] ?? p }
+
 interface Props {
   onRefresh: () => void
 }
@@ -107,7 +111,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
             }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{item.platform}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{displayPlatform(item.platform)}</span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: cfg.color }}>
                     {isSyncing ? <Loader2 size={11} className="animate-spin" /> : cfg.icon}
                     {isSyncing ? '同步中...' : cfg.text}

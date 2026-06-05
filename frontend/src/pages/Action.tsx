@@ -724,7 +724,7 @@ function OrderCard({ order: o, onCancel }: {
             }}>{cfg.label}</span>
           </div>
           <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-            ({o.broker_name}) · {o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN') : ''}
+            ({o.broker_name === 'ibkr' || o.broker_name === 'snowball' ? '盈透证券' : o.broker_name === 'tiger' ? '老虎证券' : o.broker_name}) · {o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN') : ''}
           </div>
         </div>
         {canCancel && (

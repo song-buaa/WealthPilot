@@ -69,6 +69,13 @@ function getPct(concentration: Record<string, number>, name: string): number {
     .reduce((sum, [, v]) => sum + v, 0)
 }
 
+// ── 平台显示名映射（内部标识不变，仅改用户可见文案）──
+// 持仓通道 snowball 与下单通道 ibkr 对用户统一显示为"盈透证券"
+const PLATFORM_DISPLAY: Record<string, string> = { '雪盈证券': '盈透证券' }
+function displayPlatform(platform: string): string {
+  return PLATFORM_DISPLAY[platform] ?? platform
+}
+
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Dashboard() {
   const [summary, setSummary]       = useState<PortfolioSummary | null>(null)
@@ -161,6 +168,7 @@ export default function Dashboard() {
   const platEntries = Object.entries(bs.platform_distribution)
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => [displayPlatform(name), value] as [string, number])
 
   // 持仓排序
   const platTotals: Record<string, number> = {}
@@ -327,7 +335,7 @@ export default function Dashboard() {
                     <tr key={p.id}
                       onMouseEnter={e => (e.currentTarget.style.background = '#F9FAFB')}
                       onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={td}><span style={tag('#DBEAFE','#1E40AF')}>{p.platform}</span></td>
+                      <td style={td}><span style={tag('#DBEAFE','#1E40AF')}>{displayPlatform(p.platform)}</span></td>
                       <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.name}>{p.name}</td>
                       <td style={{ ...td, color: '#6B7280', fontSize: 12 }}>{p.ticker || '—'}</td>
                       <td style={{ ...td, textAlign: 'center' }}><span style={tag('#F3F4F6','#374151')}>{p.asset_class}</span></td>
@@ -744,7 +752,7 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
                     <input type="radio" name="ss_platform" value={p} checked={ssPlatform === p}
                       onChange={() => { setSsPlatform(p); setSsMsg(null); setSsPreview(null) }}
                       style={{ display: 'none' }} />
-                    {p}
+                    {displayPlatform(p)}
                   </label>
                 ))}
               </div>

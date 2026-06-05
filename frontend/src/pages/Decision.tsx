@@ -1561,7 +1561,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 12, color: '#6B7280' }}>平台</span>
                         <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
-                          {position.platforms.join(' / ')}
+                          {position.platforms.map((p: string) => p === '雪盈证券' ? '盈透证券' : p).join(' / ')}
                         </span>
                       </div>
                     )}
