@@ -26,6 +26,7 @@ futu-api
 apscheduler
 pytz>=2024.1             # 时区处理（apscheduler 定时任务）
 snbpy
+ib_async>=2.0.0
 
 # ── v3.6 知识层基础设施 ────────────────────────────────────────────────────
 chromadb>=0.5.0

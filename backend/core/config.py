@@ -49,4 +49,24 @@ class Settings:
     )
 
 
+    # Interactive Brokers (IBKR) — TWS / IB Gateway
+    ibkr_host: str = field(
+        default_factory=lambda: os.environ.get("IBKR_HOST", "127.0.0.1")
+    )
+    ibkr_port: int = field(
+        default_factory=lambda: int(os.environ.get("IBKR_PORT", "4002"))  # 4002=paper, 4001=live
+    )
+    ibkr_client_id: int = field(
+        default_factory=lambda: int(os.environ.get("IBKR_CLIENT_ID", "1"))
+    )
+    ibkr_account: str | None = field(
+        default_factory=lambda: os.environ.get("IBKR_ACCOUNT")
+    )
+    ibkr_read_only_mode: bool = field(
+        default_factory=lambda: os.environ.get(
+            "IBKR_READ_ONLY_MODE", "true"
+        ).lower() == "true"
+    )
+
+
 settings = Settings()
