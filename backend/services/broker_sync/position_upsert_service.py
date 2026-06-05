@@ -23,6 +23,7 @@ BROKER_TO_PLATFORM = {
     "tiger": "老虎证券",
     "futu": "富途证券",
     "snowball": "雪盈证券",
+    "guojin": "国金证券",
 }
 
 # 受保护字段(首次写入,后续不覆盖)

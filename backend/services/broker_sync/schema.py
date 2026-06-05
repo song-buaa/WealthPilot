@@ -29,7 +29,7 @@ class Position(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # ===== 标识 =====
-    broker: Literal["tiger", "futu", "snowball"]
+    broker: Literal["tiger", "futu", "snowball", "guojin"]
     account_id: str
     symbol: str  # 归一化代码: AAPL:US / 0068:HK (TICKER:MARKET 格式)
     raw_symbol: str  # 券商原始代码,去掉前导 ' 后的形态
