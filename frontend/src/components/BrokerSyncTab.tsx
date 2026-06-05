@@ -33,7 +33,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  const handleSync = async (broker: 'tiger' | 'futu' | 'snowball' | 'all') => {
+  const handleSync = async (broker: 'tiger' | 'futu' | 'snowball' | 'guojin' | 'all') => {
     setSyncing(broker)
     setMessage(null)
 
@@ -125,7 +125,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                 )}
               </div>
               <button
-                onClick={() => handleSync(item.broker as 'tiger' | 'futu' | 'snowball')}
+                onClick={() => handleSync(item.broker as 'tiger' | 'futu' | 'snowball' | 'guojin')}
                 disabled={isSyncing || syncing === 'all'}
                 style={{ ...btnSync, ...(isSyncing || syncing === 'all' ? btnDisabled : {}) }}
               >

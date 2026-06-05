@@ -26,7 +26,7 @@ export async function getSyncStatus(): Promise<SyncStatusResponse> {
   return res.json();
 }
 
-export async function triggerSync(broker: "tiger" | "futu" | "all" = "all"): Promise<TriggerResponse> {
+export async function triggerSync(broker: "tiger" | "futu" | "snowball" | "guojin" | "all" = "all"): Promise<TriggerResponse> {
   const res = await fetch(`${BASE}/trigger`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
