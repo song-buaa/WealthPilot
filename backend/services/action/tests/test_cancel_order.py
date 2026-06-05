@@ -317,6 +317,40 @@ class TestCancelBranchC:
         order = mgr.cancel_order(order.id)
         assert order.status == OrderStatus.UNKNOWN
 
+    def test_cancel_network_error_from_broker_pending(self, db_session):
+        """分支 c 起点 broker_pending: 网络异常 → UNKNOWN。"""
+        adapter = StubAdapter(
+            cancel_raises=ConnectionError("network down"),
+        )
+        order, _, mgr = _create_submitted_order(db_session, adapter)
+
+        # 推到 broker_pending
+        adapter._orders[order.broker_order_id]["status"] = "broker_pending"
+        order.status = OrderStatus.BROKER_PENDING
+        db_session.flush()
+
+        order = mgr.cancel_order(order.id)
+        assert order.status == OrderStatus.UNKNOWN
+
+    def test_cancel_network_error_from_partially_filled(self, db_session):
+        """分支 c 起点 partially_filled: 网络异常 → UNKNOWN。"""
+        adapter = StubAdapter(
+            cancel_raises=ConnectionError("network down"),
+        )
+        order, _, mgr = _create_submitted_order(db_session, adapter)
+
+        # 推到 partially_filled
+        adapter._orders[order.broker_order_id]["status"] = "partially_filled"
+        adapter._orders[order.broker_order_id]["filled_quantity"] = 20
+        order.status = OrderStatus.PARTIALLY_FILLED
+        order.filled_quantity = 20
+        db_session.flush()
+
+        order = mgr.cancel_order(order.id)
+        assert order.status == OrderStatus.UNKNOWN
+        # 已有的部分成交数量不应被清零
+        # （UNKNOWN 不修改 filled_quantity，等 poller 同步真实值）
+
 
 # ═══════════════════════════════════════════════════════════════════
 # cancel_requested 标记验证
