@@ -124,6 +124,7 @@ _ORDER_TRANSITIONS: dict[str, set[str]] = {
         OrderStatus.BROKER_PENDING,
         OrderStatus.REJECTED,
         OrderStatus.CANCELLED,
+        OrderStatus.UNKNOWN,
     },
     OrderStatus.BROKER_PENDING: {
         OrderStatus.PARTIALLY_FILLED,

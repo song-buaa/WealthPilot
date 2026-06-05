@@ -25,10 +25,13 @@ from backend.services.action.state_machine import OrderStatus
 logger = logging.getLogger(__name__)
 
 # 需要轮询的非终态状态
+# UNKNOWN 纳入轮询：撤单时网络异常会导致 status=unknown，poller 需要
+# 后续确认券商端真实状态以收敛到终态。
 POLLABLE_STATUSES = {
     OrderStatus.SUBMITTED_TO_BROKER,
     OrderStatus.BROKER_PENDING,
     OrderStatus.PARTIALLY_FILLED,
+    OrderStatus.UNKNOWN,
 }
 
 

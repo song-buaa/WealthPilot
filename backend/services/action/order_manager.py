@@ -333,18 +333,95 @@ class OrderManager:
         return q.order_by(OrderRecord.created_at.desc()).all()
 
     def cancel_order(self, order_id: str) -> OrderRecord:
-        """本地取消订单。"""
+        """撤销订单 — 先通知券商，再按真实结果更新本地状态。
+
+        分流逻辑（撤单受理 ≠ 已撤销）：
+        - 无 broker_order_id（从未提交）→ 仅本地置 CANCELLED
+        - 已终态 → 拒绝，抛 ValueError
+        - 有 broker_order_id 且非终态 → 调 adapter.cancel_order()：
+          a) True（受理）→ 立即 sync 确认真实状态
+          b) False（券商称已终态）→ sync 拉真实状态回填
+          c) 网络异常 → 置 UNKNOWN，交 poller 后续收敛
+        """
         order = self.get_order(order_id)
         if order is None:
             raise ValueError(f"订单不存在: {order_id}")
+
+        # 已终态 → 拒绝
         if order.status in OrderStatus.TERMINAL:
             raise ValueError(f"订单已终态（{order.status}），不可取消")
-        validate_order_transition(order.status, OrderStatus.CANCELLED)
-        order.status = OrderStatus.CANCELLED
-        order.cancelled_at = datetime.now(timezone.utc)
-        self._audit("order_cancelled", {"order_id": order_id})
+
+        # 无 broker_order_id（从未提交到券商）→ 仅本地取消
+        if not order.broker_order_id or not self.broker_adapter:
+            validate_order_transition(order.status, OrderStatus.CANCELLED)
+            order.status = OrderStatus.CANCELLED
+            order.cancelled_at = datetime.now(timezone.utc)
+            self._audit("order_cancelled", {
+                "order_id": order_id,
+                "cancel_type": "local_only",
+            })
+            self.session.flush()
+            return order
+
+        # 有 broker_order_id → 先通知券商
+        try:
+            accepted = self.broker_adapter.cancel_order(order.broker_order_id)
+        except (ConnectionError, TimeoutError) as e:
+            # 分支 c: 网络异常，无法确认撤单结果
+            validate_order_transition(order.status, OrderStatus.UNKNOWN)
+            order.status = OrderStatus.UNKNOWN
+            self._audit("cancel_network_error", {
+                "order_id": order_id,
+                "error": str(e),
+                "note": "撤单结果未知，交 poller 后续确认",
+            })
+            # 在 raw_broker_response 标记 cancel_requested，供 poller/审计追溯
+            self._mark_cancel_requested(order)
+            logger.warning(
+                "[OrderManager] cancel_order 网络异常: %s, 已置 UNKNOWN", e,
+            )
+            self.session.flush()
+            return order
+
+        # 分支 a/b: 券商有响应 → 立即 sync 确认真实状态
+        self._audit("cancel_broker_responded", {
+            "order_id": order_id,
+            "broker_accepted": accepted,
+        })
+
+        # 调 sync_order_status 拉取券商端真实状态
+        order = self.sync_order_status(order_id)
+
+        # sync 后标记 cancel_requested（sync 会覆盖 raw_broker_response，所以在之后标记）
+        self._mark_cancel_requested(order)
         self.session.flush()
+
+        # 如果 sync 后仍非终态（撤单受理但尚未生效），交 poller 继续轮询
+        if order.status not in OrderStatus.TERMINAL:
+            logger.info(
+                "[OrderManager] cancel 已受理但券商未确认终态 "
+                "(status=%s)，交 poller 继续轮询", order.status,
+            )
+
         return order
+
+    @staticmethod
+    def _mark_cancel_requested(order: OrderRecord) -> None:
+        """在 raw_broker_response JSON 中标记 cancel_requested=true。
+
+        不新增 DB 字段，复用现有 Text 列存储撤单追溯信息。
+        """
+        existing = {}
+        if order.raw_broker_response:
+            try:
+                existing = json.loads(order.raw_broker_response)
+            except (json.JSONDecodeError, TypeError):
+                existing = {"_prev_raw": order.raw_broker_response}
+        existing["cancel_requested"] = True
+        existing["cancel_requested_at"] = datetime.now(timezone.utc).isoformat()
+        order.raw_broker_response = json.dumps(
+            existing, ensure_ascii=False, default=str,
+        )
 
     def place_order(self, strategy_id: str, order_params: dict) -> OrderRecord:
         """
