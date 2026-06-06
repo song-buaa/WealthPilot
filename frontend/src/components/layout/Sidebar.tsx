@@ -102,7 +102,7 @@ export default function Sidebar() {
         <div>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>WealthPilot</div>
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 1 }}>
-            个人智能投顾系统
+            个人投资决策工作台
           </div>
         </div>
       </div>
