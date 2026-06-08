@@ -105,10 +105,11 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._host = host
         self._port = port
         self._client_id = client_id
-        self._account_id = account_id
+        self._account_id = account_id  # 可能为空，连接后从 managedAccounts() 取
         self._timeout = timeout
+        self._account_verified = False  # 闸门 1 延迟到连接后校验
 
-        # ── 闸门 1: paper-only ────────────────────────────────
+        # ── 闸门 1 预检: 构造时若已知 account_id 且明确非 paper → 立即拒绝
         if not ENABLE_IBKR_LIVE_TRADING:
             if account_id and not account_id.startswith("DU"):
                 raise AssertionError(
@@ -158,16 +159,58 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         self._connected = True
 
-        if not self._account_id:
-            accounts = self._ib.managedAccounts()
-            if accounts:
-                self._account_id = accounts[0]
-                logger.info("[IBKR] 自动获取账户: %s", self._account_id)
+        # ── 闸门 1 真校验: 基于 managedAccounts() 的真实账户 ──
+        # 探针实测: order.account 是空字符串，唯一可靠来源是 managedAccounts()
+        self._resolve_and_verify_account()
 
         logger.info(
             "[IBKR] 连接成功 %s:%d client=%d account=%s",
             self._host, self._port, self._client_id, self._account_id,
         )
+
+    def _resolve_and_verify_account(self) -> None:
+        """从 managedAccounts() 解析真实账户并做 paper-only 断言。
+
+        探针发现: placeOrder 后 order.account 是空字符串，
+        唯一可靠的账户来源是 ib.managedAccounts() → list[str]。
+
+        逻辑:
+        1. 取 managedAccounts()，空列表 → 报错
+        2. 如果 config 指定了 account_id → 在列表中找匹配项，找不到 → 报错
+        3. 如果 config 没指定 → 取第一个
+        4. paper-only 断言: 非 DU 开头 + 实盘未开启 → 拒绝
+        """
+        accounts = self._ib.managedAccounts()
+        if not accounts:
+            raise RuntimeError(
+                "IB Gateway 未返回任何账户 (managedAccounts 为空)。"
+                "请检查 TWS/Gateway 是否已登录。"
+            )
+
+        if self._account_id:
+            # config 指定了账户 → 必须在 managedAccounts 中
+            if self._account_id not in accounts:
+                raise RuntimeError(
+                    f"IBKR_ACCOUNT={self._account_id} 不在 Gateway 的"
+                    f"managedAccounts 中: {accounts}"
+                )
+        else:
+            # config 未指定 → 取第一个
+            self._account_id = accounts[0]
+            logger.info("[IBKR] 从 managedAccounts 自动获取账户: %s", self._account_id)
+
+        # ── 闸门 1 真校验 ──
+        if not ENABLE_IBKR_LIVE_TRADING:
+            if not self._account_id.startswith("DU"):
+                self._ib.disconnect()
+                self._connected = False
+                raise AssertionError(
+                    f"实盘交易未开启(ENABLE_IBKR_LIVE_TRADING=false)，"
+                    f"Gateway 返回非 Paper 账号 {self._account_id}。"
+                    f"模拟盘账号以 DU 开头。"
+                )
+
+        self._account_verified = True
 
     # ── BrokerAdapter ABC ─────────────────────────────────────
 

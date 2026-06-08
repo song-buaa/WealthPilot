@@ -71,6 +71,7 @@ def _make_adapter(**kwargs):
     adapter._account_id = kwargs.get("account_id", "DU1234567")
     adapter._timeout = 5.0
     adapter._connected = True
+    adapter._account_verified = True
     adapter._loop = MagicMock()
     adapter._thread = MagicMock()
     adapter._ib = MagicMock()
@@ -93,20 +94,70 @@ def _make_request(**overrides):
 
 
 class TestGate1PaperOnly:
+    """闸门 1: paper-only 断言。
 
-    def test_paper_account_allowed(self):
+    构造时预检 + 连接后 _resolve_and_verify_account 双重校验。
+    """
+
+    def test_paper_account_precheck_pass(self):
+        """构造时传 DU 开头 → 预检通过（不触发连接）。"""
         adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
         IBKRBrokerAdapter.__init__(adapter, account_id="DU1234567")
+        assert adapter._account_id == "DU1234567"
 
     @patch.dict("os.environ", {"ENABLE_IBKR_LIVE_TRADING": "false"})
-    def test_live_account_rejected(self):
+    def test_live_account_precheck_rejected(self):
+        """构造时传非 DU 开头 + 实盘未开启 → 预检拒绝。"""
         with pytest.raises(AssertionError, match="实盘交易未开启"):
             IBKRBrokerAdapter(account_id="U1234567")
 
     @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
     def test_live_account_allowed_when_enabled(self):
+        """实盘开启时非 DU 账号预检通过。"""
         adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
         IBKRBrokerAdapter.__init__(adapter, account_id="U1234567")
+
+    def test_resolve_managed_du_account(self):
+        """连接后 managedAccounts 返回 DU 账户 → 校验通过。"""
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["DU9999999"]
+        adapter._resolve_and_verify_account()
+        assert adapter._account_id == "DU9999999"
+        assert adapter._account_verified is True
+
+    def test_resolve_managed_live_account_rejected(self):
+        """连接后 managedAccounts 返回非 DU → 拒绝并断连。"""
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["U7777777"]
+        with pytest.raises(AssertionError, match="非 Paper 账号"):
+            adapter._resolve_and_verify_account()
+
+    def test_resolve_empty_managed_accounts_rejected(self):
+        """连接后 managedAccounts 返回空列表 → 报错。"""
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = []
+        with pytest.raises(RuntimeError, match="未返回任何账户"):
+            adapter._resolve_and_verify_account()
+
+    def test_resolve_config_account_not_in_managed(self):
+        """config 指定的账户不在 managedAccounts 中 → 报错。"""
+        adapter = _make_adapter(account_id="DU1111111")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["DU2222222"]
+        with pytest.raises(RuntimeError, match="不在.*managedAccounts"):
+            adapter._resolve_and_verify_account()
+
+    def test_resolve_config_account_matches(self):
+        """config 指定的账户在 managedAccounts 中 → 校验通过。"""
+        adapter = _make_adapter(account_id="DU1234567")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["DU1234567", "DU9999999"]
+        adapter._resolve_and_verify_account()
+        assert adapter._account_id == "DU1234567"
+        assert adapter._account_verified is True
 
 
 class TestGate2MarketWhitelist:
