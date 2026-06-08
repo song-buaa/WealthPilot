@@ -692,7 +692,7 @@ export default function Decision() {
             msg.role === 'user' ? (
               <UserMessage key={msg.id} msg={msg} />
             ) : (
-              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} onGenerateAction={handleGenerateAction} />
+              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} onGenerateAction={handleGenerateAction} explainData={explainData} />
             )
           ))}
           <div ref={messagesEnd} />
@@ -840,10 +840,11 @@ function UserMessage({ msg }: { msg: Message }) {
 }
 
 // ── AI 消息 ───────────────────────────────────────────────────
-function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
+function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
   msg: Message
   onSelectCandidate?: (name: string) => void
   onGenerateAction?: (msgId: number) => void
+  explainData?: ExplainData | null
 }) {
   const [showExecPlan, setShowExecPlan] = useState(false)
   // loading 态：无内容且正在流式输出 — 根据 stage 事件动态显示进度
@@ -961,19 +962,30 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
         )}
         {showExecPlan && (() => {
           const intent = msg.intent as Record<string, unknown> | undefined
-          const asset = (intent?.asset as string) || ''
           const action = (intent?.action as string) || 'BUY'
-          // 简单推断 symbol 和 market
-          const symbolGuess = asset.includes(':') ? asset : (asset || 'UNKNOWN:US')
-          const marketGuess = symbolGuess.includes(':') ? symbolGuess.split(':')[1] : 'US'
+          // 从 explainData.target_position 读标准 symbol (后端 _serialize_target_position 产出)
+          const tp = (explainData?.data as Record<string, unknown>)?.target_position as Record<string, unknown> | undefined
+          const symbol = (tp?.symbol as string) || ''
+          const market = symbol.includes(':') ? symbol.split(':')[1] : 'US'
           const sideMap: Record<string, string> = {
             buy_init: 'BUY', buy_more: 'ADD', trim: 'REDUCE', exit: 'SELL',
             BUY: 'BUY', ADD: 'ADD', REDUCE: 'REDUCE', SELL: 'SELL',
           }
+          if (!symbol) {
+            return (
+              <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 10,
+                padding: '10px 14px', marginTop: 8, fontSize: 12, color: '#9A3412' }}>
+                无法获取标的代码(target_position.symbol 为空)。请先完成一次持仓决策分析。
+                <button onClick={() => setShowExecPlan(false)} style={{
+                  marginLeft: 8, background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 11,
+                }}>关闭</button>
+              </div>
+            )
+          }
           return (
             <ExecutionPlanPanel
-              symbol={symbolGuess}
-              market={marketGuess}
+              symbol={symbol}
+              market={market}
               side={sideMap[action] || 'BUY'}
               onClose={() => setShowExecPlan(false)}
             />

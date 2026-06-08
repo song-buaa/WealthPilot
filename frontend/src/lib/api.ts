@@ -882,6 +882,9 @@ export interface ExplainData {
     total_assets?: number
     target_position?: {
       name: string
+      ticker?: string
+      symbol?: string           // v3.11: TICKER:MARKET (如 LI:US)
+      symbol_source?: string    // v3.11: market_data_currency / position_currency / inferred
       weight: number
       market_value_cny: number
       profit_loss_rate?: number
