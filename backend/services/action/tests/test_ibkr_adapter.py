@@ -520,6 +520,22 @@ class TestMisc:
     def test_parse_symbol_cn(self):
         assert IBKRBrokerAdapter._parse_symbol("600519:SH") == ("SH", "600519")
 
+    def test_order_attributes_explicit(self):
+        """防回归: adapter 构造的 Order 必须显式设 tif/outsideRth/orderType，
+        不留空给 TWS preset 覆盖（error 10349 修复）。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(order_id=99, perm_id=9999)
+        adapter._ib.placeOrder.return_value = trade
+
+        adapter.place_order(_make_request(symbol="AAPL:US"))
+
+        # 拿到 placeOrder 被调时的 order 参数
+        call_args = adapter._ib.placeOrder.call_args
+        order = call_args[1].get("order") or call_args[0][1]
+        assert order.tif == "DAY", f"tif 不能为空，实际: {order.tif!r}"
+        assert order.outsideRth is False
+        assert order.orderType == "LMT"
+
 
 # ═══════════════════════════════════════════════════════════════════
 # M2.5: errorCode 双来源合并 + Inactive 分流校准
