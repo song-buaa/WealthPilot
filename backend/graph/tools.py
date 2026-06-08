@@ -937,6 +937,179 @@ RETRIEVE_PRINCIPLES_SCHEMA = {
 
 
 # ══════════════════════════════════════════════════════════════════
+# wp-generate-execution-plan (v3.11)
+# ══════════════════════════════════════════════════════════════════
+
+
+def execute_generate_execution_plan(**kwargs) -> dict:
+    """确定性 orchestrator: factors → rule_engine → LLM(仅解释) → [validator 留接口]。
+
+    所有数字由 rule_engine 产出,LLM 只写 rationale/risk_notes。
+    """
+    import json
+    import logging
+    from backend.services.execution_plan.factors import build_factor_snapshot
+    from backend.services.execution_plan.rule_engine import generate_plan, PlanInput
+
+    _logger = logging.getLogger("wp-generate-execution-plan")
+
+    symbol = kwargs["symbol"]
+    market = kwargs["market"]
+    side = kwargs["side"]
+
+    _logger.info("[orchestrator] Step 1: factors for %s", symbol)
+
+    # ── Step 1: 因子 ──
+    factor_snap = build_factor_snapshot(symbol, market)
+    factor_dict = factor_snap.to_dict()
+
+    _logger.info("[orchestrator] Step 2: rule_engine for %s", symbol)
+
+    # ── Step 2: 规则引擎(数字在此定死) ──
+    plan_input = PlanInput(
+        symbol=symbol,
+        market=market,
+        side=side,
+        target_position_pct=kwargs.get("target_position_pct", 0.0),
+        current_position_pct=kwargs.get("current_position_pct", 0.0),
+        current_price=factor_snap.current_price or kwargs.get("current_price", 0.0),
+        total_assets=kwargs.get("total_assets", 0.0),
+        user_anchor_prices=kwargs.get("user_anchor_prices") or [],
+        quick_mode=kwargs.get("quick_mode", False),
+        atr14=factor_snap.atr14,
+        volatility_annual=factor_snap.volatility_annual,
+        price_percentile=factor_snap.price_percentile,
+        drawdown_from_high=factor_snap.drawdown_from_high,
+    )
+    plan_result = generate_plan(plan_input, factor_dict)
+
+    _logger.info("[orchestrator] Step 3: LLM rationale for %s", symbol)
+
+    # ── Step 3: LLM 只写解释文案 ──
+    rationale, risk_notes = _llm_write_rationale(
+        symbol=symbol,
+        side=side,
+        plan_summary=plan_result.plan_summary_block,
+        factor_snapshot=factor_dict,
+        constraints=plan_result.constraints_applied,
+        warnings=plan_result.warnings,
+        violations=plan_result.violations,
+    )
+
+    _logger.info("[orchestrator] Step 4: validator placeholder for %s", symbol)
+
+    # ── Step 4: validator(M4 接入,当前占位) ──
+    # TODO(M4): validate plan_summary_block vs LLM output
+
+    return {
+        "plan_summary_block": plan_result.plan_summary_block,
+        "factor_snapshot": factor_dict,
+        "constraints_applied": plan_result.constraints_applied,
+        "rationale": rationale,
+        "risk_notes": risk_notes,
+        "warnings": plan_result.warnings,
+        "violations": plan_result.violations,
+        "tick_degraded": plan_result.tick_degraded,
+        "source_decision_ref": kwargs.get("source_decision_ref", ""),
+    }
+
+
+def _llm_write_rationale(
+    symbol: str,
+    side: str,
+    plan_summary: dict,
+    factor_snapshot: dict,
+    constraints: dict,
+    warnings: list,
+    violations: list,
+) -> tuple[str, str]:
+    """调 LLM 写 rationale + risk_notes。
+
+    LLM 只接收已定死的数字作为入参,只输出文本,不返回任何数字字段。
+    """
+    import json
+    import os
+    import logging
+
+    _logger = logging.getLogger("wp-generate-execution-plan")
+
+    factor_subset = {
+        "current_price": factor_snapshot.get("current_price"),
+        "volatility_annual": factor_snapshot.get("volatility_annual"),
+        "price_percentile": factor_snapshot.get("price_percentile"),
+        "drawdown_from_high": factor_snapshot.get("drawdown_from_high"),
+        "trend_signal": factor_snapshot.get("trend_signal"),
+        "rsi14": factor_snapshot.get("rsi14"),
+        "ma_position": factor_snapshot.get("ma_position"),
+    }
+    plan_json = json.dumps(plan_summary, indent=2, ensure_ascii=False, default=str)
+    factor_json = json.dumps(factor_subset, indent=2, ensure_ascii=False, default=str)
+    constraint_info = f"纪律违规修正: {violations}" if violations else "无纪律违规"
+    warning_info = f"警告: {warnings}" if warnings else "无警告"
+
+    prompt = f"""你是 WealthPilot 执行计划解释器。你的任务是为一份已确定的分批执行计划写解释和风险提示。
+
+## 严格禁止
+- 绝不输出任何价格、数量、批次数字。所有数字已由规则引擎确定，你无权修改或新增。
+- 绝不编造计划之外的任何数值。
+- 如需引用波动率、回撤、分位等数据，必须取自下方的因子快照，不得自行计算或估算。
+
+## 已确定的执行计划
+```json
+{plan_json}
+```
+
+## 因子快照
+```json
+{factor_json}
+```
+
+## 约束信息
+{constraint_info}
+{warning_info}
+
+## 输出要求
+请输出**且仅输出**以下 JSON,不要包含 markdown 代码块标记:
+{{
+  "rationale": "一段 100-200 字的中文解释,说明为什么这样分批(引用因子快照中的趋势/波动率/分位等,但不重复计划里的具体数字)",
+  "risk_notes": "一段 50-100 字的风险提示(如波动较高需关注、接近低点但趋势偏弱等)"
+}}
+"""
+
+    try:
+        from openai import OpenAI
+        import httpx
+
+        client = OpenAI(
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(30.0)),
+        )
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        raw = resp.choices[0].message.content.strip()
+
+        # 去 markdown 代码块
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+
+        parsed = json.loads(raw)
+        return parsed.get("rationale", ""), parsed.get("risk_notes", "")
+
+    except Exception as e:
+        _logger.warning("[orchestrator] LLM rationale 失败,降级为空: %s", e)
+        return (
+            f"执行计划已由规则引擎生成。标的 {symbol} 的 {side} 计划包含分批操作。",
+            "LLM 解释生成失败,请人工审阅计划数字。",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Tool 注册表（统一入口）
 # ══════════════════════════════════════════════════════════════════
 
@@ -976,6 +1149,7 @@ TOOL_EXECUTORS = {
     "search_financial_news":      execute_search_financial_news,
     "get_latest_quotations":      execute_get_latest_quotations,
     "retrieve_principles":        execute_retrieve_principles,
+    "generate_execution_plan":    execute_generate_execution_plan,
 }
 
 
