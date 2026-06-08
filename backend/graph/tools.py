@@ -998,8 +998,25 @@ def execute_generate_execution_plan(**kwargs) -> dict:
 
     _logger.info("[orchestrator] Step 4: validator placeholder for %s", symbol)
 
-    # ── Step 4: validator(M4 接入,当前占位) ──
-    # TODO(M4): validate plan_summary_block vs LLM output
+    # ── Step 4: validator — 数值比对 (PRD §9) ──
+    from backend.graph.decision_validator import validate_execution_plan
+
+    validation = validate_execution_plan(
+        plan_dict=plan_result.plan_summary_block,
+        llm_rationale=rationale,
+        llm_risk_notes=risk_notes,
+        factor_snapshot=factor_dict,
+    )
+    if not validation.passed:
+        failure_msgs = [f.message for f in validation.failures]
+        _logger.warning("[orchestrator] validator 拦截: %s", failure_msgs)
+        return {
+            "error": "plan_value_mismatch",
+            "validation_failures": failure_msgs,
+            "plan_summary_block": plan_result.plan_summary_block,
+        }
+
+    _logger.info("[orchestrator] validator 通过")
 
     return {
         "plan_summary_block": plan_result.plan_summary_block,
