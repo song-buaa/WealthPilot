@@ -49,8 +49,15 @@ def _get_manager():
     默认 "mock"(向后兼容 v3.2 行为)。
     """
     session = get_session()
+    def _resolve_broker_name(bm: str) -> str:
+        if "tiger" in bm:
+            return "tiger"
+        if "ibkr" in bm:
+            return "ibkr"
+        return "mock"
+
     adapter = get_broker_adapter(
-        broker_name="tiger" if "tiger" in _BROKER_MODE else "mock",
+        broker_name=_resolve_broker_name(_BROKER_MODE),
         mode=_BROKER_MODE.split(".")[-1] if "." in _BROKER_MODE else _BROKER_MODE,
     )
     return OrderManager(session, broker_adapter=adapter), session

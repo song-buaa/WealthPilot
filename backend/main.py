@@ -49,8 +49,9 @@ async def lifespan(app: FastAPI):
 
     def _get_adapter():
         _bm = _os.getenv("BROKER_MODE", "mock")
+        _bn = "tiger" if "tiger" in _bm else "ibkr" if "ibkr" in _bm else "mock"
         return get_broker_adapter(
-            broker_name="tiger" if "tiger" in _bm else "mock",
+            broker_name=_bn,
             mode=_bm.split(".")[-1] if "." in _bm else _bm,
         )
 
