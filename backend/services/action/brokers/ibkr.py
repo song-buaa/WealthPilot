@@ -55,16 +55,16 @@ IB_TO_V32_STATUS = {
     "ApiCancelled": "cancelled",
 }
 
-# ── Inactive 二义性: 拒单类 errorCode（IBKR 常见）──
-# TradeLogEntry.errorCode 命中这些 → 判 rejected
-# 参考: https://ibkrcampus.com/campus/ibkr-api-page/twsapi-doc/#error-codes
+# ── Inactive 二义性: 拒单类 errorCode ──────────────────────
+# 来源: M2.5 开市探针实测（docs/v3.10/m2_5_probe_open_result.md）
+# 注意: 202 是正常撤单确认，绝不能进拒单码表
 REJECTED_ERROR_CODES = {
-    201,  # Order rejected - reason given in error text
+    200,  # No security definition found — 无效合约（探针 2a: 直接 Cancelled）
+    201,  # Order rejected — 保证金不足等（探针 2b: 进 Inactive，errorCode 经 error callback 异步到达）
     203,  # Security is not available for trading
-    110,  # Price does not conform to minimum price variation
     104,  # Can't modify a filled order
-    105,  # Order being modified does not match original order
     106,  # Transmit order failed: can't transmit
+    # 以下保留自 M2 原始推理，未经探针实测
     2110, # Connectivity between IB and exchange lost
 }
 
@@ -123,6 +123,13 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ib = None
         self._connected = False
 
+        # M2.5: error callback 抓取的 errorCode 映射
+        # key: orderId (int), value: {"errorCode": int, "errorString": str}
+        # 线程安全: errorEvent 在 ib_async 的事件循环线程中触发，
+        # _map_inactive 在调用线程中读取。dict 的单次赋值在 CPython 下是原子的，
+        # 且写入发生在读取之前（error callback 先于 status 查询），无需额外锁。
+        self._error_codes: dict[int, dict] = {}
+
     def _ensure_connected(self) -> None:
         """确保 IB 连接已建立。首次调用时启动后台线程。"""
         if self._connected and self._ib:
@@ -158,6 +165,11 @@ class IBKRBrokerAdapter(BrokerAdapter):
             ) from e
 
         self._connected = True
+
+        # M2.5: 订阅 error callback，抓取 errorCode → orderId 映射
+        # errorEvent 签名: (reqId: int, errorCode: int, errorString: str, contract)
+        # reqId 是 orderId（-1 表示非订单相关错误）
+        self._ib.errorEvent += self._on_ib_error
 
         # ── 闸门 1 真校验: 基于 managedAccounts() 的真实账户 ──
         # 探针实测: order.account 是空字符串，唯一可靠来源是 managedAccounts()
@@ -486,70 +498,104 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         return None
 
+    # ── 内部: error callback 处理（M2.5）─────────────────────
+
+    def _on_ib_error(self, reqId: int, errorCode: int, errorString: str, contract) -> None:
+        """IB error callback。记录 orderId → errorCode 映射。
+
+        探针实测发现: errorCode 201（保证金不足）不在 trade.log 里
+        （trade.log 显示 errorCode=0），而是通过此 callback 异步到达。
+        _map_inactive 需要同时查 trade.log 和此映射才能正确分流。
+        """
+        if reqId > 0 and errorCode in REJECTED_ERROR_CODES:
+            self._error_codes[reqId] = {
+                "errorCode": errorCode,
+                "errorString": errorString,
+            }
+            logger.warning(
+                "[IBKR] error callback: orderId=%d errorCode=%d msg=%s",
+                reqId, errorCode, errorString[:200],
+            )
+
     # ── 内部: 状态映射 ───────────────────────────────────────
 
-    @staticmethod
-    def _map_status(trade) -> tuple[str, dict]:
+    def _map_status(self, trade) -> tuple[str, dict]:
         """IB status → (v3.2 状态, raw_response 额外字段)。
 
         Inactive 走 _map_inactive 做二义性分类（同 tiger 的 _map_expired）。
         """
         ib_status = trade.orderStatus.status
         if ib_status == "Inactive":
-            return IBKRBrokerAdapter._map_inactive(trade)
+            return self._map_inactive(trade)
         return IB_TO_V32_STATUS.get(ib_status, "unknown"), {}
 
-    @staticmethod
-    def _map_inactive(trade) -> tuple[str, dict]:
+    def _map_inactive(self, trade) -> tuple[str, dict]:
         """Inactive 二义性分流（同 tiger _map_expired 思路）。
 
         IBKR 的 Inactive ∈ DoneStates，但语义模糊:
-        - 下单被拒 → errorCode + message 在 trade.log
+        - 下单被拒 → errorCode + message
         - 盘前临时 inactive → 无 error
         - 其他不明情况
 
+        errorCode 双来源合并（M2.5 探针校准）:
+        - 来源 1: trade.log 中的 TradeLogEntry.errorCode（大部分 error 走这里）
+        - 来源 2: error callback 抓取的 _error_codes[orderId]（201 等异步 error 走这里）
+        探针实测: 201 保证金不足时 trade.log errorCode=0，但 error callback 带 201。
+        两个来源取并集，任一命中拒单码即判 rejected。
+
         分流逻辑:
-        1. trade.log 中有 errorCode 命中 REJECTED_ERROR_CODES → rejected
-        2. trade.log message 命中 REJECTED_KEYWORDS → rejected
-        3. 无 error log 且 whyHeld 非空 → broker_pending（可能是临时）
-        4. 都不是 → unknown（标注原因待人工确认）
-
-        errorCode 获取方式: TradeLogEntry.errorCode (int)，每个 TradeLogEntry
-        记录一次状态变更或错误事件。Inactive 时通常伴随 errorCode != 0 的 log。
+        1. errorCode（来源 1 或 2）命中 REJECTED_ERROR_CODES → rejected
+        2. message 命中 REJECTED_KEYWORDS → rejected
+        3. 无 error + whyHeld 非空 → broker_pending（临时）
+        4. 都不是 → unknown（待人工确认）
         """
-        error_code = 0
-        error_message = ""
-
-        # 从 trade.log 最后几条里找 errorCode 或 error message
+        # 来源 1: trade.log
+        log_error_code = 0
+        log_error_message = ""
         for entry in reversed(trade.log):
             ec = getattr(entry, "errorCode", 0)
             msg = getattr(entry, "message", "")
             if ec != 0:
-                error_code = ec
-                error_message = msg
+                log_error_code = ec
+                log_error_message = msg
                 break
-            if msg and not error_message:
-                # errorCode=0 但有 message（如 Inactive 的文字描述）
-                error_message = msg
+            if msg and not log_error_message:
+                log_error_message = msg
+
+        # 来源 2: error callback 映射
+        cb_info = self._error_codes.get(trade.order.orderId, {})
+        cb_error_code = cb_info.get("errorCode", 0)
+        cb_error_message = cb_info.get("errorString", "")
+
+        # 合并: 取非零的那个（如果两个都非零，优先 callback 的，因为它更权威）
+        error_code = cb_error_code if cb_error_code != 0 else log_error_code
+        error_message = cb_error_message if cb_error_code != 0 else log_error_message
 
         extras = {
             "inactive_error_code": error_code,
             "inactive_error_message": error_message,
+            "inactive_log_error_code": log_error_code,
+            "inactive_cb_error_code": cb_error_code,
         }
 
-        # 分支 1: 命中拒单类 errorCode
+        # 分支 1: 命中拒单类 errorCode（任一来源）
         if error_code in REJECTED_ERROR_CODES:
+            extras["inactive_resolved_as"] = "rejected"
+            return "rejected", extras
+        # 也查另一个来源（防两个 code 不同但都应判拒单的边缘情况）
+        if log_error_code in REJECTED_ERROR_CODES or cb_error_code in REJECTED_ERROR_CODES:
             extras["inactive_resolved_as"] = "rejected"
             return "rejected", extras
 
         # 分支 2: errorCode=0 但 message 命中拒单关键词
-        if error_code == 0 and error_message:
-            msg_lower = error_message.lower()
+        combined_msg = (error_message or "") + " " + (cb_error_message or "")
+        if combined_msg.strip():
+            msg_lower = combined_msg.lower()
             if any(kw in msg_lower for kw in REJECTED_KEYWORDS):
                 extras["inactive_resolved_as"] = "rejected"
                 return "rejected", extras
 
-        # 分支 3: 无 error + whyHeld 非空 → 临时 inactive，保持 broker_pending
+        # 分支 3: 无 error + whyHeld 非空 → 临时 inactive
         why_held = getattr(trade.orderStatus, "whyHeld", "")
         if error_code == 0 and not error_message and why_held:
             extras["inactive_resolved_as"] = "broker_pending"

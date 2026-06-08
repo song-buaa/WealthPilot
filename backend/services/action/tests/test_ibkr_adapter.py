@@ -75,6 +75,7 @@ def _make_adapter(**kwargs):
     adapter._loop = MagicMock()
     adapter._thread = MagicMock()
     adapter._ib = MagicMock()
+    adapter._error_codes = kwargs.get("error_codes", {})  # M2.5
     return adapter
 
 
@@ -512,3 +513,124 @@ class TestMisc:
 
     def test_parse_symbol_cn(self):
         assert IBKRBrokerAdapter._parse_symbol("600519:SH") == ("SH", "600519")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# M2.5: errorCode 双来源合并 + Inactive 分流校准
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestM25ErrorCodeDualSource:
+    """M2.5 开市探针校准: error callback + trade.log 双来源。"""
+
+    def test_inactive_with_201_via_callback_rejected(self):
+        """★ 核心回归: 201 经 error callback 到达 → Inactive 判 rejected。
+
+        探针实测: 保证金不足时 trade.log errorCode=0，
+        但 error callback 带 201。修复前会误判成 unknown。
+        """
+        adapter = _make_adapter(error_codes={
+            8: {"errorCode": 201, "errorString": "Order rejected - insufficient margin"},
+        })
+        trade = _make_mock_trade(
+            order_id=8,
+            status="Inactive",
+            log=[_make_mock_log_entry(error_code=0, message="", status="Inactive")],
+        )
+        mapped, extras = adapter._map_inactive(trade)
+        assert mapped == "rejected", f"expected rejected, got {mapped}"
+        assert extras["inactive_cb_error_code"] == 201
+        assert extras["inactive_resolved_as"] == "rejected"
+
+    def test_inactive_with_200_in_trade_log_rejected(self):
+        """200 在 trade.log 里 → rejected（无效合约，探针 2a 的 Cancelled 分支不走 Inactive，
+        但如果未来 IB 行为变化导致 200 + Inactive，也应判 rejected）。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=6,
+            status="Inactive",
+            log=[_make_mock_log_entry(error_code=200, message="No security definition",
+                                     status="Inactive")],
+        )
+        mapped, extras = adapter._map_inactive(trade)
+        assert mapped == "rejected"
+        assert extras["inactive_log_error_code"] == 200
+
+    def test_inactive_no_error_code_unknown(self):
+        """Inactive 但无任何拒单码 → unknown（保守处理）。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=9,
+            status="Inactive",
+            log=[_make_mock_log_entry(error_code=0, message="", status="Inactive")],
+        )
+        mapped, extras = adapter._map_inactive(trade)
+        assert mapped == "unknown"
+        assert extras["inactive_resolved_as"] == "unknown"
+
+    def test_error_202_not_rejected(self):
+        """202 是撤单确认，不能判 rejected。
+
+        202 在 Cancelled 状态出现（不走 Inactive），但确认 REJECTED_ERROR_CODES 不含 202。
+        """
+        from backend.services.action.brokers.ibkr import REJECTED_ERROR_CODES
+        assert 202 not in REJECTED_ERROR_CODES
+
+    def test_inactive_keyword_fallback_rejected(self):
+        """trade.log errorCode=0 但 message 含拒单关键词 → rejected。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=10,
+            status="Inactive",
+            log=[_make_mock_log_entry(
+                error_code=0,
+                message="Your buying power is insufficient",
+                status="Inactive",
+            )],
+        )
+        mapped, extras = adapter._map_inactive(trade)
+        assert mapped == "rejected"
+
+    def test_inactive_why_held_broker_pending(self):
+        """Inactive + whyHeld 非空 + 无 error → broker_pending。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=11,
+            status="Inactive",
+            log=[_make_mock_log_entry(error_code=0, message="", status="Inactive")],
+        )
+        trade.orderStatus.whyHeld = "locate"
+        mapped, extras = adapter._map_inactive(trade)
+        assert mapped == "broker_pending"
+        assert extras["why_held"] == "locate"
+
+    def test_on_ib_error_captures_rejected_codes(self):
+        """_on_ib_error 只捕获 REJECTED_ERROR_CODES 里的 code。"""
+        adapter = _make_adapter()
+        # 201 应被捕获
+        adapter._on_ib_error(reqId=8, errorCode=201,
+                             errorString="Order rejected", contract=None)
+        assert 8 in adapter._error_codes
+        assert adapter._error_codes[8]["errorCode"] == 201
+
+        # 202 不应被捕获（撤单确认）
+        adapter._on_ib_error(reqId=9, errorCode=202,
+                             errorString="Order Canceled", contract=None)
+        assert 9 not in adapter._error_codes
+
+        # -1 不应被捕获（非订单相关）
+        adapter._on_ib_error(reqId=-1, errorCode=201,
+                             errorString="something", contract=None)
+        assert -1 not in adapter._error_codes
+
+    def test_cancelled_with_200_not_misclassified(self):
+        """带 200 的 Cancelled（无效合约）→ _map_status 走 Cancelled 分支，
+        不走 Inactive 分流，映射为 cancelled。"""
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=6, status="Cancelled",
+            log=[_make_mock_log_entry(error_code=200, message="No security definition",
+                                     status="Cancelled")],
+        )
+        mapped, extras = adapter._map_status(trade)
+        assert mapped == "cancelled"  # Cancelled 直接走 IB_TO_V32_STATUS，不进 _map_inactive
