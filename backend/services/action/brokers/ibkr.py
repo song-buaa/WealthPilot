@@ -584,13 +584,18 @@ class IBKRBrokerAdapter(BrokerAdapter):
             extras["inactive_resolved_as"] = "rejected"
             return "rejected", extras
 
-        # 分支 2: errorCode=0 但 message 命中拒单关键词
+        # 分支 2: message 命中拒单关键词 → unknown（降级，不判 rejected）
+        # 纪律: rejected 是终态，只有 REJECTED_ERROR_CODES 数字码有权判定。
+        # keyword 匹配作为信号保留在 raw_response 里，交人工确认。
         combined_msg = (error_message or "") + " " + (cb_error_message or "")
         if combined_msg.strip():
             msg_lower = combined_msg.lower()
-            if any(kw in msg_lower for kw in REJECTED_KEYWORDS):
-                extras["inactive_resolved_as"] = "rejected"
-                return "rejected", extras
+            matched_kw = [kw for kw in REJECTED_KEYWORDS if kw in msg_lower]
+            if matched_kw:
+                extras["inactive_resolved_as"] = "unknown"
+                extras["keyword_matched"] = matched_kw
+                extras["keyword_note"] = "message 含拒单关键词但无实测 errorCode，降级为 unknown 待人工确认"
+                return "unknown", extras
 
         # 分支 3: 无 error + whyHeld 非空 → 临时 inactive
         why_held = getattr(trade.orderStatus, "whyHeld", "")

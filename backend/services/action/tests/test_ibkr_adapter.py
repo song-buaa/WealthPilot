@@ -335,8 +335,9 @@ class TestInactiveMapping:
         assert result.raw_response["inactive_resolved_as"] == "rejected"
         assert result.raw_response["inactive_error_code"] == 201
 
-    def test_inactive_with_rejected_keyword(self):
-        """Inactive + errorCode=0 但 message 含拒单关键词 → rejected。"""
+    def test_inactive_with_rejected_keyword_now_unknown(self):
+        """Inactive + errorCode=0 但 message 含拒单关键词 → unknown（降级）。
+        keyword 匹配不再判 rejected，降级为 unknown 待人工确认。"""
         adapter = _make_adapter()
         log_entry = _make_mock_log_entry(
             error_code=0, message="Insufficient buying power"
@@ -345,8 +346,10 @@ class TestInactiveMapping:
         adapter._ib.trades.return_value = [trade]
 
         result = adapter.get_order_status("1")
-        assert result.status == "rejected"
-        assert result.raw_response["inactive_resolved_as"] == "rejected"
+        assert result.status == "unknown"
+        assert result.raw_response["inactive_resolved_as"] == "unknown"
+        assert "buying power" in result.raw_response["keyword_matched"]
+        assert "待人工确认" in result.raw_response["keyword_note"]
 
     def test_inactive_no_error_with_why_held(self):
         """Inactive + 无 error + whyHeld 非空 → broker_pending。"""
@@ -372,7 +375,7 @@ class TestInactiveMapping:
 
     def test_inactive_error_code_203_not_in_rejected_codes(self):
         """errorCode=203 未经探针实测，不在 REJECTED_ERROR_CODES 中。
-        但 message 含 "not available" 关键词 → 仍经 keyword fallback 判 rejected。"""
+        message 含 "not available" → keyword 降级为 unknown（非 rejected）。"""
         adapter = _make_adapter()
         log_entry = _make_mock_log_entry(
             error_code=203, message="Security is not available"
@@ -381,8 +384,9 @@ class TestInactiveMapping:
         adapter._ib.trades.return_value = [trade]
 
         result = adapter.get_order_status("1")
-        # 203 不在码表中，但 "not available" 命中 REJECTED_KEYWORDS → rejected
-        assert result.status == "rejected"
+        # 203 不在码表 + keyword 降级 → unknown
+        assert result.status == "unknown"
+        assert "not available" in result.raw_response["keyword_matched"]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -578,8 +582,9 @@ class TestM25ErrorCodeDualSource:
         from backend.services.action.brokers.ibkr import REJECTED_ERROR_CODES
         assert 202 not in REJECTED_ERROR_CODES
 
-    def test_inactive_keyword_fallback_rejected(self):
-        """trade.log errorCode=0 但 message 含拒单关键词 → rejected。"""
+    def test_inactive_keyword_fallback_unknown(self):
+        """Inactive + 无实测码 + message 含拒单关键词 → unknown（降级，非 rejected）。
+        keyword 匹配作为信号保留在 extras，交人工确认。"""
         adapter = _make_adapter()
         trade = _make_mock_trade(
             order_id=10,
@@ -591,7 +596,10 @@ class TestM25ErrorCodeDualSource:
             )],
         )
         mapped, extras = adapter._map_inactive(trade)
-        assert mapped == "rejected"
+        assert mapped == "unknown"
+        assert extras["inactive_resolved_as"] == "unknown"
+        assert "insufficient" in extras["keyword_matched"]
+        assert "待人工确认" in extras["keyword_note"]
 
     def test_inactive_why_held_broker_pending(self):
         """Inactive + whyHeld 非空 + 无 error → broker_pending。"""
