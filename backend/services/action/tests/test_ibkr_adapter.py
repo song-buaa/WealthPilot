@@ -370,8 +370,9 @@ class TestInactiveMapping:
         assert result.status == "unknown"
         assert result.raw_response["inactive_resolved_as"] == "unknown"
 
-    def test_inactive_error_code_203(self):
-        """errorCode=203 (Security not available) → rejected。"""
+    def test_inactive_error_code_203_not_in_rejected_codes(self):
+        """errorCode=203 未经探针实测，不在 REJECTED_ERROR_CODES 中。
+        但 message 含 "not available" 关键词 → 仍经 keyword fallback 判 rejected。"""
         adapter = _make_adapter()
         log_entry = _make_mock_log_entry(
             error_code=203, message="Security is not available"
@@ -380,6 +381,7 @@ class TestInactiveMapping:
         adapter._ib.trades.return_value = [trade]
 
         result = adapter.get_order_status("1")
+        # 203 不在码表中，但 "not available" 命中 REJECTED_KEYWORDS → rejected
         assert result.status == "rejected"
 
 

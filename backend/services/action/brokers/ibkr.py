@@ -56,16 +56,13 @@ IB_TO_V32_STATUS = {
 }
 
 # ── Inactive 二义性: 拒单类 errorCode ──────────────────────
+# 纪律: 此表只收录真实观测到的拒单码（探针/真实回报证据）。
+#        新增任何码前必须有实测证据，不得照文档或印象添加。
 # 来源: M2.5 开市探针实测（docs/v3.10/m2_5_probe_open_result.md）
-# 注意: 202 是正常撤单确认，绝不能进拒单码表
+# 排除: 202 是正常撤单确认，明确不在此表中。
 REJECTED_ERROR_CODES = {
     200,  # No security definition found — 无效合约（探针 2a: 直接 Cancelled）
     201,  # Order rejected — 保证金不足等（探针 2b: 进 Inactive，errorCode 经 error callback 异步到达）
-    203,  # Security is not available for trading
-    104,  # Can't modify a filled order
-    106,  # Transmit order failed: can't transmit
-    # 以下保留自 M2 原始推理，未经探针实测
-    2110, # Connectivity between IB and exchange lost
 }
 
 # 拒单类关键词（errorCode=0 时 fallback 看 message）
