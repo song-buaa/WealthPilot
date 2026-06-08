@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm'
 import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
 import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
 import ActionDraftCard from '@/components/ActionDraftCard'
+import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
 import { useDecisionStore } from '@/store/decisionStore'
 
@@ -844,6 +845,7 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
   onSelectCandidate?: (name: string) => void
   onGenerateAction?: (msgId: number) => void
 }) {
+  const [showExecPlan, setShowExecPlan] = useState(false)
   // loading 态：无内容且正在流式输出 — 根据 stage 事件动态显示进度
   if (msg.streaming && !msg.content) {
     const lastStage = (msg.stages ?? []).at(-1)
@@ -943,6 +945,40 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction }: {
             />
           </div>
         )}
+
+        {/* v3.11 执行计划入口 — actionable 时显示,与旧按钮并行 */}
+        {!msg.streaming && msg.content && msg.actionable && !showExecPlan && (
+          <button
+            onClick={() => setShowExecPlan(true)}
+            style={{
+              marginTop: 6, padding: '5px 14px', fontSize: 12, fontWeight: 500,
+              borderRadius: 6, border: '1px solid #BAE6FD', background: '#F0F9FF',
+              color: '#0369A1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            📋 生成执行计划(分批)
+          </button>
+        )}
+        {showExecPlan && (() => {
+          const intent = msg.intent as Record<string, unknown> | undefined
+          const asset = (intent?.asset as string) || ''
+          const action = (intent?.action as string) || 'BUY'
+          // 简单推断 symbol 和 market
+          const symbolGuess = asset.includes(':') ? asset : (asset || 'UNKNOWN:US')
+          const marketGuess = symbolGuess.includes(':') ? symbolGuess.split(':')[1] : 'US'
+          const sideMap: Record<string, string> = {
+            buy_init: 'BUY', buy_more: 'ADD', trim: 'REDUCE', exit: 'SELL',
+            BUY: 'BUY', ADD: 'ADD', REDUCE: 'REDUCE', SELL: 'SELL',
+          }
+          return (
+            <ExecutionPlanPanel
+              symbol={symbolGuess}
+              market={marketGuess}
+              side={sideMap[action] || 'BUY'}
+              onClose={() => setShowExecPlan(false)}
+            />
+          )
+        })()}
       </div>
     </div>
   )

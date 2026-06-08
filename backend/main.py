@@ -25,6 +25,7 @@ from backend.api import broker_sync as broker_sync_api
 from backend.api import action as action_api
 from backend.api import knowledge as knowledge_api
 from backend.api import philosophy as philosophy_api
+from backend.api import execution_plan as execution_plan_api
 
 
 @asynccontextmanager
@@ -120,6 +121,7 @@ app.include_router(broker_sync_api.router, prefix="/api/broker-sync", tags=["bro
 app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 app.include_router(knowledge_api.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(philosophy_api.router, prefix="/api/philosophy", tags=["philosophy"])
+app.include_router(execution_plan_api.router, prefix="/api/execution-plan", tags=["execution-plan"])
 
 
 @app.get("/api/health")
