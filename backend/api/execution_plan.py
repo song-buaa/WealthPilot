@@ -53,6 +53,10 @@ def generate_execution_plan(req: GenerateRequest):
         logger.error("执行计划生成失败: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+    # 数据不足拒绝(不是错误,是正常的诚实拒绝)
+    if isinstance(result, dict) and result.get("insufficient_data"):
+        return result  # 200 + insufficient_data=true,前端判断展示
+
     # validator 拦截
     if isinstance(result, dict) and result.get("error") == "plan_value_mismatch":
         raise HTTPException(

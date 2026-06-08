@@ -59,6 +59,8 @@ class PlanResult:
     warnings: list[str] = field(default_factory=list)
     violations: list[str] = field(default_factory=list)  # 硬约束违反(被修正)
     tick_degraded: bool = False
+    insufficient_data: bool = False       # 全因子降级且无锚点价
+    insufficient_data_reason: str = ""    # 拒绝原因(给前端展示)
 
 
 def generate_plan(inp: PlanInput, factor_snapshot: dict) -> PlanResult:
@@ -102,6 +104,26 @@ def generate_plan(inp: PlanInput, factor_snapshot: dict) -> PlanResult:
         return PlanResult(
             tranches=[], plan_summary_block={}, constraints_applied={},
             warnings=["目标仓位与当前相同，无需执行"],
+        )
+
+    # ── 全因子降级守卫: 无因子且无锚点价 → 拒绝生成空壳计划 ──
+    has_factors = (inp.atr14 is not None or inp.volatility_annual is not None
+                   or inp.price_percentile is not None)
+    has_price = inp.current_price and inp.current_price > 0
+    has_anchors = bool(inp.user_anchor_prices)
+
+    if not has_factors and not has_anchors:
+        return PlanResult(
+            tranches=[],
+            plan_summary_block={},
+            constraints_applied={},
+            warnings=[],
+            violations=[],
+            insufficient_data=True,
+            insufficient_data_reason=(
+                "当前无行情/K线数据（ATR/波动率/分位均不可用），无法生成有依据的分批计划。"
+                "请提供你的目标价位（锚点价），或稍后行情恢复后重试。"
+            ),
         )
 
     # ── (C') 退化单笔豁免 ──
@@ -237,16 +259,16 @@ def _generate_trigger_prices(
     inp: PlanInput, n: int, warnings: list[str],
 ) -> list[Optional[float]]:
     """(A)(B) 优先级阶梯生成触发价列表。"""
-    P = inp.current_price
-    if P <= 0:
-        return [None] * n
-
-    # (A-1) 用户锚点价
+    # (A-1) 用户锚点价 — 优先级最高,不依赖 current_price
     if inp.user_anchor_prices:
         prices = sorted(inp.user_anchor_prices)
         if inp.side in ("BUY", "ADD"):
             prices = sorted(prices, reverse=True)  # 买入:从高到低
         return prices[:n]
+
+    P = inp.current_price
+    if P <= 0:
+        return [None] * n
 
     # (A-3) 自动生成
     is_buy = inp.side in ("BUY", "ADD")
@@ -329,11 +351,15 @@ def _calc_limit_prices(
 
 def _calc_total_shares(inp: PlanInput) -> int:
     """从仓位百分比+总资产+现价算出总股数。"""
-    if inp.current_price <= 0 or inp.total_assets <= 0:
+    # 参考价格: 优先用 current_price，降级时用第一个锚点价
+    ref_price = inp.current_price
+    if (not ref_price or ref_price <= 0) and inp.user_anchor_prices:
+        ref_price = inp.user_anchor_prices[0]
+    if not ref_price or ref_price <= 0 or inp.total_assets <= 0:
         return 0
     increment_pct = abs(inp.target_position_pct - inp.current_position_pct)
     value = inp.total_assets * increment_pct
-    shares = int(value / inp.current_price)
+    shares = int(value / ref_price)
     return max(shares, 1)
 
 

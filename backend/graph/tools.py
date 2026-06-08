@@ -983,6 +983,15 @@ def execute_generate_execution_plan(**kwargs) -> dict:
     )
     plan_result = generate_plan(plan_input, factor_dict)
 
+    # ── 全因子降级拒绝 ──
+    if plan_result.insufficient_data:
+        _logger.warning("[orchestrator] 数据不足,拒绝生成: %s", plan_result.insufficient_data_reason)
+        return {
+            "insufficient_data": True,
+            "insufficient_data_reason": plan_result.insufficient_data_reason,
+            "factor_snapshot": factor_dict,
+        }
+
     _logger.info("[orchestrator] Step 3: LLM rationale for %s", symbol)
 
     # ── Step 3: LLM 只写解释文案 ──
