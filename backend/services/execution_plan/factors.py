@@ -176,8 +176,12 @@ def build_factor_snapshot(
 def _fetch_raw_kline(wp_symbol: str, bars: int = 60) -> Optional[pd.DataFrame]:
     """拉取 Tiger 日线 K 线，返回 raw DataFrame。失败返回 None。"""
     try:
-        import os
+        import os, sys
         from pathlib import Path
+        # 确保 backend/ 在 sys.path（uvicorn 从项目根启动时需要）
+        backend_dir = str(Path(__file__).parent.parent.parent)
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
         from tigeropen.common.consts import Language
         from tigeropen.quote.quote_client import QuoteClient
         from tigeropen.tiger_open_config import TigerOpenClientConfig
@@ -232,6 +236,11 @@ def _fetch_52w(wp_symbol: str) -> tuple[Optional[float], Optional[float], str, s
         return None, None, "none", ""
 
     try:
+        import sys
+        from pathlib import Path
+        backend_dir = str(Path(__file__).parent.parent.parent)
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
         from services.market_data.futu_quote_service import fetch_quote
         quote = fetch_quote(wp_symbol)
         if quote and quote.high_52w is not None and quote.low_52w is not None:
