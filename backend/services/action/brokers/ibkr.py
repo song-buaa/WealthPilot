@@ -283,6 +283,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
             action=request.side.upper(),
             totalQuantity=int(request.quantity),
             lmtPrice=float(request.limit_price),
+            tif="DAY",  # 显式设 TIF，避免 TWS order preset 覆盖（error 10349）
         )
         # ── 闸门 4: outsideRth=False ─────────────────────────
         order.outsideRth = False
