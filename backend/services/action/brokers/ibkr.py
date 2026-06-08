@@ -37,6 +37,15 @@ ENABLE_IBKR_LIVE_TRADING = (
     os.getenv("ENABLE_IBKR_LIVE_TRADING", "false").lower() == "true"
 )
 
+# 账户前缀校验（闸门 1）
+# Paper: "DU" 前缀（实测 DUQ629797）
+# Live: 默认 "U"（个人实盘）。FA 子账户 "F"、机构 "I" 等需用户确认后扩展。
+# 待用户用真实 live 账户号确认后可调整此元组。
+IBKR_PAPER_PREFIX = "DU"
+IBKR_LIVE_ACCOUNT_PREFIXES = tuple(
+    os.getenv("IBKR_LIVE_ACCOUNT_PREFIXES", "U").split(",")
+)
+
 # ── 业务常量 ─────────────────────────────────────────────────
 SUPPORTED_MARKETS = {"US", "HK"}
 MARKET_TO_EXCHANGE = {"US": "SMART", "HK": "SEHK"}
@@ -80,6 +89,47 @@ NOT_FOUND_RETRY_DELAYS = [1, 2]  # 指数退避秒数
 
 # ── 自定义异常 ────────────────────────────────────────────────
 
+def _validate_account_prefix(account_id: str, context: str = "") -> None:
+    """闸门 1 正向校验：paper/live 模式下账户前缀互斥。
+
+    - paper (ENABLE=false): 必须 DU 开头
+    - live  (ENABLE=true):  必须匹配 IBKR_LIVE_ACCOUNT_PREFIXES（默认 U），且不能 DU 开头
+    - 空/None 一律拒绝
+
+    Raises:
+        AssertionError（沿用原有异常类型，OrderManager 不特殊处理）
+    """
+    if not account_id or not account_id.strip():
+        raise AssertionError(
+            f"[闸门1 {context}] 账户为空，拒绝连接。"
+        )
+
+    masked = f"***{account_id[-4:]}" if len(account_id) > 4 else account_id
+
+    if ENABLE_IBKR_LIVE_TRADING:
+        # live 模式：必须匹配 live 前缀，且不能是 paper (DU)
+        if account_id.startswith(IBKR_PAPER_PREFIX):
+            raise AssertionError(
+                f"[闸门1 {context}] 实盘模式(ENABLE_IBKR_LIVE_TRADING=true)，"
+                f"但账户 {masked} 以 {IBKR_PAPER_PREFIX} 开头（Paper 账户）。"
+                f"请配置实盘账户或关闭实盘开关。"
+            )
+        if not any(account_id.startswith(p) for p in IBKR_LIVE_ACCOUNT_PREFIXES):
+            raise AssertionError(
+                f"[闸门1 {context}] 实盘模式(ENABLE_IBKR_LIVE_TRADING=true)，"
+                f"但账户 {masked} 前缀不在允许列表 {IBKR_LIVE_ACCOUNT_PREFIXES} 中。"
+                f"如为 FA/机构账户，请设 IBKR_LIVE_ACCOUNT_PREFIXES 环境变量。"
+            )
+    else:
+        # paper 模式：必须 DU 开头
+        if not account_id.startswith(IBKR_PAPER_PREFIX):
+            raise AssertionError(
+                f"[闸门1 {context}] Paper 模式(ENABLE_IBKR_LIVE_TRADING=false)，"
+                f"但账户 {masked} 不以 {IBKR_PAPER_PREFIX} 开头。"
+                f"模拟盘账号以 DU 开头。"
+            )
+
+
 class OrphanOrderError(ConnectionError):
     """订单在 IB 端 not_found，本地可能有脏数据。
 
@@ -106,14 +156,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._timeout = timeout
         self._account_verified = False  # 闸门 1 延迟到连接后校验
 
-        # ── 闸门 1 预检: 构造时若已知 account_id 且明确非 paper → 立即拒绝
-        if not ENABLE_IBKR_LIVE_TRADING:
-            if account_id and not account_id.startswith("DU"):
-                raise AssertionError(
-                    f"实盘交易未开启(ENABLE_IBKR_LIVE_TRADING=false)，"
-                    f"拒绝使用账号 {account_id}。"
-                    f"模拟盘账号以 DU 开头。"
-                )
+        # ── 闸门 1 预检: 构造时若已知 account_id → 正向校验前缀
+        if account_id:
+            _validate_account_prefix(account_id, "构造时预检")
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -209,15 +254,12 @@ class IBKRBrokerAdapter(BrokerAdapter):
             logger.info("[IBKR] 从 managedAccounts 自动获取账户: %s", self._account_id)
 
         # ── 闸门 1 真校验 ──
-        if not ENABLE_IBKR_LIVE_TRADING:
-            if not self._account_id.startswith("DU"):
-                self._ib.disconnect()
-                self._connected = False
-                raise AssertionError(
-                    f"实盘交易未开启(ENABLE_IBKR_LIVE_TRADING=false)，"
-                    f"Gateway 返回非 Paper 账号 {self._account_id}。"
-                    f"模拟盘账号以 DU 开头。"
-                )
+        try:
+            _validate_account_prefix(self._account_id, "连接后校验")
+        except AssertionError:
+            self._ib.disconnect()
+            self._connected = False
+            raise
 
         self._account_verified = True
 

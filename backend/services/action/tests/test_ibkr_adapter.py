@@ -94,32 +94,28 @@ def _make_request(**overrides):
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestGate1PaperOnly:
-    """闸门 1: paper-only 断言。
+class TestGate1AccountPrefix:
+    """闸门 1: 账户前缀正向校验（paper/live 互斥）。
 
     构造时预检 + 连接后 _resolve_and_verify_account 双重校验。
     """
 
-    def test_paper_account_precheck_pass(self):
-        """构造时传 DU 开头 → 预检通过（不触发连接）。"""
+    # ── paper 模式 ──
+
+    def test_paper_du_precheck_pass(self):
+        """paper 模式 + DU 账户 → 预检通过。"""
         adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
         IBKRBrokerAdapter.__init__(adapter, account_id="DU1234567")
         assert adapter._account_id == "DU1234567"
 
     @patch.dict("os.environ", {"ENABLE_IBKR_LIVE_TRADING": "false"})
-    def test_live_account_precheck_rejected(self):
-        """构造时传非 DU 开头 + 实盘未开启 → 预检拒绝。"""
-        with pytest.raises(AssertionError, match="实盘交易未开启"):
+    def test_paper_u_account_precheck_rejected(self):
+        """paper 模式 + U 账户（实盘）→ 预检拒绝。"""
+        with pytest.raises(AssertionError, match="Paper 模式"):
             IBKRBrokerAdapter(account_id="U1234567")
 
-    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
-    def test_live_account_allowed_when_enabled(self):
-        """实盘开启时非 DU 账号预检通过。"""
-        adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
-        IBKRBrokerAdapter.__init__(adapter, account_id="U1234567")
-
-    def test_resolve_managed_du_account(self):
-        """连接后 managedAccounts 返回 DU 账户 → 校验通过。"""
+    def test_paper_resolve_du_pass(self):
+        """连接后 managedAccounts 返回 DU → paper 模式通过。"""
         adapter = _make_adapter(account_id="")
         adapter._account_verified = False
         adapter._ib.managedAccounts.return_value = ["DU9999999"]
@@ -127,13 +123,73 @@ class TestGate1PaperOnly:
         assert adapter._account_id == "DU9999999"
         assert adapter._account_verified is True
 
-    def test_resolve_managed_live_account_rejected(self):
-        """连接后 managedAccounts 返回非 DU → 拒绝并断连。"""
+    def test_paper_resolve_u_rejected(self):
+        """连接后 managedAccounts 返回 U → paper 模式拒绝。"""
         adapter = _make_adapter(account_id="")
         adapter._account_verified = False
         adapter._ib.managedAccounts.return_value = ["U7777777"]
-        with pytest.raises(AssertionError, match="非 Paper 账号"):
+        with pytest.raises(AssertionError, match="Paper 模式"):
             adapter._resolve_and_verify_account()
+
+    # ── live 模式 ──
+
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
+    def test_live_u_precheck_pass(self):
+        """live 模式 + U 账户 → 预检通过。"""
+        adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
+        IBKRBrokerAdapter.__init__(adapter, account_id="U1234567")
+        assert adapter._account_id == "U1234567"
+
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
+    def test_live_du_precheck_rejected(self):
+        """live 模式 + DU 账户（paper）→ 预检拒绝（互斥）。"""
+        with pytest.raises(AssertionError, match="Paper 账户"):
+            IBKRBrokerAdapter(account_id="DU1234567")
+
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
+    def test_live_resolve_u_pass(self):
+        """连接后 live 模式 + U 账户 → 通过。"""
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["U7777777"]
+        with patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True):
+            adapter._resolve_and_verify_account()
+        assert adapter._account_id == "U7777777"
+        assert adapter._account_verified is True
+
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
+    def test_live_resolve_du_rejected(self):
+        """连接后 live 模式 + DU 账户 → 拒绝（互斥）。"""
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["DU1234567"]
+        with patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True):
+            with pytest.raises(AssertionError, match="Paper 账户"):
+                adapter._resolve_and_verify_account()
+
+    # ── 空/异常 ──
+
+    def test_empty_account_rejected(self):
+        """任何模式 + 空账户 → 拒绝。"""
+        from backend.services.action.brokers.ibkr import _validate_account_prefix
+        with pytest.raises(AssertionError, match="账户为空"):
+            _validate_account_prefix("", "test")
+
+    def test_none_account_rejected(self):
+        """任何模式 + None 账户 → 拒绝。"""
+        from backend.services.action.brokers.ibkr import _validate_account_prefix
+        with pytest.raises(AssertionError, match="账户为空"):
+            _validate_account_prefix(None, "test")
+
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True)
+    def test_live_unknown_prefix_rejected(self):
+        """live 模式 + 异常前缀 → 拒绝。"""
+        from backend.services.action.brokers.ibkr import _validate_account_prefix
+        with patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", True):
+            with pytest.raises(AssertionError, match="前缀不在允许列表"):
+                _validate_account_prefix("X9999999", "test")
+
+    # ── 原有：managedAccounts 边界 ──
 
     def test_resolve_empty_managed_accounts_rejected(self):
         """连接后 managedAccounts 返回空列表 → 报错。"""
