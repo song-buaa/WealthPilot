@@ -57,6 +57,45 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
+  const [adjustText, setAdjustText] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustMsg, setAdjustMsg] = useState<string | null>(null)
+
+  async function handleAdjust() {
+    if (!adjustText.trim() || !plan?.plan_summary_block) return
+    setAdjusting(true)
+    setAdjustMsg(null)
+    try {
+      const psb = plan.plan_summary_block
+      const res = await fetch('/api/execution-plan/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_text: adjustText,
+          symbol, market, side,
+          target_position_pct: psb.target_position_pct,
+          current_position_pct: psb.current_position_pct,
+          current_price: psb.current_price,
+          total_assets: 1000000,
+          user_anchor_prices: parseAnchors().length > 0 ? parseAnchors() : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.status === 'ambiguous' || data.status === 'out_of_scope' || data.status === 'error') {
+        setAdjustMsg(data.message)
+      } else if (data.status === 'adjusted' && data.plan_summary_block) {
+        setPlan(data)
+        setAdjustMsg(`已按你的调整重新生成：${data.adjustment_description}`)
+        setAdjustText('')
+      } else if (data.status === 'insufficient_data') {
+        setAdjustMsg(data.insufficient_data_reason || '数据不足')
+      }
+    } catch (e: unknown) {
+      setAdjustMsg(`调整失败: ${e instanceof Error ? e.message : '未知错误'}`)
+    } finally {
+      setAdjusting(false)
+    }
+  }
   const [showFactors, setShowFactors] = useState(false)
   const [showConstraints, setShowConstraints] = useState(false)
 
@@ -316,6 +355,35 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
           ))}
         </div>
       )}
+
+      {/* Step C: 对话式调整 */}
+      <div style={{ marginTop: 8, background: '#F9FAFB', borderRadius: 6, padding: '8px 10px', border: '1px solid #E5E7EB' }}>
+        <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
+          想调整？一句话告诉我，如「分5批」「按我的价位 15,16,17」「目标改成10%」
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input type="text" value={adjustText}
+            onChange={e => { setAdjustText(e.target.value); setAdjustMsg(null) }}
+            placeholder="如：分5批"
+            onKeyDown={e => { if (e.key === 'Enter' && adjustText.trim()) handleAdjust() }}
+            style={{ flex: 1, padding: '4px 8px', fontSize: 12, border: '1px solid #D1D5DB', borderRadius: 4 }}
+          />
+          <button onClick={handleAdjust} disabled={!adjustText.trim() || adjusting}
+            style={{
+              padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 4,
+              border: '1px solid #93C5FD', background: adjusting ? '#F3F4F6' : '#EFF6FF',
+              color: '#1D4ED8', cursor: adjusting ? 'wait' : 'pointer',
+            }}>
+            {adjusting ? '重算中...' : '调整'}
+          </button>
+        </div>
+        {adjustMsg && (
+          <div style={{ fontSize: 11, marginTop: 4,
+            color: adjustMsg.startsWith('已') ? '#059669' : '#D97706' }}>
+            {adjustMsg}
+          </div>
+        )}
+      </div>
 
       {/* 确认按钮 */}
       {onConfirmPlan && plan.plan_summary_block && (

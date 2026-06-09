@@ -976,6 +976,7 @@ def execute_generate_execution_plan(**kwargs) -> dict:
         total_assets=kwargs.get("total_assets", 0.0),
         user_anchor_prices=kwargs.get("user_anchor_prices") or [],
         quick_mode=kwargs.get("quick_mode", False),
+        batch_count_override=kwargs.get("batch_count_override"),
         atr14=factor_snap.atr14,
         volatility_annual=factor_snap.volatility_annual,
         price_percentile=factor_snap.price_percentile,

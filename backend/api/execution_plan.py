@@ -1,8 +1,11 @@
 """
-执行计划 API 路由 — v3.11 M7 最小版。
+执行计划 API 路由 — v3.11。
 
 端点:
-- POST /api/execution-plan/generate — 生成执行计划草案(只读预览,不下单)
+- POST /api/execution-plan/generate — 生成执行计划草案
+- POST /api/execution-plan/persist-draft — 生成+持久化
+- POST /api/execution-plan/{plan_id}/confirm — 确认→拆 SymbolStrategy
+- POST /api/execution-plan/adjust — Step C 对话式调整
 """
 import logging
 from fastapi import APIRouter, HTTPException
@@ -149,3 +152,81 @@ def confirm_plan(plan_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+
+class AdjustRequest(BaseModel):
+    user_text: str
+    symbol: str
+    market: str
+    side: str
+    target_position_pct: float
+    current_position_pct: float = 0.0
+    current_price: float = 0.0
+    total_assets: float = 0.0
+    user_anchor_prices: Optional[list[float]] = None
+    quick_mode: bool = False
+    source_decision_ref: str = ""
+
+
+@router.post("/adjust")
+def adjust_plan(req: AdjustRequest):
+    """Step C: 对话式调整 — 解析用户意图 → 合并参数 → 规则引擎重算。"""
+    from backend.services.execution_plan.adjustment_parser import parse_adjustment
+
+    parsed = parse_adjustment(req.user_text)
+
+    if "ambiguous" in parsed:
+        return {"status": "ambiguous", "message": parsed["ambiguous"]}
+    if "out_of_scope" in parsed:
+        return {"status": "out_of_scope", "message": parsed.get("message", "超出可调整范围")}
+    if "error" in parsed:
+        return {"status": "error", "message": parsed["error"]}
+
+    params = parsed.get("params", {})
+    if not params:
+        return {"status": "ambiguous", "message": "没有识别到可调整的参数。"}
+
+    merged = {
+        "symbol": req.symbol, "market": req.market, "side": req.side,
+        "target_position_pct": params.get("target_position_pct", req.target_position_pct),
+        "current_position_pct": req.current_position_pct,
+        "current_price": req.current_price, "total_assets": req.total_assets,
+        "quick_mode": req.quick_mode, "source_decision_ref": req.source_decision_ref,
+    }
+
+    if "batch_count" in params:
+        merged["batch_count_override"] = params["batch_count"]
+
+    if "user_anchor_prices" in params:
+        merged["user_anchor_prices"] = params["user_anchor_prices"]
+    elif req.user_anchor_prices:
+        merged["user_anchor_prices"] = req.user_anchor_prices
+
+    if "first_batch_immediate" in params:
+        if params["first_batch_immediate"]:
+            merged["quick_mode"] = True
+
+    from backend.skills import invoke_skill
+    try:
+        result = invoke_skill("wp-generate-execution-plan", **merged)
+    except Exception as e:
+        logger.error("调整重算失败: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if isinstance(result, dict) and result.get("insufficient_data"):
+        return {"status": "insufficient_data", **result}
+    if isinstance(result, dict) and result.get("error") == "plan_value_mismatch":
+        raise HTTPException(status_code=422, detail=result)
+
+    parts = []
+    if "batch_count" in params: parts.append(f"分{params['batch_count']}批")
+    if "user_anchor_prices" in params: parts.append(f"按价位 {','.join(str(p) for p in params['user_anchor_prices'])}")
+    if "target_position_pct" in params: parts.append(f"目标仓位改为{params['target_position_pct']*100:.0f}%")
+    if "first_batch_immediate" in params: parts.append("首批立即执行" if params["first_batch_immediate"] else "首批等回调")
+
+    return {
+        "status": "adjusted",
+        "adjustment_applied": params,
+        "adjustment_description": "、".join(parts) or "参数调整",
+        **result,
+    }

@@ -31,6 +31,7 @@ class PlanInput:
     total_assets: float = 0.0            # 总投资性资产
     user_anchor_prices: list[float] = field(default_factory=list)
     quick_mode: bool = False             # 快速单笔模式
+    batch_count_override: Optional[int] = None  # Step C: 用户指定批数覆盖
     # 因子
     atr14: Optional[float] = None
     volatility_annual: Optional[float] = None
@@ -137,6 +138,13 @@ def generate_plan(inp: PlanInput, factor_snapshot: dict) -> PlanResult:
     if inp.user_anchor_prices:
         # 锚点价优先
         n = len(inp.user_anchor_prices)
+    elif inp.batch_count_override is not None:
+        # Step C: 用户指定批数（仍受纪律约束）
+        n = max(min_batches_required, min(inp.batch_count_override, ep_config.MAX_BATCHES))
+        if inp.batch_count_override > ep_config.MAX_BATCHES:
+            violations.append(f"指定{inp.batch_count_override}批超过纪律上限，已按{ep_config.MAX_BATCHES}批生成")
+        if inp.batch_count_override < min_batches_required and not n_one_exempt:
+            violations.append(f"指定{inp.batch_count_override}批低于纪律最少{min_batches_required}批，已按{min_batches_required}批生成")
     elif n_one_exempt:
         n = 1
     else:
