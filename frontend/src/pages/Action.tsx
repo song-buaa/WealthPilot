@@ -488,6 +488,20 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
         {isPaused && <span style={{
           fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4, background: '#FEF3C7', color: '#D97706',
         }}>已暂停</span>}
+        {/* v3.11 M6: 到价/暂缓标记 */}
+        {strategy.armed_at && !strategy.interval_blocked && (
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+            background: '#EFF6FF', color: '#1D4ED8',
+            boxShadow: '0 0 0 1px #93C5FD',
+          }}>已到价 · 待确认下单</span>
+        )}
+        {strategy.interval_blocked && (
+          <span style={{
+            fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4,
+            background: '#FEF3C7', color: '#D97706',
+          }}>{strategy.interval_blocked}</span>
+        )}
       </div>
       {/* Row 2: 触发价/限价 + 目标 + 进度 */}
       <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6, fontVariantNumeric: 'tabular-nums' }}>

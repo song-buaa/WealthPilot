@@ -104,8 +104,21 @@ def evaluate_triggers(
                 continue
 
             # 纪律间隔检查
-            if not _check_interval(session, plan.id, min_interval_days, now):
+            interval_ok = _check_interval(session, plan.id, min_interval_days, now)
+
+            if tranche.linked_symbol_strategy_id:
+                from backend.services.action.models import SymbolStrategy
+                strategy = session.query(SymbolStrategy).filter_by(
+                    id=tranche.linked_symbol_strategy_id
+                ).first()
+            else:
+                strategy = None
+
+            if not interval_ok:
                 result["skipped_interval"] += 1
+                # 结构化标记纪律暂缓
+                if strategy:
+                    strategy.interval_blocked = f"价格已到，距上批成交不足{min_interval_days}天，暂缓"
                 logger.info(
                     "[trigger] %s 批%d 到价但纪律间隔未满(%d天)，暂缓",
                     plan.symbol, tranche.sequence, min_interval_days,
@@ -122,17 +135,10 @@ def evaluate_triggers(
             tranche.status = TrancheStatus.ARMED
             tranche.triggered_at = now
 
-            # 在对应 strategy 上打标记（后端直接更新，前端不需要 join tranche）
-            if tranche.linked_symbol_strategy_id:
-                from backend.services.action.models import SymbolStrategy
-                strategy = session.query(SymbolStrategy).filter_by(
-                    id=tranche.linked_symbol_strategy_id
-                ).first()
-                if strategy:
-                    strategy.decision_basis = (
-                        (strategy.decision_basis or "") +
-                        f"\n[已到价] 批{tranche.sequence} 于 {now.strftime('%Y-%m-%d %H:%M')} UTC 触达触发价 {tp}"
-                    ).strip()
+            # 结构化标记 armed（前端判断 armed_at != null）
+            if strategy:
+                strategy.armed_at = now
+                strategy.interval_blocked = None  # 清除之前的暂缓标记
 
             result["armed"] += 1
             logger.info(
@@ -209,3 +215,170 @@ def _fetch_kline_high_low_default(symbol: str, market: str) -> tuple[float, floa
 
 def get_last_scan_time() -> datetime | None:
     return _last_scan_time
+
+
+# ══════════════════════════════════════════════════════════════════
+# 补扫（backfill）— 用历史 K 线补判遗漏
+# ══════════════════════════════════════════════════════════════════
+
+
+def backfill_missed_triggers(
+    session: Session,
+    since: datetime,
+    now: datetime | None = None,
+    fetch_history_klines=None,
+) -> dict:
+    """补扫：拉 since→now 的历史 15 分钟 K 线，判断是否有遗漏的触达。
+
+    不依赖 APScheduler misfire，显式拉历史数据。
+    **绝不自动下单。**
+
+    Args:
+        session: DB session
+        since: 上次扫描时间
+        now: 当前时间
+        fetch_history_klines: 可注入。签名 (symbol, market, since, now) → list[(high, low)]
+    """
+    global _last_scan_time
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    if fetch_history_klines is None:
+        fetch_history_klines = _fetch_history_klines_default
+
+    from app.discipline.config import get_rules
+    rules = get_rules()
+    min_interval_days = rules.get("position_sizing", {}).get(
+        "min_interval_between_adds_days", 1
+    )
+
+    result = {"scanned": 0, "armed": 0, "skipped_interval": 0, "failed_fetch": 0}
+
+    plans = session.query(ExecutionPlan).filter_by(plan_status=PlanStatus.ACTIVE).all()
+
+    for plan in plans:
+        pending_tranches = (
+            session.query(ExecutionTranche)
+            .filter_by(plan_id=plan.id, status=TrancheStatus.PENDING)
+            .filter(ExecutionTranche.trigger_price.isnot(None))
+            .order_by(ExecutionTranche.sequence)
+            .all()
+        )
+        if not pending_tranches:
+            continue
+
+        # 拉历史 K 线
+        bars = fetch_history_klines(plan.symbol, plan.market, since, now)
+        if bars is None:
+            result["failed_fetch"] += 1
+            logger.warning("[backfill] %s 历史K线取不到，保守跳过", plan.symbol)
+            continue
+
+        is_buy = plan.side in ("BUY", "ADD")
+
+        for tranche in pending_tranches:
+            result["scanned"] += 1
+            tp = float(tranche.trigger_price)
+
+            # 遍历每根 K 线判断
+            triggered = False
+            for bar_high, bar_low in bars:
+                if is_buy and bar_low <= tp:
+                    triggered = True
+                    break
+                elif not is_buy and bar_high >= tp:
+                    triggered = True
+                    break
+
+            if not triggered:
+                continue
+
+            # 纪律间隔
+            interval_ok = _check_interval(session, plan.id, min_interval_days, now)
+
+            from backend.services.action.models import SymbolStrategy
+            strategy = None
+            if tranche.linked_symbol_strategy_id:
+                strategy = session.query(SymbolStrategy).filter_by(
+                    id=tranche.linked_symbol_strategy_id
+                ).first()
+
+            if not interval_ok:
+                result["skipped_interval"] += 1
+                if strategy:
+                    strategy.interval_blocked = f"补扫发现到价，但距上批成交不足{min_interval_days}天"
+                continue
+
+            try:
+                validate_tranche_transition(tranche.status, TrancheStatus.ARMED)
+            except ValueError:
+                continue
+
+            tranche.status = TrancheStatus.ARMED
+            tranche.triggered_at = now
+
+            if strategy:
+                strategy.armed_at = now
+                strategy.interval_blocked = None
+
+            result["armed"] += 1
+            logger.info("[backfill] %s 批%d 补扫 armed", plan.symbol, tranche.sequence)
+
+    session.flush()
+    _last_scan_time = now
+    return result
+
+
+def _fetch_history_klines_default(
+    symbol: str, market: str, since: datetime, until: datetime,
+) -> list[tuple[float, float]] | None:
+    """用 Tiger 历史 15 分钟 K 线。返回 [(high, low), ...]。"""
+    try:
+        import os
+        from pathlib import Path
+        from tigeropen.common.consts import Language, BarPeriod
+        from tigeropen.quote.quote_client import QuoteClient
+        from tigeropen.tiger_open_config import TigerOpenClientConfig
+        from tigeropen.common.util.signature_utils import read_private_key
+        from utils.symbol import symbol_to_tiger_ticker
+
+        tiger_symbol = symbol_to_tiger_ticker(symbol)
+
+        project_root = Path(__file__).parent.parent.parent.parent
+        pk_path = project_root / "backend" / "secrets" / "tiger_private_key.pem"
+        if not pk_path.exists():
+            pk_path = Path(__file__).parent.parent.parent / "secrets" / "tiger_private_key.pem"
+
+        config = TigerOpenClientConfig(sandbox_debug=False)
+        config.tiger_id = os.environ.get("TIGER_ID")
+        config.account = os.environ.get("TIGER_ACCOUNT")
+        config.private_key = read_private_key(str(pk_path))
+        config.language = Language.zh_CN
+        client = QuoteClient(config)
+
+        # begin_time/end_time 支持毫秒时间戳或字符串
+        begin_ms = int(since.timestamp() * 1000)
+        end_ms = int(until.timestamp() * 1000)
+
+        data = client.get_bars(
+            [tiger_symbol],
+            period=BarPeriod.FIFTEEN_MINUTES,
+            begin_time=begin_ms,
+            end_time=end_ms,
+            limit=100,
+        )
+
+        if data is None or len(data) == 0:
+            return None
+
+        if "symbol" in data.columns:
+            data = data[data["symbol"] == tiger_symbol]
+
+        if len(data) == 0:
+            return None
+
+        return [(float(row["high"]), float(row["low"])) for _, row in data.iterrows()]
+
+    except Exception as e:
+        logger.warning("[backfill] 历史K线获取失败 %s: %s", symbol, e)
+        return None

@@ -599,6 +599,8 @@ export interface SymbolStrategyResponse {
   limit_price: number | null
   status: string
   decision_basis: string | null
+  armed_at: string | null          // v3.11 M6: 非 null = 已到价待确认
+  interval_blocked: string | null  // v3.11 M6: 非 null = 纪律暂缓原因
   is_held: boolean
   created_at: string | null
   updated_at: string | null

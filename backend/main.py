@@ -80,10 +80,22 @@ async def lifespan(app: FastAPI):
 
     def _run_trigger_evaluation():
         from app.database import get_session as _gs
-        from backend.services.execution_plan.trigger_evaluator import evaluate_triggers
+        from backend.services.execution_plan.trigger_evaluator import (
+            evaluate_triggers, backfill_missed_triggers, get_last_scan_time,
+        )
+        from datetime import datetime, timezone
         session = _gs()
         try:
-            result = evaluate_triggers(session)
+            # 补扫：如果上次扫描距今超过 15 分钟，先补判遗漏
+            last_scan = get_last_scan_time()
+            now = datetime.now(timezone.utc)
+            if last_scan and (now - last_scan).total_seconds() > 900 + 60:
+                bf = backfill_missed_triggers(session, since=last_scan, now=now)
+                if bf["armed"] > 0 or bf["failed_fetch"] > 0:
+                    print(f"[trigger] 补扫完成: {bf}", flush=True)
+                session.commit()
+
+            result = evaluate_triggers(session, now=now)
             if result["armed"] > 0 or result["skipped_interval"] > 0:
                 print(f"[trigger] 评估完成: {result}", flush=True)
             session.commit()

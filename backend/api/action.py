@@ -107,6 +107,8 @@ def _serialize_strategy(s) -> dict:
         "limit_price": float(s.limit_price) if s.limit_price else None,
         "status": s.status,
         "decision_basis": s.decision_basis,
+        "armed_at": utc_iso(getattr(s, "armed_at", None)),        # v3.11 M6
+        "interval_blocked": getattr(s, "interval_blocked", None),  # v3.11 M6
         "created_at": utc_iso(s.created_at),
         "updated_at": utc_iso(s.updated_at),
     }

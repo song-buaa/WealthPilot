@@ -21,7 +21,7 @@ from app.database import Base
 import backend.services.action.models  # noqa: F401
 from backend.services.execution_plan.models import ExecutionPlan, ExecutionTranche
 from backend.services.execution_plan.state_machine import TrancheStatus, PlanStatus
-from backend.services.execution_plan.trigger_evaluator import evaluate_triggers
+from backend.services.execution_plan.trigger_evaluator import evaluate_triggers, backfill_missed_triggers
 from backend.services.execution_plan.market_hours import is_market_open
 
 
@@ -205,3 +205,80 @@ class TestTriggerEvaluation:
         result = evaluate_triggers(db_session, fetch_kline_high_low=fetcher, now=now)
 
         assert result["armed"] == 3
+
+    def test_armed_at_set_on_strategy(self, db_session):
+        """armed 时 strategy.armed_at 被设置(结构化标记)。"""
+        plan = _make_plan(db_session, trigger_prices=(13.0,))
+        # 关联 strategy
+        from backend.services.action.models import SymbolStrategy
+        strategy = SymbolStrategy(
+            symbol="LI:US", side="BUY", target_quantity=100,
+            order_type="LIMIT", status="active", plan_id=plan.id,
+        )
+        db_session.add(strategy)
+        db_session.flush()
+        tranche = db_session.query(ExecutionTranche).filter_by(plan_id=plan.id).first()
+        tranche.linked_symbol_strategy_id = strategy.id
+        db_session.flush()
+
+        fetcher = self._make_fetcher(high=14.0, low=12.0)
+        now = datetime(2026, 6, 9, 15, 0, tzinfo=timezone.utc)
+        evaluate_triggers(db_session, fetch_kline_high_low=fetcher, now=now)
+
+        db_session.refresh(strategy)
+        assert strategy.armed_at is not None
+        assert strategy.interval_blocked is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 补扫
+# ═══════════════════════════════════════════════════════════════════
+
+class TestBackfill:
+
+    def test_a_backfill_armed(self, db_session):
+        """(a) 历史K线里有触达 → 补扫后 armed。"""
+        plan = _make_plan(db_session, trigger_prices=(13.0, 12.0))
+        since = datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 9, 15, 0, tzinfo=timezone.utc)
+
+        # 历史 K 线: 一根 low=12.5 触达 batch1(13.0), 不触达 batch2(12.0)
+        def fetcher(symbol, market, s, e):
+            return [(14.0, 12.5), (13.8, 13.0)]  # 两根 K 线
+
+        result = backfill_missed_triggers(db_session, since, now, fetch_history_klines=fetcher)
+
+        assert result["armed"] == 1
+        t1 = db_session.query(ExecutionTranche).filter_by(plan_id=plan.id, sequence=1).first()
+        t2 = db_session.query(ExecutionTranche).filter_by(plan_id=plan.id, sequence=2).first()
+        assert t1.status == TrancheStatus.ARMED
+        assert t2.status == TrancheStatus.PENDING
+
+    def test_b_fetch_failure_skip(self, db_session):
+        """(b) 历史K线取不到 → 保守跳过、不误触发。"""
+        plan = _make_plan(db_session, trigger_prices=(13.0,))
+        since = datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 9, 15, 0, tzinfo=timezone.utc)
+
+        def fetcher(symbol, market, s, e):
+            return None  # 接口失败
+
+        result = backfill_missed_triggers(db_session, since, now, fetch_history_klines=fetcher)
+
+        assert result["failed_fetch"] >= 1
+        assert result["armed"] == 0
+        t = db_session.query(ExecutionTranche).filter_by(plan_id=plan.id).first()
+        assert t.status == TrancheStatus.PENDING
+
+    def test_backfill_no_trigger(self, db_session):
+        """历史K线里没有触达 → 保持 pending。"""
+        plan = _make_plan(db_session, trigger_prices=(10.0,))
+        since = datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 9, 15, 0, tzinfo=timezone.utc)
+
+        def fetcher(symbol, market, s, e):
+            return [(14.0, 12.0), (13.5, 11.0)]  # 都没到 10.0
+
+        result = backfill_missed_triggers(db_session, since, now, fetch_history_klines=fetcher)
+
+        assert result["armed"] == 0

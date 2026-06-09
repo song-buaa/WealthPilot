@@ -157,6 +157,10 @@ class SymbolStrategy(Base):
     related_conversation_id = Column(String(36), nullable=True)
     decision_basis = Column(Text, nullable=True)
 
+    # v3.11 M6: 到价触发标记
+    armed_at = Column(DateTime, nullable=True)        # 非 null = 已到价待确认
+    interval_blocked = Column(String(100), nullable=True)  # 非 null = 纪律暂缓原因
+
     created_at = Column(DateTime, nullable=False, default=_utcnow)
     updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
     completed_at = Column(DateTime, nullable=True)
