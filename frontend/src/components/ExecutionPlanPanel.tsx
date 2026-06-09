@@ -5,6 +5,7 @@
  */
 import { useState } from 'react'
 import { Loader2, ChevronDown, ChevronUp, AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { formatDataSource, formatDegraded, formatFactors, formatConstraints } from '@/lib/plan-display'
 
 interface Tranche {
   sequence: number
@@ -269,44 +270,51 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
         </div>
       )}
 
-      {/* 数据来源 */}
-      <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <span>K线: {String(dsm.kline_source || 'N/A')} ({String(dsm.kline_points || 0)}根)</span>
-        <span>行情: {String(dsm.price_source || 'N/A')}{dsm.is_realtime ? ' (实时)' : ''}</span>
-        {plan.tick_degraded && <span style={{ color: '#D97706' }}>tick降级</span>}
+      {/* 数据来源(人话) */}
+      <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
+        {formatDataSource(dsm)}
       </div>
       {degraded.length > 0 && (
         <div style={{ fontSize: 11, color: '#D97706', display: 'flex', gap: 4, alignItems: 'center' }}>
-          <Info size={12} /> 数据降级: {degraded.join(', ')}
+          <Info size={12} /> {formatDegraded(degraded)}
         </div>
       )}
 
-      {/* 折叠: 因子快照 */}
+      {/* 计划依据的关键指标 */}
       <button onClick={() => setShowFactors(!showFactors)} style={expandBtnStyle}>
         {showFactors ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        因子快照
+        计划依据的关键指标
       </button>
       {showFactors && (
-        <pre style={preStyle}>
-          {JSON.stringify({
-            current_price: fs.current_price, atr14: fs.atr14,
-            volatility_annual: fs.volatility_annual,
-            price_percentile: fs.price_percentile,
-            drawdown_from_high: fs.drawdown_from_high,
-            trend_signal: fs.trend_signal, rsi14: fs.rsi14,
-          }, null, 2)}
-        </pre>
+        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '8px 10px', marginTop: 4 }}>
+          {formatFactors(fs).map((f, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, fontSize: 11, lineHeight: 1.5 }}>
+              <span style={{ color: '#374151', fontWeight: 600, minWidth: 80 }}>{f.label}</span>
+              <span style={{ color: '#1D4ED8', fontWeight: 600, minWidth: 45 }}>{f.value}</span>
+              <span style={{ color: '#6B7280' }}>{f.desc}</span>
+            </div>
+          ))}
+        </div>
       )}
 
-      {/* 折叠: 纪律约束 */}
+      {/* 本计划遵守的纪律 */}
       <button onClick={() => setShowConstraints(!showConstraints)} style={expandBtnStyle}>
         {showConstraints ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        套用的纪律约束
+        本计划遵守的纪律
       </button>
       {showConstraints && (
-        <pre style={preStyle}>
-          {JSON.stringify(plan.constraints_applied, null, 2)}
-        </pre>
+        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '8px 10px', marginTop: 4 }}>
+          {formatConstraints(
+            plan.constraints_applied as Record<string, unknown>,
+            psb.num_tranches,
+            psb.target_position_pct,
+          ).map((c, i) => (
+            <div key={i} style={{ fontSize: 11, color: c.checked ? '#059669' : '#D97706', marginBottom: 3, display: 'flex', gap: 4 }}>
+              <span>{c.checked ? '✓' : '⚠'}</span>
+              <span>{c.text}</span>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* 确认按钮 */}
