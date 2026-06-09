@@ -111,7 +111,7 @@ class TestConversions:
 
     def test_symbol_to_futu(self):
         assert symbol_to_futu("QQQ:US") == "US.QQQ"
-        assert symbol_to_futu("0700:HK") == "HK.0700"
+        assert symbol_to_futu("0700:HK") == "HK.00700"  # 港股补零到5位
 
     def test_symbol_to_av_ticker_us(self):
         assert symbol_to_av_ticker("LI:US") == "LI"
@@ -122,7 +122,7 @@ class TestConversions:
 
     def test_symbol_to_tiger_ticker(self):
         assert symbol_to_tiger_ticker("LI:US") == "LI"
-        assert symbol_to_tiger_ticker("0700:HK") == "0700"
+        assert symbol_to_tiger_ticker("0700:HK") == "00700"  # 港股补零到5位
 
 
 # ── infer_symbol_from_ticker ─────────────────────────────────

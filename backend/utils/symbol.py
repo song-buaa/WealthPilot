@@ -140,12 +140,18 @@ def broker_sync_to_symbol(broker_sync_str: str) -> str:
 def symbol_to_futu(symbol_str: str) -> str:
     """TICKER:MARKET → MARKET.TICKER (富途 SDK 格式)。
 
+    港股 ticker 补零到 5 位（富途需要 HK.00700 而非 HK.0700）。
+
     >>> symbol_to_futu("QQQ:US")
     'US.QQQ'
     >>> symbol_to_futu("0700:HK")
-    'HK.0700'
+    'HK.00700'
+    >>> symbol_to_futu("00700:HK")
+    'HK.00700'
     """
     ticker, market = parse_symbol(symbol_str)
+    if market == "HK" and ticker.isdigit():
+        ticker = ticker.zfill(5)
     return f"{market}.{ticker}"
 
 
@@ -166,12 +172,18 @@ def symbol_to_av_ticker(symbol_str: str) -> str | None:
 def symbol_to_tiger_ticker(symbol_str: str) -> str:
     """TICKER:MARKET → Tiger SDK 纯 ticker。
 
+    港股 ticker 补零到 5 位（Tiger SDK 需要 00700 而非 0700）。
+
     >>> symbol_to_tiger_ticker("LI:US")
     'LI'
     >>> symbol_to_tiger_ticker("0700:HK")
-    '0700'
+    '00700'
+    >>> symbol_to_tiger_ticker("00700:HK")
+    '00700'
     """
-    ticker, _ = parse_symbol(symbol_str)
+    ticker, market = parse_symbol(symbol_str)
+    if market == "HK" and ticker.isdigit():
+        ticker = ticker.zfill(5)
     return ticker
 
 
