@@ -225,22 +225,26 @@ def make_fallback_result(intent_type: str, original_error: str = ""):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 执行计划 validator (v3.11, PRD §9)
+# 执行计划 validator (v3.11 债4, PRD §9)
 # 旁路调用,不走 validate_decision_output 的 intent_type 分发
+#
+# 两层防线:
+#   1. plan_summary_block 结构化比对(hard) — 锁死下单安全
+#   2. 文案数字白名单检查(soft) — 暴露 LLM 编数但不卡下单
 # ══════════════════════════════════════════════════════════════════
 
 import re
 
-# 匹配文案中的"疑似计划数字"：带小数点的浮点数 或 ≥100 的整数
-# 不匹配：百分比(如"45%")、小整数(<100)、中文量词后缀
-_SUSPICIOUS_NUMBER_RE = re.compile(
-    r"(?<![.\d])"           # 前面不是数字或小数点
-    r"(\d+\.\d+)"          # 浮点数(如 13.91, 0.45)
-    r"(?![\d%])"            # 后面不是数字/百分号
+# 匹配文案中的数字：浮点数(≥3.0) 或 ≥100 的整数
+# 排除：百分号后缀、中文量词后缀、小浮点/小整数
+_TEXT_NUMBER_RE = re.compile(
+    r"(?<![.\d])"
+    r"(\d+\.\d+)"          # 浮点数
+    r"(?![\d%])"
     r"|"
     r"(?<![.\d])"
-    r"(\d{3,})"             # ≥100 的整数(如 1877, 5633)
-    r"(?![\d%年月日天条批周])" # 后面不是数字/百分号/中文量词
+    r"(\d{3,})"             # ≥100 的整数
+    r"(?![\d%年月日天条批周])"
 )
 
 # 因子快照里允许在文案中引用的字段
@@ -256,50 +260,54 @@ def validate_execution_plan(
     llm_rationale: str,
     llm_risk_notes: str,
     factor_snapshot: dict,
+    plan_dict_frozen: dict | None = None,
 ) -> ValidationResult:
-    """执行计划 validator — 校验 LLM 输出与规则引擎数字一致。
+    """执行计划 validator — 结构化比对(hard) + 文案白名单(soft)。
 
-    PRD §9:
-    1. plan_summary_block 里的数字必须与 plan_dict 逐一一致
-       (本函数不需要比对两份数据——因为 plan_summary_block 就是 plan_dict
-        直接产出的。真正要防的是 orchestrator 组装时错传/LLM 篡改。)
-    2. rationale/risk_notes 禁止新增 plan_dict 之外的价格/数量/批次数字
-    3. 引用波动率/回撤/分位必须能追溯到 factor_snapshot
-
-    Returns:
-        ValidationResult (旁路调用版,intent_type="ExecutionPlan")
+    Args:
+        plan_dict: orchestrator 最终返回的 plan_summary_block
+        llm_rationale: LLM 产出的解释文案
+        llm_risk_notes: LLM 产出的风险提示
+        factor_snapshot: 因子快照(用于文案数字白名单)
+        plan_dict_frozen: 规则引擎原始产出的 plan dict(调 LLM 前锁定)。
+                          若提供，与 plan_dict 逐字段比对；不一致 = hard。
     """
     failures: list[ValidationFailure] = []
 
-    # ── Check 1: plan_summary_block 数值完整性 ──
-    psb = plan_dict.get("plan_summary_block", plan_dict)
+    # ══ Layer 1: plan_summary_block 结构化比对 (hard) ══
+    psb = plan_dict
     tranches = psb.get("tranches", [])
     if not tranches:
         failures.append(ValidationFailure(
-            rule="plan_value_mismatch",
+            rule="plan_structure_invalid",
             message="plan_summary_block 不含 tranches",
             severity="hard",
         ))
 
-    # ── Check 2: rationale/risk_notes 不含计划外数字 ──
-    # 收集 plan dict 里所有合法数字(含 factor_snapshot 可引用值)
-    allowed_numbers = _collect_allowed_numbers(psb, factor_snapshot)
-
-    for label, text in [("rationale", llm_rationale), ("risk_notes", llm_risk_notes)]:
-        if not text:
-            continue
-        suspicious = _find_suspicious_numbers(text, allowed_numbers)
-        for num_str in suspicious:
+    # 如果有冻结副本，逐字段比对
+    if plan_dict_frozen is not None:
+        mismatches = _compare_plan_dicts(plan_dict_frozen, plan_dict)
+        for field, expected, actual in mismatches:
             failures.append(ValidationFailure(
                 rule="plan_value_mismatch",
-                message=(
-                    f"{label} 中出现计划/因子之外的数字 '{num_str}'，"
-                    f"LLM 不应新增 plan_dict 之外的数值"
-                ),
+                message=f"plan_summary_block.{field}: 期望 {expected}, 实际 {actual}",
                 severity="hard",
             ))
 
-    # 判定
+    # ══ Layer 2: 文案数字白名单检查 (soft) ══
+    allowed = _collect_allowed_numbers(psb, factor_snapshot)
+    for label, text in [("rationale", llm_rationale), ("risk_notes", llm_risk_notes)]:
+        if not text:
+            continue
+        suspicious = _find_text_numbers(text, allowed)
+        for num_str in suspicious:
+            failures.append(ValidationFailure(
+                rule="plan_text_number_untracked",
+                message=f"{label} 含计划/因子之外的数字 '{num_str}'",
+                severity="soft",
+            ))
+
+    # 判定: hard failure → 拦截; soft only → 通过但带警告
     hard = [f for f in failures if f.severity == "hard"]
     return ValidationResult(
         passed=len(hard) == 0,
@@ -309,31 +317,56 @@ def validate_execution_plan(
     )
 
 
-def _collect_allowed_numbers(plan_summary: dict, factor_snapshot: dict) -> set[str]:
-    """收集所有"允许出现在文案中"的数字字符串。"""
-    allowed = set()
+def _compare_plan_dicts(frozen: dict, actual: dict) -> list[tuple[str, object, object]]:
+    """逐字段比对 frozen plan dict 与 actual plan dict。
 
-    # plan_summary 里的所有数值
-    def _extract_nums(obj):
+    返回 [(field_path, expected, actual), ...]
+    """
+    mismatches = []
+    # 顶层数值字段
+    for key in ("total_quantity", "num_tranches", "target_position_pct",
+                "current_position_pct", "current_price"):
+        fv = frozen.get(key)
+        av = actual.get(key)
+        if fv != av:
+            mismatches.append((key, fv, av))
+
+    # tranches 逐批比对
+    ft = frozen.get("tranches", [])
+    at = actual.get("tranches", [])
+    if len(ft) != len(at):
+        mismatches.append(("tranches.length", len(ft), len(at)))
+    else:
+        for i, (f, a) in enumerate(zip(ft, at)):
+            for field in ("sequence", "quantity", "trigger_price", "limit_price", "trigger_type"):
+                fv = f.get(field)
+                av = a.get(field)
+                if fv != av:
+                    mismatches.append((f"tranches[{i}].{field}", fv, av))
+    return mismatches
+
+
+def _collect_allowed_numbers(plan_summary: dict, factor_snapshot: dict) -> set[str]:
+    """收集 plan dict + factor_snapshot 里所有合法数字的字符串表示。"""
+    allowed: set[str] = set()
+
+    def _extract(obj):
         if isinstance(obj, (int, float)):
-            # 多种字符串表示都允许
             allowed.add(str(obj))
             if isinstance(obj, float):
-                # 允许不同精度
                 for d in range(5):
                     allowed.add(f"{obj:.{d}f}")
             if isinstance(obj, int):
                 allowed.add(str(float(obj)))
         elif isinstance(obj, dict):
             for v in obj.values():
-                _extract_nums(v)
+                _extract(v)
         elif isinstance(obj, list):
             for v in obj:
-                _extract_nums(v)
+                _extract(v)
 
-    _extract_nums(plan_summary)
+    _extract(plan_summary)
 
-    # factor_snapshot 里允许引用的字段值
     for field in _ALLOWED_FACTOR_FIELDS:
         val = factor_snapshot.get(field)
         if val is not None:
@@ -341,7 +374,6 @@ def _collect_allowed_numbers(plan_summary: dict, factor_snapshot: dict) -> set[s
             if isinstance(val, float):
                 for d in range(5):
                     allowed.add(f"{val:.{d}f}")
-                # 百分比形式也允许(0.4544 → 45.44)
                 pct = val * 100
                 allowed.add(f"{pct:.1f}")
                 allowed.add(f"{pct:.2f}")
@@ -350,42 +382,26 @@ def _collect_allowed_numbers(plan_summary: dict, factor_snapshot: dict) -> set[s
     return allowed
 
 
-def _find_suspicious_numbers(text: str, allowed: set[str]) -> list[str]:
-    """在文案中找出不在允许集合里的可疑数字。
-
-    只关注"看起来像价格/数量"的数字：
-    - 浮点数(如 13.91, 15.50) — 几乎都是价格
-    - ≥100 的整数(如 1877, 5633) — 几乎都是股数
-    不关注：小整数、百分比、中文量词后缀的数字。
-    """
+def _find_text_numbers(text: str, allowed: set[str]) -> list[str]:
+    """在文案中找不在白名单里的数字(浮点≥3 或整数≥100)。"""
     suspicious = []
-    for match in _SUSPICIOUS_NUMBER_RE.finditer(text):
-        # 两个捕获组：group(1)=浮点数, group(2)=大整数
+    for match in _TEXT_NUMBER_RE.finditer(text):
         num_str = match.group(1) or match.group(2)
         if not num_str:
             continue
-
         try:
             val = float(num_str)
         except ValueError:
             continue
-
-        # 浮点数: 跳过很小的值(如 0.45, 0.78 — 通常是比例)
         if "." in num_str and val < 3.0:
             continue
-
         if num_str in allowed:
             continue
-
-        # 尝试各种精度匹配
-        matched = False
-        for a in allowed:
-            try:
-                if abs(float(a) - val) < 0.01:
-                    matched = True
-                    break
-            except ValueError:
-                continue
+        matched = any(
+            abs(float(a) - val) < 0.01
+            for a in allowed
+            if a.replace(".", "", 1).replace("-", "", 1).isdigit()
+        )
         if not matched:
             suspicious.append(num_str)
     return suspicious

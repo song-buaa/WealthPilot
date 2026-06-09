@@ -1005,19 +1005,30 @@ def execute_generate_execution_plan(**kwargs) -> dict:
         violations=plan_result.violations,
     )
 
-    _logger.info("[orchestrator] Step 4: validator placeholder for %s", symbol)
+    _logger.info("[orchestrator] Step 4: validator for %s", symbol)
 
-    # ── Step 4: validator — 数值比对 (PRD §9) ──
+    # ── Step 4: validator — 结构化比对(hard) + 文案白名单(soft) ──
     from backend.graph.decision_validator import validate_execution_plan
+    import copy
+
+    # plan_dict_frozen: 规则引擎原始产出的冻结副本(LLM 之前锁定)
+    plan_dict_frozen = copy.deepcopy(plan_result.plan_summary_block)
 
     validation = validate_execution_plan(
         plan_dict=plan_result.plan_summary_block,
         llm_rationale=rationale,
         llm_risk_notes=risk_notes,
         factor_snapshot=factor_dict,
+        plan_dict_frozen=plan_dict_frozen,
     )
+
+    # soft warnings 记录但不阻断
+    soft_warnings = [f.message for f in validation.failures if f.severity == "soft"]
+    if soft_warnings:
+        _logger.info("[orchestrator] validator soft warnings: %s", soft_warnings)
+
     if not validation.passed:
-        failure_msgs = [f.message for f in validation.failures]
+        failure_msgs = [f.message for f in validation.failures if f.severity == "hard"]
         _logger.warning("[orchestrator] validator 拦截: %s", failure_msgs)
         return {
             "error": "plan_value_mismatch",
@@ -1033,7 +1044,7 @@ def execute_generate_execution_plan(**kwargs) -> dict:
         "constraints_applied": plan_result.constraints_applied,
         "rationale": rationale,
         "risk_notes": risk_notes,
-        "warnings": plan_result.warnings,
+        "warnings": plan_result.warnings + soft_warnings,
         "violations": plan_result.violations,
         "tick_degraded": plan_result.tick_degraded,
         "source_decision_ref": kwargs.get("source_decision_ref", ""),
