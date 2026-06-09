@@ -250,3 +250,44 @@ class PositionUpsertService:
                 return parts[0]
 
         return symbol
+
+
+def backfill_bare_names(session: Session) -> int:
+    """补全 name == ticker（裸代码）的持仓行的中文名。
+
+    按 symbol（如 LI:US）分组，组内若存在 name≠ticker 的行（有中文名）
+    则作为 donor，回填给组内 name==ticker 的行。
+
+    自限制：一旦补上中文名，name≠ticker，后续不再触发。
+    """
+    all_positions = session.query(BusinessPosition).filter(
+        BusinessPosition.market_value_cny > 0,
+        BusinessPosition.symbol.isnot(None),
+        BusinessPosition.symbol != "",
+    ).all()
+
+    from collections import defaultdict
+    groups: dict[str, list] = defaultdict(list)
+    for p in all_positions:
+        groups[p.symbol].append(p)
+
+    count = 0
+    for symbol, members in groups.items():
+        donor_name = None
+        for p in members:
+            if p.ticker and p.name and p.name != p.ticker:
+                donor_name = p.name
+                break
+
+        if not donor_name:
+            continue
+
+        for p in members:
+            if p.ticker and p.name == p.ticker:
+                p.name = donor_name
+                count += 1
+
+    if count:
+        session.commit()
+        print(f"[backfill] 补全 {count} 条裸代码名称", flush=True)
+    return count

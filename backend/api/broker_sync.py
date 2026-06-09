@@ -138,6 +138,10 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
             service = GuojinSyncService()
             service.sync_and_persist(db, triggered_by=triggered_by)
         print(f"[broker-sync] {broker} 同步完成 @ {datetime.now()}", flush=True)
+
+        # ── 统一后处理：补全裸代码名称（如雪盈 LI → 理想汽车）──
+        from services.broker_sync.position_upsert_service import backfill_bare_names
+        backfill_bare_names(db)
     except Exception as e:
         import traceback
         print(f"[broker-sync] {broker} 同步失败: {type(e).__name__}: {e}", flush=True)
