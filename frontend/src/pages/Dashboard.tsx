@@ -60,11 +60,13 @@ const ALLOC_EXAMPLES: Record<string, string> = {
 
 // DataTip 已抽取为共享组件 @/components/shared/DataTip
 
-// ── concentration 按名称累加 ─────────────────────────────────
-function getPct(concentration: Record<string, number>, name: string): number {
-  return Object.entries(concentration)
-    .filter(([k]) => k.split(':')[1] === name)
-    .reduce((sum, [, v]) => sum + v, 0)
+// ── concentration 按 position id 精确取值 ────────────────────
+function getPct(concentration: Record<string, number>, id: number): number {
+  const prefix = `${id}:`
+  for (const [k, v] of Object.entries(concentration)) {
+    if (k.startsWith(prefix)) return v
+  }
+  return 0
 }
 
 // ── 平台显示名映射（内部标识不变，仅改用户可见文案）──
@@ -323,7 +325,7 @@ export default function Dashboard() {
                   const pnlV = p.profit_loss_value ?? 0
                   const costV = (p.market_value_cny ?? 0) - pnlV
                   const rate = costV > 0 ? (pnlV / costV) * 100 : 0
-                  const pct = getPct(bs.concentration, p.name)
+                  const pct = getPct(bs.concentration, p.id)
                   const isUSD = p.original_currency === 'USD'
                   const isHKD = p.original_currency === 'HKD'
                   return (
