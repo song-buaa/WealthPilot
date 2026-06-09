@@ -75,8 +75,34 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    # M6: 触发评估循环(盘中每 15 分钟)
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    def _run_trigger_evaluation():
+        from app.database import get_session as _gs
+        from backend.services.execution_plan.trigger_evaluator import evaluate_triggers
+        session = _gs()
+        try:
+            result = evaluate_triggers(session)
+            if result["armed"] > 0 or result["skipped_interval"] > 0:
+                print(f"[trigger] 评估完成: {result}", flush=True)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"[trigger] 评估异常: {e}", flush=True)
+        finally:
+            session.close()
+
+    scheduler.add_job(
+        _run_trigger_evaluation,
+        trigger=IntervalTrigger(minutes=15),
+        id="trigger_evaluation",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
+
     scheduler.start()
-    print("[scheduler] 定时同步已启动,每天北京时间 22:00 执行")
+    print("[scheduler] 定时同步(22:00) + 触发评估(每15分钟) 已启动")
 
     yield
 
