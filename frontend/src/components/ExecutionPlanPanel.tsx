@@ -41,6 +41,7 @@ interface Props {
   market: string
   side: string
   onClose: () => void
+  onConfirmPlan?: (planResult: PlanResult & { plan_id: string }) => void
 }
 
 const SIDE_LABEL: Record<string, string> = {
@@ -51,7 +52,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   IMMEDIATE: '立即', PRICE_BELOW: '低于', PRICE_ABOVE: '高于', MANUAL: '手动',
 }
 
-export default function ExecutionPlanPanel({ symbol, market, side, onClose }: Props) {
+export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
@@ -75,7 +76,7 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose }: Pr
     setPlan(null)
     const anchors = parseAnchors()
     try {
-      const res = await fetch('/api/execution-plan/generate', {
+      const res = await fetch('/api/execution-plan/persist-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -308,9 +309,19 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose }: Pr
         </pre>
       )}
 
-      <div style={{ marginTop: 10, fontSize: 11, color: '#9CA3AF', textAlign: 'center' }}>
-        草案预览(第一阶段) — 确认/下单功能待第二阶段接入
-      </div>
+      {/* 确认按钮 */}
+      {onConfirmPlan && plan.plan_summary_block && (
+        <div style={{ marginTop: 10, textAlign: 'center' }}>
+          <button onClick={() => onConfirmPlan({ ...plan, plan_id: (plan as Record<string,unknown>).plan_id as string })}
+            style={{
+              padding: '8px 24px', fontSize: 13, fontWeight: 600, borderRadius: 8,
+              border: 'none', background: '#1B2A4A', color: '#fff', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+            确认计划 → 加入投资行动
+          </button>
+        </div>
+      )}
     </div>
   )
 }

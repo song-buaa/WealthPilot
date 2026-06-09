@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft } from '@/lib/api'
 import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
@@ -230,6 +230,10 @@ export default function Decision() {
   // v3.2 行动清单
   const [draftCardOpen, setDraftCardOpen] = useState(false)
   const [currentDraft, setCurrentDraft] = useState<ActionDraftResponse | null>(null)
+  const [planMetaForModal, setPlanMetaForModal] = useState<{
+    plan_id?: string; factor_snapshot?: Record<string,unknown>;
+    constraints_applied?: Record<string,unknown>; rationale?: string;
+  } | null>(null)
   const [actionMsgId, setActionMsgId] = useState<number | null>(null)
 
   // ── 初始化：加载会话列表 + URL 参数处理 ──
@@ -805,6 +809,7 @@ export default function Decision() {
         onClose={handleDraftClose}
         draft={currentDraft}
         onConfirmed={handleDraftConfirmed}
+        planMeta={planMetaForModal}
       />
     </div>
   )
@@ -988,6 +993,44 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
               market={market}
               side={sideMap[action] || 'BUY'}
               onClose={() => setShowExecPlan(false)}
+              onConfirmPlan={(planResult) => {
+                // 组装 ActionDraftResponse 格式，打开 modal
+                const tranches = planResult.plan_summary_block?.tranches || []
+                const strategies = tranches.map((t, i) => ({
+                  symbol: planResult.plan_summary_block?.symbol || symbol,
+                  side: sideMap[action] || 'BUY',
+                  quantity: t.quantity,
+                  quantity_pct: null,
+                  order_type: 'LIMIT' as const,
+                  trigger_price: t.trigger_price,
+                  limit_price: t.limit_price,
+                  parent_intent_index: null,
+                  value_sources: null,
+                  _trigger_type: t.trigger_type,
+                }))
+                const fakeDraft: ActionDraftResponse = {
+                  id: planResult.plan_id || '',
+                  conversation_id: '',
+                  decision_summary: planResult.rationale || '',
+                  payload: {
+                    symbol_strategies: strategies as SymbolStrategyDraft[],
+                    allocation_intents: [],
+                    risk_notes: planResult.risk_notes ? [planResult.risk_notes] : [],
+                    missing_fields: [],
+                  },
+                  status: 'draft',
+                  created_at: null, updated_at: null, confirmed_at: null, discarded_at: null,
+                }
+                setPlanMetaForModal({
+                  plan_id: planResult.plan_id,
+                  factor_snapshot: planResult.factor_snapshot as Record<string,unknown>,
+                  constraints_applied: planResult.constraints_applied as Record<string,unknown>,
+                  rationale: planResult.rationale,
+                })
+                setCurrentDraft(fakeDraft)
+                setDraftCardOpen(true)
+                setShowExecPlan(false)
+              }}
             />
           )
         })()}
