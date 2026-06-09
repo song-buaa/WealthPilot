@@ -175,12 +175,15 @@ def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[Dev
         _check_range("另类资产", balance_sheet.alternative_pct,
                      portfolio.min_alternative_pct, portfolio.max_alternative_pct)
 
-        # ── 2. 纪律触发检测（阈值来自 app/discipline/config.py，与投资纪律页统一）──
+        # ── 2. 纪律触发检测（按标的合并后判断，与投资纪律交易评估口径统一）──
+        from app.utils.position_aggregator import aggregate_investment_positions
         _cfg_pos = get_rules()["single_asset_limits"]
         _max_pct     = _cfg_pos["max_position_pct"] * 100       # 40%
         _warning_pct = _cfg_pos["warning_position_pct"] * 100   # 30%
-        for key, pct in balance_sheet.concentration.items():
-            display_name = key.split(":", 1)[1]  # 剥掉 "id:" 前缀，取可读名称
+        agg_positions, _ = aggregate_investment_positions(portfolio_id)
+        for agg in agg_positions:
+            pct = round(agg.weight * 100, 1)
+            display_name = agg.name
             if pct > _max_pct:
                 alerts.append(DeviationAlert(
                     alert_type="纪律触发",
