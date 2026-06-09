@@ -33,7 +33,7 @@ const FIELD_OPTS: Record<string, string[]> = {
   total_assets:          ['<50万','50-200万','200-500万','>500万'],
   investable_ratio:      ['<20%','20-50%','50-80%','>80%'],
   liability_level:       ['无','低','中','高'],
-  family_status:         ['单身','已婚无子','已婚有子','退休'],
+  family_status:         ['未婚','已婚无子','已婚有子','退休'],
   asset_structure:       ['现金为主','固收为主','股票基金为主','多元配置'],
   investment_motivation: ['新增资金','调整配置','市场波动调整','长期规划'],
   fund_usage_timeline:   ['1年内','1-3年','3年以上','不确定'],

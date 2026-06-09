@@ -26,24 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# _SKILL_BUNDLES_BY_ROUTE 语义说明（v3.7 显性化）
+# v3.8.2: LEGACY 兼容表。内容 == v3.8.1 旧 _SKILL_BUNDLES_BY_ROUTE 逐字不变。
+# 仅用于 _select_skills_for_route → PlanningOutput.selected_skills 兼容输出。
+# 真实任务分工描述见 skill_manifest.py 的 SKILL_MANIFEST。
 #
-# 当前语义：本配置不是 ExecutingAgent 的执行契约。
-#   - 仅用于 PlanningOutput.selected_skills 字段赋值（供日志和评测观测）
-#   - 仅用于 LLM Skill Selector 候选集白名单过滤
-#   - ExecutingAgent 通过硬编码 if/elif route 分支执行，不读取本配置
-#
-# v3.7 范围：保留现状结构（list[str]），不重构为分阶段 dict。
-#
-# 已知不一致（v3.8 统一处理）：
-#   1. wp-reasoning / wp-citation-rules / wp-output-validator 实际由
-#      ExpressingAgent / ReviewingAgent 调用，非 ExecutingAgent 阶段能力
-#   2. wp-retrieve-principles 在 position/portfolio 路由下由 data_loader
-#      内部触发，非 ExecutingAgent 显式 invoke_skill 调用
-#   3. 见下方 TODO(v3.8) 标注的幽灵 Skill
+# 已知不一致（v3.8.1 对账层已结构化记录）：
+#   1. wp-reasoning / wp-citation-rules / wp-output-validator 非 Executing 阶段
+#   2. wp-retrieve-principles 在 position/portfolio 下被 data_loader 内部吞
+#   3. wp-calc-allocation-deviation / wp-propose-allocation 为幽灵 Skill（留 v3.8.3 清理）
 # ─────────────────────────────────────────────────────────────────────────
 
-_SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
+LEGACY_SELECTED_SKILLS_BY_ROUTE: dict[str, list[str]] = {
     # PositionDecision 单标决策：完整流程
     "position_single": [
         "wp-fetch-holdings",
@@ -94,9 +87,13 @@ _SKILL_BUNDLES_BY_ROUTE: dict[str, list[str]] = {
 }
 
 
+# deprecated alias — 保留一个版本防漏引用，v3.8.3+ 删除
+_SKILL_BUNDLES_BY_ROUTE = LEGACY_SELECTED_SKILLS_BY_ROUTE
+
+
 def _select_skills_for_route(route: str) -> list[str]:
     """根据路由决策选择 Skill 组合（静态映射，99% 场景）。"""
-    return _SKILL_BUNDLES_BY_ROUTE.get(route, [])
+    return LEGACY_SELECTED_SKILLS_BY_ROUTE.get(route, [])
 
 
 # ════════════════════════════════════════════════

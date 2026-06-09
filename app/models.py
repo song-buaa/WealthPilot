@@ -279,7 +279,7 @@ class UserProfile(Base):
     total_assets          = Column(String(20),  nullable=True)   # "<50万"|"50-200万"|"200-500万"|">500万"
     investable_ratio      = Column(String(10),  nullable=True)   # "<20%"|"20-50%"|"50-80%"|">80%"
     liability_level       = Column(String(10),  nullable=True)   # "无"|"低"|"中"|"高"
-    family_status         = Column(String(20),  nullable=True)   # "单身"|"已婚无子"|"已婚有子"|"退休"
+    family_status         = Column(String(20),  nullable=True)   # "未婚"|"已婚无子"|"已婚有子"|"退休"
     asset_structure       = Column(String(20),  nullable=True)   # "现金为主"|"固收为主"|"股票基金为主"|"多元配置"
     investment_motivation = Column(String(20),  nullable=True)   # "新增资金"|"调整配置"|"市场波动调整"|"长期规划"
     fund_usage_timeline   = Column(String(10),  nullable=True)   # "1年内"|"1-3年"|"3年以上"|"不确定"

@@ -3,63 +3,88 @@ Philosophy Service — 投资理念文档管理
 
 管理 knowledge_base/investment_style/investment_philosophy.md 的读写。
 参照 discipline_service.py 的手册管理模式。
+
+防复发设计（v3.8 修复）：
+- GET 读不到文件时返回占位符但不写盘（"读"和"写默认值"解耦）
+- reset（DELETE）覆盖前先备份当前内容到 .bak
+- reindex 不索引占位符内容
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 _PHILOSOPHY_FILE = Path("knowledge_base/investment_style/investment_philosophy.md")
+_BACKUP_DIR = Path("knowledge_base/investment_style/_backups")
 
-# 内置默认内容（用于 reset 恢复）
-_DEFAULT_CONTENT: Optional[str] = None
+# 硬编码占位符（仅用于 GET fallback 和 reset，不会被自动持久化）
+_PLACEHOLDER = (
+    "---\n"
+    "source: 自己\n"
+    "date: 2026-05-13\n"
+    "time_sensitivity: permanent\n"
+    "tags: [投资理念]\n"
+    "---\n\n"
+    "# 投资理念\n\n"
+    "[在这里填写]\n"
+)
 
-
-def _get_default_content() -> str:
-    """读取当前文件内容作为默认内容（首次调用时缓存）。"""
-    global _DEFAULT_CONTENT
-    if _DEFAULT_CONTENT is None:
-        if _PHILOSOPHY_FILE.exists():
-            _DEFAULT_CONTENT = _PHILOSOPHY_FILE.read_text(encoding="utf-8")
-        else:
-            _DEFAULT_CONTENT = "---\nsource: 自己\ndate: 2026-05-13\ntime_sensitivity: permanent\ntags: [投资理念]\n---\n\n# 投资理念\n\n[在这里填写]\n"
-    return _DEFAULT_CONTENT
+_PLACEHOLDER_MARKER = "[在这里填写]"
 
 
 def get_philosophy() -> dict:
-    """返回投资理念文档内容。"""
+    """返回投资理念文档内容。文件不存在时返回占位符但不写盘。"""
     if _PHILOSOPHY_FILE.exists():
         content = _PHILOSOPHY_FILE.read_text(encoding="utf-8")
         return {"source": "current", "content": content}
-    return {"source": "default", "content": _get_default_content()}
+    return {"source": "default", "content": _PLACEHOLDER}
 
 
 def save_philosophy(content: str) -> None:
-    """保存投资理念文档（保留 YAML frontmatter 不变，或完整覆盖）。"""
+    """保存投资理念文档。"""
     _PHILOSOPHY_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PHILOSOPHY_FILE.write_text(content, encoding="utf-8")
     logger.info(f"投资理念文档已保存: {_PHILOSOPHY_FILE}")
 
-    # 触发知识库重新索引
     _trigger_reindex()
 
 
 def reset_philosophy() -> dict:
-    """恢复为默认投资理念内容。"""
-    default = _get_default_content()
+    """恢复为占位符内容。覆盖前先备份当前磁盘内容。"""
+    _backup_current()
     _PHILOSOPHY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PHILOSOPHY_FILE.write_text(default, encoding="utf-8")
+    _PHILOSOPHY_FILE.write_text(_PLACEHOLDER, encoding="utf-8")
     logger.info(f"投资理念文档已恢复默认: {_PHILOSOPHY_FILE}")
 
     _trigger_reindex()
-    return {"source": "default", "content": default}
+    return {"source": "default", "content": _PLACEHOLDER}
+
+
+def _backup_current() -> None:
+    """把当前磁盘文件备份到 _backups/ 目录（带时间戳），内容为占位符时跳过。"""
+    if not _PHILOSOPHY_FILE.exists():
+        return
+    content = _PHILOSOPHY_FILE.read_text(encoding="utf-8")
+    if _PLACEHOLDER_MARKER in content:
+        logger.info("当前内容为占位符，跳过备份")
+        return
+    _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak_path = _BACKUP_DIR / f"investment_philosophy_{ts}.bak"
+    bak_path.write_text(content, encoding="utf-8")
+    logger.info(f"投资理念已备份: {bak_path}")
 
 
 def _trigger_reindex() -> None:
-    """触发知识库增量索引（失败不阻塞）。"""
+    """触发知识库增量索引（失败不阻塞）。占位符内容不索引。"""
+    if _PHILOSOPHY_FILE.exists():
+        content = _PHILOSOPHY_FILE.read_text(encoding="utf-8")
+        if _PLACEHOLDER_MARKER in content:
+            logger.info("投资理念为占位符，跳过索引")
+            return
     try:
         from backend.knowledge.store import KnowledgeStore
         store = KnowledgeStore.get_instance()

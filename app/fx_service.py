@@ -16,10 +16,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# ── 默认 fallback 汇率 ──────────────────────────────────────────
+# ── 默认 fallback 汇率（2026-06 更新）─────────────────────────────
 FALLBACK_RATES = {
-    "USD": 6.90,
-    "HKD": 0.92,
+    "USD": 7.25,
+    "HKD": 0.93,
 }
 
 FRANKFURTER_BASE_URL = "https://api.frankfurter.app"
@@ -137,6 +137,10 @@ class FXService:
         else:
             rate = fallback_from / fallback_to if fallback_to != 0 else fallback_from
 
+        logger.warning(
+            f"[FX fallback] {from_currency}->{to_currency} 使用兜底汇率 {rate:.4f}"
+            f"（Frankfurter 不可用，hardcoded: {from_currency}={fallback_from}, {to_currency}={fallback_to}）"
+        )
         warnings.warn(
             f"FX fallback: {from_currency}->{to_currency} 使用硬编码汇率 {rate:.4f}",
             RuntimeWarning,

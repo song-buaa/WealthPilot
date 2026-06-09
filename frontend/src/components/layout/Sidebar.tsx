@@ -4,8 +4,8 @@
  *
  * 结构：
  *   Brand（Logo区）
- *   三个 NavGroup：投资规划 / 财务规划 / 资产负债总览
- *   每个 group 内的 NavItem 用 NavLink 管理 active 状态
+ *   投资主线 6 项平铺（无分组标题）
+ *   其他分组按开关控制显示（财务规划 / 资产负债总览 / 收益分析）
  */
 import { NavLink } from 'react-router-dom'
 
@@ -22,23 +22,25 @@ interface NavGroupDef {
   items: NavItemDef[]
 }
 
-// ── 导航结构（以 ui_preview-有导航栏.html 为准）──────────
+// ── 显示开关（设为 true 可恢复对应导航入口，路由和页面不受影响）──
+const SHOW_PROFIT_ANALYSIS = false   // 收益分析（模块建设中）
+const SHOW_FINANCE_PLANNING = false  // 财务规划分组
+const SHOW_BALANCE_SHEET = false     // 资产负债总览分组
 
+// ── 投资主线（始终显示，无分组标题，平铺）──────────────────
+const INVEST_ITEMS: NavItemDef[] = [
+  { label: '用户画像',       to: '/profile' },
+  { label: '投资账户总览',   to: '/dashboard' },
+  { label: '投资纪律',       to: '/discipline' },
+  { label: '投研观点',       to: '/research' },
+  { label: '投资决策',       to: '/decision' },
+  { label: '投资行动',       to: '/action' },
+  ...(SHOW_PROFIT_ANALYSIS ? [{ label: '收益分析', to: '/placeholder/收益分析' }] : []),
+]
+
+// ── 分组导航（按开关条件显示）──────────────────────────────
 const NAV_GROUPS: NavGroupDef[] = [
-  {
-    icon: '📈',
-    title: '投资规划',
-    items: [
-      { label: '用户画像', to: '/profile' },
-      { label: '投资账户总览',       to: '/dashboard' },
-      { label: '投资纪律',           to: '/discipline' },
-      { label: '投研观点',           to: '/research' },
-      { label: '投资决策',           to: '/decision' },
-      { label: '投资行动',           to: '/action' },
-      { label: '收益分析',           to: '/placeholder/收益分析' },
-    ],
-  },
-  {
+  ...(SHOW_FINANCE_PLANNING ? [{
     icon: '🏠',
     title: '财务规划',
     items: [
@@ -47,15 +49,15 @@ const NAV_GROUPS: NavGroupDef[] = [
       { label: '购房规划',     to: '/placeholder/购房规划' },
       { label: '消费规划',     to: '/placeholder/消费规划' },
     ],
-  },
-  {
+  }] : []),
+  ...(SHOW_BALANCE_SHEET ? [{
     icon: '📊',
     title: '资产负债总览',
     items: [
       { label: '个人资产负债总览', to: '/placeholder/个人资产负债总览' },
       { label: '家族资产负债总览', to: '/placeholder/家族资产负债总览' },
     ],
-  },
+  }] : []),
 ]
 
 // ── 组件 ──────────────────────────────────────────────────
@@ -107,42 +109,26 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ── 导航分组 ── */}
+      {/* ── 导航 ── */}
       <nav style={{ flex: 1, paddingBottom: 16 }}>
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={group.title}>
-            {/* 分割线（第一组前不加） */}
-            {gi > 0 && (
-              <div
-                style={{
-                  height: 1,
-                  background: 'rgba(255,255,255,0.07)',
-                  margin: '6px 12px',
-                }}
-              />
-            )}
+        {/* 投资主线（平铺，无分组标题） */}
+        <div style={{ padding: '20px 14px 6px' }}>
+          {INVEST_ITEMS.map((item) => (
+            <NavItem key={item.to} item={item} />
+          ))}
+        </div>
 
-            {/* 分组标题 */}
+        {/* 其他分组（按开关条件显示） */}
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title}>
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '6px 12px' }} />
             <div style={{ padding: '14px 12px 6px' }}>
-              <div
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '4px 8px 8px',
-                }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px' }}>
                 <span style={{ fontSize: 14 }}>{group.icon}</span>
-                <span
-                  style={{
-                    fontSize: 13, fontWeight: 700,
-                    color: 'rgba(255,255,255,0.88)',
-                    letterSpacing: 0.1,
-                  }}
-                >
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.88)', letterSpacing: 0.1 }}>
                   {group.title}
                 </span>
               </div>
-
-              {/* 导航项 */}
               {group.items.map((item) => (
                 <NavItem key={item.to} item={item} />
               ))}
@@ -163,13 +149,13 @@ function NavItem({ item }: { item: NavItemDef }) {
       style={({ isActive }) => ({
         display: 'flex',
         alignItems: 'center',
-        padding: isActive ? '6px 8px 6px 26px' : '6px 8px 6px 28px',
-        borderRadius: 7,
-        fontSize: 12,
-        fontWeight: isActive ? 600 : 400,
-        color: isActive ? '#93C5FD' : 'rgba(255,255,255,0.48)',
+        padding: isActive ? '12px 16px 12px 14px' : '12px 16px 12px 16px',
+        borderRadius: 8,
+        fontSize: 15,
+        fontWeight: isActive ? 600 : 500,
+        color: isActive ? '#93C5FD' : 'rgba(255,255,255,0.55)',
         textDecoration: 'none',
-        marginBottom: 1,
+        marginBottom: 4,
         whiteSpace: 'nowrap' as const,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -178,6 +164,8 @@ function NavItem({ item }: { item: NavItemDef }) {
         borderLeft: isActive ? '2px solid #3B82F6' : '2px solid transparent',
         cursor: 'pointer',
       })}
+      onMouseEnter={e => { if (!e.currentTarget.classList.contains('active')) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)' }}
+      onMouseLeave={e => { if (!e.currentTarget.classList.contains('active')) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
     >
       {item.label}
     </NavLink>

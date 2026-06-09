@@ -8,18 +8,16 @@
  *   5. 导入/导出 区块
  *   6. 负债明细表格
  *   7. 负债导入/导出
- *   8. AI 综合分析报告
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, Sparkles, ImageIcon, RefreshCw } from 'lucide-react'
+import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, ImageIcon, RefreshCw } from 'lucide-react'
 import { BrokerSyncTab } from '@/components/BrokerSyncTab'
 import { FundEImportTab } from '@/components/FundEImportTab'
 import {
-  portfolioApi, decisionApi,
-  streamDecisionChat,
-  type PortfolioSummary, type Position, type Alert, type Liability,
+  portfolioApi,
+  type PortfolioSummary, type Position, type Liability,
 } from '@/lib/api'
 import { fmtCny, fmtCnySigned, fmtPct, fmtDelta, fmtQty, fmtFx, fmtLeverage } from '@/lib/fmt'
 import { allocationApi } from '@/lib/allocation-api'
@@ -81,7 +79,6 @@ export default function Dashboard() {
   const [summary, setSummary]       = useState<PortfolioSummary | null>(null)
   const [positions, setPositions]   = useState<Position[]>([])
   const [liabilities, setLiabilities] = useState<Liability[]>([])
-  const [alerts, setAlerts]         = useState<Alert[]>([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
   const [cashRange, setCashRange]   = useState<{ min: number; max: number } | undefined>(undefined)
@@ -100,14 +97,12 @@ export default function Dashboard() {
       portfolioApi.getSummary(),
       portfolioApi.getPositions(),
       portfolioApi.getLiabilities(),
-      portfolioApi.getAlerts(),
       allocationApi.getTargets().catch(() => []),
     ])
-      .then(([s, p, l, a, targets]) => {
+      .then(([s, p, l, targets]) => {
         setSummary(s)
         setPositions(p.items)
         setLiabilities(l.items)
-        setAlerts(a.items)
         const ct = targets.find((t: { asset_class: string }) => t.asset_class === 'cash')
         if (ct?.cash_min_amount != null && ct?.cash_max_amount != null) {
           setCashRange({ min: ct.cash_min_amount, max: ct.cash_max_amount })
@@ -415,12 +410,6 @@ export default function Dashboard() {
 
       {/* ── 负债导入/导出 ── */}
       <LiabImportSection open={liabImportOpen} onToggle={() => setLiabImportOpen(v => !v)} onRefresh={fetchAll} />
-
-      {/* ── 投资预警 ── */}
-      {alerts.length > 0 && <AlertsSection alerts={alerts} />}
-
-      {/* ── AI 综合分析报告 ── */}
-      <AIReportSection conversationId={crypto.randomUUID()} />
     </div>
   )
 }
@@ -439,34 +428,6 @@ function PageHeader({ posCount }: { posCount: number }) {
           账户总览 · 持仓分析
         </div>
       </div>
-    </div>
-  )
-}
-
-function AlertsSection({ alerts }: { alerts: Alert[] }) {
-  function alertColors(severity: string) {
-    if (severity === 'danger')  return { bg: '#FFF5F5', border: '#FECACA', title: '#991B1B', body: '#B91C1C', icon: '🔴' }
-    if (severity === 'warning') return { bg: '#FFFBEB', border: '#FDE68A', title: '#92400E', body: '#B45309', icon: '⚠️' }
-    return                             { bg: '#EFF6FF', border: '#BFDBFE', title: '#1E40AF', body: '#1D4ED8', icon: 'ℹ️' }
-  }
-  return (
-    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '16px 20px', marginBottom: 16, boxShadow: 'var(--shadow-sm)' }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <AlertTriangle size={14} color="#DC2626" /> 投资预警
-        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 400, color: '#9CA3AF' }}>{alerts.length} 条</span>
-      </div>
-      {alerts.map((a, i) => {
-        const c = alertColors(a.severity)
-        return (
-          <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 12px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, marginBottom: i < alerts.length - 1 ? 8 : 0 }}>
-            <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>{c.icon}</span>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: c.title }}>{a.title}</div>
-              <div style={{ fontSize: 12, color: c.body, marginTop: 2, lineHeight: 1.5 }}>{a.description}</div>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -569,6 +530,9 @@ const SS_HINTS: Record<SSPlatform, string> = {
 }
 
 /** 资产导入/导出 折叠面板（通用 CSV + broker CSV + 截图识别）*/
+// 开关：设为 true 可恢复「CSV 导入（按平台替换）」和「截图识别（按平台替换）」两个 Tab
+const SHOW_PLATFORM_REPLACE_TABS = false
+
 function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle: () => void; onRefresh: () => void }) {
   const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync' | 'fund-e'>('csv')
 
@@ -680,10 +644,10 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
           {/* Tab 行 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             <button style={tabStyle(activeTab === 'csv')}    onClick={() => setActiveTab('csv')}>通用 CSV（全量覆盖）</button>
-            <button style={tabStyle(activeTab === 'broker')} onClick={() => setActiveTab('broker')}>CSV 导入（按平台替换）</button>
-            <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
+            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'broker')} onClick={() => setActiveTab('broker')}>CSV 导入（按平台替换）</button>}
+            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ImageIcon size={11} /> 截图识别（按平台替换）</span>
-            </button>
+            </button>}
             <button style={tabStyle(activeTab === 'api-sync')} onClick={() => setActiveTab('api-sync')}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} /> API 同步</span>
             </button>
@@ -714,7 +678,7 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
           )}
 
           {/* ── Broker CSV ── */}
-          {activeTab === 'broker' && (
+          {SHOW_PLATFORM_REPLACE_TABS && activeTab === 'broker' && (
             <div>
               <p style={{ fontSize: 12, color: '#6B7280', marginTop: 0, marginBottom: 12, lineHeight: 1.6 }}>
                 直接导入老虎证券对账单或富途持仓 CSV，<strong>只替换该平台数据</strong>，其他平台不受影响。
@@ -741,7 +705,7 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
           )}
 
           {/* ── 截图识别 ── */}
-          {activeTab === 'screenshot' && (
+          {SHOW_PLATFORM_REPLACE_TABS && activeTab === 'screenshot' && (
             <div>
               <p style={{ fontSize: 12, color: '#6B7280', marginTop: 0, marginBottom: 12, lineHeight: 1.6 }}>
                 上传 APP 截图，AI 自动识别持仓数据，<strong>只替换所选平台数据</strong>，其他平台不受影响。
@@ -863,84 +827,6 @@ function MsgBanner({ msg, style }: { msg: string; style?: React.CSSProperties })
       ...style,
     }}>
       {msg}
-    </div>
-  )
-}
-
-/** AI 综合分析报告区块 */
-function AIReportSection({ conversationId }: { conversationId: string }) {
-  const [report, setReport]     = useState<string | null>(null)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  async function generate() {
-    if (loading) return
-    setLoading(true); setReport(null); setError(null)
-    abortRef.current = new AbortController()
-
-    const QUERY = '请综合分析我当前的投资组合，从持仓集中度、资产配置、风险敞口三个维度给出评估，并给出具体的调仓建议。'
-    let text = ''
-
-    try {
-      for await (const evt of streamDecisionChat(QUERY, conversationId, abortRef.current.signal)) {
-        if (evt.type === 'text') {
-          text += (evt.data.delta as string) ?? ''
-          setReport(text)
-        } else if (evt.type === 'error') {
-          setError((evt.data.message as string) ?? 'AI 分析失败，请检查 API Key 配置')
-          break
-        } else if (evt.type === 'done') {
-          break
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
-        setError(e instanceof Error ? e.message : 'AI 分析失败')
-      }
-    } finally {
-      setLoading(false)
-      // 清理 session
-      decisionApi.clearSession(conversationId).catch(() => {})
-    }
-  }
-
-  return (
-    <div style={{ background: 'linear-gradient(135deg, #EFF6FF 0%, #F0FDF4 100%)', border: '1px solid #BFDBFE', borderRadius: 12, padding: '18px 24px 16px', marginBottom: 16 }}>
-      {/* 头部 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <Sparkles size={16} color="#3B82F6" />
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>AI 综合分析报告</span>
-        <span style={{ background: '#FEE2E2', color: '#DC2626', borderRadius: 5, padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>Beta</span>
-      </div>
-      <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6, marginBottom: 14 }}>
-        报告将融合：账户总览 · 投资纪律检查 · 偏离度分析 · 风险告警，生成个性化投资建议。
-      </div>
-
-      {/* 生成按钮 */}
-      <button
-        onClick={generate}
-        disabled={loading}
-        style={{ ...btnPrimary, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-      >
-        {loading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-        {loading ? 'AI 分析中…' : '✨ 生成报告'}
-      </button>
-
-      {/* 错误 */}
-      {error && (
-        <div style={{ marginTop: 12, padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, fontSize: 12, color: '#991B1B' }}>
-          ❌ {error}
-        </div>
-      )}
-
-      {/* 报告内容（流式追加） */}
-      {report && (
-        <div style={{ marginTop: 12, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '16px 20px', fontSize: 13, lineHeight: 1.8, color: '#374151', whiteSpace: 'pre-wrap' }}>
-          {report}
-          {loading && <span style={{ display: 'inline-block', width: 6, height: 14, background: '#3B82F6', borderRadius: 1, marginLeft: 2, verticalAlign: 'text-bottom', animation: 'pulse 1s infinite' }} />}
-        </div>
-      )}
     </div>
   )
 }

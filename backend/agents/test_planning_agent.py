@@ -69,19 +69,19 @@ def test_planning_agent_portfolio():
 
 def test_planning_agent_skill_bundle_consistency():
     """验证 Skill 组合静态映射的覆盖度。"""
-    from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
+    from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
 
     expected_routes = {
         "position_single", "position_multi", "portfolio",
         "general", "clarify", "low_confidence",
     }
-    actual_routes = set(_SKILL_BUNDLES_BY_ROUTE.keys())
+    actual_routes = set(LEGACY_SELECTED_SKILLS_BY_ROUTE.keys())
 
     assert expected_routes == actual_routes, \
         f"路由 vs Skills 映射不一致：缺失 {expected_routes - actual_routes}, " \
         f"多余 {actual_routes - expected_routes}"
 
-    for route, skills in _SKILL_BUNDLES_BY_ROUTE.items():
+    for route, skills in LEGACY_SELECTED_SKILLS_BY_ROUTE.items():
         if skills:
             assert "wp-reasoning" in skills, \
                 f"路由 {route} 的 Skills 缺少 wp-reasoning"

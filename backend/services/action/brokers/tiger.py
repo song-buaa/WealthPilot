@@ -343,6 +343,19 @@ class TigerBrokerAdapter(BrokerAdapter):
             if not assets:
                 return {"broker": "tiger", "error": "no_account_data"}
             summary = getattr(assets[0], "summary", assets[0])
+            # gross_position_value: 优先从 summary 取（与 net_liq/cash 口径一致）
+            gpv = float(getattr(summary, "gross_position_value", 0) or 0)
+            gpv_source = "summary"
+            if gpv in (0.0, float("inf")):
+                # fallback: 从 SecuritySegment("S") 取（仅证券段，口径可能窄于 summary）
+                seg_s = assets[0].segment("S") if hasattr(assets[0], "segment") else None
+                gpv = float(getattr(seg_s, "gross_position_value", 0) or 0) if seg_s else 0.0
+                if gpv not in (0.0, float("inf")):
+                    gpv_source = "SecuritySegment"
+                    logger.warning(
+                        "[TigerBrokerAdapter] gross_position_value 从 SecuritySegment 取得"
+                        "（summary 无此字段），口径可能窄于 net_liquidation/cash"
+                    )
             return {
                 "broker": "tiger",
                 "account_id_masked": f"***{self._account_id[-5:]}",
@@ -351,6 +364,8 @@ class TigerBrokerAdapter(BrokerAdapter):
                 "cash": float(getattr(summary, "cash", 0) or 0),
                 "buying_power": float(getattr(summary, "buying_power", 0) or 0),
                 "net_liquidation": float(getattr(summary, "net_liquidation", 0) or 0),
+                "gross_position_value": gpv,
+                "gross_position_value_source": gpv_source,
             }
         except ApiException as e:
             logger.warning("[TigerBrokerAdapter] get_account_info ApiException: %s", e)

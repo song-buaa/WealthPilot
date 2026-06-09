@@ -102,22 +102,22 @@ class TestBundleConfiguration:
     """测试 Bundle 配置包含 wp-retrieve-principles。"""
 
     def test_position_single_bundle(self):
-        from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["position_single"]
+        from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
+        assert "wp-retrieve-principles" in LEGACY_SELECTED_SKILLS_BY_ROUTE["position_single"]
 
     def test_position_multi_bundle(self):
-        from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["position_multi"]
+        from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
+        assert "wp-retrieve-principles" in LEGACY_SELECTED_SKILLS_BY_ROUTE["position_multi"]
 
     def test_portfolio_bundle(self):
-        from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["portfolio"]
+        from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
+        assert "wp-retrieve-principles" in LEGACY_SELECTED_SKILLS_BY_ROUTE["portfolio"]
 
     def test_general_included(self):
         """general 路由已包含 wp-retrieve-principles（M5b）。"""
-        from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" in _SKILL_BUNDLES_BY_ROUTE["general"]
+        from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
+        assert "wp-retrieve-principles" in LEGACY_SELECTED_SKILLS_BY_ROUTE["general"]
 
     def test_clarify_not_included(self):
-        from backend.agents.planning_agent import _SKILL_BUNDLES_BY_ROUTE
-        assert "wp-retrieve-principles" not in _SKILL_BUNDLES_BY_ROUTE.get("clarify", [])
+        from backend.agents.planning_agent import LEGACY_SELECTED_SKILLS_BY_ROUTE
+        assert "wp-retrieve-principles" not in LEGACY_SELECTED_SKILLS_BY_ROUTE.get("clarify", [])
