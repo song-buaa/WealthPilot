@@ -7,7 +7,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen } from 'lucide-react'
+import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft } from '@/lib/api'
@@ -948,7 +948,8 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
               cursor: 'pointer', boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.15)',
             }}
           >
-            生成执行计划
+            <Zap size={14} />
+            {msg.actionable_hint || '生成执行计划'}
           </button>
         )}
         {showExecPlan && (() => {
