@@ -94,7 +94,7 @@ function isGenericName(name: string): boolean {
 
 function buildPersonalizedQuestions(positions: Position[], totalAssets: number): string[] {
   const holdings = positions
-    .filter(p => p.market_value_cny > 0)
+    .filter(p => p.market_value_cny > 0 && p.ticker !== 'HKCONNECT')
     .map(p => ({
       name: p.name,
       ratio: p.market_value_cny / totalAssets,
