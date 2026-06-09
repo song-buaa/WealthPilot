@@ -102,8 +102,8 @@ export default function Sidebar() {
         </div>
         {/* 品牌名称 */}
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>WealthPilot</div>
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 1 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>WealthPilot</div>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', marginTop: 1 }}>
             个人投资决策工作台
           </div>
         </div>
@@ -149,13 +149,13 @@ function NavItem({ item }: { item: NavItemDef }) {
       style={({ isActive }) => ({
         display: 'flex',
         alignItems: 'center',
-        padding: isActive ? '12px 16px 12px 14px' : '12px 16px 12px 16px',
+        padding: isActive ? '9px 16px 9px 14px' : '9px 16px 9px 16px',
         borderRadius: 8,
-        fontSize: 15,
-        fontWeight: isActive ? 600 : 500,
+        fontSize: 13,
+        fontWeight: 500,
         color: isActive ? '#93C5FD' : 'rgba(255,255,255,0.55)',
         textDecoration: 'none',
-        marginBottom: 4,
+        marginBottom: 2,
         whiteSpace: 'nowrap' as const,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
