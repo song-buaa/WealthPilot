@@ -135,6 +135,9 @@ class SymbolStrategy(Base):
     parent_intent_id = Column(
         String(36), ForeignKey("allocation_intents.id"), nullable=True,
     )
+    # v3.11: 执行计划关联
+    plan_id = Column(String(36), nullable=True)  # 关联 execution_plans.id
+    tranche_sequence = Column(Integer, nullable=True)  # 批次序号
 
     symbol = Column(String(50), nullable=False)  # 标的代码，如 MSFT / 02015
     side = Column(String(10), nullable=False)  # BUY / SELL
