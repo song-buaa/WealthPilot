@@ -587,6 +587,8 @@ export interface SymbolStrategyResponse {
   id: string
   source_draft_id: string | null
   parent_intent_id: string | null
+  plan_id: string | null            // v3.11: 执行计划关联
+  tranche_sequence: number | null    // v3.11: 批次序号
   symbol: string
   side: string
   target_quantity: number | null

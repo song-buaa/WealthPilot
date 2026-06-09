@@ -82,6 +82,8 @@ def _serialize_strategy(s) -> dict:
         "id": s.id,
         "source_draft_id": s.source_draft_id,
         "parent_intent_id": getattr(s, "parent_intent_id", None),
+        "plan_id": getattr(s, "plan_id", None),              # v3.11
+        "tranche_sequence": getattr(s, "tranche_sequence", None),  # v3.11
         "symbol": s.symbol,
         "side": s.side,
         "target_quantity": s.target_quantity,

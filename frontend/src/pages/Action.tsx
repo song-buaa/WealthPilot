@@ -158,14 +158,24 @@ function ActionListTab({
   // Group strategies by parent_intent_id
   const grouped = new Map<string, SymbolStrategyResponse[]>()
   const orphanStrategies: SymbolStrategyResponse[] = []
+  // v3.11: Group by plan_id (execution plan)
+  const planGrouped = new Map<string, SymbolStrategyResponse[]>()
   for (const s of strategies) {
-    if (s.parent_intent_id) {
+    if (s.plan_id) {
+      const arr = planGrouped.get(s.plan_id) || []
+      arr.push(s)
+      planGrouped.set(s.plan_id, arr)
+    } else if (s.parent_intent_id) {
       const arr = grouped.get(s.parent_intent_id) || []
       arr.push(s)
       grouped.set(s.parent_intent_id, arr)
     } else {
       orphanStrategies.push(s)
     }
+  }
+  // Sort plan groups by tranche_sequence
+  for (const [, arr] of planGrouped) {
+    arr.sort((a, b) => (a.tranche_sequence || 0) - (b.tranche_sequence || 0))
   }
 
   async function handlePause(id: string) {
@@ -270,6 +280,43 @@ function ActionListTab({
                 onDiscardIntent={() => handleDiscardIntent(intent.id)}
                 onPlaceOrder={setPlaceOrderStrategy}
               />
+            )
+          })}
+
+          {/* v3.11: 执行计划归组 */}
+          {Array.from(planGrouped.entries()).map(([planId, planStrategies]) => {
+            const first = planStrategies[0]
+            const sideLabel = first.side === 'BUY' ? '买入' : '卖出'
+            const totalQty = planStrategies.reduce((s, st) => s + (st.target_quantity || 0), 0)
+            return (
+              <div key={planId} style={{
+                border: '1px solid #BAE6FD', borderRadius: 12, padding: '16px 18px',
+                marginBottom: 12, background: '#F0F9FF',
+              }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>{first.symbol}</span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                    background: first.side === 'BUY' ? '#DCFCE7' : '#FEE2E2',
+                    color: first.side === 'BUY' ? '#16A34A' : '#DC2626',
+                  }}>{sideLabel} 计划</span>
+                  <span style={{ fontSize: 11, color: '#6B7280' }}>
+                    {planStrategies.length} 批 · 共 {totalQty.toLocaleString()} 股
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {planStrategies.map(s => (
+                    <StrategyCard key={s.id} strategy={s}
+                      onPause={() => handlePause(s.id)}
+                      onResume={() => handleResume(s.id)}
+                      onDiscard={() => handleDiscard(s.id)}
+                      onPlaceOrder={() => setPlaceOrderStrategy(s)}
+                      compact
+                      trancheLabel={`第 ${s.tranche_sequence || '?'} 批`}
+                    />
+                  ))}
+                </div>
+              </div>
             )
           })}
 
@@ -393,13 +440,14 @@ function IntentGroup({
 
 // ── 策略卡片 ────────────────────────────────────────────────
 
-function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, compact }: {
+function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, compact, trancheLabel }: {
   strategy: SymbolStrategyResponse
   onPause: () => void
   onResume: () => void
   onDiscard: () => void
   onPlaceOrder: () => void
   compact?: boolean
+  trancheLabel?: string  // v3.11: "第 N 批"
 }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
@@ -427,19 +475,24 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
     }}>
       {/* Row 1: 标的名 + Badges */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>{strategy.symbol}</span>
-        <span style={{
+        {trancheLabel && (
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+            background: '#DBEAFE', color: '#1E40AF' }}>{trancheLabel}</span>
+        )}
+        {!trancheLabel && <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>{strategy.symbol}</span>}
+        {!trancheLabel && <span style={{
           fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
           background: sideBadgeBg, color: sideBadgeColor,
-        }}>{sideLabel}</span>
+        }}>{sideLabel}</span>}
         <span style={{ fontSize: 11, color: '#9CA3AF', background: '#F3F4F6', padding: '2px 6px', borderRadius: 4 }}>限价单</span>
         {isPaused && <span style={{
           fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 4, background: '#FEF3C7', color: '#D97706',
         }}>已暂停</span>}
       </div>
-      {/* Row 2: 限价 + 目标 + 进度 */}
+      {/* Row 2: 触发价/限价 + 目标 + 进度 */}
       <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6, fontVariantNumeric: 'tabular-nums' }}>
-        {strategy.limit_price ? `$${strategy.limit_price}` : '限价未设'}
+        {strategy.trigger_price ? `触发 $${strategy.trigger_price} → ` : ''}
+        {strategy.limit_price ? `限价 $${strategy.limit_price}` : '限价未设'}
         {strategy.target_quantity ? <span style={{ fontWeight: 400, color: '#6B7280' }}> · 目标 {strategy.target_quantity.toLocaleString()} 股</span> : ''}
         <span style={{ fontWeight: 400, color: '#9CA3AF', marginLeft: 8, fontSize: 11 }}>
           已成交 {strategy.cumulative_filled_quantity}/{strategy.target_quantity || '—'} ({progress}%)
