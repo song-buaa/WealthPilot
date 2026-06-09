@@ -942,7 +942,7 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
           <button
             onClick={() => setShowExecPlan(true)}
             style={{
-              marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6,
+              marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
               padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
               border: '1px solid #93C5FD', background: '#EFF6FF', color: '#1D4ED8',
               cursor: 'pointer', boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.15)',
