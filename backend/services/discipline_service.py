@@ -48,12 +48,28 @@ def evaluate_trade(text: str, portfolio_id: int) -> dict:
       4. 调用 evaluate_action()
       5. 序列化结果返回
     """
-    raw = _load_positions(portfolio_id)
-    total_assets = sum(r["market_value_cny"] for r in raw) or 1.0
+    # 使用聚合后持仓（按标的合并，单标的集中度反映真实暴露）
+    from app.utils.position_aggregator import aggregate_investment_positions
+    agg_positions, total_assets = aggregate_investment_positions(portfolio_id)
+
+    # 转为 _parse_trade_intent 需要的 raw 格式（兼容既有解析逻辑）
+    raw = [
+        {
+            "name": a.name,
+            "ticker": a.ticker,
+            "platform": a.platform_display,
+            "asset_class": a.asset_class,
+            "market_value_cny": a.market_value_cny,
+            "profit_loss_rate": a.pl_rate,
+            "profit_loss_value": a.profit_loss_value,
+            "is_leverage_etf": a.is_leverage_etf,
+        }
+        for a in agg_positions
+    ]
 
     parsed = _parse_trade_intent(text, raw, total_assets)
 
-    # 构建 PortfolioState
+    # 构建 PortfolioState（基于聚合后数据）
     portfolio_state = _build_portfolio_state(raw, portfolio_drawdown_pct=0.0)
 
     # 构建 PositionState（目标标的）
