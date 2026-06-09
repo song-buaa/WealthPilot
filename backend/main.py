@@ -48,12 +48,9 @@ async def lifespan(app: FastAPI):
     from app.state import get_session
 
     def _get_adapter():
-        _bm = _os.getenv("BROKER_MODE", "mock")
-        _bn = "tiger" if "tiger" in _bm else "ibkr" if "ibkr" in _bm else "mock"
-        return get_broker_adapter(
-            broker_name=_bn,
-            mode=_bm.split(".")[-1] if "." in _bm else _bm,
-        )
+        # 复用 action.py 的 adapter 单例（避免 IBKR client_id 冲突）
+        from backend.api.action import _get_adapter as _action_get_adapter
+        return _action_get_adapter()
 
     orphan_count = scan_orphan_orders(get_session, _get_adapter)
     if orphan_count:

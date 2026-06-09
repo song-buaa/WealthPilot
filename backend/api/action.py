@@ -42,13 +42,12 @@ import os as _action_os
 _BROKER_MODE = _action_os.getenv("BROKER_MODE", "mock")
 
 
-def _get_manager():
-    """获取 OrderManager 实例（每次请求新建 session + 注入 broker_adapter）。
+_cached_adapter = None  # IBKR adapter 单例（避免同 client_id 多连接冲突）
 
-    v3.4 M3: 通过 BROKER_MODE 环境变量切换 mock / tiger.paper / tiger.live。
-    默认 "mock"(向后兼容 v3.2 行为)。
-    """
-    session = get_session()
+
+def _get_adapter():
+    """获取 BrokerAdapter 单例。IBKR 模式下复用同一连接。"""
+    global _cached_adapter
     def _resolve_broker_name(bm: str) -> str:
         if "tiger" in bm:
             return "tiger"
@@ -56,10 +55,24 @@ def _get_manager():
             return "ibkr"
         return "mock"
 
+    bn = _resolve_broker_name(_BROKER_MODE)
+    # mock 和 tiger 每次新建无副作用；IBKR 必须单例(client_id 唯一)
+    if bn == "ibkr" and _cached_adapter is not None:
+        return _cached_adapter
+
     adapter = get_broker_adapter(
-        broker_name=_resolve_broker_name(_BROKER_MODE),
+        broker_name=bn,
         mode=_BROKER_MODE.split(".")[-1] if "." in _BROKER_MODE else _BROKER_MODE,
     )
+    if bn == "ibkr":
+        _cached_adapter = adapter
+    return adapter
+
+
+def _get_manager():
+    """获取 OrderManager 实例（每次请求新建 session + 注入 broker_adapter）。"""
+    session = get_session()
+    adapter = _get_adapter()
     return OrderManager(session, broker_adapter=adapter), session
 
 
