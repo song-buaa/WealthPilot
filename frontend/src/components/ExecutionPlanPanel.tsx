@@ -106,10 +106,10 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   // ── 初始态: 输入表单 ──
   if (!plan && !loading && !error) {
     return (
-      <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10,
+      <div style={{ background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
         padding: '12px 16px', marginTop: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#0369A1' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1D4ED8' }}>
             执行计划 — {symbol} {SIDE_LABEL[side] || side}
           </span>
           <button onClick={onClose} style={closeBtnStyle}>关闭</button>
@@ -147,9 +147,9 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   // ── 加载中 ──
   if (loading) {
     return (
-      <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10,
+      <div style={{ background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
         padding: '16px', marginTop: 8, textAlign: 'center' }}>
-        <Loader2 size={18} className="animate-spin" style={{ color: '#0284C7' }} />
+        <Loader2 size={18} className="animate-spin" style={{ color: '#1D4ED8' }} />
         <span style={{ fontSize: 12, color: '#6B7280', marginLeft: 8 }}>
           正在生成执行计划(因子→规则引擎→解释)...
         </span>
@@ -208,13 +208,13 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   const degraded = (dsm.degraded_fields ?? []) as string[]
 
   return (
-    <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10,
+    <div style={{ background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
       padding: '14px 16px', marginTop: 8 }}>
       {/* 标题 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <CheckCircle size={14} style={{ color: '#059669' }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#0369A1' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1D4ED8' }}>
             执行计划草案 — {psb.symbol} {SIDE_LABEL[psb.side] || psb.side}
           </span>
         </div>
@@ -338,8 +338,10 @@ const closeBtnStyle2: React.CSSProperties = {
   border: '1px solid #FECACA', background: '#fff', cursor: 'pointer', color: '#DC2626',
 }
 const primaryBtnStyle: React.CSSProperties = {
-  padding: '6px 16px', fontSize: 12, fontWeight: 600, borderRadius: 6,
-  border: 'none', cursor: 'pointer', color: '#fff', background: '#0284C7',
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+  border: '1px solid #93C5FD', background: '#EFF6FF', color: '#1D4ED8',
+  cursor: 'pointer',
 }
 const inputStyle: React.CSSProperties = {
   padding: '3px 8px', fontSize: 12, border: '1px solid #D1D5DB', borderRadius: 4,

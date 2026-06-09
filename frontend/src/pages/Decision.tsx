@@ -942,12 +942,13 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
           <button
             onClick={() => setShowExecPlan(true)}
             style={{
-              marginTop: 6, padding: '5px 14px', fontSize: 12, fontWeight: 500,
-              borderRadius: 6, border: '1px solid #BAE6FD', background: '#F0F9FF',
-              color: '#0369A1', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+              border: '1px solid #93C5FD', background: '#EFF6FF', color: '#1D4ED8',
+              cursor: 'pointer', boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.15)',
             }}
           >
-            📋 生成执行计划(分批)
+            生成执行计划
           </button>
         )}
         {showExecPlan && (() => {

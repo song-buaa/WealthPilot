@@ -160,7 +160,7 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
             {isExecutionPlan && (
               <>
                 {/* 计划头 */}
-                <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, padding: '14px 16px' }}>
+                <div style={{ background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10, padding: '14px 16px' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A' }}>{planSymbol}</span>
                     <span style={{

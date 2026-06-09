@@ -290,8 +290,8 @@ function ActionListTab({
             const totalQty = planStrategies.reduce((s, st) => s + (st.target_quantity || 0), 0)
             return (
               <div key={planId} style={{
-                border: '1px solid #BAE6FD', borderRadius: 12, padding: '16px 18px',
-                marginBottom: 12, background: '#F0F9FF',
+                border: '1px solid #93C5FD', borderRadius: 12, padding: '16px 18px',
+                marginBottom: 12, background: '#EFF6FF',
               }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>{first.symbol}</span>
