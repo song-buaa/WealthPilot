@@ -937,22 +937,7 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
           </div>
         )}
 
-        {/* v3.2 行动清单按钮 — 仅 actionable 或已生成时显示 */}
-        {!msg.streaming && msg.content && (msg.actionable || msg.actionDraftStatus === 'completed' || msg.actionDraftStatus === 'loading') && (
-          <div style={{ marginTop: 8 }}>
-            <ActionListGenerateButton
-              state={
-                msg.actionDraftStatus === 'completed' ? 'completed' :
-                msg.actionDraftStatus === 'loading' ? 'loading' :
-                'highlighted'
-              }
-              actionable_hint={msg.actionable_hint}
-              onClick={() => onGenerateAction?.(msg.id)}
-            />
-          </div>
-        )}
-
-        {/* v3.11 执行计划入口 — actionable 时显示,与旧按钮并行 */}
+        {/* v3.11 执行计划入口(收编旧"加入投资行动") */}
         {!msg.streaming && msg.content && msg.actionable && !showExecPlan && (
           <button
             onClick={() => setShowExecPlan(true)}
