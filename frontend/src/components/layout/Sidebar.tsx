@@ -8,6 +8,7 @@
  *   其他分组按开关控制显示（财务规划 / 资产负债总览 / 收益分析）
  */
 import { NavLink } from 'react-router-dom'
+import { Compass } from 'lucide-react'
 
 // ── 类型 ──────────────────────────────────────────────────
 
@@ -68,8 +69,7 @@ export default function Sidebar() {
       style={{
         width: 'var(--sidebar-w)',
         flexShrink: 0,
-        background: 'linear-gradient(180deg, #1B2A4A 0%, #0F1E35 100%)',
-        borderRight: '1px solid rgba(255,255,255,0.05)',
+        background: '#1F2937',
         display: 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
@@ -83,7 +83,6 @@ export default function Sidebar() {
           alignItems: 'center',
           gap: 10,
           padding: '20px 16px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
           flexShrink: 0,
         }}
       >
@@ -92,18 +91,17 @@ export default function Sidebar() {
           style={{
             width: 36, height: 36,
             borderRadius: 10,
-            background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',
-            boxShadow: '0 2px 8px rgba(59,130,246,0.4)',
+            background: 'rgba(255,255,255,0.16)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 17, flexShrink: 0,
+            flexShrink: 0,
           }}
         >
-          📊
+          <Compass size={20} color="#F9FAFB" strokeWidth={2} />
         </div>
         {/* 品牌名称 */}
         <div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>WealthPilot</div>
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', marginTop: 1 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#F9FAFB' }}>WealthPilot</div>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)', marginTop: 1 }}>
             个人投资决策工作台
           </div>
         </div>
@@ -125,7 +123,7 @@ export default function Sidebar() {
             <div style={{ padding: '14px 12px 6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px' }}>
                 <span style={{ fontSize: 14 }}>{group.icon}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.88)', letterSpacing: 0.1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)', letterSpacing: 0.1 }}>
                   {group.title}
                 </span>
               </div>
@@ -149,19 +147,18 @@ function NavItem({ item }: { item: NavItemDef }) {
       style={({ isActive }) => ({
         display: 'flex',
         alignItems: 'center',
-        padding: isActive ? '9px 16px 9px 14px' : '9px 16px 9px 16px',
+        padding: '9px 16px',
         borderRadius: 8,
         fontSize: 13,
         fontWeight: 500,
-        color: isActive ? '#93C5FD' : 'rgba(255,255,255,0.55)',
+        color: isActive ? '#FFFFFF' : '#9CA3AF',
         textDecoration: 'none',
         marginBottom: 2,
         whiteSpace: 'nowrap' as const,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         transition: 'all 0.14s',
-        background: isActive ? 'rgba(59,130,246,0.16)' : 'transparent',
-        borderLeft: isActive ? '2px solid #3B82F6' : '2px solid transparent',
+        background: isActive ? 'rgba(255,255,255,0.10)' : 'transparent',
         cursor: 'pointer',
       })}
       onMouseEnter={e => { if (!e.currentTarget.classList.contains('active')) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)' }}

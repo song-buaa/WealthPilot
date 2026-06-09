@@ -315,7 +315,7 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
           <button onClick={() => onConfirmPlan({ ...plan, plan_id: (plan as Record<string,unknown>).plan_id as string })}
             style={{
               padding: '8px 24px', fontSize: 13, fontWeight: 600, borderRadius: 8,
-              border: 'none', background: '#1B2A4A', color: '#fff', cursor: 'pointer',
+              border: 'none', background: '#1F2937', color: '#fff', cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
             确认计划 → 加入投资行动

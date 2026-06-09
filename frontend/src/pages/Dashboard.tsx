@@ -199,7 +199,7 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
         {/* Primary：总资产 */}
         <div style={{
-          background: 'linear-gradient(135deg, #1B2A4A 0%, #0F1E35 100%)',
+          background: 'linear-gradient(135deg, #1F2937 0%, #111827 100%)',
           borderRadius: 12, padding: '20px 24px',
           boxShadow: 'var(--shadow-dark)',
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 100,

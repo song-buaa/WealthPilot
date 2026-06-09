@@ -736,7 +736,7 @@ export default function Decision() {
               disabled={!streaming && !input.trim()}
               style={{
                 width: 40, height: 40, flexShrink: 0,
-                background: streaming ? '#EF4444' : (input.trim() ? '#1B2A4A' : '#E5E7EB'),
+                background: streaming ? '#EF4444' : (input.trim() ? '#1F2937' : '#E5E7EB'),
                 borderRadius: '50%', border: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: streaming || input.trim() ? 'pointer' : 'not-allowed',

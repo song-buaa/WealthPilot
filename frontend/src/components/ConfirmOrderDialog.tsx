@@ -318,7 +318,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
               style={{
                 padding: '8px 20px', fontSize: 13, borderRadius: 8, fontWeight: 600,
                 border: 'none',
-                background: canSubmit ? '#1B2A4A' : '#F3F4F6',
+                background: canSubmit ? '#1F2937' : '#F3F4F6',
                 color: canSubmit ? '#fff' : '#9CA3AF',
                 cursor: canSubmit ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,

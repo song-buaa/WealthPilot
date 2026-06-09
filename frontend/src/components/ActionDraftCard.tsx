@@ -359,7 +359,7 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
               style={{
                 padding: '8px 20px', fontSize: 13, borderRadius: 8, fontWeight: 600,
                 border: 'none',
-                background: canConfirm ? '#1B2A4A' : '#D1D5DB',
+                background: canConfirm ? '#1F2937' : '#D1D5DB',
                 color: canConfirm ? '#fff' : '#9CA3AF',
                 cursor: canConfirm ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,
