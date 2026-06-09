@@ -182,6 +182,7 @@ class PositionUpsertService:
             new_pos = BusinessPosition(
                 portfolio_id=1,
                 ticker=ticker,
+                symbol=snap.symbol,  # v3.11: 存完整 TICKER:MARKET 真值
                 platform=platform,
                 name=snap.name,
                 asset_class=resolved_asset_class,
@@ -215,6 +216,7 @@ class PositionUpsertService:
             existing.profit_loss_rate = pnl_pct
             existing.profit_loss_original_value = pnl_original
             existing.currency = snap.currency  # v3.4 修复: 存原币种(USD/HKD)
+            existing.symbol = snap.symbol      # v3.11: 每次 sync 更新 symbol 真值
             # name / asset_class / segment 受保护,不覆盖
             # 但如果 asset_class 是非法值(如英文 'equity'),强制修正
             if existing.asset_class not in LEGAL_CN_CLASSES:

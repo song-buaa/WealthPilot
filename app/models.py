@@ -82,6 +82,7 @@ class Position(Base):
 
     name = Column(String(200), nullable=False)          # 资产名称 (如: 理想汽车、沪深300ETF)
     ticker = Column(String(50), nullable=True)           # 代码 (如: LI, 510300)
+    symbol = Column(String(30), nullable=True)           # v3.11: 标准 TICKER:MARKET (如: LI:US, 0700:HK)
     platform = Column(String(50), nullable=False)        # 所在平台
     asset_class = Column(String(20), nullable=False)     # 大类资产分类
     currency = Column(String(10), default="CNY")         # 币种

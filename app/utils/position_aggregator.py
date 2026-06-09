@@ -63,6 +63,7 @@ class AggregatedPosition:
     weight: float                # 占投资组合总市值比例（0~1 小数）
     platforms: list[str] = field(default_factory=list)   # 持仓平台列表
     is_leverage_etf: bool = False
+    symbol: str = ""             # v3.11: TICKER:MARKET（来自第一个有 symbol 的持仓）
 
     @property
     def platform_display(self) -> str:
@@ -109,6 +110,7 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
             {
                 "name": p.name,
                 "ticker": p.ticker or "",
+                "symbol": getattr(p, "symbol", None) or "",  # v3.11: TICKER:MARKET 真值
                 "platform": p.platform or "",
                 "asset_class": p.asset_class or "未知",
                 "market_value_cny": p.market_value_cny or 0.0,
@@ -168,6 +170,7 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
             buckets[key] = {
                 "name": display_name,
                 "ticker": r["ticker"] or key,
+                "symbol": r.get("symbol", ""),  # v3.11: TICKER:MARKET 真值
                 "asset_class": r["asset_class"],
                 "market_value_cny": 0.0,
                 "profit_loss_value": 0.0,
@@ -196,6 +199,7 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
         result.append(AggregatedPosition(
             name=b["name"],
             ticker=b["ticker"],
+            symbol=b.get("symbol", ""),
             asset_class=b["asset_class"],
             market_value_cny=b["market_value_cny"],
             profit_loss_value=b["profit_loss_value"],

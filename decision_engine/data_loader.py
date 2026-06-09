@@ -62,6 +62,7 @@ class PositionInfo:
     profit_loss_rate: float    # 加权盈亏率（小数）
     platforms: list[str] = field(default_factory=list)  # 持仓平台列表
     is_virtual: bool = False  # v3.4 M8.3: True = 新建仓虚拟持仓,非真实持仓
+    symbol: str = ""           # v3.11: TICKER:MARKET 真值 (如 LI:US)
 
     @classmethod
     def from_aggregated(cls, agg: AggregatedPosition) -> "PositionInfo":
@@ -69,6 +70,7 @@ class PositionInfo:
         return cls(
             name=agg.name,
             ticker=agg.ticker,
+            symbol=getattr(agg, "symbol", ""),
             asset_class=agg.asset_class,
             weight=agg.weight,
             market_value_cny=agg.market_value_cny,

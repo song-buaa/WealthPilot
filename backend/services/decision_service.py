@@ -709,51 +709,32 @@ def _serialize_target_position(ld, result) -> dict:
             est_shares = round(tp.market_value_cny / (q.current_price * fx))
             info["estimated_shares"] = est_shares
 
-    # v3.11: 拼接标准 TICKER:MARKET symbol，供执行计划入口使用
+    # v3.11 债1: symbol 真值优先(来自 Position.symbol 列，由 broker_sync 写入)
     _CURRENCY_TO_MARKET = {"USD": "US", "HKD": "HK"}
-    ticker = tp.ticker
-    symbol = None
+    symbol = getattr(tp, "symbol", None) or None
     symbol_source = "unknown"
 
-    if ticker:
-        # 一级: 从 market_data.quote.currency 推断 market(来自富途/AV 真实行情)
+    if symbol and ":" in symbol:
+        # 一级: Position 表的 symbol 列(真值,来自 PositionSnapshot)
+        symbol_source = "position_table"
+    else:
+        # 二级兜底: 从 market_data.quote.currency 推断(历史数据尚未回填时)
+        ticker = tp.ticker
         currency = info.get("currency")
-        if currency and currency in _CURRENCY_TO_MARKET:
+        if ticker and currency and currency in _CURRENCY_TO_MARKET:
             symbol = f"{ticker}:{_CURRENCY_TO_MARKET[currency]}"
             symbol_source = "market_data_currency"
-        else:
-            # 二级: 从 Position 表的 original_currency 兜底
-            _fallback_currency = _lookup_position_currency(ticker, tp.platforms)
-            if _fallback_currency and _fallback_currency in _CURRENCY_TO_MARKET:
-                symbol = f"{ticker}:{_CURRENCY_TO_MARKET[_fallback_currency]}"
-                symbol_source = "position_currency"
-            else:
-                # 三级: 启发式(纯字母→US, 纯数字4-5位→HK)
-                if ticker.isalpha():
-                    symbol = f"{ticker}:US"
-                elif ticker.isdigit() and len(ticker) in (4, 5):
-                    symbol = f"{ticker}:HK"
-                symbol_source = "inferred"
+        elif ticker:
+            # 三级: 启发式
+            if ticker.isalpha():
+                symbol = f"{ticker}:US"
+            elif ticker.isdigit() and len(ticker) in (4, 5):
+                symbol = f"{ticker}:HK"
+            symbol_source = "inferred"
 
     info["symbol"] = symbol
     info["symbol_source"] = symbol_source
     return info
-
-
-def _lookup_position_currency(ticker: str, platforms: list[str]) -> str | None:
-    """从 Position 业务表查 original_currency 作为 symbol 推断的兜底来源。"""
-    try:
-        from app.models import Position, get_session
-        session = get_session()
-        try:
-            row = session.query(Position).filter_by(ticker=ticker).first()
-            if row and row.original_currency:
-                return row.original_currency
-        finally:
-            session.close()
-    except Exception:
-        pass
-    return None
 
 
 def _serialize_decision_result(result: DecisionResult) -> dict:
