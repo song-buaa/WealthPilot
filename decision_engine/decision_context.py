@@ -166,20 +166,14 @@ def _build_user_profile_summary(session, portfolio_id: int) -> dict:
         print(f"[decision_context] userProfile 读取失败: {e}", flush=True)
 
     try:
-        # hardConstraints: 从 portfolios 表
-        portfolio = session.query(Portfolio).filter_by(id=portfolio_id).first()
-        if portfolio:
-            constraints = []
-            if portfolio.max_single_stock_pct is not None:
-                pct = portfolio.max_single_stock_pct
-                # 兼容 0~1 和 0~100 两种存储格式
-                val = pct if pct > 1 else pct * 100
-                constraints.append(f"单标的仓位上限 {val:.0f}%")
-            if portfolio.min_cash_pct is not None:
-                pct = portfolio.min_cash_pct
-                val = pct if pct > 1 else pct * 100
-                constraints.append(f"最低现金比例 {val:.0f}%")
-            result["hardConstraints"] = constraints
+        # hardConstraints: 统一从 discipline/config.py 读取，与 data_loader/llm_engine 同源
+        dr = _get_discipline_rules()
+        constraints = []
+        max_pos = dr["single_asset_limits"]["max_position_pct"]
+        constraints.append(f"单标的仓位上限 {max_pos:.0%}")
+        min_cash = dr["liquidity_limits"]["min_cash_pct"]
+        constraints.append(f"最低现金比例 {min_cash:.0%}")
+        result["hardConstraints"] = constraints
     except Exception as e:
         print(f"[decision_context] hardConstraints 读取失败: {e}", flush=True)
 

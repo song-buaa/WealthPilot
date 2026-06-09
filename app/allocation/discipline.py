@@ -83,7 +83,7 @@ def check_discipline(
             ))
 
     # 4. 集中度校验（单一标的 ≤ 纪律集中度阈值）
-    # V1: 使用 Portfolio 表中的 max_single_stock_pct，默认 15%
+    # 单标的上限统一由 discipline/config.py 提供（40%），Portfolio 表字段已废弃。
     # 此校验在增量分配层面暂不做（需要标的级别数据），由 AI 输出时提示
 
     # 5. 杠杆校验

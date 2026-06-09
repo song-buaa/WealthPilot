@@ -62,7 +62,9 @@ class Portfolio(Base):
     max_alternative_pct = Column(Float, default=100.0)
 
     # 投资纪律约束
-    max_single_stock_pct = Column(Float, default=15.0)  # 单一股票仓位上限
+    # [已废弃] 单标的上限统一由 discipline/config.py 提供，生产链路不再读取此字段。
+    # 保留列避免 schema 变更，default 对齐 config (0.40 → 40.0) 防止误用。
+    max_single_stock_pct = Column(Float, default=40.0)
     max_leverage_ratio = Column(Float, default=20.0)     # 最大杠杆率
 
     # 关联

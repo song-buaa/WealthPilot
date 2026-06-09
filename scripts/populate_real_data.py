@@ -49,7 +49,7 @@ def main():
             max_cash_pct=100.0,
             min_alternative_pct=0.0,
             max_alternative_pct=100.0,
-            max_single_stock_pct=15.0,
+            max_single_stock_pct=40.0,  # 对齐 discipline/config.py
             max_leverage_ratio=80.0,
         )
         session.add(portfolio)

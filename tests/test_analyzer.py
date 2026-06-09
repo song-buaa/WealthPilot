@@ -31,7 +31,7 @@ def _make_portfolio(**kwargs):
     p.max_cash_pct = kwargs.get("max_cash_pct", 100.0)
     p.min_alternative_pct = kwargs.get("min_alternative_pct", 0.0)
     p.max_alternative_pct = kwargs.get("max_alternative_pct", 100.0)
-    p.max_single_stock_pct = kwargs.get("max_single_stock_pct", 15.0)
+    p.max_single_stock_pct = kwargs.get("max_single_stock_pct", 40.0)
     p.max_leverage_ratio = kwargs.get("max_leverage_ratio", 20.0)
     return p
 
@@ -247,7 +247,7 @@ class TestCheckDeviations:
 
     def test_single_position_over_limit(self):
         """单一持仓超过上限产生纪律触发告警"""
-        bs = self._bs_with_alloc(concentration={"1:股票A": 20.0})  # 上限 15%
+        bs = self._bs_with_alloc(concentration={"1:股票A": 45.0})  # 上限 40%
         alerts = self._run(bs)
         assert any(a.alert_type == "纪律触发" and "股票A" in a.title for a in alerts)
 
