@@ -167,8 +167,8 @@ chat_answer 输出格式：
 - 当 payload 中包含 realtime_market_data 时，其中的数字来自富途实时行情和 Alpha Vantage 结构化数据
 - **优先使用 realtime_market_data 里的数字**，而非 research 里的文本描述
 - 行情数据（现价/PE/PB/52周高低/涨跌幅）来源标注"（实时行情）"
-- 财报数据（营收增速/净利增速/ROE/毛利率）来源标注"（AV 财报数据）"
-- 分析师数据（目标价/评级/覆盖人数）来源标注"（AV 分析师数据）"
+- 财报数据（营收增速/净利增速/ROE/毛利率）来源标注"（Alpha Vantage 财报数据）"
+- 分析师数据（目标价/评级/覆盖人数）来源标注"（Alpha Vantage 分析师数据）"
 - 如果 research 中有与 realtime_market_data 冲突的数字，以 realtime_market_data 为准
 - _unavailable_fields 列出的字段不可用，分析时不要提及或编造
 
@@ -226,9 +226,9 @@ chat_answer 用户可见的输出里。
 
 允许的来源标注只有：
 - （富途行情）/ （实时行情）— 实时报价数据
-- （AV 数据）/ （AV 财报数据）/ （AV 分析师数据）— Alpha Vantage
+- （Alpha Vantage 数据）/ （Alpha Vantage 财报数据）/ （Alpha Vantage 分析师数据）
 - [[来源]](https://...) — 网页链接（Markdown 链接语法）
-- （AV 数据 + 富途行情）— 多源融合时
+- （Alpha Vantage 数据 + 富途行情）— 多源融合时
 
 不允许出现任何 payload 内部字段名、"据公开数据"等虚指、或编造的来源。
 
@@ -242,7 +242,7 @@ chat_answer 用户可见的输出里。
 - "据市场普遍预期，估值偏高" ❌
 
 正确示范：
-- "情绪面：（AV 分析师数据暂不可用）" ✅
+- "情绪面：（Alpha Vantage 分析师数据暂不可用）" ✅
 - "估值面：🟡 PE 73.96（富途行情），分析师数据暂缺" ✅
 - 直接跳过该评级项，不输出这一行 ✅
 
@@ -337,7 +337,7 @@ WealthPilot 独家视角，必须包含：
 
 重要约束：
 - 必须引用 realtime_market_data 中的具体数字，不允许虚指
-- 数字来源标注：行情类标注（富途行情）；财报/分析师标注（AV 数据）；新闻类标注链接
+- 数字来源标注：行情类标注（富途行情）；财报/分析师标注（Alpha Vantage 数据）；新闻类标注链接
 - 跨平台持仓合并必须基于 position_context 中的真实数据
 - 压力测试必须引用 stress_test 字段的预计算数字，不允许自己计算或编造
 """
@@ -358,7 +358,7 @@ _CHAT_FORMAT_FOLLOWUP = """
 - 如果核心建议首轮已经给出，追问里直接给增量信息（更具体的价位/时机/条件）
 
 唯一的硬约束：
-- 涉及具体数字必须引用 realtime_market_data，并标注来源（富途行情/AV 数据）
+- 涉及具体数字必须引用 realtime_market_data，并标注来源（富途行情/Alpha Vantage 数据）
 - 不允许"据公开数据""市场普遍预期"等虚指
 - 不允许编造 realtime_market_data 中没有的数字
 - 跨平台持仓数据必须基于 position_context
