@@ -67,6 +67,12 @@ const STANCE: Record<string, { label: string; bg: string; color: string }> = {
   watch:   { label: '观察', bg: '#FEF3C7', color: '#D97706' },
 }
 
+// ── v3.12 模块收敛开关（设 true 可恢复被隐藏的 UI）──────────────────
+const SHOW_AUTO_FETCH_PANEL = false          // 资料导入内「自动拉取资讯」面板
+const SHOW_PENDING_REVIEW_QUEUE = false      // 待审核观点卡队列（V1 + V2）
+const SHOW_DECISION_SEARCH_TAB = false       // 「决策检索」tab
+const SHOW_CONFIRMED_CARDS_IN_IMPORT = false // 资料导入内「v2 已确认观点卡」区块
+
 function validityBadge(status: string | undefined) {
   const v = VALIDITY[status ?? 'active'] ?? VALIDITY.active
   return <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 10, background: v.bg, color: v.color }}>{v.label}</span>
@@ -606,8 +612,9 @@ export default function Research() {
     }
   }
 
-  // ── 观点库过滤（v2 卡）──
+  // ── 观点库过滤（v2 卡，v3.12: 默认排除 archived）──
   const filteredV2 = v2Cards.filter(c => {
+    if (c.status === 'archived') return false  // v3.12: 归档卡不显示
     const q = query.toLowerCase()
     const thesis = c.narrative.thesis ?? ''
     const symbol = c.facts.primary_symbol ?? ''
@@ -621,7 +628,7 @@ export default function Research() {
 
   // 标的下拉选项（从 v2Cards 动态提取 + holdings 取中文名）
   const v2SymbolOptions = React.useMemo(() => {
-    const syms = v2Cards.map(c => c.facts.primary_symbol).filter(Boolean) as string[]
+    const syms = v2Cards.filter(c => c.status !== 'archived').map(c => c.facts.primary_symbol).filter(Boolean) as string[]
     return Array.from(new Set(syms)).sort()
   }, [v2Cards])
 
@@ -846,8 +853,8 @@ export default function Research() {
     }
   }
 
-  const v2Pending = v2Cards.filter(c => c.judgment.is_ai_prefilled && c.judgment.validity_status !== 'invalidated')
-  const v2Confirmed = v2Cards.filter(c => !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree' && c.judgment.validity_status !== 'invalidated')
+  const v2Pending = v2Cards.filter(c => c.status !== 'archived' && c.judgment.is_ai_prefilled && c.judgment.validity_status !== 'invalidated')
+  const v2Confirmed = v2Cards.filter(c => c.status !== 'archived' && !c.judgment.is_ai_prefilled && c.judgment.user_endorsement !== 'disagree' && c.judgment.validity_status !== 'invalidated')
 
   // 待审核（不含刚解析的那张）
   const pendingCards = cards.filter(c => !c.is_approved && c.id !== parseResult?.card.id)
@@ -893,16 +900,16 @@ export default function Research() {
         }}>🔬</div>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#1B2A4A', letterSpacing: -0.3 }}>投研观点</div>
-          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>资料导入 · AI提炼 · 观点审核 · 观点库 · 决策检索</div>
+          <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 1 }}>资料导入 · 观点库</div>
         </div>
       </div>
 
       {/* ── Tab 导航 ── */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '2px solid #E5E7EB' }}>
         {([
-          { key: 'import',  label: '资料导入', badge: pendingCards.length > 0 ? pendingCards.length : null },
-          { key: 'library', label: '观点库',   badge: v2Cards.length > 0 ? v2Cards.length : null },
-          { key: 'search',  label: '决策检索', badge: null },
+          { key: 'import',  label: '资料导入', badge: SHOW_PENDING_REVIEW_QUEUE && pendingCards.length > 0 ? pendingCards.length : null },
+          { key: 'library', label: '观点库',   badge: v2Cards.filter(c => c.status !== 'archived').length > 0 ? v2Cards.filter(c => c.status !== 'archived').length : null },
+          ...(SHOW_DECISION_SEARCH_TAB ? [{ key: 'search' as const, label: '决策检索', badge: null }] : []),
         ] as const).map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             style={{
@@ -1174,8 +1181,8 @@ export default function Research() {
             )}
           </div>
 
-          {/* ── 待审核候选卡列表 ── */}
-          {pendingCards.length > 0 && (
+          {/* ── 待审核候选卡列表（v3.12: 开关控制）── */}
+          {SHOW_PENDING_REVIEW_QUEUE && pendingCards.length > 0 && (
             <div style={{ ...S.card, padding: '20px 24px' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                 待审核观点卡
@@ -1253,8 +1260,8 @@ export default function Research() {
             )}
           </div>
 
-          {/* ══════════ v2: 自动拉取资讯 ══════════ */}
-          <div style={{ ...S.card, padding: '16px 20px' }}>
+          {/* ══════════ v2: 自动拉取资讯（v3.12: 开关控制）══════════ */}
+          {SHOW_AUTO_FETCH_PANEL && <div style={{ ...S.card, padding: '16px 20px' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Sparkles size={14} style={{ color: '#F59E0B' }} /> 自动拉取资讯
             </div>
@@ -1324,10 +1331,10 @@ export default function Research() {
 
             {v2FetchProgress && <div style={{ fontSize: 12, color: '#3B82F6', marginTop: 6 }}>{v2FetchProgress}</div>}
             {v2FetchMsg && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4, whiteSpace: 'pre-line' }}>{v2FetchMsg}</div>}
-          </div>
+          </div>}
 
-          {/* ══════════ v2: 待审核卡列表 ══════════ */}
-          {v2Pending.length > 0 && (
+          {/* ══════════ v2: 待审核卡列表（v3.12: 开关控制）══════════ */}
+          {SHOW_PENDING_REVIEW_QUEUE && v2Pending.length > 0 && (
             <div style={{ ...S.card, padding: '16px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
@@ -1382,8 +1389,8 @@ export default function Research() {
             </div>
           )}
 
-          {/* ══════════ v2: 已审核卡列表 ══════════ */}
-          {v2Confirmed.length > 0 && (
+          {/* ══════════ v2: 已审核卡列表（v3.12: 开关控制）══════════ */}
+          {SHOW_CONFIRMED_CARDS_IN_IMPORT && v2Confirmed.length > 0 && (
             <div style={{ ...S.card, padding: '16px 20px' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
                 v2 已确认观点卡 ({v2Confirmed.length})
@@ -1578,8 +1585,8 @@ export default function Research() {
         </div>
       )}
 
-      {/* ══════════ Tab 3：决策检索 (v2) ══════════ */}
-      {activeTab === 'search' && (
+      {/* ══════════ Tab 3：决策检索 (v2)（v3.12: 开关控制）══════════ */}
+      {SHOW_DECISION_SEARCH_TAB && activeTab === 'search' && (
         <div style={{ ...S.card, padding: '20px 24px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Search size={14} style={{ color: '#3B82F6' }} /> 决策检索（v2 — 决策引擎实际消费的内容）

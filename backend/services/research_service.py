@@ -36,6 +36,12 @@ try:
 except ImportError:
     _HAS_BS4 = False
 
+# ── 模块收敛开关（v3.12 PRD）────────────────────────────────────────────────
+# False = 短期信号拉取后不写入 viewpoint_cards_v2（能力保留，持久化关闭）
+ENABLE_SHORT_TERM_INGEST_PERSIST = False
+# False = 手动导入停止写 V1 三表（research_documents/cards/viewpoints），只写 V2
+ENABLE_V1_WRITE = False
+
 
 # ── 观点库 CRUD ───────────────────────────────────────────────────────────────
 
@@ -236,11 +242,19 @@ def _try_generate_v2_card(content: str, title: str, source_url: Optional[str], o
 
         card = processor.process(raw_fact)
 
+        # v3.12: user_upload 入库即 approved，不走 pending_review
+        card.status = "approved"
+
         session = get_session()
         try:
             repository.insert(session, card)
+            # repository.insert 后 status 可能被 _card_to_orm 覆盖，补一次直接更新
+            from app.models import ViewpointCardV2
+            row = session.query(ViewpointCardV2).filter_by(card_id=card.card_id).first()
+            if row and row.status != "approved":
+                row.status = "approved"
             session.commit()
-            _logger.info("v2 副作用成功: 用户上传 → card_id=%s, symbol=%s", card.card_id, card.facts.primary_symbol)
+            _logger.info("v2 副作用成功(approved): 用户上传 → card_id=%s, symbol=%s", card.card_id, card.facts.primary_symbol)
         except Exception:
             session.rollback()
             raise
@@ -268,33 +282,37 @@ def parse_text(content: str, title: str, source_url: Optional[str] = None) -> di
 
     session = get_session()
     try:
-        doc = ResearchDocument(
-            title=resolved_title,
-            source_type="text" if not source_url else "link",
-            source_url=source_url,
-            raw_content=content,
-            object_name=card_data.get("object_name"),
-            market_name=card_data.get("market_name"),
-            author=card_data.get("author"),
-            publish_time=card_data.get("publish_time"),
-            parse_status="parsed",
-            time_sensitivity=card_data.get("time_sensitivity", "medium_decay"),
-        )
-        session.add(doc)
-        session.flush()
+        # v3.12: V1 三表写入受开关控制（冻结后只走 V2）
+        if ENABLE_V1_WRITE:
+            doc = ResearchDocument(
+                title=resolved_title,
+                source_type="text" if not source_url else "link",
+                source_url=source_url,
+                raw_content=content,
+                object_name=card_data.get("object_name"),
+                market_name=card_data.get("market_name"),
+                author=card_data.get("author"),
+                publish_time=card_data.get("publish_time"),
+                parse_status="parsed",
+                time_sensitivity=card_data.get("time_sensitivity", "medium_decay"),
+            )
+            session.add(doc)
+            session.flush()
 
-        card = _create_card_from_data(doc.id, card_data)
-        session.add(card)
-        session.commit()
-        session.refresh(card)
+            card = _create_card_from_data(doc.id, card_data)
+            session.add(card)
+            session.commit()
+            session.refresh(card)
 
-        result = {"document_id": doc.id, "document_title": resolved_title, "card": _card_to_dict(card)}
+            result = {"document_id": doc.id, "document_title": resolved_title, "card": _card_to_dict(card)}
+        else:
+            result = {"document_id": None, "document_title": resolved_title, "card": card_data}
 
         # v2 副作用：同步生成 ViewpointCard（失败不阻断 v1 流程）
         _try_generate_v2_card(content, resolved_title, source_url, card_data.get("object_name"))
 
         # v3.6: 原文落盘到知识库 MD 文件 + 触发索引（失败不阻断主流程）
-        kb_path = _persist_to_knowledge_base(content, card_data, resolved_title)
+        kb_path = _persist_to_knowledge_base(content, card_data, resolved_title) if ENABLE_V1_WRITE else None
 
         # v3.6.3: 回存知识库文件路径到 DB
         if kb_path:
@@ -809,6 +827,22 @@ def v2_ingest_alpha_vantage(symbol_str: str) -> dict:
 
     cards_data = []
     errors = []
+
+    # v3.12: 持久化开关关闭时，只处理不入库（供决策时现取）
+    if not ENABLE_SHORT_TERM_INGEST_PERSIST:
+        for rf in raw_facts:
+            try:
+                card = processor.process(rf)
+                cards_data.append(card.model_dump(mode="json"))
+            except Exception as e:
+                errors.append({
+                    "source_type": rf.source_type.value if hasattr(rf.source_type, 'value') else str(rf.source_type),
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:500],
+                })
+        _v2_logger.info("v2_ingest_alpha_vantage 完成(不入库): symbol=%s, %d 张卡", symbol_str, len(cards_data))
+        return {"cards": cards_data, "errors": errors, "persisted": False}
+
     session = get_session()
     try:
         for rf in raw_facts:
@@ -859,6 +893,22 @@ def v2_ingest_akshare(symbol_str: str) -> dict:
 
     cards_data = []
     errors = []
+
+    # v3.12: 持久化开关关闭时，只处理不入库
+    if not ENABLE_SHORT_TERM_INGEST_PERSIST:
+        for rf in raw_facts:
+            try:
+                card = processor.process(rf)
+                cards_data.append(card.model_dump(mode="json"))
+            except Exception as e:
+                errors.append({
+                    "source_type": rf.source_type.value if hasattr(rf.source_type, 'value') else str(rf.source_type),
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:500],
+                })
+        _v2_logger.info("v2_ingest_akshare 完成(不入库): symbol=%s, %d 张卡", symbol_str, len(cards_data))
+        return {"cards": cards_data, "errors": errors, "persisted": False}
+
     session = get_session()
     try:
         for rf in raw_facts:
