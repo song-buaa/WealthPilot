@@ -88,7 +88,8 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
         const res = await fetch(`/api/execution-plan/${planMeta.plan_id}/confirm`, { method: 'POST' })
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }))
-          throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+          const msg = err.error || err.detail || res.statusText
+          throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
         }
       } else if (draft) {
         // 旧路径: ActionDraft confirm
@@ -347,8 +348,15 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
             )}
 
             {error && (
-              <div style={{ padding: '8px 12px', background: '#FEF2F2', borderRadius: 8, fontSize: 12, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <AlertTriangle size={14} /> {error}
+              <div style={{
+                padding: '10px 14px', borderRadius: 8, fontSize: 13, lineHeight: 1.6,
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                background: error.includes('演示模式') ? '#FFF7ED' : '#FEF2F2',
+                border: `1px solid ${error.includes('演示模式') ? '#FED7AA' : '#FECACA'}`,
+                color: error.includes('演示模式') ? '#9A3412' : '#DC2626',
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{error}</span>
               </div>
             )}
           </div>

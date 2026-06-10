@@ -79,6 +79,7 @@ def persist_draft(req: GenerateRequest):
     from backend.skills import invoke_skill
     from app.database import get_session
     from backend.services.execution_plan.models import ExecutionPlan, ExecutionTranche
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
     import json
 
     result = invoke_skill(
@@ -98,6 +99,11 @@ def persist_draft(req: GenerateRequest):
     psb = result["plan_summary_block"]
     session = get_session()
     try:
+        # 演示模式下标记 source，便于区分和清理
+        source_ref = req.source_decision_ref
+        if PUBLIC_DEMO_MODE:
+            source_ref = f"demo:{source_ref}" if source_ref else "demo"
+
         plan = ExecutionPlan(
             symbol=req.symbol, market=req.market, side=req.side,
             target_basis="QUANTITY",
@@ -108,7 +114,7 @@ def persist_draft(req: GenerateRequest):
             constraints_applied=json.dumps(result.get("constraints_applied"), default=str),
             rationale=result.get("rationale", ""),
             risk_notes=result.get("risk_notes", ""),
-            source_decision_ref=req.source_decision_ref,
+            source_decision_ref=source_ref,
         )
         session.add(plan)
         session.flush()

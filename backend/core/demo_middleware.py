@@ -2,7 +2,11 @@
 PUBLIC_DEMO_MODE 中间件：
 
 1. 访问密码门：所有 API 请求需带 X-Demo-Password 或 cookie
-2. action/execution-plan 路由拦截：直接 403
+2. 交易操作拦截：confirm / place_order / 策略管理 → 403
+3. 展示能力放行：generate / persist-draft / adjust → 放行（访客可完整体验
+   "AI 建议 → 规则引擎分批 → 对话调整"）
+
+拦截边界：confirm 是"看 vs 动"的分界线。
 """
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -19,15 +23,11 @@ _PUBLIC_PATHS = {
     "/redoc",
 }
 
-# PUBLIC_DEMO_MODE 下直接 403 的路由前缀
+# POST 方法下直接 403 的路由前缀（交易操作）
 _BLOCKED_PREFIXES = [
     "/api/action/strategies/",  # place_order, pause, resume, discard
     "/api/action/orders/",      # cancel_order
-    "/api/execution-plan/",     # adjust, persist-draft, confirm
 ]
-_BLOCKED_EXACT = {
-    "/api/action/drafts",       # POST = create draft (但 GET 可以)
-}
 
 
 class DemoMiddleware(BaseHTTPMiddleware):
@@ -45,23 +45,33 @@ class DemoMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_PATHS:
             return await call_next(request)
 
-        # ── 路由拦截：action/execution-plan 写操作 ──
+        # ── 路由拦截：交易操作 ──
         method = request.method.upper()
 
-        # action drafts: POST(创建) 和 DELETE(丢弃) 拦截，GET 放行
+        # action drafts: POST(创建) 拦截，GET 放行
         if path == "/api/action/drafts" and method == "POST":
             return JSONResponse(
                 {"error": "PUBLIC_DEMO_MODE: 演示模式下不可创建行动草稿"},
                 status_code=403,
             )
 
-        # action 子路由：confirm/place/cancel/discard/pause/resume
+        # action 子路由：place_order / cancel / discard / pause / resume
         for prefix in _BLOCKED_PREFIXES:
             if path.startswith(prefix) and method == "POST":
                 return JSONResponse(
                     {"error": "PUBLIC_DEMO_MODE: 演示模式下不可执行交易操作"},
                     status_code=403,
                 )
+
+        # execution-plan: 只拦 confirm（"看vs动"分界线）
+        # generate / persist-draft / adjust 放行（纯计算 + 草案展示）
+        if (path.startswith("/api/execution-plan/")
+                and path.endswith("/confirm")
+                and method == "POST"):
+            return JSONResponse(
+                {"error": "PUBLIC_DEMO_MODE: 演示模式下可生成和调整计划草案，但不可确认下单。"},
+                status_code=403,
+            )
 
         # ── 密码门 ──
         if DEMO_ACCESS_PASSWORD:

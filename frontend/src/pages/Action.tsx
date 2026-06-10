@@ -11,6 +11,7 @@ import { ALLOC_LABEL } from '@/lib/allocation-api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ConfirmOrderDialog from '@/components/ConfirmOrderDialog'
 import PageHeader from '@/components/shared/PageHeader'
+import { useDemoMode } from '@/hooks/useDemoMode'
 
 type TabKey = 'action' | 'history'
 
@@ -130,6 +131,7 @@ function ActionListTab({
   initialParentIntentId: string | null
 }) {
   const navigate = useNavigate()
+  const isDemo = useDemoMode()
   const [intents, setIntents] = useState<AllocationIntentResponse[]>([])
   const [strategies, setStrategies] = useState<SymbolStrategyResponse[]>([])
   const [orders, setOrders] = useState<OrderResponse[]>([])
@@ -354,8 +356,8 @@ function ActionListTab({
         </>
       )}
 
-      {/* ConfirmOrderDialog */}
-      {placeOrderStrategy && (
+      {/* ConfirmOrderDialog — demo 模式下不渲染 */}
+      {!isDemo && placeOrderStrategy && (
         <ConfirmOrderDialog
           open={!!placeOrderStrategy}
           onClose={() => setPlaceOrderStrategy(null)}
@@ -547,7 +549,7 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
             cursor: isPaused ? 'not-allowed' : 'pointer',
             fontWeight: 600,
           }}
-        >立即下单</button>
+        >{isDemo ? '演示模式' : '立即下单'}</button>
       </div>
     </div>
   )
