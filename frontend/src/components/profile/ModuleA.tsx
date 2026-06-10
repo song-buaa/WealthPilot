@@ -67,7 +67,7 @@ const FIELD_LABELS: Record<string, string> = {
   family_status:         '家庭状态',
   asset_structure:       '现有资产结构',
   investment_motivation: '本次投资动机',
-  fund_usage_timeline:   '资金使用时间',
+  fund_usage_timeline:   '投资期限',
 }
 
 const REQUIRED_FIELDS = ['risk_normalized_level', 'income_stability', 'asset_structure', 'fund_usage_timeline']

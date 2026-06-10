@@ -42,7 +42,7 @@ const FIELD_OPTS: Record<string, string[]> = {
 const FIELD_LABELS: Record<string, string> = {
   income_level:'年收入', income_stability:'收入稳定性', total_assets:'总资产',
   investable_ratio:'可投资占比', liability_level:'负债水平', family_status:'家庭状态',
-  asset_structure:'资产结构', investment_motivation:'投资动机', fund_usage_timeline:'资金使用',
+  asset_structure:'资产结构', investment_motivation:'投资动机', fund_usage_timeline:'投资期限',
 }
 
 const REQUIRED = ['risk_normalized_level','income_stability','asset_structure','fund_usage_timeline']

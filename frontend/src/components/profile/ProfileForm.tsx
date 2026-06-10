@@ -63,7 +63,7 @@ export default function ProfileForm({ onProfileCreated }: Props) {
         {/* 折叠后的摘要 */}
         {moduleADone && !moduleAOpen && (
           <div style={{ padding: '10px 18px', fontSize: 13, color: '#6B7280' }}>
-            风险等级：R{data.risk_normalized_level} {data.risk_normalized_level ? RISK_TYPE[data.risk_normalized_level] : ''} &nbsp;|&nbsp; 收入稳定性：{data.income_stability ?? '—'} &nbsp;|&nbsp; 资金使用：{data.fund_usage_timeline ?? '—'}
+            风险等级：R{data.risk_normalized_level} {data.risk_normalized_level ? RISK_TYPE[data.risk_normalized_level] : ''} &nbsp;|&nbsp; 收入稳定性：{data.income_stability ?? '—'} &nbsp;|&nbsp; 投资期限：{data.fund_usage_timeline ?? '—'}
           </div>
         )}
 
