@@ -117,17 +117,26 @@ class OrderPoller:
 
 
 def scan_orphan_orders(get_session, get_broker_adapter) -> int:
-    """启动时扫描孤儿订单: submitted_to_broker 但无 broker_order_id。
+    """启动时扫描孤儿订单。
 
-    这些订单是网络中断时 place_order 请求已发出但未收到回执的情况。
-    处理: 转为 unknown 状态 + 审计日志记录。
+    两类孤儿:
+    1. submitted_to_broker + broker_order_id IS NULL → 转 unknown (原有)
+    2. unknown + broker_order_id IS NULL → 转 cancelled (新增)
+       broker 从未收到这些订单，poller 永远无法 sync，直接标 cancelled。
+       注意: 有 broker_order_id 的 unknown 不动——那些等 TWS 在线后 poller 收敛。
 
     Returns:
-        发现的孤儿订单数量
+        发现并处理的孤儿订单数量
     """
     session = get_session()
     try:
-        orphans = (
+        from backend.services.action.order_manager import OrderManager
+        adapter = get_broker_adapter()
+        manager = OrderManager(session, broker_adapter=adapter)
+        total = 0
+
+        # 类型 1: submitted_to_broker + 无 broker_order_id → unknown
+        submitted_orphans = (
             session.query(OrderRecord)
             .filter(
                 OrderRecord.status == OrderStatus.SUBMITTED_TO_BROKER,
@@ -135,31 +144,44 @@ def scan_orphan_orders(get_session, get_broker_adapter) -> int:
             )
             .all()
         )
-        if not orphans:
-            return 0
-
-        logger.warning("[scan_orphan_orders] 发现 %d 笔孤儿订单", len(orphans))
-
-        from backend.services.action.order_manager import OrderManager
-        adapter = get_broker_adapter()
-        manager = OrderManager(session, broker_adapter=adapter)
-
-        for order in orphans:
+        for order in submitted_orphans:
             order.status = OrderStatus.UNKNOWN
             manager._audit("orphan_order_detected", {
                 "order_id": order.id,
                 "strategy_id": order.strategy_id,
                 "symbol": order.symbol,
             })
-            logger.warning(
-                "[scan_orphan_orders] 孤儿订单 %s 已标记 unknown", order.id,
-            )
+            logger.warning("[scan_orphan] %s submitted→unknown (无 broker_order_id)", order.id)
+            total += 1
 
-        session.commit()
-        return len(orphans)
+        # 类型 2: unknown + 无 broker_order_id → cancelled
+        # broker 从未收到，等同于未提交，直接标 cancelled
+        unknown_orphans = (
+            session.query(OrderRecord)
+            .filter(
+                OrderRecord.status == OrderStatus.UNKNOWN,
+                OrderRecord.broker_order_id.is_(None),
+            )
+            .all()
+        )
+        for order in unknown_orphans:
+            order.status = OrderStatus.CANCELLED
+            manager._audit("orphan_unknown_no_broker_id", {
+                "order_id": order.id,
+                "strategy_id": order.strategy_id,
+                "symbol": order.symbol,
+                "reason": "broker 从未收到此订单(无 broker_order_id)，标记为已取消",
+            })
+            logger.warning("[scan_orphan] %s unknown→cancelled (无 broker_order_id)", order.id)
+            total += 1
+
+        if total:
+            session.commit()
+            logger.warning("[scan_orphan] 共处理 %d 笔孤儿订单", total)
+        return total
     except Exception as e:
         session.rollback()
-        logger.error("[scan_orphan_orders] 扫描异常: %s", e)
+        logger.error("[scan_orphan] 扫描异常: %s", e)
         return 0
     finally:
         session.close()

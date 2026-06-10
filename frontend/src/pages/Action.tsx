@@ -701,7 +701,10 @@ function TimelineTab() {
               <div style={{ fontSize: 11, color: '#6B7280', display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
                 {t.strategy && (
                   <span>← 策略：{t.strategy.symbol} {t.strategy.side === 'BUY' ? '买入' : '卖出'}
-                    {t.strategy.limit_price ? ` @$${t.strategy.limit_price}` : ''}</span>
+                    {t.strategy.limit_price ? ` 计划限价 $${t.strategy.limit_price}` : ''}
+                    {t.order && t.order.limit_price && t.strategy.limit_price &&
+                     Number(t.order.limit_price) !== Number(t.strategy.limit_price)
+                      ? ` → 实际下单 $${t.order.limit_price}` : ''}</span>
                 )}
                 {t.draft && (
                   <span>← 行动清单：{t.draft.decision_summary || '（无摘要）'}</span>
