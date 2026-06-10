@@ -1086,6 +1086,7 @@ def _resolve_symbol(asset_name: str, session) -> Optional[str]:
     return None
 
 
+# v3.12 起停用：短期信号决策时现取不入库，函数保留备查
 def _auto_ingest_av(symbol_str: str, session) -> None:
     """后台自动触发 AV 拉取，生成 pending 卡入库。失败只 log 不抛异常。"""
     import logging
@@ -1120,6 +1121,7 @@ import threading
 _BG_INGEST_COOLDOWN: dict[str, float] = {}
 
 
+# v3.12 起停用：短期信号决策时现取不入库，函数保留备查
 def _trigger_bg_ingest(symbol_str: str) -> None:
     """在独立线程里异步执行 AV 拉取，不阻塞当前请求。同一 symbol 60 秒内不重复触发。"""
     import logging
@@ -1186,9 +1188,10 @@ def _load_research(session, pid: int, asset_name: Optional[str]) -> list[str]:
                 results.extend(recent_av)
                 _lr_logger.info("AV 近期数据: %d 条", len(recent_av))
             elif symbol_str.endswith(":US"):
-                _trigger_bg_ingest(symbol_str)
-                _lr_logger.info("AV 数据过期，后台拉取已触发: %s", symbol_str)
-                # 用现有 pending 卡兜底
+                # v3.12: 不再触发后台写库拉取（PRD: 短期信号用完即弃、不入库）
+                # _trigger_bg_ingest(symbol_str)  # 已禁用：去掉写库后异步拉取无副作用、空转烧额度
+                _lr_logger.info("AV 近期数据为空，尝试 relaxed 查询兜底: %s", symbol_str)
+                # 用现有 pending/relaxed 卡兜底
                 relaxed = repository.query_for_decision_relaxed(session, symbol_str)
                 if relaxed:
                     results.extend(relaxed)
