@@ -3,7 +3,6 @@
  * 顶部：AI总结 + 3个badge
  * 下方：两个可展开/编辑的卡片
  */
-import React from 'react'
 import type { UserProfile } from '@/lib/api'
 import ResultCardA from './ResultCardA'
 import ResultCardB from './ResultCardB'

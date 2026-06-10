@@ -7,11 +7,10 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Loader2, Send, AlertTriangle, AlertCircle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SquarePen, User, Lightbulb, BarChart3, Search, BookOpen, Zap } from 'lucide-react'
+import { Loader2, Send, AlertTriangle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, User, BarChart3, Search, BookOpen, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, actionApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft } from '@/lib/api'
-import ActionListGenerateButton, { type ActionButtonState } from '@/components/ActionListGenerateButton'
+import { streamDecisionChat, decisionApi, portfolioApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft } from '@/lib/api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
@@ -197,7 +196,7 @@ const INTENT_CATEGORIES = [
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Decision() {
   const {
-    conversations, activeConversationId, fetchConversations,
+    activeConversationId, fetchConversations,
     createConversation, switchConversation, updateConversationTitle,
   } = useDecisionStore()
 
@@ -234,7 +233,7 @@ export default function Decision() {
     plan_id?: string; factor_snapshot?: Record<string,unknown>;
     constraints_applied?: Record<string,unknown>; rationale?: string;
   } | null>(null)
-  const [actionMsgId, setActionMsgId] = useState<number | null>(null)
+  const [actionMsgId] = useState<number | null>(null)
 
   // ── 初始化：加载会话列表 + URL 参数处理 ──
   const initDone = useRef(false)
@@ -453,68 +452,10 @@ export default function Decision() {
   async function handleNewConversation() {
     abortRef.current?.abort()
     setStreaming(false)
-    const newId = await createConversation()
+    await createConversation()
     setMessages([])
     setExplainData(null)
     setInput('')
-  }
-
-  function handleClear() {
-    handleNewConversation()
-  }
-
-  // v3.2 行动清单生成
-  async function handleGenerateAction(msgId: number) {
-    // 已完成的直接跳转
-    const msg = messages.find(m => m.id === msgId)
-    if (msg?.actionDraftStatus === 'completed') {
-      // TODO: 跳转到投资行动页面
-      return
-    }
-
-    // 设置 loading 状态
-    setActionMsgId(msgId)
-    setMessages(prev => prev.map(m =>
-      m.id === msgId ? { ...m, actionDraftStatus: 'loading' as const } : m
-    ))
-
-    try {
-      // 构建对话上下文
-      const context = messages
-        .filter(m => m.content)
-        .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }))
-
-      // 获取 expressing_output（intent + explainData 的持仓信息）
-      const aiMsg = messages.find(m => m.id === msgId)
-      const expressingOutput: Record<string, unknown> = {}
-      if (aiMsg?.intent) {
-        expressingOutput.decisionType = (aiMsg.intent as Record<string, unknown>).action
-        expressingOutput.confidence = (aiMsg.intent as Record<string, unknown>).confidence
-        expressingOutput.asset = (aiMsg.intent as Record<string, unknown>).asset
-      }
-      // 注入持仓数据供 ActionPlanner 推算（含 estimated_shares / current_price）
-      if (explainData?.data) {
-        const d = explainData.data as Record<string, unknown>
-        if (d.target_position) expressingOutput.target_position = d.target_position
-        if (d.total_assets) expressingOutput.total_assets = d.total_assets
-      }
-
-      const draft = await actionApi.generateDraft({
-        conversation_id: activeConversationId!,
-        conversation_context: context,
-        expressing_output: expressingOutput,
-      })
-
-      setCurrentDraft(draft)
-      setDraftCardOpen(true)
-    } catch (e: unknown) {
-      console.error('[ActionDraft] generate failed:', e)
-      // 恢复按钮状态
-      setMessages(prev => prev.map(m =>
-        m.id === msgId ? { ...m, actionDraftStatus: undefined } : m
-      ))
-      alert(`行动清单生成失败: ${(e as Error).message}`)
-    }
   }
 
   function handleDraftConfirmed() {
@@ -538,6 +479,47 @@ export default function Decision() {
           : m
       ))
     }
+  }
+
+  // Bug 2 fix: 执行计划确认回调 — 在 Decision 作用域内，闭包可访问 state setters
+  function handleConfirmExecPlan(planResult: Record<string, unknown>) {
+    const psb = planResult.plan_summary_block as Record<string, unknown> | undefined
+    const tranches = (psb?.tranches as Array<Record<string, unknown>>) || []
+    const symbol = (psb?.symbol as string) || ''
+    const side = (psb?.side as string) || 'BUY'
+    const strategies = tranches.map((t) => ({
+      symbol,
+      side,
+      quantity: t.quantity as number,
+      quantity_pct: null,
+      order_type: 'LIMIT' as const,
+      trigger_price: t.trigger_price as number | null,
+      limit_price: t.limit_price as number | null,
+      parent_intent_index: null,
+      value_sources: null,
+      _trigger_type: t.trigger_type as string,
+    }))
+    const fakeDraft: ActionDraftResponse = {
+      id: (planResult.plan_id as string) || '',
+      conversation_id: '',
+      decision_summary: (planResult.rationale as string) || '',
+      payload: {
+        symbol_strategies: strategies as SymbolStrategyDraft[],
+        allocation_intents: [],
+        risk_notes: planResult.risk_notes ? [planResult.risk_notes as string] : [],
+        missing_fields: [],
+      },
+      status: 'draft',
+      created_at: null, updated_at: null, confirmed_at: null, discarded_at: null,
+    }
+    setPlanMetaForModal({
+      plan_id: planResult.plan_id as string,
+      factor_snapshot: planResult.factor_snapshot as Record<string, unknown>,
+      constraints_applied: planResult.constraints_applied as Record<string, unknown>,
+      rationale: planResult.rationale as string,
+    })
+    setCurrentDraft(fakeDraft)
+    setDraftCardOpen(true)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -696,7 +678,7 @@ export default function Decision() {
             msg.role === 'user' ? (
               <UserMessage key={msg.id} msg={msg} />
             ) : (
-              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} onGenerateAction={handleGenerateAction} explainData={explainData} />
+              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} explainData={explainData} onConfirmExecPlan={handleConfirmExecPlan} />
             )
           ))}
           <div ref={messagesEnd} />
@@ -845,17 +827,17 @@ function UserMessage({ msg }: { msg: Message }) {
 }
 
 // ── AI 消息 ───────────────────────────────────────────────────
-function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
+function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
   msg: Message
   onSelectCandidate?: (name: string) => void
-  onGenerateAction?: (msgId: number) => void
   explainData?: ExplainData | null
+  onConfirmExecPlan?: (planResult: Record<string, unknown>) => void
 }) {
   const [showExecPlan, setShowExecPlan] = useState(false)
   const [userInitiated, setUserInitiated] = useState(false)  // Step E: 用户主动发起
   const [userSide, setUserSide] = useState<string>('ADD')
   const [userTargetPct, setUserTargetPct] = useState('8')
-  const plan_generated_ref = useRef(false)
+  const [planGenerated, setPlanGenerated] = useState(false)
   // loading 态：无内容且正在流式输出 — 根据 stage 事件动态显示进度
   if (msg.streaming && !msg.content) {
     const lastStage = (msg.stages ?? []).at(-1)
@@ -956,19 +938,20 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
             {msg.actionable_hint || '生成执行计划'}
           </button>
         )}
-        {/* Step E: 用户主动发起(观望/持有结论时 — 次要样式) */}
+        {/* Step E: 用户主动发起(观望/持有结论时 — 次要样式，形状对齐主按钮) */}
         {!msg.streaming && msg.content && !msg.actionable && msg.intent && !showExecPlan && (
           <button
             onClick={() => { setUserInitiated(true); setShowExecPlan(true) }}
             style={{
               marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-              padding: '5px 12px', fontSize: 11, fontWeight: 500, borderRadius: 6,
-              border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#6B7280',
-              cursor: 'pointer',
+              padding: '6px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+              border: '1px solid #D1D5DB', background: '#F9FAFB', color: '#4B5563',
+              cursor: 'pointer', boxShadow: '0 0 0 2px rgba(107, 114, 128, 0.08)',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = '#F3F4F6')}
             onMouseLeave={e => (e.currentTarget.style.background = '#F9FAFB')}
           >
+            <Zap size={14} />
             主动制定执行计划
           </button>
         )}
@@ -995,7 +978,7 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
             )
           }
           // Step E: 用户主动发起时显示方向+目标选择
-          if (userInitiated && !plan_generated_ref.current) {
+          if (userInitiated && !planGenerated) {
             return (
               <div style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 10,
                 padding: '12px 16px', marginTop: 8 }}>
@@ -1020,7 +1003,7 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
                       style={{ marginLeft: 4, width: 40, padding: '3px 6px', fontSize: 12, borderRadius: 4, border: '1px solid #D1D5DB' }} /> %
                   </label>
                 </div>
-                <button onClick={() => { plan_generated_ref.current = true; setShowExecPlan(true) }}
+                <button onClick={() => setPlanGenerated(true)}
                   style={{ padding: '5px 14px', fontSize: 12, fontWeight: 500, borderRadius: 6, border: '1px solid #E5E7EB', background: '#fff', color: '#374151', cursor: 'pointer' }}>
                   生成计划
                 </button>
@@ -1038,74 +1021,15 @@ function AiMessage({ msg, onSelectCandidate, onGenerateAction, explainData }: {
               side={effectiveSide}
               userInitiated={userInitiated}
               defaultTargetPct={effectiveTargetPct}
-              onClose={() => { setShowExecPlan(false); plan_generated_ref.current = false }}
+              onClose={() => { setShowExecPlan(false); setPlanGenerated(false) }}
               onConfirmPlan={(planResult) => {
-                // 组装 ActionDraftResponse 格式，打开 modal
-                const tranches = planResult.plan_summary_block?.tranches || []
-                const strategies = tranches.map((t, i) => ({
-                  symbol: planResult.plan_summary_block?.symbol || symbol,
-                  side: sideMap[action] || 'BUY',
-                  quantity: t.quantity,
-                  quantity_pct: null,
-                  order_type: 'LIMIT' as const,
-                  trigger_price: t.trigger_price,
-                  limit_price: t.limit_price,
-                  parent_intent_index: null,
-                  value_sources: null,
-                  _trigger_type: t.trigger_type,
-                }))
-                const fakeDraft: ActionDraftResponse = {
-                  id: planResult.plan_id || '',
-                  conversation_id: '',
-                  decision_summary: planResult.rationale || '',
-                  payload: {
-                    symbol_strategies: strategies as SymbolStrategyDraft[],
-                    allocation_intents: [],
-                    risk_notes: planResult.risk_notes ? [planResult.risk_notes] : [],
-                    missing_fields: [],
-                  },
-                  status: 'draft',
-                  created_at: null, updated_at: null, confirmed_at: null, discarded_at: null,
-                }
-                setPlanMetaForModal({
-                  plan_id: planResult.plan_id,
-                  factor_snapshot: planResult.factor_snapshot as Record<string,unknown>,
-                  constraints_applied: planResult.constraints_applied as Record<string,unknown>,
-                  rationale: planResult.rationale,
-                })
-                setCurrentDraft(fakeDraft)
-                setDraftCardOpen(true)
+                onConfirmExecPlan?.(planResult as unknown as Record<string, unknown>)
                 setShowExecPlan(false)
               }}
             />
           )
         })()}
       </div>
-    </div>
-  )
-}
-
-// ── 意图 badge ────────────────────────────────────────────────
-function IntentBadge({ intent }: { intent: Record<string, unknown> }) {
-  const asset  = intent.asset as string | undefined
-  const action = intent.action as string | undefined
-  const conf   = intent.confidence as number | undefined
-  if (!asset && !action) return null
-
-  return (
-    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-      {asset  && <Chip label="标的" value={asset} />}
-      {action && <Chip label="操作" value={displayAction(action)} />}
-      {conf != null && <Chip label="置信" value={`${Math.round(conf * 100)}%`} />}
-    </div>
-  )
-}
-
-function Chip({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'inline-flex', gap: 4, background: '#EFF6FF', borderRadius: 6, padding: '2px 7px', fontSize: 11 }}>
-      <span style={{ color: '#93C5FD' }}>{label}</span>
-      <span style={{ fontWeight: 600, color: '#1B2A4A' }}>{value}</span>
     </div>
   )
 }
@@ -1168,16 +1092,6 @@ function riskBarColor(level: number): string {
   if (level <= 2) return '#10B981'
   if (level === 3) return '#F59E0B'
   return '#EF4444'
-}
-
-// ── 关键依据 chip 颜色 ─────────────────────────────────────────
-function stageChipStyle(name: string, status: string): { bg: string; color: string } {
-  const s = status.toLowerCase()
-  if (s === 'blocked' || s === 'fail') return { bg: '#FEE2E2', color: '#DC2626' }
-  const n = name.toLowerCase()
-  if (n === 'rules' || n === 'pre_check' || n === 'concentration') return { bg: '#FEF3C7', color: '#D97706' }
-  if (n === 'viewpoints') return { bg: '#D1FAE5', color: '#059669' }
-  return { bg: '#F3F4F6', color: '#6B7280' }
 }
 
 // ── intent 字段辅助映射 ───────────────────────────────────────
@@ -1497,8 +1411,8 @@ function KnowledgeFilePreview({ path, onClose }: { path: string; onClose: () => 
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>{title}</div>
             <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 2, display: 'flex', gap: 8 }}>
-              {fm.source && <span>来源: {String(fm.source)}</span>}
-              {fm.date && <span>{String(fm.date)}</span>}
+              {!!fm.source && <span>来源: {String(fm.source)}</span>}
+              {!!fm.date && <span>{String(fm.date)}</span>}
               {sensitivity && <span>{sensitivity}</span>}
             </div>
           </div>
@@ -1555,8 +1469,6 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
   const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
 
   const intent    = data.intent
-  const riskLevel = conclusion ? verdictToRiskLevel(conclusion.verdict) : 0
-  const barColor  = riskBarColor(riskLevel)
 
   return (
     <div style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1609,8 +1521,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
       {/* ── 1b. 持仓数据 / 资产分布（Education 不显示）── */}
       {intent?.primary_intent !== 'Education' && (() => {
         const isPortfolioReview = intent?.primary_intent === 'PortfolioReview' || intent?.intent_type === 'portfolio_review'
-        const breakdown = data.data?.asset_breakdown as Record<string, unknown> | undefined
-        const prResult = data.portfolioResult as Record<string, unknown> | undefined
+        const breakdown = (data.data as Record<string, unknown> | undefined)?.asset_breakdown as Record<string, unknown> | undefined
 
         // PortfolioReview：显示资产分布
         if (isPortfolioReview && breakdown) {
@@ -1886,8 +1797,8 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
             <div style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A', marginBottom: 6 }}>
               {DIAG[pr.diagnosis_type as string] ?? '综合分析'}
             </div>
-            {pr.structural_issue && (
-              <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{pr.structural_issue as string}</div>
+            {!!pr.structural_issue && (
+              <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{String(pr.structural_issue)}</div>
             )}
           </div>
         )
@@ -2016,13 +1927,11 @@ function AllocationExplainView({ data }: { data: ExplainData }) {
   const intent = data.intent
   const d = data.data as Record<string, unknown> | undefined
   const rules = data.rules as Record<string, unknown> | undefined
-  const llm = data.llm as Record<string, unknown> | undefined
 
   const subIntent = intent?.action ? (ALLOC_SUB_INTENT_LABELS[intent.action] ?? intent.action) : '资产配置'
   const totalAssets = d?.totalAssets as number | undefined
   const overallStatus = d?.overallStatus as string | undefined
   const allocationPlan = d?.allocationPlan as Array<Record<string, unknown>> | undefined
-  const reasoning = llm?.reasoning as string[] | undefined
 
   return (
     <div style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Loader2, AlertTriangle, Plus, Search, Trash2,
-  Pencil, ChevronDown, ChevronUp, Check, X, Sparkles, FileText, Link, RefreshCw,
+  Pencil, Check, X, Sparkles, FileText, Link, RefreshCw,
 } from 'lucide-react'
 import {
   researchApi, researchV2Api,
@@ -44,12 +44,6 @@ const DOC_STATUS: Record<string, { label: string; bg: string; color: string }> =
   discarded:  { label: '已丢弃', bg: '#F3F4F6', color: '#9CA3AF' },
 }
 
-// ── 有效性 / 立场 badge ───────────────────────────────────────
-const VALIDITY: Record<string, { label: string; bg: string; color: string }> = {
-  active:  { label: '有效', bg: '#D1FAE5', color: '#059669' },
-  suspect: { label: '存疑', bg: '#FEF3C7', color: '#D97706' },
-  invalid: { label: '已作废', bg: '#F3F4F6', color: '#9CA3AF' },
-}
 // 来源类型中文映射（去品牌化）
 const SOURCE_TYPE_LABEL: Record<string, string> = {
   user_upload: '用户上传',
@@ -73,10 +67,6 @@ const SHOW_PENDING_REVIEW_QUEUE = false      // 待审核观点卡队列（V1 + 
 const SHOW_DECISION_SEARCH_TAB = false       // 「决策检索」tab
 const SHOW_CONFIRMED_CARDS_IN_IMPORT = false // 资料导入内「v2 已确认观点卡」区块
 
-function validityBadge(status: string | undefined) {
-  const v = VALIDITY[status ?? 'active'] ?? VALIDITY.active
-  return <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 10, background: v.bg, color: v.color }}>{v.label}</span>
-}
 function stanceBadge(stance: string | undefined) {
   if (!stance) return null
   const v = STANCE[stance]
@@ -281,7 +271,7 @@ function ParseCardPreview({ card }: { card: ResearchCard }) {
 
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Research() {
-  const [viewpoints, setViewpoints] = useState<Viewpoint[]>([])
+  const [_viewpoints, setViewpoints] = useState<Viewpoint[]>([])
   const [cards,      setCards]      = useState<ResearchCard[]>([])
   const [documents,  setDocuments]  = useState<ResearchDocument[]>([])
   const [loading,    setLoading]    = useState(true)
@@ -331,18 +321,9 @@ export default function Research() {
   const [formSaving,     setFormSaving]     = useState(false)
   const [formError,      setFormError]      = useState<string | null>(null)
 
-  // ── Tab 3 — 决策检索 ──
-  const [searchQuery,   setSearchQuery]   = useState('')
-  const [searchObject,  setSearchObject]  = useState('')
-  const [searchLimit,   setSearchLimit]   = useState(5)
-  const [searchExpired, setSearchExpired] = useState(false)
-  const [searching,     setSearching]     = useState(false)
-  const [searchResults, setSearchResults] = useState<Viewpoint[]>([])
-  const [searchDone,    setSearchDone]    = useState(false)
-
   // ── v2 状态 ──
   const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
-  const [v2Loading,     setV2Loading]     = useState(false)
+  const [_v2Loading,    setV2Loading]     = useState(false)
   const [v2Holdings,    setV2Holdings]    = useState<{symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number; entity_id?: string | null; sibling_symbols?: string[]}[]>([])
   const [v2Selected,    setV2Selected]    = useState<Set<string>>(new Set())
   const [v2ManualSym,   setV2ManualSym]   = useState('')
@@ -572,43 +553,6 @@ export default function Research() {
       setFormError(e instanceof Error ? e.message : '保存失败')
     } finally {
       setFormSaving(false)
-    }
-  }
-
-  async function handleDelete(id: number) {
-    if (!confirm('确定删除此观点？此操作不可撤销。')) return
-    try {
-      await researchApi.deleteViewpoint(id)
-      setViewpoints(prev => prev.filter(v => v.id !== id))
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : '删除失败')
-    }
-  }
-
-  async function handleStatusChange(vp: Viewpoint, status: string) {
-    try {
-      const updated = await researchApi.updateViewpoint(vp.id, { validity_status: status })
-      setViewpoints(prev => prev.map(v => v.id === updated.id ? updated : v))
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : '更新失败')
-    }
-  }
-
-  // ── 决策检索 ──
-  async function handleSearch() {
-    if (!searchQuery.trim()) return
-    setSearching(true); setSearchDone(false)
-    try {
-      const q = [searchQuery, searchObject ? `标的:${searchObject}` : ''].filter(Boolean).join(' ')
-      const res = await researchApi.getViewpoints(q)
-      let items = res.items
-      if (!searchExpired) items = items.filter(v => v.validity_status !== 'invalid')
-      setSearchResults(items.slice(0, searchLimit))
-      setSearchDone(true)
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : '检索失败')
-    } finally {
-      setSearching(false)
     }
   }
 
@@ -1482,7 +1426,6 @@ export default function Research() {
                 const j = card.judgment
                 const isPending = j.is_ai_prefilled
                 const HORIZON_CN: Record<string, string> = { short: '短期', medium: '中期', long: '长期' }
-                const ENDORSEMENT_CN: Record<string, string> = { endorse: '认可', reference_only: '参考', disagree: '反对' }
                 const VALIDITY_CN: Record<string, { label: string; bg: string; color: string }> = {
                   active: { label: '有效', bg: '#D1FAE5', color: '#059669' },
                   expired: { label: '过期', bg: '#FEF3C7', color: '#D97706' },
@@ -1696,7 +1639,7 @@ export default function Research() {
                   <a href={r.ref_value} target="_blank" rel="noreferrer" style={{ color: '#3B82F6' }}>{r.title ?? '原文链接'} ↗</a>
                 </div>
               ))}
-              {v2ReviewCard.facts.raw_facts.summary && (
+              {!!v2ReviewCard.facts.raw_facts.summary && (
                 <div style={{ marginTop: 8, fontSize: 12, color: '#6B7280', lineHeight: 1.5, borderTop: '1px solid #E5E7EB', paddingTop: 8 }}>
                   {String(v2ReviewCard.facts.raw_facts.summary).slice(0, 300)}
                 </div>
@@ -1907,64 +1850,6 @@ export default function Research() {
               onCancel={() => { setModalOpen(false); setEditTarget(null) }}
               saving={formSaving}
             />
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── 观点行 ────────────────────────────────────────────────────
-function ViewpointRow({ vp, onEdit, onDelete, onStatusChange }: {
-  vp: Viewpoint; onEdit: () => void; onDelete: () => void; onStatusChange: (s: string) => void
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const createdAt = vp.created_at ? new Date(vp.created_at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', year: '2-digit' }) : '—'
-  const approvalLabel: Record<string, string> = { reference: '参考', partial: '部分认可', strong: '强认可' }
-
-  return (
-    <div style={{ borderBottom: '1px solid #F3F4F6' }}>
-      <div style={{
-        display: 'grid', gridTemplateColumns: '2fr 70px 60px 70px 80px 90px 80px',
-        gap: 8, padding: '10px 10px', cursor: 'pointer', fontSize: 13,
-        background: expanded ? '#F8FAFC' : 'transparent',
-      }} onClick={() => setExpanded(v => !v)}>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ fontWeight: 500, color: '#1B2A4A', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vp.title}</div>
-          {vp.object_name && <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>{vp.object_name}</div>}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>{stanceBadge(vp.stance)}</div>
-        <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: '#6B7280' }}>{vp.horizon ?? '—'}</div>
-        <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, color: '#6B7280' }}>{approvalLabel[vp.user_approval_level ?? 'reference'] ?? '—'}</div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>{validityBadge(vp.validity_status)}</div>
-        <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, color: '#9CA3AF' }}>{createdAt}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
-          <button title="编辑" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }} onClick={onEdit}><Pencil size={13} /></button>
-          <button title="删除" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }} onClick={onDelete}><Trash2 size={13} /></button>
-          {expanded ? <ChevronUp size={13} color="#9CA3AF" /> : <ChevronDown size={13} color="#9CA3AF" />}
-        </div>
-      </div>
-      {expanded && (
-        <div style={{ padding: '8px 16px 14px', background: '#F8FAFC', fontSize: 12, color: '#374151' }}>
-          {vp.thesis && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 3 }}>核心论点</div>
-              <div style={{ lineHeight: 1.6 }}>{vp.thesis}</div>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: '#9CA3AF' }}>切换状态：</span>
-            {(['active', 'suspect', 'invalid'] as const).map(s => {
-              const v = VALIDITY[s]
-              const isActive = vp.validity_status === s
-              return (
-                <button key={s} style={{
-                  fontSize: 10, padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontWeight: 500,
-                  background: isActive ? v.bg : '#fff', color: isActive ? v.color : '#9CA3AF',
-                  border: `1px solid ${isActive ? v.color : '#E5E7EB'}`,
-                }} onClick={() => onStatusChange(s)}>{v.label}</button>
-              )
-            })}
           </div>
         </div>
       )}

@@ -9,7 +9,6 @@
  *
  * 三态由 props 驱动，按钮始终可点击（不 disabled）。
  */
-import React from 'react'
 import { Loader2, Zap, CheckCircle } from 'lucide-react'
 
 export type ActionButtonState = 'default' | 'highlighted' | 'loading' | 'completed'

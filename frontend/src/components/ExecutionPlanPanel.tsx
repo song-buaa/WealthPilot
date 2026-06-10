@@ -437,9 +437,5 @@ const expandBtnStyle: React.CSSProperties = {
   marginTop: 4, background: 'none', border: 'none', cursor: 'pointer',
   fontSize: 11, color: '#6B7280', display: 'flex', alignItems: 'center', gap: 2,
 }
-const preStyle: React.CSSProperties = {
-  fontSize: 10, color: '#6B7280', background: '#F9FAFB', borderRadius: 4,
-  padding: 6, overflow: 'auto', maxHeight: 150, margin: '4px 0 0',
-}
 const tdLeft: React.CSSProperties = { padding: '4px 6px', color: '#374151' }
 const tdRight: React.CSSProperties = { padding: '4px 6px', textAlign: 'right', color: '#111827', fontVariantNumeric: 'tabular-nums' }

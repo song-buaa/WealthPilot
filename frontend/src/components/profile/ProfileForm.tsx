@@ -2,7 +2,7 @@
  * ProfileForm — 无画像时的填写页
  * 模块A + 模块B，A确认后B才解锁
  */
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { profileApi, type UserProfile } from '@/lib/api'
 import ModuleA from './ModuleA'

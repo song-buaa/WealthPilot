@@ -190,7 +190,7 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
                     </thead>
                     <tbody>
                       {strategies.map((s, i) => {
-                        const triggerType = (s as Record<string, unknown>)._trigger_type as string || 'PRICE_BELOW'
+                        const triggerType = (s as unknown as Record<string, unknown>)._trigger_type as string || 'PRICE_BELOW'
                         return (
                           <tr key={i} style={{ borderBottom: '1px solid #F3F4F6' }}>
                             <td style={{ padding: '8px', color: '#374151', fontWeight: 500 }}>第 {i + 1} 批</td>
@@ -413,8 +413,4 @@ const inputStyle: React.CSSProperties = {
 const expandBtn: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer',
   fontSize: 11, color: '#6B7280', display: 'flex', alignItems: 'center', gap: 2,
-}
-const preStyle: React.CSSProperties = {
-  fontSize: 10, color: '#6B7280', background: '#F9FAFB', borderRadius: 4,
-  padding: 6, overflow: 'auto', maxHeight: 150, margin: '4px 0 0',
 }

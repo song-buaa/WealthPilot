@@ -5,13 +5,11 @@
  */
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, AlertTriangle, CheckCircle, Trash2, ExternalLink, FileText, Edit3 } from 'lucide-react'
-import * as Dialog from '@radix-ui/react-dialog'
+import { Loader2, Trash2, FileText } from 'lucide-react'
 import { actionApi, type ActionDraftResponse, type AllocationIntentResponse, type SymbolStrategyResponse, type OrderResponse, type TimelineEvent } from '@/lib/api'
-import { allocationApi, type DeviationSnapshot, type ClassDeviation, ALLOC_LABEL } from '@/lib/allocation-api'
+import { ALLOC_LABEL } from '@/lib/allocation-api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ConfirmOrderDialog from '@/components/ConfirmOrderDialog'
-import { useToast } from '@/components/Toast'
 import PageHeader from '@/components/shared/PageHeader'
 
 type TabKey = 'action' | 'history'
@@ -124,7 +122,7 @@ export default function Action() {
 // ═══════════════════════════════════════════════════════════════════
 
 function ActionListTab({
-  drafts, onEditDraft, onDiscardDraft, initialParentIntentId,
+  drafts, onEditDraft, onDiscardDraft, initialParentIntentId: _initialParentIntentId,
 }: {
   drafts: ActionDraftResponse[]
   onEditDraft: (d: ActionDraftResponse) => void
@@ -261,7 +259,7 @@ function ActionListTab({
       {(() => {
         // 只展示有关联策略的意图
         const activeIntents = intents.filter(i => (grouped.get(i.id) || []).length > 0)
-        if (activeIntents.length === 0 && orphanStrategies.length === 0) return null
+        if (activeIntents.length === 0 && orphanStrategies.length === 0 && planGrouped.size === 0) return null
         return (
         <>
           <SectionTitle>已执行中</SectionTitle>
@@ -373,7 +371,7 @@ function ActionListTab({
 // ── 意图分组 ────────────────────────────────────────────────
 
 function IntentGroup({
-  intent, strategies, onPause, onResume, onDiscard, onDiscardIntent, onPlaceOrder,
+  intent, strategies, onPause, onResume, onDiscard, onDiscardIntent: _onDiscardIntent, onPlaceOrder,
 }: {
   intent: AllocationIntentResponse
   strategies: SymbolStrategyResponse[]

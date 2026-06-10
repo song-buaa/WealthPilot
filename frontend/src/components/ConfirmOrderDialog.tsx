@@ -8,7 +8,7 @@
  * - checkbox "我已确认订单参数无误" 必须勾选
  * - 两个条件同时满足才能点"确认提交"
  */
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2 } from 'lucide-react'
 import { actionApi, type SymbolStrategyResponse } from '@/lib/api'

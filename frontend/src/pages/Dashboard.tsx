@@ -10,7 +10,6 @@
  *   7. 负债导入/导出
  */
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, ImageIcon, RefreshCw } from 'lucide-react'
 import { BrokerSyncTab } from '@/components/BrokerSyncTab'
@@ -19,7 +18,7 @@ import {
   portfolioApi,
   type PortfolioSummary, type Position, type Liability,
 } from '@/lib/api'
-import { fmtCny, fmtCnySigned, fmtPct, fmtDelta, fmtQty, fmtFx, fmtLeverage } from '@/lib/fmt'
+import { fmtCny, fmtCnySigned, fmtDelta, fmtQty, fmtFx, fmtLeverage } from '@/lib/fmt'
 import { allocationApi } from '@/lib/allocation-api'
 import EmptyState from '@/components/shared/EmptyState'
 import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
@@ -31,15 +30,6 @@ const CHART_PALETTE = [
   '#EF4444', '#06B6D4', '#84CC16', '#F97316',
 ]
 
-// ── 大类配置偏差：类别定义 ─────────────────────────────────────
-const ALLOC_CATS = [
-  { key: 'monetary',     label: '货币', color: '#3B82F6', minPct: 0.8,  maxPct: 8.2  },
-  { key: 'fixed_income', label: '固收', color: '#10B981', minPct: 20,   maxPct: 60   },
-  { key: 'equity',       label: '权益', color: '#F59E0B', minPct: 40,   maxPct: 80   },
-  { key: 'alternative',  label: '另类', color: '#8B5CF6', minPct: 0,    maxPct: 10   },
-  { key: 'derivative',   label: '衍生', color: '#EF4444', minPct: 0,    maxPct: 10   },
-] as const
-
 // ── 杠杆分级 ──────────────────────────────────────────────────
 function leverageGrade(mult: number) {
   if (mult < 1.5) return { icon: '🟢', label: '安全（低风险）',   color: '#059669', tip: '当前杠杆水平较低，风险可控' }
@@ -47,15 +37,6 @@ function leverageGrade(mult: number) {
   if (mult < 2.5) return { icon: '🟠', label: '警戒（偏高）',     color: '#EA580C', tip: '杠杆偏高，需关注市场波动与回撤风险' }
   if (mult < 3.0) return { icon: '🔴', label: '高风险',           color: '#DC2626', tip: '杠杆较高，建议降低仓位或增加安全垫' }
   return               { icon: '🔴', label: '危险（爆仓风险高）', color: '#DC2626', tip: '杠杆过高，存在较大爆仓风险' }
-}
-
-// ── 大类资产示例文本 ─────────────────────────────────────────
-const ALLOC_EXAMPLES: Record<string, string> = {
-  monetary:     '余额宝、货币基金、活期存款等',
-  fixed_income: '债券基金、银行理财、信托等',
-  equity:       '股票、股票基金、指数ETF等',
-  alternative:  '黄金、大宗商品、REITs 等',
-  derivative:   '期权、期货等',
 }
 
 // DataTip 已抽取为共享组件 @/components/shared/DataTip
@@ -420,7 +401,7 @@ export default function Dashboard() {
 // 子组件
 // ══════════════════════════════════════════════════════════════
 
-function PageHeader({ posCount }: { posCount: number }) {
+function PageHeader(_: { posCount: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
       <div style={{ width: 38, height: 38, borderRadius: 10, background: 'linear-gradient(135deg, #1B2A4A, #2D4A7A)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>📊</div>
@@ -441,7 +422,7 @@ function PlatformCard({ platEntries }: { platEntries: [string, number][] }) {
   const pieData   = platEntries.map(([name, value]) => ({ name, value }))
 
   // hover 扇区：外径 +8px，加轻阴影，模拟 ECharts emphasis
-  const renderActiveShape = (props: Record<string, unknown>) => {
+  const renderActiveShape = (props: unknown) => {
     const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props as {
       cx: number; cy: number; innerRadius: number; outerRadius: number
       startAngle: number; endAngle: number; fill: string

@@ -359,7 +359,10 @@ export const philosophyApi = {
   upload: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
-    return request<{ source: string; content: string }>('/philosophy', { method: 'POST', body: fd, raw: true })
+    return fetch(`${BASE}/philosophy`, { method: 'POST', body: fd }).then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return r.json() as Promise<{ source: string; content: string }>
+    })
   },
   reset: () => request<{ source: string; content: string }>('/philosophy', { method: 'DELETE' }),
 }
@@ -785,7 +788,7 @@ export interface ParseResult {
 }
 
 export interface SSEEvent {
-  type: 'intent' | 'stage' | 'text' | 'done' | 'error'
+  type: 'intent' | 'stage' | 'text' | 'done' | 'error' | 'candidates'
   data: Record<string, unknown>
 }
 
