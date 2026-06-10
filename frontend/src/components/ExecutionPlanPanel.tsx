@@ -43,6 +43,8 @@ interface Props {
   side: string
   onClose: () => void
   onConfirmPlan?: (planResult: PlanResult & { plan_id: string }) => void
+  userInitiated?: boolean           // Step E: true = 用户主动发起(AI 结论为观望)
+  defaultTargetPct?: number         // Step E: 用户指定的目标仓位(小数)
 }
 
 const SIDE_LABEL: Record<string, string> = {
@@ -53,7 +55,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   IMMEDIATE: '立即', PRICE_BELOW: '低于', PRICE_ABOVE: '高于', MANUAL: '手动',
 }
 
-export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan }: Props) {
+export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan, userInitiated, defaultTargetPct }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
@@ -100,7 +102,7 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   const [showConstraints, setShowConstraints] = useState(false)
 
   // 用户输入
-  const [targetPct, setTargetPct] = useState('8')
+  const [targetPct, setTargetPct] = useState(defaultTargetPct ? String(Math.round(defaultTargetPct * 100)) : '8')
   const [anchorInput, setAnchorInput] = useState('')
 
   function parseAnchors(): number[] {
@@ -260,6 +262,14 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
         </div>
         <button onClick={onClose} style={closeBtnStyle}>关闭</button>
       </div>
+
+      {/* Step E: 用户主动发起标注 */}
+      {userInitiated && (
+        <div style={{ fontSize: 11, color: '#D97706', background: '#FFF7ED', borderRadius: 4,
+          padding: '4px 8px', marginBottom: 8 }}>
+          注：本计划由你主动发起，当前 AI 决策结论为观望/持有
+        </div>
+      )}
 
       {/* 违规/警告 */}
       {(plan.violations ?? []).length > 0 && (
