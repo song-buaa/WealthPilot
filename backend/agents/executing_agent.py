@@ -442,12 +442,13 @@ class ExecutingAgent:
             out.skill_results["wp-fetch-fundamentals"] = {"available": fundamentals is not None}
             out.skill_results["wp-fetch-capital-flow"] = {"available": capital_flow is not None}
             out.skill_results["wp-fetch-kline"] = {"available": technical is not None}
+            _has_kline = technical is not None and (not hasattr(technical, 'empty') or not technical.empty)
             logger.info(
                 f"[ExecutingAgent] 市场数据: {wp_symbol} "
                 f"quote={'✅' if quote else '❌'} "
                 f"fundamentals={'✅' if fundamentals else '❌'} "
                 f"capital_flow={'✅' if capital_flow else '❌'} "
-                f"kline={'✅' if technical else '❌'}"
+                f"kline={'✅' if _has_kline else '❌'}"
             )
 
     # ────────────────────────────────────────────────────────
