@@ -152,7 +152,10 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
 
 @router.post("/trigger", response_model=TriggerResponse)
 def trigger_sync(req: TriggerRequest, background_tasks: BackgroundTasks):
-    """手动触发同步。异步执行,立即返回。"""
+    """手动触发同步。PUBLIC_DEMO_MODE 下短路。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if PUBLIC_DEMO_MODE:
+        return TriggerResponse(message="PUBLIC_DEMO_MODE: 同步已禁用", brokers_triggered=[])
     brokers_to_run = ["tiger", "futu", "snowball", "guojin"] if req.broker == "all" else [req.broker]
 
     for broker in brokers_to_run:

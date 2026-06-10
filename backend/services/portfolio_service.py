@@ -47,6 +47,10 @@ def _get_tiger_account_cash() -> tuple[float, list[dict]]:
                                 "cny_value": 14189.91, "fx_rate_to_cny": 0.93}, ...]
     """
     try:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        if PUBLIC_DEMO_MODE:
+            return 0.0, []
+
         import os as _os_tiger
         tiger_id = _os_tiger.getenv("TIGER_ID")
         account = _os_tiger.getenv("TIGER_ACCOUNT")

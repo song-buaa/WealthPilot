@@ -74,6 +74,9 @@ class KeyringCredentialProvider(CredentialProvider):
         return f"{self.SERVICE_PREFIX}.{broker_key}"
 
     def load(self, broker_key: str) -> Optional[dict]:
+        from backend.core.demo_mode import assert_no_credentials
+        assert_no_credentials(f"KeyringCredentialProvider.load({broker_key})")
+
         import keyring
         service = self._service_name(broker_key)
         data = keyring.get_password(service, self.USERNAME)

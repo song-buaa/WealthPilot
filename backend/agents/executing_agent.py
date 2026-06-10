@@ -280,17 +280,27 @@ class ExecutingAgent:
                 currency = getattr(tp, "currency", "USD") or "USD"
                 wp_symbol = infer_symbol_from_ticker(ticker, currency)
 
-        _futu_available = _is_futu_opend_available() if wp_symbol else False
-        if _futu_available:
-            from services.market_data.futu_quote_service import fetch_quote
-            from services.market_data.futu_capital_flow_service import fetch_capital_flow
-        else:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE as _DEMO_EA
+
+        if _DEMO_EA:
+            # demo 模式：所有需要券商凭证的行情源短路
             fetch_quote = lambda *a, **kw: None  # noqa: E731
             fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
-            if wp_symbol:
-                logger.info("[ExecutingAgent] Futu OpenD 未运行，跳过 Futu 数据源")
-        from services.market_data.av_fundamentals_service import fetch_fundamentals
-        from services.market_data.tiger_kline_service import fetch_kline
+            fetch_fundamentals = lambda *a, **kw: None  # noqa: E731
+            fetch_kline = lambda *a, **kw: None  # noqa: E731
+            logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE — 行情数据源全部短路")
+        else:
+            _futu_available = _is_futu_opend_available() if wp_symbol else False
+            if _futu_available:
+                from services.market_data.futu_quote_service import fetch_quote
+                from services.market_data.futu_capital_flow_service import fetch_capital_flow
+            else:
+                fetch_quote = lambda *a, **kw: None  # noqa: E731
+                fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
+                if wp_symbol:
+                    logger.info("[ExecutingAgent] Futu OpenD 未运行，跳过 Futu 数据源")
+            from services.market_data.av_fundamentals_service import fetch_fundamentals
+            from services.market_data.tiger_kline_service import fetch_kline
 
         # 定义并行任务
         def _task_discipline():

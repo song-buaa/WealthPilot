@@ -23,17 +23,14 @@ def get_broker_adapter(
 ) -> BrokerAdapter:
     """工厂函数: 创建 BrokerAdapter 实例。
 
-    Args:
-        broker_name: "mock" / "tiger" / "ibkr"
-        mode: "paper" / "live" / "mock"
-        credential_provider: 凭证提供者(默认 KeyringCredentialProvider)
-
-    Returns:
-        BrokerAdapter 实例
-
-    Raises:
-        UnsupportedBrokerError: 不支持的 broker_name
+    PUBLIC_DEMO_MODE 下强制返回 mock adapter，不连接任何真实券商。
     """
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+
+    if PUBLIC_DEMO_MODE:
+        from backend.services.action.brokers.mock import get_mock_adapter
+        return get_mock_adapter()
+
     if broker_name == "mock" or mode == "mock":
         from backend.services.action.brokers.mock import get_mock_adapter
         return get_mock_adapter()

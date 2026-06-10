@@ -33,6 +33,13 @@ async def lifespan(app: FastAPI):
     # 初始化数据库 + 确保默认 portfolio 存在
     startup()
 
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE as _DEMO
+
+    if _DEMO:
+        print("[lifespan] PUBLIC_DEMO_MODE=True — 跳过 broker/scheduler/poller 初始化")
+        yield
+        return
+
     # v3.4 M3: Broker Adapter 初始化(通过 BROKER_MODE 环境变量切换)
     _broker_mode = _os.getenv("BROKER_MODE", "mock")
     if _broker_mode == "mock":
@@ -86,7 +93,6 @@ async def lifespan(app: FastAPI):
         from datetime import datetime, timezone
         session = _gs()
         try:
-            # 补扫：如果上次扫描距今超过 15 分钟，先补判遗漏
             last_scan = get_last_scan_time()
             now = datetime.now(timezone.utc)
             if last_scan and (now - last_scan).total_seconds() > 900 + 60:
@@ -144,6 +150,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# PUBLIC_DEMO_MODE 中间件：密码门 + action 路由拦截
+from backend.core.demo_mode import PUBLIC_DEMO_MODE
+if PUBLIC_DEMO_MODE:
+    from backend.core.demo_middleware import DemoMiddleware
+    app.add_middleware(DemoMiddleware)
+
 # 路由注册
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(discipline.router, prefix="/api/discipline", tags=["discipline"])
@@ -158,6 +170,10 @@ app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 app.include_router(knowledge_api.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(philosophy_api.router, prefix="/api/philosophy", tags=["philosophy"])
 app.include_router(execution_plan_api.router, prefix="/api/execution-plan", tags=["execution-plan"])
+
+# Demo API
+from backend.api import demo as demo_api
+app.include_router(demo_api.router, prefix="/api/demo", tags=["demo"])
 
 
 @app.get("/api/health")
