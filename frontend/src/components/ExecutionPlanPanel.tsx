@@ -45,6 +45,7 @@ interface Props {
   onConfirmPlan?: (planResult: PlanResult & { plan_id: string }) => void
   userInitiated?: boolean           // Step E: true = 用户主动发起(AI 结论为观望)
   defaultTargetPct?: number         // Step E: 用户指定的目标仓位(小数)
+  onSideChange?: (side: string) => void  // Step E: 方向切换回调
 }
 
 const SIDE_LABEL: Record<string, string> = {
@@ -55,7 +56,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   IMMEDIATE: '立即', PRICE_BELOW: '低于', PRICE_ABOVE: '高于', MANUAL: '手动',
 }
 
-export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan, userInitiated, defaultTargetPct }: Props) {
+export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan, userInitiated, defaultTargetPct, onSideChange }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
@@ -148,19 +149,36 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   // ── 初始态: 输入表单 ──
   if (!plan && !loading && !error) {
     return (
-      <div style={{ background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
+      <div style={{ background: userInitiated ? '#F9FAFB' : '#EFF6FF',
+        border: `1px solid ${userInitiated ? '#E5E7EB' : '#93C5FD'}`, borderRadius: 10,
         padding: '12px 16px', marginTop: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#1D4ED8' }}>
-            执行计划 — {symbol} {SIDE_LABEL[side] || side}
+          <span style={{ fontSize: 13, fontWeight: 600, color: userInitiated ? '#374151' : '#1D4ED8' }}>
+            {userInitiated ? '主动制定执行计划' : `执行计划 — ${symbol} ${SIDE_LABEL[side] || side}`}
           </span>
           <button onClick={onClose} style={closeBtnStyle}>关闭</button>
         </div>
+
+        {userInitiated && (
+          <div style={{ fontSize: 11, color: '#D97706', background: '#FFF7ED', borderRadius: 4, padding: '4px 8px', margin: '6px 0 8px' }}>
+            注：当前 AI 决策结论为观望/持有，本计划由你主动发起
+          </div>
+        )}
+
         <p style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 8px' }}>
           基于纪律手册自动生成分批执行计划。价格/数量/批次由规则引擎确定性产出,AI 只写解释。
         </p>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {userInitiated && (
+            <label style={{ fontSize: 12, color: '#374151' }}>方向
+              <select value={side} onChange={e => onSideChange?.(e.target.value)}
+                style={{ marginLeft: 4, padding: '3px 6px', fontSize: 12, borderRadius: 4, border: '1px solid #D1D5DB' }}>
+                <option value="ADD">加仓</option>
+                <option value="REDUCE">减仓</option>
+              </select>
+            </label>
+          )}
           <label style={{ fontSize: 12, color: '#374151' }}>
             目标仓位
             <input type="text" value={targetPct} onChange={e => setTargetPct(e.target.value)}

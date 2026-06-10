@@ -836,8 +836,6 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
   const [showExecPlan, setShowExecPlan] = useState(false)
   const [userInitiated, setUserInitiated] = useState(false)  // Step E: 用户主动发起
   const [userSide, setUserSide] = useState<string>('ADD')
-  const [userTargetPct, setUserTargetPct] = useState('8')
-  const [planGenerated, setPlanGenerated] = useState(false)
   // loading 态：无内容且正在流式输出 — 根据 stage 事件动态显示进度
   if (msg.streaming && !msg.content) {
     const lastStage = (msg.stages ?? []).at(-1)
@@ -977,42 +975,8 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
               </div>
             )
           }
-          // Step E: 用户主动发起时显示方向+目标选择
-          if (userInitiated && !planGenerated) {
-            return (
-              <div style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 10,
-                padding: '12px 16px', marginTop: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>主动制定执行计划</span>
-                  <button onClick={() => setShowExecPlan(false)} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 11 }}>关闭</button>
-                </div>
-                <div style={{ fontSize: 11, color: '#D97706', background: '#FFF7ED', borderRadius: 4, padding: '4px 8px', marginBottom: 8 }}>
-                  注：当前 AI 决策结论为观望/持有，本计划由你主动发起
-                </div>
-                <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <label style={{ fontSize: 12 }}>方向
-                    <select value={userSide} onChange={e => setUserSide(e.target.value)} style={{ marginLeft: 4, padding: '3px 6px', fontSize: 12, borderRadius: 4, border: '1px solid #D1D5DB' }}>
-                      <option value="ADD">加仓</option>
-                      <option value="REDUCE">减仓</option>
-                      <option value="BUY">买入</option>
-                      <option value="SELL">卖出</option>
-                    </select>
-                  </label>
-                  <label style={{ fontSize: 12 }}>目标仓位
-                    <input type="text" value={userTargetPct} onChange={e => setUserTargetPct(e.target.value)}
-                      style={{ marginLeft: 4, width: 40, padding: '3px 6px', fontSize: 12, borderRadius: 4, border: '1px solid #D1D5DB' }} /> %
-                  </label>
-                </div>
-                <button onClick={() => setPlanGenerated(true)}
-                  style={{ padding: '5px 14px', fontSize: 12, fontWeight: 500, borderRadius: 6, border: '1px solid #E5E7EB', background: '#fff', color: '#374151', cursor: 'pointer' }}>
-                  生成计划
-                </button>
-              </div>
-            )
-          }
-
           const effectiveSide = userInitiated ? userSide : (sideMap[action] || 'BUY')
-          const effectiveTargetPct = userInitiated ? (parseFloat(userTargetPct) / 100 || 0.08) : undefined
+          const effectiveTargetPct = userInitiated ? 0.08 : undefined
 
           return (
             <ExecutionPlanPanel
@@ -1021,7 +985,8 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
               side={effectiveSide}
               userInitiated={userInitiated}
               defaultTargetPct={effectiveTargetPct}
-              onClose={() => { setShowExecPlan(false); setPlanGenerated(false) }}
+              onClose={() => setShowExecPlan(false)}
+              onSideChange={setUserSide}
               onConfirmPlan={(planResult) => {
                 onConfirmExecPlan?.(planResult as unknown as Record<string, unknown>)
                 setShowExecPlan(false)
