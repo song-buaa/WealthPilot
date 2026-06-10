@@ -49,6 +49,8 @@ def _get_tiger_account_cash() -> tuple[float, list[dict]]:
     try:
         from backend.core.demo_mode import PUBLIC_DEMO_MODE
         if PUBLIC_DEMO_MODE:
+            # demo 模式：种子 CSV 中货币基金代表现金类，不需要额外 Tiger 现金行
+            # 种子 CSV 已有广发货币A(50000) + 工银货币A(30000) = ¥80,000 货币类
             return 0.0, []
 
         import os as _os_tiger

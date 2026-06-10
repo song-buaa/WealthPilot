@@ -283,12 +283,14 @@ class ExecutingAgent:
         from backend.core.demo_mode import PUBLIC_DEMO_MODE as _DEMO_EA
 
         if _DEMO_EA:
-            # demo 模式：所有需要券商凭证的行情源短路
-            fetch_quote = lambda *a, **kw: None  # noqa: E731
-            fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
+            # demo 模式：券商凭证行情源替换为 AKShare + 种子数据
+            from backend.services.demo_market_service import fetch_demo_quote, fetch_demo_kline
+            fetch_quote = lambda sym: fetch_demo_quote(sym)  # noqa: E731
+            fetch_kline = lambda sym: fetch_demo_kline(sym)  # noqa: E731
+            # fundamentals/capital_flow: 不可用，prompt 层声明
             fetch_fundamentals = lambda *a, **kw: None  # noqa: E731
-            fetch_kline = lambda *a, **kw: None  # noqa: E731
-            logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE — 行情数据源全部短路")
+            fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
+            logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE — 行情走 AKShare/种子; fundamentals/capital_flow 不可用")
         else:
             _futu_available = _is_futu_opend_available() if wp_symbol else False
             if _futu_available:

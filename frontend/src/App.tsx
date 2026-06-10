@@ -13,10 +13,12 @@ import Placeholder from '@/pages/Placeholder'
 import Action      from '@/pages/Action'
 import { ToastProvider } from '@/components/Toast'
 import UserProfile from '@/pages/UserProfile'
+import DemoPasswordGate from '@/components/DemoPasswordGate'
 
 export default function App() {
   return (
     <ToastProvider>
+    <DemoPasswordGate>
     <HashRouter>
       <Routes>
         <Route element={<AppLayout />}>
@@ -39,6 +41,7 @@ export default function App() {
         </Route>
       </Routes>
     </HashRouter>
+    </DemoPasswordGate>
     </ToastProvider>
   )
 }
