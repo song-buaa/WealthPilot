@@ -15,8 +15,18 @@ import os
 import threading
 from typing import Any, Optional
 
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+# mcp 依赖延迟加载（mini_racer V8 引擎在某些环境崩溃）
+# PUBLIC_DEMO_MODE 下通过 __init__.py 短路，此文件不会被 import
+ClientSession = None
+streamablehttp_client = None
+
+def _ensure_mcp():
+    global ClientSession, streamablehttp_client
+    if ClientSession is None:
+        from mcp import ClientSession as _CS
+        from mcp.client.streamable_http import streamablehttp_client as _SHC
+        ClientSession = _CS
+        streamablehttp_client = _SHC
 
 YINGMI_URL = os.environ.get("YINGMI_MCP_URL")
 YINGMI_API_KEY = os.environ.get("YINGMI_API_KEY")
@@ -72,6 +82,7 @@ class YingmiMCPClient:
                 "success": False,
                 "error": "盈米 API Key 或 URL 未配置（请检查 .env 里的 YINGMI_API_KEY 和 YINGMI_MCP_URL）",
             }
+        _ensure_mcp()
         headers = {
             "x-api-key": YINGMI_API_KEY,
             "Accept": "application/json, text/event-stream",
