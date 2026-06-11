@@ -26,6 +26,14 @@ DEMO_ALLOW_MARKET_DATA: bool = (
 # ── 访问密码 ────────────────────────────────────────────────────
 DEMO_ACCESS_PASSWORD: str = os.environ.get("DEMO_ACCESS_PASSWORD", "")
 
+# ── 启动断言: demo 模式必须配密码，不允许裸奔 ────────────────────
+if PUBLIC_DEMO_MODE and not DEMO_ACCESS_PASSWORD:
+    raise RuntimeError(
+        "PUBLIC_DEMO_MODE=true 但 DEMO_ACCESS_PASSWORD 未设置。"
+        "公开 demo 必须配置访问密码，拒绝以无密码状态启动。"
+        "请设置环境变量 DEMO_ACCESS_PASSWORD=<你的密码>"
+    )
+
 
 class DemoModeError(Exception):
     """PUBLIC_DEMO_MODE 下试图访问被禁止的路径时抛出。"""
