@@ -178,7 +178,8 @@ class MarketDataBundle:
             }
 
         td = self.technical
-        if td:
+        # TechnicalData 有 ma5 属性; DataFrame 没有(或是列名) — 用 isinstance 防止 DataFrame 误入
+        if isinstance(td, TechnicalData):
             result["technical"] = {
                 "ma5": td.ma5,
                 "ma20": td.ma20,

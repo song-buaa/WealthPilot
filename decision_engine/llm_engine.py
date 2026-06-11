@@ -1322,21 +1322,22 @@ def _build_payload(
         payload["realtime_market_data"]["capitalFlow"]["interpretation"] = \
             _interpret_capital_flow(market_data.capital_flow)
 
-    # 技术面解读注入
+    # 技术面解读注入(TechnicalData 类型检查，避免 DataFrame 误入)
     if (market_data and hasattr(market_data, 'technical')
-            and market_data.technical
             and payload.get("realtime_market_data")):
         td = market_data.technical
-        payload["realtime_market_data"]["technical"] = {
-            "ma5": td.ma5,
-            "ma20": td.ma20,
-            "rsi14": td.rsi14,
-            "macdHist": td.macd_hist,
-            "maPosition": td.ma_position,
-            "trendSignal": td.trend_signal,
-            "interpretation": _interpret_technical(td),
-            "dataAsOf": td.data_as_of,
-        }
+        from services.market_data.schema import TechnicalData as _TD
+        if isinstance(td, _TD):
+            payload["realtime_market_data"]["technical"] = {
+                "ma5": td.ma5,
+                "ma20": td.ma20,
+                "rsi14": td.rsi14,
+                "macdHist": td.macd_hist,
+                "maPosition": td.ma_position,
+                "trendSignal": td.trend_signal,
+                "interpretation": _interpret_technical(td),
+                "dataAsOf": td.data_as_of,
+            }
 
     # 场景判断（用于动态调整六段式侧重点）
     _plr = data.target_position.profit_loss_rate if data.target_position else None
