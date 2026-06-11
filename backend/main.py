@@ -146,10 +146,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS：允许本地前端开发服务器访问
+# CORS：允许本地前端开发服务器 + 单端口部署访问
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
+                   "http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -184,3 +185,24 @@ app.include_router(demo_api.router, prefix="/api/demo", tags=["demo"])
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# PUBLIC_DEMO_MODE: FastAPI 直接托管前端构建产物（单端口部署）
+if PUBLIC_DEMO_MODE:
+    import pathlib
+    from starlette.responses import FileResponse
+    from starlette.staticfiles import StaticFiles
+
+    _FRONTEND_DIST = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    if _FRONTEND_DIST.is_dir():
+        # 静态资源（JS/CSS/图片等）
+        app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="static-assets")
+
+        # SPA fallback: 非 /api 路径的 GET 请求返回 index.html
+        @app.get("/{full_path:path}")
+        async def _spa_fallback(full_path: str):
+            # 尝试返回 dist 下的静态文件（favicon.ico 等根目录文件）
+            file_path = _FRONTEND_DIST / full_path
+            if full_path and file_path.is_file():
+                return FileResponse(str(file_path))
+            return FileResponse(str(_FRONTEND_DIST / "index.html"))

@@ -20,7 +20,10 @@ export default function DemoPasswordGate({ children }: Props) {
   useEffect(() => {
     // 检查 demo 状态
     fetch(`${API_BASE}/demo/status`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`status ${r.status}`)
+        return r.json()
+      })
       .then(data => {
         if (!data.public_demo_mode) {
           setStatus('no_password')
@@ -41,7 +44,10 @@ export default function DemoPasswordGate({ children }: Props) {
           })
           .catch(() => setStatus('need_password'))
       })
-      .catch(() => setStatus('no_password'))
+      .catch(() => {
+        // fail-closed: API 不可达时停留在密码页，不放行
+        setStatus('need_password')
+      })
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
