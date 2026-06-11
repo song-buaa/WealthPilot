@@ -896,6 +896,16 @@ def reason(
         )
     position_prompt = _POSITION_DECISION_PROMPT.replace("{chat_format_block}", chat_format)
 
+    # PUBLIC_DEMO_MODE: 替换数据来源标注
+    try:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        if PUBLIC_DEMO_MODE:
+            position_prompt = position_prompt.replace("富途行情", "演示数据")
+            position_prompt = position_prompt.replace("富途实时行情", "演示数据")
+            position_prompt = position_prompt.replace("Alpha Vantage", "演示数据")
+    except ImportError:
+        pass
+
     # v3.6.5: 从 LoadedData 提取 retrieved_principles 并格式化为 prompt 段落
     principles_prompt = _extract_principles_prompt(data)
 
