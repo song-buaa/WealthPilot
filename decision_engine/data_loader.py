@@ -209,6 +209,14 @@ def _search_research_online(asset_name: str) -> list[str]:
     - 返回带 [联网参考] 前缀的字符串列表
     - 任何异常均静默处理，返回空列表，不影响主流程
     """
+    # DEMO_ALLOW_MARKET_DATA=false 时禁用联网搜索
+    try:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE, DEMO_ALLOW_MARKET_DATA
+        if PUBLIC_DEMO_MODE and not DEMO_ALLOW_MARKET_DATA:
+            return []
+    except ImportError:
+        pass
+
     # 优先走缓存
     cached = _get_cached_research(asset_name)
     if cached is not None:

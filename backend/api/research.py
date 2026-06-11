@@ -257,7 +257,10 @@ def v2_ingest_alpha_vantage(req: V2IngestAVRequest):
 
 @router.post("/v2/ingest/akshare", status_code=201)
 def v2_ingest_akshare(req: V2IngestAVRequest):
-    """触发 AKShare 港股数据拉取。"""
+    """触发 AKShare 港股数据拉取（写库）。PUBLIC_DEMO_MODE 下禁止。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if PUBLIC_DEMO_MODE:
+        raise HTTPException(status_code=403, detail="PUBLIC_DEMO_MODE: 手动数据拉取已禁用")
     if not req.symbol.strip():
         raise HTTPException(status_code=400, detail="symbol 不能为空")
     try:
