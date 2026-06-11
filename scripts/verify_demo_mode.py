@@ -84,17 +84,27 @@ def main():
     cash, details = _get_tiger_account_cash()
     check("Tiger cash short-circuited", cash == 0.0, f"got {cash}")
 
-    # 1e. MCP short-circuit
-    from backend.mcp_client.yingmi_client import call_yingmi_tool
-    result = call_yingmi_tool("BatchGetFundsDetail", {"fundCodes": "000509"})
-    check("MCP yingmi short-circuited",
-          result.get("error") is not None or result.get("success") is False,
-          f"got {result}")
+    # 1e. MCP — DEMO_ALLOW_MARKET_DATA 控制
+    from backend.core.demo_mode import DEMO_ALLOW_MARKET_DATA
+    from backend.mcp_client import call_yingmi_tool as _mcp_call
+    result = _mcp_call("BatchGetFundsDetail", {"fundCodes": "000509"})
+    if DEMO_ALLOW_MARKET_DATA:
+        # =true: 盈米放行（可能成功也可能参数错误，但不应是"已禁用"）
+        check("MCP yingmi allowed (=true)",
+              "DEMO_ALLOW" not in (result.get("error") or ""),
+              f"got {result}")
+    else:
+        check("MCP yingmi disabled (=false)",
+              "DEMO_ALLOW" in (result.get("error") or ""),
+              f"got {result}")
 
-    # 1f. data_loader search short-circuit
+    # 1f. 联网搜索 — DEMO_ALLOW_MARKET_DATA 控制
     from decision_engine.data_loader import _search_research_online
     results = _search_research_online("理想汽车")
-    check("联网搜索 short-circuited", results == [], f"got {len(results)} results")
+    if DEMO_ALLOW_MARKET_DATA:
+        check("联网搜索 allowed (=true)", True, f"got {len(results)} results")
+    else:
+        check("联网搜索 disabled (=false)", results == [], f"got {len(results)} results")
 
     # ═══════════════════════════════════════════════════════════
     section("2. 种子数据")

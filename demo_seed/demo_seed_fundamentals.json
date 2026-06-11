@@ -127,37 +127,37 @@
 
   "005827": {
     "symbol": "005827", "name": "易方达蓝筹精选混合", "type": "fund", "currency": "CNY",
-    "nav": 1.25, "fund_size_cny": 40000000000,
+    "nav": 2.18, "fund_size_cny": 40000000000,
     "annual_return_1y": -0.08, "annual_return_3y": -0.12,
     "max_drawdown": -0.45, "sharpe_ratio": -0.3,
-    "sector": "混合型", "fund_manager": "张坤"
+    "sector": "混合型"
   },
   "003095": {
     "symbol": "003095", "name": "中欧医疗健康混合A", "type": "fund", "currency": "CNY",
-    "nav": 0.65, "fund_size_cny": 15000000000,
+    "nav": 1.92, "fund_size_cny": 15000000000,
     "annual_return_1y": -0.15, "annual_return_3y": -0.20,
     "max_drawdown": -0.55, "sharpe_ratio": -0.5,
-    "sector": "混合型", "fund_manager": "葛兰"
+    "sector": "混合型"
   },
   "161725": {
     "symbol": "161725", "name": "招商中证白酒指数A", "type": "fund", "currency": "CNY",
-    "nav": 1.15, "fund_size_cny": 50000000000,
+    "nav": 0.98, "fund_size_cny": 50000000000,
     "annual_return_1y": -0.05, "annual_return_3y": -0.08,
     "max_drawdown": -0.40, "sharpe_ratio": -0.1,
-    "sector": "指数型", "fund_manager": "侯昊"
+    "sector": "指数型"
   },
   "270042": {
     "symbol": "270042", "name": "广发纳斯达克100ETF联接A", "type": "fund", "currency": "CNY",
-    "nav": 2.85, "fund_size_cny": 20000000000,
+    "nav": 2.64, "fund_size_cny": 20000000000,
     "annual_return_1y": 0.25, "annual_return_3y": 0.12,
     "max_drawdown": -0.25, "sharpe_ratio": 0.8,
-    "sector": "QDII", "fund_manager": "刘杰"
+    "sector": "QDII"
   },
   "000198": {
     "symbol": "000198", "name": "天弘余额宝货币", "type": "fund", "currency": "CNY",
-    "nav": 1.0, "fund_size_cny": 700000000000,
+    "nav": 1.00, "fund_size_cny": 700000000000,
     "annual_return_1y": 0.015, "annual_return_3y": 0.018,
     "max_drawdown": 0, "sharpe_ratio": 2.5,
-    "sector": "货币型", "fund_manager": "王登峰"
+    "sector": "货币型"
   }
 }

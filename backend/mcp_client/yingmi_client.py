@@ -136,11 +136,5 @@ def get_yingmi_client() -> YingmiMCPClient:
 
 
 def call_yingmi_tool(tool_name: str, arguments: dict) -> dict:
-    """便捷函数，外部调用入口。PUBLIC_DEMO_MODE 下短路。"""
-    try:
-        from backend.core.demo_mode import PUBLIC_DEMO_MODE
-        if PUBLIC_DEMO_MODE:
-            return {"success": False, "error": "PUBLIC_DEMO_MODE: 盈米 MCP 已禁用"}
-    except ImportError:
-        pass
+    """便捷函数，外部调用入口。开关控制在 __init__.py 层。"""
     return get_yingmi_client().call_tool(tool_name, arguments)
