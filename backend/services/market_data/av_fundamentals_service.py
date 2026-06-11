@@ -89,9 +89,44 @@ def _safe_int(val, default=None) -> Optional[int]:
         return default
 
 
+def _load_seed_fundamentals(ticker: str) -> Optional[FundamentalsData]:
+    """从种子文件加载兜底基本面数据（AV 不覆盖或 API 失败时）。"""
+    import json as _json
+    from pathlib import Path
+    seed_path = Path(__file__).resolve().parent.parent.parent.parent / "demo_seed" / "demo_seed_fundamentals.json"
+    try:
+        if not seed_path.exists():
+            return None
+        with open(seed_path, encoding="utf-8") as f:
+            seeds = _json.load(f)
+        data = seeds.get(ticker)
+        if not data:
+            return None
+        return FundamentalsData(
+            symbol=ticker,
+            market_cap=data.get("market_cap") or data.get("market_cap_hkd") or data.get("market_cap_cny"),
+            pe_ttm=data.get("pe_ratio"),
+            pe_forward=data.get("forward_pe"),
+            eps_ttm=data.get("eps") or data.get("eps_hkd") or data.get("eps_cny"),
+            revenue_ttm=data.get("revenue_ttm") or data.get("revenue_ttm_hkd") or data.get("revenue_ttm_cny"),
+            profit_margin=data.get("profit_margin"),
+            high_52w=data.get("52_week_high") or data.get("52_week_high_hkd") or data.get("52_week_high_cny"),
+            low_52w=data.get("52_week_low") or data.get("52_week_low_hkd") or data.get("52_week_low_cny"),
+            beta=data.get("beta"),
+            analyst=AnalystData(target_price_avg=data.get("analyst_target_price")),
+            data_as_of=seeds.get("_updated", "seed"),
+        )
+    except Exception as e:
+        logger.debug(f"种子基本面加载失败: {e}")
+        return None
+
+
 def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
     """调 AV OVERVIEW + INCOME_STATEMENT。失败/不支持时降级到种子数据。"""
-    ticker = _wp_symbol_to_av_ticker(wp_symbol)
+    try:
+        ticker = _wp_symbol_to_av_ticker(wp_symbol)
+    except (ValueError, Exception):
+        ticker = None
     if ticker is None:
         # AV 不支持港股/A股/基金 → 种子兜底
         raw_ticker = wp_symbol.split(":")[0] if ":" in wp_symbol else wp_symbol
@@ -119,7 +154,11 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
     # --- OVERVIEW ---
     overview = _av_get("OVERVIEW", ticker, api_key)
     if not overview:
-        return None
+        logger.info(f"AV OVERVIEW 失败，尝试种子兜底: {ticker}")
+        seed = _load_seed_fundamentals(ticker)
+        if seed:
+            set_cached(cache_key, seed, FUNDAMENTALS_TTL)
+        return seed
 
     missing = []
 
