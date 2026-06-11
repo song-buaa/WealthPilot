@@ -1,0 +1,163 @@
+{
+  "_comment": "静态基本面种子 — AV 不支持(港股/A股/基金)或 API 失败时的全局兜底。公开市场数据近似值。",
+  "_updated": "2026-06-11",
+
+  "AAPL": {
+    "symbol": "AAPL", "name": "Apple Inc.",
+    "market_cap": 3200000000000, "pe_ratio": 33.5, "forward_pe": 29.8,
+    "eps": 6.97, "revenue_ttm": 391000000000, "profit_margin": 0.267,
+    "52_week_high": 260.1, "52_week_low": 164.1, "beta": 1.24,
+    "analyst_target_price": 248.0,
+    "sector": "Technology", "industry": "Consumer Electronics"
+  },
+  "MSFT": {
+    "symbol": "MSFT", "name": "Microsoft Corp.",
+    "market_cap": 3100000000000, "pe_ratio": 36.0, "forward_pe": 31.5,
+    "eps": 12.4, "revenue_ttm": 254000000000, "profit_margin": 0.36,
+    "52_week_high": 475.0, "52_week_low": 366.0, "beta": 0.89,
+    "analyst_target_price": 490.0,
+    "sector": "Technology", "industry": "Software"
+  },
+  "NVDA": {
+    "symbol": "NVDA", "name": "NVIDIA Corp.",
+    "market_cap": 3400000000000, "pe_ratio": 55.0, "forward_pe": 35.0,
+    "eps": 2.53, "revenue_ttm": 113000000000, "profit_margin": 0.56,
+    "52_week_high": 153.0, "52_week_low": 86.6, "beta": 1.65,
+    "analyst_target_price": 165.0,
+    "sector": "Technology", "industry": "Semiconductors"
+  },
+  "GOOGL": {
+    "symbol": "GOOGL", "name": "Alphabet Inc.",
+    "market_cap": 2200000000000, "pe_ratio": 23.0, "forward_pe": 20.5,
+    "eps": 7.8, "revenue_ttm": 362000000000, "profit_margin": 0.28,
+    "52_week_high": 200.0, "52_week_low": 140.5, "beta": 1.05,
+    "analyst_target_price": 205.0,
+    "sector": "Technology", "industry": "Internet Content"
+  },
+  "AMZN": {
+    "symbol": "AMZN", "name": "Amazon.com Inc.",
+    "market_cap": 2100000000000, "pe_ratio": 42.0, "forward_pe": 32.0,
+    "eps": 5.0, "revenue_ttm": 638000000000, "profit_margin": 0.08,
+    "52_week_high": 232.0, "52_week_low": 151.6, "beta": 1.15,
+    "analyst_target_price": 235.0,
+    "sector": "Consumer Cyclical", "industry": "Internet Retail"
+  },
+  "TSLA": {
+    "symbol": "TSLA", "name": "Tesla, Inc.",
+    "market_cap": 1100000000000, "pe_ratio": 172.0, "forward_pe": 95.0,
+    "eps": 2.04, "revenue_ttm": 97000000000, "profit_margin": 0.13,
+    "52_week_high": 488.5, "52_week_low": 138.8, "beta": 2.31,
+    "analyst_target_price": 290.0,
+    "sector": "Consumer Cyclical", "industry": "Auto Manufacturers"
+  },
+  "LI": {
+    "symbol": "LI", "name": "Li Auto Inc.",
+    "market_cap": 28000000000, "pe_ratio": 18.2, "forward_pe": 14.5,
+    "eps": 0.76, "revenue_ttm": 18000000000, "profit_margin": 0.06,
+    "52_week_high": 33.9, "52_week_low": 13.2, "beta": 1.45,
+    "analyst_target_price": 25.0,
+    "sector": "Consumer Cyclical", "industry": "Auto Manufacturers"
+  },
+  "PDD": {
+    "symbol": "PDD", "name": "PDD Holdings Inc.",
+    "market_cap": 130000000000, "pe_ratio": 8.5, "forward_pe": 7.8,
+    "eps": 10.5, "revenue_ttm": 55000000000, "profit_margin": 0.25,
+    "52_week_high": 164.7, "52_week_low": 85.4, "beta": 1.3,
+    "analyst_target_price": 150.0,
+    "sector": "Consumer Cyclical", "industry": "Internet Retail"
+  },
+
+  "00700": {
+    "symbol": "00700.HK", "name": "腾讯控股", "currency": "HKD",
+    "market_cap_hkd": 4200000000000, "pe_ratio": 22.5, "forward_pe": 19.0,
+    "eps_hkd": 20.8, "revenue_ttm_hkd": 640000000000, "profit_margin": 0.26,
+    "52_week_high_hkd": 520.0, "52_week_low_hkd": 310.0, "beta": 0.95,
+    "sector": "通信服务", "industry": "互联网"
+  },
+  "09988": {
+    "symbol": "09988.HK", "name": "阿里巴巴-W", "currency": "HKD",
+    "market_cap_hkd": 1800000000000, "pe_ratio": 15.0, "forward_pe": 12.0,
+    "eps_hkd": 6.2, "revenue_ttm_hkd": 960000000000, "profit_margin": 0.08,
+    "52_week_high_hkd": 120.0, "52_week_low_hkd": 58.0, "beta": 1.1,
+    "sector": "消费", "industry": "电子商务"
+  },
+  "03690": {
+    "symbol": "03690.HK", "name": "美团-W", "currency": "HKD",
+    "market_cap_hkd": 900000000000, "pe_ratio": 30.0, "forward_pe": 22.0,
+    "eps_hkd": 5.5, "revenue_ttm_hkd": 280000000000, "profit_margin": 0.05,
+    "52_week_high_hkd": 190.0, "52_week_low_hkd": 95.0, "beta": 1.25,
+    "sector": "消费", "industry": "本地生活"
+  },
+  "01810": {
+    "symbol": "01810.HK", "name": "小米集团-W", "currency": "HKD",
+    "market_cap_hkd": 1200000000000, "pe_ratio": 35.0, "forward_pe": 28.0,
+    "eps_hkd": 1.4, "revenue_ttm_hkd": 340000000000, "profit_margin": 0.06,
+    "52_week_high_hkd": 62.0, "52_week_low_hkd": 17.5, "beta": 1.4,
+    "sector": "科技", "industry": "消费电子"
+  },
+
+  "600519": {
+    "symbol": "600519.SH", "name": "贵州茅台", "currency": "CNY",
+    "market_cap_cny": 1900000000000, "pe_ratio": 23.0, "pb_ratio": 7.5,
+    "eps_cny": 62.5, "revenue_ttm_cny": 170000000000, "profit_margin": 0.52,
+    "52_week_high_cny": 1850.0, "52_week_low_cny": 1260.0, "beta": 0.7,
+    "sector": "消费", "industry": "白酒"
+  },
+  "300750": {
+    "symbol": "300750.SZ", "name": "宁德时代", "currency": "CNY",
+    "market_cap_cny": 1100000000000, "pe_ratio": 20.0, "pb_ratio": 4.5,
+    "eps_cny": 12.8, "revenue_ttm_cny": 410000000000, "profit_margin": 0.10,
+    "52_week_high_cny": 290.0, "52_week_low_cny": 155.0, "beta": 1.3,
+    "sector": "新能源", "industry": "锂电池"
+  },
+  "000858": {
+    "symbol": "000858.SZ", "name": "五粮液", "currency": "CNY",
+    "market_cap_cny": 500000000000, "pe_ratio": 18.0, "pb_ratio": 4.2,
+    "eps_cny": 7.2, "revenue_ttm_cny": 83000000000, "profit_margin": 0.38,
+    "52_week_high_cny": 175.0, "52_week_low_cny": 105.0, "beta": 0.8,
+    "sector": "消费", "industry": "白酒"
+  },
+  "601318": {
+    "symbol": "601318.SH", "name": "中国平安", "currency": "CNY",
+    "market_cap_cny": 900000000000, "pe_ratio": 9.5, "pb_ratio": 1.1,
+    "eps_cny": 5.5, "revenue_ttm_cny": 980000000000, "profit_margin": 0.06,
+    "52_week_high_cny": 62.0, "52_week_low_cny": 36.0, "beta": 1.0,
+    "sector": "金融", "industry": "保险"
+  },
+
+  "005827": {
+    "symbol": "005827", "name": "易方达蓝筹精选混合", "type": "fund", "currency": "CNY",
+    "nav": 1.25, "fund_size_cny": 40000000000,
+    "annual_return_1y": -0.08, "annual_return_3y": -0.12,
+    "max_drawdown": -0.45, "sharpe_ratio": -0.3,
+    "sector": "混合型", "fund_manager": "张坤"
+  },
+  "003095": {
+    "symbol": "003095", "name": "中欧医疗健康混合A", "type": "fund", "currency": "CNY",
+    "nav": 0.65, "fund_size_cny": 15000000000,
+    "annual_return_1y": -0.15, "annual_return_3y": -0.20,
+    "max_drawdown": -0.55, "sharpe_ratio": -0.5,
+    "sector": "混合型", "fund_manager": "葛兰"
+  },
+  "161725": {
+    "symbol": "161725", "name": "招商中证白酒指数A", "type": "fund", "currency": "CNY",
+    "nav": 1.15, "fund_size_cny": 50000000000,
+    "annual_return_1y": -0.05, "annual_return_3y": -0.08,
+    "max_drawdown": -0.40, "sharpe_ratio": -0.1,
+    "sector": "指数型", "fund_manager": "侯昊"
+  },
+  "270042": {
+    "symbol": "270042", "name": "广发纳斯达克100ETF联接A", "type": "fund", "currency": "CNY",
+    "nav": 2.85, "fund_size_cny": 20000000000,
+    "annual_return_1y": 0.25, "annual_return_3y": 0.12,
+    "max_drawdown": -0.25, "sharpe_ratio": 0.8,
+    "sector": "QDII", "fund_manager": "刘杰"
+  },
+  "000198": {
+    "symbol": "000198", "name": "天弘余额宝货币", "type": "fund", "currency": "CNY",
+    "nav": 1.0, "fund_size_cny": 700000000000,
+    "annual_return_1y": 0.015, "annual_return_3y": 0.018,
+    "max_drawdown": 0, "sharpe_ratio": 2.5,
+    "sector": "货币型", "fund_manager": "王登峰"
+  }
+}

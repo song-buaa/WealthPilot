@@ -84,8 +84,28 @@ def _parse_av_time(time_str: str) -> datetime:
             return datetime.now()
 
 
+# ── 进程内缓存: 情绪面/评级 6h, 基本面 24h ──
+import time as _time
+
+_AV_RESEARCH_CACHE: dict[str, tuple[dict, float]] = {}
+_AV_RESEARCH_TTL: dict[str, int] = {
+    "NEWS_SENTIMENT": 6 * 3600,
+    "OVERVIEW": 24 * 3600,
+    "EARNINGS": 24 * 3600,
+    "INCOME_STATEMENT": 24 * 3600,
+}
+_AV_DEFAULT_TTL = 6 * 3600
+
+
 def _call_av_api(function_name: str, **params) -> dict:
-    """调用 Alpha Vantage REST API。"""
+    """调用 Alpha Vantage REST API（带进程内缓存）。"""
+    cache_key = f"av_research:{function_name}:{sorted(params.items())}"
+    cached = _AV_RESEARCH_CACHE.get(cache_key)
+    if cached:
+        data, expires_at = cached
+        if _time.time() < expires_at:
+            return data
+
     api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
     if not api_key:
         raise AdapterQuotaError("未配置 ALPHA_VANTAGE_API_KEY 环境变量")
@@ -102,6 +122,8 @@ def _call_av_api(function_name: str, **params) -> dict:
     if "Information" in data and "premium" in data.get("Information", "").lower():
         raise AdapterQuotaError(f"Alpha Vantage 配额受限: {data['Information']}")
 
+    ttl = _AV_RESEARCH_TTL.get(function_name, _AV_DEFAULT_TTL)
+    _AV_RESEARCH_CACHE[cache_key] = (data, _time.time() + ttl)
     return data
 
 

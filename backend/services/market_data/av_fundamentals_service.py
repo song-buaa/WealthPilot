@@ -90,16 +90,29 @@ def _safe_int(val, default=None) -> Optional[int]:
 
 
 def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
-    """调 AV OVERVIEW + INCOME_STATEMENT。任何异常返回 None。"""
+    """调 AV OVERVIEW + INCOME_STATEMENT。失败/不支持时降级到种子数据。"""
     ticker = _wp_symbol_to_av_ticker(wp_symbol)
     if ticker is None:
-        logger.info(f"AV 不支持港股: {wp_symbol}")
-        return None
+        # AV 不支持港股/A股/基金 → 种子兜底
+        raw_ticker = wp_symbol.split(":")[0] if ":" in wp_symbol else wp_symbol
+        logger.info(f"AV 不支持: {wp_symbol}，尝试种子兜底")
+        return _load_seed_fundamentals(raw_ticker)
 
     cache_key = f"av_fundamentals:{ticker}"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
+
+    # DEMO_ALLOW_MARKET_DATA=false → 跳过 AV API，直接种子
+    try:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE, DEMO_ALLOW_MARKET_DATA
+        if PUBLIC_DEMO_MODE and not DEMO_ALLOW_MARKET_DATA:
+            seed = _load_seed_fundamentals(ticker)
+            if seed:
+                set_cached(cache_key, seed, FUNDAMENTALS_TTL)
+            return seed
+    except ImportError:
+        pass
 
     api_key = get_next_av_key()
 
