@@ -449,6 +449,7 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
   compact?: boolean
   trancheLabel?: string  // v3.11: "第 N 批"
 }) {
+  const isDemo = useDemoMode()
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   function handleDiscard() {

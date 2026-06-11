@@ -18,7 +18,7 @@ export function useDemoMode(): boolean {
       .then(r => r.json())
       .then(d => {
         _cached = d.public_demo_mode ?? false
-        setIsDemo(_cached)
+        setIsDemo(_cached ?? false)
       })
       .catch(() => {
         _cached = false

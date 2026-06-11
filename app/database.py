@@ -12,7 +12,10 @@ from sqlalchemy.pool import NullPool
 
 # ── 路径配置 ──────────────────────────────────
 # __file__ = app/database.py，上两级是项目根目录
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "wealthpilot.db")
+DB_PATH = os.environ.get(
+    "WEALTHPILOT_DB_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "wealthpilot.db"),
+)
 
 # ── ORM Base（所有 Model 继承此对象）─────────────
 Base = declarative_base()

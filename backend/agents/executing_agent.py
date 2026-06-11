@@ -285,7 +285,19 @@ class ExecutingAgent:
         if _DEMO_EA:
             # demo 模式：券商凭证行情源替换为 AKShare + 种子数据
             from backend.services.demo_market_service import fetch_demo_quote, fetch_demo_kline
-            fetch_quote = lambda sym: fetch_demo_quote(sym)  # noqa: E731
+            from services.market_data.schema import QuoteData
+
+            def _demo_quote(sym):
+                raw = fetch_demo_quote(sym)
+                if raw is None:
+                    return None
+                return QuoteData(
+                    symbol=sym or "",
+                    current_price=raw.get("current_price"),
+                    source=raw.get("source", "demo_seed"),
+                )
+
+            fetch_quote = _demo_quote
             fetch_kline = lambda sym: fetch_demo_kline(sym)  # noqa: E731
             # fundamentals/capital_flow: 不可用，prompt 层声明
             fetch_fundamentals = lambda *a, **kw: None  # noqa: E731
