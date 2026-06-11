@@ -78,6 +78,14 @@ def _get_last_run(db, broker: str):
 @router.get("/status", response_model=SyncStatusResponse)
 def get_sync_status():
     """查询各 broker 最近同步状态。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if PUBLIC_DEMO_MODE:
+        # demo 模式: 不查库，返回静态"已禁用"状态
+        return SyncStatusResponse(brokers=[
+            SyncStatusItem(broker=b, platform=p, last_sync_status="disabled")
+            for b, p in BROKER_PLATFORM_MAP.items()
+        ])
+
     import sys, os
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if backend_dir not in sys.path:

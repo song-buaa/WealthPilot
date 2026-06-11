@@ -38,10 +38,12 @@ async def lifespan(app: FastAPI):
     if _DEMO:
         print("[lifespan] PUBLIC_DEMO_MODE=True — 跳过 broker/scheduler/poller 初始化")
         # 种子数据加载
-        from backend.services.demo_seed_loader import load_seed_positions_if_empty
+        from backend.services.demo_seed_loader import load_seed_positions_if_empty, load_seed_profile_if_empty
         seed_count = load_seed_positions_if_empty()
         if seed_count > 0:
             print(f"[lifespan] 导入 {seed_count} 条种子持仓")
+        if load_seed_profile_if_empty():
+            print("[lifespan] 导入演示用户画像")
         yield
         return
 

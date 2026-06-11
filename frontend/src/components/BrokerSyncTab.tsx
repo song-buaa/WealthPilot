@@ -18,7 +18,8 @@ const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; text
   success: { icon: <CheckCircle size={12} />, color: '#059669', text: '同步成功' },
   failed:  { icon: <XCircle size={12} />,    color: '#DC2626', text: '同步失败' },
   running: { icon: <Loader2 size={12} className="animate-spin" />, color: '#D97706', text: '同步中' },
-  never:   { icon: <Clock size={12} />,      color: '#9CA3AF', text: '从未同步' },
+  never:    { icon: <Clock size={12} />,      color: '#9CA3AF', text: '从未同步' },
+  disabled: { icon: <Clock size={12} />,      color: '#D1D5DB', text: '演示模式' },
 }
 
 export function BrokerSyncTab({ onRefresh }: Props) {

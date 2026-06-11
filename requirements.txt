@@ -18,6 +18,7 @@ pypdf>=4.0.0             # PDF 文字提取
 requests>=2.31.0         # URL 抓取
 beautifulsoup4>=4.12.0   # HTML 解析
 langgraph>=0.2.0
+langgraph-checkpoint-sqlite>=3.0.0  # decision_graph SqliteSaver
 mcp>=1.0.0               # 盈米基金诊断 MCP 客户端
 
 # ── 券商 OpenAPI ─────────────────────────────────────────────────────────────

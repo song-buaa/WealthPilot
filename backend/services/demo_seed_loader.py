@@ -66,3 +66,47 @@ def load_seed_positions_if_empty(portfolio_id: int = 1) -> int:
         return 0
     finally:
         session.close()
+
+
+def load_seed_profile_if_empty() -> bool:
+    """如果 DB 无用户画像，插入演示用虚构画像。返回是否插入。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if not PUBLIC_DEMO_MODE:
+        return False
+
+    from app.models import get_session
+    from app.models import UserProfile
+
+    session = get_session()
+    try:
+        if session.query(UserProfile).count() > 0:
+            return False
+
+        profile = UserProfile(
+            risk_source="demo",
+            risk_provider="演示数据",
+            risk_original_level="C4",
+            risk_normalized_level=4,
+            risk_type="积极型",
+            income_level="中高",
+            income_stability="稳定",
+            total_assets="100-500万",
+            investable_ratio="50-70%",
+            liability_level="低",
+            family_status="已婚有子女",
+            asset_structure="股票为主",
+            investment_motivation="资产增值",
+            fund_usage_timeline="3年以上",
+            max_drawdown="15-30%",
+            target_return="10-20%",
+        )
+        session.add(profile)
+        session.commit()
+        logger.info("[demo_seed] 插入演示用户画像")
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.error(f"[demo_seed] 用户画像种子失败: {e}")
+        return False
+    finally:
+        session.close()
