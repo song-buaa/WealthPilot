@@ -299,10 +299,15 @@ class ExecutingAgent:
 
             fetch_quote = _demo_quote
             fetch_kline = lambda sym: fetch_demo_kline(sym)  # noqa: E731
-            # fundamentals/capital_flow: 不可用，prompt 层声明
-            fetch_fundamentals = lambda *a, **kw: None  # noqa: E731
+            # fundamentals: DEMO_ALLOW_MARKET_DATA=true 时放行(含种子兜底)
+            from backend.core.demo_mode import DEMO_ALLOW_MARKET_DATA as _DEMO_MKT
+            if _DEMO_MKT:
+                from services.market_data.av_fundamentals_service import fetch_fundamentals
+                logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE + ALLOW_MARKET_DATA — fundamentals 放行(AV+种子)")
+            else:
+                fetch_fundamentals = lambda *a, **kw: None  # noqa: E731
+                logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE + !ALLOW_MARKET_DATA — fundamentals 不可用")
             fetch_capital_flow = lambda *a, **kw: None  # noqa: E731
-            logger.info("[ExecutingAgent] PUBLIC_DEMO_MODE — 行情走 AKShare/种子; fundamentals/capital_flow 不可用")
         else:
             _futu_available = _is_futu_opend_available() if wp_symbol else False
             if _futu_available:
