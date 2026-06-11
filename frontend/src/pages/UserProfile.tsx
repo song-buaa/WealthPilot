@@ -101,8 +101,12 @@ export default function UserProfile() {
           }}
           onClick={() => setPhilOpen(v => !v)}
         >
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>投资理念</span>
+            <span style={{
+              fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 10,
+              background: '#F0FDF4', color: '#16A34A',
+            }}>官方版</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
             <input ref={philFileRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handlePhilUpload} />
