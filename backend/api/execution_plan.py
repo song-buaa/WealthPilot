@@ -24,6 +24,7 @@ class GenerateRequest(BaseModel):
     current_position_pct: float = 0.0
     current_price: float = 0.0
     total_assets: float = 0.0
+    held_shares: int = 0                  # 该标的聚合持仓股数
     user_anchor_prices: Optional[list[float]] = None
     quick_mode: bool = False
     source_decision_ref: str = ""
@@ -48,6 +49,7 @@ def generate_execution_plan(req: GenerateRequest):
             current_position_pct=req.current_position_pct,
             current_price=req.current_price,
             total_assets=req.total_assets,
+            held_shares=req.held_shares,
             user_anchor_prices=req.user_anchor_prices or [],
             quick_mode=req.quick_mode,
             source_decision_ref=req.source_decision_ref,
@@ -89,6 +91,7 @@ def persist_draft(req: GenerateRequest):
         current_position_pct=req.current_position_pct,
         current_price=req.current_price,
         total_assets=req.total_assets,
+        held_shares=req.held_shares,
         user_anchor_prices=req.user_anchor_prices or [],
         quick_mode=req.quick_mode,
         source_decision_ref=req.source_decision_ref,
@@ -104,13 +107,19 @@ def persist_draft(req: GenerateRequest):
         if PUBLIC_DEMO_MODE:
             source_ref = f"demo:{source_ref}" if source_ref else "demo"
 
+        # 把关键输入补进 factor_snapshot，供 update-tranches 校验用
+        fs = result.get("factor_snapshot") or {}
+        fs["total_assets"] = req.total_assets
+        fs["current_position_pct"] = req.current_position_pct
+        fs["held_shares"] = req.held_shares
+
         plan = ExecutionPlan(
             symbol=req.symbol, market=req.market, side=req.side,
             target_basis="QUANTITY",
             target_value=psb.get("total_quantity"),
             user_anchor_prices=json.dumps(req.user_anchor_prices) if req.user_anchor_prices else None,
             one_shot_baseline_price=psb.get("current_price"),
-            factor_snapshot=json.dumps(result.get("factor_snapshot"), default=str),
+            factor_snapshot=json.dumps(fs, default=str),
             constraints_applied=json.dumps(result.get("constraints_applied"), default=str),
             rationale=result.get("rationale", ""),
             risk_notes=result.get("risk_notes", ""),
@@ -155,6 +164,132 @@ def confirm_plan(plan_id: str):
     except Exception as e:
         session.rollback()
         logger.error("执行计划确认失败: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+class TrancheUpdate(BaseModel):
+    sequence: int
+    quantity: int
+
+
+class UpdateTranchesRequest(BaseModel):
+    tranches: list[TrancheUpdate]
+
+
+@router.patch("/{plan_id}/update-tranches")
+def update_tranches(plan_id: str, req: UpdateTranchesRequest):
+    """用户手改批次数量 → 纪律校验 → 更新 DB + 重算目标仓位。"""
+    from app.database import get_session
+    from backend.services.execution_plan.models import ExecutionPlan, ExecutionTranche
+    from app.discipline.config import get_rules
+    import json
+
+    session = get_session()
+    try:
+        plan = session.query(ExecutionPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="计划不存在")
+        if plan.plan_status != "draft":
+            raise HTTPException(status_code=400, detail=f"只能修改 draft 状态的计划，当前: {plan.plan_status}")
+
+        db_tranches = (
+            session.query(ExecutionTranche)
+            .filter_by(plan_id=plan_id)
+            .order_by(ExecutionTranche.sequence)
+            .all()
+        )
+        if len(req.tranches) != len(db_tranches):
+            raise HTTPException(status_code=400, detail=f"批数不匹配: 提交{len(req.tranches)}批，计划有{len(db_tranches)}批")
+
+        # ── 读取纪律配置 ──
+        rules = get_rules()
+        sal = rules.get("single_asset_limits", {})
+        ps = rules.get("position_sizing", {})
+        max_position_pct = sal.get("max_position_pct", 0.40)
+        max_single_add_pct = ps.get("max_single_add_pct", 0.10)
+
+        # ── 读取计划基准价和总资产 ──
+        baseline_price = float(plan.one_shot_baseline_price) if plan.one_shot_baseline_price else 0
+        factor_data = json.loads(plan.factor_snapshot) if plan.factor_snapshot else {}
+        total_assets = factor_data.get("total_assets", 1000000)
+
+        is_buy_side = plan.side in ("BUY", "ADD")
+        violations = []
+
+        # ── 校验 1: 每批 ≥ 1 ──
+        for t in req.tranches:
+            if t.quantity < 1:
+                violations.append(f"第{t.sequence}批数量为{t.quantity}，最少1股")
+
+        # ── 校验 2: 单批上限 ──
+        if baseline_price > 0 and total_assets > 0:
+            max_single_shares = int(total_assets * max_single_add_pct / baseline_price)
+            for t in req.tranches:
+                if t.quantity > max_single_shares:
+                    violations.append(
+                        f"第{t.sequence}批 {t.quantity} 股超过单批上限 {max_single_shares} 股"
+                        f"（单次加仓≤{max_single_add_pct:.0%}，对应 {max_single_shares} 股）"
+                    )
+
+        new_total = sum(t.quantity for t in req.tranches)
+
+        # ── 校验 3: 加仓方向——改后仓位 ≤ max_position_pct ──
+        if is_buy_side and baseline_price > 0 and total_assets > 0:
+            # 当前仓位(从 factor_snapshot 读) + 新增部分
+            current_pct = factor_data.get("current_position_pct", 0.0)
+            new_increment_pct = (new_total * baseline_price) / total_assets
+            final_pct = current_pct + new_increment_pct
+            if final_pct > max_position_pct:
+                violations.append(
+                    f"改后仓位 {final_pct:.1%} 超过单票上限 {max_position_pct:.0%}"
+                )
+
+        # ── 校验 4: 减仓方向——卖出总量 ≤ 实际持仓 ──
+        if not is_buy_side:
+            from app.models import Position
+            ticker = plan.symbol.split(":")[0] if ":" in plan.symbol else plan.symbol
+            held_qty = sum(
+                float(p.quantity or 0)
+                for p in session.query(Position).filter(Position.ticker == ticker).all()
+            )
+            if held_qty > 0 and new_total > held_qty:
+                violations.append(f"卖出 {new_total} 股超过持仓 {int(held_qty)} 股")
+
+        if violations:
+            raise HTTPException(status_code=422, detail={"violations": violations})
+
+        # ── 全部通过，更新 DB ──
+        seq_to_qty = {t.sequence: t.quantity for t in req.tranches}
+        for dbt in db_tranches:
+            if dbt.sequence in seq_to_qty:
+                dbt.quantity = seq_to_qty[dbt.sequence]
+
+        # 重算目标仓位并更新 plan
+        plan.target_value = new_total
+        if baseline_price > 0 and total_assets > 0:
+            current_pct = factor_data.get("current_position_pct", 0.0)
+            new_increment_pct = (new_total * baseline_price) / total_assets
+            if is_buy_side:
+                new_target_pct = current_pct + new_increment_pct
+            else:
+                new_target_pct = max(0, current_pct - new_increment_pct)
+        else:
+            new_target_pct = None
+
+        session.commit()
+        return {
+            "plan_id": plan_id,
+            "total_quantity": new_total,
+            "target_position_pct": round(new_target_pct, 4) if new_target_pct is not None else None,
+            "tranches": [{"sequence": t.sequence, "quantity": int(t.quantity)} for t in db_tranches],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.error("更新批次失败: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()

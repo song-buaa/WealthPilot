@@ -978,6 +978,13 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
           const effectiveSide = userInitiated ? userSide : (sideMap[action] || 'BUY')
           const effectiveTargetPct = userInitiated ? 0.08 : undefined
 
+          // 从 explainData 提取真实持仓数据(替代硬编码)
+          const dataBlock = explainData?.data as Record<string, unknown> | undefined
+          const totalAssets = (dataBlock?.total_assets as number) || undefined
+          const currentPositionPct = (tp?.weight as number) ?? undefined
+          const currentPrice = (tp?.current_price as number) || undefined
+          const heldShares = (tp?.estimated_shares as number) || undefined
+
           return (
             <ExecutionPlanPanel
               symbol={symbol}
@@ -985,6 +992,10 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
               side={effectiveSide}
               userInitiated={userInitiated}
               defaultTargetPct={effectiveTargetPct}
+              realTotalAssets={totalAssets}
+              realCurrentPositionPct={currentPositionPct}
+              realCurrentPrice={currentPrice}
+              realHeldShares={heldShares}
               onClose={() => setShowExecPlan(false)}
               onSideChange={setUserSide}
               onConfirmPlan={(planResult) => {

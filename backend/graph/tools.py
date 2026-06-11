@@ -974,6 +974,7 @@ def execute_generate_execution_plan(**kwargs) -> dict:
         current_position_pct=kwargs.get("current_position_pct", 0.0),
         current_price=factor_snap.current_price or kwargs.get("current_price", 0.0),
         total_assets=kwargs.get("total_assets", 0.0),
+        held_shares=kwargs.get("held_shares", 0),
         user_anchor_prices=kwargs.get("user_anchor_prices") or [],
         quick_mode=kwargs.get("quick_mode", False),
         batch_count_override=kwargs.get("batch_count_override"),

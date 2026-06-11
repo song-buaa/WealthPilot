@@ -699,15 +699,33 @@ def _serialize_target_position(ld, result) -> dict:
         "profit_loss_rate": tp.profit_loss_rate,
         "platforms":        tp.platforms,
     }
+
+    # 持仓股数: 优先从 positions 表直查(不依赖行情)
+    if tp.ticker:
+        try:
+            from app.database import get_session as _get_session
+            from app.models import Position
+            _s = _get_session()
+            held = sum(
+                float(p.quantity or 0)
+                for p in _s.query(Position).filter(Position.ticker == tp.ticker).all()
+            )
+            _s.close()
+            if held > 0:
+                info["estimated_shares"] = int(held)
+        except Exception:
+            pass  # 查不到时 fallback 到行情反算
+
     market_data = getattr(result, '_market_data', None)
     if market_data and hasattr(market_data, 'quote') and market_data.quote:
         q = market_data.quote
         if q.current_price and q.current_price > 0:
             info["current_price"] = q.current_price
             info["currency"] = getattr(q, 'currency', 'USD')
-            fx = 7.2 if info["currency"] == "USD" else (0.92 if info["currency"] == "HKD" else 1.0)
-            est_shares = round(tp.market_value_cny / (q.current_price * fx))
-            info["estimated_shares"] = est_shares
+            # 如果 positions 直查没拿到,用行情反算 fallback
+            if "estimated_shares" not in info:
+                fx = 7.2 if info["currency"] == "USD" else (0.92 if info["currency"] == "HKD" else 1.0)
+                info["estimated_shares"] = round(tp.market_value_cny / (q.current_price * fx))
 
     # v3.11 债1: symbol 真值优先(来自 Position.symbol 列，由 broker_sync 写入)
     _CURRENCY_TO_MARKET = {"USD": "US", "HKD": "HK"}

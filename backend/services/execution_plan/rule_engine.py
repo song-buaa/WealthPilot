@@ -28,7 +28,8 @@ class PlanInput:
     target_position_pct: float           # 目标仓位占比 (0~1)
     current_position_pct: float = 0.0    # 当前仓位占比
     current_price: float = 0.0           # 当前价格
-    total_assets: float = 0.0            # 总投资性资产
+    total_assets: float = 0.0            # 总投资性资产(人民币,仅触发价等非股数计算用)
+    held_shares: int = 0                 # 该标的聚合持仓股数(跨券商合计)
     user_anchor_prices: list[float] = field(default_factory=list)
     quick_mode: bool = False             # 快速单笔模式
     batch_count_override: Optional[int] = None  # Step C: 用户指定批数覆盖
@@ -358,20 +359,36 @@ def _calc_limit_prices(
 
 
 def _calc_total_shares(inp: PlanInput) -> int:
-    """从仓位百分比+总资产+现价算出总股数。"""
-    # 参考价格: 优先用 current_price，降级时用第一个锚点价
+    """从持仓股数+仓位百分比变动算出加减仓股数。
+
+    公式: held_shares × (increment_pct / current_position_pct)
+    不碰 total_assets / ref_price，无币种问题。
+    减仓时 increment_pct ≤ current_pct → 结果 ≤ held_shares（天然安全）。
+
+    Fallback: held_shares 为 0 时降级到旧公式（total_assets / price）。
+    """
+    increment_pct = abs(inp.target_position_pct - inp.current_position_pct)
+
+    # 优先用持仓股数公式（无币种问题）
+    if inp.held_shares > 0 and inp.current_position_pct > 0:
+        shares = int(inp.held_shares * (increment_pct / inp.current_position_pct))
+        return max(shares, 1)
+
+    # Fallback: 旧公式（需币种一致时才准确）
     ref_price = inp.current_price
     if (not ref_price or ref_price <= 0) and inp.user_anchor_prices:
         ref_price = inp.user_anchor_prices[0]
     if not ref_price or ref_price <= 0 or inp.total_assets <= 0:
         return 0
-    increment_pct = abs(inp.target_position_pct - inp.current_position_pct)
     value = inp.total_assets * increment_pct
     shares = int(value / ref_price)
     return max(shares, 1)
 
 
 def _pct_to_shares(pct: float, inp: PlanInput) -> int:
+    """将仓位百分比转为股数。优先用持仓公式(无币种问题)。"""
+    if inp.held_shares > 0 and inp.current_position_pct > 0:
+        return int(inp.held_shares * (pct / inp.current_position_pct))
     if inp.current_price <= 0 or inp.total_assets <= 0:
         return 0
     return int(inp.total_assets * pct / inp.current_price)

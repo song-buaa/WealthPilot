@@ -84,7 +84,26 @@ export default function ActionDraftCard({ open, onClose, draft, onConfirmed, pla
     setError(null)
     try {
       if (planMeta?.plan_id) {
-        // 执行计划路径: 调 /api/execution-plan/{plan_id}/confirm
+        // 执行计划路径: 先同步编辑后的数量到 DB，再 confirm
+        const tranchesPayload = strategies.map((s, i) => ({
+          sequence: i + 1,
+          quantity: s.quantity || 0,
+        }))
+        const updateRes = await fetch(`/api/execution-plan/${planMeta.plan_id}/update-tranches`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tranches: tranchesPayload }),
+        })
+        if (!updateRes.ok) {
+          const err = await updateRes.json().catch(() => ({ detail: updateRes.statusText }))
+          const violations = err.detail?.violations || err.violations
+          if (violations && Array.isArray(violations)) {
+            throw new Error(violations.join('\n'))
+          }
+          const msg = err.error || err.detail || updateRes.statusText
+          throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+        }
+
         const res = await fetch(`/api/execution-plan/${planMeta.plan_id}/confirm`, { method: 'POST' })
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }))

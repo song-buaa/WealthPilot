@@ -46,6 +46,11 @@ interface Props {
   userInitiated?: boolean           // Step E: true = 用户主动发起(AI 结论为观望)
   defaultTargetPct?: number         // Step E: 用户指定的目标仓位(小数)
   onSideChange?: (side: string) => void  // Step E: 方向切换回调
+  // 真实持仓数据(从 explainData 传入，替代硬编码)
+  realTotalAssets?: number          // 真实总资产(人民币,仅传递给后端非股数计算用)
+  realCurrentPositionPct?: number   // 该标的当前仓位占比(0-1)
+  realCurrentPrice?: number         // 该标的实时现价
+  realHeldShares?: number           // 该标的聚合持仓股数(跨券商合计)
 }
 
 const SIDE_LABEL: Record<string, string> = {
@@ -56,7 +61,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   IMMEDIATE: '立即', PRICE_BELOW: '低于', PRICE_ABOVE: '高于', MANUAL: '手动',
 }
 
-export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan, userInitiated, defaultTargetPct, onSideChange }: Props) {
+export default function ExecutionPlanPanel({ symbol, market, side, onClose, onConfirmPlan, userInitiated, defaultTargetPct, onSideChange, realTotalAssets, realCurrentPositionPct, realCurrentPrice, realHeldShares }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
@@ -79,7 +84,7 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
           target_position_pct: psb.target_position_pct,
           current_position_pct: psb.current_position_pct,
           current_price: psb.current_price,
-          total_assets: 1000000,
+          total_assets: realTotalAssets ?? 1000000,
           user_anchor_prices: parseAnchors().length > 0 ? parseAnchors() : undefined,
         }),
       })
@@ -114,6 +119,17 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
   }
 
   async function handleGenerate() {
+    // Guard: 无持仓时拦住加减仓
+    const isBuySide = side === 'BUY' || side === 'ADD'
+    if (!isBuySide && (!realHeldShares || realHeldShares <= 0)) {
+      setError('无该标的持仓，无法执行减仓计划。')
+      return
+    }
+    if (isBuySide && (!realCurrentPositionPct || realCurrentPositionPct <= 0) && (!realHeldShares || realHeldShares <= 0)) {
+      // 加仓但无持仓 = 建仓场景，held_shares 公式无法使用，降级到旧公式(需币种一致)
+      // 暂不拦——规则引擎 fallback 到 total_assets/price
+    }
+
     setLoading(true)
     setError(null)
     setPlan(null)
@@ -127,9 +143,10 @@ export default function ExecutionPlanPanel({ symbol, market, side, onClose, onCo
           market,
           side,
           target_position_pct: parseFloat(targetPct) / 100 || 0.08,
-          current_position_pct: 0.0,
-          current_price: 0,
-          total_assets: 1000000,
+          current_position_pct: realCurrentPositionPct ?? 0.0,
+          current_price: realCurrentPrice ?? 0,
+          total_assets: realTotalAssets ?? 0,
+          held_shares: realHeldShares ?? 0,
           user_anchor_prices: anchors.length > 0 ? anchors : undefined,
         }),
       })
