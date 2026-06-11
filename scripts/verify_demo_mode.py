@@ -117,7 +117,7 @@ def main():
     check("种子 CSV 存在", csv_path.exists())
     with open(csv_path, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    check("种子 CSV 21 条", len(rows) == 21, f"got {len(rows)}")
+    check("种子 CSV 24 条", len(rows) == 24, f"got {len(rows)}")
 
     # 2b. 种子观点
     viewpoints_path = Path("demo_seed/demo_seed_viewpoints.md")

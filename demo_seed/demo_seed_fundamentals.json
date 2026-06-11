@@ -153,10 +153,31 @@
     "max_drawdown": -0.25, "sharpe_ratio": 0.8,
     "sector": "QDII"
   },
-  "000198": {
-    "symbol": "000198", "name": "天弘余额宝货币", "type": "fund", "currency": "CNY",
-    "nav": 1.00, "fund_size_cny": 700000000000,
-    "annual_return_1y": 0.015, "annual_return_3y": 0.018,
+  "110007": {
+    "symbol": "110007", "name": "易方达稳健收益债券A", "type": "fund", "currency": "CNY",
+    "nav": 1.82, "fund_size_cny": 18000000000,
+    "annual_return_1y": 0.045, "annual_return_3y": 0.038,
+    "max_drawdown": -0.032, "sharpe_ratio": 1.2,
+    "sector": "债券型"
+  },
+  "217022": {
+    "symbol": "217022", "name": "招商产业债券A", "type": "fund", "currency": "CNY",
+    "nav": 2.15, "fund_size_cny": 12000000000,
+    "annual_return_1y": 0.051, "annual_return_3y": 0.042,
+    "max_drawdown": -0.028, "sharpe_ratio": 1.5,
+    "sector": "债券型"
+  },
+  "002617": {
+    "symbol": "002617", "name": "中银丰利定开债", "type": "fund", "currency": "CNY",
+    "nav": 1.12, "fund_size_cny": 8000000000,
+    "annual_return_1y": 0.032, "annual_return_3y": 0.029,
+    "max_drawdown": -0.015, "sharpe_ratio": 1.8,
+    "sector": "债券型"
+  },
+  "530002": {
+    "symbol": "530002", "name": "建信货币A", "type": "fund", "currency": "CNY",
+    "nav": 1.00, "fund_size_cny": 50000000000,
+    "annual_return_1y": 0.016, "annual_return_3y": 0.019,
     "max_drawdown": 0, "sharpe_ratio": 2.5,
     "sector": "货币型"
   }

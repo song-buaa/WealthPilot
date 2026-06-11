@@ -87,7 +87,7 @@ def load_seed_profile_if_empty() -> bool:
             risk_provider="演示数据",
             risk_original_level="C4",
             risk_normalized_level=4,
-            risk_type="积极型",
+            risk_type="成长型",
             income_level="中高",
             income_stability="稳定",
             total_assets="100-500万",
@@ -99,6 +99,11 @@ def load_seed_profile_if_empty() -> bool:
             fund_usage_timeline="3年以上",
             max_drawdown="15-30%",
             target_return="10-20%",
+            goal_type='["长期资产增值", "子女教育金储备"]',
+            investment_horizon="3年以上",
+            ai_summary="您属于成长型投资者，风险承受力中高（R4），以长期资产增值为主要目标，兼顾子女教育金储备。当前组合以权益类资产为主，配置集中于中美优质科技与消费标的，辅以固收和货币类资产做安全垫。建议维持3年以上投资视野，控制单标的集中度，逐步优化固收配比。",
+            ai_style="成长",
+            ai_confidence="high",
         )
         session.add(profile)
         session.commit()
@@ -107,6 +112,84 @@ def load_seed_profile_if_empty() -> bool:
     except Exception as e:
         session.rollback()
         logger.error(f"[demo_seed] 用户画像种子失败: {e}")
+        return False
+    finally:
+        session.close()
+
+
+def load_seed_liability_if_empty(portfolio_id: int = 1) -> bool:
+    """如果 DB 无负债，插入演示用融资融券负债。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if not PUBLIC_DEMO_MODE:
+        return False
+
+    from app.models import get_session, Liability
+
+    session = get_session()
+    try:
+        if session.query(Liability).filter_by(portfolio_id=portfolio_id).count() > 0:
+            return False
+
+        liability = Liability(
+            portfolio_id=portfolio_id,
+            name="融资融券负债",
+            category="信用贷",
+            amount=50000.0,
+            interest_rate=5.5,
+            purpose="投资杠杆",
+        )
+        session.add(liability)
+        session.commit()
+        logger.info("[demo_seed] 插入演示负债 ¥50,000")
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.error(f"[demo_seed] 负债种子失败: {e}")
+        return False
+    finally:
+        session.close()
+
+
+def load_seed_research_docs_if_empty() -> bool:
+    """如果 DB 无已导入资料，插入演示用研报摘要。"""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    if not PUBLIC_DEMO_MODE:
+        return False
+
+    from app.database import get_session
+    from datetime import datetime
+    from sqlalchemy import text
+
+    session = get_session()
+    try:
+        count = session.execute(text("SELECT COUNT(*) FROM research_documents")).scalar()
+        if count > 0:
+            return False
+
+        docs = [
+            {
+                "title": "腾讯控股(00700.HK) 2026年一季度业绩前瞻",
+                "source_type": "user_upload",
+                "content": "腾讯2025年全年营收同比增长约8%，其中游戏业务受益于海外发行放量，广告业务受视频号商业化驱动保持双位数增长。2026Q1预计营收约1,700亿元，同比增长约9%。利润端受益于降本增效持续推进，Non-IFRS净利润率有望维持在30%以上。关注要点：① 微信生态商业化节奏（视频号电商GMV增速）；② 海外游戏pipeline（特别是东南亚市场的增量贡献）；③ AI大模型在企业服务板块的落地进展及对云收入的拉动。估值方面，当前PE约22倍，处于近三年中枢偏下水平，若业绩符合预期，估值存在修复空间。",
+            },
+            {
+                "title": "Apple(AAPL) AI 生态战略及对硬件周期的影响",
+                "source_type": "user_upload",
+                "content": "Apple Intelligence 于2025年下半年正式上线，覆盖iPhone/iPad/Mac全线设备，但初期功能以端侧推理为主，云端能力仍在迭代。核心观察：① 新一代Siri升级为对话式AI助手，用户活跃度数据尚未披露；② AI功能驱动的换机需求目前温和，2026财年iPhone出货量预计同比增长约5%，不及市场此前10%+的乐观预期；③ 服务收入（App Store + Apple Music + iCloud）受益于AI功能附加订阅，年化增速有望维持在15%左右。风险点在于欧盟DMA合规要求可能限制AI功能的部分分发模式，以及Epic诉讼对App Store抽成模式的潜在冲击。当前PE约35倍，反映了市场对AI生态的溢价预期。",
+            },
+        ]
+
+        for doc in docs:
+            session.execute(text(
+                "INSERT INTO research_documents (title, source_type, content, created_at) VALUES (:title, :source_type, :content, :created_at)"
+            ), {"title": doc["title"], "source_type": doc["source_type"], "content": doc["content"], "created_at": datetime.now().isoformat()})
+
+        session.commit()
+        logger.info("[demo_seed] 插入 2 份演示已导入资料")
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.error(f"[demo_seed] 已导入资料种子失败: {e}")
         return False
     finally:
         session.close()
