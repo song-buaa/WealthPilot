@@ -124,6 +124,23 @@ class MarketDataBundle:
     def has_fundamentals(self) -> bool:
         return self.fundamentals is not None
 
+    def _resolve_data_source(self, q, f) -> str:
+        """按实际数据来源拼接标注。"""
+        parts = []
+        if q:
+            src = getattr(q, 'source', 'futu')
+            if 'demo' in src or 'akshare' in src or 'seed' in src:
+                parts.append("AKShare" if 'akshare' in src else "演示数据")
+            else:
+                parts.append("富途行情")
+        if f:
+            as_of = getattr(f, 'data_as_of', '') or ''
+            if as_of.startswith("seed"):
+                parts.append("演示数据")
+            else:
+                parts.append("Alpha Vantage")
+        return "+".join(parts) if parts else "unknown"
+
     def to_snapshot_dict(self) -> dict:
         """转成 structured_result.marketDataSnapshot 格式。"""
         q = self.quote
@@ -154,7 +171,7 @@ class MarketDataBundle:
                 "sell": a.sell,
                 "strongSell": a.strong_sell,
             } if a else None,
-            "dataSource": "futu+alphavantage",
+            "dataSource": self._resolve_data_source(q, f),
             "quoteDataAsOf": utc_iso(q.data_as_of) if q else None,
             "fundamentalsDataAsOf": f.data_as_of if f else None,
             "quoteUpdateFrequency": "realtime",

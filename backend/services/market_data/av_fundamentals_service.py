@@ -114,7 +114,7 @@ def _load_seed_fundamentals(ticker: str) -> Optional[FundamentalsData]:
             low_52w=data.get("52_week_low") or data.get("52_week_low_hkd") or data.get("52_week_low_cny"),
             beta=data.get("beta"),
             analyst=AnalystData(target_price_avg=data.get("analyst_target_price")),
-            data_as_of=seeds.get("_updated", "seed"),
+            data_as_of="seed:" + seeds.get("_updated", "unknown"),
         )
     except Exception as e:
         logger.debug(f"种子基本面加载失败: {e}")

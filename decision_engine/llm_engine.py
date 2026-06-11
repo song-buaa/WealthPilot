@@ -896,13 +896,17 @@ def reason(
         )
     position_prompt = _POSITION_DECISION_PROMPT.replace("{chat_format_block}", chat_format)
 
-    # PUBLIC_DEMO_MODE: 替换数据来源标注
+    # PUBLIC_DEMO_MODE: 数据来源标注精确替换
     try:
-        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE, DEMO_ALLOW_MARKET_DATA
         if PUBLIC_DEMO_MODE:
+            # demo 不连富途 → 行情标注改为 AKShare/演示数据
             position_prompt = position_prompt.replace("富途行情", "演示数据")
             position_prompt = position_prompt.replace("富途实时行情", "演示数据")
-            position_prompt = position_prompt.replace("Alpha Vantage", "演示数据")
+            if not DEMO_ALLOW_MARKET_DATA:
+                # =false: AV 也不可用 → 全部演示数据
+                position_prompt = position_prompt.replace("Alpha Vantage", "演示数据")
+            # =true: Alpha Vantage 保持原标注（AV 真实放行）
     except ImportError:
         pass
 
