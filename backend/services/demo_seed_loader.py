@@ -181,8 +181,8 @@ def load_seed_research_docs_if_empty() -> bool:
 
         for doc in docs:
             session.execute(text(
-                "INSERT INTO research_documents (title, source_type, content, created_at) VALUES (:title, :source_type, :content, :created_at)"
-            ), {"title": doc["title"], "source_type": doc["source_type"], "content": doc["content"], "created_at": datetime.now().isoformat()})
+                "INSERT INTO research_documents (title, source_type, raw_content, uploaded_at, parse_status) VALUES (:title, :source_type, :raw_content, :uploaded_at, :parse_status)"
+            ), {"title": doc["title"], "source_type": doc["source_type"], "raw_content": doc["content"], "uploaded_at": datetime.now().isoformat(), "parse_status": "completed"})
 
         session.commit()
         logger.info("[demo_seed] 插入 2 份演示已导入资料")
