@@ -69,7 +69,7 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 
 ### 1. 概述
 
-v3.6 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构，并在 v3.6 引入私有知识库与 RAG 语义检索作为知识层基础设施。PEER 是项目参考蚂蚁开源框架 [agentUniverse](https://github.com/alipay/agentUniverse) 的设计思想实现的四层 Agent 架构，代表 Planning / Executing / Expressing / Reviewing，四个 Agent 各司其职，通过标准化的数据契约串联（设计上参考 A2A 类协议中"Agent 间以结构化任务与结果交互"的思想）。Skills 协议层是项目内部定义的能力描述层，并非依赖外部 MCP 或 Skills 框架——其目标是将持仓加载、纪律校验、信号生成、知识检索、输出校验等能力封装成具备明确输入、输出和前置条件的可编排单元，由 Planning Agent 按需动态选择、Executing Agent 按清单依次调用。
+WealthPilot 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构，并引入私有知识库与 RAG 语义检索作为知识层基础设施。PEER 是项目参考蚂蚁开源框架 [agentUniverse](https://github.com/alipay/agentUniverse) 的设计思想实现的四层 Agent 架构，代表 Planning / Executing / Expressing / Reviewing，四个 Agent 各司其职，通过标准化的数据契约串联（设计上参考 A2A 类协议中"Agent 间以结构化任务与结果交互"的思想）。Skills 协议层是项目内部定义的能力描述层，并非依赖外部 MCP 或 Skills 框架——其目标是将持仓加载、纪律校验、信号生成、知识检索、输出校验等能力封装成具备明确输入、输出和前置条件的可编排单元，由 Planning Agent 按需动态选择、Executing Agent 按清单依次调用。
 
 ### 2. PEER 四 Agent 分工
 
