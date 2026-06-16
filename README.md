@@ -2,7 +2,7 @@
 
 基于 Multi-Agent 架构的个人投资辅助决策系统
 
-**当前版本：v3.6**
+**当前版本：v3.12**
 
 ## 项目简介
 
@@ -27,9 +27,9 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 | 模块        | 解决的问题                                               | 状态     |
 | --------- | --------------------------------------------------- | ------ |
 | 投资决策      | 针对具体持仓给出有依据的买卖建议，而不是泛泛的市场观点；支持多轮追问、宏观问题分析、多标横向对比    | ✅ v3.0 |
-| 投资行动      | 决策与执行之间的"最后一公里"；将决策结论转化为可执行行动清单，经人工确认后通过券商 API 真实下单 | ✅ v3.2 |
-| 投资账户总览    | 持仓分散在多个券商看不清全貌；支持老虎 / 富途 / 雪盈 / 国金持仓自动同步，统一展示资产分布与盈亏     | ✅ v3.0 |
-| 投研观点      | 投研信息很多，但难以和具体持仓挂钩；在决策时直接调取对应标的的研究观点，支持美股 / 港股 / A 股 | ✅ v2.5 |
+| 投资行动      | 决策 → 分批执行计划 → 盘中触发评估 → 人工确认下单（老虎 / 盈透 IBKR）；规则引擎确定性产出价格与数量，AI 只写解释 | ✅ v3.11 |
+| 投资账户总览    | 持仓分散在多个券商看不清全貌；支持老虎 / 富途 / 盈透 / 国金持仓自动同步，统一展示资产分布与盈亏     | ✅ v3.0 |
+| 投研观点      | 长期价值判断入库沉淀，短期信号决策时取用即弃；在决策时直接调取对应标的的研究观点，支持美股 / 港股 / A 股 | ✅ v3.12 |
 | 资产配置      | 不知道自己的资产结构是否合理；基于五大资产类别给出配置方案，并校验是否符合自己的投资纪律        | ✅ v2.3 |
 | 投资纪律      | 明知纪律却在关键时刻难以执行；将个人投资规则写入系统，每次决策时自动前置校验              | ✅ v2.0 |
 | 用户画像与投资目标 | 系统需要理解你的风险偏好和目标，才能给出匹配的建议；支持问卷填写和截图解析两种方式           | ✅ v2.1 |
@@ -58,7 +58,8 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 - **ChromaDB**（向量库，支持知识库 RAG 语义检索）
 - **AKShare**（港股 / A 股行情数据）
 - **Alpha Vantage API**（美股基本面 / 新闻 / 财报数据）
-- **Tiger OpenAPI SDK / Futu OpenD / 雪盈 API / 国金 API**（券商持仓同步与下单）
+- **Tiger OpenAPI SDK / Futu OpenD / 盈透 API / 国金 QMT API**（券商持仓同步）
+- **ib_async**（盈透 IBKR 下单，仅 LIMIT 单，市场白名单 {US, HK}）
 
 ## 架构说明
 
@@ -100,7 +101,7 @@ v3.6 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构，并在
 
 ### 3. Skills 协议层
 
-项目内部定义的能力描述层，共 12 个原子能力单元。每个 Skill 有独立 SKILL.md，描述 intent / inputs / outputs / preconditions，Planning Agent 读取协议选择能力，Executing Agent 调用实现。
+项目内部定义的能力描述层，共 13 个原子能力单元。每个 Skill 有独立 SKILL.md，描述 intent / inputs / outputs / preconditions，Planning Agent 读取协议选择能力，Executing Agent 调用实现。
 
 **数据加载类**
 
@@ -143,6 +144,7 @@ v3.6 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构，并在
 | Skill             | 能力说明                                            |
 | ----------------- | ----------------------------------------------- |
 | wp-action-planner | 投资行动模块的核心能力，从对话上下文智能推算可执行行动清单（标的、数量、限价），供人工确认下单 |
+| wp-generate-execution-plan | 执行计划生成：规则引擎确定性产出分批触发价/限价/数量，AI 只写 rationale，约束来自 13 条纪律配置 |
 
 ### 4. 五类意图
 
@@ -173,7 +175,8 @@ v3.6 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构，并在
 | 盈米 MCP                    | 国内基金   | 基金基本信息、净值、持仓                 |
 | 富途 OpenD                  | 美股、港股  | 实时行情（snapshot）、资金流向（五档净流入）   |
 | 老虎 K线                     | 美股、港股  | 日线 K 线 + 技术指标（MA / RSI / MACD） |
-| 老虎 / 富途 / 雪盈 / 国金 OpenAPI | A / H / US | 实时持仓同步（cron 定时拉取） + 下单接口   |
+| 老虎 / 富途 / 盈透 / 国金 OpenAPI | A / H / US | 实时持仓同步（cron 定时拉取）             |
+| 老虎 / 盈透 IBKR              | 美股、港股  | 下单接口（仅 LIMIT 单）                 |
 
 ### 7. 回归评测体系
 
@@ -196,8 +199,7 @@ WealthPilot/
 │   │   │   ├── Discipline.tsx       # 投资纪律
 │   │   │   ├── Research.tsx         # 投研观点
 │   │   │   ├── Decision.tsx         # 投资决策（SSE + ExplainPanel）
-│   │   │   ├── Allocation.tsx       # 资产配置看板
-│   │   │   ├── AllocationChat.tsx   # 资产配置 AI 对话
+│   │   │   ├── Action.tsx           # 投资行动（行动清单 + 行动记录）
 │   │   │   └── UserProfile.tsx      # 用户画像
 │   │   ├── components/
 │   │   │   └── layout/              # AppLayout, Sidebar
@@ -230,17 +232,7 @@ WealthPilot/
 │   │       ├── tiger_adapter.py     # 老虎证券适配器
 │   │       ├── futu_adapter.py      # 富途证券适配器
 │   │       └── sync_service.py      # cron 调度 + 时序写入
-│   └── skills/                      # Skills 协议层（v3.0 新增）
-│       ├── wp-fetch-holdings/
-│       ├── wp-fetch-research/
-│       ├── wp-load-context/
-│       ├── wp-check-discipline/
-│       ├── wp-generate-signals/
-│       ├── wp-reasoning/
-│       ├── wp-citation-rules/
-│       ├── wp-output-validator/
-│       ├── wp-calc-allocation-deviation/
-│       └── wp-propose-allocation/
+│   └── knowledge/                   # 知识层（v3.6 新增）
 │
 ├── decision_engine/                 # 投资决策引擎（v2/v3 共用）
 │   ├── data_loader.py               # 持仓 + 投研数据加载（LLM 语义匹配）
@@ -257,6 +249,10 @@ WealthPilot/
 │   ├── database.py                  # 数据库基础设施
 │   ├── analyzer.py                  # 持仓分析引擎
 │   └── discipline/                  # 纪律子模块
+│
+├── skills/                          # Skills 协议层（13 个原子能力，各含 SKILL.md）
+│
+├── knowledge_base/                  # 私有知识库（Markdown 真相源）
 │
 ├── docs/                            # 设计文档归档
 │   └── architecture-v3.svg          # v3.0 系统架构图
@@ -283,10 +279,12 @@ cd frontend && npm install
 cp .env.example .env
 # 编辑 .env，填入：
 #   OPENAI_API_KEY        — GPT-4.1 系列（核心 LLM）
-#   TIGER_TIGER_ID        — 老虎证券持仓同步（可选）
-#   TIGER_PRIVATE_KEY     — 老虎证券私钥（可选）
+#   TIGER_ID              — 老虎证券持仓同步（可选）
+#   TIGER_PRIVATE_KEY_PATH — 老虎证券私钥路径（可选）
 #   FUTU_HOST / FUTU_PORT — 富途 OpenD 连接配置（可选）
-#   SNOWBALL_ACCOUNT      — 雪盈证券持仓同步（可选）
+#   SNOWBALL_ACCOUNT      — 盈透证券持仓同步（可选）
+#   IBKR_ACCOUNT / IBKR_PORT — 盈透 IBKR 下单配置（可选）
+#   BROKER_MODE           — 下单券商切换（mock / tiger / ibkr）
 source .env
 ```
 
@@ -314,6 +312,12 @@ pytest
 
 **近期主要版本：**
 
+- **v3.12**（2026-06-10）：投研观点模块收敛 — 长期价值判断入库沉淀 · 短期信号决策时取用即弃不再写库 · 前端收敛为两 tab
+- **v3.11**（2026-06-10）：执行计划引擎 — 决策 → 规则引擎分批计划 → 盘中触发评估 → 人工确认下单 · Step C 对话调整 · Step E 观望主动发起 · 公开演示模式（PUBLIC_DEMO_MODE）
+- **v3.10**（2026-06-10）：盈透证券 IBKR 接入 — 美股+港股 LIMIT 单 · 四闸门风控 · permId 收口 · paper/live 真连验证封板
+- **v3.9**（2026-06-05）：国金证券 QMT A 股网关 — 主动拉取（pull-mode）同步持仓 · 22:00 定时任务 · 前端接通
+- **v3.8**（2026-06-04）：Skills 生产接通 — C0/C1/C2 三个 Skill 双轨+flag 默认开启 · Skill 对账层（reconcile + manifest + phase map）
+- **v3.7**（2026-05-19）：知识层清理与契约可观测性 — 删死代码 Skill · 修 _SKILL_BUNDLES_BY_ROUTE 漂移 · 显性化日志
 - **v3.6**（2026-05-13）：私有知识库与 RAG 语义检索 — knowledge_base/ Markdown 知识仓库（投研观点 / 投资纪律 / 投资理念 / 配置原则）· Chroma 向量库 + OpenAI Embedding · wp-retrieve-principles Skill · 时效衰减打分 · File-as-Source-of-Truth 架构 · 引用来源标注
 - **v3.5**（2026-05-12）：多会话管理与长对话记忆压缩 — ChatGPT 式多会话切换 · 消息持久化 · 短期窗口+中期摘要两层架构 · 投资场景定制摘要 · 全局时区修复
 - **v3.4**（2026-05-12）：真实券商下单 — Tiger 老虎证券 LIMIT 单（美股+港股）· Symbol 标准化 · 美股新建仓评估 · paper / market 安全闸门 · 实盘验证通过
