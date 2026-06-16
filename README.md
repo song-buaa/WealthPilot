@@ -65,7 +65,7 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 
 ### 系统架构图
 
-![WealthPilot v3.6 架构图](./docs/wealthpilot_v36_arch.svg)
+![WealthPilot v3.12 架构图](./docs/wealthpilot_v36_arch.svg)
 
 ### 1. 概述
 
