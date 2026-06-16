@@ -18,6 +18,7 @@ SKILL_PHASE = {
     "wp-calc-allocation-deviation": "ghost",     # 无 invoke 点
     "wp-propose-allocation":        "ghost",     # 无 invoke 点
     "wp-action-planner":            "frontend",  # 前端按钮直触,不经 PEER
+    "wp-generate-execution-plan":   "api",       # v3.11: API endpoint 调用,不经 PEER
 }
 
 # invoked_skills 中的伪 Skill 名(出现在 invoked_skills 但不对应真 wp- SKILL.md)
