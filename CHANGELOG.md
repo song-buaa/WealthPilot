@@ -5,6 +5,165 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.12.0] - 2026-06-10
+
+投研观点模块收敛。核心理念「持久化跟随时效性」——长期价值判断入库沉淀，短期信号决策时取用即弃，不再写库。
+
+### Changed
+- 投研观点模块收敛 M1-M5：高质量观点迁移至 V2 单表，前端收敛为两个 tab（库 / 决策时信号），短期信号统一为决策时取用即弃
+
+### Removed
+- 切断决策链路上的短期信号写库路径，短期信号卡按 soft-delete 下线（保留软删除，不做物理删除）
+
+### Fixed
+- 堵死决策链路短期信号写库的漏网入口（M1 补漏）
+
+
+## [3.11.1] - 2026-06-11
+
+公开演示模式安全基础设施，并修复执行计划数量计算的系统性错误。
+
+### Added
+- `PUBLIC_DEMO_MODE` 安全基础设施：短路全部交易与外部 API 路径，作为面向公众 demo 的总开关
+- demo 行情服务 + 种子数据加载 + 前端密码门
+- 种子投研观点（5 条脱敏）+ 前端下单入口隐藏 + middleware 调整
+- `PUBLIC_DEMO_MODE` 验收脚本（17/17 全绿）
+
+### Changed
+- Step E 主动发起合并为单步交互，方向选项精简
+- 用户画像「资金使用」label 统一为「投资期限」
+- 报告数据来源标注「AV」改为全称「Alpha Vantage」
+- demo 模式下行情来源标注由「富途行情」改为「演示数据」
+
+### Fixed
+- 修复执行计划数量计算的系统性错误（币种不匹配 + 硬编码假输入），手改数量现可生效，演示模式精确拦截
+- MCP lazy import，避免 mini_racer V8 引擎在 demo 下崩溃
+- demo quote 返回 `QuoteData` 对象 + DB 路径可配置
+- 定稿种子 CSV 替换 + DataFrame bool 判断修复
+
+
+## [3.11.0] - 2026-06-10
+
+执行计划引擎：在投资决策与投资行动之间补上桥接层，把建议翻译成可触发、可复核的分批执行计划。三条铁律——数值仅来自规则引擎（AI 只写 rationale / risk_notes），约束来自既有 13 条纪律配置，Skill 生而激活。
+
+### Added
+- `ExecutionPlan` / `ExecutionTranche` 数据模型
+- 因子 service + `FactorSnapshot` + `data_source_meta`
+- 规则引擎 + 默认参数 + 港股 tick 规则
+- `wp-generate-execution-plan` Skill orchestrator
+- validator 数值比对（`plan_value_mismatch`）
+- 执行计划 endpoint + 前端执行计划预览面板
+- 锚点价输入 + 降级时诚实拒绝
+- `plan_id` 决策↔行动双向关联，confirm 落库；ActionDraftCard 计划头 + N 批次行 + 透明度内容
+- 投资行动页按 `plan_id` 归组展示
+- M6 触发评估循环：交易时段判定 + 纪律间隔 + 补扫 + armed 结构化状态 + 前端提醒
+- Step C 对话式结构化调整（白名单参数约束）
+- Step E 观望结论下用户主动发起执行计划
+
+### Changed
+- B3 执行计划文案「说人话」优化
+- validator（债4）：结构化比对走 hard 校验，文案走 soft 白名单
+
+### Fixed
+- 港股 SDK 查询补零到 5 位（债2）
+- `factors.py` import 路径兼容 uvicorn 运行环境
+- v3.11 收尾：Step E `useRef`→`useState`、确认按钮作用域、guard 漏检、孤儿订单收敛
+
+### Technical
+- 债1：Position 表新增 `symbol` 列，存 `TICKER:MARKET` 标准真值；`target_position` 输出统一为该格式
+- 债3：`sys.path` 注入移至包 `__init__.py`
+- 债5：批次 + 计划状态机合法流转校验
+
+
+## [3.10.1] - 2026-06-10
+
+多券商一致性加固与全站 UI 统一。QMT（A 股）与 IBKR（美/港股）接入后「同一标的跨券商持有」成为真实场景，集中度风控与持仓口径需按标准化 symbol 收口。
+
+### Fixed
+- 集中度风控按标准化 symbol 合并判断：修复多券商持同一标的时单标的集中度被拆条绕过（可绕过 40% 单标的上限）
+- 单标的上限数据源统一到 `discipline/config.py`：修复 LLM 收到相互矛盾的纪律值
+- 集中度告警同步按标准化 symbol 合并，与纪律口径对齐
+- 持仓占比按 position id 精确匹配：修复同名标的占比被错误合并显示
+- 跨券商回填裸代码持仓的中文名（按标准化 symbol 匹配）
+- 推荐问题排除港股通降级汇总行（`HKCONNECT`）
+- Vite proxy 绕过系统代理：修复 `/api` 请求 pending 导致「意图识别中…」卡死
+- 价格标注修复 + 孤儿 unknown 订单收敛
+
+### Changed
+- 全站深色配色统一为中性炭灰 `#1F2937`
+- 侧边栏字体规范统一
+- 副标题改为「个人投资决策工作台」
+
+### Technical
+- 保护 `investment_philosophy.md` 正常入库
+
+
+## [3.10.0] - 2026-06-10
+
+接入盈透证券 IBKR，作为美股 + 港股交易通道。基于 `ib_async`，仅 LIMIT 单，市场白名单 `{US, HK}`，四闸门风控 + 状态机映射，经 paper 与 live 真连验证封板。
+
+### Added
+- `IBKRBrokerAdapter` 骨架 + 四闸门 + 订单状态映射
+- `permId` 收口 + `orderRef` 反查 + 异常契约
+- factory 接入 + `OrderManager` 装配；api 路由识别 ibkr，paper 完整端到端跑通
+
+### Changed
+- 前端「雪盈证券」显示名改为「盈透证券」（仅显示名，内部 `snowball` 标识不变）
+- `REJECTED_ERROR_CODES` 回退为仅探针实测值 `{200, 201}`
+- keyword fallback 降级为 unknown，rejected 仅由实测数字码判定
+
+### Fixed
+- `cancel_order` 真撤单：先通知券商再按真实状态更新（修复旧版仅改本地状态不通知券商的 bug）
+- 账户来源改为 `managedAccounts`：修复 `order.account` 为空
+- `errorCode` 双来源合并：修复 201 经 callback 到达时被误判
+- 显式设 `tif='DAY'`：修复 TWS order preset 覆盖（error 10349）
+- adapter 单例化：避免同 `client_id` 多连接冲突
+- 闸门 1 正向校验：paper / live 账户前缀互斥
+
+### 测试与验证
+- M2.5 开市诊断探针：`permId` 延迟约 256ms、Inactive / errorCode 校准
+- live 账户前缀 `U` 确认 + 闸门 1 校验；实盘最小额冒烟确认 201 拒单链路成立
+- v3.10 完整验证报告封板（补实盘冒烟结论 + 账户限制）
+
+### Known Issues
+- live 账户受 Equity with Loan Value ≥ $100K 限制，当前权益不足将被拒单（仅 paper 可完整下单验证）
+
+
+## [3.9.0] - 2026-06-05
+
+接入国金证券 QMT，补齐 A 股市场能力。自建 FastAPI 网关以主动拉取（pull-mode）方式同步持仓。
+
+### Added
+- 国金 QMT 主动拉取网关：`sync_service` + 港股通汇总行
+- 同步触发端点 + 22:00 定时任务 + 前端接通
+- 端到端验证脚本
+
+### Technical
+- 网关配置项
+- 架构：网关运行于 Windows VM，主控侧主动拉取（pull-mode）
+
+### Known Issues
+- 港股通持仓明细受 xtquant / LDP counter 限制不可读，仅以汇总行（`HKCONNECT`）形式展示
+
+
+## [3.8.7] - 2026-06-04
+
+Skills 从「定义存在」推进到「生产接通」。补齐 SkillsLoader 调度机制，将两个 Skill 以双轨 + flag 方式接入生产并默认开启，新增 Skill 对账层校验声明与实现一致性。
+
+### Added
+- C0：SkillsLoader 补齐 `llm_dispatch` 机制，跑通 chat 调用路径
+- C1：`wp-output-validator` 双轨 + flag 接入 reviewing 链路
+- C2：`wp-retrieve-principles` 双轨接入 executing 链路，重建 general 基线
+- Skill 对账层：reconcile + manifest + phase map，校验声明与实现一致性，附测试（2026-06-10 合入）
+
+### Changed
+- C1 / C2 两个 Skill flag 默认值翻开，生产生效，双轨保留作回退
+
+### Fixed
+- C2：修复 `user_query` 透传 bug（影响透明度链路）
+
+---
+
 ## [3.7.0] - 2026-05-19
 
 显性化清理 patch，无功能/行为/结构变更。
@@ -20,6 +179,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `_execute_position` / `_execute_portfolio` 中 `retrieved_principles` 半接通状态显性化日志
 - `docs/v3.6.5_patch_plan.md`: wp-retrieve-principles LLM 注入修复立项备忘
 - `docs/v3.8_plan.md`: 意图编排层契约治理立项备忘
+
+---
+
+## [3.6.5] - 2026-06-01
+
+v3.6 补丁线的带外修复（commit 晚于 v3.7.0 发布）。
+
+### Fixed
+- `wp-retrieve-principles` 半接通修复
 
 ---
 
