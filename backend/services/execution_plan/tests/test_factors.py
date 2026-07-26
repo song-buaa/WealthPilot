@@ -96,54 +96,72 @@ def _make_fake_kline(n=60, start_price=100.0) -> pd.DataFrame:
     })
 
 
+def _make_mock_registry(kline_df, source="test"):
+    """构造一个返回固定 K线的 mock registry。"""
+    from backend.services.execution_plan.kline_provider import (
+        KlineProviderRegistry, KlineProvider, KlineResult,
+    )
+
+    class _MockProvider(KlineProvider):
+        name = source
+        def __init__(self, df):
+            self._df = df
+        def get_kline(self, symbol, market, period="day", count=260):
+            if self._df is None:
+                return None
+            return KlineResult(bars=self._df, source=self.name, period=period)
+
+    return KlineProviderRegistry([_MockProvider(kline_df)])
+
+
+def _make_empty_registry():
+    """构造一个所有源都返回空的 mock registry。"""
+    return _make_mock_registry(None, "none")
+
+
 class TestBuildFactorSnapshot:
 
-    @patch("backend.services.execution_plan.factors._fetch_52w")
-    @patch("backend.services.execution_plan.factors._fetch_raw_kline")
-    def test_full_snapshot_us(self, mock_kline, mock_52w):
-        mock_kline.return_value = _make_fake_kline(60, 150.0)
-        mock_52w.return_value = (200.0, 100.0, "futu", "2026-06-08T10:00:00")
+    def test_full_snapshot_us(self):
+        """K线充足（260 根）→ 因子完整，52w 从 bars 算。"""
+        kline = _make_fake_kline(260, 150.0)
+        registry = _make_mock_registry(kline, "test_broker")
 
-        snap = build_factor_snapshot("AAPL:US", "US")
+        snap = build_factor_snapshot("AAPL:US", "US", kline_registry=registry)
 
         assert snap.symbol == "AAPL:US"
         assert snap.market == "US"
         assert snap.current_price is not None
         assert snap.atr14 is not None and snap.atr14 > 0
         assert snap.volatility_annual is not None and snap.volatility_annual > 0
+        assert snap.high_52w is not None  # 260 >= 252, 52w 可算
+        assert snap.low_52w is not None
         assert snap.price_percentile is not None
         assert 0 <= snap.price_percentile <= 1
         assert snap.drawdown_from_high is not None and snap.drawdown_from_high <= 0
         assert snap.ma5 is not None
         assert snap.ma20 is not None
         assert snap.rsi14 is not None
-        assert snap.data_source_meta["kline_source"] == "tiger"
-        assert snap.data_source_meta["price_source"] == "futu"
+        assert snap.data_source_meta["kline_source"] == "test_broker"
         assert snap.data_source_meta["degraded_fields"] == []
 
-    @patch("backend.services.execution_plan.factors._fetch_52w")
-    @patch("backend.services.execution_plan.factors._fetch_raw_kline")
-    def test_degraded_no_52w(self, mock_kline, mock_52w):
-        """52w 缺失 → price_percentile 降级，不报错。"""
-        mock_kline.return_value = _make_fake_kline(60, 300.0)
-        mock_52w.return_value = (None, None, "none", "")
+    def test_degraded_no_52w_short_bars(self):
+        """bars 不足 252 → 52w 降级，不报错。"""
+        kline = _make_fake_kline(60, 300.0)
+        registry = _make_mock_registry(kline, "test")
 
-        snap = build_factor_snapshot("0700:HK", "HK")
+        snap = build_factor_snapshot("0700:HK", "HK", kline_registry=registry)
 
         assert snap.current_price is not None
         assert snap.atr14 is not None
+        assert snap.high_52w is None  # bars<252, 52w 不可用
         assert snap.price_percentile is None
         assert "52w_high_low" in snap.data_source_meta["degraded_fields"]
-        assert snap.data_source_meta["price_source"] == "none"
 
-    @patch("backend.services.execution_plan.factors._fetch_52w")
-    @patch("backend.services.execution_plan.factors._fetch_raw_kline")
-    def test_degraded_no_kline(self, mock_kline, mock_52w):
+    def test_degraded_no_kline(self):
         """K 线缺失 → 所有 K 线因子降级，不报错。"""
-        mock_kline.return_value = None
-        mock_52w.return_value = (200.0, 100.0, "futu", "2026-06-08")
+        registry = _make_empty_registry()
 
-        snap = build_factor_snapshot("LI:US", "US")
+        snap = build_factor_snapshot("LI:US", "US", kline_registry=registry)
 
         assert snap.current_price is None
         assert snap.atr14 is None
@@ -151,23 +169,23 @@ class TestBuildFactorSnapshot:
         assert snap.ma5 is None
         assert "kline" in snap.data_source_meta["degraded_fields"]
 
-    def test_unsupported_market(self):
-        """A 股等不支持市场 → 不报错，标 degraded。"""
-        snap = build_factor_snapshot("600519:SH", "SH")
-        assert snap.market == "SH"
-        assert "all" in snap.data_source_meta["degraded_fields"]
+    def test_unsupported_market_now_works_via_seed(self):
+        """v3.14: 不支持市场也能通过 seed 出数据（如果 registry 有 seed）。"""
+        kline = _make_fake_kline(260, 100.0)
+        registry = _make_mock_registry(kline, "seed")
 
-    @patch("backend.services.execution_plan.factors._fetch_52w")
-    @patch("backend.services.execution_plan.factors._fetch_raw_kline")
-    def test_to_dict(self, mock_kline, mock_52w):
+        snap = build_factor_snapshot("600519:CN", "CN", kline_registry=registry)
+        assert snap.current_price is not None
+        assert snap.atr14 is not None
+
+    def test_to_dict(self):
         """to_dict() 输出可 JSON 序列化。"""
         import json
-        mock_kline.return_value = _make_fake_kline(60, 150.0)
-        mock_52w.return_value = (200.0, 100.0, "futu", "")
+        kline = _make_fake_kline(260, 150.0)
+        registry = _make_mock_registry(kline, "test")
 
-        snap = build_factor_snapshot("AAPL:US", "US")
+        snap = build_factor_snapshot("AAPL:US", "US", kline_registry=registry)
         d = snap.to_dict()
-        # 确认可 JSON 序列化
         json_str = json.dumps(d, default=str)
         assert "atr14" in json_str
         assert "data_source_meta" in json_str

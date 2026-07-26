@@ -2,9 +2,10 @@
 执行计划因子 service — 确定性计算，不调 LLM。
 
 产出 FactorSnapshot(dict)，给规则引擎消费。
-数据来源:
-  - K 线(日线 OHLCV): Tiger SDK（美股+港股）
-  - 52w high/low: 富途 QuoteData（美股+港股）
+
+v3.14 改造：
+  - K 线(日线 OHLCV): 通过 KlineProviderRegistry 获取（Broker → AV → Seed）
+  - 52w high/low: 从 bars 计算（bars ≥252 根时），不再依赖富途
   - 降级原则: 缺失只标 null + 记 degraded_fields，绝不 block
 """
 from __future__ import annotations
@@ -72,78 +73,85 @@ class FactorSnapshot:
 def build_factor_snapshot(
     wp_symbol: str,
     market: str,
-    bars: int = 60,
+    bars: int = 260,
+    kline_registry=None,
 ) -> FactorSnapshot:
     """构建因子快照。
 
+    v3.14: 通过 KlineProviderRegistry 获取 K线，单一 FactorComputer 算因子。
+    52w 从 bars 计算（≥252 根时），不再依赖富途。
     任何数据缺失只降级标记，绝不抛异常。
     """
-    if market not in ("US", "HK"):
-        return FactorSnapshot(
-            symbol=wp_symbol,
-            market=market,
-            data_source_meta={"degraded_fields": ["all"], "degraded_reason": f"市场 {market} 不在 v1 范围(US/HK)"},
-        )
+    # 懒初始化 registry（允许外部注入以便测试）
+    if kline_registry is None:
+        from backend.services.execution_plan.kline_provider import build_kline_registry
+        kline_registry = build_kline_registry()
 
     degraded: list[str] = []
     degraded_reasons: list[str] = []
 
-    # ── 1. K 线数据 ──
-    kline_df = _fetch_raw_kline(wp_symbol, bars)
-    kline_source = "tiger"
-    kline_points = 0
+    # ── 1. 通过 registry 获取 K线 ──
+    kline_result, kline_degraded = kline_registry.resolve(wp_symbol, market, "day", bars)
 
-    if kline_df is None or len(kline_df) == 0:
+    if kline_degraded:
+        provider_reasons = getattr(kline_registry, "last_degraded_reasons", [])
+        degraded.extend(f"kline_provider:{name}" for name in kline_degraded)
+        degraded_reasons.extend(provider_reasons or [
+            f"K线降级: {', '.join(kline_degraded)} 不可用"
+        ])
+
+    if kline_result is None or kline_result.bars is None or len(kline_result.bars) == 0:
         kline_source = "none"
+        kline_points = 0
         degraded.append("kline")
-        degraded_reasons.append("Tiger K线数据获取失败或为空")
-        kline_df = pd.DataFrame()  # 空 DataFrame，后续因子全降级
+        if not kline_degraded:
+            degraded_reasons.append("所有 K线数据源均不可用")
+        kline_df = pd.DataFrame()
+        price_time = ""
+        is_realtime = False
+        delayed_minutes = None
     else:
+        kline_source = kline_result.source
+        kline_df = kline_result.bars
         kline_points = len(kline_df)
+        price_time = kline_result.latest_price_time
+        is_realtime = kline_result.is_realtime
+        delayed_minutes = kline_result.delayed_minutes
 
-    # ── 2. 从 K 线算因子 ──
-    closes = kline_df["close"].astype(float) if "close" in kline_df.columns else pd.Series(dtype=float)
-    highs = kline_df["high"].astype(float) if "high" in kline_df.columns else pd.Series(dtype=float)
-    lows = kline_df["low"].astype(float) if "low" in kline_df.columns else pd.Series(dtype=float)
+    # ── 2. 单一 FactorComputer：从 bars 算全部因子 ──
+    snapshot_data = compute_factors_from_bars(kline_df)
 
-    current_price = float(closes.iloc[-1]) if len(closes) > 0 else None
-
-    # 复用因子
-    ma5 = _safe_round(closes.tail(5).mean(), 2) if len(closes) >= 5 else None
-    ma20 = _safe_round(closes.tail(20).mean(), 2) if len(closes) >= 20 else None
-    rsi14 = _calc_rsi(closes, 14)
-    macd_val, macd_sig, macd_hist = _calc_macd(closes)
-    ma_position = _determine_ma_position(current_price, ma5, ma20) if current_price else "N/A"
-    trend_signal = _determine_trend(ma_position, rsi14, macd_hist)
-
-    # 新增因子
-    atr14 = _calc_atr(highs, lows, closes, 14)
-    volatility_annual = _calc_annual_volatility(closes)
-    drawdown = _calc_drawdown_from_high(closes)
-
-    # ── 3. 52w high/low (富途) ──
-    high_52w, low_52w, price_source, price_time = _fetch_52w(wp_symbol)
-    if high_52w is None or low_52w is None:
+    # ── 3. 52w 从 bars 计算（≥252 根时）──
+    high_52w = None
+    low_52w = None
+    if len(kline_df) >= 252 and "high" in kline_df.columns and "low" in kline_df.columns:
+        last_252 = kline_df.tail(252)
+        high_52w = _safe_round(float(last_252["high"].astype(float).max()), 2)
+        low_52w = _safe_round(float(last_252["low"].astype(float).min()), 2)
+    elif len(kline_df) > 0:
         degraded.append("52w_high_low")
-        degraded_reasons.append("富途 52w 数据不可用")
+        degraded_reasons.append(f"bars 不足 252 根({len(kline_df)})，无法计算 52w")
 
     # 价格分位
+    current_price = snapshot_data.get("current_price")
     price_percentile = None
     if current_price and high_52w and low_52w and high_52w > low_52w:
         price_percentile = round((current_price - low_52w) / (high_52w - low_52w), 4)
         price_percentile = max(0.0, min(1.0, price_percentile))
     elif current_price:
-        degraded.append("price_percentile")
-        degraded_reasons.append("缺少 52w 数据，无法计算价格分位")
+        if "52w_high_low" not in degraded:
+            degraded.append("price_percentile")
+            degraded_reasons.append("缺少 52w 数据，无法计算价格分位")
 
     # ── 4. 组装 ──
     meta = DataSourceMeta(
-        price_source=price_source,
+        price_source=kline_source,
         kline_source=kline_source,
         kline_period="day",
         kline_points=kline_points,
         latest_price_time=price_time,
-        is_realtime=(price_source == "futu"),
+        is_realtime=is_realtime,
+        delayed_minutes=delayed_minutes,
         degraded_fields=degraded,
         degraded_reason="; ".join(degraded_reasons) if degraded_reasons else "",
     )
@@ -154,20 +162,62 @@ def build_factor_snapshot(
         current_price=current_price,
         high_52w=high_52w,
         low_52w=low_52w,
-        ma5=ma5,
-        ma20=ma20,
-        rsi14=_safe_round(rsi14, 1),
-        macd=_safe_round(macd_val, 4),
-        macd_signal=_safe_round(macd_sig, 4),
-        macd_hist=_safe_round(macd_hist, 4),
-        ma_position=ma_position,
-        trend_signal=trend_signal,
-        atr14=_safe_round(atr14, 4),
-        volatility_annual=_safe_round(volatility_annual, 4),
+        ma5=snapshot_data.get("ma5"),
+        ma20=snapshot_data.get("ma20"),
+        rsi14=snapshot_data.get("rsi14"),
+        macd=snapshot_data.get("macd"),
+        macd_signal=snapshot_data.get("macd_signal"),
+        macd_hist=snapshot_data.get("macd_hist"),
+        ma_position=snapshot_data.get("ma_position", "N/A"),
+        trend_signal=snapshot_data.get("trend_signal", "neutral"),
+        atr14=snapshot_data.get("atr14"),
+        volatility_annual=snapshot_data.get("volatility_annual"),
         price_percentile=price_percentile,
-        drawdown_from_high=_safe_round(drawdown, 4),
+        drawdown_from_high=snapshot_data.get("drawdown_from_high"),
         data_source_meta=asdict(meta),
     )
+
+
+def compute_factors_from_bars(kline_df: pd.DataFrame) -> dict:
+    """单一 FactorComputer：从 OHLCV bars 算全部因子。
+
+    所有 provider 共用这一份计算逻辑。
+    返回 dict，字段名与 FactorSnapshot 对齐。
+    """
+    if kline_df is None or len(kline_df) == 0:
+        return {}
+
+    closes = kline_df["close"].astype(float) if "close" in kline_df.columns else pd.Series(dtype=float)
+    highs = kline_df["high"].astype(float) if "high" in kline_df.columns else pd.Series(dtype=float)
+    lows = kline_df["low"].astype(float) if "low" in kline_df.columns else pd.Series(dtype=float)
+
+    current_price = float(closes.iloc[-1]) if len(closes) > 0 else None
+
+    ma5 = _safe_round(closes.tail(5).mean(), 2) if len(closes) >= 5 else None
+    ma20 = _safe_round(closes.tail(20).mean(), 2) if len(closes) >= 20 else None
+    rsi14 = _calc_rsi(closes, 14)
+    macd_val, macd_sig, macd_hist = _calc_macd(closes)
+    ma_position = _determine_ma_position(current_price, ma5, ma20) if current_price else "N/A"
+    trend_signal = _determine_trend(ma_position, rsi14, macd_hist)
+
+    atr14 = _calc_atr(highs, lows, closes, 14)
+    volatility_annual = _calc_annual_volatility(closes)
+    drawdown = _calc_drawdown_from_high(closes)
+
+    return {
+        "current_price": current_price,
+        "ma5": ma5,
+        "ma20": ma20,
+        "rsi14": _safe_round(rsi14, 1),
+        "macd": _safe_round(macd_val, 4),
+        "macd_signal": _safe_round(macd_sig, 4),
+        "macd_hist": _safe_round(macd_hist, 4),
+        "ma_position": ma_position,
+        "trend_signal": trend_signal,
+        "atr14": _safe_round(atr14, 4),
+        "volatility_annual": _safe_round(volatility_annual, 4),
+        "drawdown_from_high": _safe_round(drawdown, 4),
+    }
 
 
 # ── 内部: K 线获取 ─────────────────────────────────────────────
