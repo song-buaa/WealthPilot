@@ -58,4 +58,5 @@ def init_db():
     # 延迟 import 避免循环依赖：database ← models ← database
     from app import models  # noqa: F401  触发所有 Model 类的注册
     import backend.services.action.models  # noqa: F401  v3.2 投资行动模块 5 张表
+    import backend.services.execution_plan.models  # noqa: F401  v3.14 执行计划表
     Base.metadata.create_all(get_engine())
