@@ -293,6 +293,9 @@ source .env
 `DEMO_ACCESS_PASSWORD`；无需知识检索或输出校验 Skill 时，可将
 `WP_USE_SKILL_RETRIEVE_PRINCIPLES` 和 `WP_USE_SKILL_OUTPUT_VALIDATOR` 设为 `false`。
 
+v3.14 的 Execution Plan 在隔离 Demo 中使用提交的静态 OHLCV fixture 计算技术因子；
+它不会连接实时行情、LLM、券商或交易接口。
+
 ### 3. 启动应用
 
 ```bash
