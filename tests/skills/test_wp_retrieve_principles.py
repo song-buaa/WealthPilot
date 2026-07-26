@@ -7,8 +7,8 @@ wp-retrieve-principles Skill 单元测试。
 import os
 import pytest
 
-HAS_API_KEY = bool(os.getenv("OPENAI_API_KEY"))
-skip_no_key = pytest.mark.skipif(not HAS_API_KEY, reason="OPENAI_API_KEY not set")
+HAS_API_KEY = bool(os.getenv("WEALTHPILOT_OPENAI_API_KEY"))
+skip_no_key = pytest.mark.skipif(not HAS_API_KEY, reason="WEALTHPILOT_OPENAI_API_KEY not set")
 
 
 class TestRetrievePrinciplesTool:

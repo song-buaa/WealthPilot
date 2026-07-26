@@ -1120,7 +1120,7 @@ def _llm_write_rationale(
         import httpx
 
         client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_key=os.environ.get("WEALTHPILOT_OPENAI_API_KEY"),
             http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(30.0)),
         )
         resp = client.chat.completions.create(

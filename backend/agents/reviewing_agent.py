@@ -240,7 +240,7 @@ class ReviewingAgent:
             import os
             import openai
 
-            client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+            client = openai.OpenAI(api_key=os.environ.get("WEALTHPILOT_OPENAI_API_KEY", ""))
 
             intent = planning_output.intent
             intent_type = intent.get("primary_intent", "Unknown") if isinstance(intent, dict) else "Unknown"

@@ -68,9 +68,9 @@ def parse_bank_screenshot(image_bytes: bytes, bank: str) -> tuple[dict, Optional
     result_dict: {"活钱管理": 1234.56, ...}
     error_str: None 表示成功，否则为错误信息
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
     if not api_key:
-        return {}, "未配置 OPENAI_API_KEY"
+        return {}, "未配置 WEALTHPILOT_OPENAI_API_KEY"
 
     prompt = BANK_PROMPTS.get(bank)
     if not prompt:
@@ -128,9 +128,9 @@ BROKER_PROMPTS = {
 
 def _call_vision_api(image_bytes: bytes, prompt: str, max_tokens: int = 1000) -> tuple[str, Optional[str]]:
     """调用 GPT-4o Vision，返回 (raw_text, error_str)"""
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
     if not api_key:
-        return "", "未配置 OPENAI_API_KEY"
+        return "", "未配置 WEALTHPILOT_OPENAI_API_KEY"
 
     try:
         http_client = httpx.Client(

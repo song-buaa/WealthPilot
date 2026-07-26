@@ -23,11 +23,11 @@ _client: Optional[OpenAI] = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
         if not api_key:
             raise EnvironmentError(
-                "未找到 OPENAI_API_KEY 环境变量。\n"
-                "请执行：export OPENAI_API_KEY='sk-your-key'"
+                "未找到 WEALTHPILOT_OPENAI_API_KEY 环境变量。\n"
+                "请执行：export WEALTHPILOT_OPENAI_API_KEY='sk-your-key'"
             )
         _client = OpenAI(api_key=api_key)
     return _client

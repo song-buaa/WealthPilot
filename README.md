@@ -278,7 +278,7 @@ cd frontend && npm install
 ```bash
 cp .env.example .env
 # 编辑 .env，填入：
-#   OPENAI_API_KEY        — GPT-4.1 系列（核心 LLM）
+#   WEALTHPILOT_OPENAI_API_KEY        — GPT-4.1 系列（核心 LLM）
 #   TIGER_ID              — 老虎证券持仓同步（可选）
 #   TIGER_PRIVATE_KEY_PATH — 老虎证券私钥路径（可选）
 #   FUTU_HOST / FUTU_PORT — 富途 OpenD 连接配置（可选）
@@ -287,6 +287,11 @@ cp .env.example .env
 #   BROKER_MODE           — 下单券商切换（mock / tiger / ibkr）
 source .env
 ```
+
+隔离 Demo 使用 `PUBLIC_DEMO_MODE=true`、`DEMO_ALLOW_MARKET_DATA=false` 和
+`BROKER_MODE=mock`，并通过 `WEALTHPILOT_DB_PATH` 指向临时数据库。Demo 必须设置
+`DEMO_ACCESS_PASSWORD`；无需知识检索或输出校验 Skill 时，可将
+`WP_USE_SKILL_RETRIEVE_PRINCIPLES` 和 `WP_USE_SKILL_OUTPUT_VALIDATOR` 设为 `false`。
 
 ### 3. 启动应用
 

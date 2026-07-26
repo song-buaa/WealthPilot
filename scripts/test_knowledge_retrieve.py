@@ -8,7 +8,7 @@ WealthPilot v3.6 Knowledge Layer 验证脚本。
     python scripts/test_knowledge_retrieve.py
 
 前置条件：
-    - OPENAI_API_KEY 环境变量已设置
+    - WEALTHPILOT_OPENAI_API_KEY 环境变量已设置
     - backend/knowledge_base/allocation_principles/ 下有 seed MD 文件
 """
 from __future__ import annotations
@@ -35,8 +35,8 @@ def main():
     print("=" * 60)
 
     # 检查 API Key
-    if not os.getenv("OPENAI_API_KEY"):
-        print("\n[ERROR] OPENAI_API_KEY 未设置。请在 .env 中配置。")
+    if not os.getenv("WEALTHPILOT_OPENAI_API_KEY"):
+        print("\n[ERROR] WEALTHPILOT_OPENAI_API_KEY 未设置。请在 .env 中配置。")
         sys.exit(1)
 
     # 导入知识层模块

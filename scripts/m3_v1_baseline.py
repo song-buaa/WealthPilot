@@ -69,7 +69,7 @@ def distill_research_cards_v1(session, asset_name: str) -> list[str]:
 
         combined = f"\n\n---\n".join(sections)
 
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        openai_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
         if not openai_key:
             return []
 

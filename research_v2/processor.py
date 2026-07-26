@@ -71,9 +71,9 @@ def _build_user_message(raw_fact: RawFact) -> str:
 
 def _call_llm(system_prompt: str, user_message: str) -> str:
     """调用 LLM 返回原始文本。"""
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
     if not api_key:
-        raise EnvironmentError("未配置 OPENAI_API_KEY 环境变量")
+        raise EnvironmentError("未配置 WEALTHPILOT_OPENAI_API_KEY 环境变量")
 
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(

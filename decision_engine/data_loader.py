@@ -207,7 +207,7 @@ def _search_research_online(asset_name: str) -> list[str]:
     技术细节：
     - 4 个 query 分别聚焦：财报业绩、交付/销量、分析师评级、动态/风险
     - 通过线程池并行执行后合并去重，上限 8 条
-    - 优先使用 PERPLEXITY_API_KEY；未配置时降级到 OPENAI_API_KEY + gpt-4o-search-preview
+    - 优先使用 PERPLEXITY_API_KEY；未配置时降级到 WEALTHPILOT_OPENAI_API_KEY + gpt-4o-search-preview
     - 返回带 [联网参考] 前缀的字符串列表
     - 任何异常均静默处理，返回空列表，不影响主流程
     """
@@ -225,7 +225,7 @@ def _search_research_online(asset_name: str) -> list[str]:
         return cached
 
     perplexity_key = os.environ.get("PERPLEXITY_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
 
     if not perplexity_key and not openai_key:
         return []
@@ -372,7 +372,7 @@ def search_portfolio_research(positions: list) -> list[str]:
         return cached
 
     perplexity_key = os.environ.get("PERPLEXITY_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
     if not perplexity_key and not openai_key:
         return []
 
@@ -983,7 +983,7 @@ def _resolve_asset_by_llm(positions: list, asset_name: str) -> Optional[object]:
 
     try:
         import openai as _openai
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
         if not api_key:
             return None
 

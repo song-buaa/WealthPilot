@@ -1,7 +1,7 @@
 """
 KnowledgeStore 单元测试。
 
-注意：需要 OPENAI_API_KEY 环境变量。
+注意：需要 WEALTHPILOT_OPENAI_API_KEY 环境变量。
 如果未设置，依赖真实 Embedding 的测试会被跳过。
 """
 import os
@@ -13,10 +13,10 @@ import pytest
 from backend.knowledge.schemas import ChunkInput
 
 # 检查是否有 API key 可用
-HAS_API_KEY = bool(os.getenv("OPENAI_API_KEY"))
+HAS_API_KEY = bool(os.getenv("WEALTHPILOT_OPENAI_API_KEY"))
 skip_no_key = pytest.mark.skipif(
     not HAS_API_KEY,
-    reason="OPENAI_API_KEY not set",
+    reason="WEALTHPILOT_OPENAI_API_KEY not set",
 )
 
 

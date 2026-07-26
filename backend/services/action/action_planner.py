@@ -331,9 +331,9 @@ def plan_actions(
 
 def _get_default_client():
     import openai
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("WEALTHPILOT_OPENAI_API_KEY")
     if not api_key:
-        raise EnvironmentError("OPENAI_API_KEY 未配置")
+        raise EnvironmentError("WEALTHPILOT_OPENAI_API_KEY 未配置")
     return openai.OpenAI(api_key=api_key)
 
 

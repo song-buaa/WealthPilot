@@ -101,9 +101,9 @@ class KnowledgeStore:
         """构建 OpenAI Embedding 调用函数。"""
         import openai
 
-        api_key = os.getenv("OPENAI_API_KEY", "")
+        api_key = os.getenv("WEALTHPILOT_OPENAI_API_KEY", "")
         if not api_key:
-            raise KnowledgeStoreError("OPENAI_API_KEY 未设置")
+            raise KnowledgeStoreError("WEALTHPILOT_OPENAI_API_KEY 未设置")
 
         client = openai.OpenAI(api_key=api_key)
         embed_config = self._config.get("embedding", {})
