@@ -2,6 +2,9 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# Local handover snapshots (kept outside the repository)
+data/wealthpilot.db.bak.*
+data/wealthpilot.db.empty_*
 
 # 环境变量（包含 API Key，绝不提交）
 .env
