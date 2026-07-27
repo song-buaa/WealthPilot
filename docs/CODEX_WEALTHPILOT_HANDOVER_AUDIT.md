@@ -312,3 +312,15 @@ pytest 失败分类：分析器 fixture 与现行 portfolio 数据模型（8）�
 本审计中确认的 P1 已在 `codex/wealthpilot-v3.14-handover` 收口：新 SQLite 初始化注册执行计划表；K 线 Provider 修复 symbol import、统一 Demo 配置 gate、固定静态 OHLCV fixture 与 metadata 降级契约；重复副本及两份 SQLite 快照已迁至仓库外备份。`docs/public/demo_seed_positions.csv` 因来源未确认仍保留未跟踪，未纳入任何提交。
 
 离线定向验证覆盖数据库建表、Provider fallback、Demo 零网络调用和 FactorSnapshot 元数据。全量测试、静态检查和隔离 Demo 启动结果见本轮交付记录；未运行任何真实行情、LLM、券商或交易路径。
+
+## v3.14 合并前回归基线核对（2026-07-27）
+
+本次以 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python`、同一组空白外部凭证、`PUBLIC_DEMO_MODE=true`、`DEMO_ALLOW_MARKET_DATA=false`、`BROKER_MODE=mock` 与各自独立临时 SQLite，对 `main@11cd2e9` 的 detached worktree 和当前接管分支进行了对照。两侧 `pytest --collect-only -qq` 均为 402 个 nodeid，集合差异为 0；完整 pytest 均为 **352 passed / 43 failed / 7 skipped**，43 个失败 nodeid 完全相同。因此本分支没有 "main 通过、当前失败" 的新增正式测试回归，也没有顺带消除 main 失败。
+
+先前脏工作区的 438 项收集数比 clean baseline 多 36 项，恰好等于三个已验证精确重复副本的现行测试数：`tests/test_legacy_selected_skills_compat 2.py`（5）、`tests/test_skill_manifest 2.py`（18）和 `tests/test_skill_reconcile 2.py`（13）。其余带 ` 2` 的 ExecutionPlan 副本不在 pytest.ini 的正式 testpaths 中，未影响这次 402 项比较。
+
+环境变量迁移未改变测试隔离：本分支当前运行代码只读取 `WEALTHPILOT_OPENAI_API_KEY`，正式 key 依赖测试也使用新变量；本次同时显式置空新旧 Key 与所有已知外部凭证，两侧得到相同失败集合，未发生真实 LLM 请求。archive 中的旧 `OPENAI_API_KEY` 仅为历史材料。
+
+隔离验收使用 `/tmp/wealthpilot-v314-acceptance.db`：启动后 `execution_plans`、`execution_tranches` 均存在；通过 ORM 创建并读取了带 `demo:acceptance` 来源的最小草稿及一个 tranche，未提交订单。Demo registry 为 `[av, seed]`；AV 在网络函数前以“Demo 已禁用外部行情”降级，AAPL 固定 fixture 回退为 `seed`（260 根、截至 2025-12-26、收盘 242.35），重复读取结果一致；metadata 正确包含 `kline_provider:av` 与可读原因，注入 delayed provider 时 `delayed_minutes=15` 透传；非 Demo registry 不注册 Seed。后端 OpenAPI 返回 200，前端开发服务器可由本机 HTTP 访问；本轮浏览器容器无法访问 loopback，故页面交互留给本机人工入口复核。
+
+结论：P1 及本轮回归核对均无合并前阻塞，`codex/wealthpilot-v3.14-handover` 标记为**可合并候选**。仍不执行 merge 或 push；`docs/public/demo_seed_positions.csv` 继续是唯一待产品确认的未跟踪文件。
