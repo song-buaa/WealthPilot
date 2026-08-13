@@ -111,8 +111,9 @@ class TestGate1AccountPrefix:
     @patch.dict("os.environ", {"ENABLE_IBKR_LIVE_TRADING": "false"})
     def test_paper_u_account_precheck_rejected(self):
         """paper 模式 + U 账户（实盘）→ 预检拒绝。"""
-        with pytest.raises(AssertionError, match="Paper 模式"):
-            IBKRBrokerAdapter(account_id="U1234567")
+        with patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", False):
+            with pytest.raises(AssertionError, match="Paper 模式"):
+                IBKRBrokerAdapter(account_id="U1234567")
 
     def test_paper_resolve_du_pass(self):
         """连接后 managedAccounts 返回 DU → paper 模式通过。"""
@@ -128,8 +129,25 @@ class TestGate1AccountPrefix:
         adapter = _make_adapter(account_id="")
         adapter._account_verified = False
         adapter._ib.managedAccounts.return_value = ["U7777777"]
-        with pytest.raises(AssertionError, match="Paper 模式"):
-            adapter._resolve_and_verify_account()
+        with patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", False):
+            with pytest.raises(AssertionError, match="Paper 模式"):
+                adapter._resolve_and_verify_account()
+
+    @patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", True)
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", False)
+    def test_live_read_only_u_precheck_pass(self):
+        """Live + local read-only + live trading disabled 可只读连接。"""
+        adapter = IBKRBrokerAdapter(account_id="U1234567")
+        assert adapter._account_id == "U1234567"
+
+    @patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", True)
+    @patch("backend.services.action.brokers.ibkr.ENABLE_IBKR_LIVE_TRADING", False)
+    def test_live_read_only_resolve_u_pass(self):
+        adapter = _make_adapter(account_id="")
+        adapter._account_verified = False
+        adapter._ib.managedAccounts.return_value = ["U7777777"]
+        adapter._resolve_and_verify_account()
+        assert adapter._account_id == "U7777777"
 
     # ── live 模式 ──
 
@@ -269,6 +287,22 @@ class TestGate4OutsideRth:
         call_args = adapter._ib.placeOrder.call_args
         order_arg = call_args[1].get("order") or call_args[0][1]
         assert order_arg.outsideRth is False
+
+
+class TestLiveReadOnlyMutationGuard:
+    @patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", True)
+    def test_place_order_is_rejected_without_gateway_mutation(self):
+        adapter = _make_adapter(account_id="U1234567")
+        result = adapter.place_order(_make_request())
+        assert result.status == "rejected"
+        assert "只读模式" in result.raw_response["reason"]
+        adapter._ib.placeOrder.assert_not_called()
+
+    @patch("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", True)
+    def test_cancel_order_is_blocked_without_gateway_mutation(self):
+        adapter = _make_adapter(account_id="U1234567")
+        assert adapter.cancel_order("555") is False
+        adapter._ib.cancelOrder.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════

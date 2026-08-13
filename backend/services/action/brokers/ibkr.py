@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 ENABLE_IBKR_LIVE_TRADING = (
     os.getenv("ENABLE_IBKR_LIVE_TRADING", "false").lower() == "true"
 )
+IBKR_READ_ONLY_MODE = (
+    os.getenv("IBKR_READ_ONLY_MODE", "true").lower() == "true"
+)
 
 # 账户前缀校验（闸门 1）
 # Paper: "DU" 前缀（实测 DUQ629797）
@@ -90,10 +93,12 @@ NOT_FOUND_RETRY_DELAYS = [1, 2]  # 指数退避秒数
 # ── 自定义异常 ────────────────────────────────────────────────
 
 def _validate_account_prefix(account_id: str, context: str = "") -> None:
-    """闸门 1 正向校验：paper/live 模式下账户前缀互斥。
+    """闸门 1 正向校验：账户类型必须与连接意图一致。
 
     - paper (ENABLE=false): 必须 DU 开头
     - live  (ENABLE=true):  必须匹配 IBKR_LIVE_ACCOUNT_PREFIXES（默认 U），且不能 DU 开头
+    - live read-only (READ_ONLY=true, ENABLE=false): 可连接已验证的 live 前缀；
+      下单与撤单会被本地硬拒绝
     - 空/None 一律拒绝
 
     Raises:
@@ -106,6 +111,12 @@ def _validate_account_prefix(account_id: str, context: str = "") -> None:
 
     masked = f"***{account_id[-4:]}" if len(account_id) > 4 else account_id
 
+    is_live_account = any(
+        account_id.startswith(prefix) for prefix in IBKR_LIVE_ACCOUNT_PREFIXES
+    )
+    if IBKR_READ_ONLY_MODE and not ENABLE_IBKR_LIVE_TRADING and is_live_account:
+        return
+
     if ENABLE_IBKR_LIVE_TRADING:
         # live 模式：必须匹配 live 前缀，且不能是 paper (DU)
         if account_id.startswith(IBKR_PAPER_PREFIX):
@@ -114,7 +125,7 @@ def _validate_account_prefix(account_id: str, context: str = "") -> None:
                 f"但账户 {masked} 以 {IBKR_PAPER_PREFIX} 开头（Paper 账户）。"
                 f"请配置实盘账户或关闭实盘开关。"
             )
-        if not any(account_id.startswith(p) for p in IBKR_LIVE_ACCOUNT_PREFIXES):
+        if not is_live_account:
             raise AssertionError(
                 f"[闸门1 {context}] 实盘模式(ENABLE_IBKR_LIVE_TRADING=true)，"
                 f"但账户 {masked} 前缀不在允许列表 {IBKR_LIVE_ACCOUNT_PREFIXES} 中。"
@@ -128,6 +139,14 @@ def _validate_account_prefix(account_id: str, context: str = "") -> None:
                 f"但账户 {masked} 不以 {IBKR_PAPER_PREFIX} 开头。"
                 f"模拟盘账号以 DU 开头。"
             )
+
+
+def _is_live_read_only_account(account_id: str) -> bool:
+    """只读验收允许 Live 连接，但绝不允许交易 mutation。"""
+    return (
+        IBKR_READ_ONLY_MODE
+        and any(account_id.startswith(prefix) for prefix in IBKR_LIVE_ACCOUNT_PREFIXES)
+    )
 
 
 class OrphanOrderError(ConnectionError):
@@ -285,6 +304,13 @@ class IBKRBrokerAdapter(BrokerAdapter):
         - ConnectionError / TimeoutError 不 catch，由上层 OrderManager 处理。
         - 业务拒单在此方法内返回 rejected。
         """
+        if _is_live_read_only_account(self._account_id):
+            return self._rejected(
+                request,
+                reason="IBKR_READ_ONLY_MODE=true：真实账户只读模式禁止下单",
+                action="place_order_blocked_read_only",
+            )
+
         from ib_async import LimitOrder, Stock
 
         self._ensure_connected()
@@ -378,6 +404,10 @@ class IBKRBrokerAdapter(BrokerAdapter):
         按 permId 在 trades() 反查 Trade 对象再 cancelOrder。
         查不到/已终态返回 False，受理成功 True。
         """
+        if _is_live_read_only_account(self._account_id):
+            logger.warning("[IBKR] 真实账户只读模式禁止撤单")
+            return False
+
         self._ensure_connected()
 
         trade = self._find_trade(broker_order_id)
