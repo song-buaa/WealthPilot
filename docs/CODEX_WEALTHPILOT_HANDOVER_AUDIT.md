@@ -346,3 +346,11 @@ IBKR 的 v3.10 PRD 目标架构为 IB Gateway（paper 4002 / live 4001），但�
 以该配置和 `clientId=10` 执行的 IB API 只读 smoke 已成功读取账户、账户摘要、可用资金/购买力/净值/现金/持仓市值等摘要标签、真实持仓以及已有订单；未发现活动订单。全过程没有调用 place、submit、cancel、modify 或 replace。v3.10 PRD 明确不建立 `broker_sync/ibkr/`，持仓同步继续由既有通道承担；因此本次没有把 IBKR 读取结果写入主库，也没有改变 Dashboard 数据。
 
 同时发现现有 `IBKRBrokerAdapter` 的跨线程同步读取在 Live Gateway 的账户快照调用中不能及时返回。最小修复仅让 Live 账户在只读模式连接，并在本地硬拒绝下单和撤单；其 69 项定向测试通过。Gateway 原生只读读取可以证明连接与数据权限，但该 adapter 的读取便利方法仍需单独修复和实测，不应被表述为完整产品链路已通过。故本分支继续保持不 push、不 merge，Self-use 的真实 DB、LLM、行情与 Execution Plan 验收有效，但**尚不满足**以“所有 Private Full Mode 链路均通过”为由 fast-forward 合并 main 的条件。
+
+### IBKR adapter dedicated-loop 读取收口（2026-08-13）
+
+上述剩余 adapter 阻塞已完成最小修复：`IBKRBrokerAdapter` 的连接、账户识别、认证、账户摘要、持仓、已有订单、订单状态与 orderRef 查询均通过 dedicated background event loop 执行；跨线程只返回普通 Python 快照，不返回 `ib_async` runtime 对象。每次调用具备明确 timeout；连接/查询失败抛出明确错误，不再伪装为“空持仓”或“空订单”。下单、撤单也已收口到 loop；此前的 Live read-only 本地拒绝语义保持不变。
+
+定向单测为 **75 passed**，覆盖 dedicated-loop 执行、timeout、查询失败与真实空集合的区分、shutdown 后重连，以及 read-only 下订单 mutation 的硬拒绝。针对当前 Live Gateway 的真实 adapter smoke 连续两轮完成 `authenticate`、`get_account_info`、`get_positions` 和 `list_open_orders`，均无 hang；随后 `shutdown()` 后重新连接并完成最小持仓读取。账户摘要、真实持仓及已有订单查询均成功，活动订单为零。本轮没有创建、提交、撤销、修改或替换任何订单，也没有执行 IBKR 持仓同步（v3.10 明确不新增 `broker_sync/ibkr`）。
+
+结论更新：在此前真实主库备份/完整性、Private Mode、真实行情、真实 LLM Decision、Execution Plan draft 与核心 API 验收的基础上，IBKR Live read-only adapter 链路现已补齐。本分支满足既定的 Self-use Full Mode 验收与 fast-forward 合并 main 的工程条件；仍由所有者执行后续 merge，Codex 不会自行 merge 或 push。`docs/public/demo_seed_positions.csv` 仍是唯一已知未跟踪文件，未纳入任何提交。
