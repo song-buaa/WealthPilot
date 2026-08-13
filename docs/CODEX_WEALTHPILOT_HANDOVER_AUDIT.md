@@ -324,3 +324,17 @@ pytest 失败分类：分析器 fixture 与现行 portfolio 数据模型（8）�
 隔离验收使用 `/tmp/wealthpilot-v314-acceptance.db`：启动后 `execution_plans`、`execution_tranches` 均存在；通过 ORM 创建并读取了带 `demo:acceptance` 来源的最小草稿及一个 tranche，未提交订单。Demo registry 为 `[av, seed]`；AV 在网络函数前以“Demo 已禁用外部行情”降级，AAPL 固定 fixture 回退为 `seed`（260 根、截至 2025-12-26、收盘 242.35），重复读取结果一致；metadata 正确包含 `kline_provider:av` 与可读原因，注入 delayed provider 时 `delayed_minutes=15` 透传；非 Demo registry 不注册 Seed。后端 OpenAPI 返回 200，前端开发服务器可由本机 HTTP 访问；本轮浏览器容器无法访问 loopback，故页面交互留给本机人工入口复核。
 
 结论：P1 及本轮回归核对均无合并前阻塞，`codex/wealthpilot-v3.14-handover` 标记为**可合并候选**。仍不执行 merge 或 push；`docs/public/demo_seed_positions.csv` 继续是唯一待产品确认的未跟踪文件。
+
+## Self-use / Private Full Mode 恢复与验收（2026-08-13）
+
+本次已停止隔离 Public Demo，并以现有正式启动路径恢复私有模式：`PUBLIC_DEMO_MODE=false`，后端 `127.0.0.1:8000`，前端 `127.0.0.1:5173`。私有模式不加载 Demo Seed、没有 Demo 密码门，非 Demo K 线 registry 为 `[broker, av]`；运行时使用的 canonical self-use DB 是 `data/wealthpilot.db`，不是临时数据库。启动前已将该主库以 SQLite 安全备份方式保存至仓库外 `~/Documents/WealthPilot-local-backups/self-use-restore-20260813-201117/`，并记录校验和；主库完整性检查为 `ok`，核心业务表及 Execution Plan 表均可读，未执行 destructive migration。
+
+本地 ignored 配置已有新的 `WEALTHPILOT_OPENAI_API_KEY`，无需迁移旧变量。本轮补强并复核交易安全配置：`ENABLE_IBKR_LIVE_TRADING=false`、`ENABLE_TIGER_LIVE_TRADING=false`，IBKR/Tiger/Futu/Snowball 均保持 read-only。没有调用 place、submit、cancel、modify 或 replace，也没有创建真实订单。
+
+验收结果：核心只读 API（Dashboard/Position/Profile/Discipline/Research/Conversation/Action history）均返回正常；真实持仓上下文的单次 Decision SSE 完成 Planning、Executing、Expressing 与 Reviewing，且会话写回成功；Execution Plan 使用真实 broker K 线（260 根、无降级）生成并重新读取了一个本地 `draft`（两个 tranche），未 confirm、未转为 Action/Order。该记录只用于本次只读验收。
+
+发现并最小处理了一项 Private Mode 运行时阻塞：`data/checkpoints.db` 是 LangGraph 的 ignored runtime checkpoint，不是个人持仓主库；其 SQLite `integrity_check` 报损坏，导致 Planning 阶段返回 `database disk image is malformed`。在停止后端后，已把原文件和校验和完整移至上述仓库外备份目录，再让应用创建空 checkpoint；随后 Planning 与真实 LLM 验收恢复。未修改 `wealthpilot.db` 中的持仓、资产、订单或 schema。
+
+IBKR 的 v3.10 PRD 目标架构为 IB Gateway（paper 4002 / live 4001），但历史 probe 实际使用 TWS（paper 7497 / live 7496）。当前私有配置保持既有 TWS Paper `127.0.0.1:7497`、`clientId=10` 与 paper 账户类型；本机所有相关端口当时均未监听。因此本轮没有修改连接架构，也没有运行 IBKR adapter；待用户手动启动并登录对应 TWS/Gateway、开启本地 API 后，才可进行连接、账户、持仓与已有订单的只读 smoke。
+
+当前限制：IBKR 的实际只读连接因本机 TWS/Gateway 未运行而未完成；未主动执行账户同步。真实 Market K 线与 LLM/Execution Plan 已通过，服务保持在线，供所有者在浏览器中确认 Dashboard 为本人真实数据。无 push、无 merge；本节为文档记录，未包含任何密钥、完整账号或资产明细。
