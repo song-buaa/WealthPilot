@@ -338,3 +338,11 @@ pytest 失败分类：分析器 fixture 与现行 portfolio 数据模型（8）�
 IBKR 的 v3.10 PRD 目标架构为 IB Gateway（paper 4002 / live 4001），但历史 probe 实际使用 TWS（paper 7497 / live 7496）。当前私有配置保持既有 TWS Paper `127.0.0.1:7497`、`clientId=10` 与 paper 账户类型；本机所有相关端口当时均未监听。因此本轮没有修改连接架构，也没有运行 IBKR adapter；待用户手动启动并登录对应 TWS/Gateway、开启本地 API 后，才可进行连接、账户、持仓与已有订单的只读 smoke。
 
 当前限制：IBKR 的实际只读连接因本机 TWS/Gateway 未运行而未完成；未主动执行账户同步。真实 Market K 线与 LLM/Execution Plan 已通过，服务保持在线，供所有者在浏览器中确认 Dashboard 为本人真实数据。无 push、无 merge；本节为文档记录，未包含任何密钥、完整账号或资产明细。
+
+### IBKR Live Gateway 只读复验（2026-08-13）
+
+所有者启动并登录 IB Gateway Live 后，`127.0.0.1:4001` 实际监听。ignored 本地配置已从历史 TWS Paper 切换为该 Gateway 的 host/port/clientId 与经 `managedAccounts()` 验证匹配的 Live 账户；不记录完整账号。Gateway Read-Only API 保持开启且仅允许 localhost；WealthPilot 侧 `IBKR_READ_ONLY_MODE=true`、`ENABLE_IBKR_LIVE_TRADING=false`。
+
+以该配置和 `clientId=10` 执行的 IB API 只读 smoke 已成功读取账户、账户摘要、可用资金/购买力/净值/现金/持仓市值等摘要标签、真实持仓以及已有订单；未发现活动订单。全过程没有调用 place、submit、cancel、modify 或 replace。v3.10 PRD 明确不建立 `broker_sync/ibkr/`，持仓同步继续由既有通道承担；因此本次没有把 IBKR 读取结果写入主库，也没有改变 Dashboard 数据。
+
+同时发现现有 `IBKRBrokerAdapter` 的跨线程同步读取在 Live Gateway 的账户快照调用中不能及时返回。最小修复仅让 Live 账户在只读模式连接，并在本地硬拒绝下单和撤单；其 69 项定向测试通过。Gateway 原生只读读取可以证明连接与数据权限，但该 adapter 的读取便利方法仍需单独修复和实测，不应被表述为完整产品链路已通过。故本分支继续保持不 push、不 merge，Self-use 的真实 DB、LLM、行情与 Execution Plan 验收有效，但**尚不满足**以“所有 Private Full Mode 链路均通过”为由 fast-forward 合并 main 的条件。
