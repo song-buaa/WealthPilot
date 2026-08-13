@@ -7,9 +7,12 @@ IBKRBrokerAdapter 单元测试 — M1 + M2 验证。
 
 运行: cd ~/Documents/GitHub/WealthPilot && python -m pytest backend/services/action/tests/test_ibkr_adapter.py -v
 """
+import asyncio
+import inspect
+import threading
 from datetime import datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -76,6 +79,11 @@ def _make_adapter(**kwargs):
     adapter._thread = MagicMock()
     adapter._ib = MagicMock()
     adapter._error_codes = kwargs.get("error_codes", {})  # M2.5
+    def run_immediately(operation, **_kwargs):
+        result = operation()
+        return asyncio.run(result) if inspect.isawaitable(result) else result
+
+    adapter._run_on_loop = run_immediately
     return adapter
 
 
@@ -305,6 +313,98 @@ class TestLiveReadOnlyMutationGuard:
         adapter._ib.cancelOrder.assert_not_called()
 
 
+class TestDedicatedLoopReadPath:
+    """读取必须通过 dedicated event loop，且失败不能伪装为空集合。"""
+
+    @staticmethod
+    def _loop_adapter(timeout=0.1):
+        adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
+        adapter._timeout = timeout
+        adapter._loop = asyncio.new_event_loop()
+        adapter._thread = threading.Thread(
+            target=adapter._loop.run_forever, daemon=True,
+        )
+        adapter._thread.start()
+        adapter._ib = None
+        adapter._connected = False
+        adapter._account_id = "DU1234567"
+        adapter._client_id = 1
+        adapter._error_codes = {}
+        return adapter
+
+    @staticmethod
+    def _stop_loop_adapter(adapter):
+        adapter._loop.call_soon_threadsafe(adapter._loop.stop)
+        adapter._thread.join(timeout=1)
+        adapter._loop.close()
+
+    def test_run_on_loop_uses_dedicated_thread(self):
+        adapter = self._loop_adapter()
+        try:
+            assert adapter._run_on_loop(threading.get_ident) != threading.get_ident()
+        finally:
+            self._stop_loop_adapter(adapter)
+
+    def test_run_on_loop_times_out_and_cancels(self):
+        adapter = self._loop_adapter(timeout=0.02)
+
+        async def slow_read():
+            await asyncio.sleep(1)
+
+        try:
+            with pytest.raises(TimeoutError, match="调用超时"):
+                adapter._run_on_loop(slow_read)
+        finally:
+            self._stop_loop_adapter(adapter)
+
+    def test_authenticate_and_read_methods_dispatch_to_loop(self):
+        adapter = _make_adapter(account_id="DU1234567")
+        adapter._ensure_connected = MagicMock()
+        adapter._ib.managedAccounts.return_value = ["DU1234567"]
+        adapter._ib.positions.return_value = []
+        adapter._ib.openTrades.return_value = []
+        adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[])
+        account_value = MagicMock(tag="NetLiquidation", value="1")
+        adapter._ib.accountSummaryAsync = AsyncMock(return_value=[account_value])
+        runner = MagicMock(side_effect=adapter._run_on_loop)
+        adapter._run_on_loop = runner
+
+        assert adapter.authenticate({}) is True
+        assert adapter.get_account_info()["NetLiquidation"] == 1.0
+        assert adapter.get_positions() == []
+        assert adapter.list_open_orders() == []
+        assert runner.call_count == 4
+
+    def test_empty_positions_is_distinct_from_query_failure(self):
+        adapter = _make_adapter()
+        adapter._ensure_connected = MagicMock()
+        adapter._ib.positions.return_value = []
+        assert adapter.get_positions() == []
+
+        adapter._run_on_loop = MagicMock(side_effect=TimeoutError("timeout"))
+        with pytest.raises(TimeoutError):
+            adapter.get_positions()
+
+    def test_empty_orders_is_distinct_from_query_failure(self):
+        adapter = _make_adapter()
+        adapter._ensure_connected = MagicMock()
+        adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[])
+        adapter._ib.openTrades.return_value = []
+        assert adapter.list_open_orders() == []
+
+        adapter._run_on_loop = MagicMock(side_effect=ConnectionError("disconnected"))
+        with pytest.raises(ConnectionError):
+            adapter.list_open_orders()
+
+    def test_shutdown_clears_loop_state_for_reconnect(self):
+        adapter = _make_adapter()
+        adapter.shutdown()
+        assert adapter._connected is False
+        assert adapter._ib is None
+        assert adapter._loop is None
+        assert adapter._thread is None
+
+
 # ═══════════════════════════════════════════════════════════════════
 # place_order + permId 收口 (M2)
 # ═══════════════════════════════════════════════════════════════════
@@ -504,11 +604,10 @@ class TestNotFoundRetry:
         """第一次 not_found，重试后找到。"""
         adapter = _make_adapter()
         trade = _make_mock_trade(perm_id=555, status="Submitted")
-        # _find_trade calls trades() twice per attempt (permId scan + orderId fallback)
+        # 每次 retry 在 dedicated loop 内读取一次 trade snapshot。
         adapter._ib.trades.side_effect = [
-            [],       # attempt 0: permId scan → miss
-            [],       # attempt 0: orderId fallback → miss
-            [trade],  # attempt 1 (retry): permId scan → hit
+            [],       # attempt 0: miss
+            [trade],  # attempt 1 (retry): hit
         ]
 
         with patch("backend.services.action.brokers.ibkr.NOT_FOUND_RETRY_DELAYS", [0, 0]):

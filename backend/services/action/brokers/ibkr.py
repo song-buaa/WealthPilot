@@ -17,6 +17,8 @@ M2: Inactive 二义性分流 + permId 收口 + orderRef 幂等反查
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import inspect
 import logging
 import os
 import threading
@@ -191,6 +193,33 @@ class IBKRBrokerAdapter(BrokerAdapter):
         # 且写入发生在读取之前（error callback 先于 status 查询），无需额外锁。
         self._error_codes: dict[int, dict] = {}
 
+    def _run_on_loop(self, operation, *, timeout: float | None = None):
+        """在 adapter 专属 event loop 执行一次 IB 调用并等待普通结果。
+
+        ``operation`` 必须在 loop thread 内创建和消费 IB runtime 对象；调用者只能
+        得到已脱离 ib_async 生命周期的普通 Python 数据。超时会取消 coroutine，不能
+        被静默转换为“空持仓/空订单”。
+        """
+        if self._loop is None or not self._loop.is_running():
+            raise ConnectionError("IBKR event loop 未运行")
+
+        call_timeout = timeout if timeout is not None else self._timeout
+
+        async def invoke():
+            result = operation()
+            if inspect.isawaitable(result):
+                return await asyncio.wait_for(result, timeout=call_timeout)
+            return result
+
+        future = asyncio.run_coroutine_threadsafe(invoke(), self._loop)
+        try:
+            return future.result(timeout=call_timeout + 1)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(
+                f"IBKR 调用超时（{call_timeout}s）"
+            ) from exc
+
     def _ensure_connected(self) -> None:
         """确保 IB 连接已建立。首次调用时启动后台线程。"""
         if self._connected and self._ib:
@@ -207,41 +236,41 @@ class IBKRBrokerAdapter(BrokerAdapter):
             )
             self._thread.start()
 
-        self._ib = IB()
-
-        future = asyncio.run_coroutine_threadsafe(
-            self._ib.connectAsync(
-                host=self._host,
-                port=self._port,
-                clientId=self._client_id,
-                timeout=self._timeout,
-            ),
-            self._loop,
-        )
         try:
-            future.result(timeout=self._timeout + 5)
+            async def connect_and_snapshot_accounts():
+                self._ib = IB()
+                await self._ib.connectAsync(
+                    host=self._host,
+                    port=self._port,
+                    clientId=self._client_id,
+                    timeout=self._timeout,
+                    readonly=IBKR_READ_ONLY_MODE,
+                )
+                self._ib.errorEvent += self._on_ib_error
+                return list(self._ib.managedAccounts())
+
+            accounts = self._run_on_loop(
+                connect_and_snapshot_accounts,
+                timeout=self._timeout + 5,
+            )
         except Exception as e:
+            self._ib = None
             raise ConnectionError(
                 f"IB Gateway 连接失败 ({self._host}:{self._port}): {e}"
             ) from e
 
         self._connected = True
 
-        # M2.5: 订阅 error callback，抓取 errorCode → orderId 映射
-        # errorEvent 签名: (reqId: int, errorCode: int, errorString: str, contract)
-        # reqId 是 orderId（-1 表示非订单相关错误）
-        self._ib.errorEvent += self._on_ib_error
-
         # ── 闸门 1 真校验: 基于 managedAccounts() 的真实账户 ──
         # 探针实测: order.account 是空字符串，唯一可靠来源是 managedAccounts()
-        self._resolve_and_verify_account()
+        self._resolve_and_verify_account(accounts)
 
         logger.info(
             "[IBKR] 连接成功 %s:%d client=%d account=%s",
             self._host, self._port, self._client_id, self._account_id,
         )
 
-    def _resolve_and_verify_account(self) -> None:
+    def _resolve_and_verify_account(self, accounts: list[str] | None = None) -> None:
         """从 managedAccounts() 解析真实账户并做 paper-only 断言。
 
         探针发现: placeOrder 后 order.account 是空字符串，
@@ -253,7 +282,10 @@ class IBKRBrokerAdapter(BrokerAdapter):
         3. 如果 config 没指定 → 取第一个
         4. paper-only 断言: 非 DU 开头 + 实盘未开启 → 拒绝
         """
-        accounts = self._ib.managedAccounts()
+        if accounts is None:
+            accounts = self._run_on_loop(
+                lambda: list(self._ib.managedAccounts()),
+            )
         if not accounts:
             raise RuntimeError(
                 "IB Gateway 未返回任何账户 (managedAccounts 为空)。"
@@ -276,7 +308,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         try:
             _validate_account_prefix(self._account_id, "连接后校验")
         except AssertionError:
-            self._ib.disconnect()
+            self._run_on_loop(lambda: self._ib.disconnect())
             self._connected = False
             raise
 
@@ -291,8 +323,10 @@ class IBKRBrokerAdapter(BrokerAdapter):
     def authenticate(self, credentials: dict) -> bool:
         try:
             self._ensure_connected()
-            accounts = self._ib.managedAccounts()
+            accounts = self._run_on_loop(lambda: list(self._ib.managedAccounts()))
             return self._account_id in accounts
+        except (ConnectionError, TimeoutError):
+            raise
         except Exception as e:
             logger.error("[IBKR] authenticate 失败: %s", e)
             return False
@@ -310,8 +344,6 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 reason="IBKR_READ_ONLY_MODE=true：真实账户只读模式禁止下单",
                 action="place_order_blocked_read_only",
             )
-
-        from ib_async import LimitOrder, Stock
 
         self._ensure_connected()
 
@@ -342,24 +374,37 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 action="place_order_blocked_unsupported_market",
             )
 
-        exchange = MARKET_TO_EXCHANGE[market]
-        currency = MARKET_TO_CURRENCY[market]
-
-        contract = Stock(symbol=pure_symbol, exchange=exchange, currency=currency)
-
-        order = LimitOrder(
-            action=request.side.upper(),
-            totalQuantity=int(request.quantity),
-            lmtPrice=float(request.limit_price),
-            tif="DAY",  # 显式设 TIF，避免 TWS order preset 覆盖（error 10349）
-        )
-        # ── 闸门 4: outsideRth=False ─────────────────────────
-        order.outsideRth = False
-        # ── orderRef: 写入 WealthPilot 侧 order_record.id ────
-        order.orderRef = request.local_order_id
-
         try:
-            trade = self._ib.placeOrder(contract, order)
+            async def submit_on_loop() -> dict:
+                from ib_async import LimitOrder, Stock
+
+                exchange = MARKET_TO_EXCHANGE[market]
+                currency = MARKET_TO_CURRENCY[market]
+                contract = Stock(
+                    symbol=pure_symbol, exchange=exchange, currency=currency,
+                )
+                order = LimitOrder(
+                    action=request.side.upper(),
+                    totalQuantity=int(request.quantity),
+                    lmtPrice=float(request.limit_price),
+                    tif="DAY",
+                )
+                # ── 闸门 4: outsideRth=False ─────────────────
+                order.outsideRth = False
+                order.orderRef = request.local_order_id
+                trade = self._ib.placeOrder(contract, order)
+
+                deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
+                while time.monotonic() < deadline:
+                    if trade.order.permId or trade.orderStatus.permId:
+                        break
+                    await asyncio.sleep(PERM_ID_POLL_INTERVAL)
+                return self._snapshot_trade(trade)
+
+            snapshot = self._run_on_loop(
+                submit_on_loop,
+                timeout=self._timeout + PERM_ID_WAIT_SECONDS,
+            )
         except (ConnectionError, TimeoutError):
             raise  # 透传给上层
         except Exception as e:
@@ -370,9 +415,18 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 action="place_order_api_error",
             )
 
-        # ── permId 收口: 等待 Gateway 回填 permId ──
-        perm_id = self._wait_for_perm_id(trade)
-        broker_order_id = str(perm_id) if perm_id else str(trade.order.orderId)
+        broker_order_id = self._snapshot_broker_order_id(snapshot)
+        raw = self._build_raw_from_snapshot("place_order", snapshot)
+        raw.update({
+            "symbol": request.symbol,
+            "market": market,
+            "currency": MARKET_TO_CURRENCY[market],
+            "limit_price": float(request.limit_price),
+            "quantity": request.quantity,
+            "side": request.side,
+            "order_type": "LIMIT",
+            "order_ref": request.local_order_id,
+        })
 
         return OrderStatusUpdate(
             broker_order_id=broker_order_id,
@@ -381,21 +435,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
             filled_quantity=0,
             avg_filled_price=None,
             timestamp=int(time.time() * 1000),
-            raw_response=self._build_raw(
-                action="place_order",
-                trade=trade,
-                extra={
-                    "symbol": request.symbol,
-                    "market": market,
-                    "currency": currency,
-                    "limit_price": float(request.limit_price),
-                    "quantity": request.quantity,
-                    "side": request.side,
-                    "order_type": "LIMIT",
-                    "order_ref": request.local_order_id,
-                    "con_id": getattr(contract, "conId", None),
-                },
-            ),
+            raw_response=raw,
         )
 
     def cancel_order(self, broker_order_id: str) -> bool:
@@ -409,18 +449,23 @@ class IBKRBrokerAdapter(BrokerAdapter):
             return False
 
         self._ensure_connected()
-
-        trade = self._find_trade(broker_order_id)
-        if trade is None:
-            return False
-
-        status = trade.orderStatus.status
-        if status in ("Filled", "Cancelled", "ApiCancelled"):
-            return False
-        # Inactive 可能是临时状态，仍尝试撤单
         try:
-            self._ib.cancelOrder(trade.order)
-            return True
+            broker_id = int(broker_order_id)
+        except (TypeError, ValueError):
+            return False
+
+        def cancel_on_loop() -> bool:
+            for trade in self._ib.trades():
+                if trade.order.permId == broker_id or trade.order.orderId == broker_id:
+                    if trade.orderStatus.status in ("Filled", "Cancelled", "ApiCancelled"):
+                        return False
+                    # Inactive 可能是临时状态，仍尝试撤单
+                    self._ib.cancelOrder(trade.order)
+                    return True
+            return False
+
+        try:
+            return self._run_on_loop(cancel_on_loop)
         except Exception as e:
             logger.warning("[IBKR] cancelOrder 异常: %s", e)
             return False
@@ -432,91 +477,76 @@ class IBKRBrokerAdapter(BrokerAdapter):
         """
         self._ensure_connected()
 
-        trade = self._find_trade_with_retry(broker_order_id)
-
-        ib_status = trade.orderStatus.status
-        mapped, extras = self._map_status(trade)
-
-        raw = self._build_raw(action="get_order_status", trade=trade)
-        if extras:
-            raw.update(extras)
-
-        return OrderStatusUpdate(
+        snapshot = self._find_trade_with_retry(broker_order_id)
+        return self._status_update_from_snapshot(
+            snapshot,
+            action="get_order_status",
             broker_order_id=broker_order_id,
-            local_order_id="",
-            status=mapped,
-            filled_quantity=int(trade.orderStatus.filled),
-            avg_filled_price=(
-                Decimal(str(trade.orderStatus.avgFillPrice))
-                if trade.orderStatus.avgFillPrice
-                else None
-            ),
-            timestamp=int(time.time() * 1000),
-            raw_response=raw,
         )
 
     def list_open_orders(self) -> list[OrderStatusUpdate]:
         self._ensure_connected()
         try:
-            trades = self._ib.openTrades()
-        except Exception as e:
-            logger.warning("[IBKR] openTrades 异常: %s", e)
-            return []
+            async def fetch_open_order_snapshots():
+                await self._ib.reqOpenOrdersAsync()
+                return [
+                    self._snapshot_trade(trade)
+                    for trade in self._ib.openTrades()
+                ]
 
-        result = []
-        for t in trades:
-            mapped, _ = self._map_status(t)
-            result.append(OrderStatusUpdate(
-                broker_order_id=self._get_broker_order_id(t),
-                local_order_id="",
-                status=mapped,
-                filled_quantity=int(t.orderStatus.filled),
-                avg_filled_price=(
-                    Decimal(str(t.orderStatus.avgFillPrice))
-                    if t.orderStatus.avgFillPrice
-                    else None
-                ),
-                timestamp=int(time.time() * 1000),
-                raw_response=self._build_raw(action="list_open_orders", trade=t),
-            ))
-        return result
+            snapshots = self._run_on_loop(fetch_open_order_snapshots)
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as exc:
+            raise ConnectionError(f"IBKR 查询已有订单失败: {exc}") from exc
+
+        return [
+            self._status_update_from_snapshot(snapshot, action="list_open_orders")
+            for snapshot in snapshots
+        ]
 
     def get_positions(self) -> list[dict]:
         self._ensure_connected()
         try:
-            positions = self._ib.positions(account=self._account_id)
-            return [
-                {
-                    "symbol": p.contract.symbol if p.contract else None,
-                    "market": p.contract.exchange if p.contract else None,
-                    "currency": p.contract.currency if p.contract else None,
-                    "quantity": p.position,
-                    "average_cost": float(p.avgCost or 0),
-                    "market_value": float(p.position * (p.avgCost or 0)),
-                }
-                for p in positions
-            ]
-        except Exception as e:
-            logger.warning("[IBKR] positions 异常: %s", e)
-            return []
+            return self._run_on_loop(
+                lambda: [
+                    {
+                        "symbol": p.contract.symbol if p.contract else None,
+                        "market": p.contract.exchange if p.contract else None,
+                        "currency": p.contract.currency if p.contract else None,
+                        "quantity": p.position,
+                        "average_cost": float(p.avgCost or 0),
+                        "market_value": float(p.position * (p.avgCost or 0)),
+                    }
+                    for p in self._ib.positions(account=self._account_id)
+                ]
+            )
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as exc:
+            raise ConnectionError(f"IBKR 查询持仓失败: {exc}") from exc
 
     def get_account_info(self) -> dict:
         self._ensure_connected()
         try:
-            summary = self._ib.accountSummary(account=self._account_id)
-            info = {"broker": "ibkr", "account_id": self._account_id}
-            for item in summary:
-                if item.tag in ("TotalCashValue", "NetLiquidation", "BuyingPower"):
-                    info[item.tag] = float(item.value)
-            return info
-        except Exception as e:
-            logger.warning("[IBKR] accountSummary 异常: %s", e)
-            return {"broker": "ibkr", "error": str(e)}
+            async def fetch_account_info():
+                summary = await self._ib.accountSummaryAsync(self._account_id)
+                info = {"broker": "ibkr", "account_id": self._account_id}
+                for item in summary:
+                    if item.tag in ("TotalCashValue", "NetLiquidation", "BuyingPower"):
+                        info[item.tag] = float(item.value)
+                return info
+
+            return self._run_on_loop(fetch_account_info)
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as exc:
+            raise ConnectionError(f"IBKR 查询账户摘要失败: {exc}") from exc
 
     def shutdown(self) -> None:
         if self._ib and self._connected:
             try:
-                self._ib.disconnect()
+                self._run_on_loop(lambda: self._ib.disconnect())
             except Exception:
                 pass
             self._connected = False
@@ -544,26 +574,12 @@ class IBKRBrokerAdapter(BrokerAdapter):
         """
         self._ensure_connected()
 
-        for trade in self._ib.trades():
-            if trade.order.orderRef == order_ref:
-                mapped, extras = self._map_status(trade)
-                raw = self._build_raw(
-                    action="find_order_by_ref", trade=trade,
-                )
-                if extras:
-                    raw.update(extras)
-                return OrderStatusUpdate(
-                    broker_order_id=self._get_broker_order_id(trade),
+        for snapshot in self._read_trade_snapshots():
+            if snapshot["order_ref"] == order_ref:
+                return self._status_update_from_snapshot(
+                    snapshot,
+                    action="find_order_by_ref",
                     local_order_id=order_ref,
-                    status=mapped,
-                    filled_quantity=int(trade.orderStatus.filled),
-                    avg_filled_price=(
-                        Decimal(str(trade.orderStatus.avgFillPrice))
-                        if trade.orderStatus.avgFillPrice
-                        else None
-                    ),
-                    timestamp=int(time.time() * 1000),
-                    raw_response=raw,
                 )
 
         return None
@@ -683,8 +699,19 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
     # ── 内部: 订单查找 ───────────────────────────────────────
 
-    def _find_trade(self, broker_order_id: str):
-        """按 permId（主键）在 trades() 中反查 Trade 对象。
+    def _read_trade_snapshots(self) -> list[dict]:
+        """在 IB loop 内将 session trade 缓存转为普通 Python 快照。"""
+        try:
+            return self._run_on_loop(
+                lambda: [self._snapshot_trade(trade) for trade in self._ib.trades()]
+            )
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as exc:
+            raise ConnectionError(f"IBKR 查询订单缓存失败: {exc}") from exc
+
+    def _find_trade(self, broker_order_id: str) -> Optional[dict]:
+        """按 permId（主键）在 snapshots 中查订单，不把 Trade 跨线程返回。
 
         M2: broker_order_id 是 permId（由 place_order 时等待回填后写入）。
         兼容: 如果是纯数字且 permId 匹配不到，回退查 orderId。
@@ -694,15 +721,16 @@ class IBKRBrokerAdapter(BrokerAdapter):
         except (ValueError, TypeError):
             return None
 
+        snapshots = self._read_trade_snapshots()
         # 优先按 permId 查
-        for trade in self._ib.trades():
-            if trade.order.permId == perm_id_int:
-                return trade
+        for snapshot in snapshots:
+            if snapshot["perm_id"] == perm_id_int:
+                return snapshot
 
         # 兼容回退: 按 orderId 查（M1 存的旧数据可能是 orderId）
-        for trade in self._ib.trades():
-            if trade.order.orderId == perm_id_int:
-                return trade
+        for snapshot in snapshots:
+            if snapshot["order_id"] == perm_id_int:
+                return snapshot
 
         return None
 
@@ -712,9 +740,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
         耗尽重试后抛 OrphanOrderError（继承 ConnectionError）。
         """
         for attempt in range(NOT_FOUND_MAX_RETRIES + 1):
-            trade = self._find_trade(broker_order_id)
-            if trade is not None:
-                return trade
+            snapshot = self._find_trade(broker_order_id)
+            if snapshot is not None:
+                return snapshot
 
             if attempt < NOT_FOUND_MAX_RETRIES:
                 wait = NOT_FOUND_RETRY_DELAYS[attempt]
@@ -729,6 +757,133 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 f"IB 端订单 {broker_order_id} not_found，"
                 f"重试 {NOT_FOUND_MAX_RETRIES} 次后仍失败，可能为本地脏数据"
             )
+
+    @staticmethod
+    def _snapshot_trade(trade) -> dict:
+        """从 IB Trade 提取跨线程安全的、无 runtime 引用的值对象。"""
+        contract = getattr(trade, "contract", None)
+        order = trade.order
+        status = trade.orderStatus
+        return {
+            "order_id": int(order.orderId or 0),
+            "perm_id": int(order.permId or status.permId or 0),
+            "order_ref": order.orderRef or "",
+            "ib_status": status.status or "",
+            "filled_quantity": int(status.filled or 0),
+            "avg_filled_price": float(status.avgFillPrice or 0),
+            "why_held": status.whyHeld or "",
+            "con_id": getattr(contract, "conId", None) if contract else None,
+            "contract_symbol": getattr(contract, "symbol", None) if contract else None,
+            "contract_exchange": getattr(contract, "exchange", None) if contract else None,
+            "contract_currency": getattr(contract, "currency", None) if contract else None,
+            "log": [
+                {
+                    "error_code": int(getattr(entry, "errorCode", 0) or 0),
+                    "message": str(getattr(entry, "message", "") or ""),
+                }
+                for entry in (trade.log or [])
+            ],
+        }
+
+    def _map_snapshot_status(self, snapshot: dict) -> tuple[str, dict]:
+        ib_status = snapshot["ib_status"]
+        if ib_status != "Inactive":
+            return IB_TO_V32_STATUS.get(ib_status, "unknown"), {}
+
+        log_error_code = 0
+        log_error_message = ""
+        for entry in reversed(snapshot["log"]):
+            if entry["error_code"]:
+                log_error_code = entry["error_code"]
+                log_error_message = entry["message"]
+                break
+            if entry["message"] and not log_error_message:
+                log_error_message = entry["message"]
+
+        cb_info = self._error_codes.get(snapshot["order_id"], {})
+        cb_error_code = cb_info.get("errorCode", 0)
+        cb_error_message = cb_info.get("errorString", "")
+        error_code = cb_error_code or log_error_code
+        error_message = cb_error_message if cb_error_code else log_error_message
+        extras = {
+            "inactive_error_code": error_code,
+            "inactive_error_message": error_message,
+            "inactive_log_error_code": log_error_code,
+            "inactive_cb_error_code": cb_error_code,
+        }
+        if error_code in REJECTED_ERROR_CODES or (
+            log_error_code in REJECTED_ERROR_CODES
+            or cb_error_code in REJECTED_ERROR_CODES
+        ):
+            extras["inactive_resolved_as"] = "rejected"
+            return "rejected", extras
+
+        combined_msg = f"{error_message or ''} {cb_error_message or ''}".lower()
+        matched_kw = [kw for kw in REJECTED_KEYWORDS if kw in combined_msg]
+        if matched_kw:
+            extras.update({
+                "inactive_resolved_as": "unknown",
+                "keyword_matched": matched_kw,
+                "keyword_note": "message 含拒单关键词但无实测 errorCode，降级为 unknown 待人工确认",
+            })
+            return "unknown", extras
+        if error_code == 0 and not error_message and snapshot["why_held"]:
+            extras.update({
+                "inactive_resolved_as": "broker_pending",
+                "why_held": snapshot["why_held"],
+            })
+            return "broker_pending", extras
+        extras["inactive_resolved_as"] = "unknown"
+        return "unknown", extras
+
+    @staticmethod
+    def _snapshot_broker_order_id(snapshot: dict) -> str:
+        return str(snapshot["perm_id"] or snapshot["order_id"])
+
+    def _build_raw_from_snapshot(self, action: str, snapshot: dict) -> dict:
+        mapped, _ = self._map_snapshot_status(snapshot)
+        return {
+            "broker": "ibkr",
+            "account_id": self._account_id,
+            "client_id": self._client_id,
+            "action": action,
+            "outside_rth": False,
+            "order_id": snapshot["order_id"],
+            "perm_id": snapshot["perm_id"],
+            "broker_order_id": self._snapshot_broker_order_id(snapshot),
+            "ib_status": snapshot["ib_status"],
+            "order_ref": snapshot["order_ref"],
+            "mapped_status": mapped,
+            "con_id": snapshot["con_id"],
+            "contract_symbol": snapshot["contract_symbol"],
+            "contract_exchange": snapshot["contract_exchange"],
+            "contract_currency": snapshot["contract_currency"],
+        }
+
+    def _status_update_from_snapshot(
+        self,
+        snapshot: dict,
+        *,
+        action: str,
+        broker_order_id: str | None = None,
+        local_order_id: str = "",
+    ) -> OrderStatusUpdate:
+        mapped, extras = self._map_snapshot_status(snapshot)
+        raw = self._build_raw_from_snapshot(action, snapshot)
+        raw.update(extras)
+        return OrderStatusUpdate(
+            broker_order_id=broker_order_id or self._snapshot_broker_order_id(snapshot),
+            local_order_id=local_order_id,
+            status=mapped,
+            filled_quantity=snapshot["filled_quantity"],
+            avg_filled_price=(
+                Decimal(str(snapshot["avg_filled_price"]))
+                if snapshot["avg_filled_price"]
+                else None
+            ),
+            timestamp=int(time.time() * 1000),
+            raw_response=raw,
+        )
 
     # ── 内部: permId 工具 ────────────────────────────────────
 
