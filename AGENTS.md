@@ -1,9 +1,15 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前版本：v3.6.0 | 最后更新：2026-05-13
+> 当前稳定版本：v3.14.0 | 稳定标签：`v3.14.0` | 最后更新：2026-08-13
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
+
+## Codex 新任务入口
+
+每个新任务先读取本文件、`README.md` 和 `docs/PROJECT_GOVERNANCE.md`，再检查 `git status`、当前分支和任务相关代码。`docs/CODEX_WEALTHPILOT_HANDOVER_AUDIT.md` 已封存为历史接管证据，`docs/archive/` 也是历史资料；两者都不能覆盖当前代码、README 与治理文档中的事实。
+
+默认从最新 `main` 创建短期 `codex/<topic>` 分支；每个提交保持职责单一，精确暂存，禁止把 `.env`、数据库、券商凭证或本地备份写入 Git。未经用户明确授权，不 push、不合并、不创建或移动发布 Tag。
 
 ## 项目概述
 
@@ -16,9 +22,9 @@ WealthPilot 是 AI 驱动的个人投资决策工作台。本地运行，数据�
 - PerformanceAnalysis：收益表现归因分析
 - Education：投资知识科普 / 通用对话
 
-## 当前架构（v3.2）
+## 当前架构（v3.14）
 
-WealthPilot v3.2 是 Multi-Agent + Skills 协议架构，参考蚂蚁 agentUniverse PEER 模式与 Anthropic Skills 开放标准。v3.2 新增投资行动模块，实现从"AI 分析建议"到"用户确认下单"的完整闭环。
+WealthPilot v3.14 是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。Execution Plan 通过 K 线 Provider fallback 获取因子，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
 
 ### PEER 4 Agent
 
@@ -38,7 +44,7 @@ ExpressingAgent 在流式输出完成后，基于 `structured_payload.decisionTy
 - `decisionType ∈ {buy_init, buy_more, trim, exit}` → `actionable=true`，前端显示"生成行动清单"按钮
 - 其他 decisionType → `actionable=false`，按钮不出现
 
-### 12 个原子能力 Skill
+### 13 个能力 Skill
 
 原子 Skill（10 个）：
 - 数据获取：`wp-fetch-holdings` / `wp-fetch-research` / `wp-check-discipline`
@@ -50,8 +56,9 @@ ExpressingAgent 在流式输出完成后，基于 `structured_payload.decisionTy
 组合 Skill（1 个）：
 - `wp-load-context`（封装 data_loader.load 装配逻辑，含 v3.6 RAG 第 7a/7b 步）
 
-旁路 Skill（1 个）：
+旁路 Skill（2 个）：
 - `wp-action-planner`（不在 PEER 主链路上，由用户点击"生成行动清单"按钮触发）
+- `wp-generate-execution-plan`（将建议转换为规则驱动的分批执行计划；数值不得由 LLM 自由生成）
 
 #### 知识检索 Skill 语义二分法（v3.6）
 
@@ -136,7 +143,7 @@ graph LR
 ### 后端
 - FastAPI + SQLAlchemy + SQLite
 - OpenAI SDK（GPT-4.1 主模型 + GPT-4.1-mini 评分/ActionPlanner 模型）
-- Anthropic Skills 协议（12 个 SKILL.md）
+- 项目 Skills 协议（13 个 SKILL.md）
 - MCP 协议（盈米基金诊断 MCP 接入）
 - 市场数据多源：Futu OpenD（optional）/ Alpha Vantage / Tiger OpenAPI
 
@@ -239,14 +246,7 @@ v3 设计是通过 `invoke_skill()` 调用——新增能力的正确做法是�
 
 ## 已知边界 / 技术债
 
-| 问题 | 影响 | 计划 |
-|------|------|------|
-| symbol 字段不一致（LI vs 理想汽车） | ActionPlanner 有时输出 ticker、有时输出中文名，前端展示混乱 | v3.3 统一 symbol 规范 |
-| 单标的决策没走 allocation_intent | PositionDecision 直接生成 SymbolStrategy，跳过意图层 | v3.3 数据模型重构 |
-| 集中度风控买入场景未验证 | RiskEngine 集中度规则对卖出跳过已验证，买入触发未实测 | v3.3 补集成测试 |
-| ActionPlanner LLM 异常兜底文案偏技术性 | 失败时显示"AI 生成失败，请手动填写: {error}" | v3.3 优化用户文案 |
-| Futu 数据源无超时上限 | 预检 0.5s 够快，但 SDK 内部仍可能慢 | v3.3 加 asyncio.wait_for |
-| tests/test_analyzer.py 失败 | v3.2 数据清理后 analyzer 对老 Portfolio 模型的测试断言失败 | v3.3 更新 analyzer 测试 |
+当前已知质量基线与技术债清单统一记录在 `docs/PROJECT_GOVERNANCE.md`。历史 pytest/lint 债务不得被误报为某个新分支的回归；必须使用相同 Python 环境、环境变量和隔离数据库与 clean `main` 对照后再判断。
 
 ## 知识层（v3.6 新增）
 
@@ -298,7 +298,7 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - 多会话管理与消息持久化
 - 长对话记忆压缩（短期窗口 + 中期摘要）
 
-### v3.6（当前版本）✅
+### v3.6 ✅
 - 知识层基础设施：Markdown 文件 + Chroma 向量库 + OpenAI Embedding
 - `wp-retrieve-principles` Skill（原则类知识检索）
 - 投研观点 MD 落盘 + RAG 语义召回
@@ -307,10 +307,12 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - Education 意图支持 RAG 召回
 - 决策输出附引用来源
 
-### v3.6.1（近期）
-- 投资理念 UI 输入框
-- 时效类型标签 UI
-- LLM rerank（召回质量优化）
+### v3.14.0（当前稳定版本）✅
+- K 线 Provider 抽象与 broker → Alpha Vantage → Seed 降级链路
+- 隔离 Public Demo 固定 Seed、Provider gate、metadata 与草稿持久化验收
+- Self-use / Private Full Mode 真实数据库、LLM、行情和 Execution Plan 验收
+- IBKR Live 在三重交易护栏下完成 dedicated event-loop/thread 只读读取验收
+- Claude → Codex 接管完成，长期治理基线落在 `main`
 
 ### v4.0（中期）
 - 高级 Memory（Mem0 用户偏好 / 知识图谱标的关系）
@@ -325,6 +327,7 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 ## 参考文档
 
 - [README.md](./README.md)：用户视角的产品介绍 + 快速开始
-- [CHANGELOG.md](./CHANGELOG.md)：完整版本变更历史（v2.0.0 → v3.2.0）
+- [CHANGELOG.md](./CHANGELOG.md)：完整版本变更历史
+- [docs/PROJECT_GOVERNANCE.md](./docs/PROJECT_GOVERNANCE.md)：分支、发布、安全、质量基线与文档权威规则
 - [docs/](./docs/)：活文档（PRD + 设计规范 + 评测报告）
 - [docs/archive/](./docs/archive/)：历史归档文档

@@ -4,6 +4,10 @@
 > 审计范围：仓库事实勘探、隔离本地启动、基础构建/测试/页面验证。
 > 证据等级：**实际运行** > **自动化验证** > **静态代码确认** > **文档声明**。本文件不以历史 Claude Code 上下文为事实来源。
 
+> **HANDOVER CLOSED — 2026-08-13**
+>
+> 接管从 `main@11cd2e9` 开始，v3.14.0 稳定发布基线已收敛到 `main`，标签 `v3.14.0` 指向 `4314e031ca653ea87a346c198d3a6dc466017ab6`。Public Demo、Self-use / Private Full Mode、真实本地数据库、LLM/行情、Execution Plan 与 IBKR dedicated-loop 只读读取均已完成相应验收；IBKR 全程保持 Gateway Read-Only API、`IBKR_READ_ONLY_MODE=true`、`ENABLE_IBKR_LIVE_TRADING=false`，未执行订单 mutation。本文件至此封存，不再追加当前状态；后续事实以代码、`README.md`、`AGENTS.md`、`CHANGELOG.md` 和 `docs/PROJECT_GOVERNANCE.md` 为准。
+
 ## 1. 执行摘要
 
 WealthPilot 是本地优先的个人投资决策工作台：以统一持仓、投资纪律和投研上下文为输入，经 PEER 四 Agent + Skills 协议生成可解释的投资辅助分析，并提供人工确认的投资行动/执行计划入口。当前可确认的产品代码基线是 **v3.12**；工作区另有一批尚未提交的 **v3.14 K 线 Provider 解耦**在途修改，不能把它视为稳定发布基线。

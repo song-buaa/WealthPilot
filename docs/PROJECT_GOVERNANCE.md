@@ -1,0 +1,77 @@
+# WealthPilot 项目治理基线
+
+> 生效日期：2026-08-13
+> 当前稳定版本：v3.14.0
+> 稳定标签提交：`4314e031ca653ea87a346c198d3a6dc466017ab6`
+
+## 1. 当前产品与架构
+
+WealthPilot 是本地优先的个人投资决策工作台。当前前端为 React 19 + Vite 8 + TypeScript，后端为 FastAPI + SQLAlchemy + SQLite，决策链路为 PEER 四 Agent + 13 个 Skills。核心入口为 `frontend/src`、`backend/main.py`、`backend/agents`、`backend/services`、`skills` 与 `app`。
+
+`main` 是唯一长期开发与集成分支；`v3.14.0` 是本次交接形成的稳定发布标签。标签不会随治理文档提交移动。
+
+## 2. 运行模式
+
+### Public Demo
+
+- 使用隔离的临时 SQLite 数据库与提交到仓库的固定 Seed。
+- 设置 `PUBLIC_DEMO_MODE=true`、`BROKER_MODE=mock`，默认关闭外部行情。
+- Provider gate 必须阻断真实 LLM、行情、券商和交易路径；Demo 密码缺失时 fail-closed。
+- Demo 数据、草稿和测试结果不得写入真实 self-use 数据库。
+
+### Self-use / Private Full Mode
+
+- 使用用户本地、Git ignored 的数据库和环境配置。
+- 可按用户明确授权连接真实 LLM、行情和券商只读接口。
+- 凭证、完整账户号、数据库、备份及 `.env` 永远不得写入 tracked 文件或日志。
+- 券商连接不等于交易授权。真实交易权限必须按任务单独、明确放行。
+
+## 3. 分支与提交策略
+
+- `main` 是唯一长期活跃分支，也是 GitHub 默认分支。
+- 新工作从最新 `main` 创建短期 `codex/<topic>` 分支，完成验收后使用 fast-forward 或经审查的普通合并回到 `main`，随后删除短期分支。
+- 不长期维护 release、develop 或个人 handover 分支；未知历史分支在确认所有者与用途前不删除。
+- 每个提交职责单一，不 squash 已有历史；使用精确路径暂存，禁止 `git add .` 和 `git add -A`。
+- 未经明确授权，不 push、不合并、不创建或移动 Tag。
+
+## 4. 版本、Tag 与发布
+
+- 版本遵循 SemVer：破坏兼容为 major，向后兼容功能为 minor，修复与文档治理为 patch 或后续 main 提交。
+- 稳定 Tag 使用带 `v` 的完整版本号，例如 `v3.14.0`，Tag 必须指向已验收的不可变提交。
+- 发布前同步 `README.md`、`AGENTS.md` 与 `CHANGELOG.md`，确认工作区干净、敏感文件未跟踪，并执行相称的后端测试、前端 lint/build 和人工 smoke。
+- 发布后验证 local main、origin/main 与预期提交一致；Tag 只在明确发布动作中创建，不因普通文档提交重打或移动。
+
+## 5. 安全边界
+
+- `.env*`、本地 SQLite、券商凭证、私钥、完整账户号和仓库外备份不得提交。
+- Public Demo 必须与 self-use 数据库、凭证和网络能力物理/配置隔离。
+- IBKR 默认为只读：Gateway Read-Only API 开启，`IBKR_READ_ONLY_MODE=true`，`ENABLE_IBKR_LIVE_TRADING=false`。
+- 未经用户逐次明确授权，禁止 place/submit/cancel/modify/replace order 及任何等价 mutation。
+- 连接、超时和查询失败必须显式失败，不得伪装成空账户、空持仓或空订单。
+
+## 6. 质量门与当前基线
+
+每次业务代码修改至少运行任务相关定向测试；影响决策主链路时必须运行 `AV_DEV_MOCK=1 python scripts/m5_e2e_18_cases.py`。合并候选应使用同一 Python 环境、环境变量和隔离数据库与 clean `main` 对照，只有“main 通过、候选失败”才属于新增回归。
+
+2026-08-13 在 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python` 下复跑的已知基线：
+
+- 后端全量 pytest：收集 412 项，`379 passed, 26 failed, 7 skipped, 1 warning`。
+- 前端 lint：`27 errors, 4 warnings`。
+- 前端 build：通过；仅有单 chunk 超过 500 kB 的 warning。
+
+这些是已记录的历史债务，不代表允许新增失败。候选分支若改变该基线，必须给出 clean-main 对照证据。
+
+## 7. 精简技术债 Backlog
+
+1. 收敛 26 个历史 pytest 失败：旧 Portfolio fixture、Skill 默认路径、intent `session_id`、renderer 前缀、固定 FX 与 general passthrough。
+2. 清理前端 27 个 lint error 与 4 个 warning，优先处理条件 Hooks 和 effect 内同步 setState。
+3. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
+4. 对前端大 bundle 做按路由/重组件拆分。
+5. 处理 Pydantic v3 兼容 warning，并逐步提高依赖可复现性。
+
+## 8. 文档权威与仓库卫生
+
+- 当前事实优先级：运行代码与测试证据 → 本文 → `README.md` / `AGENTS.md` / `CHANGELOG.md` → 当前 PRD。
+- `docs/CODEX_WEALTHPILOT_HANDOVER_AUDIT.md` 已封存，只用于追溯接管过程；`docs/archive/` 不是当前运行说明。
+- 重复副本、导出物和临时报告不得留在仓库。删除前先确认无运行时引用，并在仓库外备份需要保留的材料。
+- 收尾目标是 `git status` 完全干净，tracked 文件中不含凭证、真实账户标识或数据库。

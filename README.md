@@ -2,7 +2,7 @@
 
 基于 Multi-Agent 架构的个人投资辅助决策系统
 
-**当前版本：v3.12**
+**当前稳定版本：v3.14.0**
 
 ## 项目简介
 
@@ -19,6 +19,15 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 - **受纪律约束**：通过规则引擎在决策链路中前置校验投资纪律
 
 本质上，它是一个 **LLM 负责推理、持仓状态提供上下文、投资规则提供约束** 的决策系统。
+
+## 运行模式
+
+WealthPilot 维护两种明确隔离的本地运行模式：
+
+- **Public Demo**：使用临时 SQLite 数据库和固定 Seed；`PUBLIC_DEMO_MODE=true`、`BROKER_MODE=mock`，默认禁止真实行情、LLM 与券商连接，且交易入口由总闸门拦截。
+- **Self-use / Private Full Mode**：使用用户本地数据库与 ignored 环境配置，可按需启用真实 LLM、行情和券商只读能力；任何真实交易能力都必须单独、显式放行。
+
+两种模式不得共用数据库或凭证配置。IBKR 的稳定验收基线保持 Gateway Read-Only API、`IBKR_READ_ONLY_MODE=true` 与 `ENABLE_IBKR_LIVE_TRADING=false` 三重护栏；读取账户、持仓和已有订单不等于授权下单。
 
 ## 核心功能
 
@@ -65,7 +74,7 @@ WealthPilot 不是一个"直接给结论"的投资问答工具，而是强调三
 
 ### 系统架构图
 
-![WealthPilot v3.12 架构图](./docs/wealthpilot_v36_arch.svg)
+![WealthPilot v3.14 架构图](./docs/wealthpilot_v36_arch.svg)
 
 ### 1. 概述
 
@@ -320,6 +329,7 @@ pytest
 
 **近期主要版本：**
 
+- **v3.14.0**（2026-08-13）：K 线 Provider 解耦与降级链路、隔离 Demo 固定 Seed、Execution Plan 持久化、Self-use Full Mode 复原，以及 IBKR dedicated-loop 只读读取链路验收
 - **v3.12**（2026-06-10）：投研观点模块收敛 — 长期价值判断入库沉淀 · 短期信号决策时取用即弃不再写库 · 前端收敛为两 tab
 - **v3.11**（2026-06-10）：执行计划引擎 — 决策 → 规则引擎分批计划 → 盘中触发评估 → 人工确认下单 · Step C 对话调整 · Step E 观望主动发起 · 公开演示模式（PUBLIC_DEMO_MODE）
 - **v3.10**（2026-06-10）：盈透证券 IBKR 接入 — 美股+港股 LIMIT 单 · 四闸门风控 · permId 收口 · paper/live 真连验证封板

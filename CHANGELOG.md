@@ -5,6 +5,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.14.0] - 2026-08-13
+
+完成 Claude → Codex 接管收口，并将 Public Demo 与 Self-use / Private Full Mode 固化为可复验的双运行基线。
+
+### Added
+- K 线 Provider 抽象、broker → Alpha Vantage → Seed fallback，以及来源/降级 metadata
+- 隔离 Demo 固定 OHLCV Seed、Provider gate 和 Execution Plan 草稿持久化验收
+- IBKR adapter dedicated asyncio loop/thread 的跨线程读取测试与真实只读 smoke
+
+### Changed
+- 统一 OpenAI 等本地环境变量命名，并保持配置、数据库和凭证仅存在于 ignored 本地文件
+- Self-use Full Mode 恢复真实本地数据库、LLM、行情与 Execution Plan 链路
+- IBKR Live 账户允许在 Gateway Read-Only API、`IBKR_READ_ONLY_MODE=true`、`ENABLE_IBKR_LIVE_TRADING=false` 下只读连接
+
+### Fixed
+- 首次初始化注册 Execution Plan 数据表，干净数据库可持久化草稿
+- IBKR 账户、持仓和已有订单读取统一进入 adapter 的 dedicated event loop，消除跨线程 hang
+- 清理 v3.14 在途工作中的重复副本并建立 clean-main 对照回归基线
+
+### Safety
+- 未放宽任何下单、撤单、改单或实盘交易权限；真实交易仍需独立显式授权
+- `v3.14.0` 稳定标签指向 `4314e031ca653ea87a346c198d3a6dc466017ab6`
+
 ## [3.12.0] - 2026-06-10
 
 投研观点模块收敛。核心理念「持久化跟随时效性」——长期价值判断入库沉淀，短期信号决策时取用即弃，不再写库。
