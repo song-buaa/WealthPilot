@@ -70,7 +70,7 @@ class TestExecutionPlanCRUD:
         db_session.add(plan)
         db_session.flush()
 
-        loaded = db_session.query(ExecutionPlan).get(plan.id)
+        loaded = db_session.get(ExecutionPlan, plan.id)
         assert json.loads(loaded.user_anchor_prices) == anchors
         assert json.loads(loaded.manual_event_lock)["enabled"] is True
         assert json.loads(loaded.factor_snapshot)["atr14"] == 5.2
@@ -86,7 +86,7 @@ class TestExecutionPlanCRUD:
         plan.plan_version = 2
         db_session.flush()
 
-        loaded = db_session.query(ExecutionPlan).get(plan.id)
+        loaded = db_session.get(ExecutionPlan, plan.id)
         assert loaded.plan_status == "active"
         assert loaded.plan_version == 2
 
@@ -156,8 +156,8 @@ class TestExecutionTrancheCRUD:
 
         tranche.status = "armed"
         db_session.flush()
-        assert db_session.query(ExecutionTranche).get(tranche.id).status == "armed"
+        assert db_session.get(ExecutionTranche, tranche.id).status == "armed"
 
         tranche.status = "filled"
         db_session.flush()
-        assert db_session.query(ExecutionTranche).get(tranche.id).status == "filled"
+        assert db_session.get(ExecutionTranche, tranche.id).status == "filled"
