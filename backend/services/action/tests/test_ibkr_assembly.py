@@ -140,7 +140,10 @@ class TestFactoryIBKR:
         mock_settings.ibkr_client_id = 1
         mock_settings.ibkr_account = "DU1234567"
 
-        with patch("backend.core.config.settings", mock_settings):
+        with (
+            patch("backend.core.demo_mode.PUBLIC_DEMO_MODE", False),
+            patch("backend.core.config.settings", mock_settings),
+        ):
             adapter = get_broker_adapter(broker_name="ibkr")
 
         assert isinstance(adapter, IBKRBrokerAdapter)
@@ -171,8 +174,9 @@ class TestFactoryIBKR:
         from backend.services.action.brokers.factory import (
             get_broker_adapter, UnsupportedBrokerError,
         )
-        with pytest.raises(UnsupportedBrokerError):
-            get_broker_adapter(broker_name="unknown_broker")
+        with patch("backend.core.demo_mode.PUBLIC_DEMO_MODE", False):
+            with pytest.raises(UnsupportedBrokerError):
+                get_broker_adapter(broker_name="unknown_broker")
 
 
 # ═══════════════════════════════════════════════════════════════════

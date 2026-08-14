@@ -223,8 +223,9 @@ class TestBrokerModeRouting:
             CredentialNotFoundError,
         )
         provider = InMemoryCredentialProvider()
-        with pytest.raises(CredentialNotFoundError):
-            get_broker_adapter(
-                broker_name="tiger", mode="paper",
-                credential_provider=provider,
-            )
+        with patch("backend.core.demo_mode.PUBLIC_DEMO_MODE", False):
+            with pytest.raises(CredentialNotFoundError):
+                get_broker_adapter(
+                    broker_name="tiger", mode="paper",
+                    credential_provider=provider,
+                )
