@@ -249,7 +249,6 @@ export default function Discipline() {
   const handbookFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setLoading(true)
     Promise.all([
       disciplineApi.getRules(),
       disciplineApi.getHandbook(),

@@ -36,7 +36,13 @@ export default function Action() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { fetchDrafts() }, [fetchDrafts])
+  useEffect(() => {
+    let active = true
+    actionApi.listDrafts('draft')
+      .then(res => { if (active) setDrafts(res.items) })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [])
 
   function handleEditDraft(draft: ActionDraftResponse) {
     setCurrentDraft(draft)
@@ -153,7 +159,23 @@ function ActionListTab({
     finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      actionApi.listIntents('active'),
+      actionApi.listStrategies({ status: 'active' }),
+      actionApi.listOrders({}),
+    ])
+      .then(([intentRes, stratRes, orderRes]) => {
+        if (!active) return
+        setIntents(intentRes.items)
+        setStrategies(stratRes.items)
+        setOrders(orderRes.items)
+      })
+      .catch(() => undefined)
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
 
   // Group strategies by parent_intent_id
   const grouped = new Map<string, SymbolStrategyResponse[]>()
@@ -359,6 +381,7 @@ function ActionListTab({
       {/* ConfirmOrderDialog — demo 模式下不渲染 */}
       {!isDemo && placeOrderStrategy && (
         <ConfirmOrderDialog
+          key={placeOrderStrategy.id}
           open={!!placeOrderStrategy}
           onClose={() => setPlaceOrderStrategy(null)}
           strategy={placeOrderStrategy}

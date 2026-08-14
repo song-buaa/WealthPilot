@@ -95,7 +95,28 @@ export default function Dashboard() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(fetchAll, [])
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      portfolioApi.getSummary(),
+      portfolioApi.getPositions(),
+      portfolioApi.getLiabilities(),
+      allocationApi.getTargets().catch(() => []),
+    ])
+      .then(([s, p, l, targets]) => {
+        if (!active) return
+        setSummary(s)
+        setPositions(p.items)
+        setLiabilities(l.items)
+        const ct = targets.find((t: { asset_class: string }) => t.asset_class === 'cash')
+        if (ct?.cash_min_amount != null && ct?.cash_max_amount != null) {
+          setCashRange({ min: ct.cash_min_amount, max: ct.cash_max_amount })
+        }
+      })
+      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : '加载失败') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
 
   // ── 加载中 ──
   if (loading) {

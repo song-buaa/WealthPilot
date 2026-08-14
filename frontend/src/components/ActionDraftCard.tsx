@@ -6,7 +6,7 @@
  * - 旧路径(单笔): 兼容，走原布局
  * - 恢复 trigger_price 可编辑
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, AlertTriangle, CheckCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import type { ActionDraftResponse, SymbolStrategyDraft } from '@/lib/api'
@@ -41,34 +41,33 @@ const TRIGGER_LABEL: Record<string, string> = {
   PRICE_BELOW: '低于', PRICE_ABOVE: '高于', IMMEDIATE: '立即', MANUAL: '手动',
 }
 
-export default function ActionDraftCard({ open, onClose, draft, onConfirmed, planMeta }: Props) {
-  const [strategies, setStrategies] = useState<SymbolStrategyDraft[]>([])
-  const [intents, setIntents] = useState<Array<{ title: string; target_allocation: Record<string, number> }>>([])
-  const [riskNotes, setRiskNotes] = useState<string[]>([])
-  const [missingFields, setMissingFields] = useState<MissingField[]>([])
-  const [summary, setSummary] = useState('')
+function normalizeMissingFields(draft: ActionDraftResponse | null): MissingField[] {
+  const rawMissing = draft?.missing_fields || draft?.payload?.missing_fields || []
+  return rawMissing.map((field: MissingField | string) =>
+    typeof field === 'string'
+      ? { target_type: 'unknown', target_index: 0, field: 'unknown', description: field }
+      : field
+  )
+}
+
+export default function ActionDraftCard(props: Props) {
+  return <ActionDraftCardContent key={props.draft?.id ?? 'empty'} {...props} />
+}
+
+function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }: Props) {
+  const [strategies, setStrategies] = useState<SymbolStrategyDraft[]>(
+    () => draft?.payload?.symbol_strategies || [],
+  )
+  const intents = draft?.payload?.allocation_intents || []
+  const riskNotes = draft?.risk_notes || draft?.payload?.risk_notes || []
+  const [missingFields, setMissingFields] = useState<MissingField[]>(
+    () => normalizeMissingFields(draft),
+  )
+  const summary = draft?.decision_summary || ''
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showFactors, setShowFactors] = useState(false)
   const [showConstraints, setShowConstraints] = useState(false)
-
-  useEffect(() => {
-    if (draft?.payload) {
-      setStrategies(draft.payload.symbol_strategies || [])
-      setIntents(draft.payload.allocation_intents || [])
-      setRiskNotes(draft.risk_notes || draft.payload.risk_notes || [])
-      const rawMissing = draft.missing_fields || draft.payload.missing_fields || []
-      const parsed: MissingField[] = rawMissing
-        .map((mf: MissingField | string) =>
-          typeof mf === 'string'
-            ? { target_type: 'unknown', target_index: 0, field: 'unknown', description: mf }
-            : mf
-        )
-      setMissingFields(parsed)
-      setSummary(draft.decision_summary || '')
-      setError(null)
-    }
-  }, [draft])
 
   const canConfirm = missingFields.length === 0
 

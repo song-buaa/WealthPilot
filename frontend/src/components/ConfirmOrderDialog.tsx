@@ -41,7 +41,7 @@ const CONFIRMATION_TEXT = '我已知晓风险并坚持下单'
 export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPlaced }: Props) {
   const { showToast } = useToast()
 
-  const [riskLoading, setRiskLoading] = useState(false)
+  const [riskLoading, setRiskLoading] = useState(true)
   const [riskResult, setRiskResult] = useState<RiskCheckResponse | null>(null)
   const [riskError, setRiskError] = useState<string | null>(null)
 
@@ -57,25 +57,17 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
 
   // Run risk check when dialog opens
   useEffect(() => {
-    if (!open) {
-      // Reset state on close
-      setRiskResult(null)
-      setRiskError(null)
-      setConfirmText('')
-      setCheckboxChecked(false)
-      setSubmitError(null)
-      return
-    }
+    if (!open) return
 
-    setRiskLoading(true)
-    setRiskError(null)
+    let active = true
     actionApi.checkRisk(strategy.id, {
       quantity,
       limit_price: limitPrice,
     })
-      .then(res => setRiskResult(res))
-      .catch(err => setRiskError(err.message || '风控检查失败'))
-      .finally(() => setRiskLoading(false))
+      .then(res => { if (active) setRiskResult(res) })
+      .catch(err => { if (active) setRiskError(err.message || '风控检查失败') })
+      .finally(() => { if (active) setRiskLoading(false) })
+    return () => { active = false }
   }, [open, strategy.id, quantity, limitPrice])
 
   const needsConfirmation = riskResult?.requires_confirmation ?? false

@@ -2,7 +2,7 @@
  * BrokerSyncTab — 券商 API 同步面板
  * 嵌入 Dashboard 的 ImportSection 作为第 4 个 tab。
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { RefreshCw, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react'
 import { getSyncStatus, triggerSync, type SyncStatusItem } from '@/lib/broker-sync-api'
 
@@ -27,16 +27,13 @@ export function BrokerSyncTab({ onRefresh }: Props) {
   const [syncing, setSyncing] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await getSyncStatus()
-      setStatus(res.brokers)
-    } catch (e) {
-      console.error('获取同步状态失败', e)
-    }
+  useEffect(() => {
+    let active = true
+    getSyncStatus()
+      .then(res => { if (active) setStatus(res.brokers) })
+      .catch(e => console.error('获取同步状态失败', e))
+    return () => { active = false }
   }, [])
-
-  useEffect(() => { fetchStatus() }, [fetchStatus])
 
   const handleSync = async (broker: 'tiger' | 'futu' | 'snowball' | 'guojin' | 'all') => {
     setSyncing(broker)

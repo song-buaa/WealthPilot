@@ -1356,11 +1356,12 @@ function KnowledgeFilePreview({ path, onClose }: { path: string; onClose: () => 
   const [fileData, setFileData] = React.useState<{ frontmatter: Record<string, unknown>; content: string } | null>(null)
 
   React.useEffect(() => {
-    setLoading(true)
-    setError(null)
+    let active = true
     knowledgeApi.getFile(path)
-      .then(data => { setFileData(data); setLoading(false) })
-      .catch(e => { setError(String(e)); setLoading(false) })
+      .then(data => { if (active) setFileData(data) })
+      .catch(e => { if (active) setError(String(e)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [path])
 
   const title = _getFileDisplayName(path)
@@ -1881,7 +1882,7 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
 
       {/* ── 知识库文件预览弹窗 ── */}
       {previewPath && (
-        <KnowledgeFilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+        <KnowledgeFilePreview key={previewPath} path={previewPath} onClose={() => setPreviewPath(null)} />
       )}
     </div>
   )
