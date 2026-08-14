@@ -1,4 +1,5 @@
 """雪盈证券持仓同步服务（只读）。"""
+import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,7 +8,7 @@ from pydantic import ValidationError
 
 from core.config import settings
 from services.broker_sync.schema import Position
-from services.broker_sync.snowball.adapter import SnowballAdapter
+from services.broker_sync.snowball.adapter import IBKRPortfolioAdapter, SnowballAdapter
 
 
 WRITE_METHOD_KEYWORDS = ("place_order", "cancel_order")
@@ -36,6 +37,21 @@ class SnowballSyncService:
     RETRY_DELAY_SECONDS = 5
 
     def __init__(self):
+        self._source_channel = (
+            "ibkr" if "ibkr" in os.environ.get("BROKER_MODE", "").lower()
+            else "snowball"
+        )
+        if self._source_channel == "ibkr":
+            if not settings.ibkr_account:
+                raise RuntimeError("IBKR_ACCOUNT 未配置")
+            from backend.api.action import _get_adapter
+            self.account_id = settings.ibkr_account
+            self.adapter = IBKRPortfolioAdapter(account_id=self.account_id)
+            self._client = _get_adapter()
+            if self._client.broker_name != "ibkr":
+                raise RuntimeError("BROKER_MODE=ibkr 但未取得 IBKRBrokerAdapter")
+            return
+
         if not settings.snowball_account:
             raise RuntimeError("SNOWBALL_ACCOUNT 未配置")
         if not settings.snowball_secret_key:
@@ -65,6 +81,15 @@ class SnowballSyncService:
     def fetch_positions(self) -> list[Position]:
         """拉取持仓 → 转换为统一 Position 列表。"""
         snapshot_time = datetime.now(timezone.utc)
+        if self._source_channel == "ibkr":
+            raw_positions = self._client.get_positions()
+            account_info = self._client.get_account_info()
+            return self.adapter.to_positions(
+                raw_positions,
+                account_info.get("cash_balances", []),
+                snapshot_time,
+            )
+
         resp = self._client.get_position_list()
 
         # SDK 数据通过 _data 私有属性访问
@@ -100,14 +125,21 @@ class SnowballSyncService:
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 positions = self.fetch_positions()
-                repo.persist_positions(run_id=run.id, positions=positions)
+                repo.persist_positions(run_id=run.id, positions=positions, finalize=False)
 
                 snapshots = db_session.query(PositionSnapshot).filter_by(run_id=run.id).all()
                 upsert_service = PositionUpsertService(db_session)
-                upsert_report = upsert_service.upsert_from_snapshots(snapshots)
+                upsert_report = upsert_service.upsert_from_snapshots(
+                    snapshots,
+                    broker="snowball",
+                    account_id=self.account_id,
+                    sync_source="api",
+                    commit=False,
+                )
 
                 if upsert_report["errors"]:
                     raise RuntimeError(f"业务表同步失败: {upsert_report['errors']}")
+                repo.mark_run_succeeded(run.id, position_count=len(positions))
                 return run.id
 
             except (ConnectionError, TimeoutError, OSError) as e:
@@ -123,7 +155,7 @@ class SnowballSyncService:
                 )
                 raise
 
-            except (ValidationError, KeyError, AttributeError, ValueError) as e:
+            except (ValidationError, KeyError, AttributeError, ValueError, RuntimeError) as e:
                 db_session.rollback()
                 repo.mark_run_failed(
                     run_id=run.id,

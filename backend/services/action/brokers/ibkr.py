@@ -508,19 +508,35 @@ class IBKRBrokerAdapter(BrokerAdapter):
     def get_positions(self) -> list[dict]:
         self._ensure_connected()
         try:
-            return self._run_on_loop(
-                lambda: [
-                    {
-                        "symbol": p.contract.symbol if p.contract else None,
-                        "market": p.contract.exchange if p.contract else None,
-                        "currency": p.contract.currency if p.contract else None,
-                        "quantity": p.position,
-                        "average_cost": float(p.avgCost or 0),
-                        "market_value": float(p.position * (p.avgCost or 0)),
-                    }
-                    for p in self._ib.positions(account=self._account_id)
-                ]
-            )
+            async def fetch_position_snapshots():
+                snapshots = []
+                for item in list(self._ib.portfolio(account=self._account_id)):
+                    contract = item.contract
+                    details = await self._ib.reqContractDetailsAsync(contract)
+                    detail = details[0] if details else None
+                    qualified = detail.contract if detail else contract
+                    snapshots.append({
+                        "symbol": qualified.symbol,
+                        "local_symbol": qualified.localSymbol,
+                        "sec_type": qualified.secType,
+                        "exchange": qualified.exchange,
+                        "primary_exchange": qualified.primaryExchange,
+                        "currency": qualified.currency,
+                        "con_id": qualified.conId,
+                        "long_name": detail.longName if detail else qualified.localSymbol,
+                        "category": detail.category if detail else "",
+                        "subcategory": detail.subcategory if detail else "",
+                        "industry": detail.industry if detail else "",
+                        "quantity": float(item.position or 0),
+                        "average_cost": float(item.averageCost or 0),
+                        "current_price": float(item.marketPrice or 0),
+                        "market_value": float(item.marketValue or 0),
+                        "unrealized_pnl": float(item.unrealizedPNL or 0),
+                        "realized_pnl": float(item.realizedPNL or 0),
+                    })
+                return snapshots
+
+            return self._run_on_loop(fetch_position_snapshots)
         except (ConnectionError, TimeoutError):
             raise
         except Exception as exc:
@@ -535,6 +551,13 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 for item in summary:
                     if item.tag in ("TotalCashValue", "NetLiquidation", "BuyingPower"):
                         info[item.tag] = float(item.value)
+                # Dashboard 现金以逐币种 CashBalance 为真值；BASE 是折算汇总，
+                # 与各原币行同时使用会重复计算。
+                info["cash_balances"] = [
+                    {"currency": item.currency, "amount": float(item.value)}
+                    for item in self._ib.accountValues(account=self._account_id)
+                    if item.tag == "CashBalance" and item.currency != "BASE"
+                ]
                 return info
 
             return self._run_on_loop(fetch_account_info)

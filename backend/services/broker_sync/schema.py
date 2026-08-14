@@ -37,7 +37,7 @@ class Position(BaseModel):
     name_en: str | None = None
 
     # ===== 资产分类 =====
-    asset_class: Literal["equity", "etf", "option", "fund", "bond", "warrant", "future"]
+    asset_class: Literal["equity", "etf", "option", "fund", "bond", "warrant", "future", "cash"]
     market: str = Field(..., description="市场代码: US/HK/CN/SG 等,跟随券商 SDK 返回")
 
     # ===== 数量与成本 =====

@@ -43,6 +43,20 @@ SEC_TYPE_MAP = {
     "WAR": "warrant",
 }
 
+IBKR_SEC_TYPE_MAP = {
+    "STK": "equity",
+    "ETF": "etf",
+    "BOND": "bond",
+    "CASH": "cash",
+    "FUND": "fund",
+    "OPT": "option",
+    "FOP": "option",
+    "FUT": "future",
+    "WAR": "warrant",
+}
+
+_FIXED_INCOME_NAME_HINTS = ("BOND", "TREAS", "FIXED INCOME", "CREDIT")
+
 
 class SnowballAdapter:
     """雪盈证券持仓数据适配器。"""
@@ -139,3 +153,135 @@ class SnowballAdapter:
         if snapshot_time is None:
             snapshot_time = datetime.now(timezone.utc)
         return [self.item_to_position(item, snapshot_time) for item in items]
+
+
+class IBKRPortfolioAdapter:
+    """把现有 IBKRBrokerAdapter 的只读值对象映射到持仓同步契约。
+
+    内部 broker 标识继续使用 ``snowball``，遵守 v3.10 已确定的同账户持仓
+    通道契约；原始 channel 则保留为 ``ibkr`` 便于审计。
+    """
+
+    BROKER_NAME = "snowball"
+    COST_METHOD = "weighted_average"
+
+    def __init__(self, account_id: str):
+        self.account_id = account_id
+
+    @staticmethod
+    def _market(raw: dict) -> str:
+        exchange = str(raw.get("primary_exchange") or raw.get("exchange") or "").upper()
+        currency = str(raw.get("currency") or "USD").upper()
+        if exchange in {"SEHK", "HKFE"} or currency == "HKD":
+            return "HK"
+        if currency in {"CNY", "CNH"}:
+            return "CN"
+        return "US"
+
+    @staticmethod
+    def map_asset_class(raw: dict) -> str:
+        """IBKR Contract 元数据 → broker sync asset_class，不依赖 symbol。"""
+        sec_type = str(raw.get("sec_type") or "").upper()
+        mapped = IBKR_SEC_TYPE_MAP.get(sec_type, "equity")
+        if mapped != "equity":
+            return mapped
+
+        long_name = str(raw.get("long_name") or raw.get("name") or "").upper()
+        if any(hint in long_name for hint in _FIXED_INCOME_NAME_HINTS):
+            return "bond"
+        exchange = str(raw.get("primary_exchange") or raw.get("exchange") or "").upper()
+        if "ETF" in exchange:
+            return "etf"
+        return "equity"
+
+    def security_to_position(
+        self,
+        raw: dict,
+        snapshot_time: datetime,
+    ) -> Position:
+        from utils.symbol import normalize_symbol
+
+        raw_symbol = str(raw.get("local_symbol") or raw.get("symbol") or "").strip()
+        market = self._market(raw)
+        symbol = normalize_symbol(raw_symbol, market)
+        quantity = Decimal(str(raw.get("quantity") or 0))
+        avg_cost = Decimal(str(raw.get("average_cost") or 0))
+        current_price = Decimal(str(raw.get("current_price") or 0))
+        market_value = Decimal(str(raw.get("market_value") or 0))
+        unrealized_pnl = Decimal(str(raw.get("unrealized_pnl") or 0))
+        cost_basis = quantity * avg_cost
+        pnl_pct = unrealized_pnl / cost_basis if cost_basis else Decimal("0")
+        name = str(raw.get("long_name") or raw_symbol)
+
+        return Position(
+            broker=self.BROKER_NAME,
+            account_id=self.account_id,
+            symbol=symbol,
+            raw_symbol=raw_symbol,
+            name=name,
+            asset_class=self.map_asset_class(raw),
+            market=market,
+            quantity=quantity,
+            available_quantity=None,
+            avg_cost=avg_cost,
+            cost_method=self.COST_METHOD,
+            cost_basis=cost_basis,
+            current_price=current_price,
+            market_value=market_value,
+            currency=str(raw.get("currency") or "USD").upper(),
+            unrealized_pnl=unrealized_pnl,
+            unrealized_pnl_pct=pnl_pct,
+            realized_pnl=Decimal(str(raw.get("realized_pnl") or 0)),
+            day_pnl=None,
+            snapshot_time=snapshot_time,
+            sync_source="api",
+            raw_data={**raw, "source_channel": "ibkr"},
+        )
+
+    def cash_to_position(self, raw: dict, snapshot_time: datetime) -> Position:
+        from utils.symbol import normalize_symbol
+
+        currency = str(raw["currency"]).upper()
+        amount = Decimal(str(raw["amount"]))
+        market = self._market({"currency": currency})
+        raw_symbol = f"CASH-{currency}"
+        return Position(
+            broker=self.BROKER_NAME,
+            account_id=self.account_id,
+            symbol=normalize_symbol(raw_symbol, market),
+            raw_symbol=raw_symbol,
+            name=f"盈透账户现金（{currency}）",
+            asset_class="cash",
+            market=market,
+            quantity=amount,
+            available_quantity=None,
+            avg_cost=Decimal("1"),
+            cost_method=self.COST_METHOD,
+            cost_basis=amount,
+            current_price=Decimal("1"),
+            market_value=amount,
+            currency=currency,
+            unrealized_pnl=Decimal("0"),
+            unrealized_pnl_pct=Decimal("0"),
+            realized_pnl=Decimal("0"),
+            day_pnl=None,
+            snapshot_time=snapshot_time,
+            sync_source="api",
+            raw_data={"tag": "CashBalance", "currency": currency, "source_channel": "ibkr"},
+        )
+
+    def to_positions(
+        self,
+        securities: list[dict],
+        cash_balances: list[dict],
+        snapshot_time: datetime | None = None,
+    ) -> list[Position]:
+        snapshot_time = snapshot_time or datetime.now(timezone.utc)
+        positions = [self.security_to_position(item, snapshot_time) for item in securities]
+        positions.extend(
+            self.cash_to_position(item, snapshot_time)
+            for item in cash_balances
+            if str(item.get("currency") or "").upper() != "BASE"
+            and Decimal(str(item.get("amount") or 0)) != 0
+        )
+        return positions
