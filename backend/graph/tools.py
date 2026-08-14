@@ -15,7 +15,7 @@ WealthPilot Tool Layer (v2.6 M2)
 
 from __future__ import annotations
 from typing import Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -528,15 +528,14 @@ def execute_generate_signals(
 
 class LoadDecisionContextOutput(BaseModel):
     """load_decision_context Tool 的结构化输出。"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     loaded_data: Optional[object] = None   # decision_engine.data_loader.LoadedData
     has_required_data: bool = False
     has_data_errors: bool = True
     has_ambiguous_matches: bool = False
     target_position_found: bool = False
     error: Optional[str] = None
-
-    class Config:
-        arbitrary_types_allowed = True
 
 LOAD_DECISION_CONTEXT_SCHEMA = {
     "name": "load_decision_context",
