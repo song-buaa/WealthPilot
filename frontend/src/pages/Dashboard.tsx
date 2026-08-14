@@ -538,7 +538,7 @@ const SS_HINTS: Record<SSPlatform, string> = {
 const SHOW_PLATFORM_REPLACE_TABS = false
 
 function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle: () => void; onRefresh: () => void }) {
-  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync' | 'fund-e'>('csv')
+  const [activeTab, setActiveTab] = useState<'csv' | 'broker' | 'screenshot' | 'api-sync' | 'fund-e'>('api-sync')
 
   // 通用 CSV tab
   const [csvLoading, setCsvLoading] = useState(false)
@@ -647,17 +647,17 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
           {/* Tab 行 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-            <button style={tabStyle(activeTab === 'csv')}    onClick={() => setActiveTab('csv')}>通用 CSV（全量覆盖）</button>
-            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'broker')} onClick={() => setActiveTab('broker')}>CSV 导入（按平台替换）</button>}
-            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ImageIcon size={11} /> 截图识别（按平台替换）</span>
-            </button>}
             <button style={tabStyle(activeTab === 'api-sync')} onClick={() => setActiveTab('api-sync')}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} /> API 同步</span>
             </button>
             <button style={tabStyle(activeTab === 'fund-e')} onClick={() => setActiveTab('fund-e')}>
               📊 基金E账户
             </button>
+            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'broker')} onClick={() => setActiveTab('broker')}>CSV 导入（按平台替换）</button>}
+            {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ImageIcon size={11} /> 截图识别（按平台替换）</span>
+            </button>}
+            <button style={tabStyle(activeTab === 'csv')} onClick={() => setActiveTab('csv')}>通用 CSV（全量覆盖）</button>
           </div>
 
           {/* ── 通用 CSV ── */}
