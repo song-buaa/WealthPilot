@@ -1247,6 +1247,7 @@ function KnowledgeCitations({ data, viewpointCards = [], onFileClick }: {
   viewpointCards?: string[]
   onFileClick: (path: string) => void
 }) {
+  const [open, setOpen] = React.useState(false)
   const principles = data.data?.retrieved_principles || []
   const researchViews = data.data?.retrieved_research_views || []
   const allChunks = [...principles, ...researchViews]
@@ -1275,8 +1276,6 @@ function KnowledgeCitations({ data, viewpointCards = [], onFileClick }: {
     const truncated = text.length > 80 ? text.slice(0, 79) + '…' : text
     return truncated
   })
-
-  const [open, setOpen] = React.useState(false)
 
   return (
     <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
@@ -1427,6 +1426,10 @@ function CollapsibleHeader({ label, open, onToggle }: { label: string; open: boo
 
 // ── 右侧结果面板 ─────────────────────────────────────────────────
 export function ExplainPanel({ data }: { data: ExplainData }) {
+  const [chainOpen,    setChainOpen]    = React.useState(false)
+  const [researchOpen, setResearchOpen] = React.useState(false)
+  const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
+
   // ── AssetAllocation 意图专用视图 ──
   if (data.intent?.intent_type === 'asset_allocation') {
     return <AllocationExplainView data={data} />
@@ -1439,10 +1442,6 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
   // v3.6.1: 分流——[投研观点] 前缀归知识库引用，其余归联网搜索
   const webSearchItems = researchRaw.filter(r => !r.startsWith('[投研观点]') && !r.startsWith('[用户资料]'))
   const viewpointCards = researchRaw.filter(r => r.startsWith('[投研观点]') || r.startsWith('[用户资料]'))
-
-  const [chainOpen,    setChainOpen]    = React.useState(false)
-  const [researchOpen, setResearchOpen] = React.useState(false)
-  const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
 
   const intent    = data.intent
 
