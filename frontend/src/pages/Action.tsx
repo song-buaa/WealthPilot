@@ -20,8 +20,6 @@ export default function Action() {
   const urlTab = searchParams.get('tab') as string | null
   // 兼容旧 URL: tab=strategies/allocation → action
   const resolvedTab: TabKey = (urlTab === 'history') ? 'history' : 'action'
-  const urlParentIntentId = searchParams.get('parent_intent_id')
-
   const [activeTab, setActiveTab] = useState<TabKey>(resolvedTab)
 
   // 草稿
@@ -106,7 +104,6 @@ export default function Action() {
             drafts={drafts}
             onEditDraft={handleEditDraft}
             onDiscardDraft={handleDiscardDraft}
-            initialParentIntentId={urlParentIntentId}
           />
         )}
         {activeTab === 'history' && <TimelineTab />}
@@ -129,12 +126,11 @@ export default function Action() {
 // ═══════════════════════════════════════════════════════════════════
 
 function ActionListTab({
-  drafts, onEditDraft, onDiscardDraft, initialParentIntentId: _initialParentIntentId,
+  drafts, onEditDraft, onDiscardDraft,
 }: {
   drafts: ActionDraftResponse[]
   onEditDraft: (d: ActionDraftResponse) => void
   onDiscardDraft: (id: string) => void
-  initialParentIntentId: string | null
 }) {
   const navigate = useNavigate()
   const isDemo = useDemoMode()
@@ -216,11 +212,6 @@ function ActionListTab({
     try { await actionApi.cancelOrder(id); fetchData() }
     catch (e: unknown) { alert((e as Error).message) }
   }
-  async function handleDiscardIntent(id: string) {
-    try { await actionApi.discardIntent(id); fetchData() }
-    catch (e: unknown) { alert((e as Error).message) }
-  }
-
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9CA3AF', padding: 20 }}><Loader2 size={16} className="animate-spin" />加载中...</div>
 
   const hasAny = drafts.length > 0 || strategies.length > 0 || orders.length > 0
@@ -299,7 +290,6 @@ function ActionListTab({
                 onPause={handlePause}
                 onResume={handleResume}
                 onDiscard={handleDiscard}
-                onDiscardIntent={() => handleDiscardIntent(intent.id)}
                 onPlaceOrder={setPlaceOrderStrategy}
               />
             )
@@ -396,14 +386,13 @@ function ActionListTab({
 // ── 意图分组 ────────────────────────────────────────────────
 
 function IntentGroup({
-  intent, strategies, onPause, onResume, onDiscard, onDiscardIntent: _onDiscardIntent, onPlaceOrder,
+  intent, strategies, onPause, onResume, onDiscard, onPlaceOrder,
 }: {
   intent: AllocationIntentResponse
   strategies: SymbolStrategyResponse[]
   onPause: (id: string) => void
   onResume: (id: string) => void
   onDiscard: (id: string) => void
-  onDiscardIntent: () => void
   onPlaceOrder: (s: SymbolStrategyResponse) => void
 }) {
   const navigate = useNavigate()

@@ -602,7 +602,7 @@ interface HandbookSection {
 function parseHandbook(md: string): { preamble: string; sections: HandbookSection[] } {
   const lines = md.split('\n')
   const sections: HandbookSection[] = []
-  let preambleLines: string[] = []
+  const preambleLines: string[] = []
   let current: HandbookSection | null = null
 
   for (const line of lines) {

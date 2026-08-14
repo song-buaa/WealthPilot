@@ -221,7 +221,7 @@ export default function Decision() {
   function togglePanel() {
     setPanelOpen(prev => {
       const next = !prev
-      try { localStorage.setItem('wp_analysis_panel_open', String(next)) } catch {}
+      try { localStorage.setItem('wp_analysis_panel_open', String(next)) } catch { /* localStorage may be unavailable */ }
       return next
     })
   }

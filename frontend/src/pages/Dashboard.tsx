@@ -142,7 +142,7 @@ export default function Dashboard() {
   if (isEmpty) {
     return (
       <div>
-        <PageHeader posCount={0} />
+        <PageHeader />
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
           <EmptyState icon={Upload} title="暂无持仓数据" desc="请通过导入 CSV 添加持仓，导入后数据将自动刷新" />
         </div>
@@ -196,7 +196,7 @@ export default function Dashboard() {
     <div>
       <DataTip />
       {/* ── 页面标题 ── */}
-      <PageHeader posCount={positions.length} />
+      <PageHeader />
 
 
       {/* ── KPI 三卡 ── */}
@@ -422,7 +422,7 @@ export default function Dashboard() {
 // 子组件
 // ══════════════════════════════════════════════════════════════
 
-function PageHeader(_: { posCount: number }) {
+function PageHeader() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
       <div style={{ width: 38, height: 38, borderRadius: 10, background: 'linear-gradient(135deg, #1B2A4A, #2D4A7A)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>📊</div>

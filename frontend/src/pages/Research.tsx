@@ -271,7 +271,7 @@ function ParseCardPreview({ card }: { card: ResearchCard }) {
 
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Research() {
-  const [_viewpoints, setViewpoints] = useState<Viewpoint[]>([])
+  const [, setViewpoints] = useState<Viewpoint[]>([])
   const [cards,      setCards]      = useState<ResearchCard[]>([])
   const [documents,  setDocuments]  = useState<ResearchDocument[]>([])
   const [loading,    setLoading]    = useState(true)
@@ -323,7 +323,7 @@ export default function Research() {
 
   // ── v2 状态 ──
   const [v2Cards,       setV2Cards]       = useState<ViewpointCardV2[]>([])
-  const [_v2Loading,    setV2Loading]     = useState(false)
+  const [, setV2Loading] = useState(false)
   const [v2Holdings,    setV2Holdings]    = useState<{symbol: string | null; asset_name: string; market: string | null; supported: boolean; weight: number; entity_id?: string | null; sibling_symbols?: string[]}[]>([])
   const [v2Selected,    setV2Selected]    = useState<Set<string>>(new Set())
   const [v2ManualSym,   setV2ManualSym]   = useState('')
@@ -759,7 +759,8 @@ export default function Research() {
   function toggleV2LibSelect(cardId: string) {
     setV2LibSelectedIds(prev => {
       const next = new Set(prev)
-      next.has(cardId) ? next.delete(cardId) : next.add(cardId)
+      if (next.has(cardId)) next.delete(cardId)
+      else next.add(cardId)
       return next
     })
   }
@@ -767,7 +768,8 @@ export default function Research() {
   function toggleV2Select(cardId: string) {
     setV2SelectedIds(prev => {
       const next = new Set(prev)
-      next.has(cardId) ? next.delete(cardId) : next.add(cardId)
+      if (next.has(cardId)) next.delete(cardId)
+      else next.add(cardId)
       return next
     })
   }
@@ -1234,7 +1236,8 @@ export default function Research() {
                             checked={v2Selected.has(h.symbol!)}
                             onChange={e => {
                               const next = new Set(v2Selected)
-                              e.target.checked ? next.add(h.symbol!) : next.delete(h.symbol!)
+                              if (e.target.checked) next.add(h.symbol!)
+                              else next.delete(h.symbol!)
                               setV2Selected(next)
                             }} />
                           <span style={{ flex: 1 }}>{h.asset_name.split(' (')[0]}</span>

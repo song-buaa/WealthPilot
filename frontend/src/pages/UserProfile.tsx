@@ -221,7 +221,7 @@ function parsePhilosophy(md: string): { preamble: string; sections: Array<{ titl
   // 拆分标题行（## 开头）
   const lines = md.split('\n')
   const sections: Array<{ title: string; body: string }> = []
-  let preambleLines: string[] = []
+  const preambleLines: string[] = []
   let currentTitle = ''
   let currentBody: string[] = []
 
