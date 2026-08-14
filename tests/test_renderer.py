@@ -76,7 +76,7 @@ class TestRendererUserUploadWithURL(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
-        self.assertTrue(lines[0].startswith("[用户资料]"))
+        self.assertTrue(lines[0].startswith("[投研观点]"))
         self.assertIn("[ref:https://example.com/report]", lines[0])
         self.assertIn("理想汽车Q1财报超预期", lines[0])
         for line in lines:
@@ -95,7 +95,7 @@ class TestRendererUserUploadNoURL(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
-        self.assertTrue(lines[0].startswith("[用户资料] "))
+        self.assertTrue(lines[0].startswith("[投研观点] "))
         self.assertNotIn("[ref:", lines[0])
         self.assertIn("特斯拉Cybertruck", lines[0])
         self.assertTrue(lines[0].endswith("(数据截至 2026-04-01)"))
@@ -118,7 +118,7 @@ class TestRendererAlphaVantageNews(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
-        self.assertTrue(lines[0].startswith("[第三方数据]"))
+        self.assertTrue(lines[0].startswith("[Alpha Vantage]"))
         self.assertIn("[ref:https://news.example.com/li-rating]", lines[0])
         self.assertIn("大和重申理想汽车买入评级", lines[0])
         kpi_line = [l for l in lines if "目标价上行空间" in l]
@@ -144,7 +144,7 @@ class TestRendererAlphaVantageFundamental(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        self.assertTrue(lines[0].startswith("[第三方数据] "))
+        self.assertTrue(lines[0].startswith("[Alpha Vantage] "))
         kpi_line = lines[1]
         self.assertIn("营收同比+48.0%", kpi_line)
         self.assertIn("净利率8.2%", kpi_line)
@@ -173,7 +173,7 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        self.assertTrue(lines[0].startswith("[第三方数据]"))
+        self.assertTrue(lines[0].startswith("[Alpha Vantage]"))
         self.assertIn("[ref:https://api.example.com/earnings/LI]", lines[0])
         self.assertIn("EPS超预期", lines[0])
         kpi_line = [l for l in lines if "盈利同比" in l]
@@ -186,7 +186,7 @@ class TestRendererAlphaVantageEarnings(unittest.TestCase):
 
 
 class TestRendererAllLinesHavePrefix(unittest.TestCase):
-    """Case 6: 所有返回行都以 [用户资料] 或 [第三方数据] 或 [联网参考] 开头"""
+    """Case 6: 所有返回行都带当前可追溯的具体来源标签。"""
 
     def test_all_lines_prefixed(self):
         card = _make_card(
@@ -206,7 +206,7 @@ class TestRendererAllLinesHavePrefix(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 2)
-        valid_prefixes = ("[用户资料]", "[第三方数据]", "[联网参考]")
+        valid_prefixes = ("[投研观点]", "[Alpha Vantage]", "[AKShare]", "[Perplexity]", "[数据源]")
         for i, line in enumerate(lines):
             self.assertTrue(
                 line.startswith(valid_prefixes),
@@ -225,7 +225,7 @@ class TestRendererFallbackToSummary(unittest.TestCase):
         )
         lines = render_card(card)
         self.assertTrue(len(lines) >= 1)
-        self.assertTrue(lines[0].startswith("[用户资料]"))
+        self.assertTrue(lines[0].startswith("[投研观点]"))
         self.assertIn("新能源汽车行业", lines[0])
         self.assertIn("(数据截至 2026-04-01)", lines[0])
 
