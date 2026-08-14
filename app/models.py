@@ -84,6 +84,11 @@ class Position(Base):
     ticker = Column(String(50), nullable=True)           # 代码 (如: LI, 510300)
     symbol = Column(String(30), nullable=True)           # v3.11: 标准 TICKER:MARKET (如: LI:US, 0700:HK)
     platform = Column(String(50), nullable=False)        # 所在平台
+    # Broker API 同步归属。手工/CSV/基金数据保持 NULL，避免 authoritative
+    # snapshot reconciliation 误删非该账户、非该来源的数据。
+    broker = Column(String(20), nullable=True)
+    broker_account_id = Column(String(50), nullable=True)
+    sync_source = Column(String(20), nullable=True)
     asset_class = Column(String(20), nullable=False)     # 大类资产分类
     currency = Column(String(10), default="CNY")         # 币种
     quantity = Column(Float, default=0)                  # 数量/份额

@@ -43,6 +43,7 @@ class PositionSnapshotRepository:
         run_id: int,
         positions: list[Position],
         total_market_value_cnh: Optional[Decimal] = None,
+        finalize: bool = True,
     ) -> None:
         """
         批量写入持仓快照,并把 run 标记为 success。
@@ -57,11 +58,29 @@ class PositionSnapshotRepository:
             snapshot = self._position_to_snapshot(run, pos)
             self.session.add(snapshot)
 
+        if finalize:
+            self.mark_run_succeeded(
+                run_id=run_id,
+                position_count=len(positions),
+                total_market_value_cnh=total_market_value_cnh,
+            )
+        else:
+            self.session.flush()
+
+    def mark_run_succeeded(
+        self,
+        run_id: int,
+        position_count: int,
+        total_market_value_cnh: Optional[Decimal] = None,
+    ) -> None:
+        """在 snapshot 与业务 Position 都已成功处理后，原子提交成功状态。"""
+        run = self.session.get(PositionSnapshotRun, run_id)
+        if run is None:
+            raise ValueError(f"Run id={run_id} 不存在")
         run.finished_at = datetime.now(timezone.utc)
         run.status = "success"
-        run.position_count = len(positions)
+        run.position_count = position_count
         run.total_market_value_cnh = total_market_value_cnh
-
         self.session.commit()
 
     def mark_run_failed(

@@ -126,6 +126,7 @@ class TigerSyncService:
                     run_id=run.id,
                     positions=positions,
                     total_market_value_cnh=None,
+                    finalize=False,
                 )
 
                 # 同步到 Position 业务表
@@ -134,13 +135,20 @@ class TigerSyncService:
 
                 snapshots = db_session.query(PositionSnapshot).filter_by(run_id=run.id).all()
                 upsert_service = PositionUpsertService(db_session)
-                upsert_report = upsert_service.upsert_from_snapshots(snapshots)
+                upsert_report = upsert_service.upsert_from_snapshots(
+                    snapshots,
+                    broker="tiger",
+                    account_id=self.account_id,
+                    sync_source="api",
+                    commit=False,
+                )
 
                 if upsert_report["errors"]:
                     raise RuntimeError(
                         f"业务表同步失败: {upsert_report['errors']}"
                     )
 
+                repo.mark_run_succeeded(run.id, position_count=len(positions))
                 return run.id
 
             except (ApiException, ConnectionError, TimeoutError, OSError) as e:
@@ -156,7 +164,7 @@ class TigerSyncService:
                 )
                 raise
 
-            except (ValidationError, KeyError, AttributeError, ValueError) as e:
+            except (ValidationError, KeyError, AttributeError, ValueError, RuntimeError) as e:
                 db_session.rollback()
                 repo.mark_run_failed(
                     run_id=run.id,

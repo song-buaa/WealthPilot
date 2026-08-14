@@ -6,7 +6,7 @@ WealthPilot - 数据库基础设施
 """
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 
@@ -59,4 +59,27 @@ def init_db():
     from app import models  # noqa: F401  触发所有 Model 类的注册
     import backend.services.action.models  # noqa: F401  v3.2 投资行动模块 5 张表
     import backend.services.execution_plan.models  # noqa: F401  v3.14 执行计划表
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    _ensure_position_ownership_columns(engine)
+
+
+def _ensure_position_ownership_columns(engine) -> None:
+    """为既有 SQLite positions 表幂等补齐 Broker 同步归属字段。"""
+    if engine.dialect.name != "sqlite":
+        return
+
+    columns = {column["name"] for column in inspect(engine).get_columns("positions")}
+    additions = {
+        "broker": "VARCHAR(20)",
+        "broker_account_id": "VARCHAR(50)",
+        "sync_source": "VARCHAR(20)",
+    }
+    with engine.begin() as connection:
+        for name, sql_type in additions.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE positions ADD COLUMN {name} {sql_type}"))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_positions_sync_owner "
+            "ON positions (broker, broker_account_id, sync_source, symbol)"
+        ))

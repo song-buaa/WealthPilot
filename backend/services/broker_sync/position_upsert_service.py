@@ -41,6 +41,7 @@ SEC_TYPE_TO_CN_BASIC = {
     "warrant": "衍生",
     "bond": "固收",
     "fund": "权益",  # 基金默认权益,名称匹配可覆盖
+    "cash": "货币",
 }
 
 
@@ -78,6 +79,11 @@ class PositionUpsertService:
     def upsert_from_snapshots(
         self,
         snapshots: Iterable[PositionSnapshot],
+        *,
+        broker: str | None = None,
+        account_id: str | None = None,
+        sync_source: str | None = None,
+        commit: bool = True,
     ) -> dict:
         """
         把 snapshots 同步到 Position 业务表。
@@ -99,6 +105,12 @@ class PositionUpsertService:
         errors = []
 
         snap_list = list(snapshots)
+        scopes = self._resolve_scopes(
+            snap_list,
+            broker=broker,
+            account_id=account_id,
+            sync_source=sync_source,
+        )
 
         for snap in snap_list:
             try:
@@ -118,38 +130,124 @@ class PositionUpsertService:
 
         # 删除已清仓的持仓：本次 snapshot 覆盖的 platform 中，
         # ticker 不在本次 snapshot 里的记录应被删除
-        removed = self._remove_stale_positions(snap_list)
+        removed = 0
+        for scope_broker, scope_account, scope_source in scopes:
+            self._claim_legacy_positions_from_history(
+                broker=scope_broker,
+                account_id=scope_account,
+                sync_source=scope_source,
+            )
+            scope_snapshots = [
+                snap for snap in snap_list
+                if snap.broker == scope_broker and snap.account_id == scope_account
+            ]
+            removed += self._remove_stale_positions(
+                scope_snapshots,
+                broker=scope_broker,
+                account_id=scope_account,
+                sync_source=scope_source,
+            )
 
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return {"inserted": inserted, "updated": updated, "removed": removed, "errors": []}
 
-    def _remove_stale_positions(self, snap_list: list) -> int:
-        """删除本次 snapshot 不再包含的持仓（已卖出/清仓）。
+    @staticmethod
+    def _resolve_scopes(
+        snap_list: list[PositionSnapshot],
+        *,
+        broker: str | None,
+        account_id: str | None,
+        sync_source: str | None,
+    ) -> list[tuple[str, str, str]]:
+        """得到 authoritative snapshot scopes；空快照必须显式给出。"""
+        explicit_scope = any(value is not None for value in (broker, account_id, sync_source))
+        if explicit_scope and not all((broker, account_id, sync_source)):
+            raise ValueError("broker/account_id/sync_source 必须同时提供")
 
-        按 platform 分组：对于本次同步涉及的每个 platform，
-        找出 Position 表中属于该 platform 但 ticker 不在本次 snapshot 中的记录并删除。
-        """
-        from collections import defaultdict
+        if explicit_scope:
+            scopes = [(broker, account_id, sync_source)]
+        else:
+            scopes = sorted({(snap.broker, snap.account_id, "api") for snap in snap_list})
 
-        # 按 platform 分组，收集本次 snapshot 的所有 ticker
-        platform_tickers: dict[str, set[str]] = defaultdict(set)
-        for snap in snap_list:
-            platform = BROKER_TO_PLATFORM.get(snap.broker)
-            if platform:
-                ticker = self._denormalize_ticker(snap.symbol)
-                platform_tickers[platform].add(ticker)
+        if not scopes:
+            raise ValueError("空 snapshot reconciliation 必须提供 broker/account_id/sync_source")
 
-        removed = 0
-        for platform, current_tickers in platform_tickers.items():
-            stale = self.session.query(BusinessPosition).filter(
-                BusinessPosition.platform == platform,
-                ~BusinessPosition.ticker.in_(current_tickers),
-            ).all()
-            for pos in stale:
-                self.session.delete(pos)
-                removed += 1
+        if explicit_scope:
+            for snap in snap_list:
+                if snap.broker != broker or snap.account_id != account_id:
+                    raise ValueError("snapshot 包含 scope 外的 broker/account")
 
-        return removed
+        for scope in scopes:
+            if not all(scope):
+                raise ValueError("snapshot 包含 scope 外的 broker/account")
+
+        return scopes
+
+    def _claim_legacy_positions_from_history(
+        self,
+        *,
+        broker: str,
+        account_id: str,
+        sync_source: str,
+    ) -> None:
+        """用既有成功快照证据为升级前的 API 行补齐 ownership。"""
+        from services.broker_sync.models import PositionSnapshotRun
+
+        platform = BROKER_TO_PLATFORM.get(broker)
+        if not platform:
+            return
+
+        historical_symbols = (
+            self.session.query(PositionSnapshot.symbol)
+            .join(PositionSnapshotRun, PositionSnapshot.run_id == PositionSnapshotRun.id)
+            .filter(
+                PositionSnapshotRun.broker == broker,
+                PositionSnapshotRun.account_id == account_id,
+                PositionSnapshotRun.sync_source == sync_source,
+                PositionSnapshotRun.status == "success",
+            )
+            .distinct()
+            .all()
+        )
+        for (symbol,) in historical_symbols:
+            ticker = self._denormalize_ticker(symbol)
+            legacy = self.session.query(BusinessPosition).filter_by(
+                ticker=ticker,
+                platform=platform,
+                broker=None,
+                broker_account_id=None,
+                sync_source=None,
+            ).first()
+            if legacy is not None:
+                legacy.broker = broker
+                legacy.broker_account_id = account_id
+                legacy.sync_source = sync_source
+
+    def _remove_stale_positions(
+        self,
+        snap_list: list[PositionSnapshot],
+        *,
+        broker: str,
+        account_id: str,
+        sync_source: str,
+    ) -> int:
+        """只删除同 broker + account + source 下已不在成功快照中的持仓。"""
+        current_symbols = {snap.symbol for snap in snap_list}
+        query = self.session.query(BusinessPosition).filter_by(
+            broker=broker,
+            broker_account_id=account_id,
+            sync_source=sync_source,
+        )
+        if current_symbols:
+            query = query.filter(~BusinessPosition.symbol.in_(current_symbols))
+
+        stale = query.all()
+        for pos in stale:
+            self.session.delete(pos)
+        return len(stale)
 
     def _upsert_single(self, snap: PositionSnapshot) -> bool:
         """单条 upsert。返回 True 表示新增,False 表示更新。"""
@@ -165,8 +263,28 @@ class PositionUpsertService:
 
         # 2. 查现有行
         existing = self.session.query(BusinessPosition).filter_by(
-            ticker=ticker, platform=platform
+            symbol=snap.symbol,
+            broker=snap.broker,
+            broker_account_id=snap.account_id,
+            sync_source="api",
         ).first()
+
+        # 旧库升级后的首轮同步：只有存在相同 scope 的历史 snapshot 证据时，
+        # 才接管旧的 platform+ticker 行，避免把手工/CSV 行误认作 API 持仓。
+        if existing is None:
+            has_snapshot_evidence = self.session.query(PositionSnapshot.id).filter_by(
+                broker=snap.broker,
+                account_id=snap.account_id,
+                symbol=snap.symbol,
+            ).filter(PositionSnapshot.run_id != snap.run_id).first()
+            if has_snapshot_evidence:
+                existing = self.session.query(BusinessPosition).filter_by(
+                    ticker=ticker,
+                    platform=platform,
+                    broker=None,
+                    broker_account_id=None,
+                    sync_source=None,
+                ).first()
 
         # 3. 计算盈亏
         pnl_original = float(snap.unrealized_pnl)
@@ -184,6 +302,9 @@ class PositionUpsertService:
                 ticker=ticker,
                 symbol=snap.symbol,  # v3.11: 存完整 TICKER:MARKET 真值
                 platform=platform,
+                broker=snap.broker,
+                broker_account_id=snap.account_id,
+                sync_source="api",
                 name=snap.name,
                 asset_class=resolved_asset_class,
                 segment="投资",
@@ -217,10 +338,11 @@ class PositionUpsertService:
             existing.profit_loss_original_value = pnl_original
             existing.currency = snap.currency  # v3.4 修复: 存原币种(USD/HKD)
             existing.symbol = snap.symbol      # v3.11: 每次 sync 更新 symbol 真值
-            # name / asset_class / segment 受保护,不覆盖
-            # 但如果 asset_class 是非法值(如英文 'equity'),强制修正
-            if existing.asset_class not in LEGAL_CN_CLASSES:
-                existing.asset_class = resolved_asset_class
+            existing.broker = snap.broker
+            existing.broker_account_id = snap.account_id
+            existing.sync_source = "api"
+            # API 同步行的资产类型由 Broker 元数据权威更新；name/segment 仍保护。
+            existing.asset_class = resolved_asset_class
             return False
 
     _KNOWN_MARKETS = {"US", "HK", "SH", "SZ"}
