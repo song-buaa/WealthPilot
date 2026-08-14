@@ -1,14 +1,15 @@
 # WealthPilot 项目治理基线
 
-> 生效日期：2026-08-13
-> 当前稳定版本：v3.14.0
-> 稳定标签提交：`4314e031ca653ea87a346c198d3a6dc466017ab6`
+> 更新日期：2026-08-14
+> Current development baseline：当前 `main`
+> Latest stable release：`v3.14.1`
+> Immutable historical release：`v3.14.0` → `4314e031ca653ea87a346c198d3a6dc466017ab6`
 
 ## 1. 当前产品与架构
 
 WealthPilot 是本地优先的个人投资决策工作台。当前前端为 React 19 + Vite 8 + TypeScript，后端为 FastAPI + SQLAlchemy + SQLite，决策链路为 PEER 四 Agent + 13 个 Skills。核心入口为 `frontend/src`、`backend/main.py`、`backend/agents`、`backend/services`、`skills` 与 `app`。
 
-`main` 是唯一长期开发与集成分支；`v3.14.0` 是本次交接形成的稳定发布标签。标签不会随治理文档提交移动。
+`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.14.1` 是 Latest stable release；`v3.14.0` 保留为 immutable historical release，原 Tag 不移动、不重建。
 
 ## 2. 运行模式
 
@@ -37,7 +38,7 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 ## 4. 版本、Tag 与发布
 
 - 版本遵循 SemVer：破坏兼容为 major，向后兼容功能为 minor，修复与文档治理为 patch 或后续 main 提交。
-- 稳定 Tag 使用带 `v` 的完整版本号，例如 `v3.14.0`，Tag 必须指向已验收的不可变提交。
+- 稳定 Tag 使用带 `v` 的完整版本号，例如 `v3.14.1`，Tag 必须指向已验收的不可变提交。
 - 发布前同步 `README.md`、`AGENTS.md` 与 `CHANGELOG.md`，确认工作区干净、敏感文件未跟踪，并执行相称的后端测试、前端 lint/build 和人工 smoke。
 - 发布后验证 local main、origin/main 与预期提交一致；Tag 只在明确发布动作中创建，不因普通文档提交重打或移动。
 

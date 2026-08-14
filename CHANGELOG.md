@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.14.1] - 2026-08-14
+
+Patch Release：固化当前 `main` 的已验收 Self-use / Private Full Mode 与 IBKR Live read-only 基线，并消除开发基线与稳定版本的语义分歧。
+
+### Changed
+- 明确 Current development baseline 为当前 `main`，Latest stable release 为 `v3.14.1`
+- 保留 `v3.14.0` 为 immutable historical release，不移动或重建原 Tag
+- 本版本仅更新发布与治理元数据，不修改产品代码，也不处理既有 pytest/lint backlog
+
 ## [3.14.0] - 2026-08-13
 
 完成 Claude → Codex 接管收口，并将 Public Demo 与 Self-use / Private Full Mode 固化为可复验的双运行基线。
@@ -26,7 +35,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Safety
 - 未放宽任何下单、撤单、改单或实盘交易权限；真实交易仍需独立显式授权
-- `v3.14.0` 稳定标签指向 `4314e031ca653ea87a346c198d3a6dc466017ab6`
+- `v3.14.0` immutable historical release 标签指向 `4314e031ca653ea87a346c198d3a6dc466017ab6`
 
 ## [3.12.0] - 2026-06-10
 
