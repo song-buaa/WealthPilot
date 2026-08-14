@@ -1,0 +1,156 @@
+{
+  "schema_version": "1.0",
+  "frozen_timestamp": "2026-08-14T00:00:00Z",
+  "search_results": [
+    "离线宏观夹具：权益资产波动与行业集中度需要结合仓位权重、相关性和现金缓冲共同评估。",
+    "离线市场夹具：固定评测时点不引入任何实时行情、新闻或搜索结果。"
+  ],
+  "principles": [
+    {
+      "content": "资产配置应先明确目标、期限和风险承受能力，再用目标区间和再平衡纪律约束行为。",
+      "source_type": "allocation_principles",
+      "source_channel": "local_principles",
+      "parent_doc_path": "fixtures/allocation_principles.md",
+      "chunk_index": 0,
+      "semantic_score": 1.0,
+      "date": "2026-08-14",
+      "time_sensitivity": "low",
+      "metadata": {"fixture": true}
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "PD_001",
+      "user_query": "我有一只股票最近涨了不少，该不该趁现在落袋为安？",
+      "intent": {"primary_intent": "PositionDecision", "secondary_intents": [], "subtasks": ["thesis_review", "position_fit_check", "action_evaluation"], "actions": ["TAKE_PROFIT"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.9},
+      "planner": {"route": "clarify", "rationale": "操作意图明确但标的名称不明确，需要先选择持仓"}
+    },
+    {
+      "case_id": "PD_002",
+      "user_query": "我有一只基金持续亏损，现在止损出来还是继续持有？",
+      "intent": {"primary_intent": "PositionDecision", "secondary_intents": [], "subtasks": ["thesis_review", "position_fit_check", "action_evaluation"], "actions": ["STOP_LOSS"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.9},
+      "planner": {"route": "clarify", "rationale": "需要先确定具体基金才能结合成本和仓位分析"}
+    },
+    {
+      "case_id": "PD_003",
+      "user_query": "我看好一个标的想加仓，但它在我组合里已经不轻了，怎么判断能不能加？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.9},
+      "planner": {"route": "general", "rationale": "问题核心是重仓状态下评估加仓的方法论"},
+      "answer": "判断能否加仓，先把看好理由与仓位约束分开。检查投资逻辑是否出现了新的、可验证证据，再测算加仓后单一标的权重、行业集中度和组合最大回撤是否仍在纪律范围内。若只是价格上涨强化了信心，而基本面与估值没有同步改善，应暂停动作。可以预先写下触发条件、失效条件和分批规模，用规则代替临场情绪，并保留现金缓冲。"
+    },
+    {
+      "case_id": "PR_001",
+      "user_query": "我的持仓里有几只股票集中在同一个行业，这样风险大吗？",
+      "intent": {"primary_intent": "PortfolioReview", "secondary_intents": [], "subtasks": ["review", "risk_check", "concentration_check"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.95},
+      "planner": {"route": "portfolio", "rationale": "用户询问组合行业集中度和整体风险"},
+      "answer": "组合的主要风险不只取决于股票数量，而取决于这些持仓是否暴露于相同的盈利驱动。同行业公司往往同时受需求周期、监管和估值收缩影响，因此表面分散可能仍是同一风险来源。应按行业权重、前几大持仓权重和资产相关性检查集中度，并结合现金与固收缓冲评估承压能力。若多个标的逻辑高度重合，可优先降低重复暴露，再把腾出的风险预算配置到驱动因素不同的资产；调整应分步进行，并用目标区间持续复核。",
+      "key_findings": ["行业相关性使表面分散失效", "应结合权重和风险预算评估"]
+    },
+    {
+      "case_id": "PR_002",
+      "user_query": "我的组合调整过几次了，现在整体是什么状态？",
+      "intent": {"primary_intent": "PortfolioReview", "secondary_intents": [], "subtasks": ["review", "risk_check", "rebalance_check"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.95},
+      "planner": {"route": "portfolio", "rationale": "需要对当前组合结构进行整体复盘"},
+      "answer": "从固定评测组合看，当前状态应从结构、风险和纪律三个层面理解。先看权益、固收、货币等大类权重是否仍落在目标区间，再看前几大持仓与行业集中度是否让单一风险主导净值波动。随后核对现金缓冲、组合盈亏来源以及调整后是否出现新的偏离。多次调整本身不代表结构更优，关键是每次动作是否让风险暴露更接近既定目标。建议保留一份调整前后快照，以目标区间而非短期涨跌作为下一次再平衡依据；若仍在容忍带内，应减少无必要交易。",
+      "key_findings": ["用目标区间衡量调整效果", "避免把频繁调整等同于结构改善"]
+    },
+    {
+      "case_id": "PR_003",
+      "user_query": "我感觉我的组合在震荡市里跌得比较多，问题出在哪？",
+      "intent": {"primary_intent": "PortfolioReview", "secondary_intents": [], "subtasks": ["review", "risk_check", "concentration_check"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.95},
+      "planner": {"route": "portfolio", "rationale": "问题聚焦组合在震荡环境中的结构性风险"},
+      "answer": "震荡环境中回撤偏大，通常说明组合的风险来源比资产名称显示得更集中。高波动权益、同一行业和相似风格可能在下跌时相关性迅速上升，而现金或固收缓冲不足会放大净值波动。应对照各持仓权重、行业暴露和盈亏贡献，识别是否由少数重仓或共同因子主导。修正重点是降低重复风险、恢复缓冲资产并设定再平衡区间，而不是根据一次回撤追逐短期强势品种。",
+      "key_findings": ["下跌相关性上升会暴露隐藏集中度", "缓冲资产不足会放大回撤"]
+    },
+    {
+      "case_id": "AA_001",
+      "user_query": "我有100万准备开始投资，应该怎么分配？",
+      "intent": {"primary_intent": "AssetAllocation", "secondary_intents": [], "subtasks": ["new_cash_allocation", "goal_based_allocation"], "actions": ["REBALANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": "100万", "capital_amount": 1000000, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.98},
+      "planner": {"route": "portfolio", "rationale": "明确新增资金规模，需要进行初始资产配置"},
+      "answer": "这笔一百万元应先按用途、期限和最大可承受回撤划分，而不是直接挑产品。先预留能够覆盖近期支出与应急需求的货币类资金，再用固收承担稳定器作用，权益承担长期增长，另类资产只作为有限补充。固定评测规则给出的目标区间与计算计划应作为比例和金额的唯一数值依据，实际执行可分批完成，并在每批后复核剩余风险预算。若投资期限或收入稳定性尚未明确，应先采用目标区间中更保守的一侧；后续只在偏离容忍带、目标变化或风险能力变化时再平衡。",
+      "key_findings": ["先明确资金用途和期限", "规则计算结果约束配置数值"]
+    },
+    {
+      "case_id": "AA_002",
+      "user_query": "我准备把一笔即将到期的30万理财重新配置，不知道怎么分？",
+      "intent": {"primary_intent": "AssetAllocation", "secondary_intents": [], "subtasks": ["new_cash_allocation", "goal_based_allocation"], "actions": ["REBALANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": "30万", "capital_amount": 300000, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.98},
+      "planner": {"route": "portfolio", "rationale": "到期资金需要重新配置并与现有组合衔接"},
+      "answer": "到期的三十万元应作为新增现金流放回整体组合中评估，而不是单独复制原理财。先确认未来支出和流动性需求，再检查现有大类资产相对目标中值的偏离，让新增资金优先补足低配类别。比例与金额以规则引擎生成的目标区间和增量计划为准，AI 只解释原因。执行时可以分批投入，避免单一时点风险；每批完成后重新计算组合权重，并保留必要现金缓冲。若期限较短或本金波动容忍度低，应优先满足安全性与流动性，再考虑增长资产。",
+      "key_findings": ["新增资金优先修复现有偏离", "分批执行并保留流动性"]
+    },
+    {
+      "case_id": "AA_003",
+      "user_query": "我想把组合调整到更稳健的结构，固收应该加多少？",
+      "intent": {"primary_intent": "AssetAllocation", "secondary_intents": [], "subtasks": ["rebalance_allocation"], "actions": ["REBALANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.95},
+      "planner": {"route": "portfolio", "rationale": "用户有明确稳健化目标并询问固收增量"},
+      "answer": "固收需要增加多少，应由当前固收权重与稳健目标区间的差额计算，不能凭主观给出比例。先确认风险承受能力和资金期限是否真的发生变化，再读取规则引擎给出的当前偏离、目标中值与增量计划。调整资金可优先来自超过上限的高波动资产，同时保留现金缓冲，并采用分批方式降低时点风险。完成后应重新计算各大类权重；进入容忍带后停止继续调整，避免为了追求表面稳定而过度交易。",
+      "key_findings": ["增量由规则偏离计算", "进入容忍带后停止调整"]
+    },
+    {
+      "case_id": "PA_001",
+      "user_query": "这段时间大盘还行，但我的组合收益明显跑输了，为什么？",
+      "intent": {"primary_intent": "PerformanceAnalysis", "secondary_intents": [], "subtasks": ["pnl_breakdown", "loss_reason", "attribution"], "actions": ["VIEW_PERFORMANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.96},
+      "planner": {"route": "portfolio", "rationale": "用户要求解释组合相对市场的收益差异"},
+      "answer": "组合跑输不能只用指数涨跌解释，应把收益拆成持仓权重与各标的贡献。固定组合数据中的盈利与亏损贡献能够显示，少数重仓回撤、行业风格错配或现金占比都会造成与大盘不同的结果。还要确认比较基准是否与组合币种、市场和资产类别一致，否则结论会失真。建议先列出正负贡献最大的持仓，再把结果与目标配置和风险预算对照，区分正常的风格差异、结构性集中以及执行偏差；只有结构偏离持续存在时才进入调整评估。",
+      "key_findings": ["收益应按权重和标的贡献拆解", "基准必须与组合结构匹配"]
+    },
+    {
+      "case_id": "PA_002",
+      "user_query": "我有几笔投资一直是正收益，但整体算下来并不好看，哪里出了问题？",
+      "intent": {"primary_intent": "PerformanceAnalysis", "secondary_intents": [], "subtasks": ["pnl_breakdown", "loss_reason", "attribution"], "actions": ["VIEW_PERFORMANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.96},
+      "planner": {"route": "portfolio", "rationale": "需要按金额和权重分析整体收益归因"},
+      "answer": "个别投资为正不等于组合收益理想，因为组合结果由每笔资产的收益率、投入金额和持有时间共同决定。小仓位盈利可能抵不过大仓位亏损，频繁调仓成本、闲置现金和汇率变化也可能拖累总结果。应按绝对盈亏贡献排序，而不是只数盈利笔数；同时核对重仓资产、资产类别和时间区间。固定评测数据提供了各持仓盈亏与权重，可据此定位主要贡献者和拖累项，再判断问题来自配置、选择还是执行，避免仅凭胜率作出结论。",
+      "key_findings": ["绝对贡献比盈利笔数更重要", "权重和持有期共同决定组合结果"]
+    },
+    {
+      "case_id": "PA_003",
+      "user_query": "从我现在的持仓来看，哪些标的在拖累整体表现？",
+      "intent": {"primary_intent": "PerformanceAnalysis", "secondary_intents": [], "subtasks": ["pnl_breakdown", "attribution"], "actions": ["VIEW_PERFORMANCE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.96},
+      "planner": {"route": "portfolio", "rationale": "问题要求对当前持仓做收益贡献归因"},
+      "answer": "识别拖累项应按绝对亏损贡献排序，并结合持仓权重观察，而不能只看跌幅。小仓位的大跌可能影响有限，大仓位的小幅回撤反而可能是主要来源。固定组合上下文已经包含各标的市值、成本和盈亏，可据此列出负贡献最大的项目，并检查它们是否集中在同一行业或风格。归因完成后，还需区分短期波动与投资逻辑失效；拖累事实本身不是自动调整指令，后续动作仍应受组合纪律和风险预算约束。",
+      "key_findings": ["按绝对亏损贡献与权重识别拖累", "归因结果不等同于交易指令"]
+    },
+    {
+      "case_id": "ED_001",
+      "user_query": "我总是在股票涨了之后才后悔没多买，跌了又舍不得止损，怎么破？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.97},
+      "planner": {"route": "general", "rationale": "这是投资心理与行为纪律问题"},
+      "answer": "这类反应通常来自后见之明、损失厌恶和锚定效应。改进重点不是预测每次涨跌，而是把决策提前写成规则：进场前记录投资理由、可承受仓位、加减仓触发条件和逻辑失效条件；盘中只核对条件，不临时改剧本。复盘时把过程质量与结果分开，正确执行规则但短期亏损仍可能是好决策。还可以设置冷静期和分批机制，减少一次性判断的情绪压力，并定期检查规则是否与风险承受能力一致。"
+    },
+    {
+      "case_id": "ED_002",
+      "user_query": "我听说要定期做再平衡，但不知道什么情况下该做、怎么做？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.97},
+      "planner": {"route": "general", "rationale": "用户询问再平衡概念、时机和方法"},
+      "answer": "再平衡的目标是把组合风险拉回预先设定的范围，而不是追逐近期表现。常见触发方式包括定期检查与偏离阈值，两者可以结合：按固定周期复核，但只有大类资产越过容忍带、资金目标变化或风险承受能力变化时才执行。操作上先用新增资金补低配类别，再考虑卖出高配资产，并把税费与交易成本纳入判断。每次调整后记录权重和原因，进入目标区间就停止，避免把再平衡变成频繁择时。"
+    },
+    {
+      "case_id": "ED_003",
+      "user_query": "分散投资和集中持仓我一直没想清楚，对我来说哪种更适合？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.97},
+      "planner": {"route": "general", "rationale": "用户询问组合构建方法论"},
+      "answer": "分散与集中不是二选一，而是风险预算问题。集中持仓要求更强的研究能力、持续跟踪时间和承受单一判断错误的能力；分散能降低个别事件冲击，但过度分散也会让组合难以理解。可以先设定单标的、行业和权益总仓位上限，再选择自己真正能跟踪的有限资产，使每个持仓都有明确角色。若收入、期限或情绪承压能力较弱，应采用更宽的资产类别分散和更低的单一风险暴露。"
+    },
+    {
+      "case_id": "GE_001",
+      "user_query": "如果我准备开始配置权益资产，第一步应该怎么做？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.95},
+      "planner": {"route": "general", "rationale": "用户询问开始配置权益的方法"},
+      "answer": "第一步不是挑股票，而是确定这部分资金的期限、用途和最大可承受回撤。先把应急金与短期支出隔离，再设定权益资产在整体组合中的目标区间和单一持仓上限。随后选择自己理解的宽基工具或少量可持续跟踪的资产，用分批方式建立初始仓位，并提前写好再平衡与退出规则。这样后续的产品选择会服务于既定风险预算，而不是由市场情绪临时决定。"
+    },
+    {
+      "case_id": "GE_002",
+      "user_query": "稳健型投资者应该怎么理解股债的仓位比例？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.96},
+      "planner": {"route": "general", "rationale": "用户询问稳健配置中的股债关系"},
+      "answer": "股债比例应被理解为增长来源与稳定器之间的风险分工，而不是一个适用于所有人的固定数字。权益承担长期增长但波动更高，固收主要提供现金流、缓冲和再平衡弹药。稳健型投资者应结合投资期限、收入稳定性、流动性需求和最大回撤承受力设定目标区间，并保留货币类安全垫。比例确定后，用偏离阈值再平衡，避免因短期涨跌不断改变长期结构。"
+    },
+    {
+      "case_id": "GE_003",
+      "user_query": "同样是买基金，主动型和指数型怎么选？",
+      "intent": {"primary_intent": "Education", "secondary_intents": [], "subtasks": ["concept_explain", "rule_explain"], "actions": ["ANALYZE"], "entities": {"asset": null, "asset_normalized": null, "capital": null, "capital_amount": null, "portfolio_id": null, "time_horizon": null, "multi_assets": []}, "confidence": 0.96},
+      "planner": {"route": "general", "rationale": "用户询问基金类型选择方法"},
+      "answer": "指数型基金的优势是规则透明、成本通常较低，适合作为长期核心仓位；主动型基金依赖管理人的选股与风控能力，可能创造超额收益，也带来风格漂移和人员变化风险。选择时应比较投资范围、长期一致性、费用、回撤和与现有持仓的重复度，而不是只看近期排名。可以用低成本指数承担核心暴露，再把有限风险预算分配给有清晰方法且可持续验证的主动策略。"
+    }
+  ]
+}
