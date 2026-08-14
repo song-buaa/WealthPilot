@@ -52,25 +52,34 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 
 ## 6. 质量门与当前基线
 
-每次业务代码修改至少运行任务相关定向测试；影响决策主链路时必须运行 `AV_DEV_MOCK=1 python scripts/m5_e2e_18_cases.py`。合并候选应使用同一 Python 环境、环境变量和隔离数据库与 clean `main` 对照，只有“main 通过、候选失败”才属于新增回归。
+每次业务代码修改至少运行任务相关定向测试。合并候选应使用同一 Python 环境、环境变量和隔离数据库与 clean `main` 对照，只有“main 通过、候选失败”才属于新增回归。
+
+Mandatory Merge Gates：
+
+- 所有业务代码：`python -m pytest`、frontend `npm run lint`、frontend `npm run build`，以及任务相关定向测试。
+- 影响决策主链路：在上述 Gate 之外，必须运行默认 Offline M5：`python scripts/m5_e2e_18_cases.py`，并达到 18/18。
+- Offline M5 使用显式环境白名单、临时 SQLite、固定 Demo Seed、冻结 LLM/Search/Knowledge/Clock fixture、Mock broker 与公网 socket guard；本地 `.env`、个人数据库和真实 Provider 不属于测试前提。
+- 默认 M5 报告写入系统临时 artifact；只有显式 `--update-report` 才能更新 tracked `docs/m5_e2e_report.md`。
+
+Live M5 仅用于人工、授权型 Provider 观察：必须同时使用 `--mode live` 与 `M5_ALLOW_LIVE_PROVIDER=1`，仍使用临时 Eval DB 且禁止券商和订单 mutation。Live M5 具有模型与外部服务波动，不是 deterministic merge gate，也不替代 Offline M5。
 
 2026-08-14 在 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python`、临时 SQLite、空外部密钥、Public Demo/Mock broker 安全配置下建立的新基线：
 
-- 后端全量 pytest：收集 412 项，`405 passed, 7 skipped, 0 failed, 0 warnings`。
+- 后端全量 pytest：收集 423 项，`416 passed, 7 skipped, 0 failed, 0 warnings`。
 - IBKR adapter 定向测试：`86 passed`；仅使用 mock runtime，未连接 Gateway 或执行订单 mutation。
 - Execution Plan 定向测试：`98 passed, 0 warnings`。
+- Offline M5：连续三次 `18/18`，报告哈希一致；使用冻结 fixture，公网连接尝试为 `0`。
 - Python compileall：通过。
 - 前端 lint：`0 errors, 0 warnings`。
 - 前端 build：通过；仍有单 chunk 超过 500 kB 的非阻断提示。
 
-从该基线起，`python -m pytest`、`npm run lint` 和 `npm run build` 是 mandatory merge gates；任务相关定向测试继续按改动范围追加执行。测试必须使用临时数据库和显式关闭的外部 Provider，不能以本地 `.env`、个人数据库或真实服务可用性作为通过条件。
+从该基线起，上述 mandatory merge gates 持续适用。测试必须使用临时数据库和显式关闭或冻结的外部 Provider，不能以本地 `.env`、个人数据库或真实服务可用性作为通过条件。
 
 ## 7. 精简技术债 Backlog
 
 1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
 2. 对前端大 bundle 做按路由/重组件拆分。
-3. 将 `scripts/m5_e2e_18_cases.py` 改造成可在无真实 LLM 的隔离环境运行的确定性评测，或为其增加明确的授权型 Provider Gate；当前脚本在空 `WEALTHPILOT_OPENAI_API_KEY` 时 fail-closed。
-4. 将已恢复全绿的 pytest、frontend lint/build 纳入轻量 CI，并逐步提高依赖可复现性。
+3. 将已恢复全绿的 pytest、frontend lint/build 与 Offline M5 纳入轻量 CI，并逐步提高依赖可复现性。
 
 ## 8. 文档权威与仓库卫生
 
