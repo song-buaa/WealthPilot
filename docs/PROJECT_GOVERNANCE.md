@@ -54,21 +54,23 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 
 每次业务代码修改至少运行任务相关定向测试；影响决策主链路时必须运行 `AV_DEV_MOCK=1 python scripts/m5_e2e_18_cases.py`。合并候选应使用同一 Python 环境、环境变量和隔离数据库与 clean `main` 对照，只有“main 通过、候选失败”才属于新增回归。
 
-2026-08-13 在 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python` 下复跑的已知基线：
+2026-08-14 在 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python`、临时 SQLite、空外部密钥、Public Demo/Mock broker 安全配置下建立的新基线：
 
-- 后端全量 pytest：收集 412 项，`379 passed, 26 failed, 7 skipped, 1 warning`。
-- 前端 lint：`27 errors, 4 warnings`。
-- 前端 build：通过；仅有单 chunk 超过 500 kB 的 warning。
+- 后端全量 pytest：收集 412 项，`405 passed, 7 skipped, 0 failed, 0 warnings`。
+- IBKR adapter 定向测试：`86 passed`；仅使用 mock runtime，未连接 Gateway 或执行订单 mutation。
+- Execution Plan 定向测试：`98 passed, 0 warnings`。
+- Python compileall：通过。
+- 前端 lint：`0 errors, 0 warnings`。
+- 前端 build：通过；仍有单 chunk 超过 500 kB 的非阻断提示。
 
-这些是已记录的历史债务，不代表允许新增失败。候选分支若改变该基线，必须给出 clean-main 对照证据。
+从该基线起，`python -m pytest`、`npm run lint` 和 `npm run build` 是 mandatory merge gates；任务相关定向测试继续按改动范围追加执行。测试必须使用临时数据库和显式关闭的外部 Provider，不能以本地 `.env`、个人数据库或真实服务可用性作为通过条件。
 
 ## 7. 精简技术债 Backlog
 
-1. 收敛 26 个历史 pytest 失败：旧 Portfolio fixture、Skill 默认路径、intent `session_id`、renderer 前缀、固定 FX 与 general passthrough。
-2. 清理前端 27 个 lint error 与 4 个 warning，优先处理条件 Hooks 和 effect 内同步 setState。
-3. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
-4. 对前端大 bundle 做按路由/重组件拆分。
-5. 处理 Pydantic v3 兼容 warning，并逐步提高依赖可复现性。
+1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
+2. 对前端大 bundle 做按路由/重组件拆分。
+3. 将 `scripts/m5_e2e_18_cases.py` 改造成可在无真实 LLM 的隔离环境运行的确定性评测，或为其增加明确的授权型 Provider Gate；当前脚本在空 `WEALTHPILOT_OPENAI_API_KEY` 时 fail-closed。
+4. 将已恢复全绿的 pytest、frontend lint/build 纳入轻量 CI，并逐步提高依赖可复现性。
 
 ## 8. 文档权威与仓库卫生
 
