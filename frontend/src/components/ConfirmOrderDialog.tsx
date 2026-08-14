@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2 } from 'lucide-react'
 import { actionApi, type SymbolStrategyResponse } from '@/lib/api'
-import { useToast } from '@/components/Toast'
+import { useToast } from '@/hooks/useToast'
 
 interface RiskWarning {
   rule: string

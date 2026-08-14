@@ -2,24 +2,13 @@
  * Toast 通知组件 — M6
  * 右上角弹出，3 秒自动消失，支持 success / error / info
  */
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
-
-type ToastType = 'success' | 'error' | 'info'
+import React, { useState, useCallback, useRef } from 'react'
+import { ToastContext, type ToastType } from '@/hooks/useToast'
 
 interface ToastItem {
   id: number
   type: ToastType
   message: string
-}
-
-interface ToastContextValue {
-  showToast: (type: ToastType, message: string) => void
-}
-
-const ToastContext = createContext<ToastContextValue>({ showToast: () => {} })
-
-export function useToast() {
-  return useContext(ToastContext)
 }
 
 const TOAST_STYLES: Record<ToastType, { bg: string; border: string; color: string; icon: string; accent: string }> = {

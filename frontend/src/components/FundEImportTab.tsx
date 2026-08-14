@@ -39,8 +39,8 @@ export function FundEImportTab({ onRefresh }: Props) {
       if (!res.ok) throw new Error(data.detail || '导入失败')
       setResult(data)
       onRefresh()
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '导入失败')
     } finally {
       setLoading(false)
       if (inputRef.current) inputRef.current.value = ''

@@ -892,7 +892,7 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
                       </a>
                     ),
                     // 兜底：LLM 没加 ### 前缀时，把 "一、X" 等段落识别为 H3
-                    p: ({ children, node }: any) => {
+                    p: ({ children, node }) => {
                       const firstChild = node?.children?.[0]
                       const textContent = firstChild?.type === 'text' ? firstChild.value : null
                       if (textContent && /^[一二三四五六七八九十]、/.test(textContent)) {

@@ -73,8 +73,9 @@ export function BrokerSyncTab({ onRefresh }: Props) {
       if (attempts >= maxAttempts) {
         setMessage('⚠️ 同步可能仍在进行中,请稍后刷新查看')
       }
-    } catch (e: any) {
-      setMessage(`❌ 触发失败: ${e.message}`)
+    } catch (e: unknown) {
+      const detail = e instanceof Error ? e.message : '未知错误'
+      setMessage(`❌ 触发失败: ${detail}`)
     } finally {
       setSyncing(null)
     }
