@@ -58,26 +58,43 @@ def test_general_non_invest_skips_retrieve():
 # ── 2. 双轨等价 ────────────────────────────────────────────────
 
 def test_dual_track_same_type_and_count():
-    """flag off 和 flag on 返回的 retrieved_principles 同类型(RetrievedChunk)、同条数。"""
+    """显式 legacy off 和默认 production on 返回同一确定性契约。"""
     from backend.knowledge.schemas import RetrievedChunk
 
     planning, user_query = _make_general_planning("再平衡")
+    raw = {
+        "chunks": [{
+            "content": "再平衡应遵循目标配置与纪律边界。",
+            "source_type": "allocation_principles",
+            "source_channel": "local_principles",
+            "parent_doc_path": "allocation.md",
+            "chunk_index": 0,
+            "semantic_score": 0.9,
+        }],
+        "total_retrieved": 1,
+    }
+    direct_chunks = _adapt_retrieve_result(raw)
 
-    results = {}
-    for flag_label, flag_val in [("OFF", ""), ("ON", "1")]:
-        if flag_val:
-            os.environ["WP_USE_SKILL_RETRIEVE_PRINCIPLES"] = flag_val
-        else:
-            os.environ.pop("WP_USE_SKILL_RETRIEVE_PRINCIPLES", None)
+    os.environ["WP_USE_SKILL_RETRIEVE_PRINCIPLES"] = "0"
+    with patch(
+        "backend.knowledge.store.KnowledgeStore.get_instance",
+    ) as mock_store_cls:
+        mock_store = MagicMock()
+        mock_store.is_ready.return_value = True
+        mock_store.retrieve.return_value = direct_chunks
+        mock_store_cls.return_value = mock_store
         agent = ExecutingAgent()
         out = agent.run(planning, user_query=user_query)
-        rp = getattr(out.loaded_data, "retrieved_principles", [])
-        results[flag_label] = rp
+        rp_off = getattr(out.loaded_data, "retrieved_principles", [])
 
     os.environ.pop("WP_USE_SKILL_RETRIEVE_PRINCIPLES", None)
-
-    rp_off = results["OFF"]
-    rp_on = results["ON"]
+    with patch(
+        "backend.agents.executing_agent.invoke_skill",
+        return_value=raw,
+    ):
+        agent = ExecutingAgent()
+        out = agent.run(planning, user_query=user_query)
+        rp_on = getattr(out.loaded_data, "retrieved_principles", [])
 
     assert len(rp_off) == len(rp_on), f"count mismatch: {len(rp_off)} vs {len(rp_on)}"
     assert len(rp_off) > 0, "both should have results"
@@ -124,9 +141,9 @@ def test_adapt_retrieve_result_empty():
 
 # ── 4. flag 行为 ────────────────────────────────────────────────
 
-def test_flag_off_by_default():
+def test_flag_on_by_default():
     os.environ.pop("WP_USE_SKILL_RETRIEVE_PRINCIPLES", None)
-    assert _use_skill_retrieve_principles() is False
+    assert _use_skill_retrieve_principles() is True
 
 
 def test_flag_on_when_set():
@@ -139,9 +156,9 @@ def test_flag_on_when_set():
 
 # ── 5. 路径切换 spy ─────────────────────────────────────────────
 
-def test_flag_off_calls_direct_store():
-    """flag off → KnowledgeStore.retrieve 被调，invoke_skill 没被调。"""
-    os.environ.pop("WP_USE_SKILL_RETRIEVE_PRINCIPLES", None)
+def test_explicit_zero_calls_direct_store():
+    """显式 legacy off → KnowledgeStore.retrieve；默认仍保持 Skill 路径。"""
+    os.environ["WP_USE_SKILL_RETRIEVE_PRINCIPLES"] = "0"
     planning, user_query = _make_general_planning("再平衡")
 
     mock_chunks = [MagicMock(spec=["content", "source_type"])]
@@ -164,6 +181,7 @@ def test_flag_off_calls_direct_store():
         for call in mock_skill.call_args_list:
             assert call.args[0] != "wp-retrieve-principles", \
                 "flag off 不应调 invoke_skill('wp-retrieve-principles')"
+    os.environ.pop("WP_USE_SKILL_RETRIEVE_PRINCIPLES", None)
 
 
 def test_flag_on_calls_invoke_skill():

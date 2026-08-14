@@ -66,15 +66,15 @@ class MockGenericLLMResult:
 
 
 def _run_both_tracks(llm_result, intent_type: str):
-    """分别 flag off / flag on 调一次，返回 (vr_off, vr_on)。"""
+    """分别显式 legacy off / 默认 production on 调一次。"""
     from backend.graph.decision_validator import validate_decision_output
 
     # flag off: 直连
-    os.environ.pop("WP_USE_SKILL_OUTPUT_VALIDATOR", None)
+    os.environ["WP_USE_SKILL_OUTPUT_VALIDATOR"] = "0"
     vr_off = validate_decision_output(result=llm_result, intent_type=intent_type)
 
-    # flag on: invoke_skill
-    os.environ["WP_USE_SKILL_OUTPUT_VALIDATOR"] = "1"
+    # 默认 production 路径: invoke_skill
+    os.environ.pop("WP_USE_SKILL_OUTPUT_VALIDATOR", None)
     try:
         from backend.skills import invoke_skill
         vr_on = invoke_skill("wp-output-validator", result=llm_result, intent_type=intent_type)
@@ -144,11 +144,11 @@ def test_dual_track_retry_chat_answer_empty():
     assert vr_off.action == "retry"
 
 
-def test_flag_off_by_default():
-    """默认不设环境变量，flag 返回 False。"""
+def test_flag_on_by_default():
+    """生产契约：默认不设环境变量时走 Skill。"""
     os.environ.pop("WP_USE_SKILL_OUTPUT_VALIDATOR", None)
     from backend.agents.reviewing_agent import _use_skill_output_validator
-    assert _use_skill_output_validator() is False
+    assert _use_skill_output_validator() is True
 
 
 def test_flag_on_when_set():
@@ -179,13 +179,13 @@ def _make_reviewing_inputs():
     return out, plan, expr
 
 
-def test_flag_off_calls_direct_not_invoke_skill():
-    """flag off → 直连 validate_decision_output 被调，invoke_skill 没被调。"""
+def test_explicit_zero_calls_direct_not_invoke_skill():
+    """显式 legacy off → 直连 validator；默认仍保持 Skill 路径。"""
     from unittest.mock import patch, MagicMock
     from backend.agents.reviewing_agent import ReviewingAgent
     from backend.graph.decision_validator import ValidationResult, ValidationFailure
 
-    os.environ.pop("WP_USE_SKILL_OUTPUT_VALIDATOR", None)
+    os.environ["WP_USE_SKILL_OUTPUT_VALIDATOR"] = "0"
     out, plan, expr = _make_reviewing_inputs()
 
     mock_vr = ValidationResult(passed=True, failures=[], action="pass", intent_type="PositionDecision")
@@ -206,6 +206,7 @@ def test_flag_off_calls_direct_not_invoke_skill():
         call_kwargs = mock_direct.call_args.kwargs
         assert call_kwargs["result"] is expr.llm_result
         assert call_kwargs["intent_type"] == "PositionDecision"
+    os.environ.pop("WP_USE_SKILL_OUTPUT_VALIDATOR", None)
 
 
 def test_flag_on_calls_invoke_skill_not_direct():
