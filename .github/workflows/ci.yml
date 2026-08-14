@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHON_DOTENV_DISABLED: "1"
-      WEALTHPILOT_DB_PATH: ${{ runner.temp }}/wealthpilot-pytest.db
+      WEALTHPILOT_DB_PATH: /tmp/wealthpilot-${{ github.run_id }}-${{ github.run_attempt }}-pytest.db
       PUBLIC_DEMO_MODE: "true"
       DEMO_ACCESS_PASSWORD: ci-offline-only
       DEMO_ALLOW_MARKET_DATA: "false"
