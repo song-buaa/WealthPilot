@@ -75,11 +75,22 @@ Live M5 仅用于人工、授权型 Provider 观察：必须同时使用 `--mode
 
 从该基线起，上述 mandatory merge gates 持续适用。测试必须使用临时数据库和显式关闭或冻结的外部 Provider，不能以本地 `.env`、个人数据库或真实服务可用性作为通过条件。
 
+### Automated CI
+
+GitHub Actions 的 `Quality Gates` workflow 自动执行三个并行检查：
+
+- `backend-tests`：Python 3.11、compileall、全量 pytest；
+- `frontend-checks`：Node 22、`npm ci`、lint、build；
+- `offline-m5`：确定性 Offline M5 18/18。
+
+Workflow 在面向 `main` 的 Pull Request、`main` 与 `codex/**` 分支 push，以及手动 `workflow_dispatch` 时运行；同一分支或 PR 的新提交会取消旧 Run。权限限定为 `contents: read`，每个 Job 有独立 timeout。
+
+CI 只做自动质量验证，不自动修复、提交、合并、发布或部署；不配置真实 Secret，不访问个人数据库，不调用真实 LLM、行情或券商，也不执行任何订单 mutation。Live M5 继续仅限人工 opt-in，不进入 CI。
+
 ## 7. 精简技术债 Backlog
 
 1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
 2. 对前端大 bundle 做按路由/重组件拆分。
-3. 将已恢复全绿的 pytest、frontend lint/build 与 Offline M5 纳入轻量 CI，并逐步提高依赖可复现性。
 
 ## 8. 文档权威与仓库卫生
 
