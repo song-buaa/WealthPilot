@@ -9,16 +9,29 @@ load_dotenv()
 
 def test_planning_agent_position_single():
     """单标的决策：路由 + Skill 组合都正确。"""
+    from unittest.mock import patch
     from backend.agents.planning_agent import get_planning_agent
     from backend.agents.contracts import AgentTaskStatus
 
     agent = get_planning_agent()
-    out = agent.run(
-        user_query="茅台还能拿吗",
-        conversation_id="test_session_001",
-        portfolio_id=1,
-        conversation_history=[],
-    )
+    orchestrator_result = {
+        "intent_payload": {
+            "primary_intent": "PositionDecision",
+            "asset": "贵州茅台",
+            "action_type": "持有评估",
+            "confidence": 0.95,
+        },
+        "route": "position_single",
+        "sse_handler": "position_single",
+        "planner_rationale": "deterministic contract fixture",
+    }
+    with patch.object(agent, "_invoke_orchestrator", return_value=orchestrator_result):
+        out = agent.run(
+            user_query="茅台还能拿吗",
+            conversation_id="test_session_001",
+            portfolio_id=1,
+            conversation_history=[],
+        )
 
     assert out.status == AgentTaskStatus.COMPLETED, \
         f"PlanningAgent 没有完成，status={out.status}, error={out.error}"
@@ -29,6 +42,7 @@ def test_planning_agent_position_single():
     print(f"   duration: {out.duration_ms}ms")
 
     assert out.task_id.startswith("task_")
+    assert out.route == "position_single"
 
     if out.route in ("position_single", "position_multi", "portfolio", "general"):
         assert len(out.selected_skills) > 0, \

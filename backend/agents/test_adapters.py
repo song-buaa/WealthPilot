@@ -77,23 +77,33 @@ def test_discipline_adapter_empty_rule_details():
 
 def test_discipline_adapter_via_invoke_skill():
     """端到端：invoke_skill → Adapter → RuleResult。"""
+    from unittest.mock import patch
     from backend.skills import invoke_skill
     from backend.agents.adapters import discipline_output_to_rule_result
+    from decision_engine.rule_engine import RuleResult
 
-    output = invoke_skill(
-        "wp-check-discipline",
-        asset_name="贵州茅台",
-        portfolio_id=1,
-        action_type="HOLD",
+    deterministic_result = RuleResult(
+        violation=False,
+        warning=None,
+        current_weight=0.10,
+        max_position=0.40,
+        position_ratio=0.25,
+        rule_details=["仓位健康"],
     )
+    with (
+        patch("decision_engine.data_loader.load", return_value=object()),
+        patch("decision_engine.rule_engine.check", return_value=deterministic_result),
+    ):
+        output = invoke_skill(
+            "wp-check-discipline",
+            asset_name="贵州茅台",
+            portfolio_id=1,
+            action_type="HOLD",
+        )
 
     rule_result = discipline_output_to_rule_result(output)
 
-    print(f"   violation: {rule_result.violation}")
-    print(f"   current_weight: {rule_result.current_weight:.2%}")
-    print(f"   max_position: {rule_result.max_position:.2%}")
-    print(f"   warning: {rule_result.warning}")
-    print(f"✅ end-to-end: invoke_skill → Adapter 正常工作")
+    assert rule_result == deterministic_result
 
 
 # ════════════════════════════════════════════════

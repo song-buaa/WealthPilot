@@ -117,45 +117,105 @@ def test_executing_agent_portfolio_route():
 
 
 def test_executing_agent_with_real_planning_output():
-    """端到端：用真实 PlanningAgent 输出驱动 ExecutingAgent（防止契约不匹配）。"""
+    """用真实 Agent contracts 验证 Planning → Executing，无 DB/LLM/行情。"""
+    from unittest.mock import patch
     from backend.agents import get_planning_agent, get_executing_agent
-    from app.utils.position_aggregator import aggregate_investment_positions
-
-    all_positions, _ = aggregate_investment_positions(1)
+    from backend.graph.tools import (
+        DisciplineCheckOutput,
+        GenerateSignalsOutput,
+        LoadDecisionContextOutput,
+    )
+    from decision_engine.data_loader import (
+        InvestmentRules,
+        LoadedData,
+        PositionInfo,
+        UserProfile,
+    )
 
     planning = get_planning_agent()
-    plan_out = planning.run(
-        user_query="我有一只股票最近涨了不少，该不该趁现在落袋为安？（标的：特斯拉）",
-        conversation_id="test_e2e_planning_executing",
-        portfolio_id=1,
-        all_positions=all_positions,
+    orchestrator_result = {
+        "intent_payload": {
+            "primary_intent": "PositionDecision",
+            "asset": "特斯拉",
+            "action_type": "持有评估",
+            "confidence": 0.95,
+        },
+        "route": "position_single",
+        "sse_handler": "position_single",
+        "planner_rationale": "deterministic contract fixture",
+    }
+    with patch.object(planning, "_invoke_orchestrator", return_value=orchestrator_result):
+        plan_out = planning.run(
+            user_query="特斯拉该不该落袋为安？",
+            conversation_id="test_e2e_planning_executing",
+            portfolio_id=1,
+        )
+
+    target = PositionInfo(
+        name="特斯拉",
+        ticker="",
+        asset_class="权益",
+        weight=0.10,
+        market_value_cny=100_000,
+        cost_price=80_000,
+        current_price=0,
+        profit_loss_rate=0.25,
+    )
+    loaded = LoadedData(
+        profile=UserProfile(),
+        positions=[target],
+        target_position=target,
+        rules=InvestmentRules(
+            max_single_position=0.40,
+            max_equity_pct=0.80,
+            min_cash_pct=0.10,
+            max_leverage_ratio=1.20,
+        ),
+        total_assets=1_000_000,
     )
 
     assert plan_out.intent is not None, "intent is None"
     assert isinstance(plan_out.intent, dict), "intent not dict"
 
-    asset = plan_out.intent.get("asset")
-    print(f"   PlanningAgent asset={repr(asset)}, route={plan_out.route}")
-
-    if plan_out.route in ("clarify", "low_confidence"):
-        print("   Planner routed to clarify/low_conf, skipping ExecutingAgent test")
-        print("✅ Planning→Executing e2e (skipped - Planner route)")
-        return
-
-    assert asset, f"intent.asset empty: {repr(asset)}"
-
     executing = get_executing_agent()
-    exec_out = executing.run(
-        plan_out,
-        "我有一只股票最近涨了不少，该不该趁现在落袋为安？（标的：特斯拉）",
-    )
+    skill_outputs = {
+        "wp-load-context": LoadDecisionContextOutput(
+            loaded_data=loaded,
+            has_required_data=True,
+            has_data_errors=False,
+            target_position_found=True,
+        ),
+        "wp-check-discipline": DisciplineCheckOutput(
+            violation=False,
+            warning=None,
+            current_weight=0.10,
+            max_position=0.40,
+            position_ratio=0.25,
+            rule_details=["仓位健康"],
+        ),
+        "wp-generate-signals": GenerateSignalsOutput(
+            asset_name="特斯拉",
+            position_signal="合理",
+            fundamental_signal="中性",
+            sentiment_signal="中性",
+            event_uncertainty="低",
+            event_direction="中性",
+        ),
+    }
+
+    with patch(
+        "backend.agents.executing_agent.invoke_skill",
+        side_effect=lambda name, **_: skill_outputs[name],
+    ):
+        exec_out = executing.run(plan_out, "特斯拉该不该落袋为安？")
 
     assert not exec_out.aborted, f"ExecutingAgent ABORT: {exec_out.abort_reason}"
     assert exec_out.loaded_data is not None, "loaded_data None"
     assert exec_out.loaded_data.target_position is not None, "target_position None"
 
-    print(f"   target: {exec_out.loaded_data.target_position.name}")
-    print("✅ Planning→Executing 端到端契约一致")
+    assert exec_out.loaded_data.target_position.name == "特斯拉"
+    assert exec_out.rule_result.current_weight == 0.10
+    assert exec_out.signal_result.position_signal == "合理"
 
 
 if __name__ == "__main__":
