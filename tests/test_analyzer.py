@@ -11,8 +11,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from app.analyzer import analyze_portfolio, check_deviations, BalanceSheet, DeviationAlert
+from app.models import Liability, Portfolio, Position
 
 
 # ──────────────────────────────────────────────
@@ -52,6 +54,7 @@ def _make_position(name, asset_class, platform, market_value_cny,
     pos.cost_price = cost_price
     pos.current_price = current_price
     pos.quantity = quantity
+    pos.profit_loss_value = 0.0
     return pos
 
 
@@ -73,11 +76,21 @@ class TestAnalyzePortfolio:
     def _run(self, positions, liabilities):
         """patch DB，直接测计算逻辑"""
         portfolio = _make_portfolio()
-        portfolio.positions = positions
-        portfolio.liabilities = liabilities
 
         session_mock = MagicMock()
-        session_mock.query.return_value.filter_by.return_value.first.return_value = portfolio
+
+        def query(model):
+            result = MagicMock()
+            filtered = result.filter_by.return_value
+            if model is Portfolio:
+                filtered.first.return_value = portfolio
+            elif model is Position:
+                filtered.all.return_value = positions
+            elif model is Liability:
+                filtered.all.return_value = liabilities
+            return result
+
+        session_mock.query.side_effect = query
 
         with patch("app.analyzer.get_session", return_value=session_mock):
             return analyze_portfolio(portfolio_id=1)
@@ -100,16 +113,16 @@ class TestAnalyzePortfolio:
         positions = [
             _make_position("股票A", "权益", "港美股券商", 60_000),
             _make_position("债券B", "固收", "银行", 30_000),
-            _make_position("余额宝", "现金", "支付宝", 10_000),
+            _make_position("余额宝", "货币", "支付宝", 10_000),
         ]
         bs = self._run(positions, [])
 
         assert bs.equity_value == 60_000
         assert bs.fixed_income_value == 30_000
-        assert bs.cash_value == 10_000
+        assert bs.monetary_value == 10_000
         assert bs.equity_pct == 60.0
         assert bs.fixed_income_pct == 30.0
-        assert bs.cash_pct == 10.0
+        assert bs.monetary_pct == 10.0
 
     def test_leverage_ratio(self):
         """杠杆率 = 负债 / 总资产 × 100"""
@@ -181,7 +194,18 @@ class TestCheckDeviations:
         session_mock = MagicMock()
         session_mock.query.return_value.filter_by.return_value.first.return_value = portfolio
 
-        with patch("app.analyzer.get_session", return_value=session_mock):
+        aggregated = [
+            SimpleNamespace(name=key.split(":", 1)[-1], weight=pct / 100)
+            for key, pct in bs.concentration.items()
+        ]
+
+        with (
+            patch("app.analyzer.get_session", return_value=session_mock),
+            patch(
+                "app.utils.position_aggregator.aggregate_investment_positions",
+                return_value=(aggregated, bs.total_assets),
+            ),
+        ):
             return check_deviations(portfolio_id=1, balance_sheet=bs)
 
     def _bs_with_alloc(self, equity=60.0, fi=30.0, cash=10.0, alt=0.0,
@@ -189,9 +213,11 @@ class TestCheckDeviations:
         """快速构造一个 BalanceSheet"""
         bs = BalanceSheet()
         bs.total_assets = 100.0  # 用 100 方便直接把百分比当数值
+        bs.total_liabilities = leverage
+        bs.net_worth = bs.total_assets - leverage
         bs.equity_pct = equity
         bs.fixed_income_pct = fi
-        bs.cash_pct = cash
+        bs.monetary_pct = cash
         bs.alternative_pct = alt
         bs.leverage_ratio = leverage
         bs.concentration = concentration or {}
@@ -258,8 +284,8 @@ class TestCheckDeviations:
         assert not any(a.alert_type == "纪律触发" for a in alerts)
 
     def test_leverage_over_limit(self):
-        """杠杆率超限产生风险暴露告警"""
-        bs = self._bs_with_alloc(leverage=25.0)  # 上限 20%
+        """杠杆倍数超过可接受上限时产生风险暴露告警"""
+        bs = self._bs_with_alloc(leverage=25.0)  # 资产/净资产 = 1.33x
         alerts = self._run(bs)
         assert any(a.alert_type == "风险暴露" and "杠杆" in a.title for a in alerts)
 
@@ -267,8 +293,8 @@ class TestCheckDeviations:
         """告警按严重程度排序：高 > 中 > 低"""
         bs = self._bs_with_alloc(
             equity=93,                            # 中：超过 max=80，偏离 +13pp
-            concentration={"1:股票A": 20.0},      # 高：纪律触发
-            leverage=25.0,                         # 高：风险暴露
+            concentration={"1:股票A": 45.0},      # 高：纪律触发
+            leverage=30.0,                         # 高：杠杆倍数 1.43x
         )
         alerts = self._run(bs)
         severity_order = {"高": 0, "中": 1, "低": 2}
