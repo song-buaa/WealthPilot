@@ -87,6 +87,12 @@ Workflow 在面向 `main` 的 Pull Request、`main` 与 `codex/**` 分支 push�
 
 CI 只做自动质量验证，不自动修复、提交、合并、发布或部署；不配置真实 Secret，不访问个人数据库，不调用真实 LLM、行情或券商，也不执行任何订单 mutation。Live M5 继续仅限人工 opt-in，不进入 CI。
 
+### Main branch protection
+
+GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：要求 GitHub Actions 的 `Backend tests`、`Frontend checks`、`Offline M5` 三项检查通过，并采用 strict up-to-date 策略；同时要求 linear history，禁止 force push 和删除 `main`。短期开发分支不受该 Ruleset 约束。
+
+当前不强制 Pull Request、Review、Signed Commits、Deployment 或 Merge Queue。标准流程仍为短期分支 push、等待 CI 全绿、确认基于最新 `main` 后 fast-forward 更新 `main`。仓库 Owner 保留显式紧急 bypass；该能力只用于恢复，日常合并仍须遵循 Mandatory Merge Gates。
+
 ## 7. 精简技术债 Backlog
 
 1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
