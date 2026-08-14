@@ -118,6 +118,17 @@ class TestSymbolValidation:
 # ============================================================
 
 class TestAuditFxEnrichment:
+    @pytest.fixture(autouse=True)
+    def deterministic_fx_rates(self, monkeypatch):
+        """Audit enrichment uses a fixed contract fixture, not mutable fallback values."""
+        from app import fx_service
+
+        monkeypatch.setattr(
+            fx_service,
+            "FALLBACK_RATES",
+            {"USD": 6.9, "HKD": 0.92},
+        )
+
     def test_enrich_usd(self):
         payload = OrderManager._enrich_audit_payload(
             {"order_id": "test"},
