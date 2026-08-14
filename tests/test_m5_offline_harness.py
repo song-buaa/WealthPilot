@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,24 @@ def test_offline_environment_is_allowlisted_and_ignores_inherited_secrets(tmp_pa
     assert child["BROKER_MODE"] == "mock"
     assert child["IBKR_READ_ONLY_MODE"] == "true"
     assert child["ENABLE_IBKR_LIVE_TRADING"] == "false"
+
+    tracked_before = TRACKED_REPORT.read_bytes()
+    run_env = os.environ.copy()
+    run_env.update(inherited)
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "m5_e2e_18_cases.py")],
+        cwd=ROOT,
+        env=run_env,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    logs = completed.stdout + completed.stderr
+    assert completed.returncode == 0, logs
+    assert "M5 offline: 18/18 passed, 0 failed" in logs
+    assert "provider=offline_fixture public_network_attempts=0" in logs
+    assert FAKE_SECRET not in logs
+    assert TRACKED_REPORT.read_bytes() == tracked_before
 
 
 def test_offline_network_guard_blocks_public_without_dns():
