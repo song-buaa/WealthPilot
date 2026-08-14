@@ -4,7 +4,7 @@
  * Tab 2: 观点库（多维筛选 · 可折叠列表 · CRUD）
  * Tab 3: 决策检索（自然语言查询）
  */
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Loader2, AlertTriangle, Plus, Search, Trash2,
   Pencil, Check, X, Sparkles, FileText, Link, RefreshCw,
@@ -677,24 +677,7 @@ export default function Research() {
     }
   }
 
-  // 切换持仓选项时自动触发检索
-  const v2SearchSymbolRef = useRef(v2SearchSymbol)
-  useEffect(() => {
-    if (v2SearchSymbol && v2SearchSymbol !== v2SearchSymbolRef.current && activeTab === 'search') {
-      v2SearchSymbolRef.current = v2SearchSymbol
-      handleV2Search()
-    }
-  }, [v2SearchSymbol, activeTab])
-
-  // 首次进入 Tab 3 时默认选中第一个有 symbol 的持仓
-  useEffect(() => {
-    if (activeTab === 'search' && !v2SearchSymbol && v2Holdings.length > 0) {
-      const first = v2Holdings.find(h => h.symbol)
-      if (first?.symbol) setV2SearchSymbol(first.symbol)
-    }
-  }, [activeTab, v2Holdings])
-
-  async function handleV2Search() {
+  const handleV2Search = useCallback(async () => {
     if (!v2SearchSymbol.trim()) return
     setV2Searching(true)
     try {
@@ -706,7 +689,24 @@ export default function Research() {
     } finally {
       setV2Searching(false)
     }
-  }
+  }, [v2SearchSymbol])
+
+  // 切换持仓选项时自动触发检索
+  const v2SearchSymbolRef = useRef(v2SearchSymbol)
+  useEffect(() => {
+    if (v2SearchSymbol && v2SearchSymbol !== v2SearchSymbolRef.current && activeTab === 'search') {
+      v2SearchSymbolRef.current = v2SearchSymbol
+      handleV2Search()
+    }
+  }, [v2SearchSymbol, activeTab, handleV2Search])
+
+  // 首次进入 Tab 3 时默认选中第一个有 symbol 的持仓
+  useEffect(() => {
+    if (activeTab === 'search' && !v2SearchSymbol && v2Holdings.length > 0) {
+      const first = v2Holdings.find(h => h.symbol)
+      if (first?.symbol) setV2SearchSymbol(first.symbol)
+    }
+  }, [activeTab, v2Holdings, v2SearchSymbol])
 
   async function handleV2BatchAction(action: 'confirm' | 'discard') {
     const ids = [...v2SelectedIds]

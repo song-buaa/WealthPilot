@@ -265,7 +265,7 @@ export default function Decision() {
       // 无 URL 参数时：不自动选中任何会话，保持 activeConversationId = null
       // 用户点击会话或 "+ 新对话" 后才激活
     })()
-  }, [])
+  }, [fetchConversations, searchParams, setSearchParams, switchConversation])
 
   // B区：拉取持仓数据，生成个性化推荐
   useEffect(() => {
@@ -422,7 +422,15 @@ export default function Decision() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeConversationId, messages.length])
+  }, [
+    input,
+    streaming,
+    activeConversationId,
+    messages.length,
+    createConversation,
+    fetchConversations,
+    updateConversationTitle,
+  ])
 
   // ── 会话切换处理 ──
   async function handleSwitchConversation(id: string) {
