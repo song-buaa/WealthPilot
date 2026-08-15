@@ -5,6 +5,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.14.2] - 2026-08-15
+
+Patch Release：修复 Portfolio / Broker 同步的数据正确性、快照对账与 IBKR 资产元数据。
+
+### Fixed
+- Broker authoritative snapshot reconciliation
+- Futu 成功空快照清理 stale positions
+- 同步失败时保留上一次成功快照
+- IBKR instrument metadata 与固收资产分类
+- IBKR 逐币种现金同步
+- Dashboard 导入 Tab 顺序
+
+### Safety
+- Broker 同步继续保持只读
+- 未改变任何交易权限，未启用任何订单 mutation
+
 ## [3.14.1] - 2026-08-14
 
 Patch Release：固化当前 `main` 的已验收 Self-use / Private Full Mode 与 IBKR Live read-only 基线，并消除开发基线与稳定版本的语义分歧。
