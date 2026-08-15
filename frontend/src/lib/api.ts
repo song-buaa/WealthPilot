@@ -470,6 +470,127 @@ export interface RiskCheckResponse {
   confirmation_text_required: string | null
 }
 
+export interface ExecutionLegResponse {
+  id: string
+  sequence: number
+  user_alias: string
+  allocation_mode: 'APPROX_AMOUNT' | 'REMAINDER'
+  target_amount: number | null
+  authorization_class: string
+  resolved_con_id: number
+  symbol: string
+  local_symbol: string
+  sec_type: string
+  stock_type: string
+  exchange: string
+  primary_exchange: string
+  currency: string
+  trading_class: string
+  isin: string
+  long_name: string
+  share_class_requirement: string
+  share_class_verification: string
+  verification_source: string
+  quote_bid: number | null
+  quote_ask: number | null
+  quote_last: number | null
+  quote_as_of: string | null
+  quote_quality: string | null
+  market_data_type: string | null
+  market_rule_id: number | null
+  min_tick: number | null
+  reference_price: number | null
+  suggested_limit: number | null
+  final_limit: number | null
+  estimated_quantity: number | null
+  final_quantity: number | null
+  estimated_notional: number | null
+  what_if: Record<string, unknown> | null
+  execution_variance_amount: number
+  released_intent_amount: number
+  status: string
+  linked_strategy_id: string | null
+  linked_order_id: string | null
+}
+
+export interface ExecutionBatchResponse {
+  id: string
+  broker: string
+  account_masked: string
+  funding_currency: string
+  budget_mode: string
+  source_conversation_id: string
+  source_message_id: number
+  stated_cash: number | null
+  authoritative_cash_snapshot: Record<string, unknown>
+  cash_accounting_model_version: string
+  usable_cash: number | null
+  safety_cushion: number
+  estimated_fees: number
+  reserved_amount: number
+  estimated_total: number
+  estimated_residual: number
+  status: string
+  confirmation_version: number
+  confirmation_hash: string | null
+  execution_policy: Record<string, unknown>
+  attention_reason: string | string[] | null
+  created_at: string | null
+  updated_at: string | null
+  confirmed_at: string | null
+  legs: ExecutionLegResponse[]
+}
+
+export const executionBatchApi = {
+  create: (conversationId: string, messageId: number) =>
+    request<ExecutionBatchResponse>('/execution-batches', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId, message_id: messageId }),
+    }),
+  list: () => request<{ items: ExecutionBatchResponse[] }>('/execution-batches'),
+  get: (batchId: string) => request<ExecutionBatchResponse>(`/execution-batches/${batchId}`),
+  refresh: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/refresh`, { method: 'POST' },
+  ),
+  confirm: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/confirm`, { method: 'POST' },
+  ),
+  safety: () => request<{
+    ibkr_read_only_mode: boolean
+    live_trading_enabled: boolean
+    broker_gateway_read_only: string
+    mutation_endpoint: string
+  }>('/execution-batches/safety'),
+  submitLeg: (
+    batchId: string,
+    legId: string,
+    confirmationVersion: number,
+    confirmationText: string,
+  ) => request<{
+    order_id: string
+    batch_id: string
+    leg_id: string
+    status: string
+    broker_order_id: string | null
+  }>(`/execution-batches/${batchId}/legs/${legId}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({
+      confirmation_version: confirmationVersion,
+      live_order_acknowledged: true,
+      confirmation_text: confirmationText,
+    }),
+  }),
+  reconcileLeg: (batchId: string, legId: string) => request<ExecutionLegResponse>(
+    `/execution-batches/${batchId}/legs/${legId}/reconcile`, { method: 'POST' },
+  ),
+  skipLeg: (batchId: string, legId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/legs/${legId}/skip`, { method: 'POST' },
+  ),
+  stopRemaining: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/stop-remaining`, { method: 'POST' },
+  ),
+}
+
 export const actionApi = {
   generateDraft: (params: {
     conversation_id: string

@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, Loader2, ShieldCheck } from 'lucide-react'
 
-import { decisionApi, type StructuredTradeIntent, type TradeIntentField } from '@/lib/api'
+import { decisionApi, executionBatchApi, type StructuredTradeIntent, type TradeIntentField } from '@/lib/api'
 
 interface Props {
   intent: StructuredTradeIntent
@@ -60,7 +61,9 @@ function Fact({ label, field, value }: { label: string; field: TradeIntentField;
 }
 
 export default function TradeIntentPreview({ intent, conversationId, messageId, onConfirmed }: Props) {
+  const navigate = useNavigate()
   const [submitting, setSubmitting] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const confirmable = intent.readiness === 'READY_FOR_CONFIRMATION'
@@ -80,6 +83,20 @@ export default function TradeIntentPreview({ intent, conversationId, messageId, 
       setError(err instanceof Error ? err.message : '确认失败，请重试')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleGenerateBatch() {
+    if (!conversationId || messageId === undefined) return
+    setGenerating(true)
+    setError(null)
+    try {
+      const batch = await executionBatchApi.create(conversationId, messageId)
+      navigate(`/action?batch=${encodeURIComponent(batch.id)}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成交易执行计划失败')
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -138,7 +155,17 @@ export default function TradeIntentPreview({ intent, conversationId, messageId, 
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {intent.confirmation_status === 'CONFIRMED' ? (
-            <div style={{ fontSize: 12, color: '#047857', fontWeight: 600 }}>已确认解析含义；未创建执行计划、批次或订单。</div>
+            <>
+              <div style={{ fontSize: 12, color: '#047857', fontWeight: 600 }}>已确认解析含义；尚未创建或提交订单。</div>
+              <button
+                onClick={handleGenerateBatch}
+                disabled={!conversationId || messageId === undefined || generating}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 13px', border: 'none', borderRadius: 8, background: '#2563EB', color: '#fff', fontSize: 12, fontWeight: 600, cursor: generating ? 'wait' : 'pointer' }}
+              >
+                {generating && <Loader2 size={13} className="animate-spin" />}
+                生成交易执行计划
+              </button>
+            </>
           ) : (
             <button
               onClick={handleConfirm}
@@ -149,7 +176,7 @@ export default function TradeIntentPreview({ intent, conversationId, messageId, 
               {blockingIssues.length ? '请先澄清意图' : '确认意图理解'}
             </button>
           )}
-          <span style={{ fontSize: 10, color: '#94A3B8' }}>确认不会连接券商，也不会创建或提交订单</span>
+          <span style={{ fontSize: 10, color: '#94A3B8' }}>生成计划仅执行只读解析、报价与资金校验；不会提交订单</span>
         </div>
         {error && <div style={{ fontSize: 11, color: '#DC2626' }}>{error}</div>}
       </div>

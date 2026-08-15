@@ -6,12 +6,13 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Trash2, FileText } from 'lucide-react'
-import { actionApi, type ActionDraftResponse, type AllocationIntentResponse, type SymbolStrategyResponse, type OrderResponse, type TimelineEvent } from '@/lib/api'
+import { actionApi, executionBatchApi, type ActionDraftResponse, type AllocationIntentResponse, type SymbolStrategyResponse, type OrderResponse, type TimelineEvent, type ExecutionBatchResponse } from '@/lib/api'
 import { ALLOC_LABEL } from '@/lib/allocation-api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ConfirmOrderDialog from '@/components/ConfirmOrderDialog'
 import PageHeader from '@/components/shared/PageHeader'
 import { useDemoMode } from '@/hooks/useDemoMode'
+import ExecutionBatchCard from '@/components/ExecutionBatchCard'
 
 type TabKey = 'action' | 'history'
 
@@ -137,20 +138,23 @@ function ActionListTab({
   const [intents, setIntents] = useState<AllocationIntentResponse[]>([])
   const [strategies, setStrategies] = useState<SymbolStrategyResponse[]>([])
   const [orders, setOrders] = useState<OrderResponse[]>([])
+  const [batches, setBatches] = useState<ExecutionBatchResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [placeOrderStrategy, setPlaceOrderStrategy] = useState<SymbolStrategyResponse | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [intentRes, stratRes, orderRes] = await Promise.all([
+      const [intentRes, stratRes, orderRes, batchRes] = await Promise.all([
         actionApi.listIntents('active'),
         actionApi.listStrategies({ status: 'active' }),
         actionApi.listOrders({}),  // v3.4 M5: 显示所有订单,不仅 broker_pending
+        executionBatchApi.list(),
       ])
       setIntents(intentRes.items)
       setStrategies(stratRes.items)
       setOrders(orderRes.items)
+      setBatches(batchRes.items.filter(batch => batch.status !== 'CANCELLED'))
     } catch { /* ignore */ }
     finally { setLoading(false) }
   }, [])
@@ -161,12 +165,14 @@ function ActionListTab({
       actionApi.listIntents('active'),
       actionApi.listStrategies({ status: 'active' }),
       actionApi.listOrders({}),
+      executionBatchApi.list(),
     ])
-      .then(([intentRes, stratRes, orderRes]) => {
+      .then(([intentRes, stratRes, orderRes, batchRes]) => {
         if (!active) return
         setIntents(intentRes.items)
         setStrategies(stratRes.items)
         setOrders(orderRes.items)
+        setBatches(batchRes.items.filter(batch => batch.status !== 'CANCELLED'))
       })
       .catch(() => undefined)
       .finally(() => { if (active) setLoading(false) })
@@ -214,7 +220,7 @@ function ActionListTab({
   }
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9CA3AF', padding: 20 }}><Loader2 size={16} className="animate-spin" />加载中...</div>
 
-  const hasAny = drafts.length > 0 || strategies.length > 0 || orders.length > 0
+  const hasAny = batches.length > 0 || drafts.length > 0 || strategies.length > 0 || orders.length > 0
 
   if (!hasAny) {
     return (
@@ -229,6 +235,22 @@ function ActionListTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {batches.length > 0 && (
+        <>
+          <SectionTitle>多标的交易执行</SectionTitle>
+          {batches.map(batch => (
+            <ExecutionBatchCard
+              key={batch.id}
+              batch={batch}
+              onChanged={next => setBatches(current => [
+                next,
+                ...current.filter(item => item.id !== batch.id && item.id !== next.id),
+              ])}
+            />
+          ))}
+        </>
+      )}
 
       {/* ── 待确认 ── */}
       {drafts.length > 0 && (
