@@ -1,5 +1,5 @@
 /**
- * FundEImportTab — 基金E账户 Excel 持仓导入
+ * FundEImportTab — 基金账户 Excel 持仓导入
  * 嵌入 Dashboard ImportSection 的第 5 个 tab。
  */
 import { useState, useRef } from 'react'
@@ -50,13 +50,13 @@ export function FundEImportTab({ onRefresh }: Props) {
   return (
     <div>
       <p style={{ fontSize: 12, color: '#6B7280', marginTop: 0, marginBottom: 12, lineHeight: 1.6 }}>
-        从基金E账户App导出持仓Excel，上传后自动解析全市场公募基金持仓。
+        从基金账户 App 导出持仓 Excel，上传后自动解析全市场公募基金持仓。
         按销售平台分组<strong>替换</strong>境内基金持仓，不影响境外券商和中信证券。
       </p>
 
       <div style={{ background: '#F9FAFB', borderRadius: 6, border: '1px solid #F3F4F6', padding: '8px 12px', fontSize: 11, color: '#6B7280', marginBottom: 14, lineHeight: 1.7 }}>
         <strong style={{ color: '#374151' }}>操作步骤：</strong><br />
-        ① 基金E账户App → 持有查询 → 右上角导出<br />
+        ① 基金账户 App → 持有查询 → 右上角导出<br />
         ② 填写邮箱 + 短信验证码，等待邮件<br />
         ③ 解压附件压缩包（密码为身份证后6位）<br />
         ④ 上传解压后的 .xlsx 文件

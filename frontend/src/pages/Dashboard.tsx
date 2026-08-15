@@ -651,7 +651,7 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><RefreshCw size={11} /> API 同步</span>
             </button>
             <button style={tabStyle(activeTab === 'fund-e')} onClick={() => setActiveTab('fund-e')}>
-              📊 基金E账户
+              📊 基金账户
             </button>
             {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'broker')} onClick={() => setActiveTab('broker')}>CSV 导入（按平台替换）</button>}
             {SHOW_PLATFORM_REPLACE_TABS && <button style={tabStyle(activeTab === 'screenshot')} onClick={() => setActiveTab('screenshot')}>
@@ -745,7 +745,7 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
             <BrokerSyncTab onRefresh={onRefresh} />
           )}
 
-          {/* ── 基金E账户 ── */}
+          {/* ── 基金账户 ── */}
           {activeTab === 'fund-e' && (
             <FundEImportTab onRefresh={onRefresh} />
           )}

@@ -97,9 +97,11 @@ def _fake_fx(amount, _from_ccy, _to_ccy="CNY", _date="latest"):
 
 def test_dashboard_import_tabs_are_api_fund_csv_order():
     source = (ROOT / "frontend/src/pages/Dashboard.tsx").read_text()
+    fund_import_source = (ROOT / "frontend/src/components/FundEImportTab.tsx").read_text()
     tab_block = source[source.index("{/* Tab 行 */}"):source.index("{/* ── 通用 CSV ── */}")]
     assert "('api-sync')" in source
-    assert tab_block.index("API 同步") < tab_block.index("基金E账户") < tab_block.index("通用 CSV")
+    assert tab_block.index("API 同步") < tab_block.index("基金账户") < tab_block.index("通用 CSV")
+    assert "基金E账户" not in source + fund_import_source
 
 
 def test_existing_sqlite_positions_table_gets_idempotent_ownership_columns():
