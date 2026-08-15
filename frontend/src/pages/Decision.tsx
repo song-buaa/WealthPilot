@@ -10,9 +10,10 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2, Send, AlertTriangle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, User, BarChart3, Search, BookOpen, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft, type StructuredTradeIntent } from '@/lib/api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
+import TradeIntentPreview from '@/components/TradeIntentPreview'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
 import { useDecisionStore } from '@/store/decisionStore'
 
@@ -33,6 +34,8 @@ interface Message {
   actionable?: boolean
   actionable_hint?: string | null
   actionDraftStatus?: 'idle' | 'loading' | 'completed'
+  tradeIntent?: StructuredTradeIntent
+  persistedMessageId?: number
 }
 
 interface StageInfo {
@@ -255,6 +258,8 @@ export default function Decision() {
             role: m.role === 'assistant' ? 'ai' as const : 'user' as const,
             content: m.content,
             intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
+            tradeIntent: m.metadata?.trade_intent,
+            persistedMessageId: m.role === 'assistant' ? m.id : undefined,
           }))
           msgIdRef.current = loaded.length
           setMessages(loaded)
@@ -346,6 +351,13 @@ export default function Decision() {
 
         } else if (ev.type === 'intent') {
           updateAi(m => ({ ...m, intent: ev.data }))
+
+        } else if (ev.type === 'trade_intent') {
+          updateAi(m => ({
+            ...m,
+            tradeIntent: ev.data.intent as StructuredTradeIntent,
+            persistedMessageId: ev.data.message_id as number | undefined,
+          }))
 
         } else if (ev.type === 'stage') {
           const stage: StageInfo = {
@@ -449,6 +461,8 @@ export default function Decision() {
         role: m.role === 'assistant' ? 'ai' as const : 'user' as const,
         content: m.content,
         intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
+        tradeIntent: m.metadata?.trade_intent,
+        persistedMessageId: m.role === 'assistant' ? m.id : undefined,
       }))
       msgIdRef.current = loaded.length
       setMessages(loaded)
@@ -487,6 +501,12 @@ export default function Decision() {
           : m
       ))
     }
+  }
+
+  function handleTradeIntentConfirmed(messageId: number, intent: StructuredTradeIntent) {
+    setMessages(prev => prev.map(message =>
+      message.id === messageId ? { ...message, tradeIntent: intent } : message
+    ))
   }
 
   // Bug 2 fix: 执行计划确认回调 — 在 Decision 作用域内，闭包可访问 state setters
@@ -686,7 +706,15 @@ export default function Decision() {
             msg.role === 'user' ? (
               <UserMessage key={msg.id} msg={msg} />
             ) : (
-              <AiMessage key={msg.id} msg={msg} onSelectCandidate={handleSelectQuestion} explainData={explainData} onConfirmExecPlan={handleConfirmExecPlan} />
+              <AiMessage
+                key={msg.id}
+                msg={msg}
+                conversationId={activeConversationId}
+                onSelectCandidate={handleSelectQuestion}
+                explainData={explainData}
+                onConfirmExecPlan={handleConfirmExecPlan}
+                onTradeIntentConfirmed={intent => handleTradeIntentConfirmed(msg.id, intent)}
+              />
             )
           ))}
           <div ref={messagesEnd} />
@@ -835,11 +863,13 @@ function UserMessage({ msg }: { msg: Message }) {
 }
 
 // ── AI 消息 ───────────────────────────────────────────────────
-function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
+function AiMessage({ msg, conversationId, onSelectCandidate, explainData, onConfirmExecPlan, onTradeIntentConfirmed }: {
   msg: Message
+  conversationId: string | null
   onSelectCandidate?: (name: string) => void
   explainData?: ExplainData | null
   onConfirmExecPlan?: (planResult: Record<string, unknown>) => void
+  onTradeIntentConfirmed?: (intent: StructuredTradeIntent) => void
 }) {
   const [showExecPlan, setShowExecPlan] = useState(false)
   const [userInitiated, setUserInitiated] = useState(false)  // Step E: 用户主动发起
@@ -929,8 +959,17 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
           </div>
         )}
 
+        {msg.tradeIntent && !msg.streaming && (
+          <TradeIntentPreview
+            intent={msg.tradeIntent}
+            conversationId={conversationId}
+            messageId={msg.persistedMessageId}
+            onConfirmed={onTradeIntentConfirmed}
+          />
+        )}
+
         {/* v3.11 执行计划入口(AI 建议 — 主样式) */}
-        {!msg.streaming && msg.content && msg.actionable && !showExecPlan && (
+        {!msg.tradeIntent && !msg.streaming && msg.content && msg.actionable && !showExecPlan && (
           <button
             onClick={() => { setUserInitiated(false); setShowExecPlan(true) }}
             style={{
@@ -945,7 +984,7 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
           </button>
         )}
         {/* Step E: 用户主动发起(观望/持有结论时 — 次要样式，形状对齐主按钮) */}
-        {!msg.streaming && msg.content && !msg.actionable && msg.intent && !showExecPlan && (
+        {!msg.tradeIntent && !msg.streaming && msg.content && !msg.actionable && msg.intent && !showExecPlan && (
           <button
             onClick={() => { setUserInitiated(true); setShowExecPlan(true) }}
             style={{
@@ -961,7 +1000,7 @@ function AiMessage({ msg, onSelectCandidate, explainData, onConfirmExecPlan }: {
             主动制定执行计划
           </button>
         )}
-        {showExecPlan && (() => {
+        {!msg.tradeIntent && showExecPlan && (() => {
           const intent = msg.intent as Record<string, unknown> | undefined
           const action = (intent?.action as string) || 'BUY'
           // 从 explainData.target_position 读标准 symbol (后端 _serialize_target_position 产出)

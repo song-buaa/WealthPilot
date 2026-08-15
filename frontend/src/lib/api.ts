@@ -342,6 +342,11 @@ export const decisionApi = {
     request<ExplainData>(`/decision/explain/${decisionId}?conversation_id=${conversationId}`),
   clearSession: (conversationId: string) =>
     request<{ message: string }>(`/decision/conversation/${conversationId}`, { method: 'DELETE' }),
+  confirmTradeIntent: (intentId: string, conversationId: string, messageId: number) =>
+    request<{ trade_intent: StructuredTradeIntent }>(`/decision/trade-intents/${intentId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId, message_id: messageId }),
+    }),
 }
 
 // v3.6.1: 知识库 API
@@ -384,6 +389,7 @@ export interface ConversationMessageDTO {
   content: string
   intent: string | null
   asset: string | null
+  metadata: { trade_intent?: StructuredTradeIntent } | null
   created_at: string
 }
 
@@ -787,8 +793,70 @@ export interface ParseResult {
   card: ResearchCard
 }
 
+export type TradeIntentProvenance = 'USER_EXPLICIT' | 'AI_INFERRED' | 'NOT_PROVIDED'
+export type TradeIntentResolution =
+  | 'RESOLVED'
+  | 'MISSING'
+  | 'AMBIGUOUS'
+  | 'CONFLICTING'
+  | 'UNSUPPORTED_FOR_V3_15_V1'
+export type TradeIntentReadiness =
+  | 'READY_FOR_CONFIRMATION'
+  | 'NEEDS_REVIEW'
+  | 'UNSUPPORTED_FOR_V3_15_V1'
+  | 'PARSE_FAILED'
+export type TradeIntentConfirmation = 'PENDING' | 'BLOCKED' | 'CONFIRMED'
+
+export interface TradeIntentField {
+  value: string | number | boolean | Record<string, unknown> | null
+  provenance: TradeIntentProvenance
+  source_text: string | null
+  status: TradeIntentResolution
+}
+
+export interface TradeIntentIssue {
+  code: string
+  field_path: string
+  status: TradeIntentResolution
+  message: string
+  blocking: boolean
+}
+
+export interface TradeIntentLeg {
+  sequence: number
+  alias: TradeIntentField
+  allocation_mode: TradeIntentField
+  target_amount: TradeIntentField
+  venue_override: TradeIntentField
+  trading_currency_override: TradeIntentField
+  share_class_override: TradeIntentField
+}
+
+export interface StructuredTradeIntent {
+  schema_version: string
+  intent_id: string
+  candidate: boolean
+  broker: TradeIntentField
+  account: TradeIntentField
+  funding_source: TradeIntentField
+  funding_currency: TradeIntentField
+  budget_mode: TradeIntentField
+  stated_cash: TradeIntentField
+  venue: TradeIntentField
+  trading_currency: TradeIntentField
+  share_class: TradeIntentField
+  side: TradeIntentField
+  order_type: TradeIntentField
+  legs: TradeIntentLeg[]
+  issues: TradeIntentIssue[]
+  readiness: TradeIntentReadiness
+  confirmation_status: TradeIntentConfirmation
+  confirmed_at: string | null
+  phase_boundary: 'TYPED_INTENT_ONLY'
+}
+
 export interface SSEEvent {
-  type: 'intent' | 'stage' | 'text' | 'done' | 'error' | 'candidates'
+  type: 'intent' | 'stage' | 'text' | 'done' | 'error' | 'candidates' | 'trade_intent'
   data: Record<string, unknown>
 }
 
