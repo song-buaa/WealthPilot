@@ -63,6 +63,7 @@ def init_db():
     Base.metadata.create_all(engine)
     _ensure_position_ownership_columns(engine)
     _ensure_conversation_message_metadata_column(engine)
+    _ensure_execution_linkage_columns(engine)
 
 
 def _ensure_position_ownership_columns(engine) -> None:
@@ -101,4 +102,39 @@ def _ensure_conversation_message_metadata_column(engine) -> None:
         with engine.begin() as connection:
             connection.execute(text(
                 "ALTER TABLE conversation_messages ADD COLUMN metadata_json TEXT"
+            ))
+
+
+def _ensure_execution_linkage_columns(engine) -> None:
+    """为既有 action 表幂等补齐 v3.15 Batch/Leg 追溯与幂等字段。"""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    additions = {
+        "symbol_strategies": {"batch_leg_id": "VARCHAR(36)"},
+        "order_records": {
+            "batch_id": "VARCHAR(36)",
+            "batch_leg_id": "VARCHAR(36)",
+            "confirmation_version": "INTEGER",
+        },
+    }
+    with engine.begin() as connection:
+        for table, columns in additions.items():
+            if table not in tables:
+                continue
+            existing = {
+                column["name"] for column in inspect(engine).get_columns(table)
+            }
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"
+                    ))
+        if "order_records" in tables:
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_order_records_batch_submission "
+                "ON order_records (batch_id, confirmation_version, batch_leg_id) "
+                "WHERE batch_id IS NOT NULL"
             ))

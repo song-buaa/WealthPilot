@@ -26,8 +26,9 @@ import uuid
 
 from sqlalchemy import (
     Column, Integer, String, DateTime, Numeric, Text,
-    ForeignKey, Index,
+    ForeignKey, Index, UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -138,6 +139,7 @@ class SymbolStrategy(Base):
     # v3.11: 执行计划关联
     plan_id = Column(String(36), nullable=True)  # 关联 execution_plans.id
     tranche_sequence = Column(Integer, nullable=True)  # 批次序号
+    batch_leg_id = Column(String(36), nullable=True)  # v3.15 ExecutionLeg authority
 
     symbol = Column(String(50), nullable=False)  # 标的代码，如 MSFT / 02015
     side = Column(String(10), nullable=False)  # BUY / SELL
@@ -193,6 +195,9 @@ class OrderRecord(Base):
     strategy_id = Column(
         String(36), ForeignKey("symbol_strategies.id"), nullable=False,
     )
+    batch_id = Column(String(36), nullable=True)
+    batch_leg_id = Column(String(36), nullable=True)
+    confirmation_version = Column(Integer, nullable=True)
 
     broker_name = Column(String(20), nullable=False, default="mock")
     # broker_name: mock / tiger / futu / gjzq
@@ -259,4 +264,127 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_logs_event_type", "event_type"),
         Index("ix_audit_logs_timestamp", "timestamp"),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 6. ExecutionBatch / ExecutionLeg — v3.15 多标的执行权威层
+# ═══════════════════════════════════════════════════════════════════
+
+class ExecutionBatch(Base):
+    """一次经用户确认的多标的资产配置与执行授权。"""
+
+    __tablename__ = "execution_batches"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    broker = Column(String(20), nullable=False, default="ibkr")
+    account_ref = Column(String(100), nullable=False)
+    funding_currency = Column(String(10), nullable=False, default="USD")
+    budget_mode = Column(String(40), nullable=False)
+    source_conversation_id = Column(String(36), nullable=False)
+    source_message_id = Column(Integer, nullable=False)
+    source_trade_intent = Column(Text, nullable=False)
+
+    stated_cash = Column(Numeric(20, 4), nullable=True)
+    authoritative_cash_snapshot = Column(Text, nullable=True)
+    cash_accounting_model_version = Column(String(40), nullable=False, default="case1-v1")
+    usable_cash = Column(Numeric(20, 4), nullable=True)
+    safety_cushion = Column(Numeric(20, 4), nullable=False, default=25)
+    estimated_fees = Column(Numeric(20, 4), nullable=False, default=0)
+    reserved_amount = Column(Numeric(20, 4), nullable=False, default=0)
+    estimated_total = Column(Numeric(20, 4), nullable=False, default=0)
+    estimated_residual = Column(Numeric(20, 4), nullable=False, default=0)
+
+    status = Column(String(30), nullable=False, default="DRAFT")
+    confirmation_version = Column(Integer, nullable=False, default=0)
+    confirmation_hash = Column(String(64), nullable=True)
+    execution_policy = Column(Text, nullable=False)
+    attention_reason = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    confirmed_at = Column(DateTime, nullable=True)
+
+    legs = relationship(
+        "ExecutionLeg",
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="ExecutionLeg.sequence",
+    )
+
+    __table_args__ = (
+        Index("ix_execution_batches_status", "status"),
+        Index("ix_execution_batches_source_intent", "source_message_id"),
+    )
+
+
+class ExecutionLeg(Base):
+    """ExecutionBatch 中一个已解析、可独立跟踪的标的执行腿。"""
+
+    __tablename__ = "execution_legs"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    batch_id = Column(
+        String(36), ForeignKey("execution_batches.id"), nullable=False,
+    )
+    sequence = Column(Integer, nullable=False)
+
+    user_alias = Column(String(20), nullable=False)
+    allocation_mode = Column(String(30), nullable=False)
+    target_amount = Column(Numeric(20, 4), nullable=True)
+    authorization_class = Column(String(50), nullable=False)
+
+    resolved_con_id = Column(Integer, nullable=True)
+    symbol = Column(String(30), nullable=True)
+    local_symbol = Column(String(30), nullable=True)
+    sec_type = Column(String(20), nullable=True)
+    stock_type = Column(String(20), nullable=True)
+    exchange = Column(String(30), nullable=True)
+    primary_exchange = Column(String(30), nullable=True)
+    currency = Column(String(10), nullable=True)
+    trading_class = Column(String(30), nullable=True)
+    isin = Column(String(20), nullable=True)
+    long_name = Column(Text, nullable=True)
+    resolution_snapshot = Column(Text, nullable=True)
+
+    share_class_requirement = Column(String(20), nullable=False, default="ACC")
+    share_class_verification = Column(String(40), nullable=False)
+    verification_source = Column(Text, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+
+    quote_bid = Column(Numeric(20, 6), nullable=True)
+    quote_ask = Column(Numeric(20, 6), nullable=True)
+    quote_last = Column(Numeric(20, 6), nullable=True)
+    quote_as_of = Column(DateTime, nullable=True)
+    quote_quality = Column(String(20), nullable=True)
+    market_data_type = Column(String(30), nullable=True)
+    market_rule_id = Column(Integer, nullable=True)
+    min_tick = Column(Numeric(20, 8), nullable=True)
+    market_rule = Column(Text, nullable=True)
+    trading_hours = Column(Text, nullable=True)
+
+    reference_price = Column(Numeric(20, 6), nullable=True)
+    suggested_limit = Column(Numeric(20, 6), nullable=True)
+    final_limit = Column(Numeric(20, 6), nullable=True)
+    estimated_quantity = Column(Integer, nullable=True)
+    final_quantity = Column(Integer, nullable=True)
+    estimated_notional = Column(Numeric(20, 4), nullable=True)
+    what_if_snapshot = Column(Text, nullable=True)
+
+    execution_variance_amount = Column(Numeric(20, 4), nullable=False, default=0)
+    released_intent_amount = Column(Numeric(20, 4), nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="DRAFT")
+    linked_strategy_id = Column(String(36), nullable=True)
+    linked_order_id = Column(String(36), nullable=True)
+    submission_attempted_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    batch = relationship("ExecutionBatch", back_populates="legs")
+
+    __table_args__ = (
+        UniqueConstraint("batch_id", "sequence", name="uq_execution_leg_sequence"),
+        UniqueConstraint("batch_id", "user_alias", name="uq_execution_leg_alias"),
+        Index("ix_execution_legs_status", "status"),
     )
