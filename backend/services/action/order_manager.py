@@ -458,6 +458,20 @@ class OrderManager:
             )
 
         quantity = order_params.get("quantity", 0)
+
+        # v3.15 服务端幂等：同一 Batch confirmation version 的同一 Leg
+        # 只能拥有一条 OrderRecord。重放返回既有记录，不再触发 Broker。
+        batch_id = order_params.get("batch_id")
+        batch_leg_id = order_params.get("batch_leg_id")
+        confirmation_version = order_params.get("confirmation_version")
+        if batch_id and batch_leg_id and confirmation_version is not None:
+            existing = self.session.query(OrderRecord).filter_by(
+                batch_id=batch_id,
+                batch_leg_id=batch_leg_id,
+                confirmation_version=confirmation_version,
+            ).first()
+            if existing is not None:
+                return existing
         if strategy.target_quantity is not None and quantity > 0:
             remaining = strategy.target_quantity - strategy.cumulative_filled_quantity
             if quantity > remaining:
@@ -481,6 +495,9 @@ class OrderManager:
             limit_price=order_params.get("limit_price", strategy.limit_price),
             stop_price=order_params.get("stop_price", strategy.trigger_price),
             status=OrderStatus.CREATED,
+            batch_id=batch_id,
+            batch_leg_id=batch_leg_id,
+            confirmation_version=confirmation_version,
         )
         self.session.add(order)
         self.session.flush()
@@ -509,6 +526,7 @@ class OrderManager:
                     else (Decimal(str(strategy.trigger_price)) if strategy.trigger_price else None)
                 ),
                 local_order_id=order.id,
+                resolved_contract=order_params.get("resolved_contract"),
             )
 
             try:
