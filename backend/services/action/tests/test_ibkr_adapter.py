@@ -355,6 +355,38 @@ class TestCase1ResolvedContractCapabilities:
         assert result["exchange"] == "LSEETF"
         assert result["market_rule_id"] == 1874
 
+    def test_resolver_uses_generic_local_symbol_path_for_cbu0(self):
+        adapter = _make_adapter()
+        description = MagicMock()
+        description.contract.symbol = "CBU0"
+        description.contract.localSymbol = ""
+        wrong = self._detail("SMART")
+        wrong.contract.conId = 999
+        wrong.contract.symbol = "CBU0"
+        wrong.contract.localSymbol = "CBU0"
+        wrong.contract.currency = "EUR"
+        target = self._detail("LSEETF")
+        target.contract.conId = 79000139
+        target.contract.symbol = "CSBGU0"
+        target.contract.localSymbol = "CBU0"
+        target.contract.primaryExchange = "EBS"
+        target.longName = "ISHARES USD TRES BOND 7-10Y"
+        target.secIdList = [MagicMock(tag="ISIN", value="IE00B3VWN518")]
+        target.marketRuleIds = "26,983"
+        adapter._ib.reqMatchingSymbolsAsync = AsyncMock(return_value=[description])
+        adapter._ib.reqContractDetailsAsync = AsyncMock(
+            side_effect=[[wrong], [target], [target]],
+        )
+        adapter._ib.qualifyContractsAsync = AsyncMock(return_value=[target.contract])
+        adapter._ib.reqMarketRuleAsync = AsyncMock(
+            return_value=[MagicMock(lowEdge=0, increment=0.0005)],
+        )
+        result = adapter.resolve_lse_usd_etf("CBU0")
+        assert result["con_id"] == 79000139
+        assert result["symbol"] == "CSBGU0"
+        assert result["local_symbol"] == "CBU0"
+        assert result["market_rule_id"] == 983
+
     def test_resolved_lse_contract_uses_persisted_conid_not_ticker_guess(self):
         adapter = _make_adapter()
         trade = _make_mock_trade(order_id=48, perm_id=1008)

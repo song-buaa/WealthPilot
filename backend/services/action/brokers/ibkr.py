@@ -551,6 +551,23 @@ class IBKRBrokerAdapter(BrokerAdapter):
                         }
                     ):
                         details_by_con_id[snap["con_id"]] = (detail, snap)
+            # Some LSE ETF aliases are only an IBKR localSymbol (CBU0 is
+            # symbol=CSBGU0, localSymbol=CBU0).  This is a generic localSymbol
+            # query, not a ticker-specific rewrite.
+            if not details_by_con_id:
+                local_query = Contract(
+                    secType="STK", localSymbol=alias,
+                    exchange="LSEETF", currency="USD",
+                )
+                for detail in await self._ib.reqContractDetailsAsync(local_query):
+                    snap = self._contract_snapshot(detail)
+                    if (
+                        snap["currency"] == "USD"
+                        and snap["stock_type"] == "ETF"
+                        and snap["exchange"] == "LSEETF"
+                        and snap["local_symbol"].upper() == alias.upper()
+                    ):
+                        details_by_con_id[snap["con_id"]] = (detail, snap)
             if len(details_by_con_id) != 1:
                 return {
                     "candidate_count": len(details_by_con_id),
