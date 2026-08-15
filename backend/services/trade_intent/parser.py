@@ -150,6 +150,12 @@ Rules:
    and fractional-share requests in unsupported_features without rewriting them.
 8. Leg-specific constraints must be placed in the override fields. Conflicting
    global and leg-specific constraints must also be described in ambiguities.
+9. Provenance describes where the underlying fact came from, not whether an
+   enum was normalized. If the user wrote "现金", CASH is USER_EXPLICIT. If the
+   user wrote "$", "美元", "USD", or "美金", USD is USER_EXPLICIT.
+10. ALL_AVAILABLE_CASH means the user describes an available cash balance and
+    directs that all of it be used (including a remainder leg). FIXED_TOTAL means
+    the user deliberately sets aside a fixed total such as "拿 1 万美元买...".
 """
 
 
@@ -228,6 +234,55 @@ def is_actionable_trade_candidate(user_message: str) -> bool:
     if _ANALYSIS_ONLY_PATTERN.search(text) and "执行" not in text:
         return False
     return True
+
+
+_EXPLICIT_CASH_PATTERN = re.compile(r"(?:现金|cash)", re.IGNORECASE)
+_EXPLICIT_USD_PATTERN = re.compile(r"(?:\$|美元|美金|\bUSD\b)", re.IGNORECASE)
+_AVAILABLE_BALANCE_PATTERN = re.compile(
+    r"(?:(?:现在|目前|账户|券商|IBKR).{0,16})?"
+    r"(?:还有|可用|余额).{0,24}(?:现金|资金)|(?:全部可用现金|全部可用资金)",
+    re.IGNORECASE,
+)
+_USE_ALL_PATTERN = re.compile(
+    r"(?:全部用于|全部用来|全部拿来|(?:现金|资金)全部|剩余(?:现金|资金)全部)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_explicit_user_semantics(
+    extraction: TradeIntentExtraction,
+    user_message: str,
+) -> TradeIntentExtraction:
+    """Correct narrow, text-provable facts before public-contract validation.
+
+    This normalization never consults environment, portfolio, broker, market,
+    or execution data. It only upgrades facts directly evidenced by the current
+    user message and distinguishes available-balance instructions from a fixed
+    amount deliberately set aside for a trade.
+    """
+    normalized = extraction.model_copy(deep=True)
+
+    if (
+        normalized.funding_source.value == "CASH"
+        and _EXPLICIT_CASH_PATTERN.search(user_message)
+    ):
+        normalized.funding_source.provenance = ExtractionProvenance.USER_EXPLICIT
+
+    if (
+        normalized.funding_currency.value == "USD"
+        and _EXPLICIT_USD_PATTERN.search(user_message)
+    ):
+        normalized.funding_currency.provenance = ExtractionProvenance.USER_EXPLICIT
+
+    if (
+        _AVAILABLE_BALANCE_PATTERN.search(user_message)
+        and _USE_ALL_PATTERN.search(user_message)
+    ):
+        normalized.budget_mode.value = "ALL_AVAILABLE_CASH"
+        normalized.budget_mode.provenance = ExtractionProvenance.AI_INFERRED
+        normalized.budget_mode.source_text = normalized.budget_mode.source_text or "全部可用现金"
+
+    return normalized
 
 
 def _provenance(raw: ExtractionProvenance) -> FieldProvenance:
@@ -586,7 +641,8 @@ def parse_trade_intent(
         )
         if not extraction.is_trade_intent:
             return None
-        return build_and_validate_intent(extraction)
+        normalized = _normalize_explicit_user_semantics(extraction, user_message)
+        return build_and_validate_intent(normalized)
     except Exception as exc:
         logger.warning("[TradeIntentParser] fail-closed: %s", exc)
         return _failed_intent("交易意图解析失败，未生成任何可执行数据")

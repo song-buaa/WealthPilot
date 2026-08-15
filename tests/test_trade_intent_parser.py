@@ -89,9 +89,11 @@ def canonical_extraction() -> TradeIntentExtraction:
         is_trade_intent=True,
         broker=enum_field("IBKR", source="IBKR"),
         account=text_field(None, "MISSING"),
-        funding_source=enum_field("CASH", source="现金"),
-        funding_currency=enum_field("USD", source="$16,632"),
-        budget_mode=enum_field("ALL_AVAILABLE_CASH", "AI_INFERRED", "全部用于"),
+        # Mirrors the misclassification observed during the first human check.
+        # Parser normalization must correct facts provable from user text.
+        funding_source=enum_field("CASH", "AI_INFERRED", "现金"),
+        funding_currency=enum_field("USD", "AI_INFERRED", "$16,632"),
+        budget_mode=enum_field("FIXED_TOTAL", "AI_INFERRED", "全部用于"),
         stated_cash=money_field(16632, "USD", source="$16,632"),
         venue=enum_field("LSE", source="LSE"),
         trading_currency=enum_field("USD", source="美元交易线"),
@@ -130,6 +132,9 @@ def test_canonical_case_builds_ready_typed_intent_without_execution_facts(monkey
     assert intent.broker.value == "IBKR"
     assert intent.stated_cash.value == {"amount": 16632.0, "currency": "USD"}
     assert intent.stated_cash.provenance == FieldProvenance.USER_EXPLICIT
+    assert intent.budget_mode.value == "ALL_AVAILABLE_CASH"
+    assert intent.funding_source.provenance == FieldProvenance.USER_EXPLICIT
+    assert intent.funding_currency.provenance == FieldProvenance.USER_EXPLICIT
     assert intent.account.value is None
     assert intent.account.status == FieldResolutionStatus.MISSING
     assert [item.alias.value for item in intent.legs] == ["IBTA", "VDCA", "CBU0", "IB01"]
@@ -189,6 +194,24 @@ def test_missing_multi_leg_allocation_is_blocked_without_fifty_fifty_inference()
     assert intent.confirmation_status == IntentConfirmationStatus.BLOCKED
     assert all(item.target_amount.value is None for item in intent.legs)
     assert all(item.allocation_mode.status == FieldResolutionStatus.AMBIGUOUS for item in intent.legs)
+
+
+def test_true_fixed_total_is_not_rewritten_as_all_available_cash():
+    extraction = canonical_extraction()
+    extraction.budget_mode = enum_field("FIXED_TOTAL", "AI_INFERRED", "拿 1 万美元")
+    extraction.stated_cash = money_field(10000, "USD", source="1 万美元")
+    extraction.legs = [
+        leg("IBTA", "APPROX_AMOUNT", 7000),
+        leg("VDCA", "APPROX_AMOUNT", 3000),
+    ]
+
+    intent = parse_trade_intent(
+        "我准备拿 1 万美元买 IBTA 7000、VDCA 3000。全部走 LSE 美元交易线、Acc，使用限价单买入。",
+        provider=FakeProvider(extraction),
+    )
+
+    assert intent.budget_mode.value == "FIXED_TOTAL"
+    assert intent.funding_currency.provenance == FieldProvenance.USER_EXPLICIT
 
 
 def test_remainder_keeps_target_amount_null():

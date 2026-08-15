@@ -16,6 +16,7 @@ import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
 import TradeIntentPreview from '@/components/TradeIntentPreview'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
 import { useDecisionStore } from '@/store/decisionStore'
+import { summarizeTradeIntentForPanel } from '@/lib/tradeIntentPresentation'
 
 // ── 消息类型 ─────────────────────────────────────────────────
 interface Message {
@@ -803,8 +804,8 @@ export default function Decision() {
             {/* 内容区 */}
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {(() => {
-                if (explainData) return <ExplainPanel data={explainData} />
                 const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
+                if (explainData) return <ExplainPanel data={explainData} tradeIntent={lastDone?.tradeIntent} />
                 if (!lastDone) return <ExplainEmpty />
                 const fallback: ExplainData = {
                   decision_id: String(lastDone.id),
@@ -812,7 +813,7 @@ export default function Decision() {
                   stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
                   conclusion: lastDone.conclusion,
                 }
-                return <ExplainPanel data={fallback} />
+                return <ExplainPanel data={fallback} tradeIntent={lastDone.tradeIntent} />
               })()}
             </div>
           </div>
@@ -1473,13 +1474,17 @@ function CollapsibleHeader({ label, open, onToggle }: { label: string; open: boo
 }
 
 // ── 右侧结果面板 ─────────────────────────────────────────────────
-export function ExplainPanel({ data }: { data: ExplainData }) {
+export function ExplainPanel({ data, tradeIntent }: {
+  data: ExplainData
+  tradeIntent?: StructuredTradeIntent
+}) {
   const [chainOpen,    setChainOpen]    = React.useState(false)
   const [researchOpen, setResearchOpen] = React.useState(false)
   const [previewPath,  setPreviewPath]  = React.useState<string | null>(null)
+  const tradeIntentSummary = summarizeTradeIntentForPanel(tradeIntent)
 
   // ── AssetAllocation 意图专用视图 ──
-  if (data.intent?.intent_type === 'asset_allocation') {
+  if (data.intent?.intent_type === 'asset_allocation' && !tradeIntentSummary) {
     return <AllocationExplainView data={data} />
   }
 
@@ -1492,16 +1497,30 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
   const viewpointCards = researchRaw.filter(r => r.startsWith('[投研观点]') || r.startsWith('[用户资料]'))
 
   const intent    = data.intent
-
   return (
     <div style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
       {/* ── 1. 识别意图 ── */}
-      {intent && (
+      {(intent || tradeIntentSummary) && (
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: '12px 14px' }}>
           <SectionLabel label="识别意图" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {intent.primary_intent && (
+            {tradeIntentSummary ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#6B7280' }}>类型</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{tradeIntentSummary.type}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#6B7280' }}>标的</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{tradeIntentSummary.legCount} 个</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#6B7280' }}>操作</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{tradeIntentSummary.action}</span>
+                </div>
+              </>
+            ) : intent?.primary_intent && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>意图</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
@@ -1509,13 +1528,13 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
                 </span>
               </div>
             )}
-            {intent.asset && (
+            {!tradeIntentSummary && intent?.asset && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>标的</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{intent.asset}</span>
               </div>
             )}
-            {intent.action && (
+            {!tradeIntentSummary && intent?.action && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>操作</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>
@@ -1523,13 +1542,13 @@ export function ExplainPanel({ data }: { data: ExplainData }) {
                 </span>
               </div>
             )}
-            {intent.time_context && intent.time_context !== '未知' && (
+            {!tradeIntentSummary && intent?.time_context && intent.time_context !== '未知' && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>时间</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{intent.time_context}</span>
               </div>
             )}
-            {intent.confidence != null && (
+            {!tradeIntentSummary && intent?.confidence != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: '#6B7280' }}>置信度</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
