@@ -244,7 +244,9 @@ def save_conversation_turn(
     chat_answer: str,
     intent: str | None = None,
     asset: str | None = None,
-) -> None:
+    *,
+    assistant_metadata: dict | None = None,
+) -> int:
     """写入本轮的 user 消息和 assistant 消息，共两条记录。
     同时确保 conversations 主表有对应记录（首条消息自动创建）。
     """
@@ -276,11 +278,17 @@ def save_conversation_turn(
         db.add(ConversationMessage(
             conversation_id=conversation_id, role="user", content=user_input,
         ))
-        db.add(ConversationMessage(
+        assistant_message = ConversationMessage(
             conversation_id=conversation_id, role="assistant", content=chat_answer,
             intent=intent, asset=asset,
-        ))
+            metadata_json=(
+                json.dumps(assistant_metadata, ensure_ascii=False)
+                if assistant_metadata else None
+            ),
+        )
+        db.add(assistant_message)
         db.commit()
+        db.refresh(assistant_message)
 
         # 首条消息写入成功后，在后台异步用 LLM 生成更好的标题
         if is_first_message and user_input:
@@ -293,6 +301,8 @@ def save_conversation_turn(
         ).count()
         if unsummarized_count > 20:
             _compress_conversation_async(conversation_id)
+
+        return assistant_message.id
 
     except Exception:
         db.rollback()

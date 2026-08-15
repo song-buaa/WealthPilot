@@ -196,6 +196,7 @@ class OpenAIStructuredTradeIntentProvider:
                 {"role": "user", "content": prompt},
             ],
             text_format=TradeIntentExtraction,
+            timeout=20.0,
         )
         parsed = response.output_parsed
         if parsed is None:
@@ -370,6 +371,12 @@ def build_and_validate_intent(extraction: TradeIntentExtraction) -> StructuredTr
         "order_type": {"LIMIT"},
     }.items():
         _mark_required_field(intent, field_name, allowed)
+
+    # Account identity is never inferred. Phase 1 may preserve only an account
+    # identifier the user actually typed; config/broker selection belongs to
+    # Phase 2 and is deliberately unavailable to this parser.
+    if intent.account.provenance != FieldProvenance.USER_EXPLICIT:
+        intent.account = unresolved_field()
 
     if intent.account.value is None:
         _add_issue(

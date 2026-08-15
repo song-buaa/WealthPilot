@@ -150,6 +150,18 @@ def test_canonical_case_builds_ready_typed_intent_without_execution_facts(monkey
         assert forbidden not in encoded
 
 
+def test_ai_inferred_account_is_discarded_and_deferred_to_phase2():
+    extraction = canonical_extraction()
+    extraction.account = text_field("inferred-live-account", "AI_INFERRED")
+
+    intent = parse_trade_intent(CANONICAL_MESSAGE, provider=FakeProvider(extraction))
+
+    assert intent.account.value is None
+    assert intent.account.provenance == FieldProvenance.NOT_PROVIDED
+    assert intent.account.status == FieldResolutionStatus.MISSING
+    assert intent.readiness == IntentReadiness.READY_FOR_CONFIRMATION
+
+
 def test_analysis_only_does_not_call_provider_or_create_preview():
     message = "比较一下 IBTA、VDCA、CBU0 和 IB01，哪个更适合配置固收？"
     provider = FakeProvider(error=AssertionError("provider must not be called"))

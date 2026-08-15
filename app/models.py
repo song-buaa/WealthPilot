@@ -339,6 +339,7 @@ class ConversationMessage(Base):
     content    = Column(Text,    nullable=False)   # user原文 / assistant的chat_answer
     intent     = Column(String,  nullable=True)    # 仅assistant轮，如"PositionDecision"
     asset      = Column(String,  nullable=True)    # 仅assistant轮，如"理想汽车"
+    metadata_json = Column(Text, nullable=True)    # 可选结构化消息元数据（如 Typed Trade Intent）
     is_summarized = Column(Boolean, default=False, nullable=False)  # 已纳入摘要
     created_at = Column(DateTime, default=datetime.utcnow)
 

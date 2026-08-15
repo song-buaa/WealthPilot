@@ -19,6 +19,8 @@ from backend.agents import (
     get_reviewing_agent,
 )
 from backend.agents.contracts import AgentTaskStatus
+from backend.services.trade_intent.models import StructuredTradeIntent
+from backend.services.trade_intent.parser import parse_trade_intent
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,24 @@ logger = logging.getLogger(__name__)
 def _sse(event_type: str, data: dict) -> str:
     """SSE 事件格式化（同 v2.6）。"""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _trade_intent_metadata(intent: StructuredTradeIntent | None) -> dict | None:
+    if intent is None:
+        return None
+    return {"trade_intent": intent.model_dump(mode="json")}
+
+
+def _trade_intent_event(
+    intent: StructuredTradeIntent | None,
+    message_id: int | None,
+) -> str | None:
+    if intent is None:
+        return None
+    return _sse("trade_intent", {
+        "intent": intent.model_dump(mode="json"),
+        "message_id": message_id,
+    })
 
 
 async def run_chat_stream_v3(
@@ -40,6 +60,7 @@ async def run_chat_stream_v3(
     Planning → Executing → Expressing(流式) → Reviewing → done
     """
     decision_id = f"decision_{uuid.uuid4().hex[:12]}"
+    trade_intent_input = user_input
 
     try:
         # ── Stage 0: 加载对话历史 ──
@@ -97,10 +118,17 @@ async def run_chat_stream_v3(
         yield _sse("stage", {"stage": "intent", "label": "意图识别中..."})
 
         planning = get_planning_agent()
-        plan_out = await asyncio.to_thread(
-            planning.run,
-            user_input, conversation_id, portfolio_id, conversation_history,
-            all_positions,
+        plan_out, trade_intent = await asyncio.gather(
+            asyncio.to_thread(
+                planning.run,
+                user_input, conversation_id, portfolio_id, conversation_history,
+                all_positions,
+            ),
+            asyncio.to_thread(
+                parse_trade_intent,
+                trade_intent_input,
+                conversation_history,
+            ),
         )
 
         if plan_out.status == AgentTaskStatus.FAILED:
@@ -154,12 +182,17 @@ async def run_chat_stream_v3(
             # 保存对话历史
             try:
                 from backend.services.decision_service import save_conversation_turn
-                await asyncio.to_thread(
+                assistant_message_id = await asyncio.to_thread(
                     save_conversation_turn, conversation_id, user_input, clarify_text,
                     "LowConfidence", None,
+                    assistant_metadata=_trade_intent_metadata(trade_intent),
                 )
             except Exception as e:
                 logger.warning(f"[v3] low_confidence save_conversation_turn 失败: {e}")
+                assistant_message_id = None
+            trade_event = _trade_intent_event(trade_intent, assistant_message_id)
+            if trade_event:
+                yield trade_event
             yield _sse("done", {
                 "decision_id": None,
                 "conclusion_level": None,
@@ -170,6 +203,7 @@ async def run_chat_stream_v3(
         if plan_out.route == "clarify":
             async for event in _handle_clarify(
                 plan_out, decision_id, user_input, conversation_id, portfolio_id,
+                trade_intent,
             ):
                 yield event
             return
@@ -179,6 +213,7 @@ async def run_chat_stream_v3(
             async for event in _handle_position_multi(
                 plan_out, plan_out.multi_assets, user_input,
                 conversation_id, portfolio_id, decision_id,
+                trade_intent,
             ):
                 yield event
             return
@@ -208,13 +243,18 @@ async def run_chat_stream_v3(
                 from backend.services.decision_service import save_conversation_turn
                 abort_text = exec_out.abort_chat_answer or exec_out.abort_reason or ""
                 intent_dict = plan_out.intent if isinstance(plan_out.intent, dict) else {}
-                await asyncio.to_thread(
+                assistant_message_id = await asyncio.to_thread(
                     save_conversation_turn, conversation_id, user_input, abort_text,
                     intent_dict.get("primary_intent", "Unknown"),
                     intent_dict.get("asset"),
+                    assistant_metadata=_trade_intent_metadata(trade_intent),
                 )
             except Exception as e:
                 logger.warning(f"[v3] ABORT save_conversation_turn 失败: {e}")
+                assistant_message_id = None
+            trade_event = _trade_intent_event(trade_intent, assistant_message_id)
+            if trade_event:
+                yield trade_event
             yield _sse("done", {
                 "decision_id": decision_id,
                 "conclusion_level": "aborted",
@@ -274,10 +314,14 @@ async def run_chat_stream_v3(
             })
 
         # ── Stage 5: 写入 store + 保存对话历史 + done 事件 ──
-        await _write_stores_v3(
+        assistant_message_id = await _write_stores_v3(
             conversation_id, decision_id, plan_out, exec_out, expr_out,
             user_input=user_input,
+            trade_intent=trade_intent,
         )
+        trade_event = _trade_intent_event(trade_intent, assistant_message_id)
+        if trade_event:
+            yield trade_event
         done_payload = _build_done_payload(plan_out, expr_out, review_out, decision_id)
         yield _sse("done", done_payload)
 
@@ -292,6 +336,7 @@ async def _handle_clarify(
     user_input: str,
     conversation_id: str,
     portfolio_id: int,
+    trade_intent: StructuredTradeIntent | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Clarify 路由：完整移植 v2.6 的候选清单交互（M1.1）。
@@ -343,15 +388,20 @@ async def _handle_clarify(
 
     # 6. 持久化对话（best effort）
     try:
-        await asyncio.to_thread(
+        assistant_message_id = await asyncio.to_thread(
             save_conversation_turn,
             conversation_id, user_input, reply, "PositionDecision", None,
+            assistant_metadata=_trade_intent_metadata(trade_intent),
         )
     except Exception as e:
         logger.debug(f"[v3] save_conversation_turn 失败（可忽略）: {e}")
+        assistant_message_id = None
 
     # 7. yield text + done
     yield _sse("text", {"delta": reply})
+    trade_event = _trade_intent_event(trade_intent, assistant_message_id)
+    if trade_event:
+        yield trade_event
     yield _sse("done", {
         "decision_id": None,
         "conclusion_level": None,
@@ -366,6 +416,7 @@ async def _handle_position_multi(
     conversation_id: str,
     portfolio_id: int,
     decision_id: str,
+    trade_intent: StructuredTradeIntent | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Position multi 路由：循环分析多个标的，拼接结果。
@@ -522,15 +573,20 @@ async def _handle_position_multi(
 
     # 保存对话历史
     try:
-        await asyncio.to_thread(
+        assistant_message_id = await asyncio.to_thread(
             save_conversation_turn,
             conversation_id, user_input, answer,
             "PositionDecision", ", ".join(multi_assets),
+            assistant_metadata=_trade_intent_metadata(trade_intent),
         )
     except Exception as e:
         logger.warning(f"[v3] position_multi save_conversation_turn 失败: {e}")
+        assistant_message_id = None
 
     # done 事件
+    trade_event = _trade_intent_event(trade_intent, assistant_message_id)
+    if trade_event:
+        yield trade_event
     last_did = valid_results[-1][1].decision_id if valid_results else None
     yield _sse("done", {
         "decision_id": last_did,
@@ -546,7 +602,8 @@ async def _write_stores_v3(
     exec_out,
     expr_out,
     user_input: str = "",
-) -> None:
+    trade_intent: StructuredTradeIntent | None = None,
+) -> int | None:
     """
     v3 决策完成后写入 _DECISION_STORE / _ALLOC_EXPLAIN_STORE / _PRIMARY_INTENT_CACHE
     + save_conversation_turn（R2 修复）。
@@ -673,16 +730,21 @@ async def _write_stores_v3(
             chat_answer = "(无回复内容)"
         asset = intent_dict.get("asset") if intent_dict else None
         try:
-            await asyncio.to_thread(
+            assistant_message_id = await asyncio.to_thread(
                 save_conversation_turn,
                 conversation_id, user_input, chat_answer,
                 primary_intent, asset,
+                assistant_metadata=_trade_intent_metadata(trade_intent),
             )
         except Exception as e:
             logger.warning(f"[v3] save_conversation_turn 失败: {e}")
+            assistant_message_id = None
+
+        return assistant_message_id
 
     except Exception as e:
         logger.warning(f"[v3] store 写入失败（不阻断主流程）: {e}")
+        return None
 
 
 def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dict:

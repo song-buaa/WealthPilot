@@ -1,6 +1,4 @@
-"""
-Conversations API — 会话 CRUD
-"""
+"""Conversations API — 会话 CRUD."""
 
 from datetime import datetime
 from typing import Optional
@@ -155,6 +153,7 @@ def get_messages(conversation_id: str):
     """返回该会话所有消息，按 created_at 升序。"""
     from app.database import get_session as get_db_session
     from app.models import ConversationMessage
+    from backend.services.trade_intent.persistence import decode_message_metadata
 
     db = get_db_session()
     try:
@@ -171,6 +170,7 @@ def get_messages(conversation_id: str):
                 "content": r.content,
                 "intent": r.intent,
                 "asset": r.asset,
+                "metadata": decode_message_metadata(r.metadata_json) or None,
                 "created_at": _utc_iso(r.created_at),
             }
             for r in rows

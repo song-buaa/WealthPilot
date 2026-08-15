@@ -62,6 +62,7 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_position_ownership_columns(engine)
+    _ensure_conversation_message_metadata_column(engine)
 
 
 def _ensure_position_ownership_columns(engine) -> None:
@@ -83,3 +84,21 @@ def _ensure_position_ownership_columns(engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_positions_sync_owner "
             "ON positions (broker, broker_account_id, sync_source, symbol)"
         ))
+
+
+def _ensure_conversation_message_metadata_column(engine) -> None:
+    """Idempotently add the lightweight message metadata extension."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    if "conversation_messages" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("conversation_messages")
+    }
+    if "metadata_json" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE conversation_messages ADD COLUMN metadata_json TEXT"
+            ))

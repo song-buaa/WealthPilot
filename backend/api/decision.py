@@ -27,6 +27,11 @@ class ChatRequest(BaseModel):
     portfolio_id: Optional[int] = None  # 不传则用默认 portfolio
 
 
+class ConfirmTradeIntentRequest(BaseModel):
+    conversation_id: str
+    message_id: int
+
+
 # ── SSE 对话接口 ──────────────────────────────────────────────────────────────
 
 @router.post("/chat")
@@ -107,3 +112,30 @@ def clear_session(conversation_id: str):
     """
     svc.clear_session(conversation_id)
     return {"message": f"conversation {conversation_id} cleared"}
+
+
+@router.post("/trade-intents/{intent_id}/confirm")
+def confirm_trade_intent(intent_id: str, req: ConfirmTradeIntentRequest):
+    """Confirm parser meaning only; never create an execution entity."""
+    from app.database import get_session as get_db_session
+    from backend.services.trade_intent.persistence import (
+        TradeIntentConfirmationBlockedError,
+        TradeIntentNotFoundError,
+        confirm_trade_intent as confirm_persisted_intent,
+    )
+
+    db = get_db_session()
+    try:
+        intent = confirm_persisted_intent(
+            db,
+            conversation_id=req.conversation_id,
+            message_id=req.message_id,
+            intent_id=intent_id,
+        )
+        return {"trade_intent": intent.model_dump(mode="json")}
+    except TradeIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TradeIntentConfirmationBlockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        db.close()
