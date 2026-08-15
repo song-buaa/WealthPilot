@@ -530,6 +530,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ensure_connected()
 
         async def resolve_on_loop():
+            from ib_async import Contract
             candidates = await self._ib.reqMatchingSymbolsAsync(alias)
             details_by_con_id = {}
             for description in candidates:
@@ -542,9 +543,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 for detail in await self._ib.reqContractDetailsAsync(candidate):
                     snap = self._contract_snapshot(detail)
                     if (
-                        snap["exchange"] == "LSEETF"
-                        and snap["currency"] == "USD"
+                        snap["currency"] == "USD"
                         and snap["stock_type"] == "ETF"
+                        and "LSEETF" in snap["valid_exchanges"]
                         and alias.upper() in {
                             snap["symbol"].upper(), snap["local_symbol"].upper(),
                         }
@@ -555,8 +556,28 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     "candidate_count": len(details_by_con_id),
                     "candidates": [item[1] for item in details_by_con_id.values()],
                 }
-            detail, snapshot = next(iter(details_by_con_id.values()))
-            qualified = await self._ib.qualifyContractsAsync(detail.contract)
+            detail, broad_snapshot = next(iter(details_by_con_id.values()))
+            direct_contract = Contract(
+                conId=broad_snapshot["con_id"],
+                symbol=broad_snapshot["symbol"],
+                localSymbol=broad_snapshot["local_symbol"],
+                secType=broad_snapshot["sec_type"],
+                exchange="LSEETF",
+                currency="USD",
+                tradingClass=broad_snapshot["trading_class"],
+            )
+            direct_details = await self._ib.reqContractDetailsAsync(direct_contract)
+            direct = next((
+                item for item in direct_details
+                if int(item.contract.conId or 0) == broad_snapshot["con_id"]
+                and item.contract.exchange == "LSEETF"
+            ), None)
+            snapshot = self._contract_snapshot(direct or detail)
+            snapshot["exchange"] = "LSEETF"
+            snapshot["market_rule_id"] = broad_snapshot.get("market_rule_id")
+            if not snapshot.get("isin"):
+                snapshot["isin"] = broad_snapshot.get("isin")
+            qualified = await self._ib.qualifyContractsAsync(direct_contract)
             if len(qualified) != 1 or int(qualified[0].conId or 0) != snapshot["con_id"]:
                 return {"candidate_count": 0, "candidates": []}
             rule_id = snapshot.get("market_rule_id")

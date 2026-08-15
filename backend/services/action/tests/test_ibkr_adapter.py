@@ -314,6 +314,47 @@ class TestLiveReadOnlyMutationGuard:
 
 
 class TestCase1ResolvedContractCapabilities:
+    @staticmethod
+    def _detail(exchange: str):
+        detail = MagicMock()
+        detail.contract.conId = 272686955
+        detail.contract.symbol = "IBTA"
+        detail.contract.localSymbol = "IBTA"
+        detail.contract.secType = "STK"
+        detail.contract.exchange = exchange
+        detail.contract.primaryExchange = "LSEETF"
+        detail.contract.currency = "USD"
+        detail.contract.tradingClass = "EUET"
+        detail.stockType = "ETF"
+        detail.longName = "ISHARES USD TRSRY 1-3Y USD A"
+        isin = MagicMock(tag="ISIN", value="IE00BYXPSP02")
+        detail.secIdList = [isin]
+        detail.minTick = 0.0001
+        detail.validExchanges = "SMART,LSEETF"
+        detail.marketRuleIds = "26,1874"
+        detail.tradingHours = "20260815:0000-20260815:2359"
+        detail.liquidHours = detail.tradingHours
+        detail.timeZoneId = "UTC"
+        return detail
+
+    def test_resolver_converts_routable_row_to_direct_lse_contract(self):
+        adapter = _make_adapter()
+        description = MagicMock()
+        description.contract.symbol = "IBTA"
+        description.contract.localSymbol = "IBTA"
+        adapter._ib.reqMatchingSymbolsAsync = AsyncMock(return_value=[description])
+        broad = self._detail("SMART")
+        direct = self._detail("LSEETF")
+        adapter._ib.reqContractDetailsAsync = AsyncMock(side_effect=[[broad], [direct]])
+        adapter._ib.qualifyContractsAsync = AsyncMock(return_value=[direct.contract])
+        rule = MagicMock(lowEdge=0, increment=0.0001)
+        adapter._ib.reqMarketRuleAsync = AsyncMock(return_value=[rule])
+        result = adapter.resolve_lse_usd_etf("IBTA")
+        assert result["candidate_count"] == 1
+        assert result["con_id"] == 272686955
+        assert result["exchange"] == "LSEETF"
+        assert result["market_rule_id"] == 1874
+
     def test_resolved_lse_contract_uses_persisted_conid_not_ticker_guess(self):
         adapter = _make_adapter()
         trade = _make_mock_trade(order_id=48, perm_id=1008)
