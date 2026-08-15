@@ -57,6 +57,11 @@ def test_fixed_amount_never_exceeds_user_target():
     assert notional <= Decimal("11350")
 
 
+def test_money_accepts_phase1_amount_currency_value_object():
+    from backend.services.execution_batch.calculator import money
+    assert money({"amount": 16632, "currency": "USD"}) == Decimal("16632")
+
+
 def test_quantity_zero_is_not_forced_to_one():
     with pytest.raises(ExecutionSafetyError, match="quantity=0"):
         calculate_fixed_quantity(Decimal("1"), Decimal("10"))

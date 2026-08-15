@@ -12,6 +12,8 @@ class ExecutionSafetyError(ValueError):
 
 
 def money(value) -> Decimal:
+    if isinstance(value, dict):
+        value = value.get("amount", 0)
     return Decimal(str(value or 0))
 
 
