@@ -65,6 +65,9 @@ def _serialize_leg(leg) -> dict:
         "reference_price": float(leg.reference_price) if leg.reference_price is not None else None,
         "suggested_limit": float(leg.suggested_limit) if leg.suggested_limit is not None else None,
         "final_limit": float(leg.final_limit) if leg.final_limit is not None else None,
+        "limit_source": leg.limit_source,
+        "manual_limit_confirmed_at": utc_iso(leg.manual_limit_confirmed_at),
+        "market_open": bool(leg.market_open),
         "estimated_quantity": leg.estimated_quantity,
         "final_quantity": leg.final_quantity,
         "estimated_notional": (
@@ -185,6 +188,23 @@ def confirm_batch(batch_id: str):
     session = get_session()
     try:
         batch = _service(session).confirm_batch(batch_id)
+        session.commit()
+        return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
+
+
+@router.post("/{batch_id}/manual-limits")
+def apply_manual_limits(batch_id: str, body: dict):
+    session = get_session()
+    try:
+        limits = body.get("limits")
+        if not isinstance(limits, dict):
+            raise ExecutionSafetyError("limits 必须为 alias → price")
+        batch = _service(session).apply_manual_limits(batch_id, limits)
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:

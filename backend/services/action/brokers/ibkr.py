@@ -629,13 +629,18 @@ class IBKRBrokerAdapter(BrokerAdapter):
             quality = {
                 1: "LIVE", 2: "FROZEN", 3: "DELAYED", 4: "FROZEN",
             }.get(market_data_type, "MISSING")
+            bid = self._finite_number(getattr(ticker, "bid", None))
+            ask = self._finite_number(getattr(ticker, "ask", None))
+            last = self._finite_number(getattr(ticker, "last", None))
+            if bid is None and ask is None and last is None:
+                quality = "MISSING"
             quote_time = getattr(ticker, "time", None) or datetime.now(timezone.utc)
             if quote_time.tzinfo is None:
                 quote_time = quote_time.replace(tzinfo=timezone.utc)
             return {
-                "bid": self._finite_number(getattr(ticker, "bid", None)),
-                "ask": self._finite_number(getattr(ticker, "ask", None)),
-                "last": self._finite_number(getattr(ticker, "last", None)),
+                "bid": bid,
+                "ask": ask,
+                "last": last,
                 "market_data_type": market_data_type,
                 "quote_quality": quality,
                 "quote_timestamp": quote_time.astimezone(timezone.utc).isoformat(),

@@ -200,6 +200,32 @@ def test_readonly_whatif_failure_is_recorded_and_not_ready(session):
     )
 
 
+def test_missing_quote_can_use_user_manual_tick_validated_limits(session):
+    adapter = FakeIBKRExecutionAdapter()
+    adapter.get_executable_quote = lambda _resolved: {
+        "bid": None, "ask": None, "last": None,
+        "quote_quality": "MISSING", "market_data_type": 1,
+        "quote_timestamp": NOW.isoformat(), "source": "FAKE_IBKR",
+    }
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    batch = service.create_batch(conversation_id="case1-conversation", message_id=1)
+    assert batch.status == "DRAFT"
+    service.apply_manual_limits(batch.id, {
+        "IBTA": 5, "VDCA": 61, "CBU0": 5, "IB01": 126,
+    })
+    assert batch.status == "READY"
+    assert all(leg.limit_source == "USER_MANUAL_CONFIRMED" for leg in batch.legs)
+    assert all(leg.what_if_snapshot for leg in batch.legs)
+
+
+def test_manual_limit_must_be_exact_market_rule_tick(session):
+    service, _adapter, batch = make_ready_batch(session)
+    with pytest.raises(ExecutionSafetyError, match="MarketRule tick"):
+        service.apply_manual_limits(batch.id, {
+            "IBTA": 5.005, "VDCA": 61, "CBU0": 5, "IB01": 126,
+        })
+
+
 def test_confirmation_hash_and_sequential_submission_are_server_authoritative(session):
     service, adapter, batch = make_ready_batch(session)
     service.confirm_batch(batch.id)

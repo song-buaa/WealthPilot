@@ -451,6 +451,23 @@ class TestCase1ResolvedContractCapabilities:
             "liquid_hours": "20260815:CLOSED", "time_zone_id": "UTC",
         }, now=now) is False
 
+    def test_quote_without_prices_is_missing_even_if_market_data_type_is_live(self):
+        adapter = _make_adapter()
+        ticker = MagicMock()
+        ticker.marketDataType = 1
+        ticker.bid = float("nan")
+        ticker.ask = float("nan")
+        ticker.last = float("nan")
+        ticker.time = datetime(2026, 8, 15, tzinfo=timezone.utc)
+        adapter._ib.reqTickersAsync = AsyncMock(return_value=[ticker])
+        result = adapter.get_executable_quote({
+            "con_id": 272686955, "symbol": "IBTA", "local_symbol": "IBTA",
+            "sec_type": "STK", "exchange": "LSEETF",
+            "primary_exchange": "LSEETF", "currency": "USD",
+            "trading_class": "EUET",
+        })
+        assert result["quote_quality"] == "MISSING"
+
 
 class TestDedicatedLoopReadPath:
     """读取必须通过 dedicated event loop，且失败不能伪装为空集合。"""

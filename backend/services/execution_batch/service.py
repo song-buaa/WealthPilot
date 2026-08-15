@@ -234,6 +234,7 @@ class ExecutionBatchService:
                     "time_zone_id": resolved.get("time_zone_id"),
                 }),
                 status="DRAFT",
+                market_open=self.adapter.is_market_open(resolved, now=self.clock()),
             )
             self.session.add(leg)
             self.session.flush()
@@ -243,6 +244,7 @@ class ExecutionBatchService:
                 leg.reference_price = ask
                 leg.suggested_limit = limit
                 leg.final_limit = limit
+                leg.limit_source = "SUGGESTED_BEST_ASK"
                 if mode == "APPROX_AMOUNT":
                     quantity, notional = calculate_fixed_quantity(target, limit)
                     leg.estimated_quantity = leg.final_quantity = quantity
@@ -384,6 +386,106 @@ class ExecutionBatchService:
             conversation_id=batch.source_conversation_id,
             message_id=batch.source_message_id,
         )
+
+    def apply_manual_limits(
+        self, batch_id: str, limits: dict[str, object],
+    ) -> ExecutionBatch:
+        """Apply user-entered limits with exact MarketRule validation and WhatIf."""
+        batch = self.get_batch(batch_id)
+        if any(leg.linked_order_id for leg in batch.legs):
+            raise ExecutionSafetyError("已有 Broker order，不可修改 Limit")
+        aliases = {leg.user_alias for leg in batch.legs}
+        if set(limits) != aliases:
+            raise ExecutionSafetyError("必须为 IBTA/VDCA/CBU0/IB01 分别输入 Limit")
+
+        total_notional = Decimal("0")
+        total_fees = Decimal("0")
+        attention = []
+        fixed = []
+        remainder = None
+        for leg in batch.legs:
+            limit = money(limits[leg.user_alias])
+            tiers = json.loads(leg.market_rule or "[]")
+            if limit <= 0 or normalize_buy_limit(limit, tiers) != limit:
+                raise ExecutionSafetyError(
+                    f"{leg.user_alias}: 手工 Limit 不符合 MarketRule tick"
+                )
+            leg.final_limit = limit
+            leg.limit_source = "USER_MANUAL_CONFIRMED"
+            leg.manual_limit_confirmed_at = self.clock()
+            resolved = json.loads(leg.resolution_snapshot)
+            leg.market_open = self.adapter.is_market_open(resolved, now=self.clock())
+            if leg.allocation_mode == "APPROX_AMOUNT":
+                quantity, notional = calculate_fixed_quantity(
+                    money(leg.target_amount), limit,
+                )
+                leg.final_quantity = leg.estimated_quantity = quantity
+                leg.estimated_notional = notional
+                fixed.append(leg)
+            else:
+                remainder = leg
+
+        for leg in fixed:
+            total_notional += money(leg.estimated_notional)
+            try:
+                result = self.adapter.what_if_limit_order(
+                    json.loads(leg.resolution_snapshot),
+                    quantity=leg.final_quantity,
+                    limit_price=money(leg.final_limit),
+                )
+                leg.what_if_snapshot = _json(result)
+                total_fees += money(result.get("commission"))
+            except (ConnectionError, TimeoutError) as exc:
+                leg.what_if_snapshot = _json({
+                    "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
+                    "what_if": True, "transmit": False,
+                })
+                attention.append(f"{leg.user_alias}: WhatIf 待 Live Enable")
+
+        snapshot = json.loads(batch.authoritative_cash_snapshot)
+        authoritative_cash = money(snapshot["authoritative_usd_cash"])
+        if remainder:
+            remainder_budget = max(
+                Decimal("0"),
+                authoritative_cash - total_notional - total_fees - money(batch.safety_cushion),
+            )
+            quantity, notional = calculate_fixed_quantity(
+                remainder_budget, money(remainder.final_limit),
+            )
+            remainder.final_quantity = remainder.estimated_quantity = quantity
+            remainder.estimated_notional = notional
+            total_notional += notional
+            try:
+                result = self.adapter.what_if_limit_order(
+                    json.loads(remainder.resolution_snapshot),
+                    quantity=quantity, limit_price=money(remainder.final_limit),
+                )
+                remainder.what_if_snapshot = _json(result)
+                total_fees += money(result.get("commission"))
+            except (ConnectionError, TimeoutError) as exc:
+                remainder.what_if_snapshot = _json({
+                    "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
+                    "what_if": True, "transmit": False,
+                })
+                attention.append("IB01: WhatIf 待 Live Enable")
+
+        batch.estimated_total = total_notional
+        batch.estimated_fees = total_fees
+        batch.estimated_residual = max(
+            Decimal("0"),
+            authoritative_cash - total_notional - total_fees - money(batch.safety_cushion),
+        )
+        batch.confirmation_hash = None
+        batch.status = "DRAFT" if attention else "READY"
+        batch.attention_reason = _json(attention) if attention else None
+        for leg in batch.legs:
+            leg.status = "DRAFT" if attention else "READY"
+        self._audit("execution_batch_manual_limits_applied", {
+            "batch_id": batch.id, "status": batch.status,
+            "broker_mutation": 0,
+        })
+        self.session.flush()
+        return batch
 
     def _assert_live_mutation_enabled(self) -> None:
         allowed = self._allow_mutation_override

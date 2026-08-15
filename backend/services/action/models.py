@@ -26,7 +26,7 @@ import uuid
 
 from sqlalchemy import (
     Column, Integer, String, DateTime, Numeric, Text,
-    ForeignKey, Index, UniqueConstraint,
+    ForeignKey, Index, UniqueConstraint, Boolean,
 )
 from sqlalchemy.orm import relationship
 
@@ -366,6 +366,9 @@ class ExecutionLeg(Base):
     reference_price = Column(Numeric(20, 6), nullable=True)
     suggested_limit = Column(Numeric(20, 6), nullable=True)
     final_limit = Column(Numeric(20, 6), nullable=True)
+    limit_source = Column(String(30), nullable=True)
+    manual_limit_confirmed_at = Column(DateTime, nullable=True)
+    market_open = Column(Boolean, nullable=False, default=False)
     estimated_quantity = Column(Integer, nullable=True)
     final_quantity = Column(Integer, nullable=True)
     estimated_notional = Column(Numeric(20, 4), nullable=True)

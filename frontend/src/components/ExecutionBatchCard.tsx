@@ -25,6 +25,9 @@ export default function ExecutionBatchCard({
   const [error, setError] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [ack, setAck] = useState(false)
+  const [manualLimits, setManualLimits] = useState<Record<string, string>>(() =>
+    Object.fromEntries(batch.legs.map(leg => [leg.user_alias, leg.final_limit?.toString() || ''])),
+  )
   const [safety, setSafety] = useState<{
     ibkr_read_only_mode: boolean
     live_trading_enabled: boolean
@@ -48,6 +51,20 @@ export default function ExecutionBatchCard({
   async function confirm() {
     setBusy(true); setError(null)
     try { update(await executionBatchApi.confirm(batch.id)) }
+    catch (err) { setError((err as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  async function applyManualLimits() {
+    const values = Object.fromEntries(
+      Object.entries(manualLimits).map(([alias, value]) => [alias, Number(value)]),
+    )
+    if (Object.values(values).some(value => !Number.isFinite(value) || value <= 0)) {
+      setError('请为 4 个标的输入有效的手工 Limit')
+      return
+    }
+    setBusy(true); setError(null)
+    try { update(await executionBatchApi.applyManualLimits(batch.id, values)) }
     catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
@@ -76,7 +93,9 @@ export default function ExecutionBatchCard({
     } finally { setBusy(false) }
   }
 
-  const liveReady = safety?.live_trading_enabled === true && safety.ibkr_read_only_mode === false
+  const liveReady = safety?.live_trading_enabled === true
+    && safety.ibkr_read_only_mode === false
+    && batch.legs.every(leg => leg.market_open)
   const attention = Array.isArray(batch.attention_reason)
     ? batch.attention_reason
     : batch.attention_reason ? [batch.attention_reason] : []
@@ -131,7 +150,18 @@ export default function ExecutionBatchCard({
                   <td style={{ padding: '9px 6px', lineHeight: 1.5 }}>
                     <div>Ask {price(leg.quote_ask)} · {leg.quote_quality || 'MISSING'}</div>
                     <div>Limit {price(leg.final_limit)}</div>
+                    {!leg.linked_order_id && (
+                      <input
+                        aria-label={`${leg.user_alias} 手工 Limit`}
+                        value={manualLimits[leg.user_alias] || ''}
+                        onChange={event => setManualLimits(current => ({ ...current, [leg.user_alias]: event.target.value }))}
+                        placeholder="手工 Limit"
+                        inputMode="decimal"
+                        style={{ width: 88, marginTop: 4, padding: '3px 5px', border: '1px solid #CBD5E1', borderRadius: 5, fontSize: 11 }}
+                      />
+                    )}
                     <div>Rule {leg.market_rule_id} · {leg.quote_as_of ? new Date(leg.quote_as_of).toLocaleString('zh-CN') : '—'}</div>
+                    <div style={{ color: leg.market_open ? '#047857' : '#B45309' }}>{leg.market_open ? 'MARKET OPEN' : 'MARKET CLOSED'}</div>
                   </td>
                   <td style={{ padding: '9px 6px' }}>{leg.final_quantity ?? '—'} 股<br />{usd(leg.estimated_notional)}</td>
                   <td style={{ padding: '9px 6px' }}>
@@ -159,6 +189,9 @@ export default function ExecutionBatchCard({
           <button onClick={refresh} disabled={busy || Boolean(batch.legs.some(leg => leg.linked_order_id))} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, border: '1px solid #CBD5E1', background: '#fff', cursor: 'pointer' }}>
             <RefreshCw size={13} />刷新只读事实
           </button>
+          {batch.status === 'DRAFT' && (
+            <button onClick={applyManualLimits} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, cursor: 'pointer' }}>校验手工 Limit</button>
+          )}
           {batch.status === 'READY' && (
             <button onClick={confirm} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: 'none', background: '#2563EB', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>确认交易计划</button>
           )}
@@ -167,7 +200,7 @@ export default function ExecutionBatchCard({
           )}
         </div>
         {!liveReady && batch.status === 'CONFIRMED' && (
-          <div style={{ textAlign: 'right', fontSize: 10, color: '#B45309', marginTop: 5 }}>当前仍为本地只读 / Live Trading OFF，提交入口已硬禁用。</div>
+          <div style={{ textAlign: 'right', fontSize: 10, color: '#B45309', marginTop: 5 }}>当前仍为本地只读、Live Trading OFF 或 Market Closed，提交入口已硬禁用。</div>
         )}
         {error && <div style={{ marginTop: 8, color: '#DC2626', fontSize: 11 }}>{error}</div>}
       </div>

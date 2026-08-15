@@ -118,6 +118,11 @@ def _ensure_execution_linkage_columns(engine) -> None:
             "batch_leg_id": "VARCHAR(36)",
             "confirmation_version": "INTEGER",
         },
+        "execution_legs": {
+            "limit_source": "VARCHAR(30)",
+            "manual_limit_confirmed_at": "DATETIME",
+            "market_open": "BOOLEAN NOT NULL DEFAULT 0",
+        },
     }
     with engine.begin() as connection:
         for table, columns in additions.items():

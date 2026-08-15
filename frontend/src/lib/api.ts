@@ -502,6 +502,9 @@ export interface ExecutionLegResponse {
   reference_price: number | null
   suggested_limit: number | null
   final_limit: number | null
+  limit_source: string | null
+  manual_limit_confirmed_at: string | null
+  market_open: boolean
   estimated_quantity: number | null
   final_quantity: number | null
   estimated_notional: number | null
@@ -555,6 +558,10 @@ export const executionBatchApi = {
   confirm: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/confirm`, { method: 'POST' },
   ),
+  applyManualLimits: (batchId: string, limits: Record<string, number>) =>
+    request<ExecutionBatchResponse>(`/execution-batches/${batchId}/manual-limits`, {
+      method: 'POST', body: JSON.stringify({ limits }),
+    }),
   safety: () => request<{
     ibkr_read_only_mode: boolean
     live_trading_enabled: boolean

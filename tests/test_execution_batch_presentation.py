@@ -22,6 +22,7 @@ def test_batch_review_contains_required_contract_and_cash_evidence():
         "resolved_con_id", "local_symbol", "exchange", "currency", "isin",
         "share_class_verification", "market_rule_id", "quote_as_of",
         "safety_cushion", "estimated_fees", "estimated_residual",
+        "manualLimits", "market_open",
     ]:
         assert field in BATCH_CARD
 
