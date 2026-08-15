@@ -370,6 +370,21 @@ class ExecutionBatchService:
             ExecutionBatch.created_at.desc()
         ).all()
 
+    def refresh_batch(self, batch_id: str) -> ExecutionBatch:
+        """Rebuild all broker facts into a new versioned review object."""
+        batch = self.get_batch(batch_id)
+        if any(leg.linked_order_id for leg in batch.legs):
+            raise ExecutionSafetyError("已有 Broker order 的 Batch 不可整体刷新")
+        batch.status = "CANCELLED"
+        self._audit("execution_batch_superseded", {
+            "batch_id": batch.id, "broker_mutation": 0,
+        })
+        self.session.flush()
+        return self.create_batch(
+            conversation_id=batch.source_conversation_id,
+            message_id=batch.source_message_id,
+        )
+
     def _assert_live_mutation_enabled(self) -> None:
         allowed = self._allow_mutation_override
         if allowed is None:

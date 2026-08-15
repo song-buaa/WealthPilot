@@ -26,6 +26,7 @@ from backend.api import action as action_api
 from backend.api import knowledge as knowledge_api
 from backend.api import philosophy as philosophy_api
 from backend.api import execution_plan as execution_plan_api
+from backend.api import execution_batch as execution_batch_api
 
 
 @asynccontextmanager
@@ -185,6 +186,11 @@ app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 app.include_router(knowledge_api.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(philosophy_api.router, prefix="/api/philosophy", tags=["philosophy"])
 app.include_router(execution_plan_api.router, prefix="/api/execution-plan", tags=["execution-plan"])
+app.include_router(
+    execution_batch_api.router,
+    prefix="/api/execution-batches",
+    tags=["execution-batches"],
+)
 
 # Demo API
 from backend.api import demo as demo_api
