@@ -10,7 +10,7 @@ IBKRBrokerAdapter 单元测试 — M1 + M2 验证。
 import asyncio
 import inspect
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -311,6 +311,72 @@ class TestLiveReadOnlyMutationGuard:
         adapter = _make_adapter(account_id="U1234567")
         assert adapter.cancel_order("555") is False
         adapter._ib.cancelOrder.assert_not_called()
+
+
+class TestCase1ResolvedContractCapabilities:
+    def test_resolved_lse_contract_uses_persisted_conid_not_ticker_guess(self):
+        adapter = _make_adapter()
+        trade = _make_mock_trade(order_id=48, perm_id=1008)
+        trade.contract.conId = 79000139
+        trade.contract.symbol = "CSBGU0"
+        trade.contract.exchange = "LSEETF"
+        trade.contract.currency = "USD"
+        adapter._ib.placeOrder.return_value = trade
+        resolved = {
+            "con_id": 79000139, "symbol": "CSBGU0", "local_symbol": "CBU0",
+            "sec_type": "STK", "exchange": "LSEETF", "primary_exchange": "EBS",
+            "currency": "USD", "trading_class": "EUET",
+        }
+        result = adapter.place_order(_make_request(
+            symbol="CBU0:LSE", resolved_contract=resolved,
+        ))
+        contract = adapter._ib.placeOrder.call_args[0][0]
+        assert contract.conId == 79000139
+        assert contract.symbol == "CSBGU0"
+        assert contract.localSymbol == "CBU0"
+        assert contract.exchange == "LSEETF"
+        assert result.raw_response["con_id"] == 79000139
+
+    def test_resolved_contract_mismatch_fails_before_gateway_mutation(self):
+        adapter = _make_adapter()
+        result = adapter.place_order(_make_request(
+            symbol="IBTA:LSE",
+            resolved_contract={
+                "con_id": 272686955, "symbol": "IBTA", "local_symbol": "IBTA",
+                "sec_type": "STK", "exchange": "SMART", "currency": "USD",
+            },
+        ))
+        assert result.status == "rejected"
+        assert result.raw_response["action"] == "place_order_blocked_contract_identity"
+        adapter._ib.placeOrder.assert_not_called()
+
+    def test_whatif_sets_non_transmitting_flags(self):
+        adapter = _make_adapter()
+        state = MagicMock()
+        state.commission = 1.23
+        state.minCommission = 1
+        state.maxCommission = 2
+        state.commissionCurrency = "USD"
+        state.warningText = ""
+        adapter._ib.whatIfOrderAsync = AsyncMock(return_value=state)
+        result = adapter.what_if_limit_order({
+            "con_id": 272686955, "symbol": "IBTA", "local_symbol": "IBTA",
+            "sec_type": "STK", "exchange": "LSEETF",
+            "primary_exchange": "LSEETF", "currency": "USD",
+            "trading_class": "EUET",
+        }, quantity=10, limit_price=Decimal("5.00"))
+        order = adapter._ib.whatIfOrderAsync.call_args[0][1]
+        assert order.whatIf is True
+        assert order.transmit is False
+        assert result["what_if"] is True
+        assert result["transmit"] is False
+
+    def test_market_hours_closed_fails_closed(self):
+        adapter = _make_adapter()
+        now = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+        assert adapter.is_market_open({
+            "liquid_hours": "20260815:CLOSED", "time_zone_id": "UTC",
+        }, now=now) is False
 
 
 class TestDedicatedLoopReadPath:

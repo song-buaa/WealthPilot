@@ -13,7 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -27,6 +27,7 @@ class OrderRequest:
     trigger_price: Optional[Decimal] = None  # CONDITIONAL_LIMIT 必填
     time_in_force: str = "GTC"          # DAY / GTC
     local_order_id: str = ""            # WealthPilot 侧 order_record.id
+    resolved_contract: Optional[dict[str, Any]] = None  # v3.15 broker-qualified identity
 
 
 @dataclass

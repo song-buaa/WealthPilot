@@ -23,6 +23,9 @@ import logging
 import os
 import threading
 import time
+import math
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Optional
 
@@ -338,14 +341,13 @@ class IBKRBrokerAdapter(BrokerAdapter):
         - ConnectionError / TimeoutError 不 catch，由上层 OrderManager 处理。
         - 业务拒单在此方法内返回 rejected。
         """
+        self._ensure_connected()
         if _is_live_read_only_account(self._account_id):
             return self._rejected(
                 request,
                 reason="IBKR_READ_ONLY_MODE=true：真实账户只读模式禁止下单",
                 action="place_order_blocked_read_only",
             )
-
-        self._ensure_connected()
 
         # ── 闸门 3: order_type 白名单 ─────────────────────────
         order_type = request.order_type.upper()
@@ -363,8 +365,22 @@ class IBKRBrokerAdapter(BrokerAdapter):
             )
 
         # ── 闸门 2: market 白名单 ─────────────────────────────
+        resolved = request.resolved_contract or None
         market, pure_symbol = self._parse_symbol(request.symbol)
-        if market not in SUPPORTED_MARKETS:
+        if resolved:
+            if (
+                not resolved.get("con_id")
+                or resolved.get("exchange") != "LSEETF"
+                or resolved.get("currency") != "USD"
+                or resolved.get("sec_type") != "STK"
+            ):
+                return self._rejected(
+                    request,
+                    reason="v3.15 resolved Contract 未通过 LSEETF/USD/STK 身份校验",
+                    action="place_order_blocked_contract_identity",
+                )
+            market = "LSE"
+        elif market not in SUPPORTED_MARKETS:
             return self._rejected(
                 request,
                 reason=(
@@ -376,13 +392,25 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         try:
             async def submit_on_loop() -> dict:
-                from ib_async import LimitOrder, Stock
+                from ib_async import Contract, LimitOrder, Stock
 
-                exchange = MARKET_TO_EXCHANGE[market]
-                currency = MARKET_TO_CURRENCY[market]
-                contract = Stock(
-                    symbol=pure_symbol, exchange=exchange, currency=currency,
-                )
+                if resolved:
+                    contract = Contract(
+                        conId=int(resolved["con_id"]),
+                        symbol=resolved["symbol"],
+                        localSymbol=resolved["local_symbol"],
+                        secType=resolved["sec_type"],
+                        exchange=resolved["exchange"],
+                        primaryExchange=resolved.get("primary_exchange", ""),
+                        currency=resolved["currency"],
+                        tradingClass=resolved.get("trading_class", ""),
+                    )
+                else:
+                    exchange = MARKET_TO_EXCHANGE[market]
+                    currency = MARKET_TO_CURRENCY[market]
+                    contract = Stock(
+                        symbol=pure_symbol, exchange=exchange, currency=currency,
+                    )
                 order = LimitOrder(
                     action=request.side.upper(),
                     totalQuantity=int(request.quantity),
@@ -420,7 +448,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         raw.update({
             "symbol": request.symbol,
             "market": market,
-            "currency": MARKET_TO_CURRENCY[market],
+            "currency": resolved["currency"] if resolved else MARKET_TO_CURRENCY[market],
             "limit_price": float(request.limit_price),
             "quantity": request.quantity,
             "side": request.side,
@@ -437,6 +465,254 @@ class IBKRBrokerAdapter(BrokerAdapter):
             timestamp=int(time.time() * 1000),
             raw_response=raw,
         )
+
+    # ── v3.15 Case 1 read-only evidence capabilities ─────────────
+
+    @staticmethod
+    def _finite_number(value) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    @staticmethod
+    def _contract_snapshot(detail, selected_exchange: str = "LSEETF") -> dict:
+        contract = detail.contract
+        isin = None
+        for item in getattr(detail, "secIdList", []) or []:
+            if str(getattr(item, "tag", "")).upper() == "ISIN":
+                isin = getattr(item, "value", None)
+                break
+        exchanges = str(getattr(detail, "validExchanges", "") or "").split(",")
+        rule_ids = str(getattr(detail, "marketRuleIds", "") or "").split(",")
+        market_rule_id = None
+        if selected_exchange in exchanges:
+            index = exchanges.index(selected_exchange)
+            if index < len(rule_ids) and rule_ids[index]:
+                market_rule_id = int(rule_ids[index])
+        return {
+            "con_id": int(contract.conId or 0),
+            "symbol": contract.symbol or "",
+            "local_symbol": contract.localSymbol or "",
+            "sec_type": contract.secType or "",
+            "stock_type": getattr(detail, "stockType", "") or "",
+            "exchange": contract.exchange or "",
+            "primary_exchange": contract.primaryExchange or "",
+            "currency": contract.currency or "",
+            "trading_class": contract.tradingClass or "",
+            "long_name": getattr(detail, "longName", "") or "",
+            "isin": isin,
+            "min_tick": float(getattr(detail, "minTick", 0) or 0),
+            "market_rule_id": market_rule_id,
+            "valid_exchanges": exchanges,
+            "trading_hours": getattr(detail, "tradingHours", "") or "",
+            "liquid_hours": getattr(detail, "liquidHours", "") or "",
+            "time_zone_id": getattr(detail, "timeZoneId", "") or "",
+        }
+
+    @staticmethod
+    def _ib_contract_from_snapshot(snapshot: dict):
+        from ib_async import Contract
+        return Contract(
+            conId=int(snapshot["con_id"]),
+            symbol=snapshot["symbol"],
+            localSymbol=snapshot.get("local_symbol", ""),
+            secType=snapshot.get("sec_type", "STK"),
+            exchange=snapshot.get("exchange", "LSEETF"),
+            primaryExchange=snapshot.get("primary_exchange", ""),
+            currency=snapshot.get("currency", "USD"),
+            tradingClass=snapshot.get("trading_class", ""),
+        )
+
+    def resolve_lse_usd_etf(self, alias: str) -> dict:
+        """Resolve alias via symbol/localSymbol and return one qualified value object."""
+        self._ensure_connected()
+
+        async def resolve_on_loop():
+            candidates = await self._ib.reqMatchingSymbolsAsync(alias)
+            details_by_con_id = {}
+            for description in candidates:
+                candidate = description.contract
+                if alias.upper() not in {
+                    str(candidate.symbol or "").upper(),
+                    str(candidate.localSymbol or "").upper(),
+                }:
+                    continue
+                for detail in await self._ib.reqContractDetailsAsync(candidate):
+                    snap = self._contract_snapshot(detail)
+                    if (
+                        snap["exchange"] == "LSEETF"
+                        and snap["currency"] == "USD"
+                        and snap["stock_type"] == "ETF"
+                        and alias.upper() in {
+                            snap["symbol"].upper(), snap["local_symbol"].upper(),
+                        }
+                    ):
+                        details_by_con_id[snap["con_id"]] = (detail, snap)
+            if len(details_by_con_id) != 1:
+                return {
+                    "candidate_count": len(details_by_con_id),
+                    "candidates": [item[1] for item in details_by_con_id.values()],
+                }
+            detail, snapshot = next(iter(details_by_con_id.values()))
+            qualified = await self._ib.qualifyContractsAsync(detail.contract)
+            if len(qualified) != 1 or int(qualified[0].conId or 0) != snapshot["con_id"]:
+                return {"candidate_count": 0, "candidates": []}
+            rule_id = snapshot.get("market_rule_id")
+            rules = await self._ib.reqMarketRuleAsync(rule_id) if rule_id else []
+            snapshot["market_rule"] = [
+                {
+                    "low_edge": float(rule.lowEdge),
+                    "increment": float(rule.increment),
+                }
+                for rule in rules
+            ]
+            return {"candidate_count": 1, "candidates": [snapshot], **snapshot}
+
+        result = self._run_on_loop(resolve_on_loop, timeout=self._timeout + 15)
+        if result.get("candidate_count") != 1:
+            raise ValueError(
+                f"{alias}: LSEETF/USD/ETF qualified candidate count="
+                f"{result.get('candidate_count', 0)}"
+            )
+        return result
+
+    def get_executable_quote(self, resolved: dict) -> dict:
+        self._ensure_connected()
+
+        async def quote_on_loop():
+            contract = self._ib_contract_from_snapshot(resolved)
+            tickers = await self._ib.reqTickersAsync(contract)
+            if len(tickers) != 1:
+                return {"quote_quality": "MISSING"}
+            ticker = tickers[0]
+            market_data_type = int(getattr(ticker, "marketDataType", 0) or 0)
+            quality = {
+                1: "LIVE", 2: "FROZEN", 3: "DELAYED", 4: "FROZEN",
+            }.get(market_data_type, "MISSING")
+            quote_time = getattr(ticker, "time", None) or datetime.now(timezone.utc)
+            if quote_time.tzinfo is None:
+                quote_time = quote_time.replace(tzinfo=timezone.utc)
+            return {
+                "bid": self._finite_number(getattr(ticker, "bid", None)),
+                "ask": self._finite_number(getattr(ticker, "ask", None)),
+                "last": self._finite_number(getattr(ticker, "last", None)),
+                "market_data_type": market_data_type,
+                "quote_quality": quality,
+                "quote_timestamp": quote_time.astimezone(timezone.utc).isoformat(),
+                "source": "IBKR",
+            }
+
+        return self._run_on_loop(quote_on_loop, timeout=self._timeout + 5)
+
+    def get_cash_snapshot(self, currency: str = "USD") -> dict:
+        self._ensure_connected()
+
+        async def cash_on_loop():
+            summary = await self._ib.accountSummaryAsync(self._account_id)
+            values = list(self._ib.accountValues(account=self._account_id))
+            result = {
+                "currency": currency,
+                "account_masked": f"***{self._account_id[-4:]}",
+                "as_of": datetime.now(timezone.utc).isoformat(),
+            }
+            for item in [*summary, *values]:
+                if item.currency != currency:
+                    continue
+                if item.tag in {
+                    "CashBalance", "SettledCash", "TotalCashValue",
+                    "AvailableFunds", "BuyingPower",
+                }:
+                    value = self._finite_number(item.value)
+                    if value is not None:
+                        result[item.tag] = value
+            return result
+
+        return self._run_on_loop(cash_on_loop, timeout=self._timeout + 5)
+
+    def list_open_order_details(self) -> list[dict]:
+        self._ensure_connected()
+
+        async def read_on_loop():
+            await self._ib.reqOpenOrdersAsync()
+            return [
+                {
+                    **self._snapshot_trade(trade),
+                    "side": str(trade.order.action or "").upper(),
+                    "remaining_quantity": int(trade.orderStatus.remaining or 0),
+                    "limit_price": self._finite_number(trade.order.lmtPrice),
+                }
+                for trade in self._ib.openTrades()
+            ]
+
+        return self._run_on_loop(read_on_loop)
+
+    def what_if_limit_order(
+        self, resolved: dict, *, quantity: int, limit_price: Decimal,
+    ) -> dict:
+        """Run IBKR WhatIf only; never transmit an order."""
+        self._ensure_connected()
+
+        async def what_if_on_loop():
+            from ib_async import LimitOrder
+            contract = self._ib_contract_from_snapshot(resolved)
+            order = LimitOrder(
+                action="BUY", totalQuantity=int(quantity),
+                lmtPrice=float(limit_price), tif="DAY",
+            )
+            order.whatIf = True
+            order.transmit = False
+            order.account = self._account_id
+            state = await self._ib.whatIfOrderAsync(contract, order)
+            return {
+                "status": "PASS",
+                "commission": self._finite_number(state.commission),
+                "min_commission": self._finite_number(state.minCommission),
+                "max_commission": self._finite_number(state.maxCommission),
+                "commission_currency": state.commissionCurrency or "USD",
+                "warning_text": state.warningText or "",
+                "transmit": False,
+                "what_if": True,
+            }
+
+        try:
+            return self._run_on_loop(what_if_on_loop, timeout=self._timeout + 10)
+        except Exception as exc:
+            raise ConnectionError(f"IBKR WhatIf 查询失败: {exc}") from exc
+
+    def is_market_open(self, resolved: dict, *, now: datetime | None = None) -> bool:
+        """Evaluate current exchange liquid-hours snapshot without an order call."""
+        raw = str(resolved.get("liquid_hours") or "")
+        if not raw:
+            return False
+        timezone_name = str(resolved.get("time_zone_id") or "Europe/London")
+        timezone_name = {
+            "GB-Eire": "Europe/London",
+            "GMT": "Europe/London",
+        }.get(timezone_name, timezone_name)
+        try:
+            local_now = (now or datetime.now(timezone.utc)).astimezone(
+                ZoneInfo(timezone_name)
+            )
+        except Exception:
+            return False
+        for segment in raw.split(";"):
+            if not segment or "CLOSED" in segment.upper() or "-" not in segment:
+                continue
+            left, right = segment.split("-", 1)
+            try:
+                start = datetime.strptime(left, "%Y%m%d:%H%M").replace(
+                    tzinfo=local_now.tzinfo
+                )
+                end = datetime.strptime(right, "%Y%m%d:%H%M").replace(
+                    tzinfo=local_now.tzinfo
+                )
+            except ValueError:
+                continue
+            if start <= local_now <= end:
+                return True
+        return False
 
     def cancel_order(self, broker_order_id: str) -> bool:
         """取消订单。
