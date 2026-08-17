@@ -35,6 +35,7 @@ class TrustedInstrument:
 
 
 _VERIFIED_AT = datetime(2026, 8, 15, tzinfo=timezone.utc).isoformat()
+_CBU3_VERIFIED_AT = datetime(2026, 8, 17, tzinfo=timezone.utc).isoformat()
 
 TRUSTED_INSTRUMENTS: dict[str, TrustedInstrument] = {
     "IBTA": TrustedInstrument(
@@ -73,6 +74,18 @@ TRUSTED_INSTRUMENTS: dict[str, TrustedInstrument] = {
         ),
         verified_at=_VERIFIED_AT,
     ),
+    "CBU3": TrustedInstrument(
+        user_alias="CBU3", isin="IE00B3VWN179", con_id=79000224,
+        symbol="CSBGU3", local_symbol="CBU3", sec_type="STK", stock_type="ETF",
+        exchange="LSEETF", primary_exchange="EBS", currency="USD",
+        trading_class="EUET", long_name="ISHARES TRSY 1-3YR USD ACC B",
+        share_class="ACC", verification_status="VERIFIED",
+        verification_source=(
+            "https://www.ishares.com/uk/individual/en/products/253499/"
+            "CBU3?siteEntryPassthrough=true"
+        ),
+        verified_at=_CBU3_VERIFIED_AT,
+    ),
     "IB01": TrustedInstrument(
         user_alias="IB01", isin="IE00BGSF1X88", con_id=354802220,
         symbol="IB01", local_symbol="IB01", sec_type="STK", stock_type="ETF",
@@ -92,6 +105,7 @@ EXPECTED_MARKET_RULE_IDS = {
     "IBTA": 1874,
     "VDCA": 98,
     "CBU0": 983,
+    "CBU3": 983,
     "IB01": 1874,
 }
 
@@ -108,7 +122,9 @@ def verify_resolved_instrument(alias: str, resolved: dict) -> TrustedInstrument:
         "sec_type": trusted.sec_type,
         "stock_type": trusted.stock_type,
         "exchange": trusted.exchange,
+        "primary_exchange": trusted.primary_exchange,
         "currency": trusted.currency,
+        "trading_class": trusted.trading_class,
         "isin": trusted.isin,
     }
     mismatches = {

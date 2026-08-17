@@ -596,6 +596,9 @@ export const executionBatchApi = {
   stopRemaining: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/stop-remaining`, { method: 'POST' },
   ),
+  retireReplacedIntent: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/retire-replaced-intent`, { method: 'POST' },
+  ),
 }
 
 export const actionApi = {

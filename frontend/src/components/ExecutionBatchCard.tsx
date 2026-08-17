@@ -4,8 +4,6 @@ import { AlertTriangle, CheckCircle, Loader2, RefreshCw, ShieldAlert, X } from '
 import { executionBatchApi, type ExecutionBatchResponse } from '@/lib/api'
 
 
-const LIVE_CONFIRMATION_TEXT = '确认并提交 4 笔 IBKR 实盘限价单'
-
 function usd(value: number | null | undefined) {
   return value == null ? '—' : `$${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
 }
@@ -32,6 +30,11 @@ export default function ExecutionBatchCard({
     ibkr_read_only_mode: boolean
     live_trading_enabled: boolean
   } | null>(null)
+  const confirmationText = `确认并提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
+  const legSequence = batch.legs.map(leg => leg.user_alias).join(' → ')
+  const retired = batch.status === 'CANCELLED'
+  const intentReplaced = Array.isArray(batch.attention_reason)
+    && batch.attention_reason.includes('INTENT_REPLACED')
 
   useEffect(() => {
     executionBatchApi.safety().then(setSafety).catch(() => setSafety(null))
@@ -60,7 +63,7 @@ export default function ExecutionBatchCard({
       Object.entries(manualLimits).map(([alias, value]) => [alias, Number(value)]),
     )
     if (Object.values(values).some(value => !Number.isFinite(value) || value <= 0)) {
-      setError('请为 4 个标的输入有效的手工 Limit')
+      setError(`请为 ${batch.legs.length} 个标的输入有效的手工 Limit`)
       return
     }
     setBusy(true); setError(null)
@@ -76,7 +79,7 @@ export default function ExecutionBatchCard({
       for (const leg of batch.legs) {
         if (leg.linked_order_id || ['FILLED', 'CANCELLED'].includes(leg.status)) continue
         const order = await executionBatchApi.submitLeg(
-          batch.id, leg.id, batch.confirmation_version, LIVE_CONFIRMATION_TEXT,
+          batch.id, leg.id, batch.confirmation_version, confirmationText,
         )
         const refreshed = await executionBatchApi.get(batch.id)
         update(refreshed)
@@ -101,11 +104,11 @@ export default function ExecutionBatchCard({
     : batch.attention_reason ? [batch.attention_reason] : []
 
   return (
-    <div style={{ border: '1px solid #93C5FD', borderRadius: 12, background: '#fff', overflow: 'hidden', marginBottom: 14 }}>
-      <div style={{ padding: '13px 16px', background: '#EFF6FF', display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div style={{ border: `1px solid ${retired ? '#CBD5E1' : '#93C5FD'}`, borderRadius: 12, background: '#fff', overflow: 'hidden', marginBottom: 14, opacity: retired ? 0.82 : 1 }}>
+      <div style={{ padding: '13px 16px', background: retired ? '#F1F5F9' : '#EFF6FF', display: 'flex', alignItems: 'center', gap: 10 }}>
         <ShieldAlert size={17} color="#1D4ED8" />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1E3A8A' }}>IBKR Case 1 · 4 标的交易执行批次</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: retired ? '#475569' : '#1E3A8A' }}>IBKR Case 1 · {batch.legs.length} 标的交易执行批次</div>
           <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
             {batch.account_masked} · USD Cash · {batch.status} · Confirmation v{batch.confirmation_version}
           </div>
@@ -114,6 +117,13 @@ export default function ExecutionBatchCard({
       </div>
 
       <div style={{ padding: 16 }}>
+        {retired && (
+          <div style={{ marginBottom: 12, padding: '9px 10px', background: '#F8FAFC', borderRadius: 8, color: '#475569', fontSize: 11, fontWeight: 600 }}>
+            {intentReplaced
+              ? '已因投资意图变更终止 / 已替换；此批次只保留历史证据，不能继续提交。'
+              : '此批次已终止，只保留历史证据，不能继续提交。'}
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 10, marginBottom: 14 }}>
           {[
             ['权威 USD Cash', usd(batch.usable_cash)],
@@ -121,6 +131,7 @@ export default function ExecutionBatchCard({
             ['WhatIf 费用', usd(batch.estimated_fees)],
             ['安全垫', usd(batch.safety_cushion)],
             ['预计剩余', usd(batch.estimated_residual)],
+            ['外部 Open Orders', String(batch.execution_policy.external_open_order_count ?? '—')],
           ].map(([label, value]) => (
             <div key={label} style={{ background: '#F8FAFC', borderRadius: 8, padding: '9px 10px' }}>
               <div style={{ fontSize: 10, color: '#94A3B8' }}>{label}</div>
@@ -186,7 +197,7 @@ export default function ExecutionBatchCard({
         </div>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 13 }}>
-          <button onClick={refresh} disabled={busy || Boolean(batch.legs.some(leg => leg.linked_order_id))} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, border: '1px solid #CBD5E1', background: '#fff', cursor: 'pointer' }}>
+          <button onClick={refresh} disabled={busy || retired || Boolean(batch.legs.some(leg => leg.linked_order_id))} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, border: '1px solid #CBD5E1', background: '#fff', cursor: retired ? 'not-allowed' : 'pointer' }}>
             <RefreshCw size={13} />刷新只读事实
           </button>
           {batch.status === 'DRAFT' && (
@@ -215,14 +226,14 @@ export default function ExecutionBatchCard({
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', gap: 8, color: '#991B1B', fontSize: 12, lineHeight: 1.6 }}>
                 <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-                <span>将按 IBTA → VDCA → CBU0 → IB01 顺序提交 4 笔真实 BUY LIMIT 订单。每一腿都会重新检查资金、报价、合约和 WhatIf；UNKNOWN/TIMEOUT/REJECTED 会立即停止。</span>
+                <span>将按 {legSequence} 顺序提交 {batch.legs.length} 笔真实 BUY LIMIT 订单。每一腿都会重新检查资金、报价、合约和 WhatIf；UNKNOWN/TIMEOUT/REJECTED 会立即停止。</span>
               </div>
               <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16, fontSize: 12, color: '#334155' }}>
                 <input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />
                 <span>我已确认 IB Gateway 已关闭 Read-Only，并理解这些订单将进入真实账户。</span>
               </label>
               <button onClick={submitAll} disabled={!ack || busy} style={{ width: '100%', marginTop: 16, padding: '10px 14px', border: 0, borderRadius: 8, background: ack ? '#B91C1C' : '#D1D5DB', color: '#fff', fontWeight: 800, cursor: ack ? 'pointer' : 'not-allowed' }}>
-                {busy && <Loader2 size={14} className="animate-spin" />} {LIVE_CONFIRMATION_TEXT}
+                {busy && <Loader2 size={14} className="animate-spin" />} {confirmationText}
               </button>
             </div>
           </div>

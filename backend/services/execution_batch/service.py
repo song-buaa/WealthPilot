@@ -52,6 +52,19 @@ LEG_STATUSES = {
 }
 ADVANCEABLE_LEG_STATUSES = {"SUBMITTED", "OPEN", "PARTIAL_FILLED", "FILLED"}
 
+CASE1_INTENT_VARIANTS = {
+    "ORIGINAL_4_LEG": [
+        ("IBTA", "APPROX_AMOUNT", Decimal("11350")),
+        ("VDCA", "APPROX_AMOUNT", Decimal("2850")),
+        ("CBU0", "APPROX_AMOUNT", Decimal("1400")),
+        ("IB01", "REMAINDER", None),
+    ],
+    "CBU3_IB01_2_LEG": [
+        ("CBU3", "APPROX_AMOUNT", Decimal("15600")),
+        ("IB01", "REMAINDER", None),
+    ],
+}
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -95,6 +108,39 @@ class ExecutionBatchService:
     def _audit(self, event_type: str, payload: dict) -> None:
         self.session.add(AuditLog(event_type=event_type, payload=_json(payload)))
 
+    def _calculate_remainder_with_what_if(
+        self,
+        leg: ExecutionLeg,
+        *,
+        budget_before_own_fee: Decimal,
+        funding_currency: str,
+        max_iterations: int = 4,
+    ) -> tuple[int, Decimal, dict, Decimal]:
+        """Converge whole-share remainder quantity with its own WhatIf fee.
+
+        The fee is broker-authoritative and may depend on quantity.  Each pass
+        reserves the latest fee before recalculating quantity; a bounded loop
+        fails closed instead of returning an underfunded plan.
+        """
+        limit = money(leg.final_limit)
+        resolved = json.loads(leg.resolution_snapshot)
+        fee = Decimal("0")
+        for _ in range(max_iterations):
+            spendable = max(Decimal("0"), budget_before_own_fee - fee)
+            quantity, notional = calculate_fixed_quantity(spendable, limit)
+            result = self.adapter.what_if_limit_order(
+                resolved, quantity=quantity, limit_price=limit,
+            )
+            next_fee = _commission_in_funding_currency(result, funding_currency)
+            next_spendable = max(
+                Decimal("0"), budget_before_own_fee - next_fee,
+            )
+            next_quantity, _ = calculate_fixed_quantity(next_spendable, limit)
+            if next_quantity == quantity:
+                return quantity, notional, result, next_fee
+            fee = next_fee
+        raise ExecutionSafetyError("REMAINDER WhatIf fee/quantity 未在有限迭代内收敛")
+
     @staticmethod
     def _canonical_leg_values(intent: StructuredTradeIntent) -> list[tuple[str, str, Decimal | None]]:
         result = []
@@ -106,7 +152,7 @@ class ExecutionBatchService:
         return result
 
     @staticmethod
-    def _validate_case1_intent(intent: StructuredTradeIntent) -> None:
+    def _validate_case1_intent(intent: StructuredTradeIntent) -> str:
         if intent.confirmation_status.value != "CONFIRMED":
             raise ExecutionSafetyError("Trade Intent 尚未人工确认")
         required = {
@@ -120,14 +166,10 @@ class ExecutionBatchService:
             if actual != expected:
                 raise ExecutionSafetyError(f"Case 1 {name}={actual}, expected={expected}")
         legs = ExecutionBatchService._canonical_leg_values(intent)
-        expected = [
-            ("IBTA", "APPROX_AMOUNT", Decimal("11350")),
-            ("VDCA", "APPROX_AMOUNT", Decimal("2850")),
-            ("CBU0", "APPROX_AMOUNT", Decimal("1400")),
-            ("IB01", "REMAINDER", None),
-        ]
-        if legs != expected:
-            raise ExecutionSafetyError(f"仅支持冻结的 Case 1 legs，收到 {legs}")
+        for variant, expected in CASE1_INTENT_VARIANTS.items():
+            if legs == expected:
+                return variant
+        raise ExecutionSafetyError(f"仅支持冻结的 Case 1 intent variants，收到 {legs}")
 
     def load_confirmed_intent(
         self, *, conversation_id: str, message_id: int,
@@ -150,6 +192,7 @@ class ExecutionBatchService:
         intent = self.load_confirmed_intent(
             conversation_id=conversation_id, message_id=message_id,
         )
+        intent_variant = self._validate_case1_intent(intent)
         existing = self.session.query(ExecutionBatch).filter_by(
             source_message_id=message_id,
         ).order_by(ExecutionBatch.created_at.desc()).first()
@@ -160,8 +203,9 @@ class ExecutionBatchService:
             raise ConnectionError("IBKR authenticate 失败")
         cash_snapshot = self.adapter.get_cash_snapshot("USD")
         authoritative_cash, cash_source = select_authoritative_cash(cash_snapshot)
+        open_order_details = self.adapter.list_open_order_details()
         competing = [
-            item for item in self.adapter.list_open_order_details()
+            item for item in open_order_details
             if str(item.get("side", "")).upper() == "BUY"
             and int(item.get("remaining_quantity") or 0) > 0
         ]
@@ -188,7 +232,10 @@ class ExecutionBatchService:
             execution_policy=_json({
                 "broker": "IBKR", "venue": "LSEETF", "currency": "USD",
                 "side": "BUY", "order_type": "LIMIT", "quantity": "WHOLE",
-                "sequence": ["IBTA", "VDCA", "CBU0", "IB01"],
+                "intent_variant": intent_variant,
+                "sequence": [item[0] for item in self._canonical_leg_values(intent)],
+                "external_open_order_count": len(open_order_details),
+                "external_open_buy_order_count": len(competing),
                 "remainder": "DYNAMIC_LAST",
                 "unknown_timeout": "HARD_STOP",
             }),
@@ -256,6 +303,16 @@ class ExecutionBatchService:
             self.session.add(leg)
             self.session.flush()
             try:
+                if str(quote.get("market_data_type")) != "1":
+                    raise ExecutionSafetyError(
+                        f"marketDataType={quote.get('market_data_type')}，要求 LIVE(1)"
+                    )
+                if str(quote.get("quote_quality") or "").upper() != "LIVE":
+                    raise ExecutionSafetyError(
+                        f"quote quality={quote.get('quote_quality')}，要求 LIVE"
+                    )
+                if not leg.market_open:
+                    raise ExecutionSafetyError("MARKET_CLOSED")
                 ask, _ = quote_guard(quote, now=self.clock())
                 limit = normalize_buy_limit(ask, resolved.get("market_rule", []))
                 leg.reference_price = ask
@@ -293,34 +350,40 @@ class ExecutionBatchService:
                 attention.append(f"{leg.user_alias}: WhatIf 待解除 Gateway Read-Only 后重跑")
 
         if remainder_leg and remainder_leg.suggested_limit:
-            remainder_budget = max(
+            remainder_budget_before_own_fee = max(
                 Decimal("0"), authoritative_cash - total_notional - total_fees - cushion,
             )
             try:
                 quantity, notional = calculate_fixed_quantity(
-                    remainder_budget, money(remainder_leg.suggested_limit),
+                    remainder_budget_before_own_fee,
+                    money(remainder_leg.suggested_limit),
                 )
                 remainder_leg.estimated_quantity = remainder_leg.final_quantity = quantity
                 remainder_leg.estimated_notional = notional
-                total_notional += notional
                 try:
-                    result = self.adapter.what_if_limit_order(
-                        json.loads(remainder_leg.resolution_snapshot),
-                        quantity=quantity,
-                        limit_price=money(remainder_leg.suggested_limit),
+                    quantity, notional, result, fee = (
+                        self._calculate_remainder_with_what_if(
+                            remainder_leg,
+                            budget_before_own_fee=remainder_budget_before_own_fee,
+                            funding_currency=batch.funding_currency,
+                        )
                     )
+                    remainder_leg.estimated_quantity = quantity
+                    remainder_leg.final_quantity = quantity
+                    remainder_leg.estimated_notional = notional
                     remainder_leg.what_if_snapshot = _json(result)
-                    total_fees += _commission_in_funding_currency(
-                        result, batch.funding_currency,
-                    )
+                    total_fees += fee
                 except (ConnectionError, TimeoutError) as exc:
                     remainder_leg.what_if_snapshot = _json({
                         "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
                         "what_if": True, "transmit": False,
                     })
-                    attention.append("IB01: WhatIf 待解除 Gateway Read-Only 后重跑")
+                    attention.append(
+                        f"{remainder_leg.user_alias}: WhatIf 待解除 Gateway Read-Only 后重跑"
+                    )
+                total_notional += money(remainder_leg.estimated_notional)
             except ExecutionSafetyError as exc:
-                attention.append(f"IB01: {exc}")
+                attention.append(f"{remainder_leg.user_alias}: {exc}")
 
         batch.estimated_total = total_notional
         batch.estimated_fees = total_fees
@@ -417,7 +480,9 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("已有 Broker order，不可修改 Limit")
         aliases = {leg.user_alias for leg in batch.legs}
         if set(limits) != aliases:
-            raise ExecutionSafetyError("必须为 IBTA/VDCA/CBU0/IB01 分别输入 Limit")
+            raise ExecutionSafetyError(
+                f"必须为 {'/'.join(leg.user_alias for leg in batch.legs)} 分别输入 Limit"
+            )
 
         total_notional = Decimal("0")
         total_fees = Decimal("0")
@@ -468,31 +533,34 @@ class ExecutionBatchService:
         snapshot = json.loads(batch.authoritative_cash_snapshot)
         authoritative_cash = money(snapshot["authoritative_usd_cash"])
         if remainder:
-            remainder_budget = max(
+            remainder_budget_before_own_fee = max(
                 Decimal("0"),
                 authoritative_cash - total_notional - total_fees - money(batch.safety_cushion),
             )
             quantity, notional = calculate_fixed_quantity(
-                remainder_budget, money(remainder.final_limit),
+                remainder_budget_before_own_fee, money(remainder.final_limit),
             )
             remainder.final_quantity = remainder.estimated_quantity = quantity
             remainder.estimated_notional = notional
-            total_notional += notional
             try:
-                result = self.adapter.what_if_limit_order(
-                    json.loads(remainder.resolution_snapshot),
-                    quantity=quantity, limit_price=money(remainder.final_limit),
+                quantity, notional, result, fee = (
+                    self._calculate_remainder_with_what_if(
+                        remainder,
+                        budget_before_own_fee=remainder_budget_before_own_fee,
+                        funding_currency=batch.funding_currency,
+                    )
                 )
+                remainder.final_quantity = remainder.estimated_quantity = quantity
+                remainder.estimated_notional = notional
                 remainder.what_if_snapshot = _json(result)
-                total_fees += _commission_in_funding_currency(
-                    result, batch.funding_currency,
-                )
+                total_fees += fee
             except (ConnectionError, TimeoutError) as exc:
                 remainder.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
                     "what_if": True, "transmit": False,
                 })
-                attention.append("IB01: WhatIf 待 Live Enable")
+                attention.append(f"{remainder.user_alias}: WhatIf 待 Live Enable")
+            total_notional += money(remainder.estimated_notional)
 
         batch.estimated_total = total_notional
         batch.estimated_fees = total_fees
@@ -735,6 +803,25 @@ class ExecutionBatchService:
         batch.status = "CANCELLED"
         self._audit("execution_batch_remaining_stopped", {
             "batch_id": batch.id, "broker_cancel_mutations": 0,
+        })
+        self.session.flush()
+        return batch
+
+    def retire_replaced_intent(self, batch_id: str) -> ExecutionBatch:
+        """Retire an unsubmitted batch after an intent-level allocation change."""
+        batch = self.get_batch(batch_id)
+        if any(leg.linked_order_id for leg in batch.legs):
+            raise ExecutionSafetyError("已有 Broker order，不能按未提交意图替换处理")
+        for leg in batch.legs:
+            if leg.status != "FILLED":
+                leg.status = "CANCELLED"
+        batch.status = "CANCELLED"
+        batch.attention_reason = _json(["INTENT_REPLACED"])
+        self._audit("execution_batch_retired_intent_replaced", {
+            "batch_id": batch.id,
+            "reason": "INTENT_REPLACED",
+            "broker_cancel_mutations": 0,
+            "broker_order_mutations": 0,
         })
         self.session.flush()
         return batch

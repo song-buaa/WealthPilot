@@ -16,6 +16,7 @@ from backend.services.execution_batch.trusted_instruments import (
     EXPECTED_MARKET_RULE_IDS,
     TRUSTED_INSTRUMENTS,
 )
+from backend.services.trade_intent.models import StructuredTradeIntent
 
 
 NOW = datetime(2026, 8, 15, 8, 0, tzinfo=timezone.utc)
@@ -61,6 +62,32 @@ def canonical_intent():
     }
 
 
+def canonical_two_leg_intent():
+    intent = canonical_intent()
+    intent["intent_id"] = "ti-case1-two-leg"
+    intent["legs"] = [
+        {
+            "sequence": 1,
+            "alias": field("CBU3"),
+            "allocation_mode": field("APPROX_AMOUNT", "AI_INFERRED"),
+            "target_amount": field(15600),
+            "venue_override": field("LSE"),
+            "trading_currency_override": field("USD"),
+            "share_class_override": field("ACC"),
+        },
+        {
+            "sequence": 2,
+            "alias": field("IB01"),
+            "allocation_mode": field("REMAINDER", "AI_INFERRED"),
+            "target_amount": field(None),
+            "venue_override": field("LSE"),
+            "trading_currency_override": field("USD"),
+            "share_class_override": field("ACC"),
+        },
+    ]
+    return intent
+
+
 class FakeIBKRExecutionAdapter:
     broker_name = "ibkr"
 
@@ -104,7 +131,7 @@ class FakeIBKRExecutionAdapter:
         return result
 
     def get_executable_quote(self, resolved):
-        asks = {"IBTA": 5, "VDCA": 61, "CSBGU0": 5, "IB01": 126}
+        asks = {"IBTA": 5, "VDCA": 61, "CSBGU0": 5, "CSBGU3": 5, "IB01": 126}
         ask = asks[resolved["symbol"]]
         return {
             "bid": ask - 0.01, "ask": ask, "last": ask,
@@ -155,6 +182,10 @@ def session():
         id=1, conversation_id=conversation.id, role="assistant", content="analysis",
         metadata_json=json.dumps({"trade_intent": canonical_intent()}),
     ))
+    db.add(ConversationMessage(
+        id=2, conversation_id=conversation.id, role="assistant", content="analysis",
+        metadata_json=json.dumps({"trade_intent": canonical_two_leg_intent()}),
+    ))
     db.commit()
     yield db
     db.close()
@@ -168,6 +199,17 @@ def make_ready_batch(session, adapter=None):
     batch = service.create_batch(conversation_id="case1-conversation", message_id=1)
     assert batch.status == "READY"
     assert [leg.user_alias for leg in batch.legs] == ["IBTA", "VDCA", "CBU0", "IB01"]
+    return service, adapter, batch
+
+
+def make_ready_two_leg_batch(session, adapter=None):
+    adapter = adapter or FakeIBKRExecutionAdapter()
+    service = ExecutionBatchService(
+        session, adapter, clock=lambda: NOW, allow_mutation=True,
+    )
+    batch = service.create_batch(conversation_id="case1-conversation", message_id=2)
+    assert batch.status == "READY"
+    assert [leg.user_alias for leg in batch.legs] == ["CBU3", "IB01"]
     return service, adapter, batch
 
 
@@ -187,6 +229,66 @@ def test_create_batch_has_contract_quote_cash_whatif_and_dynamic_remainder(sessi
     assert adapter.place_calls == []
 
 
+def test_two_leg_case1_intent_variant_is_exact_and_does_not_reuse_old_shape():
+    intent = StructuredTradeIntent.model_validate(canonical_two_leg_intent())
+    assert ExecutionBatchService._validate_case1_intent(intent) == "CBU3_IB01_2_LEG"
+    assert [leg.alias.value for leg in intent.legs] == ["CBU3", "IB01"]
+    assert intent.legs[0].target_amount.value == Decimal("15600")
+    assert intent.legs[1].allocation_mode.value == "REMAINDER"
+    assert intent.legs[1].target_amount.value is None
+
+
+def test_two_leg_batch_uses_trusted_cbu3_and_new_confirmation_without_orders(session):
+    old_service, old_adapter, old_batch = make_ready_batch(session)
+    old_service.confirm_batch(old_batch.id)
+    service, adapter, batch = make_ready_two_leg_batch(session)
+
+    assert batch.id != old_batch.id
+    assert json.loads(batch.execution_policy)["intent_variant"] == "CBU3_IB01_2_LEG"
+    assert json.loads(batch.execution_policy)["external_open_order_count"] == 0
+    assert batch.legs[0].resolved_con_id == 79000224
+    assert batch.legs[0].symbol == "CSBGU3"
+    assert batch.legs[0].isin == "IE00B3VWN179"
+    assert batch.legs[0].estimated_notional <= Decimal("15600")
+    assert batch.legs[1].allocation_mode == "REMAINDER"
+    assert session.query(OrderRecord).count() == 0
+    assert all(leg.linked_order_id is None for leg in batch.legs)
+    assert old_adapter.place_calls == []
+    assert adapter.place_calls == []
+
+    service.confirm_batch(batch.id)
+    assert batch.confirmation_version == 1
+    assert batch.confirmation_hash != old_batch.confirmation_hash
+
+
+def test_remainder_quantity_converges_with_its_own_quantity_dependent_fee(session):
+    service, adapter, batch = make_ready_batch(session)
+    remainder = batch.legs[-1]
+    remainder.final_limit = Decimal("100")
+    calls = []
+
+    def quantity_dependent_what_if(_resolved, *, quantity, limit_price):
+        calls.append(quantity)
+        fee = Decimal("150") if quantity >= 10 else Decimal("50")
+        return {
+            "status": "PASS", "commission": fee,
+            "commission_currency": "USD", "what_if": True,
+            "transmit": True, "quantity": quantity,
+            "limit_price": str(limit_price),
+        }
+
+    adapter.what_if_limit_order = quantity_dependent_what_if
+    quantity, notional, result, fee = service._calculate_remainder_with_what_if(
+        remainder, budget_before_own_fee=Decimal("1000"), funding_currency="USD",
+    )
+    assert calls == [10, 8, 9]
+    assert quantity == 9
+    assert notional == Decimal("900")
+    assert fee == Decimal("50")
+    assert result["what_if"] is True
+    assert notional + fee <= Decimal("1000")
+
+
 def test_external_buy_order_blocks_batch_generation(session):
     adapter = FakeIBKRExecutionAdapter(open_orders=[{
         "side": "BUY", "remaining_quantity": 10, "order_ref": "outside",
@@ -194,6 +296,35 @@ def test_external_buy_order_blocks_batch_generation(session):
     service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
     with pytest.raises(ExecutionSafetyError, match="外部 BUY"):
         service.create_batch(conversation_id="case1-conversation", message_id=1)
+
+
+def test_case1_batch_requires_live_market_data_type_one(session):
+    adapter = FakeIBKRExecutionAdapter()
+    original = adapter.get_executable_quote
+
+    def frozen_quote(resolved):
+        quote = original(resolved)
+        quote.update({"quote_quality": "FROZEN", "market_data_type": 2})
+        return quote
+
+    adapter.get_executable_quote = frozen_quote
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    batch = service.create_batch(conversation_id="case1-conversation", message_id=2)
+    assert batch.status == "DRAFT"
+    assert "marketDataType=2" in batch.attention_reason
+    assert session.query(OrderRecord).count() == 0
+    assert adapter.place_calls == []
+
+
+def test_case1_batch_requires_market_open(session):
+    adapter = FakeIBKRExecutionAdapter()
+    adapter.is_market_open = lambda _resolved, *, now=None: False
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    batch = service.create_batch(conversation_id="case1-conversation", message_id=2)
+    assert batch.status == "DRAFT"
+    assert "MARKET_CLOSED" in batch.attention_reason
+    assert session.query(OrderRecord).count() == 0
+    assert adapter.place_calls == []
 
 
 def test_readonly_whatif_failure_is_recorded_and_not_ready(session):
@@ -400,6 +531,45 @@ def test_stop_remaining_never_cancels_submitted_broker_order(session):
     assert [leg.status for leg in batch.legs[1:]] == [
         "CANCELLED", "CANCELLED", "CANCELLED",
     ]
+    assert len(adapter.place_calls) == 1
+
+
+def test_replaced_confirmed_unsubmitted_batch_is_terminal_and_preserves_evidence(session):
+    service, adapter, batch = make_ready_batch(session)
+    service.confirm_batch(batch.id)
+    original_hash = batch.confirmation_hash
+    original_version = batch.confirmation_version
+    original_what_if = [leg.what_if_snapshot for leg in batch.legs]
+
+    retired = service.retire_replaced_intent(batch.id)
+
+    assert retired.status == "CANCELLED"
+    assert json.loads(retired.attention_reason) == ["INTENT_REPLACED"]
+    assert retired.confirmation_hash == original_hash
+    assert retired.confirmation_version == original_version
+    assert [leg.what_if_snapshot for leg in retired.legs] == original_what_if
+    assert all(leg.status == "CANCELLED" for leg in retired.legs)
+    assert all(leg.linked_order_id is None for leg in retired.legs)
+    assert session.query(OrderRecord).count() == 0
+    assert adapter.place_calls == []
+
+    with pytest.raises(ExecutionSafetyError, match="不可提交"):
+        service.submit_next_leg(
+            retired.id,
+            confirmation_version=original_version,
+            leg_id=retired.legs[0].id,
+        )
+    assert adapter.place_calls == []
+
+
+def test_replaced_intent_retirement_refuses_any_batch_with_broker_order(session):
+    service, adapter, batch = make_ready_batch(session)
+    service.confirm_batch(batch.id)
+    service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=batch.legs[0].id,
+    )
+    with pytest.raises(ExecutionSafetyError, match="已有 Broker order"):
+        service.retire_replaced_intent(batch.id)
     assert len(adapter.place_calls) == 1
 
 

@@ -154,7 +154,7 @@ function ActionListTab({
       setIntents(intentRes.items)
       setStrategies(stratRes.items)
       setOrders(orderRes.items)
-      setBatches(batchRes.items.filter(batch => batch.status !== 'CANCELLED'))
+      setBatches(batchRes.items)
     } catch { /* ignore */ }
     finally { setLoading(false) }
   }, [])
@@ -172,7 +172,7 @@ function ActionListTab({
         setIntents(intentRes.items)
         setStrategies(stratRes.items)
         setOrders(orderRes.items)
-        setBatches(batchRes.items.filter(batch => batch.status !== 'CANCELLED'))
+        setBatches(batchRes.items)
       })
       .catch(() => undefined)
       .finally(() => { if (active) setLoading(false) })

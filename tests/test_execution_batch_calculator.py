@@ -19,16 +19,18 @@ from backend.services.execution_batch.trusted_instruments import (
 
 
 def test_trusted_case1_mapping_is_exact_and_acc_verified():
-    assert set(TRUSTED_INSTRUMENTS) == {"IBTA", "VDCA", "CBU0", "IB01"}
+    assert set(TRUSTED_INSTRUMENTS) == {"IBTA", "VDCA", "CBU0", "CBU3", "IB01"}
     assert {item.con_id for item in TRUSTED_INSTRUMENTS.values()} == {
-        272686955, 354532794, 79000139, 354802220,
+        272686955, 354532794, 79000139, 79000224, 354802220,
     }
     assert TRUSTED_INSTRUMENTS["CBU0"].symbol == "CSBGU0"
     assert TRUSTED_INSTRUMENTS["CBU0"].local_symbol == "CBU0"
+    assert TRUSTED_INSTRUMENTS["CBU3"].symbol == "CSBGU3"
+    assert TRUSTED_INSTRUMENTS["CBU3"].isin == "IE00B3VWN179"
     assert all(item.share_class == "ACC" for item in TRUSTED_INSTRUMENTS.values())
     assert all(item.verification_status == "VERIFIED" for item in TRUSTED_INSTRUMENTS.values())
     assert EXPECTED_MARKET_RULE_IDS == {
-        "IBTA": 1874, "VDCA": 98, "CBU0": 983, "IB01": 1874,
+        "IBTA": 1874, "VDCA": 98, "CBU0": 983, "CBU3": 983, "IB01": 1874,
     }
 
 

@@ -17,7 +17,11 @@ from backend.utils.datetime_utils import utc_iso
 
 
 router = APIRouter()
-LIVE_CONFIRMATION_TEXT = "确认并提交 4 笔 IBKR 实盘限价单"
+def live_confirmation_text(leg_count: int) -> str:
+    return f"确认并提交 {leg_count} 笔 IBKR 实盘限价单"
+
+
+LIVE_CONFIRMATION_TEXT = live_confirmation_text(4)
 
 
 def _adapter():
@@ -218,11 +222,13 @@ def apply_manual_limits(batch_id: str, body: dict):
 def submit_leg(batch_id: str, leg_id: str, body: dict):
     if body.get("live_order_acknowledged") is not True:
         raise HTTPException(status_code=422, detail="必须确认这是 IBKR 实盘订单")
-    if body.get("confirmation_text") != LIVE_CONFIRMATION_TEXT:
-        raise HTTPException(status_code=422, detail="实盘确认文字不匹配")
     session = get_session()
     try:
-        order = _service(session).submit_next_leg(
+        service = _service(session)
+        batch = service.get_batch(batch_id)
+        if body.get("confirmation_text") != live_confirmation_text(len(batch.legs)):
+            raise ExecutionSafetyError("实盘确认文字不匹配")
+        order = service.submit_next_leg(
             batch_id,
             confirmation_version=int(body.get("confirmation_version") or 0),
             leg_id=leg_id,
@@ -273,6 +279,20 @@ def stop_remaining(batch_id: str):
     session = get_session()
     try:
         batch = _service(session).stop_remaining(batch_id)
+        session.commit()
+        return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
+
+
+@router.post("/{batch_id}/retire-replaced-intent")
+def retire_replaced_intent(batch_id: str):
+    session = get_session()
+    try:
+        batch = _service(session).retire_replaced_intent(batch_id)
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:
