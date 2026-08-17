@@ -498,6 +498,7 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
   const sideBadgeBg = strategy.side === 'BUY' ? '#DCFCE7' : '#FEE2E2'
   const sideBadgeColor = strategy.side === 'BUY' ? '#16A34A' : '#DC2626'
   const isPaused = strategy.status === 'paused'
+  const batchManaged = Boolean(strategy.batch_leg_id)
   const progressColor = isPaused ? '#9CA3AF' : strategy.side === 'BUY' ? '#3B82F6' : '#F59E0B'
 
   return (
@@ -572,19 +573,25 @@ function StrategyCard({ strategy, onPause, onResume, onDiscard, onPlaceOrder, co
           background: confirmDiscard ? '#FEF2F2' : '#fff',
           color: confirmDiscard ? '#DC2626' : '#9CA3AF', cursor: 'pointer',
         }}>{confirmDiscard ? '确认作废？' : '作废'}</button>
-        <button
-          data-testid={`place-order-btn-${strategy.id}`}
-          onClick={onPlaceOrder}
-          disabled={isPaused || strategy.status !== 'active'}
-          style={{
-            fontSize: 11, padding: '4px 10px', borderRadius: 6,
-            border: `1px solid ${isPaused ? '#D1D5DB' : '#DC2626'}`,
-            background: isPaused ? '#F9FAFB' : '#FEF2F2',
-            color: isPaused ? '#D1D5DB' : '#DC2626',
-            cursor: isPaused ? 'not-allowed' : 'pointer',
-            fontWeight: 600,
-          }}
-        >{isDemo ? '演示模式' : '立即下单'}</button>
+        {batchManaged ? (
+          <span style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, background: '#F1F5F9', color: '#64748B', fontWeight: 600 }}>
+            由执行批次管理
+          </span>
+        ) : (
+          <button
+            data-testid={`place-order-btn-${strategy.id}`}
+            onClick={onPlaceOrder}
+            disabled={isPaused || strategy.status !== 'active'}
+            style={{
+              fontSize: 11, padding: '4px 10px', borderRadius: 6,
+              border: `1px solid ${isPaused ? '#D1D5DB' : '#DC2626'}`,
+              background: isPaused ? '#F9FAFB' : '#FEF2F2',
+              color: isPaused ? '#D1D5DB' : '#DC2626',
+              cursor: isPaused ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+            }}
+          >{isDemo ? '演示模式' : '立即下单'}</button>
+        )}
       </div>
     </div>
   )

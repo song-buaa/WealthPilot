@@ -42,6 +42,15 @@ def test_replaced_batch_remains_visible_but_is_explicitly_terminal():
     assert "不能继续提交" in BATCH_CARD
 
 
+def test_attention_required_disables_retry_and_warns_user():
+    assert "batch.status === 'ATTENTION_REQUIRED'" in BATCH_CARD
+    assert "等待经纪商状态核验 / 提交结果异常" in BATCH_CARD
+    assert "再次提交已禁用" in BATCH_CARD
+    assert "batch.status === 'CONFIRMED'" in BATCH_CARD
+    assert "batchManaged" in (ROOT / "frontend/src/pages/Action.tsx").read_text()
+    assert "由执行批次管理" in (ROOT / "frontend/src/pages/Action.tsx").read_text()
+
+
 def test_submit_endpoint_rejects_missing_human_ack_before_service_access():
     with pytest.raises(HTTPException) as exc:
         submit_leg("batch", "leg", {

@@ -97,6 +97,7 @@ def _serialize_strategy(s) -> dict:
         "parent_intent_id": getattr(s, "parent_intent_id", None),
         "plan_id": getattr(s, "plan_id", None),              # v3.11
         "tranche_sequence": getattr(s, "tranche_sequence", None),  # v3.11
+        "batch_leg_id": getattr(s, "batch_leg_id", None),
         "symbol": s.symbol,
         "side": s.side,
         "target_quantity": s.target_quantity,
@@ -668,6 +669,14 @@ def check_risk(strategy_id: str, body: dict, request: Request):
         strategy = mgr.get_strategy(strategy_id)
         if strategy is None:
             raise HTTPException(status_code=404, detail="策略不存在")
+        if strategy.batch_leg_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "ExecutionBatch 关联策略只能由批次状态机提交；"
+                    "旧单腿下单入口已禁用"
+                ),
+            )
 
         quantity = body.get("quantity", strategy.target_quantity or 0)
         limit_price = Decimal(str(body.get("limit_price", strategy.limit_price or 0)))
@@ -723,6 +732,14 @@ def place_order(strategy_id: str, body: dict, request: Request):
         strategy = mgr.get_strategy(strategy_id)
         if strategy is None:
             raise HTTPException(status_code=404, detail="策略不存在")
+        if strategy.batch_leg_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "ExecutionBatch 关联策略只能由批次状态机提交；"
+                    "旧单腿下单入口已禁用"
+                ),
+            )
 
         quantity = body.get("quantity", strategy.target_quantity or 0)
         limit_price_raw = body.get("limit_price", strategy.limit_price or 0)

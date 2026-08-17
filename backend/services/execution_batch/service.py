@@ -699,16 +699,19 @@ class ExecutionBatchService:
         leg.linked_order_id = order.id
         leg.submission_attempted_at = self.clock()
         leg.status = {
-            "submitted_to_broker": "SUBMITTED",
+            "submitted_to_broker": "SUBMITTING",
             "broker_pending": "OPEN",
             "partially_filled": "PARTIAL_FILLED",
             "filled": "FILLED",
             "rejected": "REJECTED",
             "unknown": "UNKNOWN",
+            "cancelled": "CANCELLED",
         }.get(order.status, "UNKNOWN")
-        if leg.status in {"UNKNOWN", "REJECTED"}:
+        if leg.status in {"UNKNOWN", "REJECTED", "CANCELLED"}:
             batch.status = "ATTENTION_REQUIRED"
             batch.attention_reason = f"{leg.user_alias}={leg.status}"
+        elif leg.status == "SUBMITTING":
+            batch.status = "SUBMITTING"
         elif all(item.status in ADVANCEABLE_LEG_STATUSES for item in batch.legs):
             batch.status = "SUBMITTED"
         else:
@@ -764,12 +767,14 @@ class ExecutionBatchService:
         order.avg_filled_price = update.avg_filled_price
         order.raw_broker_response = _json(update.raw_response)
         leg.status = {
-            "submitted_to_broker": "SUBMITTED", "broker_pending": "OPEN",
+            "submitted_to_broker": "SUBMITTING", "broker_pending": "OPEN",
             "partially_filled": "PARTIAL_FILLED", "filled": "FILLED",
             "rejected": "REJECTED", "unknown": "UNKNOWN",
+            "cancelled": "CANCELLED",
         }.get(update.status, "UNKNOWN")
         batch.status = (
-            "ATTENTION_REQUIRED" if leg.status in {"UNKNOWN", "REJECTED"}
+            "ATTENTION_REQUIRED"
+            if leg.status in {"UNKNOWN", "REJECTED", "CANCELLED"}
             else "PARTIALLY_SUBMITTED"
         )
         self._audit("execution_leg_reconciled", {

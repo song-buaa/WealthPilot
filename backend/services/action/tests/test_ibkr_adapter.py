@@ -250,14 +250,14 @@ class TestGate2MarketWhitelist:
         trade = _make_mock_trade(order_id=42, perm_id=1001)
         adapter._ib.placeOrder.return_value = trade
         result = adapter.place_order(_make_request(symbol="AAPL:US"))
-        assert result.status == "submitted_to_broker"
+        assert result.status == "broker_pending"
 
     def test_hk_market_allowed(self):
         adapter = _make_adapter()
         trade = _make_mock_trade(order_id=43, perm_id=1002)
         adapter._ib.placeOrder.return_value = trade
         result = adapter.place_order(_make_request(symbol="0700:HK"))
-        assert result.status == "submitted_to_broker"
+        assert result.status == "broker_pending"
 
     def test_cn_market_rejected(self):
         adapter = _make_adapter()
@@ -272,7 +272,7 @@ class TestGate3OrderType:
         adapter = _make_adapter()
         adapter._ib.placeOrder.return_value = _make_mock_trade(perm_id=1003)
         result = adapter.place_order(_make_request(order_type="LIMIT"))
-        assert result.status == "submitted_to_broker"
+        assert result.status == "broker_pending"
 
     def test_conditional_limit_rejected(self):
         adapter = _make_adapter()
@@ -623,6 +623,39 @@ class TestPlaceOrderPermId:
         adapter._ib.placeOrder.return_value = trade
         result = adapter.place_order(_make_request())
         assert result.broker_order_id == "98765"
+        assert result.status == "broker_pending"
+
+    def test_cancelled_callback_is_returned_as_cancelled(self):
+        adapter = _make_adapter()
+        log_entry = _make_mock_log_entry(
+            error_code=0, message="Broker cancelled order", status="Cancelled",
+        )
+        trade = _make_mock_trade(
+            order_id=42, perm_id=98765, status="Cancelled", log=[log_entry],
+        )
+        adapter._ib.placeOrder.return_value = trade
+
+        result = adapter.place_order(_make_request())
+
+        assert result.status == "cancelled"
+        assert result.raw_response["ib_status"] == "Cancelled"
+        assert result.raw_response["broker_log"][0]["message"] == "Broker cancelled order"
+
+    def test_pending_submit_without_ack_fails_closed_unknown(self):
+        adapter = _make_adapter()
+        trade = _make_mock_trade(
+            order_id=42, perm_id=98765, status="PendingSubmit",
+        )
+        adapter._ib.placeOrder.return_value = trade
+
+        with (
+            patch("backend.services.action.brokers.ibkr.BROKER_ACK_WAIT_SECONDS", 0.01),
+            patch("backend.services.action.brokers.ibkr.BROKER_ACK_POLL_INTERVAL", 0.001),
+        ):
+            result = adapter.place_order(_make_request())
+
+        assert result.status == "unknown"
+        assert result.raw_response["broker_ack_timeout"] is True
 
     def test_fallback_to_order_id_when_perm_id_zero(self):
         """permId 超时未回填 → fallback 用 orderId。"""

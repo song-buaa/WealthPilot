@@ -77,10 +77,10 @@ def _create_strategy(session, **kwargs) -> SymbolStrategy:
 class TestPlaceOrderNormal:
 
     def test_place_order_submitted(self, manager, db_session):
-        """正常下单 → status=submitted_to_broker（Mock 同步推进到 broker_pending）。"""
+        """正常下单保留 Mock 返回的 broker_pending authority 状态。"""
         strategy = _create_strategy(db_session)
         order = manager.place_order(strategy.id, {"quantity": 50, "limit_price": 415})
-        assert order.status == OrderStatus.SUBMITTED_TO_BROKER
+        assert order.status == OrderStatus.BROKER_PENDING
         assert order.broker_order_id is not None
         assert order.broker_order_id.startswith("MOCK-")
         assert order.broker_name == "mock"
@@ -158,6 +158,15 @@ class TestPlaceOrderErrors:
         strategy = _create_strategy(db_session)
         order = mgr.place_order(strategy.id, {"quantity": 50})
         assert order.status == OrderStatus.CREATED
+
+    def test_batch_managed_strategy_rejects_legacy_order_path(self, db_session):
+        strategy = _create_strategy(db_session, batch_leg_id="case1-leg")
+        mgr = OrderManager(db_session, broker_adapter=None)
+
+        with pytest.raises(ValueError, match="只能由批次状态机提交"):
+            mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 415})
+
+        assert db_session.query(OrderRecord).count() == 0
 
 
 # ═══════════════════════════════════════════════════════════════════

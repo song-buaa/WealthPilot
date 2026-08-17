@@ -32,6 +32,8 @@ from backend.services.action.models import (
     SymbolStrategy,
     OrderRecord,
     AuditLog,
+    ExecutionBatch,
+    ExecutionLeg,
 )
 from backend.services.action.state_machine import (
     ActionDraftStatus,
@@ -75,6 +77,69 @@ class OrderManager:
             timestamp=datetime.now(timezone.utc),
         )
         self.session.add(log)
+
+    def _sync_execution_batch_linkage(self, order: OrderRecord) -> None:
+        """Propagate broker-authoritative OrderRecord state to its Case 1 leg.
+
+        The order poller owns broker reconciliation.  A linked ExecutionLeg
+        must never remain visually SUBMITTED after the OrderRecord has moved
+        to a terminal or unknown state.
+        """
+        if not order.batch_id or not order.batch_leg_id:
+            return
+        leg = self.session.query(ExecutionLeg).filter_by(
+            id=order.batch_leg_id, batch_id=order.batch_id,
+        ).first()
+        batch = self.session.query(ExecutionBatch).filter_by(
+            id=order.batch_id,
+        ).first()
+        if leg is None or batch is None or leg.linked_order_id != order.id:
+            return
+
+        leg_status = {
+            OrderStatus.CREATED: "SUBMITTING",
+            OrderStatus.SUBMITTED_TO_BROKER: "SUBMITTING",
+            OrderStatus.BROKER_PENDING: "OPEN",
+            OrderStatus.PARTIALLY_FILLED: "PARTIAL_FILLED",
+            OrderStatus.FILLED: "FILLED",
+            OrderStatus.CANCELLED: "CANCELLED",
+            OrderStatus.REJECTED: "REJECTED",
+            OrderStatus.EXPIRED: "CANCELLED",
+            OrderStatus.UNKNOWN: "UNKNOWN",
+        }.get(order.status, "UNKNOWN")
+        old_leg_status = leg.status
+        old_batch_status = batch.status
+        leg.status = leg_status
+
+        statuses = {item.status for item in batch.legs}
+        attention = statuses & {"UNKNOWN", "REJECTED", "CANCELLED"}
+        if attention:
+            batch.status = "ATTENTION_REQUIRED"
+            batch.attention_reason = json.dumps([
+                f"BROKER_{status}: {item.user_alias}"
+                for item in batch.legs
+                if (status := item.status) in attention
+            ], ensure_ascii=False)
+        elif statuses and statuses == {"FILLED"}:
+            batch.status = "COMPLETED"
+        elif "SUBMITTING" in statuses:
+            batch.status = "SUBMITTING"
+        elif statuses and statuses <= {
+            "OPEN", "PARTIAL_FILLED", "FILLED",
+        }:
+            batch.status = "SUBMITTED"
+        elif any(item.linked_order_id for item in batch.legs):
+            batch.status = "PARTIALLY_SUBMITTED"
+
+        if old_leg_status != leg.status or old_batch_status != batch.status:
+            self._audit("execution_batch_broker_state_synced", {
+                "batch_id": batch.id,
+                "leg_id": leg.id,
+                "order_id": order.id,
+                "order_status": order.status,
+                "leg_status": leg.status,
+                "batch_status": batch.status,
+            })
 
     # ─── ActionDraft CRUD ─────────────────────────────────────────
 
@@ -451,6 +516,23 @@ class OrderManager:
         if strategy.status != StrategyStatus.ACTIVE:
             raise ValueError(f"策略状态为 {strategy.status}，不可下单")
 
+        # ExecutionBatch strategies must retain the batch confirmation and
+        # per-leg idempotency authority.  The legacy single-strategy endpoint
+        # cannot create a replacement attempt for them.
+        strategy_batch_leg_id = getattr(strategy, "batch_leg_id", None)
+        if (
+            isinstance(strategy_batch_leg_id, str)
+            and strategy_batch_leg_id
+            and not (
+                order_params.get("batch_id")
+                and order_params.get("batch_leg_id") == strategy_batch_leg_id
+                and order_params.get("confirmation_version") is not None
+            )
+        ):
+            raise ValueError(
+                "ExecutionBatch 关联策略只能由批次状态机提交"
+            )
+
         # v3.4 M3: symbol 中文名保护
         if strategy.symbol and strategy.symbol[0] >= "\u4e00" and strategy.symbol[0] <= "\u9fff":
             raise InvalidSymbolError(
@@ -536,14 +618,36 @@ class OrderManager:
                     update.raw_response, ensure_ascii=False, default=str,
                 )
 
-                if update.status == "rejected":
-                    order.status = OrderStatus.REJECTED
+                if update.status in OrderStatus.ALL:
+                    order.status = update.status
+                else:
+                    order.status = OrderStatus.UNKNOWN
+
+                if order.status == OrderStatus.REJECTED:
                     self._audit("order_rejected", self._enrich_audit_payload({
                         "order_id": order.id,
                         "reason": update.raw_response.get("reason", ""),
                     }, update.raw_response, order))
+                elif order.status == OrderStatus.UNKNOWN:
+                    self._audit("order_submit_unknown", self._enrich_audit_payload({
+                        "order_id": order.id,
+                        "reason": update.raw_response.get("broker_ack_note", ""),
+                    }, update.raw_response, order))
+                elif order.status == OrderStatus.CANCELLED:
+                    order.cancelled_at = datetime.now(timezone.utc)
+                    self._audit("order_cancelled", self._enrich_audit_payload({
+                        "order_id": order.id,
+                        "broker_order_id": update.broker_order_id,
+                    }, update.raw_response, order))
+                elif order.status == OrderStatus.FILLED:
+                    order.filled_quantity = update.filled_quantity
+                    order.avg_filled_price = update.avg_filled_price
+                    order.filled_at = datetime.now(timezone.utc)
+                    self._audit("order_filled", self._enrich_audit_payload({
+                        "order_id": order.id,
+                        "broker_order_id": update.broker_order_id,
+                    }, update.raw_response, order))
                 else:
-                    order.status = OrderStatus.SUBMITTED_TO_BROKER
                     order.submitted_at = datetime.now(timezone.utc)
                     self._audit("order_submitted", self._enrich_audit_payload({
                         "order_id": order.id,
@@ -592,6 +696,7 @@ class OrderManager:
                     pass  # 当前状态不允许转 unknown，保持原状
             self._audit("sync_network_error", {"order_id": order_id, "error": str(e)})
             logger.warning(f"[OrderManager] sync 网络异常: {e}")
+            self._sync_execution_batch_linkage(order)
             self.session.flush()
             return order
 
@@ -623,6 +728,8 @@ class OrderManager:
             order.filled_at = now
         elif new_status == "cancelled":
             order.cancelled_at = now
+
+        self._sync_execution_batch_linkage(order)
 
         # 回写 strategy.cumulative_filled_quantity
         if update.filled_quantity > 0:

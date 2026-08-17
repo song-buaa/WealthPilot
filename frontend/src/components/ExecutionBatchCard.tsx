@@ -102,6 +102,7 @@ export default function ExecutionBatchCard({
   const attention = Array.isArray(batch.attention_reason)
     ? batch.attention_reason
     : batch.attention_reason ? [batch.attention_reason] : []
+  const brokerAttention = batch.status === 'ATTENTION_REQUIRED'
 
   return (
     <div style={{ border: `1px solid ${retired ? '#CBD5E1' : '#93C5FD'}`, borderRadius: 12, background: '#fff', overflow: 'hidden', marginBottom: 14, opacity: retired ? 0.82 : 1 }}>
@@ -117,6 +118,11 @@ export default function ExecutionBatchCard({
       </div>
 
       <div style={{ padding: 16 }}>
+        {brokerAttention && (
+          <div style={{ marginBottom: 12, padding: '10px 11px', background: '#FFF7ED', border: '1px solid #FDBA74', borderRadius: 8, color: '#9A3412', fontSize: 11, fontWeight: 700 }}>
+            等待经纪商状态核验 / 提交结果异常。再次提交已禁用，请勿重试或创建替代订单。
+          </div>
+        )}
         {retired && (
           <div style={{ marginBottom: 12, padding: '9px 10px', background: '#F8FAFC', borderRadius: 8, color: '#475569', fontSize: 11, fontWeight: 600 }}>
             {intentReplaced

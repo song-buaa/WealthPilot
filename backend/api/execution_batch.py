@@ -82,6 +82,7 @@ def _serialize_leg(leg) -> dict:
         "released_intent_amount": float(leg.released_intent_amount or 0),
         "status": leg.status, "linked_strategy_id": leg.linked_strategy_id,
         "linked_order_id": leg.linked_order_id,
+        "submission_attempted_at": utc_iso(leg.submission_attempted_at),
     }
 
 

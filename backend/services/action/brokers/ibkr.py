@@ -89,6 +89,9 @@ REJECTED_KEYWORDS = ["rejected", "insufficient", "buying power", "margin",
 # permId 回填等待配置
 PERM_ID_WAIT_SECONDS = 2.0
 PERM_ID_POLL_INTERVAL = 0.1
+BROKER_ACK_WAIT_SECONDS = 3.0
+BROKER_ACK_POLL_INTERVAL = 0.1
+BROKER_ACK_PENDING_STATUSES = {"", "ApiPending", "PendingSubmit"}
 
 # not_found 重试配置
 NOT_FOUND_MAX_RETRIES = 2
@@ -451,16 +454,34 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 order = self._build_live_limit_order(request)
                 trade = self._ib.placeOrder(contract, order)
 
-                deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
-                while time.monotonic() < deadline:
+                perm_deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
+                while time.monotonic() < perm_deadline:
                     if trade.order.permId or trade.orderStatus.permId:
                         break
                     await asyncio.sleep(PERM_ID_POLL_INTERVAL)
-                return self._snapshot_trade(trade)
+
+                # ``placeOrder`` returning a Trade object (or even a permId)
+                # is not broker acceptance.  Wait briefly for a working or
+                # terminal callback.  If the status never leaves the local
+                # pending states, fail closed as UNKNOWN so callers cannot
+                # advance the next leg or retry blindly.
+                ack_deadline = time.monotonic() + BROKER_ACK_WAIT_SECONDS
+                while time.monotonic() < ack_deadline:
+                    if trade.orderStatus.status not in BROKER_ACK_PENDING_STATUSES:
+                        break
+                    await asyncio.sleep(BROKER_ACK_POLL_INTERVAL)
+                snapshot = self._snapshot_trade(trade)
+                snapshot["broker_ack_timeout"] = (
+                    snapshot["ib_status"] in BROKER_ACK_PENDING_STATUSES
+                )
+                return snapshot
 
             snapshot = self._run_on_loop(
                 submit_on_loop,
-                timeout=self._timeout + PERM_ID_WAIT_SECONDS,
+                timeout=(
+                    self._timeout + PERM_ID_WAIT_SECONDS
+                    + BROKER_ACK_WAIT_SECONDS
+                ),
             )
         except (ConnectionError, TimeoutError):
             raise  # 透传给上层
@@ -474,6 +495,16 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         broker_order_id = self._snapshot_broker_order_id(snapshot)
         raw = self._build_raw_from_snapshot("place_order", snapshot)
+        mapped_status, mapped_extras = self._map_snapshot_status(snapshot)
+        if snapshot.get("broker_ack_timeout"):
+            mapped_status = "unknown"
+            mapped_extras.update({
+                "broker_ack_timeout": True,
+                "broker_ack_note": (
+                    "placeOrder returned without a broker working/terminal callback"
+                ),
+            })
+        raw.update(mapped_extras)
         raw.update({
             "symbol": request.symbol,
             "market": market,
@@ -488,9 +519,12 @@ class IBKRBrokerAdapter(BrokerAdapter):
         return OrderStatusUpdate(
             broker_order_id=broker_order_id,
             local_order_id=request.local_order_id,
-            status="submitted_to_broker",
-            filled_quantity=0,
-            avg_filled_price=None,
+            status=mapped_status,
+            filled_quantity=snapshot["filled_quantity"],
+            avg_filled_price=(
+                Decimal(str(snapshot["avg_filled_price"]))
+                if snapshot["avg_filled_price"] else None
+            ),
             timestamp=int(time.time() * 1000),
             raw_response=raw,
         )
@@ -1230,7 +1264,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
     def _build_raw_from_snapshot(self, action: str, snapshot: dict) -> dict:
         mapped, _ = self._map_snapshot_status(snapshot)
-        return {
+        raw = {
             "broker": "ibkr",
             "account_id": self._account_id,
             "client_id": self._client_id,
@@ -1247,6 +1281,13 @@ class IBKRBrokerAdapter(BrokerAdapter):
             "contract_exchange": snapshot["contract_exchange"],
             "contract_currency": snapshot["contract_currency"],
         }
+        if snapshot.get("log"):
+            raw["broker_log"] = snapshot["log"]
+        callback_error = self._error_codes.get(snapshot["order_id"])
+        if callback_error:
+            raw["broker_error_code"] = callback_error.get("errorCode")
+            raw["broker_error_message"] = callback_error.get("errorString", "")
+        return raw
 
     def _status_update_from_snapshot(
         self,

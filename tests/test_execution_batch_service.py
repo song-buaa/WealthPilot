@@ -10,6 +10,7 @@ from app.database import Base
 from app.models import Conversation, ConversationMessage
 from backend.services.action.brokers.base import OrderStatusUpdate
 from backend.services.action.models import ExecutionBatch, ExecutionLeg, OrderRecord
+from backend.services.action.order_manager import OrderManager
 from backend.services.execution_batch.calculator import ExecutionSafetyError, money
 from backend.services.execution_batch.service import ExecutionBatchService
 from backend.services.execution_batch.trusted_instruments import (
@@ -96,12 +97,13 @@ class FakeIBKRExecutionAdapter:
         commission_currency="USD",
     ):
         self._account_id = "U-FAKE"
-        self.order_statuses = list(order_statuses or ["submitted_to_broker"] * 4)
+        self.order_statuses = list(order_statuses or ["broker_pending"] * 4)
         self.open_orders = list(open_orders or [])
         self.what_if_error = what_if_error
         self.commission_currency = commission_currency
         self.place_calls = []
         self.reconcile_result = None
+        self.sync_result = None
 
     def authenticate(self, _credentials):
         return True
@@ -169,6 +171,12 @@ class FakeIBKRExecutionAdapter:
 
     def find_order_by_ref(self, _order_ref):
         return self.reconcile_result
+
+    def get_order_status(self, broker_order_id):
+        if self.sync_result is None:
+            raise AssertionError("sync_result must be configured")
+        self.sync_result.broker_order_id = broker_order_id
+        return self.sync_result
 
 
 @pytest.fixture
@@ -425,6 +433,71 @@ def test_duplicate_leg_submit_returns_same_order_without_second_broker_call(sess
     assert len(adapter.place_calls) == 1
 
 
+def test_broker_no_ack_stays_submitting_and_blocks_next_leg(session):
+    adapter = FakeIBKRExecutionAdapter(order_statuses=["submitted_to_broker"])
+    service, adapter, batch = make_ready_batch(session, adapter)
+    service.confirm_batch(batch.id)
+    first, second = batch.legs[:2]
+
+    order = service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=first.id,
+    )
+
+    assert order.status == "submitted_to_broker"
+    assert first.status == "SUBMITTING"
+    assert batch.status == "SUBMITTING"
+    with pytest.raises(ExecutionSafetyError, match="前序 Leg"):
+        service.submit_next_leg(
+            batch.id, confirmation_version=1, leg_id=second.id,
+        )
+    repeated = service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=first.id,
+    )
+    assert repeated.id == order.id
+    assert len(adapter.place_calls) == 1
+
+
+def test_immediate_broker_cancel_is_attention_not_submitted(session):
+    adapter = FakeIBKRExecutionAdapter(order_statuses=["cancelled"])
+    service, adapter, batch = make_ready_batch(session, adapter)
+    service.confirm_batch(batch.id)
+    first = batch.legs[0]
+
+    order = service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=first.id,
+    )
+
+    assert order.status == "cancelled"
+    assert first.status == "CANCELLED"
+    assert batch.status == "ATTENTION_REQUIRED"
+    assert len(adapter.place_calls) == 1
+
+
+def test_order_poller_state_propagates_to_execution_batch(session):
+    service, adapter, batch = make_ready_batch(session)
+    service.confirm_batch(batch.id)
+    first = batch.legs[0]
+    order = service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=first.id,
+    )
+    assert first.status == "OPEN"
+    adapter.sync_result = OrderStatusUpdate(
+        broker_order_id=order.broker_order_id,
+        local_order_id=order.id,
+        status="cancelled",
+        filled_quantity=0,
+        timestamp=2,
+        raw_response={"ib_status": "Cancelled"},
+    )
+
+    OrderManager(session, broker_adapter=adapter).sync_order_status(order.id)
+
+    assert order.status == "cancelled"
+    assert first.status == "CANCELLED"
+    assert batch.status == "ATTENTION_REQUIRED"
+    assert "BROKER_CANCELLED" in batch.attention_reason
+
+
 def test_timeout_hard_stops_and_reconcile_found_recovers_without_new_order(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["timeout"])
     service, adapter, batch = make_ready_batch(session, adapter)
@@ -527,7 +600,7 @@ def test_stop_remaining_never_cancels_submitted_broker_order(session):
     first = batch.legs[0]
     service.submit_next_leg(batch.id, confirmation_version=1, leg_id=first.id)
     service.stop_remaining(batch.id)
-    assert first.status == "SUBMITTED"
+    assert first.status == "OPEN"
     assert [leg.status for leg in batch.legs[1:]] == [
         "CANCELLED", "CANCELLED", "CANCELLED",
     ]
