@@ -748,7 +748,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 "commission": state_number("commission"),
                 "min_commission": state_number("minCommission"),
                 "max_commission": state_number("maxCommission"),
-                "commission_currency": state.commissionCurrency or "USD",
+                # Currency is part of the broker fact.  Never infer USD when
+                # IBKR omits it; the cash ledger must fail closed instead.
+                "commission_currency": state.commissionCurrency or None,
                 "initial_margin_before": state_number("initMarginBefore"),
                 "initial_margin_change": state_number("initMarginChange"),
                 "initial_margin_after": state_number("initMarginAfter"),

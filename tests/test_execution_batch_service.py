@@ -64,11 +64,15 @@ def canonical_intent():
 class FakeIBKRExecutionAdapter:
     broker_name = "ibkr"
 
-    def __init__(self, *, order_statuses=None, open_orders=None, what_if_error=False):
+    def __init__(
+        self, *, order_statuses=None, open_orders=None, what_if_error=False,
+        commission_currency="USD",
+    ):
         self._account_id = "U-FAKE"
         self.order_statuses = list(order_statuses or ["submitted_to_broker"] * 4)
         self.open_orders = list(open_orders or [])
         self.what_if_error = what_if_error
+        self.commission_currency = commission_currency
         self.place_calls = []
         self.reconcile_result = None
 
@@ -113,7 +117,7 @@ class FakeIBKRExecutionAdapter:
             raise ConnectionError("Gateway Read-Only")
         return {
             "status": "PASS", "commission": 1,
-            "commission_currency": "USD", "what_if": True,
+            "commission_currency": self.commission_currency, "what_if": True,
             "transmit": True, "quantity": quantity,
             "limit_price": str(limit_price),
         }
@@ -221,6 +225,20 @@ def test_whatif_timeout_fails_closed_without_real_submit(session):
     assert session.query(OrderRecord).count() == 0
     assert all(leg.linked_order_id is None for leg in batch.legs)
     assert all(leg.status == "DRAFT" for leg in batch.legs)
+    assert adapter.place_calls == []
+
+
+@pytest.mark.parametrize("commission_currency", [None, "EUR"])
+def test_whatif_commission_currency_is_required_for_usd_ledger(
+    session, commission_currency,
+):
+    adapter = FakeIBKRExecutionAdapter(
+        commission_currency=commission_currency,
+    )
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    with pytest.raises(ExecutionSafetyError, match="commission currency"):
+        service.create_batch(conversation_id="case1-conversation", message_id=1)
+    assert session.query(OrderRecord).count() == 0
     assert adapter.place_calls == []
 
 

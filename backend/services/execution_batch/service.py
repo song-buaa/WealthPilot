@@ -61,6 +61,23 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
+def _commission_in_funding_currency(result: dict, funding_currency: str) -> Decimal:
+    """Return a WhatIf fee only when its broker-reported currency is usable.
+
+    ExecutionBatch has no FX-normalization contract.  A missing or different
+    commission currency therefore cannot be added to the USD cash ledger.
+    """
+    currency = str(result.get("commission_currency") or "").upper()
+    expected = str(funding_currency or "").upper()
+    if not currency:
+        raise ExecutionSafetyError("WhatIf commission currency 缺失，禁止计入资金账本")
+    if currency != expected:
+        raise ExecutionSafetyError(
+            f"WhatIf commission currency={currency}，无法按 {expected} 汇总（未配置 FX normalization）"
+        )
+    return money(result.get("commission"))
+
+
 class ExecutionBatchService:
     def __init__(
         self,
@@ -265,7 +282,9 @@ class ExecutionBatchService:
                     limit_price=money(leg.suggested_limit),
                 )
                 leg.what_if_snapshot = _json(result)
-                total_fees += money(result.get("commission"))
+                total_fees += _commission_in_funding_currency(
+                    result, batch.funding_currency,
+                )
             except (ConnectionError, TimeoutError) as exc:
                 leg.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
@@ -291,7 +310,9 @@ class ExecutionBatchService:
                         limit_price=money(remainder_leg.suggested_limit),
                     )
                     remainder_leg.what_if_snapshot = _json(result)
-                    total_fees += money(result.get("commission"))
+                    total_fees += _commission_in_funding_currency(
+                        result, batch.funding_currency,
+                    )
                 except (ConnectionError, TimeoutError) as exc:
                     remainder_leg.what_if_snapshot = _json({
                         "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
@@ -434,7 +455,9 @@ class ExecutionBatchService:
                     limit_price=money(leg.final_limit),
                 )
                 leg.what_if_snapshot = _json(result)
-                total_fees += money(result.get("commission"))
+                total_fees += _commission_in_funding_currency(
+                    result, batch.funding_currency,
+                )
             except (ConnectionError, TimeoutError) as exc:
                 leg.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
@@ -461,7 +484,9 @@ class ExecutionBatchService:
                     quantity=quantity, limit_price=money(remainder.final_limit),
                 )
                 remainder.what_if_snapshot = _json(result)
-                total_fees += money(result.get("commission"))
+                total_fees += _commission_in_funding_currency(
+                    result, batch.funding_currency,
+                )
             except (ConnectionError, TimeoutError) as exc:
                 remainder.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
@@ -576,6 +601,7 @@ class ExecutionBatchService:
         what_if = self.adapter.what_if_limit_order(
             resolved, quantity=quantity, limit_price=limit,
         )
+        _commission_in_funding_currency(what_if, batch.funding_currency)
         leg.what_if_snapshot = _json(what_if)
 
         strategy = SymbolStrategy(
@@ -634,7 +660,9 @@ class ExecutionBatchService:
         for leg in batch.legs:
             intent_release += money(leg.released_intent_amount)
             if leg.what_if_snapshot:
-                fees += money(json.loads(leg.what_if_snapshot).get("commission"))
+                fees += _commission_in_funding_currency(
+                    json.loads(leg.what_if_snapshot), batch.funding_currency,
+                )
             if not leg.linked_order_id:
                 continue
             order = self.session.query(OrderRecord).filter_by(id=leg.linked_order_id).first()

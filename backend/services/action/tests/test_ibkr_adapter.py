@@ -452,6 +452,7 @@ class TestCase1ResolvedContractCapabilities:
         assert order.transmit is True
         assert result["what_if"] is True
         assert result["transmit"] is True
+        assert result["commission_currency"] == "USD"
         assert result["min_commission"] == 1
         assert result["max_commission"] is None
         assert result["initial_margin_change"] == 10
@@ -459,6 +460,30 @@ class TestCase1ResolvedContractCapabilities:
         assert result["equity_with_loan_change"] == -11.23
         adapter._ib.placeOrder.assert_not_called()
         adapter._ib.openTrades.assert_not_called()
+
+    def test_whatif_does_not_infer_missing_commission_currency(self):
+        adapter = _make_adapter()
+        state = MagicMock()
+        state.commission = 1.23
+        state.minCommission = float("1.7976931348623157e308")
+        state.maxCommission = float("1.7976931348623157e308")
+        state.commissionCurrency = ""
+        state.initMarginBefore = state.initMarginChange = state.initMarginAfter = 0
+        state.maintMarginBefore = state.maintMarginChange = state.maintMarginAfter = 0
+        state.equityWithLoanBefore = state.equityWithLoanChange = 0
+        state.equityWithLoanAfter = 0
+        state.warningText = ""
+        adapter._ib.whatIfOrderAsync = AsyncMock(return_value=state)
+        result = adapter.what_if_limit_order({
+            "con_id": 272686955, "symbol": "IBTA", "local_symbol": "IBTA",
+            "sec_type": "STK", "exchange": "LSEETF",
+            "primary_exchange": "LSEETF", "currency": "USD",
+            "trading_class": "EUET",
+        }, quantity=10, limit_price=Decimal("5.00"))
+        assert result["commission_currency"] is None
+        assert result["min_commission"] is None
+        assert result["max_commission"] is None
+        adapter._ib.placeOrder.assert_not_called()
 
     def test_real_order_builder_is_not_whatif_and_transmits(self):
         order = IBKRBrokerAdapter._build_live_limit_order(_make_request())
