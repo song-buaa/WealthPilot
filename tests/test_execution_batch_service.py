@@ -114,7 +114,7 @@ class FakeIBKRExecutionAdapter:
         return {
             "status": "PASS", "commission": 1,
             "commission_currency": "USD", "what_if": True,
-            "transmit": False, "quantity": quantity,
+            "transmit": True, "quantity": quantity,
             "limit_price": str(limit_price),
         }
 
@@ -168,15 +168,19 @@ def make_ready_batch(session, adapter=None):
 
 
 def test_create_batch_has_contract_quote_cash_whatif_and_dynamic_remainder(session):
-    _service, _adapter, batch = make_ready_batch(session)
+    _service, adapter, batch = make_ready_batch(session)
     assert batch.usable_cash == Decimal("16632")
     assert batch.safety_cushion == Decimal("25")
     assert batch.legs[2].symbol == "CSBGU0"
     assert batch.legs[2].local_symbol == "CBU0"
     assert all(leg.share_class_verification == "VERIFIED" for leg in batch.legs)
-    assert all(json.loads(leg.what_if_snapshot)["transmit"] is False for leg in batch.legs)
+    assert all(json.loads(leg.what_if_snapshot)["transmit"] is True for leg in batch.legs)
     assert batch.legs[-1].allocation_mode == "REMAINDER"
     assert batch.estimated_total + batch.estimated_fees + batch.safety_cushion <= batch.usable_cash
+    assert session.query(OrderRecord).count() == 0
+    assert all(leg.linked_order_id is None for leg in batch.legs)
+    assert all(leg.status == "READY" for leg in batch.legs)
+    assert adapter.place_calls == []
 
 
 def test_external_buy_order_blocks_batch_generation(session):
@@ -198,6 +202,26 @@ def test_readonly_whatif_failure_is_recorded_and_not_ready(session):
         json.loads(leg.what_if_snapshot)["status"] == "PENDING_LIVE_ENABLE"
         for leg in batch.legs
     )
+    assert session.query(OrderRecord).count() == 0
+    assert all(leg.linked_order_id is None for leg in batch.legs)
+    assert all(leg.status == "DRAFT" for leg in batch.legs)
+    assert adapter.place_calls == []
+
+
+def test_whatif_timeout_fails_closed_without_real_submit(session):
+    adapter = FakeIBKRExecutionAdapter()
+
+    def timeout(*_args, **_kwargs):
+        raise TimeoutError("simulated WhatIf timeout")
+
+    adapter.what_if_limit_order = timeout
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    batch = service.create_batch(conversation_id="case1-conversation", message_id=1)
+    assert batch.status == "DRAFT"
+    assert session.query(OrderRecord).count() == 0
+    assert all(leg.linked_order_id is None for leg in batch.legs)
+    assert all(leg.status == "DRAFT" for leg in batch.legs)
+    assert adapter.place_calls == []
 
 
 def test_missing_quote_can_use_user_manual_tick_validated_limits(session):

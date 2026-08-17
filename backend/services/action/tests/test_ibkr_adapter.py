@@ -423,13 +423,22 @@ class TestCase1ResolvedContractCapabilities:
         assert result.raw_response["action"] == "place_order_blocked_contract_identity"
         adapter._ib.placeOrder.assert_not_called()
 
-    def test_whatif_sets_non_transmitting_flags(self):
+    def test_whatif_uses_protocol_preview_flags_without_real_submit(self):
         adapter = _make_adapter()
         state = MagicMock()
         state.commission = 1.23
         state.minCommission = 1
-        state.maxCommission = 2
+        state.maxCommission = float("1.7976931348623157e308")
         state.commissionCurrency = "USD"
+        state.initMarginBefore = 100
+        state.initMarginChange = 10
+        state.initMarginAfter = 110
+        state.maintMarginBefore = 80
+        state.maintMarginChange = 8
+        state.maintMarginAfter = 88
+        state.equityWithLoanBefore = 1000
+        state.equityWithLoanChange = -11.23
+        state.equityWithLoanAfter = 988.77
         state.warningText = ""
         adapter._ib.whatIfOrderAsync = AsyncMock(return_value=state)
         result = adapter.what_if_limit_order({
@@ -440,9 +449,23 @@ class TestCase1ResolvedContractCapabilities:
         }, quantity=10, limit_price=Decimal("5.00"))
         order = adapter._ib.whatIfOrderAsync.call_args[0][1]
         assert order.whatIf is True
-        assert order.transmit is False
+        assert order.transmit is True
         assert result["what_if"] is True
-        assert result["transmit"] is False
+        assert result["transmit"] is True
+        assert result["min_commission"] == 1
+        assert result["max_commission"] is None
+        assert result["initial_margin_change"] == 10
+        assert result["maintenance_margin_change"] == 8
+        assert result["equity_with_loan_change"] == -11.23
+        adapter._ib.placeOrder.assert_not_called()
+        adapter._ib.openTrades.assert_not_called()
+
+    def test_real_order_builder_is_not_whatif_and_transmits(self):
+        order = IBKRBrokerAdapter._build_live_limit_order(_make_request())
+        assert order.whatIf is False
+        assert order.transmit is True
+        assert order.outsideRth is False
+        assert order.orderRef == "test-order-001"
 
     def test_market_hours_closed_fails_closed(self):
         adapter = _make_adapter()

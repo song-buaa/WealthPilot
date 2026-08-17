@@ -334,6 +334,43 @@ class IBKRBrokerAdapter(BrokerAdapter):
             logger.error("[IBKR] authenticate 失败: %s", e)
             return False
 
+    @staticmethod
+    def _build_live_limit_order(request: OrderRequest):
+        """Build the real submission order; never reuse the WhatIf builder."""
+        from ib_async import LimitOrder
+
+        order = LimitOrder(
+            action=request.side.upper(),
+            totalQuantity=int(request.quantity),
+            lmtPrice=float(request.limit_price),
+            tif="DAY",
+        )
+        order.whatIf = False
+        order.transmit = True
+        order.outsideRth = False
+        order.orderRef = request.local_order_id
+        return order
+
+    @staticmethod
+    def _build_what_if_limit_order(*, quantity: int, limit_price: Decimal):
+        """Build an IBKR preview request using the protocol-required flags.
+
+        IBKR requires ``transmit=True`` for a WhatIf request.  ``whatIf=True``
+        is the authority that keeps the request non-executable; this order is
+        only passed to ``whatIfOrderAsync`` and never to ``placeOrder``.
+        """
+        from ib_async import LimitOrder
+
+        order = LimitOrder(
+            action="BUY",
+            totalQuantity=int(quantity),
+            lmtPrice=float(limit_price),
+            tif="DAY",
+        )
+        order.whatIf = True
+        order.transmit = True
+        return order
+
     def place_order(self, request: OrderRequest) -> OrderStatusUpdate:
         """提交订单到 IB。
 
@@ -392,7 +429,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         try:
             async def submit_on_loop() -> dict:
-                from ib_async import Contract, LimitOrder, Stock
+                from ib_async import Contract, Stock
 
                 if resolved:
                     contract = Contract(
@@ -411,15 +448,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     contract = Stock(
                         symbol=pure_symbol, exchange=exchange, currency=currency,
                     )
-                order = LimitOrder(
-                    action=request.side.upper(),
-                    totalQuantity=int(request.quantity),
-                    lmtPrice=float(request.limit_price),
-                    tif="DAY",
-                )
-                # ── 闸门 4: outsideRth=False ─────────────────
-                order.outsideRth = False
-                order.orderRef = request.local_order_id
+                order = self._build_live_limit_order(request)
                 trade = self._ib.placeOrder(contract, order)
 
                 deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
@@ -698,24 +727,39 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ensure_connected()
 
         async def what_if_on_loop():
-            from ib_async import LimitOrder
             contract = self._ib_contract_from_snapshot(resolved)
-            order = LimitOrder(
-                action="BUY", totalQuantity=int(quantity),
-                lmtPrice=float(limit_price), tif="DAY",
+            order = self._build_what_if_limit_order(
+                quantity=quantity,
+                limit_price=limit_price,
             )
-            order.whatIf = True
-            order.transmit = False
             order.account = self._account_id
             state = await self._ib.whatIfOrderAsync(contract, order)
+
+            def state_number(name: str) -> float | None:
+                value = self._finite_number(getattr(state, name, None))
+                # IBKR uses DBL_MAX as an unset sentinel for some OrderState
+                # values, most commonly the commission range.
+                if value is not None and abs(value) >= 1e300:
+                    return None
+                return value
+
             return {
                 "status": "PASS",
-                "commission": self._finite_number(state.commission),
-                "min_commission": self._finite_number(state.minCommission),
-                "max_commission": self._finite_number(state.maxCommission),
+                "commission": state_number("commission"),
+                "min_commission": state_number("minCommission"),
+                "max_commission": state_number("maxCommission"),
                 "commission_currency": state.commissionCurrency or "USD",
+                "initial_margin_before": state_number("initMarginBefore"),
+                "initial_margin_change": state_number("initMarginChange"),
+                "initial_margin_after": state_number("initMarginAfter"),
+                "maintenance_margin_before": state_number("maintMarginBefore"),
+                "maintenance_margin_change": state_number("maintMarginChange"),
+                "maintenance_margin_after": state_number("maintMarginAfter"),
+                "equity_with_loan_before": state_number("equityWithLoanBefore"),
+                "equity_with_loan_change": state_number("equityWithLoanChange"),
+                "equity_with_loan_after": state_number("equityWithLoanAfter"),
                 "warning_text": state.warningText or "",
-                "transmit": False,
+                "transmit": True,
                 "what_if": True,
             }
 
