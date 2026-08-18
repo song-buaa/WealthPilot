@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前稳定版本：v3.14.0 | 稳定标签：`v3.14.0` | 最后更新：2026-08-13
+> 当前稳定版本：v3.15.0 | 稳定标签：`v3.15.0` | 最后更新：2026-08-18
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
@@ -22,9 +22,9 @@ WealthPilot 是 AI 驱动的个人投资决策工作台。本地运行，数据�
 - PerformanceAnalysis：收益表现归因分析
 - Education：投资知识科普 / 通用对话
 
-## 当前架构（v3.14）
+## 当前架构（v3.15）
 
-WealthPilot v3.14 是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。Execution Plan 通过 K 线 Provider fallback 获取因子，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
+WealthPilot v3.15 是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。Execution Plan 通过 K 线 Provider fallback 获取因子；Typed Trade Intent 与 ExecutionBatch 将多标的意图转为可复核计划，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
 
 ### PEER 4 Agent
 
@@ -307,12 +307,19 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - Education 意图支持 RAG 召回
 - 决策输出附引用来源
 
-### v3.14.0（当前稳定版本）✅
+### v3.14.0 ✅
 - K 线 Provider 抽象与 broker → Alpha Vantage → Seed 降级链路
 - 隔离 Public Demo 固定 Seed、Provider gate、metadata 与草稿持久化验收
 - Self-use / Private Full Mode 真实数据库、LLM、行情和 Execution Plan 验收
 - IBKR Live 在三重交易护栏下完成 dedicated event-loop/thread 只读读取验收
 - Claude → Codex 接管完成，长期治理基线落在 `main`
+
+### v3.15.0（当前稳定版本）✅
+- 自然语言多标的交易请求解析为 Typed Trade Intent，并由用户确认理解结果
+- ExecutionBatch / ExecutionLeg 固化现金权威、费用预留、安全垫、顺序提交与幂等边界
+- LSE USD Acc 上市身份与 IBKR SMART 执行路由分离，使用已验证 conId 解析合约
+- WhatIf、最终确认哈希、人工实盘确认与 Broker authority reconciliation 完成闭环
+- Case 1 Live UAT：CBU3 与 IB01 经 SMART 路由真实成交，Batch 收敛为 COMPLETED
 
 ### v4.0（中期）
 - 高级 Memory（Mem0 用户偏好 / 知识图谱标的关系）

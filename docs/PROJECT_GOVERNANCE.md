@@ -1,15 +1,16 @@
 # WealthPilot 项目治理基线
 
-> 更新日期：2026-08-14
+> 更新日期：2026-08-18
 > Current development baseline：当前 `main`
-> Latest stable release：`v3.14.1`
+> Latest stable release：`v3.15.0`
+> Previous stable release：`v3.14.2`
 > Immutable historical release：`v3.14.0` → `4314e031ca653ea87a346c198d3a6dc466017ab6`
 
 ## 1. 当前产品与架构
 
 WealthPilot 是本地优先的个人投资决策工作台。当前前端为 React 19 + Vite 8 + TypeScript，后端为 FastAPI + SQLAlchemy + SQLite，决策链路为 PEER 四 Agent + 13 个 Skills。核心入口为 `frontend/src`、`backend/main.py`、`backend/agents`、`backend/services`、`skills` 与 `app`。
 
-`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.14.1` 是 Latest stable release；`v3.14.0` 保留为 immutable historical release，原 Tag 不移动、不重建。
+`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.0` 是 Latest stable release，`v3.14.2` 是 Previous stable release；`v3.14.0` 保留为 immutable historical release，原 Tag 不移动、不重建。
 
 ## 2. 运行模式
 

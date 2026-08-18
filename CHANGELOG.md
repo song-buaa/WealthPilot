@@ -5,6 +5,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.15.0] - 2026-08-18
+
+Minor Release：完成多标的自然语言交易意图到 IBKR 人工确认实盘执行的端到端闭环。
+
+### Added
+- Typed Trade Intent 解析、透明预览、来源标注与用户确认契约
+- ExecutionBatch / ExecutionLeg 权威层，支持固定金额、动态余款、现金权威、费用预留和安全垫
+- LSE USD Acc trusted instrument mapping、真实 Contract resolution、Live Quote、MarketRule 与 WhatIf
+- Investment Action 最终确认版本/hash、顺序提交、幂等保护和 Broker reconciliation
+
+### Changed
+- 将证券上市身份与执行路由分离；本版本支持的 LSE USD 路径默认使用 IBKR SMART routing
+- Broker working/terminal state 成为本地执行状态的权威来源，Cancelled / Rejected / Unknown 均 fail closed
+
+### Live UAT
+- CBU3：123 股经 SMART 路由成交，均价 126.28
+- IB01：8 股经 SMART 路由成交，均价 121.5382
+- 最终 Batch 为 COMPLETED；open orders、duplicate orders 与 automatic Retry #4 均为 0
+
+### Safety
+- 实盘提交只能由用户在 WealthPilot UI 完成最终确认后触发
+- Release closeout 不连接 Broker、不调用真实行情/LLM，也不执行任何新增订单 mutation
+
 ## [3.14.2] - 2026-08-15
 
 Patch Release：修复 Portfolio / Broker 同步的数据正确性、快照对账与 IBKR 资产元数据。
