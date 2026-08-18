@@ -49,14 +49,25 @@ def _make_mock_log_entry(error_code=0, message="", status=""):
 
 
 def _make_mock_trade(order_id=1, status="Submitted", filled=0, avg_price=0.0,
-                     perm_id=100, order_ref="", log=None):
+                     perm_id=100, order_ref="", log=None, advanced_error=""):
     trade = MagicMock()
     trade.order = MagicMock()
     trade.order.orderId = order_id
     trade.order.permId = perm_id
     trade.order.orderRef = order_ref
+    trade.order.action = "BUY"
+    trade.order.orderType = "LMT"
+    trade.order.totalQuantity = 100
+    trade.order.lmtPrice = 150.0
+    trade.order.tif = "DAY"
+    trade.order.outsideRth = False
+    trade.order.transmit = True
+    trade.order.whatIf = False
+    trade.order.account = "DU1234567"
+    trade.order.clientId = 1
     trade.orderStatus = _make_mock_order_status(status, filled, avg_price, perm_id)
     trade.log = log or []
+    trade.advancedError = advanced_error
     trade.contract = MagicMock()
     trade.contract.conId = 12345
     trade.contract.symbol = "AAPL"
@@ -79,6 +90,8 @@ def _make_adapter(**kwargs):
     adapter._thread = MagicMock()
     adapter._ib = MagicMock()
     adapter._error_codes = kwargs.get("error_codes", {})  # M2.5
+    adapter._open_order_evidence = kwargs.get("open_order_evidence", {})
+    adapter._submitted_order_ids = kwargs.get("submitted_order_ids", set())
     def run_immediately(operation, **_kwargs):
         result = operation()
         return asyncio.run(result) if inspect.isawaitable(result) else result
@@ -640,6 +653,40 @@ class TestPlaceOrderPermId:
         assert result.status == "cancelled"
         assert result.raw_response["ib_status"] == "Cancelled"
         assert result.raw_response["broker_log"][0]["message"] == "Broker cancelled order"
+        assert result.raw_response["terminal_reason_source"] == "trade_log"
+
+    def test_cancelled_without_reason_persists_unknown_terminal_reason(self):
+        adapter = _make_adapter()
+        adapter._ib.placeOrder.return_value = _make_mock_trade(
+            order_id=42, perm_id=98765, status="Cancelled",
+        )
+
+        result = adapter.place_order(_make_request())
+
+        assert result.status == "cancelled"
+        assert result.raw_response["terminal_reason"] == "UNKNOWN_BROKER_CANCEL"
+        assert result.raw_response["terminal_reason_source"] == "fallback"
+
+    def test_cancelled_error_and_advanced_reject_are_persisted(self):
+        adapter = _make_adapter(error_codes={
+            42: {
+                "errorCode": 201,
+                "errorString": "Order rejected by broker",
+                "advancedOrderRejectJson": '{"errorCode":"XYZ"}',
+                "timestamp": "2026-08-18T00:00:00+00:00",
+            },
+        })
+        adapter._ib.placeOrder.return_value = _make_mock_trade(
+            order_id=42, perm_id=98765, status="Cancelled",
+            advanced_error='{"errorCode":"XYZ"}',
+        )
+
+        result = adapter.place_order(_make_request())
+
+        raw = result.raw_response
+        assert raw["broker_error_code"] == 201
+        assert raw["advanced_order_reject_json"] == '{"errorCode":"XYZ"}'
+        assert raw["terminal_reason_source"] == "advanced_order_reject_json"
 
     def test_pending_submit_without_ack_fails_closed_unknown(self):
         adapter = _make_adapter()
@@ -675,6 +722,21 @@ class TestPlaceOrderPermId:
         call_args = adapter._ib.placeOrder.call_args
         order_arg = call_args[1].get("order") or call_args[0][1]
         assert order_arg.orderRef == "my-wp-id-123"
+        assert order_arg.account == adapter._account_id
+
+    def test_what_if_and_live_builders_keep_key_fields_in_parity(self):
+        request = _make_request(quantity=12, limit_price=Decimal("121.52"))
+        live = IBKRBrokerAdapter._build_live_limit_order(request)
+        preview = IBKRBrokerAdapter._build_what_if_limit_order(
+            quantity=12, limit_price=Decimal("121.52"),
+        )
+        for field in (
+            "action", "orderType", "totalQuantity", "lmtPrice", "tif",
+            "outsideRth", "transmit",
+        ):
+            assert getattr(live, field) == getattr(preview, field)
+        assert live.whatIf is False
+        assert preview.whatIf is True
 
     def test_raw_response_has_multi_ids(self):
         """raw_response 包含 permId / orderId / clientId / orderRef / conId。"""
@@ -1056,24 +1118,71 @@ class TestM25ErrorCodeDualSource:
         assert mapped == "broker_pending"
         assert extras["why_held"] == "locate"
 
-    def test_on_ib_error_captures_rejected_codes(self):
-        """_on_ib_error 只捕获 REJECTED_ERROR_CODES 里的 code。"""
-        adapter = _make_adapter()
-        # 201 应被捕获
+    def test_on_ib_error_captures_all_submitted_order_errors(self):
+        adapter = _make_adapter(submitted_order_ids={8, 9})
+        trade = _make_mock_trade(order_id=8, advanced_error='{"reason":"x"}')
+        adapter._ib.trades.return_value = [trade]
         adapter._on_ib_error(reqId=8, errorCode=201,
                              errorString="Order rejected", contract=None)
         assert 8 in adapter._error_codes
         assert adapter._error_codes[8]["errorCode"] == 201
+        assert adapter._error_codes[8]["advancedOrderRejectJson"] == '{"reason":"x"}'
+        adapter._on_ib_error(reqId=8, errorCode=399,
+                             errorString="Order precaution", contract=None)
+        assert [item["errorCode"] for item in adapter._error_codes[8]["history"]] == [201, 399]
 
-        # 202 不应被捕获（撤单确认）
+        # 202 cancellation reason is evidence and must not be discarded.
         adapter._on_ib_error(reqId=9, errorCode=202,
-                             errorString="Order Canceled", contract=None)
-        assert 9 not in adapter._error_codes
+                             errorString="Order Canceled - Reason", contract=None)
+        assert adapter._error_codes[9]["errorCode"] == 202
 
-        # -1 不应被捕获（非订单相关）
+        # Non-order and unrelated request errors remain excluded.
         adapter._on_ib_error(reqId=-1, errorCode=201,
                              errorString="something", contract=None)
         assert -1 not in adapter._error_codes
+        adapter._on_ib_error(reqId=10, errorCode=399,
+                             errorString="unrelated request", contract=None)
+        assert 10 not in adapter._error_codes
+
+    def test_duplicate_order_id_error_fails_closed_with_reason(self):
+        adapter = _make_adapter(error_codes={
+            42: {
+                "errorCode": 103,
+                "errorString": "Duplicate order id",
+                "timestamp": "2026-08-18T00:00:00+00:00",
+            },
+        })
+        adapter._ib.placeOrder.return_value = _make_mock_trade(
+            order_id=42, perm_id=0, status="Cancelled",
+        )
+
+        result = adapter.place_order(_make_request())
+
+        assert result.status == "cancelled"
+        assert result.raw_response["broker_error_code"] == 103
+        assert result.raw_response["terminal_reason"] == "Duplicate order id"
+
+    def test_open_order_hook_captures_warning_and_completed_state(self):
+        adapter = _make_adapter()
+        class Wrapper:
+            def openOrder(self, order_id, contract, order, order_state):
+                return None
+
+        wrapper = Wrapper()
+        adapter._ib.wrapper = wrapper
+        adapter._install_open_order_evidence_hook()
+        state = MagicMock(
+            status="Cancelled", warningText="precaution",
+            completedTime="20260817 21:19:50", completedStatus="Cancelled",
+        )
+        order = MagicMock(account="DU1234567")
+
+        wrapper.openOrder(42, MagicMock(), order, state)
+
+        evidence = adapter._open_order_evidence[42][-1]
+        assert evidence["warning_text"] == "precaution"
+        assert evidence["completed_status"] == "Cancelled"
+        assert evidence["account_masked"] == "***4567"
 
     def test_cancelled_with_200_not_misclassified(self):
         """带 200 的 Cancelled（无效合约）→ _map_status 走 Cancelled 分支，

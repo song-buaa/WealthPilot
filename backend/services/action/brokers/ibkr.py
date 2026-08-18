@@ -198,6 +198,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
         # _map_inactive 在调用线程中读取。dict 的单次赋值在 CPython 下是原子的，
         # 且写入发生在读取之前（error callback 先于 status 查询），无需额外锁。
         self._error_codes: dict[int, dict] = {}
+        self._open_order_evidence: dict[int, list[dict]] = {}
+        self._submitted_order_ids: set[int] = set()
 
     def _run_on_loop(self, operation, *, timeout: float | None = None):
         """在 adapter 专属 event loop 执行一次 IB 调用并等待普通结果。
@@ -252,6 +254,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     timeout=self._timeout,
                     readonly=IBKR_READ_ONLY_MODE,
                 )
+                self._install_open_order_evidence_hook()
                 self._ib.errorEvent += self._on_ib_error
                 return list(self._ib.managedAccounts())
 
@@ -372,6 +375,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         )
         order.whatIf = True
         order.transmit = True
+        order.outsideRth = False
         return order
 
     def place_order(self, request: OrderRequest) -> OrderStatusUpdate:
@@ -452,7 +456,12 @@ class IBKRBrokerAdapter(BrokerAdapter):
                         symbol=pure_symbol, exchange=exchange, currency=currency,
                     )
                 order = self._build_live_limit_order(request)
+                # Use the same explicit account authority as WhatIf.  Relying
+                # on an empty account field is ambiguous for FA/multi-account
+                # sessions and prevents exact preview/live parity evidence.
+                order.account = self._account_id
                 trade = self._ib.placeOrder(contract, order)
+                self._submitted_order_ids.add(int(trade.order.orderId or 0))
 
                 perm_deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
                 while time.monotonic() < perm_deadline:
@@ -1008,18 +1017,69 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
     # ── 内部: error callback 处理（M2.5）─────────────────────
 
+    def _install_open_order_evidence_hook(self) -> None:
+        """Capture ``openOrder`` OrderState before ib_async discards it.
+
+        ``ib_async`` emits ``openOrderEvent`` with only the Trade object, so
+        ``OrderState.warningText`` and completed fields are otherwise lost.
+        The wrapper remains authoritative; this hook only snapshots plain
+        Python evidence before delegating to the original callback.
+        """
+        wrapper = self._ib.wrapper
+        if getattr(wrapper, "_wealthpilot_open_order_hook", False):
+            return
+        original = wrapper.openOrder
+
+        def capture(order_id, contract, order, order_state):
+            account = str(getattr(order, "account", "") or "")
+            evidence = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": str(getattr(order_state, "status", "") or ""),
+                "warning_text": str(
+                    getattr(order_state, "warningText", "") or ""
+                ),
+                "completed_time": str(
+                    getattr(order_state, "completedTime", "") or ""
+                ),
+                "completed_status": str(
+                    getattr(order_state, "completedStatus", "") or ""
+                ),
+                "account_masked": (
+                    f"***{account[-4:]}" if len(account) > 4 else account
+                ),
+            }
+            self._open_order_evidence.setdefault(int(order_id), []).append(evidence)
+            return original(order_id, contract, order, order_state)
+
+        wrapper.openOrder = capture
+        wrapper._wealthpilot_open_order_hook = True
+
     def _on_ib_error(self, reqId: int, errorCode: int, errorString: str, contract) -> None:
-        """IB error callback。记录 orderId → errorCode 映射。
+        """Persist every callback tied to an order submitted by this adapter.
 
         探针实测发现: errorCode 201（保证金不足）不在 trade.log 里
         （trade.log 显示 errorCode=0），而是通过此 callback 异步到达。
-        _map_inactive 需要同时查 trade.log 和此映射才能正确分流。
+        Cancellation reason、validation warning 和 advanced reject 也必须保留，
+        因此不再只记录 200/201。
         """
-        if reqId > 0 and errorCode in REJECTED_ERROR_CODES:
-            self._error_codes[reqId] = {
+        if reqId > 0 and reqId in self._submitted_order_ids:
+            advanced_reject = ""
+            for trade in list(self._ib.trades()):
+                if int(getattr(trade.order, "orderId", 0) or 0) == reqId:
+                    advanced_reject = str(
+                        getattr(trade, "advancedError", "") or ""
+                    )
+                    break
+            prior = self._error_codes.get(reqId, {})
+            history = list(prior.get("history", []))
+            event = {
                 "errorCode": errorCode,
                 "errorString": errorString,
+                "advancedOrderRejectJson": advanced_reject,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+            history.append(event)
+            self._error_codes[reqId] = {**event, "history": history}
             logger.warning(
                 "[IBKR] error callback: orderId=%d errorCode=%d msg=%s",
                 reqId, errorCode, errorString[:200],
@@ -1180,14 +1240,15 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 f"重试 {NOT_FOUND_MAX_RETRIES} 次后仍失败，可能为本地脏数据"
             )
 
-    @staticmethod
-    def _snapshot_trade(trade) -> dict:
+    def _snapshot_trade(self, trade) -> dict:
         """从 IB Trade 提取跨线程安全的、无 runtime 引用的值对象。"""
         contract = getattr(trade, "contract", None)
         order = trade.order
         status = trade.orderStatus
+        order_id = int(order.orderId or 0)
+        account = str(getattr(order, "account", "") or "")
         return {
-            "order_id": int(order.orderId or 0),
+            "order_id": order_id,
             "perm_id": int(order.permId or status.permId or 0),
             "order_ref": order.orderRef or "",
             "ib_status": status.status or "",
@@ -1198,8 +1259,33 @@ class IBKRBrokerAdapter(BrokerAdapter):
             "contract_symbol": getattr(contract, "symbol", None) if contract else None,
             "contract_exchange": getattr(contract, "exchange", None) if contract else None,
             "contract_currency": getattr(contract, "currency", None) if contract else None,
+            "advanced_order_reject_json": str(
+                getattr(trade, "advancedError", "") or ""
+            ),
+            "open_order_callbacks": list(
+                self._open_order_evidence.get(order_id, [])
+            ),
+            "order_snapshot": {
+                "action": str(getattr(order, "action", "") or ""),
+                "order_type": str(getattr(order, "orderType", "") or ""),
+                "total_quantity": int(getattr(order, "totalQuantity", 0) or 0),
+                "limit_price": self._finite_number(getattr(order, "lmtPrice", None)),
+                "tif": str(getattr(order, "tif", "") or ""),
+                "outside_rth": bool(getattr(order, "outsideRth", False)),
+                "transmit": bool(getattr(order, "transmit", False)),
+                "what_if": bool(getattr(order, "whatIf", False)),
+                "account_masked": (
+                    f"***{account[-4:]}" if len(account) > 4 else account
+                ),
+                "client_id": int(getattr(order, "clientId", 0) or 0),
+            },
             "log": [
                 {
+                    "timestamp": (
+                        getattr(entry, "time", None).isoformat()
+                        if getattr(entry, "time", None) else None
+                    ),
+                    "status": str(getattr(entry, "status", "") or ""),
                     "error_code": int(getattr(entry, "errorCode", 0) or 0),
                     "message": str(getattr(entry, "message", "") or ""),
                 }
@@ -1283,10 +1369,56 @@ class IBKRBrokerAdapter(BrokerAdapter):
         }
         if snapshot.get("log"):
             raw["broker_log"] = snapshot["log"]
+        if snapshot.get("order_snapshot"):
+            raw["broker_order_snapshot"] = snapshot["order_snapshot"]
+        if snapshot.get("open_order_callbacks"):
+            raw["open_order_callbacks"] = snapshot["open_order_callbacks"]
+            raw["open_order_callback"] = snapshot["open_order_callbacks"][-1]
+            warning = next((
+                item.get("warning_text", "")
+                for item in reversed(snapshot["open_order_callbacks"])
+                if item.get("warning_text")
+            ), "")
+            if warning:
+                raw["warning_text"] = warning
+        if snapshot.get("advanced_order_reject_json"):
+            raw["advanced_order_reject_json"] = snapshot[
+                "advanced_order_reject_json"
+            ]
         callback_error = self._error_codes.get(snapshot["order_id"])
         if callback_error:
             raw["broker_error_code"] = callback_error.get("errorCode")
             raw["broker_error_message"] = callback_error.get("errorString", "")
+            raw["broker_error_timestamp"] = callback_error.get("timestamp")
+            raw["broker_error_history"] = callback_error.get("history", [])
+            if callback_error.get("advancedOrderRejectJson"):
+                raw["advanced_order_reject_json"] = callback_error[
+                    "advancedOrderRejectJson"
+                ]
+
+        terminal_reason = None
+        terminal_source = None
+        if raw.get("advanced_order_reject_json"):
+            terminal_reason = raw["advanced_order_reject_json"]
+            terminal_source = "advanced_order_reject_json"
+        elif raw.get("broker_error_message"):
+            terminal_reason = raw["broker_error_message"]
+            terminal_source = "error_callback"
+        else:
+            for entry in reversed(snapshot.get("log", [])):
+                if entry.get("message"):
+                    terminal_reason = entry["message"]
+                    terminal_source = "trade_log"
+                    break
+        if (
+            not terminal_reason
+            and snapshot["ib_status"] in {"Cancelled", "ApiCancelled"}
+        ):
+            terminal_reason = "UNKNOWN_BROKER_CANCEL"
+            terminal_source = "fallback"
+        if terminal_reason:
+            raw["terminal_reason"] = terminal_reason
+            raw["terminal_reason_source"] = terminal_source
         return raw
 
     def _status_update_from_snapshot(
