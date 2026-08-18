@@ -2,7 +2,7 @@
 
 基于 Multi-Agent 架构的个人投资辅助决策系统
 
-**当前稳定版本：v3.15.0**
+**当前稳定版本：v3.15.1**
 
 ## 项目简介
 
@@ -329,6 +329,7 @@ pytest
 
 **近期主要版本：**
 
+- **v3.15.1**（2026-08-18）：建立 canonical asset classification，分离 Broker security type、vehicle type 与 economic asset class，修复债券 ETF 被误归为权益的问题
 - **v3.15.0**（2026-08-18）：Typed Trade Intent、多标的 ExecutionBatch、LSE USD Acc 合约身份校验、IBKR SMART 路由、WhatIf 与人工确认实盘执行闭环
 - **v3.14.0**（2026-08-13）：K 线 Provider 解耦与降级链路、隔离 Demo 固定 Seed、Execution Plan 持久化、Self-use Full Mode 复原，以及 IBKR dedicated-loop 只读读取链路验收
 - **v3.12**（2026-06-10）：投研观点模块收敛 — 长期价值判断入库沉淀 · 短期信号决策时取用即弃不再写库 · 前端收敛为两 tab

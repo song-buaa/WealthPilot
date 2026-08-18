@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前稳定版本：v3.15.0 | 稳定标签：`v3.15.0` | 最后更新：2026-08-18
+> 当前稳定版本：v3.15.1 | 稳定标签：`v3.15.1` | 最后更新：2026-08-18
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
@@ -314,12 +314,18 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - IBKR Live 在三重交易护栏下完成 dedicated event-loop/thread 只读读取验收
 - Claude → Codex 接管完成，长期治理基线落在 `main`
 
-### v3.15.0（当前稳定版本）✅
+### v3.15.0 ✅
 - 自然语言多标的交易请求解析为 Typed Trade Intent，并由用户确认理解结果
 - ExecutionBatch / ExecutionLeg 固化现金权威、费用预留、安全垫、顺序提交与幂等边界
 - LSE USD Acc 上市身份与 IBKR SMART 执行路由分离，使用已验证 conId 解析合约
 - WhatIf、最终确认哈希、人工实盘确认与 Broker authority reconciliation 完成闭环
 - Case 1 Live UAT：CBU3 与 IB01 经 SMART 路由真实成交，Batch 收敛为 COMPLETED
+
+### v3.15.1（当前稳定版本）✅
+- 建立唯一 canonical asset classification 入口，分离 Broker security type、vehicle type 与 economic asset class
+- ETF 不再因 `secType=STK` 默认归为 Equity；经济暴露证据不足时 fail closed 为 `UNKNOWN`
+- CSBGU3 / CBU3 与 IB01 正确归类为 Fixed Income，Portfolio API、汇总与 UI 使用同一 canonical 字段
+- 完成真实 Self-use API/UI 人工验收与全量自动质量 Gate
 
 ### v4.0（中期）
 - 高级 Memory（Mem0 用户偏好 / 知识图谱标的关系）

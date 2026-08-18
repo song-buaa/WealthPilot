@@ -5,6 +5,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.15.1] - 2026-08-18
+
+Patch Release：修复 Portfolio 资产分类根因，明确区分券商证券类型、载体类型与经济资产类别。
+
+### Fixed
+- 新增唯一 canonical asset classification 入口与完整分类证据契约
+- ETF 不再因 IBKR `secType=STK` 默认归为 Equity；经济暴露证据不足时 fail closed 为 `UNKNOWN`
+- CSBGU3 / CBU3 与 IB01 正确归类为 `FIXED_INCOME`，同时保留真实 Broker security type 与 ETF vehicle type
+- Portfolio API、汇总和前端统一消费 canonical economic asset class
+
+### Validation
+- 真实 Self-use API 与 Portfolio UI 人工验收一致：CSBGU3、IB01 均显示为固收；固收汇总 15.8%，权益汇总 84.1%
+- Targeted、全量 pytest、compileall、frontend lint/build 与 Offline M5 18/18 通过
+
+### Safety
+- Release closeout 不连接 Broker、不调用真实行情或 LLM，也不执行 WhatIf 或任何订单 mutation
+- `v3.15.0` 保持 immutable，不移动、不重建原 Tag
+
 ## [3.15.0] - 2026-08-18
 
 Minor Release：完成多标的自然语言交易意图到 IBKR 人工确认实盘执行的端到端闭环。
