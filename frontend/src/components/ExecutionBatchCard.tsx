@@ -33,7 +33,9 @@ export default function ExecutionBatchCard({
   const retryAttempt = Number(batch.execution_policy.retry_attempt || 0)
   const confirmationText = retryAttempt === 2
     ? `确认并重试提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
-    : `确认并提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
+    : retryAttempt === 3
+      ? `确认并提交 Retry #3 — ${batch.legs.length} 笔 IBKR SMART 实盘限价单`
+      : `确认并提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
   const legSequence = batch.legs.map(leg => leg.user_alias).join(' → ')
   const retired = batch.status === 'CANCELLED'
   const intentReplaced = Array.isArray(batch.attention_reason)
@@ -112,7 +114,7 @@ export default function ExecutionBatchCard({
       <div style={{ padding: '13px 16px', background: retired ? '#F1F5F9' : '#EFF6FF', display: 'flex', alignItems: 'center', gap: 10 }}>
         <ShieldAlert size={17} color="#1D4ED8" />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: retired ? '#475569' : '#1E3A8A' }}>IBKR Case 1{retryAttempt === 2 ? ' · Controlled Retry #2' : ''} · {batch.legs.length} 标的交易执行批次</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: retired ? '#475569' : '#1E3A8A' }}>IBKR Case 1{retryAttempt ? ` · Controlled Retry #${retryAttempt}` : ''} · {batch.legs.length} 标的交易执行批次</div>
           <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
             {batch.account_masked} · USD Cash · {batch.status} · Confirmation v{batch.confirmation_version}
           </div>
@@ -141,6 +143,7 @@ export default function ExecutionBatchCard({
             ['安全垫', usd(batch.safety_cushion)],
             ['预计剩余', usd(batch.estimated_residual)],
             ['外部 Open Orders', String(batch.execution_policy.external_open_order_count ?? '—')],
+            ['执行路由', String(batch.execution_policy.routing ?? '—')],
           ].map(([label, value]) => (
             <div key={label} style={{ background: '#F8FAFC', borderRadius: 8, padding: '9px 10px' }}>
               <div style={{ fontSize: 10, color: '#94A3B8' }}>{label}</div>
@@ -162,7 +165,8 @@ export default function ExecutionBatchCard({
                   <td style={{ padding: '9px 6px', fontWeight: 700 }}>{leg.sequence}. {leg.user_alias}</td>
                   <td style={{ padding: '9px 6px', lineHeight: 1.5 }}>
                     <div>conId {leg.resolved_con_id} · {leg.symbol}/{leg.local_symbol}</div>
-                    <div>{leg.exchange} · {leg.currency} · {leg.stock_type}</div>
+                    <div>{leg.listing_exchange} listing · {leg.currency} · {leg.stock_type}</div>
+                    <div style={{ color: '#1D4ED8', fontWeight: 600 }}>Routing {leg.execution_exchange}</div>
                     <div>{leg.isin}</div>
                     <div style={{ color: '#047857', fontWeight: 600 }}>Acc {leg.share_class_verification}</div>
                   </td>
@@ -170,7 +174,7 @@ export default function ExecutionBatchCard({
                   <td style={{ padding: '9px 6px', lineHeight: 1.5 }}>
                     <div>Ask {price(leg.quote_ask)} · {leg.quote_quality || 'MISSING'}</div>
                     <div>Limit {price(leg.final_limit)}</div>
-                    {!leg.linked_order_id && retryAttempt !== 2 && (
+                    {!leg.linked_order_id && !retryAttempt && (
                       <input
                         aria-label={`${leg.user_alias} 手工 Limit`}
                         value={manualLimits[leg.user_alias] || ''}
@@ -186,7 +190,7 @@ export default function ExecutionBatchCard({
                   <td style={{ padding: '9px 6px' }}>{leg.final_quantity ?? '—'} 股<br />{usd(leg.estimated_notional)}</td>
                   <td style={{ padding: '9px 6px' }}>
                     {leg.what_if?.status === 'PASS'
-                      ? <span style={{ color: '#047857' }}><CheckCircle size={12} /> {usd(Number(leg.what_if.commission || 0))}</span>
+                      ? <span style={{ color: '#047857' }}><CheckCircle size={12} /> {usd(Number(leg.what_if.commission_reserve ?? leg.what_if.commission ?? 0))}</span>
                       : <span style={{ color: '#B45309' }}>待校验</span>}
                   </td>
                   <td style={{ padding: '9px 6px', fontWeight: 600 }}>{leg.status}</td>
@@ -209,7 +213,7 @@ export default function ExecutionBatchCard({
           <button onClick={refresh} disabled={busy || retired || Boolean(batch.legs.some(leg => leg.linked_order_id))} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, border: '1px solid #CBD5E1', background: '#fff', cursor: retired ? 'not-allowed' : 'pointer' }}>
             <RefreshCw size={13} />刷新只读事实
           </button>
-          {batch.status === 'DRAFT' && retryAttempt !== 2 && (
+          {batch.status === 'DRAFT' && !retryAttempt && (
             <button onClick={applyManualLimits} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, cursor: 'pointer' }}>校验手工 Limit</button>
           )}
           {batch.status === 'READY' && (
@@ -235,7 +239,7 @@ export default function ExecutionBatchCard({
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', gap: 8, color: '#991B1B', fontSize: 12, lineHeight: 1.6 }}>
                 <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-                <span>将按 {legSequence} 顺序提交 {batch.legs.length} 笔真实 BUY LIMIT 订单。每一腿都会重新检查资金、报价、合约和 WhatIf；UNKNOWN/TIMEOUT/REJECTED 会立即停止。</span>
+                <span>将按 {legSequence} 顺序提交 {batch.legs.length} 笔真实 BUY LIMIT 订单。Instrument 仍是同一 LSE USD Acc listing，执行路由为 {String(batch.execution_policy.routing || 'SMART')}。每一腿都会重新检查资金、报价、合约和 WhatIf；UNKNOWN/TIMEOUT/REJECTED 会立即停止。</span>
               </div>
               <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16, fontSize: 12, color: '#334155' }}>
                 <input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} />

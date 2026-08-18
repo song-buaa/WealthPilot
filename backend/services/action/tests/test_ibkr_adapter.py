@@ -400,18 +400,26 @@ class TestCase1ResolvedContractCapabilities:
         assert result["local_symbol"] == "CBU0"
         assert result["market_rule_id"] == 983
 
-    def test_resolved_lse_contract_uses_persisted_conid_not_ticker_guess(self):
+    def test_resolved_lse_contract_uses_persisted_conid_with_smart_routing(self):
         adapter = _make_adapter()
         trade = _make_mock_trade(order_id=48, perm_id=1008)
         trade.contract.conId = 79000139
         trade.contract.symbol = "CSBGU0"
-        trade.contract.exchange = "LSEETF"
+        trade.contract.exchange = "SMART"
         trade.contract.currency = "USD"
         adapter._ib.placeOrder.return_value = trade
         resolved = {
             "con_id": 79000139, "symbol": "CSBGU0", "local_symbol": "CBU0",
-            "sec_type": "STK", "exchange": "LSEETF", "primary_exchange": "EBS",
+            "sec_type": "STK", "exchange": "SMART",
+            "listing_exchange": "LSEETF", "execution_exchange": "SMART",
+            "primary_exchange": "EBS",
             "currency": "USD", "trading_class": "EUET",
+            "smart_qualification": {
+                "con_id": 79000139, "symbol": "CSBGU0",
+                "local_symbol": "CSBGU0", "sec_type": "STK",
+                "exchange": "SMART", "primary_exchange": "EBS",
+                "currency": "USD", "trading_class": "CSBGU0",
+            },
         }
         result = adapter.place_order(_make_request(
             symbol="CBU0:LSE", resolved_contract=resolved,
@@ -419,9 +427,64 @@ class TestCase1ResolvedContractCapabilities:
         contract = adapter._ib.placeOrder.call_args[0][0]
         assert contract.conId == 79000139
         assert contract.symbol == "CSBGU0"
-        assert contract.localSymbol == "CBU0"
-        assert contract.exchange == "LSEETF"
+        assert contract.localSymbol == "CSBGU0"
+        assert contract.exchange == "SMART"
         assert result.raw_response["con_id"] == 79000139
+
+    def test_smart_qualification_preserves_verified_listing_identity(self):
+        adapter = _make_adapter()
+        qualified = MagicMock()
+        qualified.conId = 79000224
+        qualified.symbol = "CSBGU3"
+        qualified.localSymbol = "CSBGU3"
+        qualified.secType = "STK"
+        qualified.exchange = "SMART"
+        qualified.primaryExchange = "EBS"
+        qualified.currency = "USD"
+        qualified.tradingClass = "EUET"
+        adapter._ib.qualifyContractsAsync = AsyncMock(return_value=[qualified])
+        listing = {
+            "con_id": 79000224, "symbol": "CSBGU3", "local_symbol": "CBU3",
+            "sec_type": "STK", "stock_type": "ETF", "exchange": "LSEETF",
+            "primary_exchange": "EBS", "currency": "USD",
+            "trading_class": "EUET", "isin": "IE00B3VWN179",
+            "market_rule_id": 983, "market_rule": [],
+        }
+
+        result = adapter.qualify_execution_route(listing, exchange="SMART")
+
+        requested = adapter._ib.qualifyContractsAsync.call_args[0][0]
+        assert requested.conId == listing["con_id"]
+        assert requested.exchange == "SMART"
+        assert result["con_id"] == listing["con_id"]
+        assert result["isin"] == listing["isin"]
+        assert result["listing_exchange"] == "LSEETF"
+        assert result["execution_exchange"] == "SMART"
+        assert result["exchange"] == "SMART"
+        assert result["local_symbol"] == "CBU3"
+        assert result["smart_qualification"]["local_symbol"] == "CSBGU3"
+
+    def test_smart_qualification_identity_change_fails_closed(self):
+        adapter = _make_adapter()
+        qualified = MagicMock()
+        qualified.conId = 999
+        qualified.symbol = "CSBGU3"
+        qualified.localSymbol = "CBU3"
+        qualified.secType = "STK"
+        qualified.exchange = "SMART"
+        qualified.primaryExchange = "EBS"
+        qualified.currency = "USD"
+        qualified.tradingClass = "EUET"
+        adapter._ib.qualifyContractsAsync = AsyncMock(return_value=[qualified])
+        listing = {
+            "con_id": 79000224, "symbol": "CSBGU3", "local_symbol": "CBU3",
+            "sec_type": "STK", "exchange": "LSEETF",
+            "primary_exchange": "EBS", "currency": "USD",
+            "trading_class": "EUET",
+        }
+
+        with pytest.raises(ValueError, match="identity mismatch"):
+            adapter.qualify_execution_route(listing, exchange="SMART")
 
     def test_resolved_contract_mismatch_fails_before_gateway_mutation(self):
         adapter = _make_adapter()
@@ -456,16 +519,30 @@ class TestCase1ResolvedContractCapabilities:
         adapter._ib.whatIfOrderAsync = AsyncMock(return_value=state)
         result = adapter.what_if_limit_order({
             "con_id": 272686955, "symbol": "IBTA", "local_symbol": "IBTA",
-            "sec_type": "STK", "exchange": "LSEETF",
+            "sec_type": "STK", "exchange": "SMART",
+            "listing_exchange": "LSEETF", "execution_exchange": "SMART",
             "primary_exchange": "LSEETF", "currency": "USD",
             "trading_class": "EUET",
+            "smart_qualification": {
+                "con_id": 272686955, "symbol": "IBTA",
+                "local_symbol": "IBTA", "sec_type": "STK",
+                "exchange": "SMART", "primary_exchange": "LSEETF",
+                "currency": "USD", "trading_class": "EUET",
+            },
         }, quantity=10, limit_price=Decimal("5.00"))
         order = adapter._ib.whatIfOrderAsync.call_args[0][1]
+        contract = adapter._ib.whatIfOrderAsync.call_args[0][0]
+        assert contract.exchange == "SMART"
         assert order.whatIf is True
         assert order.transmit is True
         assert result["what_if"] is True
         assert result["transmit"] is True
+        assert result["con_id"] == 272686955
+        assert result["listing_exchange"] == "LSEETF"
+        assert result["execution_exchange"] == "SMART"
         assert result["commission_currency"] == "USD"
+        assert result["commission_reserve"] == 1.23
+        assert result["commission_basis"] == "EXACT"
         assert result["min_commission"] == 1
         assert result["max_commission"] is None
         assert result["initial_margin_change"] == 10
@@ -473,6 +550,38 @@ class TestCase1ResolvedContractCapabilities:
         assert result["equity_with_loan_change"] == -11.23
         adapter._ib.placeOrder.assert_not_called()
         adapter._ib.openTrades.assert_not_called()
+
+    def test_whatif_uses_max_commission_as_conservative_reserve(self):
+        adapter = _make_adapter()
+        state = MagicMock()
+        state.commission = float("1.7976931348623157e308")
+        state.minCommission = 1.99
+        state.maxCommission = 4.64030555
+        state.commissionCurrency = "USD"
+        state.initMarginBefore = state.initMarginChange = state.initMarginAfter = 0
+        state.maintMarginBefore = state.maintMarginChange = state.maintMarginAfter = 0
+        state.equityWithLoanBefore = state.equityWithLoanChange = 0
+        state.equityWithLoanAfter = 0
+        state.warningText = ""
+        adapter._ib.whatIfOrderAsync = AsyncMock(return_value=state)
+        result = adapter.what_if_limit_order({
+            "con_id": 79000224, "symbol": "CSBGU3",
+            "local_symbol": "CBU3", "sec_type": "STK",
+            "exchange": "SMART", "listing_exchange": "LSEETF",
+            "execution_exchange": "SMART", "primary_exchange": "EBS",
+            "currency": "USD", "trading_class": "EUET",
+            "smart_qualification": {
+                "con_id": 79000224, "symbol": "CSBGU3",
+                "local_symbol": "CSBGU3", "sec_type": "STK",
+                "exchange": "SMART", "primary_exchange": "EBS",
+                "currency": "USD", "trading_class": "CSBGU3",
+            },
+        }, quantity=123, limit_price=Decimal("126.29"))
+        assert result["commission"] is None
+        assert result["min_commission"] == 1.99
+        assert result["max_commission"] == 4.64030555
+        assert result["commission_reserve"] == 4.64030555
+        assert result["commission_basis"] == "MAX_COMMISSION"
 
     def test_whatif_does_not_infer_missing_commission_currency(self):
         adapter = _make_adapter()

@@ -20,6 +20,8 @@ router = APIRouter()
 def live_confirmation_text(leg_count: int, retry_attempt: int | None = None) -> str:
     if retry_attempt == 2:
         return f"确认并重试提交 {leg_count} 笔 IBKR 实盘限价单"
+    if retry_attempt == 3:
+        return f"确认并提交 Retry #3 — {leg_count} 笔 IBKR SMART 实盘限价单"
     return f"确认并提交 {leg_count} 笔 IBKR 实盘限价单"
 
 
@@ -46,6 +48,7 @@ def _load_json(raw):
 
 
 def _serialize_leg(leg) -> dict:
+    resolution = _load_json(leg.resolution_snapshot) or {}
     return {
         "id": leg.id, "sequence": leg.sequence, "user_alias": leg.user_alias,
         "allocation_mode": leg.allocation_mode,
@@ -54,6 +57,9 @@ def _serialize_leg(leg) -> dict:
         "resolved_con_id": leg.resolved_con_id, "symbol": leg.symbol,
         "local_symbol": leg.local_symbol, "sec_type": leg.sec_type,
         "stock_type": leg.stock_type, "exchange": leg.exchange,
+        "listing_exchange": resolution.get("listing_exchange", leg.exchange),
+        "execution_exchange": resolution.get("execution_exchange", leg.exchange),
+        "smart_qualification": resolution.get("smart_qualification"),
         "primary_exchange": leg.primary_exchange, "currency": leg.currency,
         "trading_class": leg.trading_class, "isin": leg.isin,
         "long_name": leg.long_name,
@@ -195,6 +201,20 @@ def create_controlled_retry(batch_id: str):
     session = get_session()
     try:
         batch = _service(session).create_controlled_retry(batch_id)
+        session.commit()
+        return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
+
+
+@router.post("/{batch_id}/smart-routing-retry")
+def create_smart_routing_retry(batch_id: str):
+    session = get_session()
+    try:
+        batch = _service(session).create_smart_routing_retry(batch_id)
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:

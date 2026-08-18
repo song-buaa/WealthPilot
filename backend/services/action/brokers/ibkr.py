@@ -412,15 +412,29 @@ class IBKRBrokerAdapter(BrokerAdapter):
         resolved = request.resolved_contract or None
         market, pure_symbol = self._parse_symbol(request.symbol)
         if resolved:
+            listing_exchange = resolved.get(
+                "listing_exchange", resolved.get("exchange"),
+            )
+            execution_exchange = resolved.get(
+                "execution_exchange", resolved.get("exchange"),
+            )
+            route_contract = resolved.get("smart_qualification") or {}
             if (
                 not resolved.get("con_id")
-                or resolved.get("exchange") != "LSEETF"
+                or listing_exchange != "LSEETF"
+                or execution_exchange != "SMART"
                 or resolved.get("currency") != "USD"
                 or resolved.get("sec_type") != "STK"
+                or route_contract.get("con_id") != resolved.get("con_id")
+                or route_contract.get("currency") != resolved.get("currency")
+                or route_contract.get("exchange") != "SMART"
             ):
                 return self._rejected(
                     request,
-                    reason="v3.15 resolved Contract 未通过 LSEETF/USD/STK 身份校验",
+                    reason=(
+                        "v3.15 resolved Contract 未通过 "
+                        "LSEETF listing/SMART routing/USD/STK 校验"
+                    ),
                     action="place_order_blocked_contract_identity",
                 )
             market = "LSE"
@@ -439,15 +453,16 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 from ib_async import Contract, Stock
 
                 if resolved:
+                    route_contract = resolved["smart_qualification"]
                     contract = Contract(
-                        conId=int(resolved["con_id"]),
-                        symbol=resolved["symbol"],
-                        localSymbol=resolved["local_symbol"],
-                        secType=resolved["sec_type"],
-                        exchange=resolved["exchange"],
-                        primaryExchange=resolved.get("primary_exchange", ""),
-                        currency=resolved["currency"],
-                        tradingClass=resolved.get("trading_class", ""),
+                        conId=int(route_contract["con_id"]),
+                        symbol=route_contract["symbol"],
+                        localSymbol=route_contract.get("local_symbol", ""),
+                        secType=route_contract["sec_type"],
+                        exchange=route_contract["exchange"],
+                        primaryExchange=route_contract.get("primary_exchange", ""),
+                        currency=route_contract["currency"],
+                        tradingClass=route_contract.get("trading_class", ""),
                     )
                 else:
                     exchange = MARKET_TO_EXCHANGE[market]
@@ -586,15 +601,18 @@ class IBKRBrokerAdapter(BrokerAdapter):
     @staticmethod
     def _ib_contract_from_snapshot(snapshot: dict):
         from ib_async import Contract
+        execution = snapshot.get("smart_qualification") or snapshot
         return Contract(
-            conId=int(snapshot["con_id"]),
-            symbol=snapshot["symbol"],
-            localSymbol=snapshot.get("local_symbol", ""),
-            secType=snapshot.get("sec_type", "STK"),
-            exchange=snapshot.get("exchange", "LSEETF"),
-            primaryExchange=snapshot.get("primary_exchange", ""),
-            currency=snapshot.get("currency", "USD"),
-            tradingClass=snapshot.get("trading_class", ""),
+            conId=int(execution["con_id"]),
+            symbol=execution["symbol"],
+            localSymbol=execution.get("local_symbol", ""),
+            secType=execution.get("sec_type", "STK"),
+            exchange=execution.get(
+                "exchange", snapshot.get("execution_exchange", "LSEETF"),
+            ),
+            primaryExchange=execution.get("primary_exchange", ""),
+            currency=execution.get("currency", "USD"),
+            tradingClass=execution.get("trading_class", ""),
         )
 
     def resolve_lse_usd_etf(self, alias: str) -> dict:
@@ -687,6 +705,100 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 f"{result.get('candidate_count', 0)}"
             )
         return result
+
+    def qualify_execution_route(
+        self, resolved: dict, *, exchange: str = "SMART",
+    ) -> dict:
+        """Qualify execution routing without changing the verified listing.
+
+        ``resolve_lse_usd_etf`` remains the source of instrument identity and
+        LSE market-rule metadata.  This method only proves that IBKR can route
+        the exact same conId/currency/listing through SMART.  It returns a
+        detached value object so no IB runtime object crosses threads.
+        """
+        self._ensure_connected()
+        if exchange != "SMART":
+            raise ValueError("Case 1 默认执行路由仅允许 SMART")
+
+        async def qualify_on_loop():
+            from ib_async import Contract
+
+            contract = Contract(
+                conId=int(resolved["con_id"]),
+                symbol=resolved["symbol"],
+                localSymbol=resolved.get("local_symbol", ""),
+                secType=resolved.get("sec_type", "STK"),
+                exchange=exchange,
+                primaryExchange=resolved.get("primary_exchange", ""),
+                currency=resolved.get("currency", "USD"),
+                tradingClass=resolved.get("trading_class", ""),
+            )
+            qualified = await self._ib.qualifyContractsAsync(contract)
+            if len(qualified) != 1:
+                raise ValueError(
+                    f"SMART qualification candidate count={len(qualified)}"
+                )
+            item = qualified[0]
+            evidence = {
+                "con_id": int(item.conId or 0),
+                "symbol": item.symbol or "",
+                "local_symbol": item.localSymbol or "",
+                "sec_type": item.secType or "",
+                "exchange": item.exchange or "",
+                "primary_exchange": item.primaryExchange or "",
+                "currency": item.currency or "",
+                "trading_class": item.tradingClass or "",
+            }
+            required = {
+                "con_id": int(resolved["con_id"]),
+                "symbol": resolved["symbol"],
+                "sec_type": resolved.get("sec_type", "STK"),
+                "currency": resolved.get("currency", "USD"),
+            }
+            mismatches = {
+                key: {"expected": expected, "actual": evidence.get(key)}
+                for key, expected in required.items()
+                if evidence.get(key) != expected
+            }
+            # SMART may normalize an LSE local ticker (CBU3) to IBKR's
+            # aggregate symbol (CSBGU3).  Both are already bound to the exact
+            # same conId; any third value remains ambiguous and fails closed.
+            allowed_local_symbols = {
+                resolved.get("local_symbol", ""), resolved["symbol"],
+            }
+            if evidence["local_symbol"] not in allowed_local_symbols:
+                mismatches["local_symbol"] = {
+                    "expected_one_of": sorted(allowed_local_symbols),
+                    "actual": evidence["local_symbol"],
+                }
+            if evidence["exchange"] != exchange:
+                mismatches["exchange"] = {
+                    "expected": exchange, "actual": evidence["exchange"],
+                }
+            expected_primary = resolved.get("primary_exchange", "")
+            if expected_primary and evidence["primary_exchange"] != expected_primary:
+                mismatches["primary_exchange"] = {
+                    "expected": expected_primary,
+                    "actual": evidence["primary_exchange"],
+                }
+            if mismatches:
+                raise ValueError(
+                    f"SMART qualification identity mismatch: {mismatches}"
+                )
+            return evidence
+
+        evidence = self._run_on_loop(
+            qualify_on_loop, timeout=self._timeout + 10,
+        )
+        return {
+            **resolved,
+            "listing_exchange": resolved.get(
+                "listing_exchange", resolved.get("exchange", ""),
+            ),
+            "execution_exchange": exchange,
+            "exchange": exchange,
+            "smart_qualification": evidence,
+        }
 
     def get_executable_quote(self, resolved: dict) -> dict:
         self._ensure_connected()
@@ -812,11 +924,31 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     return None
                 return value
 
+            commission = state_number("commission")
+            min_commission = state_number("minCommission")
+            max_commission = state_number("maxCommission")
+            commission_reserve = (
+                commission if commission is not None else max_commission
+            )
+
             return {
                 "status": "PASS",
-                "commission": state_number("commission"),
-                "min_commission": state_number("minCommission"),
-                "max_commission": state_number("maxCommission"),
+                "con_id": int(resolved["con_id"]),
+                "listing_exchange": resolved.get(
+                    "listing_exchange", resolved.get("exchange"),
+                ),
+                "execution_exchange": resolved.get(
+                    "execution_exchange", resolved.get("exchange"),
+                ),
+                "commission": commission,
+                "min_commission": min_commission,
+                "max_commission": max_commission,
+                "commission_reserve": commission_reserve,
+                "commission_basis": (
+                    "EXACT" if commission is not None
+                    else "MAX_COMMISSION" if max_commission is not None
+                    else "MISSING"
+                ),
                 # Currency is part of the broker fact.  Never infer USD when
                 # IBKR omits it; the cash ledger must fail closed instead.
                 "commission_currency": state.commissionCurrency or None,

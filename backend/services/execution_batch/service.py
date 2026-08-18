@@ -1,7 +1,7 @@
 """Authoritative v3.15 Case 1 ExecutionBatch orchestration.
 
 All executable numbers originate from broker facts and deterministic rules.
-The service is intentionally limited to IBKR/LSEETF/USD/ETF/BUY/LIMIT.
+The service is intentionally limited to IBKR/LSE USD ETF/SMART/BUY/LIMIT.
 """
 from __future__ import annotations
 
@@ -88,9 +88,16 @@ def _commission_in_funding_currency(result: dict, funding_currency: str) -> Deci
         raise ExecutionSafetyError(
             f"WhatIf commission currency={currency}，无法按 {expected} 汇总（未配置 FX normalization）"
         )
-    if result.get("commission") is None:
-        raise ExecutionSafetyError("WhatIf commission 缺失")
-    return money(result.get("commission"))
+    commission_reserve = result.get(
+        "commission_reserve", result.get("commission"),
+    )
+    if commission_reserve is None:
+        raise ExecutionSafetyError(
+            "WhatIf commission 缺失"
+            f" (min={result.get('min_commission')},"
+            f" max={result.get('max_commission')}, currency={currency})"
+        )
+    return money(commission_reserve)
 
 
 def _validate_what_if_result(result: dict, funding_currency: str) -> Decimal:
@@ -121,6 +128,37 @@ class ExecutionBatchService:
 
     def _audit(self, event_type: str, payload: dict) -> None:
         self.session.add(AuditLog(event_type=event_type, payload=_json(payload)))
+
+    def _resolve_for_smart_execution(self, alias: str) -> tuple[dict, object]:
+        """Keep LSE listing identity separate from SMART execution routing."""
+        listing = self.adapter.resolve_lse_usd_etf(alias)
+        trusted = verify_resolved_instrument(alias, listing)
+        qualifier = getattr(self.adapter, "qualify_execution_route", None)
+        if not callable(qualifier):
+            raise ExecutionSafetyError("Adapter 缺少 SMART qualification 能力")
+        routed = qualifier(listing, exchange="SMART")
+        required = {
+            "con_id": listing["con_id"],
+            "symbol": listing["symbol"],
+            "local_symbol": listing["local_symbol"],
+            "sec_type": listing["sec_type"],
+            "primary_exchange": listing.get("primary_exchange"),
+            "currency": "USD",
+            "isin": listing["isin"],
+            "listing_exchange": "LSEETF",
+            "execution_exchange": "SMART",
+            "exchange": "SMART",
+        }
+        mismatches = {
+            key: {"expected": expected, "actual": routed.get(key)}
+            for key, expected in required.items()
+            if routed.get(key) != expected
+        }
+        if mismatches:
+            raise ExecutionSafetyError(
+                f"{alias}: SMART qualification identity mismatch: {mismatches}"
+            )
+        return routed, trusted
 
     def _calculate_remainder_with_what_if(
         self,
@@ -207,6 +245,7 @@ class ExecutionBatchService:
         conversation_id: str,
         message_id: int,
         _controlled_retry_of: ExecutionBatch | None = None,
+        _retry_attempt: int | None = None,
     ) -> ExecutionBatch:
         """Resolve and calculate a real or fake plan; never submits an order."""
         intent = self.load_confirmed_intent(
@@ -234,6 +273,9 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("检测到外部 BUY open order，Case 1 资金池被锁定")
 
         cushion = money(os.getenv("BATCH_CASH_SAFETY_CUSHION_USD", "25"))
+        if _controlled_retry_of is not None and _retry_attempt not in {2, 3}:
+            raise ExecutionSafetyError("Controlled Retry attempt 必须明确为 2 或 3")
+
         batch = ExecutionBatch(
             broker="ibkr",
             account_ref=getattr(self.adapter, "_account_id", "fake-account"),
@@ -251,7 +293,9 @@ class ExecutionBatchService:
             usable_cash=authoritative_cash,
             safety_cushion=cushion,
             execution_policy=_json({
-                "broker": "IBKR", "venue": "LSEETF", "currency": "USD",
+                "broker": "IBKR", "venue": "LSE",
+                "listing_venue": "LSEETF", "routing": "SMART",
+                "currency": "USD",
                 "side": "BUY", "order_type": "LIMIT", "quantity": "WHOLE",
                 "intent_variant": intent_variant,
                 "sequence": [item[0] for item in self._canonical_leg_values(intent)],
@@ -260,9 +304,9 @@ class ExecutionBatchService:
                 "remainder": "DYNAMIC_LAST",
                 "unknown_timeout": "HARD_STOP",
                 **({
-                    "retry_attempt": 2,
+                    "retry_attempt": _retry_attempt,
                     "retry_of_batch_id": _controlled_retry_of.id,
-                    "max_retry_attempt": 2,
+                    "max_retry_attempt": _retry_attempt,
                     "automatic_retry": False,
                     "human_ui_submit_only": True,
                 } if _controlled_retry_of is not None else {}),
@@ -281,8 +325,7 @@ class ExecutionBatchService:
         for sequence, (alias, mode, target) in enumerate(
             self._canonical_leg_values(intent), start=1,
         ):
-            resolved = self.adapter.resolve_lse_usd_etf(alias)
-            trusted = verify_resolved_instrument(alias, resolved)
+            resolved, trusted = self._resolve_for_smart_execution(alias)
             expected_rule = EXPECTED_MARKET_RULE_IDS[alias]
             if resolved.get("market_rule_id") != expected_rule:
                 raise ExecutionSafetyError(
@@ -516,9 +559,113 @@ class ExecutionBatchService:
             conversation_id=source.source_conversation_id,
             message_id=source.source_message_id,
             _controlled_retry_of=source,
+            _retry_attempt=2,
         )
         if retry.account_ref != source.account_ref:
             raise ExecutionSafetyError("Retry account 与原 Case 1 不一致")
+        return retry
+
+    def create_smart_routing_retry(self, batch_id: str) -> ExecutionBatch:
+        """Create the one owner-authorized SMART-routed Case 1 Retry #3."""
+        source = self.get_batch(batch_id)
+        source_policy = json.loads(source.execution_policy or "{}")
+        if source_policy.get("retry_attempt") != 2:
+            raise ExecutionSafetyError("SMART Retry #3 仅可从 Retry #2 创建")
+
+        for candidate in self.session.query(ExecutionBatch).filter_by(
+            source_message_id=source.source_message_id,
+        ).order_by(ExecutionBatch.created_at.desc()).all():
+            policy = json.loads(candidate.execution_policy or "{}")
+            if (
+                policy.get("retry_attempt") == 3
+                and policy.get("retry_of_batch_id") == source.id
+            ):
+                return candidate
+
+        if source.status != "ATTENTION_REQUIRED":
+            raise ExecutionSafetyError(
+                f"Retry #2 status={source.status}，不可创建 Retry #3"
+            )
+        if [leg.user_alias for leg in source.legs] != ["CBU3", "IB01"]:
+            raise ExecutionSafetyError("SMART Retry #3 仅限 CBU3 → IB01")
+        first, second = source.legs
+        if first.status != "CANCELLED" or not first.linked_order_id:
+            raise ExecutionSafetyError("CBU3 Retry #2 非明确 CANCELLED，HARD STOP")
+        first_order = self.session.query(OrderRecord).filter_by(
+            id=first.linked_order_id,
+            batch_id=source.id,
+            batch_leg_id=first.id,
+        ).first()
+        if (
+            first_order is None
+            or first_order.status != "cancelled"
+            or int(first_order.filled_quantity or 0)
+        ):
+            raise ExecutionSafetyError(
+                "CBU3 Retry #2 OrderRecord 非 cancelled/filled=0，HARD STOP"
+            )
+        try:
+            broker_evidence = json.loads(first_order.raw_broker_response or "{}")
+        except json.JSONDecodeError as exc:
+            raise ExecutionSafetyError(
+                "CBU3 Retry #2 缺少可解析 Broker evidence，HARD STOP"
+            ) from exc
+        error_codes = {
+            int(item.get("errorCode"))
+            for item in broker_evidence.get("broker_error_history", [])
+            if item.get("errorCode") is not None
+        }
+        if broker_evidence.get("broker_error_code") is not None:
+            error_codes.add(int(broker_evidence["broker_error_code"]))
+        if not {10311, 201}.issubset(error_codes):
+            raise ExecutionSafetyError(
+                "Retry #2 root cause 非 10311→201，禁止 SMART Retry #3"
+            )
+        if (
+            second.status not in {"READY", "NOT_SUBMITTED"}
+            or second.linked_order_id
+            or second.submission_attempted_at
+        ):
+            raise ExecutionSafetyError("IB01 Retry #2 已发生提交尝试，HARD STOP")
+
+        if not self.adapter.authenticate({}):
+            raise ConnectionError("IBKR authenticate 失败")
+        if getattr(self.adapter, "_account_id", None) != source.account_ref:
+            raise ExecutionSafetyError("当前 Gateway account 与 Retry #2 不匹配")
+        if self.adapter.list_open_order_details():
+            raise ExecutionSafetyError("Broker 当前存在 open order，HARD STOP")
+        execution_reader = getattr(self.adapter, "list_execution_details", None)
+        if not callable(execution_reader):
+            raise ExecutionSafetyError("Adapter 缺少 execution reconciliation 能力")
+        executions = execution_reader()
+
+        prior_batches = self.session.query(ExecutionBatch).filter_by(
+            source_message_id=source.source_message_id,
+        ).all()
+        prior_orders = self.session.query(OrderRecord).filter(
+            OrderRecord.batch_id.in_([item.id for item in prior_batches]),
+        ).all()
+        prior_refs = {order.id for order in prior_orders}
+        prior_broker_ids = {
+            str(order.broker_order_id)
+            for order in prior_orders if order.broker_order_id
+        }
+        conflicting = [
+            item for item in executions
+            if str(item.get("order_ref") or "") in prior_refs
+            or str(item.get("perm_id") or "") in prior_broker_ids
+        ]
+        if conflicting:
+            raise ExecutionSafetyError("旧 attempt 出现 execution，HARD STOP")
+
+        retry = self.create_batch(
+            conversation_id=source.source_conversation_id,
+            message_id=source.source_message_id,
+            _controlled_retry_of=source,
+            _retry_attempt=3,
+        )
+        if retry.account_ref != source.account_ref:
+            raise ExecutionSafetyError("Retry #3 account 与 Retry #2 不一致")
         return retry
 
     @staticmethod
@@ -588,7 +735,8 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("已有 Broker order 的 Batch 不可整体刷新")
         policy = json.loads(batch.execution_policy or "{}")
         retry_source = None
-        if policy.get("retry_attempt") == 2:
+        retry_attempt = policy.get("retry_attempt")
+        if retry_attempt in {2, 3}:
             retry_source_id = str(policy.get("retry_of_batch_id") or "")
             retry_source = self.get_batch(retry_source_id)
         batch.status = "CANCELLED"
@@ -602,6 +750,7 @@ class ExecutionBatchService:
             conversation_id=batch.source_conversation_id,
             message_id=batch.source_message_id,
             _controlled_retry_of=retry_source,
+            _retry_attempt=retry_attempt,
         )
 
     def apply_manual_limits(
@@ -610,8 +759,8 @@ class ExecutionBatchService:
         """Apply user-entered limits with exact MarketRule validation and WhatIf."""
         batch = self.get_batch(batch_id)
         policy = json.loads(batch.execution_policy or "{}")
-        if policy.get("retry_attempt") == 2:
-            raise ExecutionSafetyError("Controlled Retry #2 必须使用 Fresh Live Quote")
+        if policy.get("retry_attempt") in {2, 3}:
+            raise ExecutionSafetyError("Controlled Retry 必须使用 Fresh Live Quote")
         if any(leg.linked_order_id for leg in batch.legs):
             raise ExecutionSafetyError("已有 Broker order，不可修改 Limit")
         aliases = {leg.user_alias for leg in batch.legs}
@@ -767,8 +916,7 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("只能按已确认顺序提交下一 Leg")
 
         # Every leg revalidates identity, live cash and external-order conflict.
-        resolved = self.adapter.resolve_lse_usd_etf(leg.user_alias)
-        verify_resolved_instrument(leg.user_alias, resolved)
+        resolved, _ = self._resolve_for_smart_execution(leg.user_alias)
         if resolved["con_id"] != leg.resolved_con_id:
             raise ExecutionSafetyError("conId changed; confirmation invalid")
         if not self.adapter.is_market_open(resolved, now=self.clock()):

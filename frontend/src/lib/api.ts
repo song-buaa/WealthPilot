@@ -483,6 +483,9 @@ export interface ExecutionLegResponse {
   sec_type: string
   stock_type: string
   exchange: string
+  listing_exchange: string
+  execution_exchange: string
+  smart_qualification: Record<string, unknown> | null
   primary_exchange: string
   currency: string
   trading_class: string
@@ -557,6 +560,9 @@ export const executionBatchApi = {
   ),
   controlledRetry: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/controlled-retry`, { method: 'POST' },
+  ),
+  smartRoutingRetry: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/smart-routing-retry`, { method: 'POST' },
   ),
   confirm: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/confirm`, { method: 'POST' },

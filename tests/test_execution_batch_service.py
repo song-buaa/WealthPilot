@@ -107,6 +107,7 @@ class FakeIBKRExecutionAdapter:
         self.what_if_error = what_if_error
         self.commission_currency = commission_currency
         self.place_calls = []
+        self.what_if_calls = []
         self.reconcile_result = None
         self.sync_result = None
         self.execution_details = []
@@ -141,6 +142,25 @@ class FakeIBKRExecutionAdapter:
         })
         return result
 
+    def qualify_execution_route(self, resolved, *, exchange="SMART"):
+        assert exchange == "SMART"
+        return {
+            **resolved,
+            "listing_exchange": resolved["exchange"],
+            "execution_exchange": exchange,
+            "exchange": exchange,
+            "smart_qualification": {
+                "con_id": resolved["con_id"],
+                "symbol": resolved["symbol"],
+                "local_symbol": resolved["symbol"],
+                "sec_type": resolved["sec_type"],
+                "exchange": exchange,
+                "primary_exchange": resolved["primary_exchange"],
+                "currency": resolved["currency"],
+                "trading_class": resolved["trading_class"],
+            },
+        }
+
     def get_executable_quote(self, resolved):
         asks = {"IBTA": 5, "VDCA": 61, "CSBGU0": 5, "CSBGU3": 5, "IB01": 126}
         ask = asks[resolved["symbol"]]
@@ -151,6 +171,10 @@ class FakeIBKRExecutionAdapter:
         }
 
     def what_if_limit_order(self, _resolved, *, quantity, limit_price):
+        self.what_if_calls.append({
+            "resolved": dict(_resolved), "quantity": quantity,
+            "limit_price": limit_price,
+        })
         if self.what_if_error:
             raise ConnectionError("Gateway Read-Only")
         return {
@@ -268,6 +292,44 @@ def make_cancelled_two_leg_attempt(session, adapter=None):
     return service, adapter, batch
 
 
+def make_cancelled_retry_two_with_unsubmitted_second_leg(session):
+    service, adapter, original = make_cancelled_two_leg_attempt(session)
+    retry = service.create_controlled_retry(original.id)
+    service.confirm_batch(retry.id)
+    first, second = retry.legs
+    strategy = SymbolStrategy(
+        symbol="CBU3:LSE", side="BUY", target_quantity=first.final_quantity,
+        order_type="LIMIT", limit_price=first.final_limit, status="active",
+        related_conversation_id=retry.source_conversation_id,
+        decision_basis="Retry #2 cancelled attempt", batch_leg_id=first.id,
+    )
+    session.add(strategy)
+    session.flush()
+    order = OrderRecord(
+        strategy_id=strategy.id, batch_id=retry.id, batch_leg_id=first.id,
+        confirmation_version=1, broker_name="ibkr", broker_order_id="2001",
+        symbol="CBU3:LSE", side="BUY", quantity=first.final_quantity,
+        filled_quantity=0, order_type="LIMIT", limit_price=first.final_limit,
+        status="cancelled", raw_broker_response=json.dumps({
+            "order_id": 114, "perm_id": 2001, "ib_status": "Cancelled",
+            "broker_error_code": 201,
+            "broker_error_history": [
+                {"errorCode": 10311}, {"errorCode": 201},
+            ],
+        }),
+    )
+    session.add(order)
+    session.flush()
+    first.linked_strategy_id = strategy.id
+    first.linked_order_id = order.id
+    first.status = "CANCELLED"
+    second.status = "READY"
+    retry.status = "ATTENTION_REQUIRED"
+    retry.attention_reason = "CBU3=CANCELLED"
+    session.flush()
+    return service, adapter, original, retry
+
+
 def test_create_batch_has_contract_quote_cash_whatif_and_dynamic_remainder(session):
     _service, adapter, batch = make_ready_batch(session)
     assert batch.usable_cash == Decimal("16632")
@@ -281,6 +343,14 @@ def test_create_batch_has_contract_quote_cash_whatif_and_dynamic_remainder(sessi
     assert session.query(OrderRecord).count() == 0
     assert all(leg.linked_order_id is None for leg in batch.legs)
     assert all(leg.status == "READY" for leg in batch.legs)
+    policy = json.loads(batch.execution_policy)
+    assert policy["listing_venue"] == "LSEETF"
+    assert policy["routing"] == "SMART"
+    assert all(leg.exchange == "SMART" for leg in batch.legs)
+    assert all(
+        json.loads(leg.resolution_snapshot)["listing_exchange"] == "LSEETF"
+        for leg in batch.legs
+    )
     assert adapter.place_calls == []
 
 
@@ -384,6 +454,88 @@ def test_controlled_retry_hard_stops_on_open_order_or_old_execution(session):
         service.create_controlled_retry(old.id)
     assert session.query(ExecutionBatch).count() == 1
     assert adapter.place_calls == []
+
+
+def test_smart_retry_three_is_new_idempotent_attempt_and_never_creates_four(session):
+    service, adapter, original, retry_two = (
+        make_cancelled_retry_two_with_unsubmitted_second_leg(session)
+    )
+    prior_order_ids = {
+        item.id for item in session.query(OrderRecord).all()
+    }
+
+    retry_three = service.create_smart_routing_retry(retry_two.id)
+    repeated = service.create_smart_routing_retry(retry_two.id)
+
+    assert retry_three.id == repeated.id
+    assert retry_three.id not in {original.id, retry_two.id}
+    policy = json.loads(retry_three.execution_policy)
+    assert policy["retry_attempt"] == 3
+    assert policy["retry_of_batch_id"] == retry_two.id
+    assert policy["routing"] == "SMART"
+    assert policy["automatic_retry"] is False
+    assert all(leg.exchange == "SMART" for leg in retry_three.legs)
+    assert all(leg.linked_order_id is None for leg in retry_three.legs)
+    assert {item.id for item in session.query(OrderRecord).all()} == prior_order_ids
+    assert adapter.place_calls == []
+    with pytest.raises(ExecutionSafetyError, match="仅可从 Retry #2"):
+        service.create_smart_routing_retry(retry_three.id)
+
+
+def test_smart_retry_three_requires_confirmed_10311_to_201_root_cause(session):
+    service, _adapter, _original, retry_two = (
+        make_cancelled_retry_two_with_unsubmitted_second_leg(session)
+    )
+    order = session.query(OrderRecord).filter_by(
+        id=retry_two.legs[0].linked_order_id,
+    ).one()
+    order.raw_broker_response = json.dumps({
+        "broker_error_code": 201,
+        "broker_error_history": [{"errorCode": 201}],
+    })
+    session.flush()
+
+    with pytest.raises(ExecutionSafetyError, match="非 10311→201"):
+        service.create_smart_routing_retry(retry_two.id)
+
+
+def test_smart_retry_three_cancelled_first_leg_never_submits_ib01(session):
+    service, adapter, _original, retry_two = (
+        make_cancelled_retry_two_with_unsubmitted_second_leg(session)
+    )
+    retry_three = service.create_smart_routing_retry(retry_two.id)
+    adapter.order_statuses = ["cancelled", "broker_pending"]
+    service.confirm_batch(retry_three.id)
+    first, second = retry_three.legs
+
+    order = service.submit_next_leg(
+        retry_three.id, confirmation_version=1, leg_id=first.id,
+    )
+
+    assert order.status == "cancelled"
+    assert retry_three.status == "ATTENTION_REQUIRED"
+    assert second.linked_order_id is None
+    assert second.submission_attempted_at is None
+    assert len(adapter.place_calls) == 1
+
+
+def test_smart_whatif_and_live_submission_use_same_routed_identity(session):
+    service, adapter, batch = make_ready_two_leg_batch(session)
+    preview = adapter.what_if_calls[0]["resolved"]
+    service.confirm_batch(batch.id)
+    service.submit_next_leg(
+        batch.id, confirmation_version=1, leg_id=batch.legs[0].id,
+    )
+    live = adapter.place_calls[0].resolved_contract
+
+    for field_name in (
+        "con_id", "symbol", "local_symbol", "currency",
+        "listing_exchange", "execution_exchange", "exchange",
+    ):
+        assert live[field_name] == preview[field_name]
+    assert live["smart_qualification"] == preview["smart_qualification"]
+    assert live["listing_exchange"] == "LSEETF"
+    assert live["execution_exchange"] == "SMART"
 
 
 def test_remainder_quantity_converges_with_its_own_quantity_dependent_fee(session):
@@ -530,6 +682,29 @@ def test_whatif_commission_value_is_required_for_usd_ledger(session):
         service.create_batch(conversation_id="case1-conversation", message_id=2)
     assert session.query(OrderRecord).count() == 0
     assert adapter.place_calls == []
+
+
+def test_whatif_max_commission_range_is_reserved_conservatively(session):
+    adapter = FakeIBKRExecutionAdapter()
+    original = adapter.what_if_limit_order
+
+    def commission_range(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.update({
+            "commission": None, "min_commission": 1.99,
+            "max_commission": 4.65, "commission_reserve": 4.65,
+            "commission_basis": "MAX_COMMISSION",
+        })
+        return result
+
+    adapter.what_if_limit_order = commission_range
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    batch = service.create_batch(
+        conversation_id="case1-conversation", message_id=2,
+    )
+    assert batch.status == "READY"
+    assert batch.estimated_fees == Decimal("9.30")
+    assert session.query(OrderRecord).count() == 0
 
 
 def test_missing_quote_can_use_user_manual_tick_validated_limits(session):
