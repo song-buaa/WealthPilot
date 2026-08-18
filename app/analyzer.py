@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 from app.models import Portfolio, Position, Liability, get_session
 from app.config import DEVIATION_THRESHOLD, HIGH_SEVERITY_THRESHOLD
 from app.discipline.config import get_rules
+from backend.services.instruments.classification import economic_asset_class_cn
 
 
 @dataclass
@@ -81,7 +82,7 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
             bs.total_assets += value
             bs.total_profit_loss += (pos.profit_loss_value or 0)
 
-            ac = pos.asset_class
+            ac = economic_asset_class_cn(pos)
             if ac == "权益":
                 bs.equity_value += value
             elif ac == "固收":

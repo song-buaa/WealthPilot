@@ -131,6 +131,14 @@ def _make_tiger_cash_item(total_cny: float, details: list[dict]) -> dict:
         "ticker":              None,
         "platform":            "老虎证券",
         "asset_class":         "货币",
+        "broker_security_type": "CASH",
+        "vehicle_type":        "CASH",
+        "economic_asset_class": "CASH",
+        "economic_asset_subclass": None,
+        "classification_source": "BROKER_DETERMINISTIC_METADATA",
+        "classification_confidence": "HIGH",
+        "classification_verification_status": "DETERMINISTIC",
+        "classification_version": "canonical-v1",
         "currency":            "CNY",
         "quantity":            None,
         "cost_price":          None,
@@ -379,12 +387,27 @@ def export_liabilities_csv(portfolio_id: int) -> str:
 # ── 内部辅助 ──────────────────────────────────────────────────────────────────
 
 def _position_to_dict(p: Position) -> dict:
+    from backend.services.instruments.classification import (
+        economic_asset_class_cn,
+        economic_asset_class_value,
+    )
+
     return {
         "id":                  p.id,
         "name":                p.name,
         "ticker":              p.ticker,
         "platform":            p.platform,
-        "asset_class":         p.asset_class,
+        "asset_class":         economic_asset_class_cn(p),
+        "broker_security_type": getattr(p, "broker_security_type", None),
+        "vehicle_type":        getattr(p, "vehicle_type", None),
+        "economic_asset_class": economic_asset_class_value(p),
+        "economic_asset_subclass": getattr(p, "economic_asset_subclass", None),
+        "classification_source": getattr(p, "classification_source", None),
+        "classification_confidence": getattr(p, "classification_confidence", None),
+        "classification_verification_status": getattr(
+            p, "classification_verification_status", None
+        ),
+        "classification_version": getattr(p, "classification_version", None),
         "currency":            p.currency,
         "quantity":            p.quantity,
         "cost_price":          p.cost_price,

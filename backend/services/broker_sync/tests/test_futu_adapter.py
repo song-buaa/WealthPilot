@@ -80,9 +80,11 @@ def test_broker_is_futu():
     assert pos.account_id == "6169"
 
 
-def test_default_asset_class_is_equity():
-    """富途 DataFrame 无 stock_type 列,默认 equity"""
+def test_etf_vehicle_and_equity_exposure_are_separate():
+    """富途名称可识别 ETF wrapper，指数 evidence 决定权益 exposure。"""
     adapter = FutuAdapter(account_id="6169")
     row = make_mock_row()
     pos = adapter.row_to_position(row)
-    assert pos.asset_class == "equity"
+    assert pos.asset_class == "etf"
+    assert pos.vehicle_type == "ETF"
+    assert pos.economic_asset_class == "EQUITY"

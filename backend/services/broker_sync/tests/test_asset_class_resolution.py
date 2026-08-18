@@ -11,9 +11,9 @@ def test_us_stock_to_equity():
     assert _resolve_asset_class("equity", "Apple Inc.", "AAPL") == "权益"
 
 
-def test_us_etf_default_equity():
-    """ETF 默认权益(QQQ 这种纳指 ETF)"""
-    assert _resolve_asset_class("etf", "纳指100ETF-Invesco QQQ Trust", "QQQ") == "权益"
+def test_unresolved_etf_does_not_default_to_equity():
+    """ETF 缺少可靠 exposure evidence 时 fail closed。"""
+    assert _resolve_asset_class("etf", "未知主题ETF", "UNKNOWN") == "未分类"
 
 
 def test_us_treasury_etf_to_fixed_income():

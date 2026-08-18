@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.models import Position, get_session
+from backend.services.instruments.classification import economic_asset_class_cn
 
 
 # ── 常量（与 discipline.py 保持完全一致）────────────────────────────────────────
@@ -112,7 +113,11 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
                 "ticker": p.ticker or "",
                 "symbol": getattr(p, "symbol", None) or "",  # v3.11: TICKER:MARKET 真值
                 "platform": p.platform or "",
-                "asset_class": p.asset_class or "未知",
+                "asset_class": economic_asset_class_cn(p),
+                "vehicle_type": getattr(p, "vehicle_type", None) or "UNKNOWN",
+                "economic_asset_class": (
+                    getattr(p, "economic_asset_class", None) or "UNKNOWN"
+                ),
                 "market_value_cny": p.market_value_cny or 0.0,
                 "profit_loss_rate": p.profit_loss_rate or 0.0,
                 "profit_loss_value": p.profit_loss_value or 0.0,

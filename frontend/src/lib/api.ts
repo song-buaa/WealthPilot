@@ -791,6 +791,14 @@ export interface Position {
   ticker?: string
   platform: string
   asset_class: string
+  broker_security_type?: string | null
+  vehicle_type?: string | null
+  economic_asset_class?: string | null
+  economic_asset_subclass?: string | null
+  classification_source?: string | null
+  classification_confidence?: string | null
+  classification_verification_status?: string | null
+  classification_version?: string | null
   currency?: string
   quantity?: number
   cost_price?: number

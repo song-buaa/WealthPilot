@@ -37,7 +37,25 @@ class Position(BaseModel):
     name_en: str | None = None
 
     # ===== 资产分类 =====
-    asset_class: Literal["equity", "etf", "option", "fund", "bond", "warrant", "future", "cash"]
+    # asset_class 是历史 vehicle alias；经济分类只能读取 economic_asset_class。
+    asset_class: Literal[
+        "equity", "etf", "option", "fund", "bond", "warrant", "future", "cash", "unknown"
+    ] = "unknown"
+    broker_security_type: str = ""
+    vehicle_type: Literal[
+        "COMMON_STOCK", "ETF", "BOND", "FUND", "REIT", "ETN", "CASH",
+        "OPTION", "FUTURE", "WARRANT", "OTHER", "UNKNOWN",
+    ] = "UNKNOWN"
+    economic_asset_class: Literal[
+        "EQUITY", "FIXED_INCOME", "CASH", "COMMODITY", "MULTI_ASSET",
+        "ALTERNATIVE", "DERIVATIVE", "UNKNOWN",
+    ] = "UNKNOWN"
+    economic_asset_subclass: str | None = None
+    classification_source: str = "UNRESOLVED"
+    classification_confidence: Literal["HIGH", "MEDIUM", "LOW"] = "LOW"
+    classification_verification_status: str = "UNVERIFIED"
+    classification_version: str = "canonical-v1"
+    classification_evidence: dict[str, Any] = Field(default_factory=dict)
     market: str = Field(..., description="市场代码: US/HK/CN/SG 等,跟随券商 SDK 返回")
 
     # ===== 数量与成本 =====

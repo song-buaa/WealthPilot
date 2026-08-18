@@ -17,9 +17,14 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.database import Base, _ensure_position_ownership_columns  # noqa: E402
+from app.database import (  # noqa: E402
+    Base,
+    _ensure_asset_classification_columns,
+    _ensure_position_ownership_columns,
+)
 from app.models import Portfolio, Position as BusinessPosition  # noqa: E402
 from backend.services.action.brokers.ibkr import IBKRBrokerAdapter  # noqa: E402
+from backend.services.instruments.classification import classify_instrument  # noqa: E402
 from services.broker_sync import models as _broker_models  # noqa: F401,E402
 from services.broker_sync.futu.sync_service import FutuSyncService  # noqa: E402
 from services.broker_sync.models import PositionSnapshot, PositionSnapshotRun  # noqa: E402
@@ -116,15 +121,52 @@ def test_existing_sqlite_positions_table_gets_idempotent_ownership_columns():
     assert {"broker", "broker_account_id", "sync_source"}.issubset(columns)
 
 
+def test_existing_sqlite_tables_get_idempotent_classification_columns():
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE positions (id INTEGER PRIMARY KEY)"))
+        connection.execute(text(
+            "CREATE TABLE position_snapshots (id INTEGER PRIMARY KEY)"
+        ))
+
+    _ensure_asset_classification_columns(engine)
+    _ensure_asset_classification_columns(engine)
+
+    for table in ("positions", "position_snapshots"):
+        columns = {
+            column["name"]
+            for column in sqlalchemy_inspect(engine).get_columns(table)
+        }
+        assert {
+            "broker_security_type",
+            "vehicle_type",
+            "economic_asset_class",
+            "economic_asset_subclass",
+            "classification_source",
+            "classification_confidence",
+            "classification_verification_status",
+            "classification_version",
+            "classification_evidence_json",
+        }.issubset(columns)
+
+
 def test_ibkr_contract_mapping_uses_metadata_not_symbol():
-    assert IBKRPortfolioAdapter.map_asset_class({"sec_type": "STK", "long_name": "Apple Inc."}) == "equity"
+    # IBKR STK by itself is ambiguous: common stock and ETF share this secType.
+    assert IBKRPortfolioAdapter.map_asset_class({"sec_type": "STK", "long_name": "Apple Inc."}) == "unknown"
+    apple = IBKRPortfolioAdapter.classification_evidence({
+        "sec_type": "STK", "stock_type": "COMMON", "long_name": "Apple Inc."
+    })
+    assert classify_instrument(apple).economic_asset_class.value == "EQUITY"
     assert IBKRPortfolioAdapter.map_asset_class({"sec_type": "BOND"}) == "bond"
     # 真实 IB01 是 STK + LSEETF；由 Contract longName 的国债语义归固收，不按 IB01 特判。
     assert IBKRPortfolioAdapter.map_asset_class({
         "sec_type": "STK",
         "exchange": "LSEETF",
         "long_name": "ISHARES US TREAS 0-1YR USD A",
-    }) == "bond"
+        "con_id": 354802220,
+        "isin": "IE00BGSF1X88",
+        "stock_type": "ETF",
+    }) == "etf"
 
 
 def test_ibkr_cash_uses_currency_cash_balance_only():

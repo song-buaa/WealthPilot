@@ -177,6 +177,8 @@ def reset_handbook() -> dict:
 # ── 内部：数据加载 ────────────────────────────────────────────────────────────
 
 def _load_positions(portfolio_id: int) -> list[dict]:
+    from backend.services.instruments.classification import economic_asset_class_cn
+
     session = get_session()
     try:
         rows = session.query(Position).filter_by(
@@ -187,7 +189,7 @@ def _load_positions(portfolio_id: int) -> list[dict]:
                 "name":            p.name,
                 "ticker":          p.ticker or "",
                 "platform":        p.platform,
-                "asset_class":     p.asset_class,
+                "asset_class":     economic_asset_class_cn(p),
                 "market_value_cny": p.market_value_cny or 0.0,
                 "profit_loss_rate": (
                     (p.profit_loss_value / ((p.market_value_cny or 0.0) - p.profit_loss_value) * 100)

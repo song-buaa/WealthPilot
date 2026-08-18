@@ -89,7 +89,17 @@ class Position(Base):
     broker = Column(String(20), nullable=True)
     broker_account_id = Column(String(50), nullable=True)
     sync_source = Column(String(20), nullable=True)
-    asset_class = Column(String(20), nullable=False)     # 大类资产分类
+    # asset_class 保留中文兼容值；economic_asset_class 是唯一经济分类真值。
+    asset_class = Column(String(20), nullable=False)
+    broker_security_type = Column(String(30), nullable=True)
+    vehicle_type = Column(String(30), nullable=True)
+    economic_asset_class = Column(String(30), nullable=True)
+    economic_asset_subclass = Column(String(50), nullable=True)
+    classification_source = Column(String(80), nullable=True)
+    classification_confidence = Column(String(20), nullable=True)
+    classification_verification_status = Column(String(30), nullable=True)
+    classification_version = Column(String(30), nullable=True)
+    classification_evidence_json = Column(Text, nullable=True)
     currency = Column(String(10), default="CNY")         # 币种
     quantity = Column(Float, default=0)                  # 数量/份额
     cost_price = Column(Float, default=0)                # 成本价

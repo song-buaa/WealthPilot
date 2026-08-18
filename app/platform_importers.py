@@ -6,11 +6,11 @@ import csv
 import re
 import io
 from typing import Tuple, List
-
-# 固收 ticker 白名单（无需名称映射，名称直接取 CSV 原始值）
-
-# 固收 ticker 白名单
-FIXED_INCOME_TICKERS = {"SHY", "BND", "AGG", "TLT", "IEF"}
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    business_position_classification_fields,
+    classify_instrument,
+)
 
 
 def _extract_ticker(name_str: str) -> str:
@@ -21,16 +21,27 @@ def _extract_ticker(name_str: str) -> str:
     return ""
 
 
-def _classify_tiger(subsection: str, ticker: str, raw_name: str) -> str:
-    """老虎证券资产大类分类"""
-    if subsection == "基金":
-        if "货币" in raw_name:
-            return "货币"
-        return "固收"
-    # 股票
-    if ticker in FIXED_INCOME_TICKERS:
-        return "固收"
-    return "权益"
+def _classification_fields(
+    *, broker: str, subsection: str, raw_name: str, currency: str
+) -> dict:
+    """Normalize CSV facts and delegate economic exposure to one authority."""
+    upper_name = raw_name.upper()
+    vehicle_hint = (
+        "FUND" if subsection == "基金"
+        else "ETF" if "ETF" in upper_name
+        else "UNKNOWN"
+    )
+    evidence = AssetClassificationEvidence(
+        broker=broker,
+        broker_security_type=f"CSV_{subsection.upper()}",
+        stock_type=vehicle_hint,
+        vehicle_type_hint=vehicle_hint,
+        long_name=raw_name,
+        currency=currency,
+    )
+    return business_position_classification_fields(
+        classify_instrument(evidence), evidence=evidence
+    )
 
 
 def parse_tiger_csv(content: str) -> Tuple[List[dict], float]:
@@ -99,7 +110,6 @@ def parse_tiger_csv(content: str) -> Tuple[List[dict], float]:
         if market_value_usd == 0 and quantity == 0:
             continue
 
-        asset_class = _classify_tiger(subsection, ticker, raw_name)
         name = raw_name  # 老虎 CSV 原始名称即为标准格式，如"纳指100ETF (QQQ)"
 
         # P&L% 计算：pnl / cost_basis * 100
@@ -113,7 +123,12 @@ def parse_tiger_csv(content: str) -> Tuple[List[dict], float]:
             "name": name,
             "ticker": ticker,
             "platform": "老虎证券",
-            "asset_class": asset_class,
+            **_classification_fields(
+                broker="tiger_csv",
+                subsection=subsection,
+                raw_name=raw_name,
+                currency="USD",
+            ),
             "segment": "投资",
             "currency": "USD",
             "original_currency": "USD",
@@ -182,7 +197,12 @@ def parse_futu_csv(content: str) -> Tuple[List[dict], float]:
             "name": name,
             "ticker": ticker,
             "platform": "富途证券",
-            "asset_class": "权益",
+            **_classification_fields(
+                broker="futu_csv",
+                subsection="股票",
+                raw_name=raw_name,
+                currency="USD",
+            ),
             "segment": "投资",
             "currency": "USD",
             "original_currency": "USD",

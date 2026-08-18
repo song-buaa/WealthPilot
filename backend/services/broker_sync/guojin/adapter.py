@@ -4,6 +4,11 @@ from decimal import Decimal
 from typing import Any
 
 from services.broker_sync.schema import Position
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    broker_position_classification_fields,
+    classify_instrument,
+)
 
 CURRENCY_TO_MARKET = {
     "CNY": "SH",
@@ -45,7 +50,21 @@ class GuojinAdapter:
 
         # asset_class: A 股 ETF 代码 51xxxx/15xxxx/16xxxx 识别为 etf,其余 equity
         ticker = symbol.split(":")[0] if ":" in symbol else symbol
-        asset_class = "etf" if ticker[:2] in ("51", "15", "16") else "equity"
+        vehicle_hint = "ETF" if ticker[:2] in ("51", "15", "16") else "COMMON_STOCK"
+        evidence = AssetClassificationEvidence(
+            broker=self.BROKER_NAME,
+            broker_security_type=str(raw.get("security_type") or "QMT_POSITION"),
+            stock_type=vehicle_hint,
+            vehicle_type_hint=vehicle_hint,
+            explicit_economic_asset_class=raw.get("economic_asset_class"),
+            explicit_source="BROKER_DETERMINISTIC_METADATA" if raw.get("economic_asset_class") else None,
+            long_name=raw.get("name", ticker),
+            category=raw.get("category"),
+            subcategory=raw.get("subcategory"),
+            industry=raw.get("industry"),
+            currency=currency,
+        )
+        classification = classify_instrument(evidence)
 
         return Position(
             broker=self.BROKER_NAME,
@@ -54,7 +73,10 @@ class GuojinAdapter:
             raw_symbol=raw_symbol,
             name=raw.get("name", ticker),
             name_en=None,
-            asset_class=asset_class,
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=quantity,
             available_quantity=Decimal(str(raw["available_quantity"])) if raw.get("available_quantity") is not None else None,

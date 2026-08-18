@@ -57,7 +57,8 @@ BANK_POSITION_MAP = {
         "活钱":     {"name": "活钱",     "asset_class": "货币"},
         "理财产品": {"name": "理财产品", "asset_class": "固收"},
         "债券":     {"name": "债券",     "asset_class": "固收"},
-        "基金":     {"name": "基金",     "asset_class": "权益"},
+        # “基金”只能证明 wrapper，不能证明底层经济暴露。
+        "基金":     {"name": "基金",     "asset_class": None, "vehicle_type": "FUND"},
     },
 }
 
@@ -93,13 +94,31 @@ def bank_positions_to_db(result: dict, bank: str) -> list[dict]:
     返回 [{"name": ..., "market_value_cny": ..., "asset_class": ...}, ...]
     """
     mapping = BANK_POSITION_MAP.get(bank, {})
+    from backend.services.instruments.classification import (
+        AssetClassificationEvidence,
+        business_position_classification_fields,
+        classify_instrument,
+    )
     updates = []
     for category, amount in result.items():
         pos_info = mapping.get(category)
         if pos_info and amount > 0:
+            evidence = AssetClassificationEvidence(
+                broker="bank_screenshot",
+                vehicle_type_hint=pos_info.get("vehicle_type"),
+                explicit_economic_asset_class=pos_info["asset_class"],
+                explicit_source=(
+                    "USER_CONFIRMED_SCREENSHOT_CATEGORY"
+                    if pos_info["asset_class"] else None
+                ),
+                long_name=pos_info["name"],
+                currency="CNY",
+            )
             updates.append({
                 "name": pos_info["name"],
-                "asset_class": pos_info["asset_class"],
+                **business_position_classification_fields(
+                    classify_instrument(evidence), evidence=evidence
+                ),
                 "market_value_cny": round(amount, 2),
             })
     return updates
@@ -224,6 +243,11 @@ def broker_positions_to_db(positions: list, broker: str) -> list[dict]:
     返回可直接传入 _import_positions_by_platform 的 list[dict]。
     """
     from app.fx_service import fx_service
+    from backend.services.instruments.classification import (
+        AssetClassificationEvidence,
+        business_position_classification_fields,
+        classify_instrument,
+    )
     usd_to_cny, _ = fx_service._get_rate_with_date("USD", "CNY", "latest")
     hkd_to_cny, _ = fx_service._get_rate_with_date("HKD", "CNY", "latest")
 
@@ -235,6 +259,17 @@ def broker_positions_to_db(positions: list, broker: str) -> list[dict]:
         ticker = str(pos.get("ticker", "")).strip()
         quantity = float(pos.get("quantity", 0))
         pnl_pct = float(pos.get("pnl_pct", 0))
+        vehicle_hint = "ETF" if "ETF" in name.upper() else "UNKNOWN"
+        evidence = AssetClassificationEvidence(
+            broker=f"{broker}_screenshot",
+            broker_security_type="SCREENSHOT_STOCK",
+            stock_type=vehicle_hint,
+            vehicle_type_hint=vehicle_hint,
+            long_name=name,
+        )
+        classification_fields = business_position_classification_fields(
+            classify_instrument(evidence), evidence=evidence
+        )
 
         if broker == "雪盈证券":
             mv_usd = float(pos.get("market_value_usd", 0))
@@ -243,7 +278,7 @@ def broker_positions_to_db(positions: list, broker: str) -> list[dict]:
                 "name": name,
                 "ticker": ticker,
                 "platform": broker,
-                "asset_class": "权益",
+                **classification_fields,
                 "segment": "投资",
                 "currency": "USD",
                 "original_currency": "USD",
@@ -268,7 +303,7 @@ def broker_positions_to_db(positions: list, broker: str) -> list[dict]:
                 "name": name,
                 "ticker": ticker,
                 "platform": broker,
-                "asset_class": "权益",
+                **classification_fields,
                 "segment": "投资",
                 "currency": "HKD",
                 "original_currency": "HKD",

@@ -12,6 +12,11 @@ from decimal import Decimal
 from typing import Any
 
 from services.broker_sync.schema import Position
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    broker_position_classification_fields,
+    classify_instrument,
+)
 
 
 EXCHANGE_TO_MARKET = {
@@ -35,7 +40,6 @@ EXCHANGE_TO_CURRENCY = {
 }
 
 SEC_TYPE_MAP = {
-    "STK": "equity",
     "OPT": "option",
     "FUT": "future",
     "BOND": "bond",
@@ -44,7 +48,6 @@ SEC_TYPE_MAP = {
 }
 
 IBKR_SEC_TYPE_MAP = {
-    "STK": "equity",
     "ETF": "etf",
     "BOND": "bond",
     "CASH": "cash",
@@ -54,9 +57,6 @@ IBKR_SEC_TYPE_MAP = {
     "FUT": "future",
     "WAR": "warrant",
 }
-
-_FIXED_INCOME_NAME_HINTS = ("BOND", "TREAS", "FIXED INCOME", "CREDIT")
-
 
 class SnowballAdapter:
     """雪盈证券持仓数据适配器。"""
@@ -120,9 +120,20 @@ class SnowballAdapter:
         realized_pnl = self._safe_decimal(get("realized_pnl"))
 
         sec_type_raw = str(get("security_type", "STK")).upper()
-        asset_class = SEC_TYPE_MAP.get(sec_type_raw, "equity")
 
         name = raw_symbol  # 雪盈不返回中文名
+        evidence = AssetClassificationEvidence(
+            broker=self.BROKER_NAME,
+            broker_security_type=sec_type_raw,
+            vehicle_type_hint=(
+                None if sec_type_raw == "STK" else SEC_TYPE_MAP.get(sec_type_raw)
+            ),
+            con_id=get("contract_id", None),
+            long_name=name,
+            exchange=exchange,
+            currency=currency,
+        )
+        classification = classify_instrument(evidence)
 
         return Position(
             broker=self.BROKER_NAME,
@@ -130,7 +141,10 @@ class SnowballAdapter:
             symbol=symbol,
             raw_symbol=raw_symbol,
             name=name,
-            asset_class=asset_class,
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=quantity,
             available_quantity=None,
@@ -179,20 +193,35 @@ class IBKRPortfolioAdapter:
         return "US"
 
     @staticmethod
-    def map_asset_class(raw: dict) -> str:
-        """IBKR Contract 元数据 → broker sync asset_class，不依赖 symbol。"""
-        sec_type = str(raw.get("sec_type") or "").upper()
-        mapped = IBKR_SEC_TYPE_MAP.get(sec_type, "equity")
-        if mapped != "equity":
-            return mapped
+    def classification_evidence(raw: dict) -> AssetClassificationEvidence:
+        return AssetClassificationEvidence(
+            broker="snowball",
+            broker_security_type=str(raw.get("sec_type") or "").upper(),
+            stock_type=str(raw.get("stock_type") or "").upper() or None,
+            vehicle_type_hint=(
+                None
+                if str(raw.get("sec_type") or "").upper() == "STK"
+                else IBKR_SEC_TYPE_MAP.get(str(raw.get("sec_type") or "").upper())
+            ),
+            con_id=raw.get("con_id"),
+            isin=raw.get("isin"),
+            long_name=raw.get("long_name") or raw.get("name"),
+            industry=raw.get("industry"),
+            category=raw.get("category"),
+            subcategory=raw.get("subcategory"),
+            exchange=raw.get("exchange"),
+            primary_exchange=raw.get("primary_exchange"),
+            currency=raw.get("currency"),
+        )
 
-        long_name = str(raw.get("long_name") or raw.get("name") or "").upper()
-        if any(hint in long_name for hint in _FIXED_INCOME_NAME_HINTS):
-            return "bond"
-        exchange = str(raw.get("primary_exchange") or raw.get("exchange") or "").upper()
-        if "ETF" in exchange:
-            return "etf"
-        return "equity"
+    @classmethod
+    def map_asset_class(cls, raw: dict) -> str:
+        """Deprecated vehicle alias retained for old snapshot callers."""
+        classification = classify_instrument(cls.classification_evidence(raw))
+        return broker_position_classification_fields(
+            classification,
+            evidence=cls.classification_evidence(raw),
+        )["asset_class"]
 
     def security_to_position(
         self,
@@ -212,6 +241,8 @@ class IBKRPortfolioAdapter:
         cost_basis = quantity * avg_cost
         pnl_pct = unrealized_pnl / cost_basis if cost_basis else Decimal("0")
         name = str(raw.get("long_name") or raw_symbol)
+        evidence = self.classification_evidence(raw)
+        classification = classify_instrument(evidence)
 
         return Position(
             broker=self.BROKER_NAME,
@@ -219,7 +250,10 @@ class IBKRPortfolioAdapter:
             symbol=symbol,
             raw_symbol=raw_symbol,
             name=name,
-            asset_class=self.map_asset_class(raw),
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=quantity,
             available_quantity=None,
@@ -245,13 +279,25 @@ class IBKRPortfolioAdapter:
         amount = Decimal(str(raw["amount"]))
         market = self._market({"currency": currency})
         raw_symbol = f"CASH-{currency}"
+        evidence = AssetClassificationEvidence(
+            broker=self.BROKER_NAME,
+            broker_security_type="CASH",
+            vehicle_type_hint="CASH",
+            explicit_economic_asset_class="CASH",
+            explicit_source="BROKER_DETERMINISTIC_METADATA",
+            currency=currency,
+        )
+        classification = classify_instrument(evidence)
         return Position(
             broker=self.BROKER_NAME,
             account_id=self.account_id,
             symbol=normalize_symbol(raw_symbol, market),
             raw_symbol=raw_symbol,
             name=f"盈透账户现金（{currency}）",
-            asset_class="cash",
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=amount,
             available_quantity=None,

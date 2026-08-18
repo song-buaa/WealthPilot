@@ -34,6 +34,7 @@ from app.allocation.types import (
     FOUR_NON_CASH,
 )
 from app.allocation.classifier import classify_position
+from backend.services.instruments.classification import economic_asset_class_cn
 
 
 # ── 配置快照构建 ──────────────────────────────────────────
@@ -60,7 +61,7 @@ def build_allocation_snapshot(
             continue
 
         ac = classify_position(
-            getattr(pos, "asset_class", ""),
+            economic_asset_class_cn(pos),
             getattr(pos, "name", ""),
         )
 

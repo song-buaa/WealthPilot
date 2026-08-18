@@ -12,7 +12,11 @@ E账户不提供成本/盈亏 → cost_price=0, profit_loss_value=0, profit_loss
 """
 import pandas as pd
 
-from app.allocation.classifier import classify_position
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    business_position_classification_fields,
+    classify_instrument,
+)
 
 # 销售机构 → WealthPilot platform
 SALES_CHANNEL_TO_PLATFORM = {
@@ -48,18 +52,19 @@ def _safe_float(val, default=0.0) -> float:
         return default
 
 
-def _resolve_asset_class(fund_name: str) -> str:
-    """通过基金名称推断5大类。"""
-    name = str(fund_name or "")
-    if any(kw in name for kw in ["货币", "现金宝", "余额宝"]):
-        return "货币"
-    result = classify_position("", name)
-    key = result.name if hasattr(result, "name") else str(result)
-    mapping = {
-        "CASH": "货币", "FIXED": "固收", "EQUITY": "权益",
-        "ALT": "另类", "DERIV": "衍生", "UNCLASSIFIED": "权益",
-    }
-    return mapping.get(key, "权益")
+def _classification_fields(fund_name: str) -> dict:
+    """Classify a fund from evidence; unresolved funds remain UNKNOWN."""
+    evidence = AssetClassificationEvidence(
+        broker="fund_e_account",
+        broker_security_type="FUND",
+        stock_type="FUND",
+        vehicle_type_hint="FUND",
+        long_name=str(fund_name or ""),
+        currency="CNY",
+    )
+    return business_position_classification_fields(
+        classify_instrument(evidence), evidence=evidence
+    )
 
 
 def parse_fund_e_excel(file_path: str) -> dict[str, list[dict]]:
@@ -105,12 +110,10 @@ def parse_fund_e_excel(file_path: str) -> dict[str, list[dict]]:
         quantity = _safe_float(row.get("持有份额"))
         current_price = _safe_float(row.get("基金净值"))
         market_value_cny = _safe_float(row.get(asset_col)) if asset_col else 0.0
-        asset_class = _resolve_asset_class(name)
-
         pos_dict = {
             "name": name,
             "ticker": ticker,
-            "asset_class": asset_class,
+            **_classification_fields(name),
             "currency": "CNY",
             "quantity": quantity,
             "cost_price": 0.0,

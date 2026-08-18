@@ -62,6 +62,7 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_position_ownership_columns(engine)
+    _ensure_asset_classification_columns(engine)
     _ensure_conversation_message_metadata_column(engine)
     _ensure_execution_linkage_columns(engine)
 
@@ -85,6 +86,50 @@ def _ensure_position_ownership_columns(engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_positions_sync_owner "
             "ON positions (broker, broker_account_id, sync_source, symbol)"
         ))
+
+
+def _ensure_asset_classification_columns(engine) -> None:
+    """Idempotently add canonical classification evidence to existing DBs."""
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    additions = {
+        "positions": {
+            "broker_security_type": "VARCHAR(30)",
+            "vehicle_type": "VARCHAR(30)",
+            "economic_asset_class": "VARCHAR(30)",
+            "economic_asset_subclass": "VARCHAR(50)",
+            "classification_source": "VARCHAR(80)",
+            "classification_confidence": "VARCHAR(20)",
+            "classification_verification_status": "VARCHAR(30)",
+            "classification_version": "VARCHAR(30)",
+            "classification_evidence_json": "TEXT",
+        },
+        "position_snapshots": {
+            "broker_security_type": "VARCHAR(30)",
+            "vehicle_type": "VARCHAR(30)",
+            "economic_asset_class": "VARCHAR(30)",
+            "economic_asset_subclass": "VARCHAR(50)",
+            "classification_source": "VARCHAR(80)",
+            "classification_confidence": "VARCHAR(20)",
+            "classification_verification_status": "VARCHAR(30)",
+            "classification_version": "VARCHAR(30)",
+            "classification_evidence_json": "TEXT",
+        },
+    }
+    with engine.begin() as connection:
+        for table, columns in additions.items():
+            if table not in inspector.get_table_names():
+                continue
+            existing = {
+                column["name"] for column in inspect(engine).get_columns(table)
+            }
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"
+                    ))
 
 
 def _ensure_conversation_message_metadata_column(engine) -> None:

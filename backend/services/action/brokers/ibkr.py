@@ -1081,14 +1081,20 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     details = await self._ib.reqContractDetailsAsync(contract)
                     detail = details[0] if details else None
                     qualified = detail.contract if detail else contract
+                    security_ids = {
+                        str(item.tag): str(item.value)
+                        for item in (getattr(detail, "secIdList", None) or [])
+                    }
                     snapshots.append({
                         "symbol": qualified.symbol,
                         "local_symbol": qualified.localSymbol,
                         "sec_type": qualified.secType,
+                        "stock_type": getattr(detail, "stockType", "") if detail else "",
                         "exchange": qualified.exchange,
                         "primary_exchange": qualified.primaryExchange,
                         "currency": qualified.currency,
                         "con_id": qualified.conId,
+                        "isin": security_ids.get("ISIN"),
                         "long_name": detail.longName if detail else qualified.localSymbol,
                         "category": detail.category if detail else "",
                         "subcategory": detail.subcategory if detail else "",

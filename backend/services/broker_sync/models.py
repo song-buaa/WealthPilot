@@ -77,6 +77,15 @@ class PositionSnapshot(Base):
 
     # 资产分类
     asset_class = Column(String(20), nullable=False)
+    broker_security_type = Column(String(30), nullable=True)
+    vehicle_type = Column(String(30), nullable=True)
+    economic_asset_class = Column(String(30), nullable=True)
+    economic_asset_subclass = Column(String(50), nullable=True)
+    classification_source = Column(String(80), nullable=True)
+    classification_confidence = Column(String(20), nullable=True)
+    classification_verification_status = Column(String(30), nullable=True)
+    classification_version = Column(String(30), nullable=True)
+    classification_evidence_json = Column(Text, nullable=True)
     market = Column(String(10), nullable=False)
 
     # 数量与成本

@@ -8,6 +8,11 @@ import csv
 import io
 from typing import List, Tuple, Optional
 from app.models import Portfolio, Position, Liability, get_session, init_db
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    business_position_classification_fields,
+    classify_instrument,
+)
 
 
 # CSV 列定义
@@ -111,11 +116,21 @@ def parse_positions_csv(csv_content: str) -> Tuple[List[dict], List[str]]:
             else:
                 fx_rate = 1.0
 
+            evidence = AssetClassificationEvidence(
+                broker="generic_csv",
+                explicit_economic_asset_class=asset_class,
+                explicit_source="USER_EXPLICIT_CSV",
+                long_name=name,
+                currency=original_currency,
+            )
+            classification = classify_instrument(evidence)
             positions.append({
                 "name": name,
                 "ticker": row.get("代码", "").strip(),
                 "platform": row.get("平台", "其他").strip(),
-                "asset_class": asset_class,
+                **business_position_classification_fields(
+                    classification, evidence=evidence
+                ),
                 "currency": original_currency,
                 "quantity": _safe_float(row.get("头寸")),
                 "cost_price": 0.0,

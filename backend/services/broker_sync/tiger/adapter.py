@@ -4,17 +4,22 @@ from decimal import Decimal
 from typing import Any
 
 from services.broker_sync.schema import Position
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    broker_position_classification_fields,
+    classify_instrument,
+)
 
 
-# 老虎 sec_type → WealthPilot asset_class
-SEC_TYPE_TO_ASSET_CLASS = {
-    "STK": "equity",
-    "ETF": "etf",
-    "OPT": "option",
-    "FUT": "future",
-    "FUND": "fund",
-    "BOND": "bond",
-    "WAR": "warrant",
+# 老虎 sec_type → canonical vehicle type。经济分类仍由 central classifier 决定。
+SEC_TYPE_TO_VEHICLE = {
+    "STK": "COMMON_STOCK",
+    "ETF": "ETF",
+    "OPT": "OPTION",
+    "FUT": "FUTURE",
+    "FUND": "FUND",
+    "BOND": "BOND",
+    "WAR": "WARRANT",
 }
 
 # currency → market 推断
@@ -43,7 +48,15 @@ class TigerAdapter:
         return _normalize(clean, market)
 
     def map_asset_class(self, sec_type: str) -> str:
-        return SEC_TYPE_TO_ASSET_CLASS.get(sec_type, "equity")
+        return {
+            "COMMON_STOCK": "equity",
+            "ETF": "etf",
+            "OPTION": "option",
+            "FUTURE": "future",
+            "FUND": "fund",
+            "BOND": "bond",
+            "WARRANT": "warrant",
+        }.get(SEC_TYPE_TO_VEHICLE.get(sec_type, "UNKNOWN"), "unknown")
 
     def _serialize_raw(self, sdk_position: Any) -> dict:
         """把 SDK Position 对象转成 dict,处理嵌套 contract 对象。"""
@@ -92,6 +105,20 @@ class TigerAdapter:
             raw_qty = sdk_position.quantity
         quantity = Decimal(str(raw_qty))
         avg_cost = Decimal(str(sdk_position.average_cost))
+        sec_type = str(getattr(contract, "sec_type", "") or "").upper()
+        vehicle_hint = SEC_TYPE_TO_VEHICLE.get(sec_type)
+        # Tiger exposes ETF as a distinct native sec_type, so STK is valid
+        # broker evidence for COMMON_STOCK in this adapter only.
+        stock_type = "COMMON" if sec_type == "STK" else None
+        evidence = AssetClassificationEvidence(
+            broker=self.BROKER_NAME,
+            broker_security_type=sec_type,
+            stock_type=stock_type,
+            vehicle_type_hint=vehicle_hint,
+            long_name=getattr(contract, "name", None) or raw_symbol,
+            currency=currency,
+        )
+        classification = classify_instrument(evidence)
 
         return Position(
             broker=self.BROKER_NAME,
@@ -100,7 +127,10 @@ class TigerAdapter:
             raw_symbol=raw_symbol,
             name=getattr(contract, "name", None) or raw_symbol,
             name_en=None,
-            asset_class=self.map_asset_class(contract.sec_type),
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=quantity,
             available_quantity=None,

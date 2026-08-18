@@ -6,7 +6,7 @@
 - code 字段含市场前缀: "US.QQQ" / "HK.00068"
 - pl_ratio 是百分数格式(8.76 = 8.76%),需要 /100 转成 0.0876
 - 成本方式: weighted_average (摊薄成本)
-- DataFrame 无 stock_type 列,asset_class 默认 equity(由 PositionUpsertService 名称兜底)
+- DataFrame 无 stock_type 时只使用可见名称 evidence；不足则 fail closed 为 UNKNOWN
 """
 import math
 from datetime import datetime, timezone
@@ -16,6 +16,11 @@ from typing import Any
 import pandas as pd
 
 from services.broker_sync.schema import Position
+from backend.services.instruments.classification import (
+    AssetClassificationEvidence,
+    broker_position_classification_fields,
+    classify_instrument,
+)
 
 
 class FutuAdapter:
@@ -109,8 +114,23 @@ class FutuAdapter:
         realized_pnl = self._safe_decimal(row.get("realized_pl")) if row.get("realized_pl") is not None else None
         day_pnl = self._safe_decimal(row.get("today_pl_val")) if row.get("today_pl_val") is not None else None
 
-        # 富途 DataFrame 无 stock_type 列,统一 equity(由 PositionUpsertService 走名称兜底)
-        asset_class = "equity"
+        stock_type_raw = row.get("stock_type")
+        stock_type = (
+            str(stock_type_raw).strip().upper()
+            if stock_type_raw is not None
+            and not (isinstance(stock_type_raw, float) and math.isnan(stock_type_raw))
+            else ""
+        )
+        vehicle_hint = "ETF" if "ETF" in name.upper() else stock_type or None
+        evidence = AssetClassificationEvidence(
+            broker=self.BROKER_NAME,
+            broker_security_type=stock_type or "UNKNOWN",
+            stock_type=stock_type or None,
+            vehicle_type_hint=vehicle_hint,
+            long_name=name,
+            currency=currency,
+        )
+        classification = classify_instrument(evidence)
 
         return Position(
             broker=self.BROKER_NAME,
@@ -118,7 +138,10 @@ class FutuAdapter:
             symbol=symbol,
             raw_symbol=raw_symbol,
             name=name,
-            asset_class=asset_class,
+            **broker_position_classification_fields(
+                classification,
+                evidence=evidence,
+            ),
             market=market,
             quantity=quantity,
             available_quantity=available_quantity,

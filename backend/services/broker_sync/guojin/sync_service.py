@@ -113,6 +113,20 @@ class GuojinSyncService:
         if hk_market_value <= 1:
             return None
 
+        from backend.services.instruments.classification import (
+            AssetClassificationEvidence,
+            broker_position_classification_fields,
+            classify_instrument,
+        )
+        evidence = AssetClassificationEvidence(
+            broker="guojin",
+            broker_security_type="HKCONNECT_SUMMARY",
+            vehicle_type_hint="COMMON_STOCK",
+            explicit_economic_asset_class="EQUITY",
+            explicit_source="BROKER_AGGREGATE_DETERMINISTIC",
+            long_name="港股通持仓(合计·明细待接入)",
+            currency="CNY",
+        )
         return Position(
             broker="guojin",
             account_id=account_id,
@@ -120,7 +134,9 @@ class GuojinSyncService:
             raw_symbol="HKCONNECT",
             name="港股通持仓(合计·明细待接入)",
             name_en=None,
-            asset_class="equity",
+            **broker_position_classification_fields(
+                classify_instrument(evidence), evidence=evidence
+            ),
             market="HK",
             quantity=Decimal("0"),
             available_quantity=None,

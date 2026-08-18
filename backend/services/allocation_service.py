@@ -128,6 +128,11 @@ def classify_asset(
     asset_class 传入英文值（如 'equity'），转换为中文存储。
     """
     from app.allocation.types import ALLOC_TO_CN
+    from backend.services.instruments.classification import (
+        AssetClassificationEvidence,
+        business_position_classification_fields,
+        classify_instrument,
+    )
     cn_class = ALLOC_TO_CN.get(AllocAssetClass(asset_class))
     if not cn_class:
         return False
@@ -136,13 +141,28 @@ def classify_asset(
         pos = session.query(Position).filter(Position.id == holding_id).first()
         if not pos:
             return False
-        pos.asset_class = cn_class
+        evidence = AssetClassificationEvidence(
+            broker="manual_ui",
+            broker_security_type=getattr(pos, "broker_security_type", None),
+            vehicle_type_hint=getattr(pos, "vehicle_type", None),
+            explicit_economic_asset_class=cn_class,
+            explicit_source="USER_EXPLICIT_UI",
+            long_name=pos.name,
+            currency=pos.currency,
+        )
+        fields = business_position_classification_fields(
+            classify_instrument(evidence), evidence=evidence
+        )
+        for field, value in fields.items():
+            setattr(pos, field, value)
         session.commit()
         return True
 
 
 def get_unclassified_holdings(portfolio_id: int) -> list:
     """获取未分类持仓列表"""
+    from backend.services.instruments.classification import economic_asset_class_cn
+
     with get_session() as session:
         positions = (
             session.query(Position)
@@ -153,14 +173,15 @@ def get_unclassified_holdings(portfolio_id: int) -> list:
         for pos in positions:
             if getattr(pos, "segment", "投资") != "投资":
                 continue
-            ac = classify_position(pos.asset_class, pos.name)
+            canonical_label = economic_asset_class_cn(pos)
+            ac = classify_position(canonical_label, pos.name)
             if ac == AllocAssetClass.UNCLASSIFIED:
                 unclassified.append({
                     "id": pos.id,
                     "name": pos.name,
                     "ticker": pos.ticker,
                     "platform": pos.platform,
-                    "asset_class": pos.asset_class,
+                    "asset_class": canonical_label,
                     "market_value_cny": pos.market_value_cny,
                 })
         return unclassified

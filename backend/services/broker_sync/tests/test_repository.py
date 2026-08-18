@@ -92,3 +92,25 @@ def test_decimal_roundtrip(db_session):
     saved = run.snapshots[0]
     assert isinstance(saved.quantity, Decimal)
     assert saved.quantity == Decimal("123.45678901")
+
+
+def test_canonical_classification_evidence_roundtrip(db_session):
+    repo = PositionSnapshotRepository(db_session)
+    run = repo.create_run(broker="tiger", account_id="4472659")
+    pos = make_position(
+        broker_security_type="STK",
+        vehicle_type="ETF",
+        economic_asset_class="FIXED_INCOME",
+        economic_asset_subclass="SHORT_TERM_TREASURY",
+        classification_source="issuer_verified_fixture",
+        classification_confidence="HIGH",
+        classification_verification_status="VERIFIED",
+        classification_evidence={"con_id": 79000224, "isin": "IE00B3VWN179"},
+    )
+    repo.persist_positions(run_id=run.id, positions=[pos])
+
+    saved = run.snapshots[0]
+    assert saved.vehicle_type == "ETF"
+    assert saved.economic_asset_class == "FIXED_INCOME"
+    assert saved.economic_asset_subclass == "SHORT_TERM_TREASURY"
+    assert '"con_id": 79000224' in saved.classification_evidence_json

@@ -7,15 +7,20 @@
 - ticker 去归一化:AAPL.US → AAPL
 - asset_class:调 classify_position 做 5 大类中文归类
 """
+import json
 from typing import Iterable
 
 from sqlalchemy.orm import Session
 
-from app.allocation.classifier import classify_position
-from app.allocation.types import ALLOC_TO_CN
 from app.fx_service import fx_service
 from app.models import Position as BusinessPosition
 from services.broker_sync.models import PositionSnapshot
+from backend.services.instruments.classification import (
+    AssetClassification,
+    AssetClassificationEvidence,
+    business_position_classification_fields,
+    classify_instrument,
+)
 
 
 # broker → platform 映射
@@ -32,42 +37,66 @@ PROTECTED_FIELDS = {"name", "asset_class", "segment"}
 # 合法中文 5 大类(Position 表 asset_class 应存这些值)
 LEGAL_CN_CLASSES = {"权益", "固收", "货币", "另类", "衍生", "未分类"}
 
-# 英文 sec_type → 中文基础映射(作为名称匹配失败时的兜底)
-SEC_TYPE_TO_CN_BASIC = {
-    "equity": "权益",
-    "etf": "权益",
-    "option": "衍生",
-    "future": "衍生",
-    "warrant": "衍生",
-    "bond": "固收",
-    "fund": "权益",  # 基金默认权益,名称匹配可覆盖
-    "cash": "货币",
-}
-
-
 def _resolve_asset_class(sec_type_en: str, name: str, ticker: str) -> str:
-    """
-    把 adapter 输出的英文 sec_type 转换成 WealthPilot 5 大类中文。
+    """Legacy test/caller shim delegated to the canonical classifier."""
+    return classify_instrument(AssetClassificationEvidence(
+        vehicle_type_hint=sec_type_en,
+        long_name=name,
+    )).asset_class_cn
 
-    逻辑(名称优先):
-    1. 先用名称做关键词匹配(更精确:债券ETF→固收,黄金→另类)
-    2. 名称匹配失败时,用 sec_type 基础映射兜底(equity→权益,option→衍生)
-    """
-    from app.allocation.classifier import classify_by_name_or_tag
-    from app.allocation.types import AllocAssetClass
 
-    # 第 1 步:名称关键词匹配(更精确)
-    name_result = classify_by_name_or_tag(name)
-    if name_result != AllocAssetClass.UNCLASSIFIED:
-        cn = ALLOC_TO_CN.get(name_result)
-        return cn if cn else "未分类"
-
-    # 第 2 步:名称无法判定时,用 sec_type 基础映射
-    cn_basic = SEC_TYPE_TO_CN_BASIC.get(sec_type_en.lower(), "")
-    if cn_basic:
-        return cn_basic
-
-    return "未分类"
+def _snapshot_classification(
+    snap: PositionSnapshot,
+) -> tuple[AssetClassification, AssetClassificationEvidence]:
+    """Rebuild canonical evidence from new or historical snapshot rows."""
+    try:
+        raw = json.loads(snap.raw_data_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raw = {}
+    try:
+        stored_evidence = json.loads(
+            getattr(snap, "classification_evidence_json", None) or "{}"
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored_evidence = {}
+    source = {**raw, **stored_evidence}
+    stored_source = getattr(snap, "classification_source", None)
+    stored_verification = getattr(
+        snap, "classification_verification_status", None
+    )
+    is_user_explicit = (
+        str(stored_source or "").upper().startswith("USER_")
+        or str(stored_verification or "").upper() == "EXPLICIT"
+    )
+    evidence = AssetClassificationEvidence(
+        broker=snap.broker,
+        broker_security_type=(
+            getattr(snap, "broker_security_type", None)
+            or source.get("broker_security_type")
+            or source.get("sec_type")
+        ),
+        stock_type=source.get("stock_type"),
+        vehicle_type_hint=(
+            getattr(snap, "vehicle_type", None)
+            or source.get("vehicle_type")
+            or snap.asset_class
+        ),
+        explicit_economic_asset_class=(
+            getattr(snap, "economic_asset_class", None)
+            if is_user_explicit else None
+        ),
+        explicit_source=stored_source if is_user_explicit else None,
+        con_id=source.get("con_id") or source.get("conId"),
+        isin=source.get("isin") or source.get("ISIN"),
+        long_name=source.get("long_name") or snap.name,
+        category=source.get("category"),
+        subcategory=source.get("subcategory"),
+        industry=source.get("industry"),
+        exchange=source.get("exchange"),
+        primary_exchange=source.get("primary_exchange"),
+        currency=snap.currency,
+    )
+    return classify_instrument(evidence), evidence
 
 
 class PositionUpsertService:
@@ -292,9 +321,12 @@ class PositionUpsertService:
         # Position 表 profit_loss_rate 存百分数(如 30.5 表示 +30.5%)
         pnl_pct = float(snap.unrealized_pnl_pct) * 100
 
-        # 4. 计算 asset_class(中文 5 大类)
-        resolved_asset_class = _resolve_asset_class(snap.asset_class, snap.name, ticker)
-
+        # 4. 由唯一 canonical authority 解析 vehicle 与经济资产类别。
+        classification, classification_evidence = _snapshot_classification(snap)
+        classification_fields = business_position_classification_fields(
+            classification,
+            evidence=classification_evidence,
+        )
         if existing is None:
             # 新建(需要 portfolio_id,默认用 1)
             new_pos = BusinessPosition(
@@ -306,7 +338,7 @@ class PositionUpsertService:
                 broker_account_id=snap.account_id,
                 sync_source="api",
                 name=snap.name,
-                asset_class=resolved_asset_class,
+                **classification_fields,
                 segment="投资",
                 currency=snap.currency,  # v3.4 修复: 存原币种(USD/HKD),不是 CNY
                 quantity=float(snap.quantity),
@@ -342,7 +374,8 @@ class PositionUpsertService:
             existing.broker_account_id = snap.account_id
             existing.sync_source = "api"
             # API 同步行的资产类型由 Broker 元数据权威更新；name/segment 仍保护。
-            existing.asset_class = resolved_asset_class
+            for field, value in classification_fields.items():
+                setattr(existing, field, value)
             return False
 
     _KNOWN_MARKETS = {"US", "HK", "SH", "SZ"}
