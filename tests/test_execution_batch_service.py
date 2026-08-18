@@ -9,7 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import Conversation, ConversationMessage
 from backend.services.action.brokers.base import OrderStatusUpdate
-from backend.services.action.models import ExecutionBatch, ExecutionLeg, OrderRecord
+from backend.services.action.models import (
+    ExecutionBatch,
+    ExecutionLeg,
+    OrderRecord,
+    SymbolStrategy,
+)
 from backend.services.action.order_manager import OrderManager
 from backend.services.execution_batch.calculator import ExecutionSafetyError, money
 from backend.services.execution_batch.service import ExecutionBatchService
@@ -104,6 +109,7 @@ class FakeIBKRExecutionAdapter:
         self.place_calls = []
         self.reconcile_result = None
         self.sync_result = None
+        self.execution_details = []
 
     def authenticate(self, _credentials):
         return True
@@ -118,6 +124,9 @@ class FakeIBKRExecutionAdapter:
 
     def list_open_order_details(self):
         return list(self.open_orders)
+
+    def list_execution_details(self):
+        return list(self.execution_details)
 
     def resolve_lse_usd_etf(self, alias):
         result = TRUSTED_INSTRUMENTS[alias].to_dict()
@@ -221,6 +230,44 @@ def make_ready_two_leg_batch(session, adapter=None):
     return service, adapter, batch
 
 
+def make_cancelled_two_leg_attempt(session, adapter=None):
+    service, adapter, batch = make_ready_two_leg_batch(session, adapter)
+    service.confirm_batch(batch.id)
+    for index, leg in enumerate(batch.legs, start=1):
+        strategy = SymbolStrategy(
+            symbol=f"{leg.user_alias}:LSE", side="BUY",
+            target_quantity=leg.final_quantity, order_type="LIMIT",
+            limit_price=leg.final_limit, status="active",
+            related_conversation_id=batch.source_conversation_id,
+            decision_basis="old cancelled attempt", batch_leg_id=leg.id,
+        )
+        session.add(strategy)
+        session.flush()
+        order = OrderRecord(
+            strategy_id=strategy.id, batch_id=batch.id, batch_leg_id=leg.id,
+            confirmation_version=1, broker_name="ibkr",
+            broker_order_id=str(1000 + index), symbol=strategy.symbol,
+            side="BUY", quantity=leg.final_quantity, filled_quantity=0,
+            order_type="LIMIT", limit_price=leg.final_limit,
+            status="cancelled", raw_broker_response=json.dumps({
+                "order_id": 80 + index, "perm_id": 1000 + index,
+                "ib_status": "Cancelled",
+            }),
+        )
+        session.add(order)
+        session.flush()
+        leg.linked_strategy_id = strategy.id
+        leg.linked_order_id = order.id
+        leg.status = "CANCELLED"
+    batch.status = "ATTENTION_REQUIRED"
+    batch.attention_reason = json.dumps([
+        "BROKER_CANCELLED: CBU3", "BROKER_CANCELLED: IB01",
+        "RETRY_DISABLED_PENDING_PRODUCT_OWNER",
+    ])
+    session.flush()
+    return service, adapter, batch
+
+
 def test_create_batch_has_contract_quote_cash_whatif_and_dynamic_remainder(session):
     _service, adapter, batch = make_ready_batch(session)
     assert batch.usable_cash == Decimal("16632")
@@ -267,6 +314,76 @@ def test_two_leg_batch_uses_trusted_cbu3_and_new_confirmation_without_orders(ses
     service.confirm_batch(batch.id)
     assert batch.confirmation_version == 1
     assert batch.confirmation_hash != old_batch.confirmation_hash
+
+
+def test_controlled_retry_creates_new_batch_and_preserves_old_attempt(session):
+    service, adapter, old = make_cancelled_two_leg_attempt(session)
+    old_order_ids = [leg.linked_order_id for leg in old.legs]
+
+    retry = service.create_controlled_retry(old.id)
+
+    assert retry.id != old.id
+    assert old.status == "ATTENTION_REQUIRED"
+    assert [leg.linked_order_id for leg in old.legs] == old_order_ids
+    assert [leg.status for leg in old.legs] == ["CANCELLED", "CANCELLED"]
+    assert all(leg.linked_order_id is None for leg in retry.legs)
+    assert all(leg.status == "READY" for leg in retry.legs)
+    policy = json.loads(retry.execution_policy)
+    assert policy["retry_attempt"] == 2
+    assert policy["retry_of_batch_id"] == old.id
+    assert policy["max_retry_attempt"] == 2
+    assert policy["automatic_retry"] is False
+    assert adapter.place_calls == []
+    assert session.query(OrderRecord).count() == 2
+
+
+def test_controlled_retry_is_idempotent_and_never_creates_retry_three(session):
+    service, adapter, old = make_cancelled_two_leg_attempt(session)
+    retry = service.create_controlled_retry(old.id)
+
+    repeated = service.create_controlled_retry(old.id)
+    assert repeated.id == retry.id
+    assert session.query(ExecutionBatch).count() == 2
+    with pytest.raises(ExecutionSafetyError, match="不可再次"):
+        service.create_controlled_retry(retry.id)
+    assert adapter.place_calls == []
+
+
+def test_controlled_retry_refresh_preserves_lineage_and_blocks_manual_limit(session):
+    service, adapter, old = make_cancelled_two_leg_attempt(session)
+    retry = service.create_controlled_retry(old.id)
+
+    with pytest.raises(ExecutionSafetyError, match="Fresh Live Quote"):
+        service.apply_manual_limits(retry.id, {"CBU3": 5, "IB01": 126})
+
+    refreshed = service.refresh_batch(retry.id)
+    assert refreshed.id != retry.id
+    assert retry.status == "CANCELLED"
+    policy = json.loads(refreshed.execution_policy)
+    assert policy["retry_attempt"] == 2
+    assert policy["retry_of_batch_id"] == old.id
+    assert session.query(OrderRecord).count() == 2
+    assert adapter.place_calls == []
+
+
+def test_controlled_retry_hard_stops_on_open_order_or_old_execution(session):
+    service, adapter, old = make_cancelled_two_leg_attempt(session)
+    adapter.open_orders = [{
+        "side": "BUY", "remaining_quantity": 1, "order_ref": "external",
+    }]
+    with pytest.raises(ExecutionSafetyError, match="open order"):
+        service.create_controlled_retry(old.id)
+
+    adapter.open_orders = []
+    adapter.execution_details = [{
+        "order_ref": old.legs[0].linked_order_id,
+        "perm_id": 1001,
+        "shares": 1,
+    }]
+    with pytest.raises(ExecutionSafetyError, match="出现 execution"):
+        service.create_controlled_retry(old.id)
+    assert session.query(ExecutionBatch).count() == 1
+    assert adapter.place_calls == []
 
 
 def test_remainder_quantity_converges_with_its_own_quantity_dependent_fee(session):
@@ -367,6 +484,23 @@ def test_whatif_timeout_fails_closed_without_real_submit(session):
     assert adapter.place_calls == []
 
 
+def test_whatif_warning_fails_closed_without_real_submit(session):
+    adapter = FakeIBKRExecutionAdapter()
+    original = adapter.what_if_limit_order
+
+    def warning(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result["warning_text"] = "broker precaution"
+        return result
+
+    adapter.what_if_limit_order = warning
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    with pytest.raises(ExecutionSafetyError, match="WhatIf warning"):
+        service.create_batch(conversation_id="case1-conversation", message_id=2)
+    assert session.query(OrderRecord).count() == 0
+    assert adapter.place_calls == []
+
+
 @pytest.mark.parametrize("commission_currency", [None, "EUR"])
 def test_whatif_commission_currency_is_required_for_usd_ledger(
     session, commission_currency,
@@ -377,6 +511,23 @@ def test_whatif_commission_currency_is_required_for_usd_ledger(
     service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
     with pytest.raises(ExecutionSafetyError, match="commission currency"):
         service.create_batch(conversation_id="case1-conversation", message_id=1)
+    assert session.query(OrderRecord).count() == 0
+    assert adapter.place_calls == []
+
+
+def test_whatif_commission_value_is_required_for_usd_ledger(session):
+    adapter = FakeIBKRExecutionAdapter()
+    original = adapter.what_if_limit_order
+
+    def missing_commission(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result["commission"] = None
+        return result
+
+    adapter.what_if_limit_order = missing_commission
+    service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
+    with pytest.raises(ExecutionSafetyError, match="commission 缺失"):
+        service.create_batch(conversation_id="case1-conversation", message_id=2)
     assert session.query(OrderRecord).count() == 0
     assert adapter.place_calls == []
 

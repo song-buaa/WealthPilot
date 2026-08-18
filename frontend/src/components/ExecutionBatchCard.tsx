@@ -30,7 +30,10 @@ export default function ExecutionBatchCard({
     ibkr_read_only_mode: boolean
     live_trading_enabled: boolean
   } | null>(null)
-  const confirmationText = `确认并提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
+  const retryAttempt = Number(batch.execution_policy.retry_attempt || 0)
+  const confirmationText = retryAttempt === 2
+    ? `确认并重试提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
+    : `确认并提交 ${batch.legs.length} 笔 IBKR 实盘限价单`
   const legSequence = batch.legs.map(leg => leg.user_alias).join(' → ')
   const retired = batch.status === 'CANCELLED'
   const intentReplaced = Array.isArray(batch.attention_reason)
@@ -83,7 +86,7 @@ export default function ExecutionBatchCard({
         )
         const refreshed = await executionBatchApi.get(batch.id)
         update(refreshed)
-        if (['unknown', 'rejected'].includes(order.status)) {
+        if (!['broker_pending', 'partially_filled', 'filled'].includes(order.status)) {
           throw new Error(`${leg.user_alias}=${order.status}，已停止后续订单`)
         }
       }
@@ -109,7 +112,7 @@ export default function ExecutionBatchCard({
       <div style={{ padding: '13px 16px', background: retired ? '#F1F5F9' : '#EFF6FF', display: 'flex', alignItems: 'center', gap: 10 }}>
         <ShieldAlert size={17} color="#1D4ED8" />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: retired ? '#475569' : '#1E3A8A' }}>IBKR Case 1 · {batch.legs.length} 标的交易执行批次</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: retired ? '#475569' : '#1E3A8A' }}>IBKR Case 1{retryAttempt === 2 ? ' · Controlled Retry #2' : ''} · {batch.legs.length} 标的交易执行批次</div>
           <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
             {batch.account_masked} · USD Cash · {batch.status} · Confirmation v{batch.confirmation_version}
           </div>
@@ -167,7 +170,7 @@ export default function ExecutionBatchCard({
                   <td style={{ padding: '9px 6px', lineHeight: 1.5 }}>
                     <div>Ask {price(leg.quote_ask)} · {leg.quote_quality || 'MISSING'}</div>
                     <div>Limit {price(leg.final_limit)}</div>
-                    {!leg.linked_order_id && (
+                    {!leg.linked_order_id && retryAttempt !== 2 && (
                       <input
                         aria-label={`${leg.user_alias} 手工 Limit`}
                         value={manualLimits[leg.user_alias] || ''}
@@ -206,7 +209,7 @@ export default function ExecutionBatchCard({
           <button onClick={refresh} disabled={busy || retired || Boolean(batch.legs.some(leg => leg.linked_order_id))} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, border: '1px solid #CBD5E1', background: '#fff', cursor: retired ? 'not-allowed' : 'pointer' }}>
             <RefreshCw size={13} />刷新只读事实
           </button>
-          {batch.status === 'DRAFT' && (
+          {batch.status === 'DRAFT' && retryAttempt !== 2 && (
             <button onClick={applyManualLimits} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, cursor: 'pointer' }}>校验手工 Limit</button>
           )}
           {batch.status === 'READY' && (

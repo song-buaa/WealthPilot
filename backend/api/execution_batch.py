@@ -17,7 +17,9 @@ from backend.utils.datetime_utils import utc_iso
 
 
 router = APIRouter()
-def live_confirmation_text(leg_count: int) -> str:
+def live_confirmation_text(leg_count: int, retry_attempt: int | None = None) -> str:
+    if retry_attempt == 2:
+        return f"确认并重试提交 {leg_count} 笔 IBKR 实盘限价单"
     return f"确认并提交 {leg_count} 笔 IBKR 实盘限价单"
 
 
@@ -188,6 +190,20 @@ def refresh_batch(batch_id: str):
         session.close()
 
 
+@router.post("/{batch_id}/controlled-retry")
+def create_controlled_retry(batch_id: str):
+    session = get_session()
+    try:
+        batch = _service(session).create_controlled_retry(batch_id)
+        session.commit()
+        return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
+
+
 @router.post("/{batch_id}/confirm")
 def confirm_batch(batch_id: str):
     session = get_session()
@@ -227,7 +243,10 @@ def submit_leg(batch_id: str, leg_id: str, body: dict):
     try:
         service = _service(session)
         batch = service.get_batch(batch_id)
-        if body.get("confirmation_text") != live_confirmation_text(len(batch.legs)):
+        policy = _load_json(getattr(batch, "execution_policy", None)) or {}
+        if body.get("confirmation_text") != live_confirmation_text(
+            len(batch.legs), policy.get("retry_attempt"),
+        ):
             raise ExecutionSafetyError("实盘确认文字不匹配")
         order = service.submit_next_leg(
             batch_id,

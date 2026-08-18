@@ -88,7 +88,21 @@ def _commission_in_funding_currency(result: dict, funding_currency: str) -> Deci
         raise ExecutionSafetyError(
             f"WhatIf commission currency={currency}，无法按 {expected} 汇总（未配置 FX normalization）"
         )
+    if result.get("commission") is None:
+        raise ExecutionSafetyError("WhatIf commission 缺失")
     return money(result.get("commission"))
+
+
+def _validate_what_if_result(result: dict, funding_currency: str) -> Decimal:
+    """Fail closed unless IBKR returned an unambiguous executable preview."""
+    if str(result.get("status") or "").upper() != "PASS":
+        raise ExecutionSafetyError("WhatIf 未返回 PASS")
+    if result.get("what_if") is not True or result.get("transmit") is not True:
+        raise ExecutionSafetyError("WhatIf 协议标志无效")
+    warning = str(result.get("warning_text") or "").strip()
+    if warning:
+        raise ExecutionSafetyError(f"WhatIf warning: {warning}")
+    return _commission_in_funding_currency(result, funding_currency)
 
 
 class ExecutionBatchService:
@@ -131,7 +145,7 @@ class ExecutionBatchService:
             result = self.adapter.what_if_limit_order(
                 resolved, quantity=quantity, limit_price=limit,
             )
-            next_fee = _commission_in_funding_currency(result, funding_currency)
+            next_fee = _validate_what_if_result(result, funding_currency)
             next_spendable = max(
                 Decimal("0"), budget_before_own_fee - next_fee,
             )
@@ -187,17 +201,24 @@ class ExecutionBatchService:
         self._validate_case1_intent(intent)
         return intent
 
-    def create_batch(self, *, conversation_id: str, message_id: int) -> ExecutionBatch:
+    def create_batch(
+        self,
+        *,
+        conversation_id: str,
+        message_id: int,
+        _controlled_retry_of: ExecutionBatch | None = None,
+    ) -> ExecutionBatch:
         """Resolve and calculate a real or fake plan; never submits an order."""
         intent = self.load_confirmed_intent(
             conversation_id=conversation_id, message_id=message_id,
         )
         intent_variant = self._validate_case1_intent(intent)
-        existing = self.session.query(ExecutionBatch).filter_by(
-            source_message_id=message_id,
-        ).order_by(ExecutionBatch.created_at.desc()).first()
-        if existing and existing.status not in {"CANCELLED", "COMPLETED"}:
-            return existing
+        if _controlled_retry_of is None:
+            existing = self.session.query(ExecutionBatch).filter_by(
+                source_message_id=message_id,
+            ).order_by(ExecutionBatch.created_at.desc()).first()
+            if existing and existing.status not in {"CANCELLED", "COMPLETED"}:
+                return existing
 
         if not self.adapter.authenticate({}):
             raise ConnectionError("IBKR authenticate 失败")
@@ -238,6 +259,13 @@ class ExecutionBatchService:
                 "external_open_buy_order_count": len(competing),
                 "remainder": "DYNAMIC_LAST",
                 "unknown_timeout": "HARD_STOP",
+                **({
+                    "retry_attempt": 2,
+                    "retry_of_batch_id": _controlled_retry_of.id,
+                    "max_retry_attempt": 2,
+                    "automatic_retry": False,
+                    "human_ui_submit_only": True,
+                } if _controlled_retry_of is not None else {}),
             }),
             status="DRAFT",
         )
@@ -339,13 +367,13 @@ class ExecutionBatchService:
                     limit_price=money(leg.suggested_limit),
                 )
                 leg.what_if_snapshot = _json(result)
-                total_fees += _commission_in_funding_currency(
+                total_fees += _validate_what_if_result(
                     result, batch.funding_currency,
                 )
             except (ConnectionError, TimeoutError) as exc:
                 leg.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
-                    "what_if": True, "transmit": False,
+                    "what_if": True, "transmit": True,
                 })
                 attention.append(f"{leg.user_alias}: WhatIf 待解除 Gateway Read-Only 后重跑")
 
@@ -376,7 +404,7 @@ class ExecutionBatchService:
                 except (ConnectionError, TimeoutError) as exc:
                     remainder_leg.what_if_snapshot = _json({
                         "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
-                        "what_if": True, "transmit": False,
+                        "what_if": True, "transmit": True,
                     })
                     attention.append(
                         f"{remainder_leg.user_alias}: WhatIf 待解除 Gateway Read-Only 后重跑"
@@ -397,12 +425,101 @@ class ExecutionBatchService:
             for leg in batch.legs:
                 leg.status = "READY"
             batch.status = "READY"
-        self._audit("execution_batch_created", {
+        self._audit(
+            "execution_batch_controlled_retry_created"
+            if _controlled_retry_of is not None
+            else "execution_batch_created",
+            {
             "batch_id": batch.id, "source_message_id": message_id,
+            "retry_of_batch_id": (
+                _controlled_retry_of.id if _controlled_retry_of is not None else None
+            ),
             "status": batch.status, "broker_mutation": 0,
-        })
+            },
+        )
         self.session.flush()
         return batch
+
+    def create_controlled_retry(self, batch_id: str) -> ExecutionBatch:
+        """Create the one allowed Case 1 Retry #2 without reusing old orders.
+
+        The source batch and both cancelled OrderRecords remain immutable audit
+        history. Repeated HTTP/UI calls return the same Retry #2 batch and can
+        never create a third attempt.
+        """
+        source = self.get_batch(batch_id)
+        source_policy = json.loads(source.execution_policy or "{}")
+        if source_policy.get("retry_attempt"):
+            raise ExecutionSafetyError("Retry batch 不可再次创建 Retry")
+
+        existing_retry = None
+        for candidate in self.session.query(ExecutionBatch).filter_by(
+            source_message_id=source.source_message_id,
+        ).order_by(ExecutionBatch.created_at.desc()).all():
+            policy = json.loads(candidate.execution_policy or "{}")
+            if policy.get("retry_of_batch_id") == source.id:
+                existing_retry = candidate
+                break
+        if existing_retry is not None:
+            return existing_retry
+
+        if source.status != "ATTENTION_REQUIRED":
+            raise ExecutionSafetyError(
+                f"仅 ATTENTION_REQUIRED 批次可创建受控 Retry，当前={source.status}"
+            )
+        if [leg.user_alias for leg in source.legs] != ["CBU3", "IB01"]:
+            raise ExecutionSafetyError("受控 Retry #2 仅限冻结的 CBU3 → IB01 Case 1")
+
+        old_orders: list[OrderRecord] = []
+        for leg in source.legs:
+            if leg.status != "CANCELLED" or not leg.linked_order_id:
+                raise ExecutionSafetyError(
+                    f"{leg.user_alias}: 旧 attempt 非明确 CANCELLED，HARD STOP"
+                )
+            order = self.session.query(OrderRecord).filter_by(
+                id=leg.linked_order_id,
+                batch_id=source.id,
+                batch_leg_id=leg.id,
+            ).first()
+            if order is None or order.status != "cancelled" or int(order.filled_quantity or 0):
+                raise ExecutionSafetyError(
+                    f"{leg.user_alias}: 旧 OrderRecord 非 cancelled/filled=0，HARD STOP"
+                )
+            old_orders.append(order)
+
+        if not self.adapter.authenticate({}):
+            raise ConnectionError("IBKR authenticate 失败")
+        if getattr(self.adapter, "_account_id", None) != source.account_ref:
+            raise ExecutionSafetyError("当前 Gateway account 与原 Case 1 不匹配")
+
+        open_orders = self.adapter.list_open_order_details()
+        if open_orders:
+            raise ExecutionSafetyError("Broker 当前存在 open order，HARD STOP")
+
+        execution_reader = getattr(self.adapter, "list_execution_details", None)
+        if not callable(execution_reader):
+            raise ExecutionSafetyError("Adapter 缺少 execution reconciliation 能力")
+        executions = execution_reader()
+        old_order_refs = {order.id for order in old_orders}
+        old_broker_ids = {
+            str(order.broker_order_id) for order in old_orders if order.broker_order_id
+        }
+        conflicting = [
+            item for item in executions
+            if str(item.get("order_ref") or "") in old_order_refs
+            or str(item.get("perm_id") or "") in old_broker_ids
+        ]
+        if conflicting:
+            raise ExecutionSafetyError("旧 attempt 出现 execution，HARD STOP")
+
+        retry = self.create_batch(
+            conversation_id=source.source_conversation_id,
+            message_id=source.source_message_id,
+            _controlled_retry_of=source,
+        )
+        if retry.account_ref != source.account_ref:
+            raise ExecutionSafetyError("Retry account 与原 Case 1 不一致")
+        return retry
 
     @staticmethod
     def _confirmation_payload(batch: ExecutionBatch) -> dict:
@@ -414,6 +531,10 @@ class ExecutionBatchService:
             "safety_cushion": str(batch.safety_cushion),
             "execution_policy": json.loads(batch.execution_policy),
             "cash_accounting_model_version": batch.cash_accounting_model_version,
+            "usable_cash": str(batch.usable_cash),
+            "estimated_fees": str(batch.estimated_fees),
+            "estimated_total": str(batch.estimated_total),
+            "estimated_residual": str(batch.estimated_residual),
             "legs": [
                 {
                     "id": leg.id, "alias": leg.user_alias,
@@ -422,6 +543,10 @@ class ExecutionBatchService:
                     "allocation_mode": leg.allocation_mode,
                     "target_amount": str(leg.target_amount) if leg.target_amount else None,
                     "share_class_verification": leg.share_class_verification,
+                    "quote_as_of": leg.quote_as_of.isoformat() if leg.quote_as_of else None,
+                    "final_limit": str(leg.final_limit),
+                    "final_quantity": leg.final_quantity,
+                    "what_if": json.loads(leg.what_if_snapshot or "null"),
                 }
                 for leg in batch.legs
             ],
@@ -461,14 +586,22 @@ class ExecutionBatchService:
         batch = self.get_batch(batch_id)
         if any(leg.linked_order_id for leg in batch.legs):
             raise ExecutionSafetyError("已有 Broker order 的 Batch 不可整体刷新")
+        policy = json.loads(batch.execution_policy or "{}")
+        retry_source = None
+        if policy.get("retry_attempt") == 2:
+            retry_source_id = str(policy.get("retry_of_batch_id") or "")
+            retry_source = self.get_batch(retry_source_id)
         batch.status = "CANCELLED"
         self._audit("execution_batch_superseded", {
-            "batch_id": batch.id, "broker_mutation": 0,
+            "batch_id": batch.id,
+            "retry_of_batch_id": retry_source.id if retry_source else None,
+            "broker_mutation": 0,
         })
         self.session.flush()
         return self.create_batch(
             conversation_id=batch.source_conversation_id,
             message_id=batch.source_message_id,
+            _controlled_retry_of=retry_source,
         )
 
     def apply_manual_limits(
@@ -476,6 +609,9 @@ class ExecutionBatchService:
     ) -> ExecutionBatch:
         """Apply user-entered limits with exact MarketRule validation and WhatIf."""
         batch = self.get_batch(batch_id)
+        policy = json.loads(batch.execution_policy or "{}")
+        if policy.get("retry_attempt") == 2:
+            raise ExecutionSafetyError("Controlled Retry #2 必须使用 Fresh Live Quote")
         if any(leg.linked_order_id for leg in batch.legs):
             raise ExecutionSafetyError("已有 Broker order，不可修改 Limit")
         aliases = {leg.user_alias for leg in batch.legs}
@@ -520,13 +656,13 @@ class ExecutionBatchService:
                     limit_price=money(leg.final_limit),
                 )
                 leg.what_if_snapshot = _json(result)
-                total_fees += _commission_in_funding_currency(
+                total_fees += _validate_what_if_result(
                     result, batch.funding_currency,
                 )
             except (ConnectionError, TimeoutError) as exc:
                 leg.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
-                    "what_if": True, "transmit": False,
+                    "what_if": True, "transmit": True,
                 })
                 attention.append(f"{leg.user_alias}: WhatIf 待 Live Enable")
 
@@ -557,7 +693,7 @@ class ExecutionBatchService:
             except (ConnectionError, TimeoutError) as exc:
                 remainder.what_if_snapshot = _json({
                     "status": "PENDING_LIVE_ENABLE", "reason": str(exc),
-                    "what_if": True, "transmit": False,
+                    "what_if": True, "transmit": True,
                 })
                 attention.append(f"{remainder.user_alias}: WhatIf 待 Live Enable")
             total_notional += money(remainder.estimated_notional)
@@ -651,11 +787,15 @@ class ExecutionBatchService:
         fresh_cash, _ = select_authoritative_cash(self.adapter.get_cash_snapshot("USD"))
         ledger = self._build_ledger(batch)
         ledger.consistency_guard(fresh_cash)
+        quote = self.adapter.get_executable_quote(resolved)
+        if str(quote.get("market_data_type")) != "1":
+            raise ExecutionSafetyError("提交前 marketDataType 非 LIVE(1)")
+        if str(quote.get("quote_quality") or "").upper() != "LIVE":
+            raise ExecutionSafetyError("提交前 quote quality 非 LIVE")
+        ask, _ = quote_guard(quote, now=self.clock())
         if leg.allocation_mode == "REMAINDER":
             if money(leg.released_intent_amount) > 0:
                 raise ExecutionSafetyError("intent-level released budget requires reconfirmation")
-            quote = self.adapter.get_executable_quote(resolved)
-            ask, _ = quote_guard(quote, now=self.clock())
             limit = normalize_buy_limit(ask, resolved["market_rule"])
             quantity, notional = calculate_fixed_quantity(ledger.remaining, limit)
             leg.reference_price, leg.final_limit = ask, limit
@@ -669,7 +809,7 @@ class ExecutionBatchService:
         what_if = self.adapter.what_if_limit_order(
             resolved, quantity=quantity, limit_price=limit,
         )
-        _commission_in_funding_currency(what_if, batch.funding_currency)
+        _validate_what_if_result(what_if, batch.funding_currency)
         leg.what_if_snapshot = _json(what_if)
 
         strategy = SymbolStrategy(

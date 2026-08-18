@@ -763,6 +763,32 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
         return self._run_on_loop(read_on_loop)
 
+    def list_execution_details(self) -> list[dict]:
+        """Return detached execution evidence for read-only reconciliation."""
+        self._ensure_connected()
+
+        async def read_on_loop():
+            from ib_async import ExecutionFilter
+
+            fills = await self._ib.reqExecutionsAsync(ExecutionFilter())
+            return [
+                {
+                    "order_id": int(fill.execution.orderId or 0),
+                    "perm_id": int(fill.execution.permId or 0),
+                    "order_ref": str(fill.execution.orderRef or ""),
+                    "exec_id": str(fill.execution.execId or ""),
+                    "con_id": int(fill.contract.conId or 0),
+                    "symbol": fill.contract.localSymbol or fill.contract.symbol or "",
+                    "side": str(fill.execution.side or "").upper(),
+                    "shares": self._finite_number(fill.execution.shares) or 0,
+                    "price": self._finite_number(fill.execution.price),
+                    "timestamp": str(fill.execution.time or ""),
+                }
+                for fill in fills
+            ]
+
+        return self._run_on_loop(read_on_loop, timeout=self._timeout + 5)
+
     def what_if_limit_order(
         self, resolved: dict, *, quantity: int, limit_price: Decimal,
     ) -> dict:

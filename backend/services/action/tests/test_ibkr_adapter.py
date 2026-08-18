@@ -999,6 +999,37 @@ class TestMisc:
     def test_broker_name(self):
         assert _make_adapter().broker_name == "ibkr"
 
+    def test_execution_reconciliation_returns_detached_evidence(self):
+        adapter = _make_adapter()
+        fill = MagicMock()
+        fill.execution.orderId = 85
+        fill.execution.permId = 1347224986
+        fill.execution.orderRef = "local-order-ref"
+        fill.execution.execId = "exec-1"
+        fill.execution.side = "BOT"
+        fill.execution.shares = 3
+        fill.execution.price = 126.25
+        fill.execution.time = datetime(2026, 8, 18, tzinfo=timezone.utc)
+        fill.contract.conId = 79000224
+        fill.contract.localSymbol = "CBU3"
+        fill.contract.symbol = "CSBGU3"
+        adapter._ib.reqExecutionsAsync = AsyncMock(return_value=[fill])
+
+        result = adapter.list_execution_details()
+
+        assert result == [{
+            "order_id": 85,
+            "perm_id": 1347224986,
+            "order_ref": "local-order-ref",
+            "exec_id": "exec-1",
+            "con_id": 79000224,
+            "symbol": "CBU3",
+            "side": "BOT",
+            "shares": 3.0,
+            "price": 126.25,
+            "timestamp": "2026-08-18 00:00:00+00:00",
+        }]
+
     def test_parse_symbol_us(self):
         assert IBKRBrokerAdapter._parse_symbol("AAPL:US") == ("US", "AAPL")
 

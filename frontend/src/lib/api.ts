@@ -555,6 +555,9 @@ export const executionBatchApi = {
   refresh: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/refresh`, { method: 'POST' },
   ),
+  controlledRetry: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/controlled-retry`, { method: 'POST' },
+  ),
   confirm: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/confirm`, { method: 'POST' },
   ),

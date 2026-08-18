@@ -34,6 +34,9 @@ def test_final_modal_uses_explicit_live_language_and_exact_button_copy():
     assert "batch.legs.length" in BATCH_CARD
     assert "batch.legs.map" in BATCH_CARD
     assert live_confirmation_text(2) == "确认并提交 2 笔 IBKR 实盘限价单"
+    assert live_confirmation_text(2, 2) == "确认并重试提交 2 笔 IBKR 实盘限价单"
+    assert "确认并重试提交" in BATCH_CARD
+    assert "Controlled Retry #2" in BATCH_CARD
 
 
 def test_replaced_batch_remains_visible_but_is_explicitly_terminal():
@@ -49,6 +52,11 @@ def test_attention_required_disables_retry_and_warns_user():
     assert "batch.status === 'CONFIRMED'" in BATCH_CARD
     assert "batchManaged" in (ROOT / "frontend/src/pages/Action.tsx").read_text()
     assert "由执行批次管理" in (ROOT / "frontend/src/pages/Action.tsx").read_text()
+
+
+def test_ui_stops_sequence_for_every_non_working_broker_state():
+    assert "['broker_pending', 'partially_filled', 'filled'].includes(order.status)" in BATCH_CARD
+    assert "retryAttempt !== 2" in BATCH_CARD
 
 
 def test_submit_endpoint_rejects_missing_human_ack_before_service_access():
