@@ -1,0 +1,58 @@
+{
+  "AAPL": {
+    "instrument_id": "IBKR:265598",
+    "con_id": 265598,
+    "isin": "US0378331005",
+    "symbol": "AAPL",
+    "local_symbol": "AAPL",
+    "market": "NASDAQ",
+    "exchange": "SMART",
+    "primary_exchange": "NASDAQ",
+    "currency": "USD",
+    "sec_type": "STK",
+    "stock_type": "COMMON",
+    "timezone": "US/Eastern"
+  },
+  "SPY": {
+    "instrument_id": "IBKR:756733",
+    "con_id": 756733,
+    "isin": "US78462F1030",
+    "symbol": "SPY",
+    "local_symbol": "SPY",
+    "market": "ARCA",
+    "exchange": "SMART",
+    "primary_exchange": "ARCA",
+    "currency": "USD",
+    "sec_type": "STK",
+    "stock_type": "ETF",
+    "timezone": "US/Eastern"
+  },
+  "CBU3": {
+    "instrument_id": "IBKR:79000224",
+    "con_id": 79000224,
+    "isin": "IE00B3VWN179",
+    "symbol": "CSBGU3",
+    "local_symbol": "CBU3",
+    "market": "LSEETF",
+    "exchange": "LSEETF",
+    "primary_exchange": "EBS",
+    "currency": "USD",
+    "sec_type": "STK",
+    "stock_type": "ETF",
+    "timezone": "MET"
+  },
+  "IB01": {
+    "instrument_id": "IBKR:354802220",
+    "con_id": 354802220,
+    "isin": "IE00BGSF1X88",
+    "symbol": "IB01",
+    "local_symbol": "IB01",
+    "market": "LSEETF",
+    "exchange": "LSEETF",
+    "primary_exchange": "LSEETF",
+    "currency": "USD",
+    "sec_type": "STK",
+    "stock_type": "ETF",
+    "timezone": "MET"
+  }
+}
