@@ -1,0 +1,113 @@
+{
+  "source_freeze": {
+    "repository": "Tovest",
+    "tag": "tpg-v1.10",
+    "commit": "937edb62727f4d8c36d41b36e93521d077da20f9",
+    "tree": "834b39f121d4a851c6c3710cc76ff6d67c2d8fb3",
+    "source_files": {
+      "pivot": "services/technical-analysis/app/structure/pivot_engine.py",
+      "boundary": "services/technical-analysis/app/structure/boundary_trend.py",
+      "range": "services/technical-analysis/app/structure/range_structure.py",
+      "geometry": "services/technical-analysis/app/patterns/triangle.py",
+      "identity": "services/technical-analysis/app/structure/contracts.py"
+    },
+    "source_oracle": {
+      "pivot_result_hash": "1ae3e863386e84a8b37bd16f88d8ec616efe3590d8acc65b8d56bf5dc9ca76b5",
+      "boundary_result_hash": "2fb67fc64ba1f266e44be78264abd8955dfcc3154192a51be66ac51e88d650b5",
+      "range_result_hash": "0ee21459a5ce018ce5c92e7b2fd52bd47f627f5032e380c723216e081a94c102",
+      "geometry_fit": [-0.5, 110.0, 0.0],
+      "identity": "fixture_566fd36cec581afdfe4c"
+    }
+  },
+  "adaptation_contract": {
+    "source_time_axis": "fixed wall-clock interval",
+    "target_time_axis": "dense exchange-session ordinal plus source session date",
+    "source_identity_namespace": "TPTS structure identity",
+    "target_identity_namespace": "WP-PATTERN-CORE-IDENTITY-1.0",
+    "parity_rule": "exact structural semantics; exact mapped target identity and hashes; no Product output"
+  },
+  "pivot_case": {
+    "instrument_id": "fixture:1",
+    "con_id": 1,
+    "isin": "TESTISIN",
+    "symbol": "FIX",
+    "sessions": ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"],
+    "highs": [11.0, 14.0, 12.0, 15.0, 11.0],
+    "lows": [10.0, 11.0, 11.0, 11.0, 10.0],
+    "parameters": {
+      "left_window_bars": 1,
+      "right_confirmation_bars": 1,
+      "minimum_price_separation_pct": 0.0,
+      "minimum_bar_separation": 0,
+      "plateau_tolerance_pct": 0.0
+    },
+    "parameter_version": "pivot-fixture-v1",
+    "source_semantic_expected": {
+      "confirmed": [{"type": "swing_high", "price": 15.0, "source_ordinal": 3, "confirmed_ordinal": 4}],
+      "superseded": [{"type": "swing_high", "price": 14.0, "source_ordinal": 1, "confirmed_ordinal": 2}],
+      "timeline_events": ["candidate", "candidate", "confirmed", "candidate", "candidate_replaced", "confirmed_superseded", "confirmed"],
+      "candidate_pivot_count": 2,
+      "candidate_replacement_count": 1,
+      "confirmed_supersession_count": 1
+    },
+    "mapped_expected": {
+      "confirmed_ids": ["pvt_29d594f11c588b4443b4"],
+      "superseded_ids": ["pvt_793bbe8c52bdad3868e3"],
+      "result_hash": "e071de805c02f137f9a07341bef1f0f0d418a5e93b539c1e53639edde8524de1"
+    }
+  },
+  "boundary_range_case": {
+    "instrument_id": "fixture:boundary",
+    "con_id": 2,
+    "sessions": ["2025-02-03", "2025-02-04", "2025-02-05", "2025-02-06", "2025-02-07", "2025-02-10", "2025-02-11", "2025-02-12", "2025-02-13"],
+    "pivots": [
+      {"pivot_id": "p-0", "type": "swing_low", "price": 100.0, "source_ordinal": 0, "confirmed_ordinal": 1},
+      {"pivot_id": "p-1", "type": "swing_high", "price": 110.0, "source_ordinal": 2, "confirmed_ordinal": 3},
+      {"pivot_id": "p-2", "type": "swing_low", "price": 100.5, "source_ordinal": 4, "confirmed_ordinal": 5},
+      {"pivot_id": "p-3", "type": "swing_high", "price": 109.5, "source_ordinal": 6, "confirmed_ordinal": 7}
+    ],
+    "evaluation_session_ordinal": 8,
+    "boundary_tolerance_pct": 0.01,
+    "parameter_version": "boundary-fixture-v1",
+    "source_semantic_expected": {
+      "boundaries": [
+        {"role": "support", "price_low": 100.0, "price_high": 100.5, "touch_count": 2, "source_pivot_ids": ["p-0", "p-2"]},
+        {"role": "resistance", "price_low": 109.5, "price_high": 110.0, "touch_count": 2, "source_pivot_ids": ["p-1", "p-3"]}
+      ],
+      "trend_state": "neutral",
+      "trend_confidence": "mixed",
+      "range_low": 100.5,
+      "range_high": 109.5,
+      "range_width": 9.0,
+      "range_width_pct": 0.08955223880597014
+    },
+    "mapped_expected": {
+      "boundary_ids": ["bnd_ac49e0b5d2b18ab5fa09", "bnd_a030833c325aa25b41ba"],
+      "trend_id": "trd_d59fe84701614db48b3a",
+      "boundary_cache_key": "e0707dbb316745413735e4810b489e0edafc34dd5362ac09707a7150aacd4974",
+      "boundary_result_hash": "b5eedcf099e469541e1e73301d33c7dabad0c301690dae433f7dc9995a6f4ffb",
+      "range_id": "rng_2037b614512ab87a3cb1",
+      "range_cache_key": "3818b3c92e0972adfb23ec3e8a8bfaeffd337f2f8346011b44e34caa07fcf5b4",
+      "range_result_hash": "7eed8e14435ec6283ee0694a58e2a2f1e88b77ec9f5b37aac65702d5d6e57048"
+    }
+  },
+  "geometry_case": {
+    "points": [[0, 110.0], [2, 109.0], [4, 108.0]],
+    "base_price": 100.0,
+    "expected": {"slope_per_session": -0.5, "intercept": 110.0, "max_error_pct": 0.0}
+  },
+  "identity_case": {
+    "prefix": "fixture",
+    "material": {"a": 1, "b": ["x", 2]},
+    "expected": "fixture_566fd36cec581afdfe4c"
+  },
+  "lifecycle_case": {
+    "pattern_id": "pattern-fixture",
+    "formed_session_ordinal": 0,
+    "confirmed_session_ordinal": 1,
+    "expires_at_session_ordinal": 4,
+    "expected_state": "expired",
+    "expected_transitions": [["candidate", "confirmed", 1], ["confirmed", "expired", 4]],
+    "expected_result_hash": "df1811ec3bd01bf2bebf9740f9169dda97744b141307db5ed567122dbeccfc2e"
+  }
+}
