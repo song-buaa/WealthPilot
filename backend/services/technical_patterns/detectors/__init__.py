@@ -1,0 +1,58 @@
+"""Provider-independent Pattern detector framework; no concrete detectors yet."""
+
+from .contracts import (
+    CandidateProposal,
+    ConfirmationAssessment,
+    ConfirmationState,
+    ConfirmationType,
+    DetectorDescriptor,
+    EvidenceFact,
+    InvalidationAssessment,
+    PatternCandidate,
+    PatternDirection,
+    PatternFamily,
+    PatternResult,
+    PatternType,
+    SourceFactReference,
+    SourceFactType,
+)
+from .framework import (
+    CandidateDetector,
+    CausalityViolation,
+    DetectorContext,
+    DetectorFramework,
+    DetectorRunResult,
+    DirectionConfirmationEvaluator,
+    InvalidationEvaluator,
+    StructureConfirmationEvaluator,
+)
+from .parity import GoldenParityComparator, ParityDifference, ParityResult, normalize_pattern_result
+
+__all__ = [
+    "CandidateDetector",
+    "CandidateProposal",
+    "CausalityViolation",
+    "ConfirmationAssessment",
+    "ConfirmationState",
+    "ConfirmationType",
+    "DetectorContext",
+    "DetectorDescriptor",
+    "DetectorFramework",
+    "DetectorRunResult",
+    "DirectionConfirmationEvaluator",
+    "EvidenceFact",
+    "GoldenParityComparator",
+    "InvalidationAssessment",
+    "InvalidationEvaluator",
+    "ParityDifference",
+    "ParityResult",
+    "PatternCandidate",
+    "PatternDirection",
+    "PatternFamily",
+    "PatternResult",
+    "PatternType",
+    "SourceFactReference",
+    "SourceFactType",
+    "StructureConfirmationEvaluator",
+    "normalize_pattern_result",
+]
