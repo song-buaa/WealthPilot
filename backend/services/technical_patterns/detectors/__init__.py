@@ -16,6 +16,13 @@ from .contracts import (
     SourceFactReference,
     SourceFactType,
 )
+from .ascending_triangle import (
+    ASCENDING_TRIANGLE_DETECTOR_VERSION,
+    AscendingTriangleDetector,
+    AscendingTriangleDirectionConfirmation,
+    AscendingTriangleInvalidation,
+    AscendingTriangleStructureConfirmation,
+)
 from .framework import (
     CandidateDetector,
     CausalityViolation,
@@ -43,6 +50,11 @@ from .rectangle import (
 )
 
 __all__ = [
+    "ASCENDING_TRIANGLE_DETECTOR_VERSION",
+    "AscendingTriangleDetector",
+    "AscendingTriangleDirectionConfirmation",
+    "AscendingTriangleInvalidation",
+    "AscendingTriangleStructureConfirmation",
     "BreakdownDetector",
     "BreakoutDetector",
     "CandidateDetector",

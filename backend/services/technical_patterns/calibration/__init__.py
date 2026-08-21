@@ -5,6 +5,10 @@ from .datasets import (
     CalibrationDatasetManifest,
     CalibrationPartition,
 )
+from .ascending_triangle import (
+    US_ASCENDING_TRIANGLE_DEVELOPMENT_VERSION,
+    build_us_ascending_triangle_development_parameter_sets,
+)
 from .level_break import (
     US_LEVEL_BREAK_DEVELOPMENT_VERSION,
     build_us_level_break_development_parameter_sets,
@@ -31,8 +35,10 @@ __all__ = [
     "CalibrationProvider",
     "CalibrationRegistry",
     "DetectorParameterSet",
+    "US_ASCENDING_TRIANGLE_DEVELOPMENT_VERSION",
     "US_LEVEL_BREAK_DEVELOPMENT_VERSION",
     "US_RECTANGLE_DEVELOPMENT_VERSION",
+    "build_us_ascending_triangle_development_parameter_sets",
     "build_us_level_break_development_parameter_sets",
     "build_us_rectangle_development_parameter_sets",
 ]

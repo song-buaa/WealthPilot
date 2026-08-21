@@ -353,6 +353,7 @@ def test_detector_framework_has_no_provider_product_or_concrete_detector_couplin
 
     assert production_modules == {
         "__init__.py",
+        "ascending_triangle.py",
         "contracts.py",
         "framework.py",
         "level_break.py",

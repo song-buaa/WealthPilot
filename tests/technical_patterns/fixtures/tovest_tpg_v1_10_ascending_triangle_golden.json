@@ -1,0 +1,129 @@
+{
+  "source_freeze": {
+    "repository": "Tovest tpg-v1.10",
+    "commit": "937edb62727f4d8c36d41b36e93521d077da20f9",
+    "blobs": {
+      "services/technical-analysis/app/patterns/triangle.py": "87e2b68c71d78f3f841fb39a1f3fa76c5c41215e",
+      "services/technical-analysis/tests/test_triangle.py": "689d1af83fb231f9c218e00198bf323b8fd55329",
+      "services/technical-analysis/app/structure/boundary_trend.py": "fa2c2f06e922b5c0a3b60b759b8034ab33905911",
+      "services/technical-analysis/app/structure/pivot_engine.py": "d77d3888c968ad08dce1d961a99f45a8e43768c3"
+    }
+  },
+  "adaptation_contract": {
+    "fixture_role": "code-regression parity only; never a US production calibration",
+    "clock_mapping": "source bar offset maps to US closed-session ordinal distance",
+    "identity": "WealthPilot source-lineage identity replaces Tovest runtime identity",
+    "boundary": "WealthPilot requires a confirmed BoundaryTrendEngine resistance reference",
+    "structure_status": "Tovest confirmed_structure maps to structure confirmed plus direction pending",
+    "invalidation": "opposite downside break maps to the explicit lower-trendline technical fact",
+    "expiry": "WealthPilot adds configured session-ordinal expiry"
+  },
+  "tovest_oracle": {
+    "triangle_id": "tri_2dfe7ee17c29aac706ba",
+    "pattern_type": "ascending_triangle",
+    "source_pivot_ids": ["ah-1", "ah-2", "ah-3", "ah-4"],
+    "source_boundary_ids": ["a1-resistance"],
+    "upper_slope_per_bar": 0.01249999999999929,
+    "lower_slope_per_bar": 0.5,
+    "upper_slope_pct_per_bar": 0.0001178967224711086,
+    "lower_slope_pct_per_bar": 0.004715868898844612,
+    "upper_fit_error_pct": 0.0,
+    "lower_fit_error_pct": 0.0,
+    "start_gap": 12.0,
+    "confirmed_gap": 6.1499999999999915,
+    "contraction_pct": 0.4875000000000007,
+    "apex_bar_offset": 24.61538461538458,
+    "apex_progress_at_confirmation": 0.48750000000000066,
+    "structure_span_bars": 12.0,
+    "upper_touch_count": 2,
+    "lower_touch_count": 2,
+    "confirmed_structure": {
+      "status": "confirmed_structure",
+      "directional_confirmation": "pending",
+      "result_hash": "b32cc422e5e2b2a21baae198a6217b581fd2d40bd6f3429562fbb2ee9aa2282a"
+    },
+    "breakout": {
+      "status": "breakout_confirmed",
+      "directional_confirmation": "bullish_confirmed",
+      "result_hash": "51e2c164734b5eb1786e7d96cc281ee0fecf360854123a5acd1bffe8fe657a44"
+    },
+    "invalidated": {
+      "status": "invalidated",
+      "directional_confirmation": "pending",
+      "reason": "opposite_downside_break_invalidates_subtype",
+      "result_hash": "5ef6c515607e6108161d35e732ed051a44fbadfbf6dc5450ae499b2995d1fe2b"
+    }
+  },
+  "wealthpilot_expected": {
+    "confirmed_structure": {
+      "available_from_session_ordinal": 14,
+      "formed_session_ordinal": 1,
+      "pattern_type": "ascending_triangle",
+      "direction": "bullish",
+      "status": "candidate",
+      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "candidate_hash": "14e874e192356f7df7f66c38cf4b1a5161f25c60ed5f10e8787f0e89c5fedc4b",
+      "result_hash": "c2d31b57098a01a2827e2aa86921b60ded590c223dc51f0d9fd20985a02ffbc7",
+      "source_pivot_ids": [
+        "pvt_fc36cc9e27f1cb7aac01",
+        "pvt_f29d0ae8062e700ba7cc",
+        "pvt_feed2cddd395073011ac",
+        "pvt_86dcc9aef19d9ec33b9b"
+      ],
+      "source_boundary_ids": ["bnd_8e492bc8afc0b229fd34"],
+      "source_pivot_count": 4,
+      "source_boundary_count": 1,
+      "upper_slope_per_session": 0.01249999999999929,
+      "upper_intercept": 109.9875,
+      "lower_slope_per_session": 0.5,
+      "lower_intercept": 97.5,
+      "upper_slope_pct_per_session": 0.0001178967224711086,
+      "lower_slope_pct_per_session": 0.004715868898844612,
+      "upper_fit_error_pct": 0.0,
+      "lower_fit_error_pct": 0.0,
+      "start_gap": 12.0,
+      "confirmed_gap": 6.1499999999999915,
+      "contraction_pct": 0.4875000000000007,
+      "apex_session_ordinal": 25.61538461538457,
+      "apex_span_sessions": 24.61538461538457,
+      "apex_progress_at_confirmation": 0.4875000000000009,
+      "resistance_at_confirmation": 110.14999999999999,
+      "support_at_confirmation": 104.0,
+      "structure_span_sessions": 12,
+      "touch_sequence": "RSRS",
+      "resistance_touch_count": 2,
+      "support_touch_count": 2,
+      "structure_confirmation": "confirmed",
+      "structure_reason": "confirmed_available_ascending_triangle_geometry_exists",
+      "structure_observed_session_ordinal": 14,
+      "direction_confirmation": "pending",
+      "direction_reason": "structure_exists_without_confirmed_upside_close",
+      "direction_observed_session_ordinal": null,
+      "lifecycle_transitions": []
+    },
+    "breakout_confirmed": {
+      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "status": "confirmed",
+      "direction_confirmation": "confirmed",
+      "direction_reason": "closed_session_close_cleared_resistance",
+      "direction_observed_session_ordinal": 15,
+      "transitions": ["confirmed"],
+      "result_hash": "3a1f998b520346c70a1bd4899630fc43cec8612e5c3f165f4a87e9791b1d4964"
+    },
+    "invalidated": {
+      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "status": "invalidated",
+      "observed_session_ordinal": 15,
+      "reason": "closed_session_below_rising_support",
+      "transitions": ["invalidated"],
+      "result_hash": "ac88bac98633275602518331574f7d1653a098217bdcfdcd0b62a8bd90447249"
+    },
+    "expired": {
+      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "status": "expired",
+      "expired_session_ordinal": 19,
+      "transitions": ["expired"],
+      "result_hash": "91a27774bdf6acb64fa174a81f1e47c7d33d6e3e589c968f2fbd1730cb1f79c3"
+    }
+  }
+}
