@@ -1,4 +1,4 @@
-"""Provider-independent Pattern detector framework; no concrete detectors yet."""
+"""Provider-independent Pattern detector framework and migrated detectors."""
 
 from .contracts import (
     CandidateProposal,
@@ -26,9 +26,19 @@ from .framework import (
     InvalidationEvaluator,
     StructureConfirmationEvaluator,
 )
+from .level_break import (
+    LEVEL_BREAK_DETECTOR_VERSION,
+    BreakdownDetector,
+    BreakoutDetector,
+    LevelBreakDirectionConfirmation,
+    LevelBreakInvalidation,
+    LevelBreakStructureConfirmation,
+)
 from .parity import GoldenParityComparator, ParityDifference, ParityResult, normalize_pattern_result
 
 __all__ = [
+    "BreakdownDetector",
+    "BreakoutDetector",
     "CandidateDetector",
     "CandidateProposal",
     "CausalityViolation",
@@ -44,6 +54,10 @@ __all__ = [
     "GoldenParityComparator",
     "InvalidationAssessment",
     "InvalidationEvaluator",
+    "LEVEL_BREAK_DETECTOR_VERSION",
+    "LevelBreakDirectionConfirmation",
+    "LevelBreakInvalidation",
+    "LevelBreakStructureConfirmation",
     "ParityDifference",
     "ParityResult",
     "PatternCandidate",

@@ -1,0 +1,150 @@
+{
+  "source_freeze": {
+    "repository": "Tovest tpg-v1.10",
+    "commit": "937edb62727f4d8c36d41b36e93521d077da20f9",
+    "blobs": {
+      "app/detectors/breakout.py": "eb4e0ff516efc7882c4c403090491c300b1bbec4",
+      "app/detectors/breakdown.py": "64d65226b9b85c34466e610a78a2337c5906a994",
+      "app/detectors/common.py": "346012c98508e3a5e095fc0a799b8457294eab3e",
+      "app/config/breakout.yaml": "5bb7da27af598ebb81e8ef752b8e964d82549360",
+      "app/config/breakdown.yaml": "d8d0760313f824a8251b4ca32ea03c99aaa6c2dd",
+      "app/events/level_break.py": "e375e4a42f924c707782680d4e723e3d330c6eb9",
+      "app/features/dataframe.py": "f6496f356951aaf726b7259459225d74101103f3"
+    }
+  },
+  "adaptation_contract": {
+    "fixture_role": "code-regression parity only; never a US production calibration",
+    "clock_mapping": "source bar order maps to US closed-session ordinal",
+    "volume_mapping": "current volume divided by the previous 20 closed bars",
+    "identity": "WealthPilot stable identity replaces Tovest product/database identity",
+    "lifecycle": "session-ordinal expiry replaces source wall-clock arithmetic"
+  },
+  "tovest_oracle": {
+    "breakout": {
+      "pattern_type": "breakout",
+      "status": "confirmed",
+      "boundary_axis": 100.0,
+      "boundary_authoritative": true,
+      "boundary_zone_low": 99.84464286,
+      "boundary_zone_high": 100.15535714,
+      "break_close": 102.8,
+      "volume_ratio": 3.0,
+      "volume_confirmed": true,
+      "authority_confirmed": true,
+      "invalidation_boundary": 99.5
+    },
+    "breakdown": {
+      "pattern_type": "breakdown",
+      "status": "confirmed",
+      "boundary_axis": 100.5,
+      "boundary_authoritative": true,
+      "boundary_zone_low": 100.34719736,
+      "boundary_zone_high": 100.65280264,
+      "break_close": 99.4,
+      "volume_ratio": 3.0,
+      "volume_confirmed": true,
+      "trend_aligned": true,
+      "invalidation_boundary": 101.3
+    }
+  },
+  "wealthpilot_expected": {
+    "breakout": {
+      "available_from_session_ordinal": 80,
+      "boundary_available_ordinal": 79,
+      "source_boundary_count": 1,
+      "source_boundary_id": "bnd_9dd69c45f0c1b28bd57c",
+      "source_pivot_count": 0,
+      "boundary_axis": 100.0,
+      "boundary_authoritative": true,
+      "boundary_zone_high": 100.15535714285714,
+      "boundary_zone_low": 99.84464285714286,
+      "break_close": 102.8,
+      "break_edge": 100.15535714285714,
+      "break_threshold": 100.29277306470797,
+      "candidate_hash": "26382572a67417b4fd68381da121234443846674fa76de65ce6e26da5abaa7ae",
+      "candidate_id": "pat_b11943a5b65ea6f12dc7",
+      "direction": "bullish",
+      "direction_confirmation": "confirmed",
+      "ema_direction_aligned": true,
+      "formed_session_ordinal": 80,
+      "invalidation_boundary": 99.5,
+      "lifecycle_transitions": ["confirmed"],
+      "pattern_type": "breakout",
+      "result_hash": "c8d80f6118fb38259f8c099d1dce8d8b6ab906811e43a4b14a723a788b0db553",
+      "status": "confirmed",
+      "structure_confirmation": "confirmed",
+      "structure_observed_session_ordinal": 80,
+      "structure_reason": "closed_session_price_cleared_boundary",
+      "direction_observed_session_ordinal": 80,
+      "direction_reason": "volume_and_direction_evidence_confirmed",
+      "volume_confirmed": true,
+      "volume_ratio": 3.0
+    },
+    "breakdown": {
+      "available_from_session_ordinal": 80,
+      "boundary_available_ordinal": 79,
+      "source_boundary_count": 1,
+      "source_boundary_id": "bnd_f896dbd6229a4c4e6220",
+      "source_pivot_count": 0,
+      "boundary_axis": 100.5,
+      "boundary_authoritative": true,
+      "boundary_zone_high": 100.65280264021716,
+      "boundary_zone_low": 100.34719735978284,
+      "break_close": 99.4,
+      "break_edge": 100.5,
+      "break_threshold": 100.5,
+      "candidate_hash": "6deb62cb99bc492cdbbb20307c02df027404a369ce7b6b008f96c4c630583b1b",
+      "candidate_id": "pat_6bcb48b94c51112b3fa6",
+      "direction": "bearish",
+      "direction_confirmation": "confirmed",
+      "ema_direction_aligned": true,
+      "formed_session_ordinal": 80,
+      "invalidation_boundary": 101.3,
+      "lifecycle_transitions": ["confirmed"],
+      "pattern_type": "breakdown",
+      "result_hash": "095213e8149c16d8687f3749869905861e46e29ac3a30957a416873d68bb1098",
+      "status": "confirmed",
+      "structure_confirmation": "confirmed",
+      "structure_observed_session_ordinal": 80,
+      "structure_reason": "closed_session_price_cleared_boundary",
+      "direction_observed_session_ordinal": 80,
+      "direction_reason": "volume_and_direction_evidence_confirmed",
+      "volume_confirmed": true,
+      "volume_ratio": 3.0
+    }
+  },
+  "wealthpilot_lifecycle_expected": {
+    "breakout": {
+      "invalidated": {
+        "candidate_id": "pat_b11943a5b65ea6f12dc7",
+        "status": "invalidated",
+        "observed_session_ordinal": 81,
+        "transitions": ["confirmed", "invalidated"],
+        "result_hash": "a8d4774e9ebaac0421d67fe8faa29a3d862b9ed1e87baf1042207e66c3267921"
+      },
+      "expired": {
+        "candidate_id": "pat_b11943a5b65ea6f12dc7",
+        "status": "expired",
+        "expired_session_ordinal": 92,
+        "transitions": ["confirmed", "expired"],
+        "result_hash": "dbdc751be3db96b49933ee4f0ddc387d4ac727cdd2ab1de923ab10e229f40413"
+      }
+    },
+    "breakdown": {
+      "invalidated": {
+        "candidate_id": "pat_6bcb48b94c51112b3fa6",
+        "status": "invalidated",
+        "observed_session_ordinal": 81,
+        "transitions": ["confirmed", "invalidated"],
+        "result_hash": "2caacb8e90454d11429baf18fbc58d5aaddbbf5a15842f9e43aede75c15a0157"
+      },
+      "expired": {
+        "candidate_id": "pat_6bcb48b94c51112b3fa6",
+        "status": "expired",
+        "expired_session_ordinal": 92,
+        "transitions": ["confirmed", "expired"],
+        "result_hash": "8be64edbc06eb4bcc5b279da74590125441d2948d02afbc35a94d8552ad014f3"
+      }
+    }
+  }
+}

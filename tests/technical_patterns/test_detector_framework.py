@@ -351,7 +351,7 @@ def test_detector_framework_has_no_provider_product_or_concrete_detector_couplin
         "from tigeropen",
     )
 
-    assert production_modules == {"__init__.py", "contracts.py", "framework.py", "parity.py"}
+    assert production_modules == {"__init__.py", "contracts.py", "framework.py", "level_break.py", "parity.py"}
     for path in package.glob("*.py"):
         source = path.read_text(encoding="utf-8")
         assert all(item not in source for item in forbidden_imports)
