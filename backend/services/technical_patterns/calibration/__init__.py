@@ -17,6 +17,10 @@ from .registry import (
     CalibrationRegistry,
     DetectorParameterSet,
 )
+from .rectangle import (
+    US_RECTANGLE_DEVELOPMENT_VERSION,
+    build_us_rectangle_development_parameter_sets,
+)
 
 __all__ = [
     "CalibrationDataset",
@@ -28,5 +32,7 @@ __all__ = [
     "CalibrationRegistry",
     "DetectorParameterSet",
     "US_LEVEL_BREAK_DEVELOPMENT_VERSION",
+    "US_RECTANGLE_DEVELOPMENT_VERSION",
     "build_us_level_break_development_parameter_sets",
+    "build_us_rectangle_development_parameter_sets",
 ]

@@ -35,6 +35,12 @@ from .level_break import (
     LevelBreakStructureConfirmation,
 )
 from .parity import GoldenParityComparator, ParityDifference, ParityResult, normalize_pattern_result
+from .rectangle import (
+    RECTANGLE_DETECTOR_VERSION,
+    RectangleDetector,
+    RectangleInvalidation,
+    RectangleStructureConfirmation,
+)
 
 __all__ = [
     "BreakdownDetector",
@@ -65,6 +71,10 @@ __all__ = [
     "PatternFamily",
     "PatternResult",
     "PatternType",
+    "RECTANGLE_DETECTOR_VERSION",
+    "RectangleDetector",
+    "RectangleInvalidation",
+    "RectangleStructureConfirmation",
     "SourceFactReference",
     "SourceFactType",
     "StructureConfirmationEvaluator",

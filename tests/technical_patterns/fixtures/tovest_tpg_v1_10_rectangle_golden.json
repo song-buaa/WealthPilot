@@ -1,0 +1,92 @@
+{
+  "source_freeze": {
+    "repository": "Tovest tpg-v1.10",
+    "commit": "937edb62727f4d8c36d41b36e93521d077da20f9",
+    "blobs": {
+      "app/patterns/rectangle.py": "813056205fa392be08761f140b4cbdea47da7bed",
+      "app/patterns/rectangle_discovery.py": "05c7cd00768d39bbb693a45034b85e386d92a188",
+      "app/structure/range_structure.py": "9dbc06b3364d9ac97054a9c0193cd3c6432b1e83",
+      "tests/test_rectangle.py": "a846fe447feb0e92b858ebd9271bb836ad8afb98"
+    }
+  },
+  "adaptation_contract": {
+    "fixture_role": "code-regression parity only; never a US production calibration",
+    "clock_mapping": "source bar order maps to US closed-session ordinal",
+    "identity": "WealthPilot stable source-lineage identity replaces Tovest runtime identity",
+    "confirmation": "range existence is structure confirmation; direction confirmation is not required",
+    "invalidation": "a closed-session boundary break replaces source candidate-pair reset as the technical fact",
+    "expiry": "WealthPilot adds explicit session-ordinal expiry; the frozen Tovest rectangle fixture has no expiry contract"
+  },
+  "tovest_oracle": {
+    "pattern_type": "rectangle",
+    "status": "confirmed",
+    "direction": "neutral",
+    "support": 100.0,
+    "resistance": 110.0,
+    "range_width": 10.0,
+    "support_touch_count": 2,
+    "resistance_touch_count": 2,
+    "touch_sequence": "SRSR",
+    "structure_span_bars": 6,
+    "source_pivot_ids": ["p1", "p2", "p3", "p4"],
+    "source_rectangle_id": "rect_989cb636b44c879612ae",
+    "invalidated_status": "invalidated"
+  },
+  "wealthpilot_expected": {
+    "available_from_session_ordinal": 8,
+    "formed_session_ordinal": 1,
+    "pattern_type": "rectangle",
+    "direction": "neutral",
+    "status": "confirmed",
+    "candidate_id": "pat_144ef1e62033499b8862",
+    "candidate_hash": "ec6bc441e093a2678e4ff970c3e51e25ca0d1e096500d2ba964b7a159fa5e078",
+    "result_hash": "b06c0c4fb4c5540676c6fd83e701fff108b53e7f1f88ca67c659205000a568de",
+    "source_pivot_ids": [
+      "pvt_e8c11c1bd201ec9c9df0",
+      "pvt_6b594ac4572fc2fbeb4d",
+      "pvt_40c2e6205258d15b752e",
+      "pvt_8cdb57b3cb95fabfc443"
+    ],
+    "source_boundary_ids": [
+      "bnd_48d17faf0dcac8f1183f",
+      "bnd_3de71ac299e1798c1104"
+    ],
+    "source_pivot_count": 4,
+    "source_boundary_count": 2,
+    "range_low": 100.0,
+    "range_high": 110.0,
+    "range_width": 10.0,
+    "range_width_pct": 10.0,
+    "support_touch_count": 2,
+    "resistance_touch_count": 2,
+    "touch_sequence": "SRSR",
+    "structure_span_sessions": 6,
+    "support_zone_low": 100.0,
+    "support_zone_high": 100.0,
+    "resistance_zone_low": 110.0,
+    "resistance_zone_high": 110.0,
+    "structure_confirmation": "confirmed",
+    "structure_reason": "confirmed_available_range_structure_exists",
+    "structure_observed_session_ordinal": 8,
+    "direction_confirmation": "not_required",
+    "direction_reason": "direction_confirmation_not_required_by_candidate",
+    "lifecycle_transitions": ["confirmed"]
+  },
+  "wealthpilot_lifecycle_expected": {
+    "invalidated": {
+      "candidate_id": "pat_144ef1e62033499b8862",
+      "status": "invalidated",
+      "observed_session_ordinal": 9,
+      "reason": "closed_session_above_resistance",
+      "transitions": ["confirmed", "invalidated"],
+      "result_hash": "6c94af835c92717afa8334e26a998484aaa6148bc78226ec10f7bdb6da98422a"
+    },
+    "expired": {
+      "candidate_id": "pat_144ef1e62033499b8862",
+      "status": "expired",
+      "expired_session_ordinal": 13,
+      "transitions": ["confirmed", "expired"],
+      "result_hash": "09b691191cff831b1207d6fd6f782f53f6abf9b1ec6a81f6b5e35ca988bbee59"
+    }
+  }
+}
