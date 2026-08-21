@@ -1,9 +1,14 @@
 """WealthPilot-owned detector calibration contracts and exact registry."""
 
 from .datasets import (
+    AssetCoverage,
     CalibrationDataset,
     CalibrationDatasetManifest,
     CalibrationPartition,
+    DatasetReviewStatus,
+    MarketEdgeCase,
+    MarketRegime,
+    PatternReviewLabel,
 )
 from .ascending_triangle import (
     US_ASCENDING_TRIANGLE_DEVELOPMENT_VERSION,
@@ -29,8 +34,22 @@ from .rectangle import (
     US_RECTANGLE_DEVELOPMENT_VERSION,
     build_us_rectangle_development_parameter_sets,
 )
+from .validation import (
+    SIX_PATTERN_BINDINGS,
+    CalibrationAttemptRecord,
+    CalibrationValidationFramework,
+    CalibrationWorkflowError,
+    FrozenCalibrationVersion,
+    PatternSampleReview,
+    PatternValidationEvaluation,
+    PatternValidationReport,
+    PromotionAssessment,
+    PromotionRecommendation,
+)
 
 __all__ = [
+    "AssetCoverage",
+    "CalibrationAttemptRecord",
     "CalibrationDataset",
     "CalibrationDatasetManifest",
     "CalibrationKey",
@@ -38,7 +57,20 @@ __all__ = [
     "CalibrationPartition",
     "CalibrationProvider",
     "CalibrationRegistry",
+    "CalibrationValidationFramework",
+    "CalibrationWorkflowError",
+    "DatasetReviewStatus",
     "DetectorParameterSet",
+    "FrozenCalibrationVersion",
+    "MarketEdgeCase",
+    "MarketRegime",
+    "PatternReviewLabel",
+    "PatternSampleReview",
+    "PatternValidationEvaluation",
+    "PatternValidationReport",
+    "PromotionAssessment",
+    "PromotionRecommendation",
+    "SIX_PATTERN_BINDINGS",
     "US_ASCENDING_TRIANGLE_DEVELOPMENT_VERSION",
     "US_DOUBLE_REVERSAL_DEVELOPMENT_VERSION",
     "US_LEVEL_BREAK_DEVELOPMENT_VERSION",

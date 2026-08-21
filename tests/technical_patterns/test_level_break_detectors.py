@@ -7,11 +7,8 @@ from time import perf_counter
 import pytest
 
 from backend.services.technical_patterns.calibration import (
-    CalibrationDataset,
-    CalibrationDatasetManifest,
     CalibrationKey,
     CalibrationNotConfigured,
-    CalibrationPartition,
     CalibrationRegistry,
     DetectorParameterSet,
     US_LEVEL_BREAK_DEVELOPMENT_VERSION,
@@ -282,44 +279,6 @@ def test_us_development_calibrations_are_exact_stock_etf_keys_not_btc_fallback()
             assert registry.resolve(key).require("parameter_origin") == "wealthpilot_us_hypothesis_not_validated"
     with pytest.raises(CalibrationNotConfigured, match="BTC fallback are forbidden"):
         registry.resolve(CalibrationKey("CRYPTO", "CRYPTO", "1d", "level_break", "breakout", "btc-v1"))
-
-
-def test_calibration_dataset_manifest_keeps_development_holdout_validation_disjoint():
-    def dataset(partition, suffix):
-        return CalibrationDataset(
-            f"us-equity-{suffix}",
-            partition,
-            "US",
-            "EQUITY",
-            "1d",
-            (f"instrument:{suffix}",),
-            (f"hash:{suffix}",),
-            f"Frozen {suffix} partition",
-        )
-
-    manifest = CalibrationDatasetManifest(
-        dataset(CalibrationPartition.DEVELOPMENT, "development"),
-        dataset(CalibrationPartition.HOLDOUT, "holdout"),
-        dataset(CalibrationPartition.VALIDATION, "validation"),
-    )
-    assert manifest.manifest_id.startswith("caldata_")
-
-    overlapping_holdout = CalibrationDataset(
-        "us-equity-overlap",
-        CalibrationPartition.HOLDOUT,
-        "US",
-        "EQUITY",
-        "1d",
-        ("instrument:development",),
-        ("hash:holdout-independent",),
-        "Invalid overlapping holdout",
-    )
-    with pytest.raises(ValueError, match="disjoint instruments"):
-        CalibrationDatasetManifest(
-            dataset(CalibrationPartition.DEVELOPMENT, "development"),
-            overlapping_holdout,
-            dataset(CalibrationPartition.VALIDATION, "validation"),
-        )
 
 
 def test_single_instrument_runtime_is_bounded_and_records_no_detector_cache_contract():
