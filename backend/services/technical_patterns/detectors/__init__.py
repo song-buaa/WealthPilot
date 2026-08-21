@@ -33,6 +33,15 @@ from .framework import (
     InvalidationEvaluator,
     StructureConfirmationEvaluator,
 )
+from .double_reversal import (
+    DOUBLE_REVERSAL_DETECTOR_VERSION,
+    DoubleBottomDetector,
+    DoubleReversalDetector,
+    DoubleReversalDirectionConfirmation,
+    DoubleReversalInvalidation,
+    DoubleReversalStructureConfirmation,
+    DoubleTopDetector,
+)
 from .level_break import (
     LEVEL_BREAK_DETECTOR_VERSION,
     BreakdownDetector,
@@ -67,6 +76,13 @@ __all__ = [
     "DetectorDescriptor",
     "DetectorFramework",
     "DetectorRunResult",
+    "DOUBLE_REVERSAL_DETECTOR_VERSION",
+    "DoubleBottomDetector",
+    "DoubleReversalDetector",
+    "DoubleReversalDirectionConfirmation",
+    "DoubleReversalInvalidation",
+    "DoubleReversalStructureConfirmation",
+    "DoubleTopDetector",
     "DirectionConfirmationEvaluator",
     "EvidenceFact",
     "GoldenParityComparator",

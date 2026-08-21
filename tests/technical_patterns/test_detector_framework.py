@@ -355,6 +355,7 @@ def test_detector_framework_has_no_provider_product_or_concrete_detector_couplin
         "__init__.py",
         "ascending_triangle.py",
         "contracts.py",
+        "double_reversal.py",
         "framework.py",
         "level_break.py",
         "parity.py",
