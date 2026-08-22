@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .cache import DailyPatternDataCache
 from .contracts import (
@@ -33,6 +33,7 @@ class IBKRPatternAdapterConfig:
     target_bar_count: int = 1460
     durations: tuple[str, ...] = ("2 Y", "4 Y", "6 Y", "7 Y")
     schedule_calendar_days: int = 2200
+    schedule_page_sessions: int = 365
 
     def __post_init__(self) -> None:
         if self.target_bar_count <= 0:
@@ -41,6 +42,10 @@ class IBKRPatternAdapterConfig:
             raise ValueError("at least one bounded duration is required")
         if self.schedule_calendar_days < self.target_bar_count:
             raise ValueError("schedule calendar span must cover target bars")
+        if self.schedule_page_sessions <= 0:
+            raise ValueError("schedule_page_sessions must be positive")
+        if self.schedule_page_sessions > self.schedule_calendar_days:
+            raise ValueError("schedule_page_sessions cannot exceed schedule capacity")
 
 
 class IBKRPatternDataAdapter:
@@ -92,7 +97,10 @@ class IBKRPatternDataAdapter:
             schedule = self._source.fetch_schedule(
                 identity,
                 end=observed_at,
-                num_days=self._config.schedule_calendar_days,
+                num_days=min(
+                    self._config.schedule_page_sessions,
+                    self._config.schedule_calendar_days,
+                ),
                 use_rth=True,
             )
             closed_sessions = tuple(
@@ -116,6 +124,12 @@ class IBKRPatternDataAdapter:
                     use_rth=True,
                 )
                 normalized = self._normalize(raw, last_closed)
+                if normalized:
+                    schedule = self._extend_schedule(
+                        identity,
+                        schedule,
+                        first_required_session=normalized[0].session_date,
+                    )
                 blocked = self._quality_gate(
                     normalized,
                     schedule,
@@ -179,6 +193,53 @@ class IBKRPatternDataAdapter:
                 f"{self._config.target_bar_count} closed bars"
             ),
             requested_durations=tuple(requested),
+        )
+
+    def _extend_schedule(
+        self,
+        identity,
+        schedule: ScheduleSnapshot,
+        *,
+        first_required_session: date,
+    ) -> ScheduleSnapshot:
+        """Page SCHEDULE backwards without issuing one oversized IBKR request.
+
+        Live Gateway validation established that 365-session pages return
+        reliably while larger single requests can time out.  The configured
+        schedule capacity remains a hard upper bound, and failure to cover the
+        first historical bar is left to the existing fail-closed quality gate.
+        """
+
+        by_date = {session.ref_date: session for session in schedule.sessions}
+        if not by_date:
+            return schedule
+
+        while (
+            min(by_date) > first_required_session
+            and len(by_date) < self._config.schedule_calendar_days
+        ):
+            previous_first = min(by_date)
+            first_session = by_date[previous_first]
+            remaining = self._config.schedule_calendar_days - len(by_date)
+            page_size = min(self._config.schedule_page_sessions, remaining)
+            page = self._source.fetch_schedule(
+                identity,
+                end=first_session.start - timedelta(seconds=1),
+                num_days=page_size,
+                use_rth=True,
+            )
+            if page.timezone != schedule.timezone:
+                raise PatternDataQualityError(
+                    "SCHEDULE timezone changed while paging historical sessions"
+                )
+            for session in page.sessions:
+                by_date[session.ref_date] = session
+            if not page.sessions or min(by_date) >= previous_first:
+                break
+
+        return ScheduleSnapshot(
+            timezone=schedule.timezone,
+            sessions=tuple(by_date[key] for key in sorted(by_date)),
         )
 
     @staticmethod

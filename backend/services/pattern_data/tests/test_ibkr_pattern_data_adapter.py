@@ -129,6 +129,34 @@ class FakeIBKRSource:
         return tuple(bars)
 
 
+class PaginatedScheduleFakeIBKRSource(FakeIBKRSource):
+    def __init__(self, alias: str) -> None:
+        super().__init__(alias)
+        self.schedule_requests: list[dict] = []
+
+    def fetch_schedule(self, contract, *, end, num_days, use_rth):
+        self.schedule_calls += 1
+        self.schedule_requests.append({"end": end, "num_days": num_days})
+        zone = ZoneInfo(self.identity.timezone)
+        local_end = end.astimezone(zone)
+        eligible = [value for value in self.dates if value <= local_end.date()]
+        dates = eligible[-num_days:]
+        is_us = self.identity.timezone == "US/Eastern"
+        start_at = datetime_time(9, 30) if is_us else datetime_time(8, 0)
+        end_at = datetime_time(16, 0) if is_us else datetime_time(16, 30)
+        return ScheduleSnapshot(
+            self.identity.timezone,
+            tuple(
+                TradingSession(
+                    ref_date=value,
+                    start=datetime.combine(value, start_at, zone),
+                    end=datetime.combine(value, end_at, zone),
+                )
+                for value in dates
+            ),
+        )
+
+
 def _query(alias: str) -> InstrumentQuery:
     item = FIXTURE[alias]
     return InstrumentQuery(
@@ -221,6 +249,21 @@ def test_bounded_history_expands_to_1460_capacity():
     assert len(result.series.bars) == 1460
     assert result.requested_durations == ("2 Y", "4 Y", "6 Y", "7 Y")
     assert [call["duration"] for call in source.history_calls] == ["2 Y", "4 Y", "6 Y", "7 Y"]
+
+
+def test_schedule_is_paged_backwards_with_a_bounded_live_safe_page_size():
+    source = PaginatedScheduleFakeIBKRSource("AAPL")
+    result = _adapter(source, target=1460).get_series(_query("AAPL"), as_of=AS_OF)
+
+    assert result.status is PatternDataStatus.READY
+    assert result.series is not None
+    assert len(result.series.bars) == 1460
+    assert len(source.schedule_requests) >= 4
+    assert all(item["num_days"] <= 365 for item in source.schedule_requests)
+    assert all(
+        right["end"] < left["end"]
+        for left, right in zip(source.schedule_requests, source.schedule_requests[1:])
+    )
 
 
 def test_insufficient_history_fails_closed_after_maximum_duration():
