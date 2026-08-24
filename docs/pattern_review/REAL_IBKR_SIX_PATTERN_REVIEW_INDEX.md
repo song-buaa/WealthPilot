@@ -1,10 +1,12 @@
-# Real IBKR Six-Pattern Human Chart Review Index
+# Real IBKR Six-Pattern Evidence Review Index
 
-> Gate: `READY_FOR_HUMAN_CHART_REVIEW`
+> Gate: `READY_FOR_GOVERNANCE_REVIEW`
 
-Codex generated detector evidence and blank review fields. A human reviewer must inspect every selected chart and fill only the manifest fields `human_review_label`, `human_review_notes`, `reviewer`, and `reviewed_at`.
+The 120 cases completed an AI-assisted engineering consistency review. This is not independent human chart review and does not authorize Production Promotion. See [the AI-assisted review report](./REAL_IBKR_SIX_PATTERN_AI_ASSISTED_REVIEW_REPORT.md).
 
 Allowed labels: `PASS`, `FALSE_POSITIVE`, `FALSE_NEGATIVE`, `AMBIGUOUS`, `REVIEW_DISAGREEMENT`.
+
+The inventory status below records the original evidence-selection threshold; the authoritative current gate is the one above and in the manifest.
 
 ## Scope Inventory
 
@@ -150,7 +152,9 @@ Allowed labels: `PASS`, `FALSE_POSITIVE`, `FALSE_NEGATIVE`, `AMBIGUOUS`, `REVIEW
 
 ## Gate Boundary
 
-- Human labels remain `null`.
+- AI-assisted labels: `120/120 PASS` with reviewer `AI-assisted-engineering-review`.
+- Independent human review complete: `false`.
+- AI-assisted engineering review complete: `true`.
 - Holdout detector run: `false`.
 - Untouched Validation detector run: `false`.
-- No Production Promotion verdict has been issued.
+- Production Promotion authorized: `false`.
