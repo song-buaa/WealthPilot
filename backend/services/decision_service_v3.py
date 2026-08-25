@@ -19,10 +19,21 @@ from backend.agents import (
     get_reviewing_agent,
 )
 from backend.agents.contracts import AgentTaskStatus
+from backend.services.technical_patterns.decision_integration import (
+    DecisionPatternEvidenceCollector,
+    DecisionPatternEvidenceSnapshot,
+    PatternDecisionTarget,
+    PatternInvocationScope,
+    resolve_pattern_invocation_scope,
+    serialize_pattern_evidence_snapshot,
+    target_from_execution_output,
+)
 from backend.services.trade_intent.models import StructuredTradeIntent
 from backend.services.trade_intent.parser import parse_trade_intent
 
 logger = logging.getLogger(__name__)
+
+_PATTERN_SIDECAR_TIMEOUT_SECONDS = 30.0
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -31,9 +42,43 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 def _trade_intent_metadata(intent: StructuredTradeIntent | None) -> dict | None:
-    if intent is None:
-        return None
-    return {"trade_intent": intent.model_dump(mode="json")}
+    return _assistant_metadata(intent, None)
+
+
+def _assistant_metadata(
+    intent: StructuredTradeIntent | None,
+    pattern_evidence: dict | None,
+) -> dict | None:
+    """Merge independent metadata owners without replacing either value."""
+
+    metadata: dict = {}
+    if intent is not None:
+        metadata["trade_intent"] = intent.model_dump(mode="json")
+    if pattern_evidence is not None:
+        metadata["pattern_evidence"] = pattern_evidence
+    return metadata or None
+
+
+async def _collect_decision_pattern_evidence(
+    invocation_scope: PatternInvocationScope,
+    targets: tuple[PatternDecisionTarget, ...],
+) -> tuple[DecisionPatternEvidenceSnapshot | None, dict | None]:
+    """Run the optional sidecar with a second, Decision-level fail-open guard."""
+
+    if invocation_scope is PatternInvocationScope.NONE:
+        return None, None
+    try:
+        collector = DecisionPatternEvidenceCollector()
+        snapshot = await asyncio.wait_for(
+            asyncio.to_thread(collector.collect, invocation_scope, targets),
+            timeout=_PATTERN_SIDECAR_TIMEOUT_SECONDS,
+        )
+        return snapshot, serialize_pattern_evidence_snapshot(snapshot)
+    except Exception as exc:  # noqa: BLE001 - Pattern must never block Decision
+        logger.warning(
+            "[v3] Pattern evidence sidecar failed: %s", type(exc).__name__
+        )
+        return None, None
 
 
 def _trade_intent_event(
@@ -280,6 +325,24 @@ async def run_chat_stream_v3(
         except Exception as e:
             logger.warning(f"[v3] R-M7 asset 回写失败: {e}")
 
+        # Optional Pattern Evidence sidecar.  The existing Decision path has
+        # already resolved the target; Pattern cannot resolve or fan out here.
+        pattern_evidence_metadata = None
+        target = target_from_execution_output(exec_out)
+        targets = (target,) if target is not None else ()
+        invocation_scope = resolve_pattern_invocation_scope(
+            route=plan_out.route,
+            user_input=user_input,
+            targets=targets,
+            trade_intent=trade_intent,
+            aborted=exec_out.aborted,
+            requested_symbol_count=1,
+        )
+        snapshot, pattern_evidence_metadata = (
+            await _collect_decision_pattern_evidence(invocation_scope, targets)
+        )
+        exec_out.pattern_evidence = snapshot
+
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
@@ -318,11 +381,18 @@ async def run_chat_stream_v3(
             conversation_id, decision_id, plan_out, exec_out, expr_out,
             user_input=user_input,
             trade_intent=trade_intent,
+            pattern_evidence_metadata=pattern_evidence_metadata,
         )
         trade_event = _trade_intent_event(trade_intent, assistant_message_id)
         if trade_event:
             yield trade_event
-        done_payload = _build_done_payload(plan_out, expr_out, review_out, decision_id)
+        done_payload = _build_done_payload(
+            plan_out,
+            expr_out,
+            review_out,
+            decision_id,
+            pattern_evidence_metadata=pattern_evidence_metadata,
+        )
         yield _sse("done", done_payload)
 
     except Exception as e:
@@ -436,10 +506,14 @@ async def _handle_position_multi(
     expressing = get_expressing_agent()
 
     results: list[tuple[str, DecisionResult | None]] = []
+    execution_rows: list[tuple[str, object, object | None]] = []
     intent_base = plan_out.intent if isinstance(plan_out.intent, dict) else {}
 
+    # First resolve every requested symbol through the existing execution path.
+    # This two-phase shape prevents a partial Pattern fan-out when a later
+    # compare leg aborts or cannot be resolved.
     for asset_name in multi_assets:
-        yield _sse("stage", {"stage": "reasoning", "label": f"分析 {asset_name} 中..."})
+        yield _sse("stage", {"stage": "loading", "label": f"加载 {asset_name} 数据..."})
 
         # 构造单标 PlanningOutput（强制 PositionDecision 让 ExpressingAgent 走 reason 路径）
         single_plan = copy(plan_out)
@@ -451,31 +525,78 @@ async def _handle_position_multi(
 
         try:
             exec_out = await asyncio.to_thread(executing.run, single_plan, user_input)
+            if exec_out.status == AgentTaskStatus.FAILED:
+                execution_rows.append((asset_name, single_plan, None))
+            else:
+                execution_rows.append((asset_name, single_plan, exec_out))
+        except Exception as e:
+            logger.warning(f"[v3] position_multi 分析 {asset_name} 失败: {e}")
+            execution_rows.append((asset_name, single_plan, None))
 
-            if exec_out.aborted:
-                # 单标 ABORT：构造 aborted DecisionResult
-                dr = DecisionResult(
-                    decision_id=f"{decision_id}_{asset_name}",
-                    stage=FlowStage.ABORTED,
-                    intent=IntentResult(
-                        asset=asset_name,
-                        action_type=intent_base.get("action_type", "持有评估"),
-                        time_horizon="未知", trigger=None, confidence_score=0.9,
-                    ),
-                )
-                dr.aborted_reason = exec_out.abort_chat_answer or exec_out.abort_reason or "分析中断"
-                results.append((asset_name, dr))
-                continue
+    successful_rows = tuple(
+        row
+        for row in execution_rows
+        if row[2] is not None and not getattr(row[2], "aborted", False)
+    )
+    resolved_pairs = tuple(
+        (row, target_from_execution_output(row[2]))
+        for row in successful_rows
+    )
+    targets = tuple(
+        target for _, target in resolved_pairs if target is not None
+    )
+    compare_aborted = (
+        len(successful_rows) != len(multi_assets)
+        or len(targets) != len(multi_assets)
+    )
+    invocation_scope = resolve_pattern_invocation_scope(
+        route="position_multi",
+        user_input=user_input,
+        targets=targets,
+        trade_intent=trade_intent,
+        aborted=compare_aborted,
+        requested_symbol_count=len(multi_assets),
+    )
+    snapshot, pattern_evidence_metadata = (
+        await _collect_decision_pattern_evidence(invocation_scope, targets)
+    )
+    for _, _, exec_out in successful_rows:
+        exec_out.pattern_evidence = snapshot
 
-            # 调 ExpressingAgent（消费全部 chunk，只取 last_output）
+    # Pattern collection is complete before any per-symbol AI expression.
+    for asset_name, single_plan, exec_out in execution_rows:
+        if exec_out is None:
+            results.append((asset_name, None))
+            continue
+        if exec_out.aborted:
+            dr = DecisionResult(
+                decision_id=f"{decision_id}_{asset_name}",
+                stage=FlowStage.ABORTED,
+                intent=IntentResult(
+                    asset=asset_name,
+                    action_type=intent_base.get("action_type", "持有评估"),
+                    time_horizon="未知", trigger=None, confidence_score=0.9,
+                ),
+            )
+            dr.aborted_reason = (
+                exec_out.abort_chat_answer
+                or exec_out.abort_reason
+                or "分析中断"
+            )
+            results.append((asset_name, dr))
+            continue
+
+        yield _sse(
+            "stage",
+            {"stage": "reasoning", "label": f"分析 {asset_name} 中..."},
+        )
+        try:
             async for _ in expressing.run_streaming(
                 single_plan, exec_out, user_input, [],
             ):
                 pass
             expr_out = expressing.last_output
-
             llm_result = getattr(expr_out, "llm_result", None) if expr_out else None
-
             dr = DecisionResult(
                 decision_id=f"{decision_id}_{asset_name}",
                 stage=FlowStage.DONE,
@@ -492,9 +613,8 @@ async def _handle_position_multi(
             )
             results.append((asset_name, dr))
             _DECISION_STORE.setdefault(conversation_id, {})[dr.decision_id] = dr
-
         except Exception as e:
-            logger.warning(f"[v3] position_multi 分析 {asset_name} 失败: {e}")
+            logger.warning(f"[v3] position_multi 表达 {asset_name} 失败: {e}")
             results.append((asset_name, None))
 
     # P2 修复：调综合 LLM 生成横向对比报告（替代机械拼接）
@@ -577,7 +697,10 @@ async def _handle_position_multi(
             save_conversation_turn,
             conversation_id, user_input, answer,
             "PositionDecision", ", ".join(multi_assets),
-            assistant_metadata=_trade_intent_metadata(trade_intent),
+            assistant_metadata=_assistant_metadata(
+                trade_intent,
+                pattern_evidence_metadata,
+            ),
         )
     except Exception as e:
         logger.warning(f"[v3] position_multi save_conversation_turn 失败: {e}")
@@ -588,11 +711,14 @@ async def _handle_position_multi(
     if trade_event:
         yield trade_event
     last_did = valid_results[-1][1].decision_id if valid_results else None
-    yield _sse("done", {
+    done_payload = {
         "decision_id": last_did,
         "conclusion_level": "multi_asset",
         "conclusion_label": f"已分析 {len(valid_results)} 个标的",
-    })
+    }
+    if pattern_evidence_metadata is not None:
+        done_payload["pattern_evidence"] = pattern_evidence_metadata
+    yield _sse("done", done_payload)
 
 
 async def _write_stores_v3(
@@ -603,6 +729,7 @@ async def _write_stores_v3(
     expr_out,
     user_input: str = "",
     trade_intent: StructuredTradeIntent | None = None,
+    pattern_evidence_metadata: dict | None = None,
 ) -> int | None:
     """
     v3 决策完成后写入 _DECISION_STORE / _ALLOC_EXPLAIN_STORE / _PRIMARY_INTENT_CACHE
@@ -734,7 +861,10 @@ async def _write_stores_v3(
                 save_conversation_turn,
                 conversation_id, user_input, chat_answer,
                 primary_intent, asset,
-                assistant_metadata=_trade_intent_metadata(trade_intent),
+                assistant_metadata=_assistant_metadata(
+                    trade_intent,
+                    pattern_evidence_metadata,
+                ),
             )
         except Exception as e:
             logger.warning(f"[v3] save_conversation_turn 失败: {e}")
@@ -747,7 +877,14 @@ async def _write_stores_v3(
         return None
 
 
-def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dict:
+def _build_done_payload(
+    plan_out,
+    expr_out,
+    review_out,
+    decision_id: str,
+    *,
+    pattern_evidence_metadata: dict | None = None,
+) -> dict:
     """构造 done 事件 payload（兼容 v2.6 结构）。"""
     validator_payload = {
         "passed": review_out.passed,
@@ -773,7 +910,7 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
         llm_result = expr_out.llm_result
 
         if isinstance(llm_result, LLMResult):
-            return {
+            payload = {
                 "decision_id": decision_id,
                 "conclusion_level": llm_result.decision,
                 "conclusion_label": llm_result.decision_cn,
@@ -783,7 +920,10 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
                 "validator": validator_payload,
                 **actionable_fields,
             }
-        return {
+            if pattern_evidence_metadata is not None:
+                payload["pattern_evidence"] = pattern_evidence_metadata
+            return payload
+        payload = {
             "decision_id": decision_id,
             "conclusion_level": "HOLD",
             "conclusion_label": "观望",
@@ -793,6 +933,9 @@ def _build_done_payload(plan_out, expr_out, review_out, decision_id: str) -> dic
             "validator": validator_payload,
             **actionable_fields,
         }
+        if pattern_evidence_metadata is not None:
+            payload["pattern_evidence"] = pattern_evidence_metadata
+        return payload
 
     # Portfolio 类
     if plan_out.route == "portfolio":

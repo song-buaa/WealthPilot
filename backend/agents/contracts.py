@@ -28,7 +28,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from backend.services.technical_patterns.decision_integration import (
+        DecisionPatternEvidenceSnapshot,
+    )
 
 # 复用现有类型定义，避免循环依赖
 # 这些类型已经在 v2.6 阶段稳定，v3.0 不修改
@@ -162,6 +167,8 @@ class ExecutionOutput:
     rule_result: Optional[object] = None      # decision_engine.rule_engine.RuleResult
     signal_result: Optional[object] = None    # decision_engine.signal_engine.SignalResult
     market_data: Optional[object] = None      # services.market_data.schema.MarketDataBundle
+    pattern_evidence: Optional["DecisionPatternEvidenceSnapshot"] = None
+    """Optional read-only Decision supporting evidence; never execution authority."""
 
     # === Stage 中断标记（数据加载失败 / 前置校验失败时）===
     aborted: bool = False
