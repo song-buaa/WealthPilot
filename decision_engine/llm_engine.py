@@ -866,6 +866,7 @@ def reason(
     signals: SignalResult,
     conversation_history: list[dict] | None = None,
     market_data: object | None = None,
+    pattern_ai_context: object | None = None,
 ) -> LLMResult:
     """
     调用 LLM 进行投资推理。
@@ -929,6 +930,15 @@ def reason(
         if principles_prompt:
             system_prompt += "\n\n" + principles_prompt
         system_prompt += "\n\n" + position_prompt
+
+    if pattern_ai_context is not None:
+        from backend.services.technical_patterns.ai_integration import (
+            format_pattern_ai_prompt_section,
+        )
+
+        pattern_section = format_pattern_ai_prompt_section(pattern_ai_context)
+        if pattern_section:
+            system_prompt += "\n\n" + pattern_section
 
     try:
         client = _get_client()
@@ -1945,6 +1955,7 @@ def compare_multi_assets(
     user_query: str,
     summaries: list[dict],
     global_rules: dict | None = None,
+    pattern_ai_context: object | None = None,
 ) -> str:
     """
     多标的横向对比 LLM 调用。
@@ -1985,6 +1996,17 @@ def compare_multi_assets(
 
     summaries_text = json.dumps(summaries, ensure_ascii=False, indent=2)
     user_prompt = f"客户问题: {user_query}\n{global_info}\n需要对比的标的数据:\n{summaries_text}\n\n请按系统提示词的格式生成横向对比报告。"
+    if pattern_ai_context is not None:
+        from backend.services.technical_patterns.ai_integration import (
+            format_pattern_ai_prompt_section,
+        )
+
+        pattern_section = format_pattern_ai_prompt_section(
+            pattern_ai_context,
+            compare=True,
+        )
+        if pattern_section:
+            user_prompt += "\n\n" + pattern_section
 
     try:
         client = _get_client()

@@ -410,10 +410,26 @@ class ExpressingAgent:
 
         loaded = execution_output.loaded_data
 
+        from backend.services.technical_patterns.ai_integration import (
+            build_pattern_ai_context,
+        )
+        from backend.services.technical_patterns.decision_integration import (
+            target_from_execution_output,
+        )
+
+        target = target_from_execution_output(execution_output)
+        requested_symbols = (
+            (target.requested_symbol,) if target is not None else None
+        )
+        pattern_ai_context = build_pattern_ai_context(
+            execution_output.pattern_evidence,
+            requested_symbols=requested_symbols,
+        )
+
         # M8.4: 新建仓分支
         if getattr(loaded, "is_new_entry", False):
             async for chunk in self._express_new_entry(
-                out, execution_output, user_query,
+                out, execution_output, user_query, pattern_ai_context,
             ):
                 yield chunk
             return
@@ -442,6 +458,7 @@ class ExpressingAgent:
                 signal_result,
                 conversation_history or [],
                 getattr(execution_output, "market_data", None),
+                pattern_ai_context=pattern_ai_context,
             )
         except Exception as e:
             out.mark_failed(f"LLM 调用失败: {e}")
@@ -471,6 +488,7 @@ class ExpressingAgent:
         out: ExpressionOutput,
         execution_output: ExecutionOutput,
         user_query: str,
+        pattern_ai_context: object | None = None,
     ) -> AsyncGenerator[str, None]:
         """新建仓评估表达(M8.4)。
 
@@ -491,6 +509,15 @@ class ExpressingAgent:
         )
 
         prompt = _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload)
+        from backend.services.technical_patterns.ai_integration import (
+            format_pattern_ai_prompt_section,
+        )
+
+        pattern_section = format_pattern_ai_prompt_section(
+            pattern_ai_context
+        )
+        if pattern_section:
+            prompt += "\n\n" + pattern_section
 
         try:
             from intent_engine._llm_client import get_client, MODEL_MAIN

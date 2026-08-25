@@ -670,9 +670,19 @@ async def _handle_position_multi(
                 summaries.append(s)
 
             yield _sse("stage", {"stage": "reasoning", "label": "生成横向对比报告..."})
+            from backend.services.technical_patterns.ai_integration import (
+                build_pattern_ai_context,
+            )
+
+            pattern_ai_context = (
+                build_pattern_ai_context(snapshot)
+                if invocation_scope is PatternInvocationScope.COMPARE
+                else None
+            )
             answer = await asyncio.to_thread(
                 _llm.compare_multi_assets, user_input, summaries,
                 global_rules=global_rules,
+                pattern_ai_context=pattern_ai_context,
             )
             logger.info(f"[v3] P2 综合对比报告生成成功, 长度={len(answer)}")
         except Exception as e:

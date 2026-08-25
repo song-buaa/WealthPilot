@@ -490,12 +490,15 @@ def test_message_persistence_failure_does_not_escape(monkeypatch):
     assert result is None
 
 
-def test_stage_2b_does_not_add_pattern_to_llm_inputs():
-    from backend.agents import expressing_agent
+def test_stage_2b_snapshot_never_becomes_an_llm_engine_parameter():
     from decision_engine import llm_engine
 
-    assert "pattern_evidence" not in inspect.getsource(expressing_agent)
-    assert "pattern_evidence" not in inspect.getsource(llm_engine)
+    reason_parameters = inspect.signature(llm_engine.reason).parameters
+    compare_parameters = inspect.signature(llm_engine.compare_multi_assets).parameters
+    assert "pattern_evidence" not in reason_parameters
+    assert "pattern_evidence" not in compare_parameters
+    assert "pattern_ai_context" in reason_parameters
+    assert "pattern_ai_context" in compare_parameters
 
 
 def test_integration_module_has_no_execution_authority_imports():
