@@ -11,12 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from ..detectors import (
-    ASCENDING_TRIANGLE_DETECTOR_VERSION,
-    DOUBLE_REVERSAL_DETECTOR_VERSION,
-    LEVEL_BREAK_DETECTOR_VERSION,
-    RECTANGLE_DETECTOR_VERSION,
-)
 from ..indicators.contracts import INDICATOR_LAYER_VERSION
 from .ascending_triangle import build_us_ascending_triangle_development_parameter_sets
 from .double_reversal import build_us_double_reversal_development_parameter_sets
@@ -52,16 +46,6 @@ _RUNTIME_VERSION_BY_FAMILY = {
     "triangle": "wp-us-ascending-triangle-runtime-candidate-v1",
     "reversal": "wp-us-double-reversal-runtime-candidate-v1",
 }
-_DETECTOR_VERSION_BY_PATTERN = {
-    "breakout": LEVEL_BREAK_DETECTOR_VERSION,
-    "breakdown": LEVEL_BREAK_DETECTOR_VERSION,
-    "rectangle": RECTANGLE_DETECTOR_VERSION,
-    "ascending_triangle": ASCENDING_TRIANGLE_DETECTOR_VERSION,
-    "double_top": DOUBLE_REVERSAL_DETECTOR_VERSION,
-    "double_bottom": DOUBLE_REVERSAL_DETECTOR_VERSION,
-}
-
-
 class RuntimePromotionVerdict(str, Enum):
     READY_FOR_RUNTIME_PROMOTION = "READY_FOR_RUNTIME_PROMOTION"
     NEEDS_RECALIBRATION = "NEEDS_RECALIBRATION"
@@ -262,9 +246,36 @@ def _development_parameter_sets() -> tuple[DetectorParameterSet, ...]:
     )
 
 
+def _detector_version_by_pattern() -> dict[str, str]:
+    """Resolve detector lineage lazily to preserve the calibration import boundary.
+
+    Detector modules consume the public calibration contracts.  Importing their
+    version constants while calibration itself is being initialized therefore
+    creates a first-request-only cycle.  Candidate construction happens after
+    module initialization, so the lineage lookup belongs at this runtime edge.
+    """
+
+    from ..detectors import (
+        ASCENDING_TRIANGLE_DETECTOR_VERSION,
+        DOUBLE_REVERSAL_DETECTOR_VERSION,
+        LEVEL_BREAK_DETECTOR_VERSION,
+        RECTANGLE_DETECTOR_VERSION,
+    )
+
+    return {
+        "breakout": LEVEL_BREAK_DETECTOR_VERSION,
+        "breakdown": LEVEL_BREAK_DETECTOR_VERSION,
+        "rectangle": RECTANGLE_DETECTOR_VERSION,
+        "ascending_triangle": ASCENDING_TRIANGLE_DETECTOR_VERSION,
+        "double_top": DOUBLE_REVERSAL_DETECTOR_VERSION,
+        "double_bottom": DOUBLE_REVERSAL_DETECTOR_VERSION,
+    }
+
+
 def build_runtime_candidate_freezes() -> tuple[FrozenRuntimeCalibrationCandidate, ...]:
     """Freeze all twelve reviewed Development thresholds without adjustment."""
 
+    detector_versions = _detector_version_by_pattern()
     freezes: list[FrozenRuntimeCalibrationCandidate] = []
     for development in _development_parameter_sets():
         runtime_parameters = DetectorParameterSet(
@@ -295,7 +306,7 @@ def build_runtime_candidate_freezes() -> tuple[FrozenRuntimeCalibrationCandidate
                 governance_acceptance=GOVERNANCE_ACCEPTANCE,
                 governance_acceptance_record=GOVERNANCE_ACCEPTANCE_RECORD,
                 governance_acceptance_record_hash=GOVERNANCE_ACCEPTANCE_RECORD_HASH,
-                detector_version=_DETECTOR_VERSION_BY_PATTERN[scope.pattern_type],
+                detector_version=detector_versions[scope.pattern_type],
                 indicator_layer_version=INDICATOR_LAYER_VERSION,
                 pattern_data_adapter_version=PATTERN_DATA_ADAPTER_VERSION,
             )

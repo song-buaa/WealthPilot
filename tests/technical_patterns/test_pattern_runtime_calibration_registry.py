@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import subprocess
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -15,9 +18,34 @@ from backend.services.technical_patterns.calibration import (
     RuntimeScopePromotionEvidence,
     build_runtime_candidate_freezes,
 )
+from backend.services.technical_patterns.calibration.runtime_registry import (
+    GOVERNANCE_ACCEPTANCE_RECORD_HASH,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_detector_first_import_does_not_cycle_through_runtime_registry():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from backend.services.technical_patterns.detectors import "
+                "ASCENDING_TRIANGLE_DETECTOR_VERSION; "
+                "from backend.services.technical_patterns.calibration import "
+                "build_runtime_candidate_freezes; "
+                "assert len(build_runtime_candidate_freezes()) == 12"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def _promotion(candidate):
@@ -60,6 +88,12 @@ def test_candidate_lineage_matches_committed_real_review_manifest():
         assert candidate.dataset_manifest_hash == manifest["dataset_manifest_hash"]
         assert candidate.review_manifest_hash == manifest["manifest_hash"]
         assert candidate.governance_acceptance == GOVERNANCE_ACCEPTANCE
+
+    acceptance = (
+        REPO_ROOT
+        / "docs/PATTERN_EVIDENCE_V1_REVIEW_GOVERNANCE_ACCEPTANCE.md"
+    ).read_bytes()
+    assert hashlib.sha256(acceptance).hexdigest() == GOVERNANCE_ACCEPTANCE_RECORD_HASH
 
 
 def test_approved_registry_contains_only_explicit_ready_scopes():
