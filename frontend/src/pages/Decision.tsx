@@ -10,13 +10,15 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2, Send, AlertTriangle, CheckCircle, XCircle, MinusCircle, ChevronDown, ChevronLeft, ChevronRight, Sparkles, User, BarChart3, Search, BookOpen, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamDecisionChat, decisionApi, portfolioApi, conversationsApi, knowledgeApi, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft, type StructuredTradeIntent } from '@/lib/api'
+import { streamDecisionChat, decisionApi, portfolioApi, conversationsApi, knowledgeApi, type DecisionPatternEvidenceSnapshotDTO, type ExplainData, type Position, type ActionDraftResponse, type SymbolStrategyDraft, type StructuredTradeIntent } from '@/lib/api'
 import ActionDraftCard from '@/components/ActionDraftCard'
 import ExecutionPlanPanel from '@/components/ExecutionPlanPanel'
 import TradeIntentPreview from '@/components/TradeIntentPreview'
+import PatternEvidenceSection from '@/components/PatternEvidenceSection'
 import ConversationSidebar from '@/components/layout/ConversationSidebar'
 import { useDecisionStore } from '@/store/decisionStore'
 import { summarizeTradeIntentForPanel } from '@/lib/tradeIntentPresentation'
+import { patternEvidenceFromMessageMetadata, patternEvidenceFromSSEData } from '@/lib/patternEvidencePresentation'
 
 // ── 消息类型 ─────────────────────────────────────────────────
 interface Message {
@@ -36,6 +38,7 @@ interface Message {
   actionable_hint?: string | null
   actionDraftStatus?: 'idle' | 'loading' | 'completed'
   tradeIntent?: StructuredTradeIntent
+  patternEvidence?: DecisionPatternEvidenceSnapshotDTO
   persistedMessageId?: number
 }
 
@@ -260,6 +263,7 @@ export default function Decision() {
             content: m.content,
             intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
             tradeIntent: m.metadata?.trade_intent,
+            patternEvidence: patternEvidenceFromMessageMetadata(m.metadata),
             persistedMessageId: m.role === 'assistant' ? m.id : undefined,
           }))
           msgIdRef.current = loaded.length
@@ -400,6 +404,7 @@ export default function Decision() {
             // v3.2 actionable
             actionable: (ev.data.actionable as boolean) ?? false,
             actionable_hint: (ev.data.actionable_hint as string) ?? null,
+            patternEvidence: patternEvidenceFromSSEData(ev.data),
           }))
 
         } else if (ev.type === 'error') {
@@ -463,6 +468,7 @@ export default function Decision() {
         content: m.content,
         intent: m.intent ? { primary_intent: m.intent, asset: m.asset } : undefined,
         tradeIntent: m.metadata?.trade_intent,
+        patternEvidence: patternEvidenceFromMessageMetadata(m.metadata),
         persistedMessageId: m.role === 'assistant' ? m.id : undefined,
       }))
       msgIdRef.current = loaded.length
@@ -805,7 +811,7 @@ export default function Decision() {
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {(() => {
                 const lastDone = messages.filter(m => m.role === 'ai' && !m.streaming && m.content).at(-1)
-                if (explainData) return <ExplainPanel data={explainData} tradeIntent={lastDone?.tradeIntent} />
+                if (explainData) return <ExplainPanel data={explainData} tradeIntent={lastDone?.tradeIntent} patternEvidence={lastDone?.patternEvidence} />
                 if (!lastDone) return <ExplainEmpty />
                 const fallback: ExplainData = {
                   decision_id: String(lastDone.id),
@@ -813,7 +819,7 @@ export default function Decision() {
                   stages: (lastDone.stages ?? []).map(s => ({ name: s.name, status: s.status, summary: s.summary ?? '' })),
                   conclusion: lastDone.conclusion,
                 }
-                return <ExplainPanel data={fallback} tradeIntent={lastDone.tradeIntent} />
+                return <ExplainPanel data={fallback} tradeIntent={lastDone.tradeIntent} patternEvidence={lastDone.patternEvidence} />
               })()}
             </div>
           </div>
@@ -1474,9 +1480,10 @@ function CollapsibleHeader({ label, open, onToggle }: { label: string; open: boo
 }
 
 // ── 右侧结果面板 ─────────────────────────────────────────────────
-export function ExplainPanel({ data, tradeIntent }: {
+export function ExplainPanel({ data, tradeIntent, patternEvidence }: {
   data: ExplainData
   tradeIntent?: StructuredTradeIntent
+  patternEvidence?: DecisionPatternEvidenceSnapshotDTO
 }) {
   const [chainOpen,    setChainOpen]    = React.useState(false)
   const [researchOpen, setResearchOpen] = React.useState(false)
@@ -1685,6 +1692,9 @@ export function ExplainPanel({ data, tradeIntent }: {
 
       {/* ── 3. 知识库引用 ── */}
       <KnowledgeCitations data={data} viewpointCards={viewpointCards} onFileClick={setPreviewPath} />
+
+      {/* ── 3a. 技术形态证据（只读、默认折叠）── */}
+      <PatternEvidenceSection snapshot={patternEvidence} />
 
       {/* ── 3b. 联网搜索（默认折叠，PerformanceAnalysis 不显示）── */}
       {intent?.primary_intent !== 'PerformanceAnalysis' && webSearchItems.length > 0 && (

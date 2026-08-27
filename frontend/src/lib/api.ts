@@ -389,7 +389,10 @@ export interface ConversationMessageDTO {
   content: string
   intent: string | null
   asset: string | null
-  metadata: { trade_intent?: StructuredTradeIntent } | null
+  metadata: {
+    trade_intent?: StructuredTradeIntent
+    pattern_evidence?: DecisionPatternEvidenceSnapshotDTO
+  } | null
   created_at: string
 }
 
@@ -1002,6 +1005,109 @@ export interface StructuredTradeIntent {
   confirmation_status: TradeIntentConfirmation
   confirmed_at: string | null
   phase_boundary: 'TYPED_INTENT_ONLY'
+}
+
+export type PatternEvidenceResultState =
+  | 'PATTERN_FOUND'
+  | 'NO_PATTERN'
+  | 'INSUFFICIENT_HISTORY'
+  | 'DATA_UNAVAILABLE'
+  | 'DATA_QUALITY_BLOCKED'
+  | 'ENGINE_ERROR'
+
+export type PatternType =
+  | 'breakout'
+  | 'breakdown'
+  | 'rectangle'
+  | 'ascending_triangle'
+  | 'double_top'
+  | 'double_bottom'
+
+export type PatternLifecycleStatus = 'CONFIRMED' | 'INVALIDATED' | 'EXPIRED'
+export type PatternConfirmationState = 'pending' | 'confirmed' | 'rejected' | 'not_required'
+
+export interface PatternEvidenceFactDTO {
+  code: string
+  value: boolean | number | string
+  available_from: string
+  available_from_session_ordinal: number
+  source_ids: string[]
+}
+
+export interface PatternConfirmationDTO {
+  state: PatternConfirmationState
+  reason: string
+  observed_on: string | null
+  observed_session_ordinal: number | null
+  facts: PatternEvidenceFactDTO[]
+}
+
+export interface PatternEvidenceBundleDTO {
+  schema_version: 'wp-pattern-evidence-bundle-v1'
+  instrument: {
+    instrument_id: string
+    symbol: string
+    market: string
+    economic_asset_class: string
+    con_id: number | null
+    isin: string | null
+    currency: string | null
+  }
+  timeframe: '1d'
+  result_state: PatternEvidenceResultState
+  evidence: {
+    pattern: {
+      candidate_id: string
+      pattern_type: PatternType
+      pattern_family: string
+      direction: 'bullish' | 'bearish' | 'neutral'
+      lifecycle_status: PatternLifecycleStatus
+      formed_on: string
+      available_from: string
+      evaluated_on: string
+    }
+    structure_confirmation: PatternConfirmationDTO
+    direction_confirmation: PatternConfirmationDTO
+    geometry: {
+      pivots: Array<Record<string, unknown>>
+      boundaries: Array<Record<string, unknown>>
+      facts: PatternEvidenceFactDTO[]
+    }
+    invalidation: {
+      invalidated: boolean
+      condition: string
+      reason: string | null
+      observed_on: string | null
+      observed_session_ordinal: number | null
+      facts: PatternEvidenceFactDTO[]
+    }
+    provenance: {
+      provider: string
+      source_bar_hash: string
+      candidate_source_bar_hash: string
+      detector_version: string
+      indicator_layer_version: string
+      calibration_version: string
+      parameter_set_id: string
+      parameter_hash: string
+      detector_result_hash: string
+    }
+  } | null
+  evidence_snapshot: {
+    uri: string | null
+    media_type: 'image/svg+xml' | 'image/png' | null
+  }
+  reason: string
+}
+
+export interface DecisionPatternEvidenceSnapshotDTO {
+  snapshot_schema_version: 'wp-decision-pattern-evidence-snapshot-v1'
+  invocation_scope: 'NONE' | 'SINGLE' | 'COMPARE'
+  requested_symbols: string[]
+  bundles: PatternEvidenceBundleDTO[]
+  bundle_hashes: string[]
+  top_evidence_candidate_ids: string[]
+  remaining_evidence_candidate_ids: string[]
 }
 
 export interface SSEEvent {

@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:pattern-evidence": "playwright test tests/e2e/pattern-evidence.spec.ts",
     "preview": "vite preview"
   },
   "dependencies": {
