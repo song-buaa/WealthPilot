@@ -1,0 +1,433 @@
+{
+  "approved_runtime_scope_count": 0,
+  "candidate_freeze_timestamp": "2026-08-27T20:43:11+08:00",
+  "dataset_manifest_hash": "a44a3fe2a77d6b36b41fcae29ab4f664ddc3c077331d2c9829bf20ef2494e4f2",
+  "governance_acceptance": "AI_ASSISTED_REVIEW_ACCEPTED_FOR_V1_PROMOTION",
+  "holdout": {
+    "causal_warmup_bars": 200,
+    "date_range": {
+      "end": "2024-12-31",
+      "start": "2023-01-01"
+    },
+    "detector_tuning_after_open": false,
+    "source_hash_matches": 17,
+    "source_hash_mismatches": 0,
+    "validation_manifest_hash": "7fd3c1d07a13226ee9ce21a54fa36062718c351b8ab9bbf8bc38e6926491c93b"
+  },
+  "manifest_hash": "6f71f5186cd0be9a070bb40723eaabe1f580272eef0fea7640d15b338fb2bd46",
+  "manifest_version": "wp-real-ibkr-pattern-runtime-validation-v1",
+  "mutations": {
+    "account_data_requests": 0,
+    "broker": 0,
+    "execution_plan": 0,
+    "order": 0,
+    "portfolio": 0,
+    "production_db": 0
+  },
+  "promotion_scopes": [
+    {
+      "calibration_version": "wp-us-ascending-triangle-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 69,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "1d733373f04205a5ef2aa27c8fea9120d4c3a36006b19107b530b0a06a7c4ba8",
+      "pattern_family": "triangle",
+      "pattern_type": "ascending_triangle",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-ascending-triangle-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 25,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "223477aef2a692f1f16c2e2c8cd50fc7b2bdf4b4f0ad755bce7cfab1c244e0cc",
+      "pattern_family": "triangle",
+      "pattern_type": "ascending_triangle",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-level-break-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 56,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "42e4f448b4ec7b695f4deb63261cf51e503ceae50ba055a59f71fde83b81e0a8",
+      "pattern_family": "level_break",
+      "pattern_type": "breakdown",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-level-break-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 90,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 9
+      },
+      "holdout_negative_controls": 4,
+      "holdout_result": "INSUFFICIENT_REAL_CASE_EVIDENCE",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "edcd922c9cbab4f2dfe2a88ec4d3186932806e45f438822fc25c51466357bcc5",
+      "pattern_family": "level_break",
+      "pattern_type": "breakdown",
+      "timeframe": "1d",
+      "untouched_result": "NOT_OPENED_HOLDOUT_DID_NOT_PASS",
+      "verdict": "INSUFFICIENT_REAL_CASE_EVIDENCE"
+    },
+    {
+      "calibration_version": "wp-us-level-break-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 198,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "0aeea84fccc730f4d3ebb5067b317e767aa195a0d2d39bf752aa8c29faa42d8e",
+      "pattern_family": "level_break",
+      "pattern_type": "breakout",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-level-break-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 29,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "9779614203c8bb4c64dea3ea22f7aebd92fe4c025e888dd9f0498c5d04ddbe74",
+      "pattern_family": "level_break",
+      "pattern_type": "breakout",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-double-reversal-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 131,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "7564ba6a91676504709eb6d84f21be0fce453f44fb8ba7449c026f84274936b6",
+      "pattern_family": "reversal",
+      "pattern_type": "double_bottom",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-double-reversal-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 47,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 9
+      },
+      "holdout_negative_controls": 4,
+      "holdout_result": "INSUFFICIENT_REAL_CASE_EVIDENCE",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "52ee41188dac96f7a1038634f4a3dcfc0bdebae65375e744cc99239e5c9ff243",
+      "pattern_family": "reversal",
+      "pattern_type": "double_bottom",
+      "timeframe": "1d",
+      "untouched_result": "NOT_OPENED_HOLDOUT_DID_NOT_PASS",
+      "verdict": "INSUFFICIENT_REAL_CASE_EVIDENCE"
+    },
+    {
+      "calibration_version": "wp-us-double-reversal-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 163,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "65c8e15c2fbe8f3a6c7f32c63555444c4fcedc6698f4905e9b82a52f821413d8",
+      "pattern_family": "reversal",
+      "pattern_type": "double_top",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-double-reversal-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 49,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "bb955e984433cfc4465697c819e7fbae48af577bdf8c9fe581902f6d59fce121",
+      "pattern_family": "reversal",
+      "pattern_type": "double_top",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-rectangle-runtime-candidate-v1",
+      "economic_asset_class": "EQUITY",
+      "holdout_detected_cases": 8,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 10
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "PASS",
+      "holdout_selected_detected_cases": 5,
+      "market": "US",
+      "parameter_hash": "e4a7c775559834e702334249477ab5296f120c0be739dbf0071601a841235752",
+      "pattern_family": "range",
+      "pattern_type": "rectangle",
+      "timeframe": "1d",
+      "untouched_result": "DATA_QUALITY_BLOCKED_SOURCE_HASH_DRIFT",
+      "verdict": "DATA_QUALITY_BLOCKED"
+    },
+    {
+      "calibration_version": "wp-us-rectangle-runtime-candidate-v1",
+      "economic_asset_class": "FIXED_INCOME",
+      "holdout_detected_cases": 3,
+      "holdout_labels": {
+        "AMBIGUOUS": 0,
+        "DATA_QUALITY_BLOCKED": 0,
+        "FALSE_NEGATIVE": 0,
+        "FALSE_POSITIVE": 0,
+        "PASS": 8
+      },
+      "holdout_negative_controls": 5,
+      "holdout_result": "INSUFFICIENT_REAL_CASE_EVIDENCE",
+      "holdout_selected_detected_cases": 3,
+      "market": "US",
+      "parameter_hash": "1720a0096f2b6e9808ec2c4c9f3418393d5f6867798a9f33cb31a0588c5ca87e",
+      "pattern_family": "range",
+      "pattern_type": "rectangle",
+      "timeframe": "1d",
+      "untouched_result": "NOT_OPENED_HOLDOUT_DID_NOT_PASS",
+      "verdict": "INSUFFICIENT_REAL_CASE_EVIDENCE"
+    }
+  ],
+  "read_accounting": {
+    "account_data_requests": 0,
+    "as_of": "2026-08-22T12:00:00+00:00",
+    "broker_mutations": 0,
+    "contract_details_requests": 17,
+    "historical_requests": 17,
+    "order_mutations": 0,
+    "schedule_requests": 102,
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "JPM",
+      "XOM",
+      "JNJ",
+      "SPY",
+      "QQQ",
+      "IWM",
+      "XLK",
+      "XLF",
+      "XLE",
+      "AGG",
+      "TLT",
+      "IEF",
+      "SHY",
+      "LQD"
+    ]
+  },
+  "recorded_at": "2026-08-27T21:05:00+08:00",
+  "review_manifest_hash": "c5c70ba339c93809e8e6244639265fc0cabed576f970b1dd074b5efac78866e4",
+  "runtime_provider_activated": false,
+  "threshold_adjustment_attempt_count": 0,
+  "untouched_validation": {
+    "date_range": {
+      "end": "2026-08-21",
+      "start": "2025-01-01"
+    },
+    "detector_run": false,
+    "mismatches": [
+      {
+        "actual_hash": "e2058aadbbafe5af8e993ae3a1ca801f4f827b6e32ecc183724ce64301007b9b",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "888ec47a74ed37c7a6450ed99d5fe3f25083373ea82b77c9d4cb6b1ceefd5893",
+        "symbol": "AAPL"
+      },
+      {
+        "actual_hash": "c81d6e2f3c1165d407fe1131962e0f18ad5986aa0e833c39820724b7ba6e1791",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "7965e6470c7bc082c01067de34b97ab8360519aa8940f535fb940ef2aac6a8b7",
+        "symbol": "MSFT"
+      },
+      {
+        "actual_hash": "ff09cd02699953352d9cf4aac7816191947963a535e3f61c43fb10a078239421",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "3b1da841958cb57459fe81f714231dbd96faaabd4b628404504d68f69333f9b3",
+        "symbol": "NVDA"
+      },
+      {
+        "actual_hash": "ab616e1196d15951ff4a6faa73ff53d745d6b32f8ad3294709f7b54a63fe1c32",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "0417074dbc78179368968d798da4615f9f8212aa4ccb5b58b8d72ca4b006c7fb",
+        "symbol": "JPM"
+      },
+      {
+        "actual_hash": "7635f6862d208cc5888fbfcc0306345d74572afeaa99c391e33ab9eb8e136712",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "1a9281e265c3208f71c6ad2950f7441355903a385e80323912de08baaab4d57c",
+        "symbol": "XOM"
+      },
+      {
+        "actual_hash": "8e9a247e2f0a3122a89137428d01721d544039e4b21dd4f0fa6d90215cca8824",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "0e8ba93f83bc03c63c6ef807c4a66c9ff4b52654ffbc080c1e52a08ffa40f2f9",
+        "symbol": "JNJ"
+      },
+      {
+        "actual_hash": "9fc2d7b4395f44994c475165725920cba2aeadeeb36e2c6e1c52113426d314cb",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "1c633b713a8da076a934034ee6d7db6c965a90df422619f3a3cacf6175ced614",
+        "symbol": "SPY"
+      },
+      {
+        "actual_hash": "b494e4a0b270f838ced507c49e30f943e89369245088c1eee7970def8ab46a0b",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "39c555120770e8414a61a1a8a48930dd67c3455733cb37b6bafbc799800ca369",
+        "symbol": "QQQ"
+      },
+      {
+        "actual_hash": "cb2e9aa64d4e6151fbd579ff03bcfff7a6aacef41a2b7100e018ce08272b01ac",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "efe7ac7e9a5a967c6458ee804252369e864799552dbbb8a1c9edab72d7a4b120",
+        "symbol": "IWM"
+      },
+      {
+        "actual_hash": "7fa962c3eb7be397e58702f497bb0d5945b908aaa37f965d77d977e69c6442fd",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "91ec33dbe36d9ed2f1d46aa938247cf803d28f344410f10809bb6b3b09dcff79",
+        "symbol": "XLK"
+      },
+      {
+        "actual_hash": "cd2844867fd7e771f28657f5871de6f61674c40a55ebf3b99bfb1f382a781ff9",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "0b2dc7aa840bc875c34a2b30a4fdf43dfbd1971d6845623217a20ce91d9b94aa",
+        "symbol": "XLF"
+      },
+      {
+        "actual_hash": "d11571b5eb526df8317dc6c19e190be6da3a0719d6394fb9d2e4378216aa8c9a",
+        "economic_asset_class": "EQUITY",
+        "expected_hash": "47a5a50c3efc25f4699357d372eebba7ccf4f91a3ea4ab17360949d20f65cef5",
+        "symbol": "XLE"
+      },
+      {
+        "actual_hash": "484612ddfc85d007e7fa66f45441f3f6fcb913a109f18941e8c83007b9cb60ac",
+        "economic_asset_class": "FIXED_INCOME",
+        "expected_hash": "b3a7af17b45d190062611b3b4885488f8cd331d73e4e1f08013bc54fcabfe2ff",
+        "symbol": "AGG"
+      },
+      {
+        "actual_hash": "bf0a2b2addd270c8f15e1b08671b381948d1e31678b8f41f1a0f218dcc3821f3",
+        "economic_asset_class": "FIXED_INCOME",
+        "expected_hash": "088fbc12a38088a5368063955b446451d28d6b6c1679c4031d9fcb04f15269fd",
+        "symbol": "TLT"
+      },
+      {
+        "actual_hash": "0a25e74c396cff511335a3e8025d71f969fb35645c1089c3c4427bb116b20cb1",
+        "economic_asset_class": "FIXED_INCOME",
+        "expected_hash": "00e1651e273b134f244e33ea87f9d2b54a7afd21ef92fbbd2564be2c4959ead8",
+        "symbol": "IEF"
+      },
+      {
+        "actual_hash": "7b2e31d0aab414757b012fe0bb76be95f1c0c53086c18562d35fdc56b2ecd50f",
+        "economic_asset_class": "FIXED_INCOME",
+        "expected_hash": "c5d1f73f08c257a35e437ffcc2e94150b3749338bc55607b61e0f2b609022551",
+        "symbol": "SHY"
+      }
+    ],
+    "reason": "pre_registered_source_hash_drift_fail_closed_before_detector",
+    "source_hash_matches": 1,
+    "source_hash_mismatches": 16
+  }
+}
