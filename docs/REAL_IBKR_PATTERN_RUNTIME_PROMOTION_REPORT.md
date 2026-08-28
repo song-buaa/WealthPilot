@@ -90,6 +90,12 @@ to Pattern Core, resolves only approved calibration scopes, and returns the
 existing `PatternEvidenceBundle` contract. Dataset v2 is never runtime market
 data. An unpromoted exact scope returns before an IBKR connection is opened.
 
+Runtime detector input is bounded to the latest 300 fully closed sessions. This
+exceeds the strictest promoted `minimum_history_bars` contract (80) while keeping
+the six-pattern replay inside the existing 30-second Decision sidecar budget.
+The bounded input receives a new canonical source hash; no stale full-history
+hash is reused.
+
 The provider source uses `readonly=True`, `StartupFetch(0)`, and exposes no
 account, portfolio or order method.
 

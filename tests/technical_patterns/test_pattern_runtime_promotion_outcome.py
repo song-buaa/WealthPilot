@@ -16,6 +16,8 @@ from backend.services.technical_patterns.calibration import (
 )
 from backend.services.technical_patterns.runtime_provider import (
     PromotedIBKRPatternEvidenceProvider,
+    RUNTIME_BAR_WINDOW,
+    _bounded_runtime_series,
 )
 
 
@@ -120,6 +122,23 @@ def test_runtime_provider_does_not_open_ibkr_for_unpromoted_scope():
     )
     assert calls == 0
     assert bundles[0].reason == "exact_runtime_pattern_scope_not_promoted"
+
+
+def test_runtime_provider_uses_current_data_with_a_deterministic_bounded_window():
+    from backend.services.pattern_data.immutable_dataset import ImmutablePatternDataset
+    from backend.services.pattern_data.contracts import build_source_bar_hash
+
+    dataset = ImmutablePatternDataset(
+        REPO_ROOT / "docs/pattern_review/REAL_IBKR_PATTERN_DATASET_V2_MANIFEST.json",
+        REPO_ROOT,
+    )
+    captured = dataset.load_series("AAPL")
+    bounded = _bounded_runtime_series(captured)
+
+    assert len(bounded.bars) == RUNTIME_BAR_WINDOW == 300
+    assert bounded.bars == captured.bars[-RUNTIME_BAR_WINDOW:]
+    assert bounded.source_bar_hash == build_source_bar_hash(bounded.bars)
+    assert bounded.source_bar_hash != captured.source_bar_hash
 
 
 def test_capture_read_accounting_has_no_account_or_mutation_surface():

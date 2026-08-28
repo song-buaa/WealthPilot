@@ -6,8 +6,12 @@ import os
 from dataclasses import replace
 from typing import Callable
 
-from backend.services.pattern_data import InstrumentQuery
-from backend.services.pattern_data.ibkr_adapter import IBKRPatternDataAdapter
+from backend.services.pattern_data import CanonicalPatternSeries, InstrumentQuery
+from backend.services.pattern_data.contracts import build_source_bar_hash
+from backend.services.pattern_data.ibkr_adapter import (
+    IBKRPatternAdapterConfig,
+    IBKRPatternDataAdapter,
+)
 from backend.services.pattern_data.ibkr_source import IBKRHistoricalDataSource
 
 from .calibration import build_approved_runtime_calibration_registry
@@ -18,6 +22,9 @@ from .detectors.framework import DetectorFramework
 from .evidence import PatternEvidenceAdapter, PatternEvidenceBundle
 from .indicators import TalibIndicatorLayer
 from .real_review import _bindings
+
+
+RUNTIME_BAR_WINDOW = 300
 
 
 class PromotedIBKRPatternEvidenceProvider:
@@ -51,7 +58,15 @@ class PromotedIBKRPatternEvidenceProvider:
 
         source = self._source_factory()
         try:
-            result = IBKRPatternDataAdapter(source).get_series(
+            result = IBKRPatternDataAdapter(
+                source,
+                config=IBKRPatternAdapterConfig(
+                    target_bar_count=RUNTIME_BAR_WINDOW,
+                    durations=("2 Y",),
+                    schedule_calendar_days=500,
+                    schedule_page_sessions=365,
+                ),
+            ).get_series(
                 InstrumentQuery(
                     symbol=target.symbol,
                     exchange="SMART",
@@ -70,7 +85,8 @@ class PromotedIBKRPatternEvidenceProvider:
                 ),
             )
 
-        core_input = PatternInputMapper().map_series(result.series)
+        runtime_series = _bounded_runtime_series(result.series)
+        core_input = PatternInputMapper().map_series(runtime_series)
         core_input = replace(core_input, market=target.market)
         framework = DetectorFramework(
             calibrations=_ApprovedCalibrationProvider(self._registry),
@@ -141,4 +157,17 @@ def _default_source() -> IBKRHistoricalDataSource:
         port=int(os.getenv("IBKR_PORT", "4001")),
         client_id=int(os.getenv("IBKR_PATTERN_CLIENT_ID", "41")),
         timeout=float(os.getenv("IBKR_PATTERN_TIMEOUT", "15")),
+    )
+
+
+def _bounded_runtime_series(
+    series: CanonicalPatternSeries,
+) -> CanonicalPatternSeries:
+    """Keep runtime below the Decision sidecar deadline without changing Core."""
+
+    bars = series.bars[-RUNTIME_BAR_WINDOW:]
+    return replace(
+        series,
+        bars=bars,
+        source_bar_hash=build_source_bar_hash(bars),
     )
