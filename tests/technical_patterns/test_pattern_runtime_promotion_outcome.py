@@ -4,25 +4,25 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
+from backend.services.pattern_data.immutable_dataset import content_hash
 from backend.services.technical_patterns.calibration import (
-    ApprovedRuntimeCalibrationRegistry,
+    RuntimeCalibrationNotPromoted,
+    RuntimeCalibrationScope,
+    build_approved_runtime_calibration_registry,
+    build_dataset_v2_runtime_promotions,
     build_runtime_candidate_freezes,
 )
-from backend.services.technical_patterns.core.identity import stable_hash
-from backend.services.technical_patterns.decision_integration import (
-    DecisionPatternEvidenceCollector,
-    PatternDecisionTarget,
-    PatternInvocationScope,
-)
-from backend.services.technical_patterns.evidence import (
-    PatternEvidenceResultState,
+from backend.services.technical_patterns.runtime_provider import (
+    PromotedIBKRPatternEvidenceProvider,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = (
     REPO_ROOT
-    / "docs/pattern_review/REAL_IBKR_PATTERN_RUNTIME_VALIDATION_MANIFEST.json"
+    / "docs/pattern_review/REAL_IBKR_PATTERN_RUNTIME_VALIDATION_V2_MANIFEST.json"
 )
 
 
@@ -30,106 +30,112 @@ def _manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-def test_real_runtime_validation_manifest_is_hash_bound_and_scope_complete():
+def test_dataset_v2_validation_manifest_is_hash_bound_and_scope_complete():
     manifest = _manifest()
     recorded_hash = manifest.pop("manifest_hash")
 
-    assert stable_hash(manifest) == recorded_hash
+    assert content_hash(manifest) == recorded_hash
+    assert manifest["evaluation_authority"] == "IMMUTABLE_DATASET_V2_ARTIFACT"
+    assert manifest["ibkr_reads_after_capture"] == 0
     assert len(manifest["promotion_scopes"]) == 12
-    assert len(
-        {
-            (item["pattern_type"], item["economic_asset_class"])
-            for item in manifest["promotion_scopes"]
-        }
-    ) == 12
     assert Counter(item["verdict"] for item in manifest["promotion_scopes"]) == {
-        "DATA_QUALITY_BLOCKED": 9,
+        "READY_FOR_RUNTIME_PROMOTION": 9,
         "INSUFFICIENT_REAL_CASE_EVIDENCE": 3,
     }
-    assert manifest["approved_runtime_scope_count"] == 0
-    assert manifest["runtime_provider_activated"] is False
 
 
-def test_holdout_results_use_exact_frozen_hashes_without_tuning():
-    manifest = _manifest()
-    candidate_hashes = {
-        (item.scope.pattern_type, item.scope.economic_asset_class): (
-            item.final_parameter_hash
-        )
+def test_nine_scopes_use_one_hash_through_all_three_partitions():
+    candidates = {
+        (item.scope.pattern_type, item.scope.economic_asset_class): item
         for item in build_runtime_candidate_freezes()
     }
-
-    assert manifest["threshold_adjustment_attempt_count"] == 0
-    assert manifest["holdout"]["detector_tuning_after_open"] is False
-    assert manifest["holdout"]["source_hash_matches"] == 17
-    assert manifest["holdout"]["source_hash_mismatches"] == 0
-    assert Counter(
-        item["holdout_result"] for item in manifest["promotion_scopes"]
-    ) == {"PASS": 9, "INSUFFICIENT_REAL_CASE_EVIDENCE": 3}
-    for item in manifest["promotion_scopes"]:
+    for item in _manifest()["promotion_scopes"]:
         key = (item["pattern_type"], item["economic_asset_class"])
-        assert item["parameter_hash"] == candidate_hashes[key]
+        assert item["parameter_hash"] == candidates[key].final_parameter_hash
+        assert item["parameter_hash_consistent"] is True
+        if item["verdict"] == "READY_FOR_RUNTIME_PROMOTION":
+            assert item["development_sanity"] == "PASS"
+            assert item["holdout_result"] == "PASS"
+            assert item["untouched_result"] == "PASS"
+            assert {
+                detail["parameter_hash"]
+                for detail in item["partition_details"].values()
+            } == {item["parameter_hash"]}
 
 
-def test_untouched_source_drift_blocks_before_detector_without_cherry_pick():
-    untouched = _manifest()["untouched_validation"]
-
-    assert untouched["detector_run"] is False
-    assert untouched["source_hash_matches"] == 1
-    assert untouched["source_hash_mismatches"] == 16
-    assert len(untouched["mismatches"]) == 16
-    assert {item["symbol"] for item in untouched["mismatches"]} == {
-        "AAPL",
-        "MSFT",
-        "NVDA",
-        "JPM",
-        "XOM",
-        "JNJ",
-        "SPY",
-        "QQQ",
-        "IWM",
-        "XLK",
-        "XLF",
-        "XLE",
-        "AGG",
-        "TLT",
-        "IEF",
-        "SHY",
+def test_three_fixed_income_evidence_gaps_remain_closed():
+    scopes = {
+        (item["pattern_type"], item["economic_asset_class"]): item
+        for item in _manifest()["promotion_scopes"]
     }
+    for key in (
+        ("breakdown", "FIXED_INCOME"),
+        ("rectangle", "FIXED_INCOME"),
+        ("double_bottom", "FIXED_INCOME"),
+    ):
+        item = scopes[key]
+        assert item["verdict"] == "INSUFFICIENT_REAL_CASE_EVIDENCE"
+        assert item["development_sanity"] == "NOT_REOPENED"
+        assert item["untouched_result"] == "NOT_OPENED"
+        assert item["partition_details"] == {}
 
 
-def test_zero_promoted_scopes_keep_registry_and_decision_provider_fail_closed():
-    registry = ApprovedRuntimeCalibrationRegistry(
-        build_runtime_candidate_freezes(),
-        (),
-    )
-    assert registry.snapshot() == ()
-
-    snapshot = DecisionPatternEvidenceCollector().collect(
-        PatternInvocationScope.SINGLE,
-        (
-            PatternDecisionTarget(
-                requested_symbol="AAPL:US",
-                symbol="AAPL",
+def test_approved_registry_is_exactly_the_nine_promoted_scopes():
+    registry = build_approved_runtime_calibration_registry()
+    assert len(build_dataset_v2_runtime_promotions()) == 9
+    assert len(registry.snapshot()) == 9
+    with pytest.raises(RuntimeCalibrationNotPromoted):
+        registry.resolve(
+            RuntimeCalibrationScope(
                 market="US",
-                currency="USD",
-                economic_asset_class="EQUITY",
-            ),
-        ),
+                economic_asset_class="FIXED_INCOME",
+                timeframe="1d",
+                pattern_family="range",
+                pattern_type="rectangle",
+            )
+        )
+
+
+def test_runtime_provider_does_not_open_ibkr_for_unpromoted_scope():
+    calls = 0
+
+    def forbidden_source():
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unpromoted scope must fail before a live read")
+
+    provider = PromotedIBKRPatternEvidenceProvider(source_factory=forbidden_source)
+    from backend.services.technical_patterns.decision_integration import (
+        PatternDecisionTarget,
     )
-    assert snapshot is not None
-    assert snapshot.bundles[0].result_state is PatternEvidenceResultState.DATA_UNAVAILABLE
-    assert snapshot.bundles[0].reason == "runtime_pattern_provider_not_promoted"
+
+    bundles = provider.collect(
+        PatternDecisionTarget(
+            requested_symbol="BTC:US",
+            symbol="BTC",
+            market="US",
+            currency="USD",
+            economic_asset_class="CRYPTO",
+        )
+    )
+    assert calls == 0
+    assert bundles[0].reason == "exact_runtime_pattern_scope_not_promoted"
 
 
-def test_live_read_accounting_has_no_account_or_mutation_surface():
-    manifest = _manifest()
-    accounting = manifest["read_accounting"]
-
-    assert accounting["contract_details_requests"] == 17
-    assert accounting["historical_requests"] == 17
-    assert accounting["schedule_requests"] == 102
-    assert accounting["account_data_requests"] == 0
-    assert accounting["broker_mutations"] == 0
-    assert accounting["order_mutations"] == 0
-    assert set(manifest["mutations"].values()) == {0}
+def test_capture_read_accounting_has_no_account_or_mutation_surface():
+    dataset = json.loads(
+        (
+            REPO_ROOT
+            / "docs/pattern_review/REAL_IBKR_PATTERN_DATASET_V2_MANIFEST.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert dataset["capture_read_accounting"] == {
+        "contract_details": 17,
+        "historical_data": 17,
+        "schedule": 102,
+        "account_requests": 0,
+        "portfolio_requests": 0,
+        "order_requests": 0,
+        "broker_mutations": 0,
+        "order_mutations": 0,
+    }

@@ -42,6 +42,8 @@ from .runtime_registry import (
     RuntimeCalibrationScope,
     RuntimePromotionVerdict,
     RuntimeScopePromotionEvidence,
+    build_approved_runtime_calibration_registry,
+    build_dataset_v2_runtime_promotions,
     build_runtime_candidate_freezes,
 )
 from .validation import (
@@ -87,6 +89,8 @@ __all__ = [
     "RuntimeCalibrationScope",
     "RuntimePromotionVerdict",
     "RuntimeScopePromotionEvidence",
+    "build_approved_runtime_calibration_registry",
+    "build_dataset_v2_runtime_promotions",
     "SIX_PATTERN_BINDINGS",
     "US_ASCENDING_TRIANGLE_DEVELOPMENT_VERSION",
     "US_DOUBLE_REVERSAL_DEVELOPMENT_VERSION",

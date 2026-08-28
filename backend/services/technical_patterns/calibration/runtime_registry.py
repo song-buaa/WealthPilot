@@ -32,19 +32,19 @@ GOVERNANCE_ACCEPTANCE_RECORD_HASH = (
     "f11781a6fb034c6cd6ad192bb6610876ca8d1613aa2fe12a7ae53a0d40c693bd"
 )
 REAL_DATASET_MANIFEST_HASH = (
-    "a44a3fe2a77d6b36b41fcae29ab4f664ddc3c077331d2c9829bf20ef2494e4f2"
+    "032c71380c775b4901c8ae73e1d1c730facfa41e032df8df30a413dad98dc12c"
 )
 REAL_REVIEW_MANIFEST_HASH = (
     "c5c70ba339c93809e8e6244639265fc0cabed576f970b1dd074b5efac78866e4"
 )
 PATTERN_DATA_ADAPTER_VERSION = "wp-ibkr-pattern-adapter-v1-schedule-paging-v1"
-RUNTIME_CANDIDATE_FREEZE_TIMESTAMP = "2026-08-27T20:43:11+08:00"
+RUNTIME_CANDIDATE_FREEZE_TIMESTAMP = "2026-08-28T16:00:00+08:00"
 
 _RUNTIME_VERSION_BY_FAMILY = {
-    "level_break": "wp-us-level-break-runtime-candidate-v1",
-    "range": "wp-us-rectangle-runtime-candidate-v1",
-    "triangle": "wp-us-ascending-triangle-runtime-candidate-v1",
-    "reversal": "wp-us-double-reversal-runtime-candidate-v1",
+    "level_break": "wp-us-level-break-runtime-candidate-v2",
+    "range": "wp-us-rectangle-runtime-candidate-v2",
+    "triangle": "wp-us-ascending-triangle-runtime-candidate-v2",
+    "reversal": "wp-us-double-reversal-runtime-candidate-v2",
 }
 class RuntimePromotionVerdict(str, Enum):
     READY_FOR_RUNTIME_PROMOTION = "READY_FOR_RUNTIME_PROMOTION"
@@ -312,3 +312,47 @@ def build_runtime_candidate_freezes() -> tuple[FrozenRuntimeCalibrationCandidate
             )
         )
     return tuple(sorted(freezes, key=lambda item: item.scope))
+
+
+_PROMOTED_DATASET_V2_SCOPES = frozenset(
+    {
+        ("breakout", "EQUITY"),
+        ("breakout", "FIXED_INCOME"),
+        ("breakdown", "EQUITY"),
+        ("rectangle", "EQUITY"),
+        ("ascending_triangle", "EQUITY"),
+        ("ascending_triangle", "FIXED_INCOME"),
+        ("double_top", "EQUITY"),
+        ("double_top", "FIXED_INCOME"),
+        ("double_bottom", "EQUITY"),
+    }
+)
+
+
+def build_dataset_v2_runtime_promotions() -> tuple[RuntimeScopePromotionEvidence, ...]:
+    """Bind the nine artifact-validated scopes; excluded scopes stay absent."""
+
+    return tuple(
+        RuntimeScopePromotionEvidence(
+            scope=candidate.scope,
+            verdict=RuntimePromotionVerdict.READY_FOR_RUNTIME_PROMOTION,
+            calibration_version=candidate.calibration_version,
+            parameter_hash=candidate.final_parameter_hash,
+            holdout_result="PASS",
+            untouched_result="PASS",
+            governance_acceptance=GOVERNANCE_ACCEPTANCE,
+        )
+        for candidate in build_runtime_candidate_freezes()
+        if (
+            candidate.scope.pattern_type,
+            candidate.scope.economic_asset_class,
+        ) in _PROMOTED_DATASET_V2_SCOPES
+    )
+
+
+def build_approved_runtime_calibration_registry() -> ApprovedRuntimeCalibrationRegistry:
+    candidates = build_runtime_candidate_freezes()
+    return ApprovedRuntimeCalibrationRegistry(
+        candidates,
+        build_dataset_v2_runtime_promotions(),
+    )

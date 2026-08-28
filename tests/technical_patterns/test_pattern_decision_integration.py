@@ -526,15 +526,14 @@ def test_integration_module_has_no_execution_authority_imports():
     )
 
 
-def test_default_runtime_provider_is_explicitly_unavailable_and_read_only():
-    snapshot = DecisionPatternEvidenceCollector().collect(
-        PatternInvocationScope.SINGLE,
-        (_target(),),
+def test_default_runtime_provider_is_promoted_read_only_ibkr_provider(monkeypatch):
+    from backend.services.technical_patterns.runtime_provider import (
+        PromotedIBKRPatternEvidenceProvider,
     )
 
-    assert snapshot is not None
-    assert snapshot.bundles[0].result_state is PatternEvidenceResultState.DATA_UNAVAILABLE
-    assert snapshot.bundles[0].reason == "runtime_pattern_provider_not_promoted"
+    monkeypatch.delenv("AV_DEV_MOCK", raising=False)
+    provider = integration.build_runtime_pattern_evidence_provider()
+    assert isinstance(provider, PromotedIBKRPatternEvidenceProvider)
 
 
 def test_single_decision_completes_with_identical_persisted_and_done_snapshot(
@@ -546,6 +545,14 @@ def test_single_decision_completes_with_identical_persisted_and_done_snapshot(
     persisted: list[dict | None] = []
     reviewed: list[ExecutionOutput] = []
     expressed: list[tuple[str, str]] = []
+
+    class ArtifactFreeCollector:
+        def collect(self, scope, targets):
+            return DecisionPatternEvidenceSnapshot.from_bundles(
+                scope,
+                tuple(target.requested_symbol for target in targets),
+                (_bundle(PatternType.BREAKOUT),),
+            )
 
     class PlanningAgent:
         def run(self, *args, **kwargs):
@@ -609,6 +616,11 @@ def test_single_decision_completes_with_identical_persisted_and_done_snapshot(
     monkeypatch.setattr(decision_service_v3, "get_executing_agent", ExecutingAgent)
     monkeypatch.setattr(decision_service_v3, "get_expressing_agent", ExpressingAgent)
     monkeypatch.setattr(decision_service_v3, "get_reviewing_agent", ReviewingAgent)
+    monkeypatch.setattr(
+        decision_service_v3,
+        "DecisionPatternEvidenceCollector",
+        ArtifactFreeCollector,
+    )
     monkeypatch.setattr(decision_service_v3, "parse_trade_intent", lambda *args: None)
     monkeypatch.setattr(decision_service, "restore_conversation_context", lambda *args: None)
     monkeypatch.setattr(decision_service, "save_conversation_turn", save_turn)

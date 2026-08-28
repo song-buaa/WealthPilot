@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -118,9 +119,13 @@ class UnavailableDecisionPatternEvidenceProvider:
 
 
 def build_runtime_pattern_evidence_provider() -> DecisionPatternEvidenceProvider:
-    """Application seam for Stage 2C+; no pilot calibration is activated here."""
+    """Build the current-IBKR provider backed by exact promoted v2 scopes."""
 
-    return UnavailableDecisionPatternEvidenceProvider()
+    if os.getenv("AV_DEV_MOCK", "0") == "1":
+        return UnavailableDecisionPatternEvidenceProvider()
+    from .runtime_provider import PromotedIBKRPatternEvidenceProvider
+
+    return PromotedIBKRPatternEvidenceProvider()
 
 
 def _bundle_requested_symbol(bundle: PatternEvidenceBundle) -> str:

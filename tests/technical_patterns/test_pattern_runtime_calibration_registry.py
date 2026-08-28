@@ -66,7 +66,7 @@ def test_all_twelve_real_development_scopes_are_frozen_without_threshold_adjustm
     assert len(candidates) == 12
     assert len({candidate.scope for candidate in candidates}) == 12
     assert all(candidate.adjustment_attempt_count == 0 for candidate in candidates)
-    assert all("runtime-candidate-v1" in candidate.calibration_version for candidate in candidates)
+    assert all("runtime-candidate-v2" in candidate.calibration_version for candidate in candidates)
     assert all("development-v1" not in candidate.calibration_version for candidate in candidates)
 
 
@@ -85,7 +85,13 @@ def test_candidate_lineage_matches_committed_real_review_manifest():
     for candidate in build_runtime_candidate_freezes():
         key = (candidate.scope.pattern_type, candidate.scope.economic_asset_class)
         assert candidate.development_parameter_hash == expected[key]
-        assert candidate.dataset_manifest_hash == manifest["dataset_manifest_hash"]
+        dataset_v2 = json.loads(
+            (
+                REPO_ROOT
+                / "docs/pattern_review/REAL_IBKR_PATTERN_DATASET_V2_MANIFEST.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert candidate.dataset_manifest_hash == dataset_v2["dataset_manifest_hash"]
         assert candidate.review_manifest_hash == manifest["manifest_hash"]
         assert candidate.governance_acceptance == GOVERNANCE_ACCEPTANCE
 
