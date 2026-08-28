@@ -1,0 +1,925 @@
+{
+  "adapter_version": "wp-ibkr-pattern-adapter-v1-schedule-paging-v1",
+  "capture_as_of": "2026-08-28T08:00:00+00:00",
+  "capture_read_accounting": {
+    "account_requests": 0,
+    "broker_mutations": 0,
+    "contract_details": 17,
+    "historical_data": 17,
+    "order_mutations": 0,
+    "order_requests": 0,
+    "portfolio_requests": 0,
+    "schedule": 102
+  },
+  "dataset_manifest_hash": "032c71380c775b4901c8ae73e1d1c730facfa41e032df8df30a413dad98dc12c",
+  "dataset_version": "wp-real-ibkr-pattern-dataset-v2",
+  "instrument_artifacts": [
+    {
+      "ISIN": "US0378331005",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "0cb2971efd20d9ccd5c514d46289f11107906bdc7a0ec9a5f534c0ce351eb9a5",
+      "artifact_path": "data/pattern_evaluation/v2/AAPL.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 265598,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:265598",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "39dc4404462f5e33314b83ea2dce5abb63d5a0fcb6dd05441713e7b897bffd4b",
+          "partition_hash": "e7c5b169a9a61a5ba06c870e029e65a04c260f2a5e20a110cff8caae0eb63809",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "990879c8a9ef2ca8c24be3f11b21508f54a5600473af994da44efd8a6085eaf4",
+          "partition_hash": "2966db1e8e48c4188829f62db0b2729a1eaaafab487079589fb5e10ab505b5c1",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "f0eb41e65fd1628feea5d03ceca772320f0cc23eda9a0fcbec0238ed648a71a6",
+          "partition_hash": "967824134b22369e263b89f66b6ec98dd6eb43ecb25c0ae8659b20e13ce6ce81",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "AAPL",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642872265",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "f49aae03e0d4a509c666cd1ad374e8882051f0e6b425fccb35eb660249fcd3c8",
+      "artifact_path": "data/pattern_evaluation/v2/AGG.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 25985141,
+      "currency": "USD",
+      "economic_asset_class": "FIXED_INCOME",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:25985141",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "34021b139326d8c048e4d41ba263914a7510dc01cf11c44827aca2affa3ddfdb",
+          "partition_hash": "a6ab18a1b782fe93023c693cd1d61cf2203094f9682a2e2be7ac4bee3198451f",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "d9c59fdcaebe84455d4ee37fd7de47175ad10691374ab7cf9898a8b489c178c5",
+          "partition_hash": "407dc01543ab88b4c4e87119cdcbfdcb762f872c5d1486b4fc8c5f285f19e89e",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "d39ce84a10413f627892aa775f4fa599f424140598b6b3f431182da3fe916e8f",
+          "partition_hash": "dbad7dd629dfc366569afeb1938532fd5a23298c03e1dacc4c9a01dfde5c9103",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "AGG",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642874402",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "bf92db7af4e9eae528187b39f890194335ab1d22a252aa4d54d10d4c446ead5c",
+      "artifact_path": "data/pattern_evaluation/v2/IEF.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 15547844,
+      "currency": "USD",
+      "economic_asset_class": "FIXED_INCOME",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:15547844",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "e0a7f9d815856bfccd52d7a79efe79f4e6369ddf89baf5c778eea2fed08b8aed",
+          "partition_hash": "0d2c7b872208c12ff8f3e8d2257851cef60e36fa7503e3f328eaafa7ec72a5be",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "656e5ddb8b012cd17669ae73cc74b6730a1757f669196d03e62bb1cd0cb93420",
+          "partition_hash": "a073d884f8a3bcb872ddb62768de0ebf8046b91cd59c8999dc03185d5f6cc04e",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "20d1a333bc682ebefc1ce5c48a9d598f0631ad5b06b1c961e3a17f1a9ba1c6d9",
+          "partition_hash": "6a64c083ec8baa98791a6f0577e10c4aa7b004815abe4c2ed5f8f4bd281f4f64",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "IEF",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642876555",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "34a82b4c2087277234bf2f678ea71984cb2d1baef542da7da809913ae967ab95",
+      "artifact_path": "data/pattern_evaluation/v2/IWM.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 9579970,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:9579970",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "87f2c8af6f37027fd24d5cfb2827f3e8ee87bbacb53e878269c11148683c3090",
+          "partition_hash": "879b5904cd5e96fe701decd82ea045219474024aa401ced17915961189f10777",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "3ac2165ff45f7f8402764b45329b835c3ac3fb1678cc53c6fdd866022184eaad",
+          "partition_hash": "8b6014380dfc73248378c82f370102e9b517a236e78de95f66818c8c35662f49",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "6052a0b4d9af05a8bd9d18649f4d1db0e3dc0e10ce339d9f254cdff490f80db3",
+          "partition_hash": "5798289d8b88bc0790b878f9f0ec70362d289cfeb45a0d2dff9b81a508736548",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "IWM",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4781601046",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "5afe1d9488ad0c43cff67da93dda3722866766f76f94ab3e76b45c0da4be3d29",
+      "artifact_path": "data/pattern_evaluation/v2/JNJ.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 8719,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:8719",
+      "last_session": "2026-08-27",
+      "market": "NYSE",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "4aa4be3cb3ad52f73f5c75093ad2f35c50e01ddc375ceb26d77a1bef76258733",
+          "partition_hash": "ec34e7d3f6bb282e15867b8203257f988f299ffba1d0c3004088e25e5ba9b03c",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "6aa11618a034b9442a3b3f472451be6cc0fa1013f42f142d138d4e5cc7c3a861",
+          "partition_hash": "8c0d6151e71ce332e102308b982c4fe0042597156aed25274f48456149efc89f",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "e1643f6ac670852c4241a56b824aabc0424303ff6840e576a550c6ebff82dcf3",
+          "partition_hash": "7d2030f369bb86f884bc4d44b31252178b4d3f35f4858e335eae0fdcf8516205",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "JNJ",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US46625H1005",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "9923b75551c23b143862f8fb178171f3c14869521e5fe2257224f5f5761832ac",
+      "artifact_path": "data/pattern_evaluation/v2/JPM.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 1520593,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:1520593",
+      "last_session": "2026-08-27",
+      "market": "NYSE",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "7b36de1a2f59c3ff6975e2492375bc797e750a4e98cb9e864b9118c34ea04e34",
+          "partition_hash": "79999eedad8acb198b5db735d4465ebc67ba00726db7e886afaa7eecee89a465",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "e7eaff212866ad53323a46ed48c0d568b5ff157127dd24e1c93fec651ed65fcb",
+          "partition_hash": "3442b1c37efc33055f93d2da04c7dc8659d91b4012e0ebaefa60ee18a12fcf9d",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "15c2a0faea54dd3024b644f46fa510e552f350636f66123d7b4f29d2ed69c041",
+          "partition_hash": "1c78e68eb14aebd8ee7a726da05cd666962a536ff396a8b12912ffb9d9bf07e1",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "JPM",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642872422",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "c5d5a691a14f0ebf3c5cc5a9f8034a429727b72b927e4f93c4bbee18a9eb2028",
+      "artifact_path": "data/pattern_evaluation/v2/LQD.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 15547816,
+      "currency": "USD",
+      "economic_asset_class": "FIXED_INCOME",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:15547816",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "23a3c496b6730bdf16647f28aeb4452e5de3f814dd710a53bd5ded504fc05796",
+          "partition_hash": "ca86205fbad40f3d7aacb22fe300b7c3670fd7b930c25c97e3e36db414ab4386",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "2d923c63bb61c579ccbd420701fbb014ae07d7fc4aad6df0a02f04cec6eaa466",
+          "partition_hash": "62f171dabef5ab35608b1509719b0544102ff5fc5649d7f78f983684487ad0b5",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "54b1ccb2d3a92eb7656905146dcea8e8b78caa440ead1caa607188115b7de844",
+          "partition_hash": "f826497b40913f1408c9797b834ce579e06fb5603d940df1374e1a0346fb579d",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "LQD",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US5949181045",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "77c0135ad0edc2c8d1ac66beee67f73246e24413ebd19cb466cf20f6300a6cf2",
+      "artifact_path": "data/pattern_evaluation/v2/MSFT.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 272093,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:272093",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "026d08710b6250ee81dc6ac4ae0317a2026e9f08cd871e4cd5047d948eeb82b0",
+          "partition_hash": "0f040c18f5e9fbdc3963d7bdbd8d8ccb0428245326dacfb2194d8511895c22a5",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "91b7e04b10f43dea0dce2f8117e45680d66320f31f420c9a1113b1b8a269b606",
+          "partition_hash": "3bcb35f462e8d8d0d585d9bdf421935995fe3819732d0d3295246ddb71cd3ccb",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "5acbfb938da6e0100c48230e697e7e0dc6fefb4c15332453536c97858b37bd95",
+          "partition_hash": "ad4d735dc20021697f2d9a864f16f51629c9957da38a6cba6500ead1705c2695",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "MSFT",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US67066G1040",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "80cfd6b84e16c13c56ec231ae6730abd152096bb1827ef4aaefe90fda27f65b7",
+      "artifact_path": "data/pattern_evaluation/v2/NVDA.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 4815747,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:4815747",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "cb49ca012c5c799e80d23c34c8e567d1f4bb7b6f7d9b8e7937a716fdf2f59b45",
+          "partition_hash": "850325bf556d8e94029278076ef2ef74f0c13444db6c311842c48c03284d5bcc",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "3995591dae1bcd02ba7a41194507850493133abca573aeb80de56d90a730a2dd",
+          "partition_hash": "82d316979f317261359328595dd629915e20f3bdc4d26f374d07d8d88e4cd650",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "e3c970899f802838c0a52b5f41374ed5b12b2e82987a7c7a041516f986558bc3",
+          "partition_hash": "d7c519a37e67dd3ce4b039aff53ea8ba3e20ea02bc033c7782605b719bbaaffc",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "NVDA",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US46090E1038",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "d691a2ab283855745a852b726f376f35def3f13639708faaec58b301ee1ca7ea",
+      "artifact_path": "data/pattern_evaluation/v2/QQQ.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 320227571,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:320227571",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "ee111b2dcb4fc20a5eca2e004b53474a7e3aee2fc41cff45b22e6afae5feb0c6",
+          "partition_hash": "93753d699def0921782cccb7eed57069579a079e469bd40428f4740ff6d889bd",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "b595144e0430d183e3be6e14a641bda2ca5de4618ca3dc736e7458b104ed3e11",
+          "partition_hash": "fe5b733abd2d3d434fc1d89f9f410762591b3ae7d152575bf4e05c4390d2a8be",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "ccb633d658091e3e2eb8057b2565c812186b3562251f89168f0161416dc305bd",
+          "partition_hash": "b8aa6d98b7117ebf02fc14be064516d311f9644b8d835cd922740e4f03907eed",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "QQQ",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642874576",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "7221ebb54ec0ae604323b8236f5408248dfe744018a13a7c90793910d6b17ff7",
+      "artifact_path": "data/pattern_evaluation/v2/SHY.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 15547851,
+      "currency": "USD",
+      "economic_asset_class": "FIXED_INCOME",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:15547851",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "bfc92f973086d1fb2efc5ff5ee1eebbcae96eaa5b569edbfb1ae74ab3ed59c36",
+          "partition_hash": "46c14ffbab384cedcc3c0ac716511ca76ef6141d506184cb4a7b46581c104619",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "29071351e5c332bee6d923569954fab0cd1cd3e9fe6fdd0180ddfddba3b027fb",
+          "partition_hash": "6a42a3637a1c798b1042bb9e5e38fd5d8e2754845637b17ffd88473f6de45a5d",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "40f600fe6721fe57d70c8178bee40e8f3e0a2260265fab79d012f184a4e69b69",
+          "partition_hash": "d3880556a3b8660a8327e75db54867e3102deae996416088a2186a2863e97666",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "SHY",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US78462F1030",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "b2b307e99db69892cf3eb3bf42dea6a8f4db6b650facf78c72c122ead5fa2eb5",
+      "artifact_path": "data/pattern_evaluation/v2/SPY.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 756733,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:756733",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "93e7d54bbd8bb50b25bbb1b13c7689686fd70a6a469594ed75a1a2e845565c8c",
+          "partition_hash": "5522ce87971b77d1d9dfa024786d7052015065c8ea6a822e35ef06a31a7e99ea",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "5c567196be901bf54d148a916bc188d4ef08dd176e0f0b2a15982beb4e20d97f",
+          "partition_hash": "b524f3b28e390f881979ad8d98f7772b547f8cb18073d0ae82e2d7f32a27cc6d",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "62ce9014e55138673c56b724ca88330d3428c7567039588e50e329e6cfd49b35",
+          "partition_hash": "06d3be213bbec8a6c99c0dc04f5d7f717729afd7098c79758e9d620a553cf233",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "SPY",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US4642874329",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "3a15d1042519222c3e5f18ca19996b7a92f84d2c9cb96b50ddf4c60b64b1d0a2",
+      "artifact_path": "data/pattern_evaluation/v2/TLT.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 15547841,
+      "currency": "USD",
+      "economic_asset_class": "FIXED_INCOME",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:15547841",
+      "last_session": "2026-08-27",
+      "market": "NASDAQ",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "a229b6091c9f4ead506256015da1ed32851f3f614c96a40a520056ec3dd233b7",
+          "partition_hash": "097c4cda9d1fa1bda00281ab66e561885e2dd69c72fd49e8b5a77851bf542201",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "2e6fb0417e7873ab967dc9c154a0bfb09d1c6d13d3b9df00d21c3d7ccd08f010",
+          "partition_hash": "091701442cd5dc902fb1b0af4995bb033a1f8e06b4b2da6e40ab619f2021f55a",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "ed6e7b8e915f14c6c1692ff33a0a1ddc5d4f4cdaa6b914a96e0636e116830525",
+          "partition_hash": "2b3092beb752b58a3f53afec248de53e49e929f8ca8949c29ad5a10d7df9b976",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "TLT",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US81369Y5069",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "3efcf37a8d2b6c05246461e953b70a947ae60930c51f88f15161bc82c4b5ebfd",
+      "artifact_path": "data/pattern_evaluation/v2/XLE.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 4215217,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:4215217",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "2630f0082f8ddcfef1456edc0485e0d0406bdbb5664591e8eb7e21f745209013",
+          "partition_hash": "3d71b16535076df1d82a4c321ef516341b4e88db02671a0bfc7e6947ce7b740a",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "75e49a6627de5c8b49092f281556d0594a500b693215157da249fef211510116",
+          "partition_hash": "fb24619a748a1ee13baef180a9753db09561023886a76a8eee8e456a82e8c1f4",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "b3e1932b8a9bcacc0d2269e6702af69a79ab681b3613a4a90805ab6de4e9d18a",
+          "partition_hash": "fe15bb561aa8d57aa887e755490e59ac7bf7089ac80ca4e6370bb7f173bc99be",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "XLE",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US81369Y6059",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "5b290231cc29b0e5dd3b2793c064a03537c307bd381765e951253e4e072cf452",
+      "artifact_path": "data/pattern_evaluation/v2/XLF.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 4215220,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:4215220",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "f7b2bb91caee39609a43c10307205679f0070a77e27014e496ddb8ceaa4cd425",
+          "partition_hash": "b767ace1e2fb6c7c035f641aeb349b6cf38d3f2ed643bac29c660bbc718ba58c",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "16e7a790e93c107f495d610eb9a6777255d32e3716af4ef6f16e79e4e35a9616",
+          "partition_hash": "507cf77a0fb0441dcd17ce5816b1c2fe6cd0af00e4a632cbc54997b8135bbad2",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "5c18b89a6531b3cbe6df4ba30a7abd35680d8e81db63c70a0cb9198c4a6bdc21",
+          "partition_hash": "f462ffd1454ea4dc09f3a77ffc3cfe9b742c8e8c17379c525105a4292c4ed149",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "XLF",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US81369Y8030",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "f41e0c1f68b0fef610217cee72f5c2d9803f691be736c47ccffe7cff4d0f1153",
+      "artifact_path": "data/pattern_evaluation/v2/XLK.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 4215230,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:4215230",
+      "last_session": "2026-08-27",
+      "market": "ARCA",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "ec12f0e6fa799196b24ca655ee13a692764de02603fd1fe0709812f55f9ca1c1",
+          "partition_hash": "f717cd736c30f7067170c7a893ca9c4b9fa008e1ae5fe6b975fbacfdc8474f92",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "3dc15df780ff66639f1eade343f03f6409dc3a6128e47487d106c4c35c1a1c6e",
+          "partition_hash": "7fcc1894b5bcd8ddc4becf346a2d849deb4b7d992635c3028224486cbb5e10ad",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "76d40efd8b38da14b1ec16b6000aafe2ae724a38fef19e3ae0a1f8302c22d1c9",
+          "partition_hash": "ad6af175a8d640507663943958c8a0f41c1500412c29f0e785999ac5f45cb0fd",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "XLK",
+      "timezone": "US/Eastern"
+    },
+    {
+      "ISIN": "US30233Q1085",
+      "adjustment_policy": "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDENDS_UNADJUSTED",
+      "artifact_hash": "e90d00c8f786ff40b0cf53c5b7c2c766078f2947fb2f4dd452e808f1bcdc711a",
+      "artifact_path": "data/pattern_evaluation/v2/XOM.json",
+      "bar_count": 1950,
+      "calendar_version": "IBKR_SCHEDULE_V1:ce9a485e6cb2096b",
+      "conId": 895178251,
+      "currency": "USD",
+      "economic_asset_class": "EQUITY",
+      "first_session": "2018-11-21",
+      "instrument_id": "IBKR:895178251",
+      "last_session": "2026-08-27",
+      "market": "NYSE",
+      "partitions": [
+        {
+          "bar_count": 1008,
+          "end_session": "2022-12-30",
+          "name": "development",
+          "ordered_session_set_hash": "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6",
+          "partition_bars_hash": "7ee6615bd052c11a0a73a9d74f350fb5624423943fac01b2f258df7a4bff53aa",
+          "partition_hash": "969383f7fc67dd2d9878719e0c2423eac0e06fb4f2d05e1ca8a8536c772f8fc5",
+          "requested_end": "2022-12-31",
+          "requested_start": "2019-01-01",
+          "start_session": "2019-01-02"
+        },
+        {
+          "bar_count": 502,
+          "end_session": "2024-12-31",
+          "name": "holdout",
+          "ordered_session_set_hash": "96a8b66531a31014e53988faddf1532580db742c078af83d97e59834a422e096",
+          "partition_bars_hash": "b385bb1ad250ba97e96dd520cdd0d1893731cf184ebe7c1f029fef238396a8fd",
+          "partition_hash": "50a3d5f6c847d0319448bff22752585e1b57e138760d05c6531664c40e51d938",
+          "requested_end": "2024-12-31",
+          "requested_start": "2023-01-01",
+          "start_session": "2023-01-03"
+        },
+        {
+          "bar_count": 414,
+          "end_session": "2026-08-27",
+          "name": "untouched_validation",
+          "ordered_session_set_hash": "dfbc11d3f4efbbfdaf2714db90ad12f86c8a21b51c5c25814f377f872be432e5",
+          "partition_bars_hash": "817f96263388c85a0fc1d626be07a9454e35c260242f3b85bb1b64ee2b0a6016",
+          "partition_hash": "58d058f977e1628ea4899828c351a5c0d702ac00a6b2e381efd5caa98076c3f8",
+          "requested_end": "2026-08-27",
+          "requested_start": "2025-01-01",
+          "start_session": "2025-01-02"
+        }
+      ],
+      "symbol": "XOM",
+      "timezone": "US/Eastern"
+    }
+  ],
+  "partition_definitions": {
+    "development": {
+      "end": "2022-12-31",
+      "start": "2019-01-01"
+    },
+    "holdout": {
+      "end": "2024-12-31",
+      "start": "2023-01-01"
+    },
+    "untouched_validation": {
+      "end": "2026-08-27",
+      "start": "2025-01-01"
+    }
+  },
+  "provider_semantics": {
+    "fully_closed_sessions_only": true,
+    "provider": "IBKR",
+    "timeframe": "1d",
+    "useRTH": true,
+    "whatToShow": "TRADES"
+  },
+  "universe_manifest_hash": "2c008aa6cf7be6fcb341a7ea1d936a8a82b7c17dccdde3a419381bc91161200d",
+  "universe_manifest_path": "docs/pattern_review/REAL_IBKR_PATTERN_UNIVERSE_MANIFEST.json"
+}
