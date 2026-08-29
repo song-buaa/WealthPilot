@@ -1,0 +1,1 @@
+{"user_rules":[{"rule_id":"rent-batch","match_text":"房东","eligibility_status":"ELIGIBLE","primary_category":"HOUSING","secondary_category":"RENT","account_id":"debit","amount":"6500","amount_tolerance":"10","effective_from":"2026-01-01"}]}

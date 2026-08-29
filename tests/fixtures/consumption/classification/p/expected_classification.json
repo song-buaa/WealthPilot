@@ -1,0 +1,1 @@
+{"fields":["eligibility_status","primary_category","secondary_category","inherited_from_event_id"],"results":[{"eligibility_status":"ELIGIBLE","primary_category":"TRAVEL","secondary_category":"ACCOMMODATION","inherited_from_event_id":null},{"eligibility_status":"INELIGIBLE","primary_category":null,"secondary_category":null,"inherited_from_event_id":"p-purchase"}]}

@@ -1,0 +1,1 @@
+[{"event_id":"p-purchase","event_type":"CONSUMPTION","event_date":"2026-07-01","account_id":"cc","descriptor":"酒店","amount":"800"},{"event_id":"p-refund","event_type":"REFUND","event_date":"2026-08-01","account_id":"cc","descriptor":"退款","amount":"800","original_event_id":"p-purchase"}]
