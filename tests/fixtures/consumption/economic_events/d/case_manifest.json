@@ -1,0 +1,1 @@
+{"case_id":"D","business_scenario":"liquidity sweep followed by payment","expected_rule":"DESCRIPTION_RULE","why":"The sweep is neutral cash management and the payment is consumption.","known_ambiguity":"none"}

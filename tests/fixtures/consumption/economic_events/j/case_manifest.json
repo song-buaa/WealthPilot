@@ -1,0 +1,1 @@
+{"case_id":"J","business_scenario":"installment original, payments, unavailable principal and fee","expected_rule":"DESCRIPTION_RULE","why":"Only the original purchase is consumption; unknown original principal is not reverse-engineered.","known_ambiguity":"Installment ledger details are unavailable."}

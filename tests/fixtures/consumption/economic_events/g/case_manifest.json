@@ -1,0 +1,1 @@
+{"case_id":"G","business_scenario":"matched full refund","expected_rule":"AMOUNT_DATE_MATCH","why":"Refund is retained in August while consumption projects net zero in July.","known_ambiguity":"Production matching will need stronger evidence than this golden reference token."}

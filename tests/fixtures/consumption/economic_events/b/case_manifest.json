@@ -1,0 +1,1 @@
+{"case_id":"B","business_scenario":"credit-card purchase plus debit repayment","expected_rule":"DESCRIPTION_RULE","why":"Repayment is independent and never a second consumption.","known_ambiguity":"No per-purchase repayment allocation."}

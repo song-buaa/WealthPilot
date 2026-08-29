@@ -1,0 +1,1 @@
+{"fields":["event_type","economic_direction","resolution_status"],"events":[{"event_type":"DEBT_REPAYMENT","economic_direction":"OUTFLOW","resolution_status":"RESOLVED"},{"event_type":"FEE_INTEREST","economic_direction":"OUTFLOW","resolution_status":"RESOLVED"},{"event_type":"LOAN_DISBURSEMENT","economic_direction":"INFLOW","resolution_status":"RESOLVED"}]}

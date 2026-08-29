@@ -1,0 +1,1 @@
+{"case_id":"N","business_scenario":"cross-batch candidate duplicate","expected_rule":"SOURCE_DEDUP","why":"Two retained Raw facts form one proved source-equivalent event.","known_ambiguity":"Production proof must retain batch provenance."}

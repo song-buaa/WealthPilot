@@ -1,0 +1,1 @@
+{"fields":["event_type","raw_transaction_ids","economic_direction","resolution_status"],"events":[{"event_type":"CONSUMPTION","raw_transaction_ids":["d-pay"],"economic_direction":"OUTFLOW","resolution_status":"RESOLVED"},{"event_type":"LIQUIDITY_SWEEP","raw_transaction_ids":["d-sweep"],"economic_direction":"NEUTRAL","resolution_status":"RESOLVED"}]}

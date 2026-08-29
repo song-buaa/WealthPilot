@@ -1,0 +1,1 @@
+{"case_id":"C","business_scenario":"total credit-card repayment","expected_rule":"DESCRIPTION_RULE","why":"A total repayment is retained without invented transaction allocation.","known_ambiguity":"Repayment-to-purchase allocation is intentionally absent."}

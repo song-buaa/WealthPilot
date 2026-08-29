@@ -1,0 +1,1 @@
+{"case_id":"P","business_scenario":"bank settlement, native CNY and unresolved foreign currency","expected_rule":"BANK_SETTLEMENT / NATIVE_CNY","why":"CNY base amount never relies on a network FX call.","known_ambiguity":"Historical FX fallback is deferred; missing settlement remains FX_REQUIRED."}

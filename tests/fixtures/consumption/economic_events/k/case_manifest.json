@@ -1,0 +1,1 @@
+{"case_id":"K","business_scenario":"salary, provident fund, internal and unknown inbound","expected_rule":"DESCRIPTION_RULE plus ACCOUNT_PAIR_MATCH","why":"Only source-explicit salary/provident fund is income.","known_ambiguity":"Ordinary inbound needs confirmation."}

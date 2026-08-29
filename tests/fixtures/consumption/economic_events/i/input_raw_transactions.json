@@ -1,0 +1,1 @@
+{"owned_account_ids":["cc"],"raw_transactions":[{"raw_id":"i-refund","account_id":"cc","account_type":"CREDIT_CARD","transaction_date":"2026-08-05","posting_date":null,"source_amount":"500.00","currency":"CNY","raw_description":"[REFUND] no safe original"}]}

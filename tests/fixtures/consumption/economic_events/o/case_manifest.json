@@ -1,0 +1,1 @@
+{"case_id":"O","business_scenario":"same-batch ambiguous identical purchases","expected_rule":"DESCRIPTION_RULE","why":"AMBIGUOUS Raw facts never silently merge on a superficial fingerprint.","known_ambiguity":"Source cannot prove the two purchases are duplicates."}

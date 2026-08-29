@@ -1,0 +1,1 @@
+{"fields":["event_type","raw_transaction_ids","amount","resolution_status"],"events":[{"event_type":"CONSUMPTION","raw_transaction_ids":["o-a"],"amount":"50.00","resolution_status":"RESOLVED"},{"event_type":"CONSUMPTION","raw_transaction_ids":["o-b"],"amount":"50.00","resolution_status":"RESOLVED"}]}

@@ -1,0 +1,1 @@
+{"case_id":"H","business_scenario":"matched partial refund","expected_rule":"AMOUNT_DATE_MATCH","why":"The immutable refund event coexists with a deterministically derived purchase net projection.","known_ambiguity":"Persistent event revision/audit representation is deferred to ORM implementation."}

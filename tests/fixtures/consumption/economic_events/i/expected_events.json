@@ -1,0 +1,1 @@
+{"fields":["event_type","analytics_effective_date","resolution_status","resolution_reason","original_event_id"],"events":[{"event_type":"REFUND","analytics_effective_date":null,"resolution_status":"UNMATCHED","resolution_reason":"ORIGINAL_CONSUMPTION_UNMATCHED","original_event_id":null}]}

@@ -1,0 +1,1 @@
+{"case_id":"L","business_scenario":"loan disbursement, principal and interest","expected_rule":"DESCRIPTION_RULE","why":"Loan disbursement is not income and principal is not consumption.","known_ambiguity":"none"}

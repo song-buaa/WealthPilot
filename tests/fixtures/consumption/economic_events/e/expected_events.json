@@ -1,0 +1,1 @@
+{"fields":["event_type","raw_transaction_ids","amount","economic_direction","resolution_status","event_date"],"events":[{"event_type":"INTERNAL_TRANSFER","raw_transaction_ids":["e-a","e-b"],"amount":"50000.00","economic_direction":"NEUTRAL","resolution_status":"RESOLVED","event_date":"2026-07-10"}]}

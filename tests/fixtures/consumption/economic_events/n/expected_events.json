@@ -1,0 +1,1 @@
+{"fields":["event_type","raw_transaction_ids","amount","rule_sources","resolution_status"],"events":[{"event_type":"CONSUMPTION","raw_transaction_ids":["n-a","n-b"],"amount":"88.00","rule_sources":["DESCRIPTION_RULE","SOURCE_DEDUP"],"resolution_status":"RESOLVED"}]}

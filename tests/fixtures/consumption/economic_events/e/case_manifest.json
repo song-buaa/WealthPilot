@@ -1,0 +1,1 @@
+{"case_id":"E","business_scenario":"two owned-account transfer","expected_rule":"ACCOUNT_PAIR_MATCH","why":"Opposite equal amounts on known-owned accounts within two days link to one event.","known_ambiguity":"Unproven ownership must remain NEEDS_REVIEW."}

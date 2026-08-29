@@ -1,0 +1,1 @@
+{"case_id":"F","business_scenario":"bank-broker, fund and wealth movements","expected_rule":"DESCRIPTION_RULE","why":"Subscriptions and redemptions remain investment movements, never income or consumption.","known_ambiguity":"Investment gain/loss is out of scope."}

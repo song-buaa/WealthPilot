@@ -1,0 +1,1 @@
+{"case_id":"I","business_scenario":"unmatched refund","expected_rule":"DESCRIPTION_RULE","why":"An unlinked refund is retained for confirmation and never randomly backdated.","known_ambiguity":"Original event is absent."}

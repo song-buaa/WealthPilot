@@ -1,0 +1,1 @@
+{"case_id":"A","business_scenario":"normal credit-card purchase","expected_rule":"DESCRIPTION_RULE","why":"A source-explicit purchase is one consumption event.","known_ambiguity":"none"}
