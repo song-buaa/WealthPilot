@@ -25,6 +25,13 @@ from .real_review import _bindings
 
 
 RUNTIME_BAR_WINDOW = 300
+# Runtime candidates can first appear after the largest promoted calibration's
+# minimum history (80 bars).  The remaining 220 bars are the governed current
+# discovery horizon.  Selecting this exact envelope before PatternInputMapper
+# makes TA-Lib initialization deterministic for any sufficiently long caller
+# prefix without expanding detector work to the full source history.
+RUNTIME_WARMUP_BARS = 80
+RUNTIME_VISIBLE_HORIZON_BARS = RUNTIME_BAR_WINDOW - RUNTIME_WARMUP_BARS
 # A 2-year IBKR TRADES response can contain slightly more than 500 sessions.
 # The adapter validates every returned bar against SCHEDULE before trimming to
 # the runtime window, so its bounded schedule capacity must cover that response.
@@ -167,7 +174,12 @@ def _default_source() -> IBKRHistoricalDataSource:
 def _bounded_runtime_series(
     series: CanonicalPatternSeries,
 ) -> CanonicalPatternSeries:
-    """Keep runtime below the Decision sidecar deadline without changing Core."""
+    """Normalize any sufficient source envelope to the governed runtime input.
+
+    The 300 bars include the fixed 80-bar discovery/indicator warm-up.  Both a
+    300-bar request and a longer request therefore enter Pattern Core with the
+    same bars and source hash at the same closed session.
+    """
 
     bars = series.bars[-RUNTIME_BAR_WINDOW:]
     return replace(
