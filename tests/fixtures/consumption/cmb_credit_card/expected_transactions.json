@@ -1,0 +1,42 @@
+[
+  {
+    "source_row_index": 3,
+    "source_row_identity": "pdf-line-3",
+    "transaction_date": "2026-07-15",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": "2026-07-16",
+    "posting_date_availability": "AVAILABLE",
+    "amount": "20.00",
+    "currency": "CNY",
+    "raw_description": "红色便利店",
+    "account_masked": "****1234",
+    "instrument_masked": "****1234",
+    "balance": null,
+    "counterparty": null,
+    "settlement_amount": "20.00",
+    "settlement_currency": "CNY",
+    "mcc": null,
+    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "explicit_statement_period", "source_row": "3"},
+    "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
+  },
+  {
+    "source_row_index": 4,
+    "source_row_identity": "pdf-line-4",
+    "transaction_date": "2026-07-20",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": "2026-07-21",
+    "posting_date_availability": "AVAILABLE",
+    "amount": "-150.50",
+    "currency": "CNY",
+    "raw_description": "蓝天航空退款",
+    "account_masked": "****1234",
+    "instrument_masked": "****1234",
+    "balance": null,
+    "counterparty": null,
+    "settlement_amount": "-150.50",
+    "settlement_currency": "CNY",
+    "mcc": null,
+    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "explicit_statement_period", "source_row": "4"},
+    "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
+  }
+]

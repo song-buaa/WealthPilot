@@ -1,0 +1,16 @@
+{
+  "institution": "CCB",
+  "statement_type": "CREDIT_CARD",
+  "source_format": "EML",
+  "parser_version": "ccb-credit-card-eml-spike-v1",
+  "statement_period_start": "2026-07-01",
+  "statement_period_end": "2026-07-31",
+  "account_masked": "****9876",
+  "instrument_masked": "****9876",
+  "source_file_hash": "SHA256_DYNAMIC",
+  "field_availability": {
+    "account_masked": "AVAILABLE",
+    "instrument_masked": "AVAILABLE",
+    "statement_period": "AVAILABLE"
+  }
+}

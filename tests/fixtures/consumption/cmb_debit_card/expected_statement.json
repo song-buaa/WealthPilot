@@ -1,0 +1,16 @@
+{
+  "institution": "CMB",
+  "statement_type": "DEBIT_CARD",
+  "source_format": "PDF",
+  "parser_version": "cmb-debit-card-pdf-spike-v1",
+  "statement_period_start": "2026-07-01",
+  "statement_period_end": "2026-08-31",
+  "account_masked": "****4321",
+  "instrument_masked": null,
+  "source_file_hash": "SHA256_DYNAMIC",
+  "field_availability": {
+    "account_masked": "AVAILABLE",
+    "instrument_masked": "SOURCE_UNAVAILABLE",
+    "statement_period": "AVAILABLE"
+  }
+}

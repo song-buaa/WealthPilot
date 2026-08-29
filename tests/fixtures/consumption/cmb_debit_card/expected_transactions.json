@@ -1,0 +1,42 @@
+[
+  {
+    "source_row_index": 3,
+    "source_row_identity": "pdf-line-3",
+    "transaction_date": "2026-08-02",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": null,
+    "posting_date_availability": "SOURCE_UNAVAILABLE",
+    "amount": "-6500.00",
+    "currency": "CNY",
+    "raw_description": "房租转账",
+    "account_masked": "****4321",
+    "instrument_masked": null,
+    "balance": "12345.67",
+    "counterparty": null,
+    "settlement_amount": null,
+    "settlement_currency": null,
+    "mcc": null,
+    "parser_provenance": {"adapter": "cmb_debit_card_pdf", "source_row": "3"},
+    "field_availability": {"balance": "AVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "SOURCE_UNAVAILABLE", "settlement_currency": "SOURCE_UNAVAILABLE"}
+  },
+  {
+    "source_row_index": 4,
+    "source_row_identity": "pdf-line-4",
+    "transaction_date": "2026-08-03",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": null,
+    "posting_date_availability": "SOURCE_UNAVAILABLE",
+    "amount": "88.00",
+    "currency": "CNY",
+    "raw_description": "红利入账",
+    "account_masked": "****4321",
+    "instrument_masked": null,
+    "balance": "12433.67",
+    "counterparty": null,
+    "settlement_amount": null,
+    "settlement_currency": null,
+    "mcc": null,
+    "parser_provenance": {"adapter": "cmb_debit_card_pdf", "source_row": "4"},
+    "field_availability": {"balance": "AVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "SOURCE_UNAVAILABLE", "settlement_currency": "SOURCE_UNAVAILABLE"}
+  }
+]

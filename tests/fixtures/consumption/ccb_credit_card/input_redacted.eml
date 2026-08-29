@@ -1,0 +1,14 @@
+From: statement@example.test
+To: holder@example.test
+Subject: 信用卡电子账单
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<p>账单周期：2026-07-01 至 2026-07-31；卡号：****9876</p>
+<table>
+  <tr><td>交易日期</td><td>记账日期</td><td>交易描述</td><td>交易金额</td><td>交易币种</td><td>入账金额</td><td>入账币种</td><td>卡号</td></tr>
+  <tr><td>2026-07-12</td><td>2026-07-13</td><td>海风酒店</td><td>100.00</td><td>USD</td><td>720.00</td><td>CNY</td><td>****9876</td></tr>
+  <tr><td>2026-07-18</td><td>2026-07-19</td><td>绿色书店</td><td>-50.00</td><td>CNY</td><td>-50.00</td><td>CNY</td><td>****9876</td></tr>
+</table>
+</body></html>

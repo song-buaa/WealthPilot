@@ -1,0 +1,12 @@
+{
+  "transaction_date": "AVAILABLE",
+  "posting_date": "SOURCE_UNAVAILABLE",
+  "amount": "AVAILABLE",
+  "currency": "AVAILABLE",
+  "raw_description": "AVAILABLE",
+  "balance": "AVAILABLE",
+  "counterparty": "SOURCE_UNAVAILABLE",
+  "settlement_amount": "SOURCE_UNAVAILABLE",
+  "settlement_currency": "SOURCE_UNAVAILABLE",
+  "mcc": "SOURCE_UNAVAILABLE"
+}

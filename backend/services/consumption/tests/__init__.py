@@ -1,0 +1,1 @@
+"""Consumption adapter Spike tests."""

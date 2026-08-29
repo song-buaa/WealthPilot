@@ -2,6 +2,12 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+
+# Local bank statements are sensitive. Committed consumption fixtures are redacted text/JSON only.
+*.eml
+*信用卡账单*.pdf
+*交易流水*.pdf
+!tests/fixtures/consumption/**/input_redacted.eml
 # Local handover snapshots (kept outside the repository)
 data/wealthpilot.db.bak.*
 data/wealthpilot.db.empty_*

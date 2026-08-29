@@ -1,0 +1,42 @@
+[
+  {
+    "source_row_index": 1,
+    "source_row_identity": "html-table-1-row-1",
+    "transaction_date": "2026-07-12",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": "2026-07-13",
+    "posting_date_availability": "AVAILABLE",
+    "amount": "100.00",
+    "currency": "USD",
+    "raw_description": "海风酒店",
+    "account_masked": "****9876",
+    "instrument_masked": "****9876",
+    "balance": null,
+    "counterparty": null,
+    "settlement_amount": "720.00",
+    "settlement_currency": "CNY",
+    "mcc": null,
+    "parser_provenance": {"adapter": "ccb_credit_card_eml", "source_row": "html-table-1-row-1"},
+    "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
+  },
+  {
+    "source_row_index": 2,
+    "source_row_identity": "html-table-1-row-2",
+    "transaction_date": "2026-07-18",
+    "transaction_date_availability": "AVAILABLE",
+    "posting_date": "2026-07-19",
+    "posting_date_availability": "AVAILABLE",
+    "amount": "-50.00",
+    "currency": "CNY",
+    "raw_description": "绿色书店",
+    "account_masked": "****9876",
+    "instrument_masked": "****9876",
+    "balance": null,
+    "counterparty": null,
+    "settlement_amount": "-50.00",
+    "settlement_currency": "CNY",
+    "mcc": null,
+    "parser_provenance": {"adapter": "ccb_credit_card_eml", "source_row": "html-table-1-row-2"},
+    "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
+  }
+]
