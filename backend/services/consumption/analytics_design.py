@@ -43,6 +43,7 @@ class ActiveEventProjection:
     original_amount: Decimal
     base_net_amount: Decimal | None
     fx_source: str
+    currency: str = "CNY"
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,23 @@ class SecondaryBreakdown:
 
 
 @dataclass(frozen=True)
+class AverageMetric:
+    """Average over complete, amount-resolved calendar months only."""
+
+    amount_cny: Decimal | None
+    months_used: int
+
+
+@dataclass(frozen=True)
+class UnresolvedAmount:
+    """Known source-currency amount that cannot yet be included in CNY totals."""
+
+    currency: str
+    amount: Decimal
+    event_count: int
+
+
+@dataclass(frozen=True)
 class MonthlySpendingPoint:
     month: date
     total_spending_cny: Decimal
@@ -96,6 +114,7 @@ class MonthlySpendingPoint:
     as_of_date: date | None
     comparison_available: bool
     comparison_reason: str | None
+    amount_unresolved_by_currency: tuple[UnresolvedAmount, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -104,6 +123,8 @@ class SpendingSummary:
     secondary_breakdowns: tuple[SecondaryBreakdown, ...]
     complete_month_average_cny: Decimal | None
     complete_month_count: int
+    three_month_average: AverageMetric
+    twelve_month_average: AverageMetric
 
 
 def month_start(value: date) -> date:
@@ -174,6 +195,7 @@ def evaluate_spending(
     for month in windows:
         daily = travel = housing = unclassified = known_total = Decimal("0")
         unresolved_original = Decimal("0")
+        unresolved_by_currency: dict[str, tuple[Decimal, int]] = {}
         eligible_count = eligibility_review = classification_review = unresolved_count = 0
         for event, interpretation in month_events[month]:
             if interpretation.eligibility_status == EligibilityStatus.NEEDS_REVIEW:
@@ -188,6 +210,12 @@ def evaluate_spending(
             if event.base_net_amount is None:
                 unresolved_count += 1
                 unresolved_original += abs(event.original_amount)
+                current_amount, current_count = unresolved_by_currency.get(
+                    event.currency, (Decimal("0"), 0)
+                )
+                unresolved_by_currency[event.currency] = (
+                    current_amount + abs(event.original_amount), current_count + 1
+                )
                 continue
             amount = Decimal(event.base_net_amount)
             known_total += amount
@@ -219,6 +247,10 @@ def evaluate_spending(
             eligible_count, eligibility_review, classification_review, unresolved_count,
             unresolved_original, unresolved_count == 0, status, partial,
             as_of_date if month == month_start(as_of_date) else None, comparison_available, reason,
+            tuple(
+                UnresolvedAmount(currency, amount, count)
+                for currency, (amount, count) in sorted(unresolved_by_currency.items())
+            ),
         ))
     window_total = sum((point.total_spending_cny for point in points), Decimal("0"))
     primary_totals = {
@@ -232,5 +264,18 @@ def evaluate_spending(
         breakdowns.append(SecondaryBreakdown(primary, secondary_name, amount, count,
             amount / window_total if window_total else None,
             amount / primary_amount if primary_amount else None))
-    complete = [item.total_spending_cny for item in points if item.data_coverage_status == DataCoverageStatus.COMPLETE and item.amount_complete]
-    return SpendingSummary(tuple(points), tuple(breakdowns), sum(complete, Decimal("0")) / len(complete) if complete else None, len(complete))
+    def average(values: Iterable[MonthlySpendingPoint]) -> AverageMetric:
+        complete = [
+            item.total_spending_cny for item in values
+            if item.data_coverage_status == DataCoverageStatus.COMPLETE and item.amount_complete
+        ]
+        return AverageMetric(
+            sum(complete, Decimal("0")) / len(complete) if complete else None,
+            len(complete),
+        )
+
+    all_complete = average(points)
+    return SpendingSummary(
+        tuple(points), tuple(breakdowns), all_complete.amount_cny, all_complete.months_used,
+        average(points[-3:]), average(points[-12:]),
+    )
