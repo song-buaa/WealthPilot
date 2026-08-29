@@ -14,6 +14,9 @@ import Action      from '@/pages/Action'
 import { ToastProvider } from '@/components/Toast'
 import UserProfile from '@/pages/UserProfile'
 import DemoPasswordGate from '@/components/DemoPasswordGate'
+import WealthOverview from '@/pages/WealthOverview'
+import Retirement from '@/pages/Retirement'
+import Consumption from '@/pages/Consumption'
 
 export default function App() {
   return (
@@ -22,8 +25,8 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          {/* 默认落地页：投资账户总览 */}
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          {/* 首页沿用现有 Dashboard；/dashboard 继续作为投资账户总览的既有稳定 route。 */}
+          <Route index element={<RouteErrorBoundary><Dashboard /></RouteErrorBoundary>} />
 
           {/* 功能页 — 每个页面包裹 ErrorBoundary，单页崩溃不影响导航 */}
           <Route path="/dashboard"  element={<RouteErrorBoundary><Dashboard /></RouteErrorBoundary>} />
@@ -32,6 +35,9 @@ export default function App() {
           <Route path="/decision"   element={<RouteErrorBoundary><Decision /></RouteErrorBoundary>} />
           <Route path="/profile"    element={<RouteErrorBoundary><UserProfile /></RouteErrorBoundary>} />
           <Route path="/action"        element={<RouteErrorBoundary><Action /></RouteErrorBoundary>} />
+          <Route path="/wealth" element={<RouteErrorBoundary><WealthOverview /></RouteErrorBoundary>} />
+          <Route path="/retirement" element={<RouteErrorBoundary><Retirement /></RouteErrorBoundary>} />
+          <Route path="/consumption" element={<RouteErrorBoundary><Consumption /></RouteErrorBoundary>} />
 
           {/* 所有未实现功能统一走 Placeholder */}
           <Route path="/placeholder/:name" element={<Placeholder />} />
