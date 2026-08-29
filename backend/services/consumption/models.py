@@ -58,6 +58,9 @@ class Account(Base):
     )
     import_batches = relationship("ImportBatch", back_populates="account")
     raw_transactions = relationship("RawTransaction", back_populates="account")
+    purpose_preferences = relationship(
+        "AccountPurposePreference", back_populates="account", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_consumption_accounts_institution_type", "institution", "account_type"),
@@ -211,6 +214,10 @@ class EconomicEvent(Base):
     projection_revisions = relationship(
         "EconomicEventProjectionRevision", back_populates="event", cascade="all, delete-orphan"
     )
+    interpretations = relationship(
+        "ConsumptionInterpretation", back_populates="event", cascade="all, delete-orphan",
+        foreign_keys="ConsumptionInterpretation.event_id"
+    )
 
     __table_args__ = (
         UniqueConstraint("normalizer_version", "semantic_key", name="uq_consumption_event_semantic"),
@@ -287,3 +294,120 @@ class EconomicEventProjectionRevision(Base):
         ),
         Index("ix_consumption_projection_event_created", "event_id", "created_at"),
     )
+
+
+class ConsumptionInterpretation(Base):
+    """Append-only eligibility and classification projection for an EconomicEvent."""
+
+    __tablename__ = "consumption_interpretations"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    event_id = Column(String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False)
+    eligibility_status = Column(String(30), nullable=False)
+    eligibility_source = Column(String(40), nullable=False)
+    eligibility_reason = Column(String(180), nullable=False)
+    classification_status = Column(String(30), nullable=False)
+    primary_category = Column(String(30), nullable=True)
+    secondary_category = Column(String(50), nullable=True)
+    classification_source = Column(String(40), nullable=False)
+    classification_reason = Column(String(180), nullable=False)
+    rule_id = Column(String(36), ForeignKey("consumption_user_rules.id", ondelete="RESTRICT"), nullable=True)
+    inherited_from_event_id = Column(String(36), ForeignKey("consumption_economic_events.id", ondelete="RESTRICT"), nullable=True)
+    user_confirmed = Column(Boolean, nullable=False, default=False)
+    revision_number = Column(Integer, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    supersedes_revision_id = Column(String(36), ForeignKey("consumption_interpretations.id", ondelete="RESTRICT"), nullable=True)
+    resolver_version = Column(String(80), nullable=False)
+    actor_type = Column(String(30), nullable=True)
+    actor_id = Column(String(80), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    event = relationship("EconomicEvent", back_populates="interpretations", foreign_keys=[event_id])
+    rule = relationship("UserClassificationRule", back_populates="interpretations")
+    supersedes_revision = relationship("ConsumptionInterpretation", remote_side=[id], uselist=False)
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "revision_number", name="uq_consumption_interpretation_revision"),
+        Index("uq_consumption_active_interpretation", "event_id", unique=True, sqlite_where=text("is_active = 1")),
+        Index("ix_consumption_interpretation_event_created", "event_id", "created_at"),
+    )
+
+
+class ConsumptionInterpretationAudit(Base):
+    """Immutable record of a local user's explicit interpretation change."""
+
+    __tablename__ = "consumption_interpretation_audits"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    event_id = Column(String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False)
+    old_interpretation_id = Column(String(36), ForeignKey("consumption_interpretations.id", ondelete="RESTRICT"), nullable=True)
+    new_interpretation_id = Column(String(36), ForeignKey("consumption_interpretations.id", ondelete="RESTRICT"), nullable=False)
+    actor_type = Column(String(30), nullable=False, default="LOCAL_USER")
+    actor_id = Column(String(80), nullable=True)
+    reason = Column(String(180), nullable=False)
+    confirmed_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("ix_consumption_interpretation_audit_event", "event_id", "confirmed_at"),)
+
+
+class UserClassificationRule(Base):
+    """Bounded, user-authored deterministic interpretation rule."""
+
+    __tablename__ = "consumption_user_rules"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    rule_type = Column(String(40), nullable=False, default="TEXT_AMOUNT_SCOPE")
+    eligibility_action = Column(String(30), nullable=False)
+    primary_category = Column(String(30), nullable=True)
+    secondary_category = Column(String(50), nullable=True)
+    account_id = Column(String(36), ForeignKey("consumption_accounts.id", ondelete="RESTRICT"), nullable=True)
+    match_text = Column(Text, nullable=True)
+    amount = Column(Numeric(20, 8), nullable=True)
+    amount_tolerance = Column(Numeric(20, 8), nullable=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(20), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    interpretations = relationship("ConsumptionInterpretation", back_populates="rule")
+
+    __table_args__ = (
+        Index("ix_consumption_user_rule_active", "status", "effective_from", "effective_to"),
+        Index("ix_consumption_user_rule_account", "account_id"),
+    )
+
+
+class TravelContext(Base):
+    """Minimal local travel window used only for generic dining/transport interpretation."""
+
+    __tablename__ = "consumption_travel_contexts"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    destination = Column(String(120), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (Index("ix_consumption_travel_context_window", "status", "start_date", "end_date"),)
+
+
+class AccountPurposePreference(Base):
+    """Versioned weak prior; never sufficient to classify a consumption event."""
+
+    __tablename__ = "consumption_account_purpose_preferences"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    account_id = Column(String(36), ForeignKey("consumption_accounts.id", ondelete="CASCADE"), nullable=False)
+    preferred_primary_category = Column(String(30), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(20), nullable=False, default="ACTIVE")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    account = relationship("Account", back_populates="purpose_preferences")
+
+    __table_args__ = (Index("ix_consumption_account_prior_active", "account_id", "status", "effective_from"),)
