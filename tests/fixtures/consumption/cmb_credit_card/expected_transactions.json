@@ -16,7 +16,7 @@
     "settlement_amount": "20.00",
     "settlement_currency": "CNY",
     "mcc": null,
-    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "explicit_statement_period", "source_row": "3"},
+    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "statement_date_year_anchor", "source_row": "3"},
     "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
   },
   {
@@ -36,7 +36,7 @@
     "settlement_amount": "-150.50",
     "settlement_currency": "CNY",
     "mcc": null,
-    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "explicit_statement_period", "source_row": "4"},
+    "parser_provenance": {"adapter": "cmb_credit_card_pdf", "date_year_resolution": "statement_date_year_anchor", "source_row": "4"},
     "field_availability": {"balance": "SOURCE_UNAVAILABLE", "counterparty": "SOURCE_UNAVAILABLE", "mcc": "SOURCE_UNAVAILABLE", "settlement_amount": "AVAILABLE", "settlement_currency": "AVAILABLE"}
   }
 ]

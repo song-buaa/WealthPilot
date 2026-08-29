@@ -3,14 +3,14 @@
   "statement_type": "CREDIT_CARD",
   "source_format": "PDF",
   "parser_version": "cmb-credit-card-pdf-spike-v1",
-  "statement_period_start": "2026-07-04",
-  "statement_period_end": "2026-08-03",
+  "statement_period_start": null,
+  "statement_period_end": null,
   "account_masked": "****1234",
   "instrument_masked": "****1234",
   "source_file_hash": "SHA256_DYNAMIC",
   "field_availability": {
     "account_masked": "AVAILABLE",
     "instrument_masked": "AVAILABLE",
-    "statement_period": "AVAILABLE"
+    "statement_period": "SOURCE_UNAVAILABLE"
   }
 }
