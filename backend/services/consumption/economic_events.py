@@ -288,7 +288,15 @@ def normalize(raw_transactions: Iterable[RawTransactionInput], context: Normaliz
         refund = _single_event(raw, EventType.REFUND, original_event_id=original.event_id)
         refund = EconomicEvent(**{**refund.__dict__, "analytics_effective_date": original.event_date, "rule_sources": (RuleSource.DESCRIPTION_RULE, RuleSource.AMOUNT_DATE_MATCH)})
         events.append(refund)
-        refunded = min(original.gross_amount or Decimal("0.00"), _magnitude(raw.source_amount))
-        events[events.index(original)] = EconomicEvent(**{**original.__dict__, "refund_amount": refunded, "net_amount": (original.gross_amount or Decimal("0.00")) - refunded})
+        refunded = min(
+            original.gross_amount or Decimal("0.00"),
+            (original.refund_amount or Decimal("0.00")) + _magnitude(raw.source_amount),
+        )
+        updated = EconomicEvent(**{
+            **original.__dict__, "refund_amount": refunded,
+            "net_amount": (original.gross_amount or Decimal("0.00")) - refunded,
+        })
+        events[events.index(original)] = updated
+        consumption_by_raw[original_raw_id] = updated
 
     return tuple(sorted(events, key=lambda item: item.event_id))

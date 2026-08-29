@@ -66,6 +66,7 @@ def init_db():
     _ensure_asset_classification_columns(engine)
     _ensure_conversation_message_metadata_column(engine)
     _ensure_execution_linkage_columns(engine)
+    _ensure_consumption_account_ownership_column(engine)
 
 
 def _ensure_position_ownership_columns(engine) -> None:
@@ -189,3 +190,23 @@ def _ensure_execution_linkage_columns(engine) -> None:
                 "ON order_records (batch_id, confirmation_version, batch_leg_id) "
                 "WHERE batch_id IS NOT NULL"
             ))
+
+
+def _ensure_consumption_account_ownership_column(engine) -> None:
+    """Add the minimal explicit ownership state to existing consumption accounts."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    if "consumption_accounts" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("consumption_accounts")}
+    with engine.begin() as connection:
+        if "ownership_status" not in columns:
+            connection.execute(text(
+                "ALTER TABLE consumption_accounts "
+                "ADD COLUMN ownership_status VARCHAR(30) NOT NULL DEFAULT 'UNCONFIRMED'"
+            ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_consumption_accounts_ownership "
+            "ON consumption_accounts (ownership_status)"
+        ))

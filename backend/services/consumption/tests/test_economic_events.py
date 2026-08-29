@@ -67,3 +67,15 @@ def test_posting_date_is_the_only_event_date_fallback_and_unproved_internal_is_n
     assert events["event:consumption:posting-only"]["event_date"] == "2026-07-16"
     assert events["event:other:unproved-in"]["resolution_reason"] == "INTERNAL_OWNERSHIP_OR_PAIR_UNPROVEN"
     assert events["event:other:unproved-in"]["event_type"] == "OTHER"
+
+
+def test_multiple_matched_refunds_accumulate_without_erasing_refund_facts():
+    rows = (
+        RawTransactionInput("purchase", "card", "CREDIT_CARD", date(2026, 7, 1), None, Decimal("-5000"), "CNY", "[CONSUMPTION] purchase"),
+        RawTransactionInput("refund-one", "card", "CREDIT_CARD", date(2026, 8, 1), None, Decimal("1000"), "CNY", "[REFUND] REF:purchase one"),
+        RawTransactionInput("refund-two", "card", "CREDIT_CARD", date(2026, 8, 2), None, Decimal("1500"), "CNY", "[REFUND] REF:purchase two"),
+    )
+    events = {item.event_id: item.to_dict() for item in normalize(rows, NormalizationContext(frozenset({"card"})))}
+    assert events["event:consumption:purchase"]["refund_amount"] == "2500.00"
+    assert events["event:consumption:purchase"]["net_amount"] == "2500.00"
+    assert {key for key in events if key.startswith("event:refund:")} == {"event:refund:refund-one", "event:refund:refund-two"}
