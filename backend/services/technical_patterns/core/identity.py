@@ -12,7 +12,8 @@ from enum import Enum
 from typing import Any
 
 
-IDENTITY_VERSION = "WP-PATTERN-CORE-IDENTITY-1.0"
+IDENTITY_VERSION = "WP-PATTERN-CORE-IDENTITY-2.0"
+PATTERN_CANDIDATE_IDENTITY_VERSION = "wp-pattern-candidate-identity-v2"
 
 
 def _decimal_text(value: Decimal) -> str:

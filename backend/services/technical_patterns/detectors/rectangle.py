@@ -366,6 +366,11 @@ class RectangleDetector:
             structure_facts=structure,
             direction_confirmation_required=False,
             expires_at_session_ordinal=available_ordinal + _integer(parameters, "expiry_sessions", minimum=1),
+            identity_anchors=tuple(
+                f"{pivot.pivot_type}:{bar_id}"
+                for pivot in relevant
+                for bar_id in pivot.source_bar_ids
+            ),
         )
 
 

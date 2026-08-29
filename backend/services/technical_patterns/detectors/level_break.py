@@ -291,6 +291,7 @@ class LevelBreakDetector:
             structure_facts=structure,
             direction_confirmation_required=True,
             expires_at_session_ordinal=trigger.session_ordinal + _integer(parameters, "expiry_sessions"),
+            identity_anchors=(boundary_id, trigger.bar_id),
         )
 
 

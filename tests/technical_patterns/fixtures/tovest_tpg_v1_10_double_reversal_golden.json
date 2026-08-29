@@ -9,7 +9,12 @@
     "double_top": {
       "pattern_type": "double_top",
       "direction": "bearish",
-      "source_pivot_ids": ["dt-1", "dt-2", "dt-3", "dt-4"],
+      "source_pivot_ids": [
+        "dt-1",
+        "dt-2",
+        "dt-3",
+        "dt-4"
+      ],
       "structure_id": "dbl_7890d199c8f028ebb0b0",
       "structure_status": "confirmed_structure",
       "directional_confirmation_at_structure": "pending",
@@ -27,7 +32,12 @@
     "double_bottom": {
       "pattern_type": "double_bottom",
       "direction": "bullish",
-      "source_pivot_ids": ["db-1", "db-2", "db-3", "db-4"],
+      "source_pivot_ids": [
+        "db-1",
+        "db-2",
+        "db-3",
+        "db-4"
+      ],
       "structure_id": "dbl_00933e3753dd052bd35a",
       "structure_status": "confirmed_structure",
       "directional_confirmation_at_structure": "pending",
@@ -48,66 +58,80 @@
   "wealthpilot_expected": {
     "double_top": {
       "structure": {
-        "candidate_id": "pat_45c8b747b285a0a7b5ba",
-        "result_hash": "bc2d71e1c95bef9026d87661d74ab8a4fbf4cd03a79a47bff3df1e87f17fae7e",
+        "candidate_id": "pat_0931508bc953a1bcdb16",
+        "result_hash": "4123b1c6fda57d78afc3009940095cec249fd7fd863542ee1eb1b44f7f4362a0",
         "status": "candidate",
         "direction_confirmation": "pending",
         "available_from_session_ordinal": 14
       },
       "confirmed": {
-        "candidate_id": "pat_45c8b747b285a0a7b5ba",
-        "result_hash": "85c288109ed5c20cadd402b964f286d0e2e18925049a5ffdc776ea2cfda3d6df",
+        "candidate_id": "pat_0931508bc953a1bcdb16",
+        "result_hash": "988edde5f443b29bee4316f4f1c46a3d9ec94a26d3d0392ca26ad9029753cb52",
         "status": "confirmed",
         "direction_confirmation": "confirmed",
         "direction_observed_session_ordinal": 15,
-        "transitions": ["confirmed"]
+        "transitions": [
+          "confirmed"
+        ]
       },
       "neckline_invalidated": {
-        "candidate_id": "pat_45c8b747b285a0a7b5ba",
-        "result_hash": "46bc4dfdcd5aef680c76d1350130f19fec05d5c601d6118c0025a781490073d0",
+        "candidate_id": "pat_0931508bc953a1bcdb16",
+        "result_hash": "9b7c092501a2a19e962a6a83a7bad992d50bbe789cfcf3c0abaaf8ad4b402f4f",
         "status": "invalidated",
         "reason": "closed_session_recovered_above_neckline",
         "observed_session_ordinal": 16,
-        "transitions": ["confirmed", "invalidated"]
+        "transitions": [
+          "confirmed",
+          "invalidated"
+        ]
       },
       "expired": {
-        "candidate_id": "pat_45c8b747b285a0a7b5ba",
-        "result_hash": "1feed3126cd2b6f183fcf1f72de014d9654e6a35b6a31bd620df890168cdbbea",
+        "candidate_id": "pat_0931508bc953a1bcdb16",
+        "result_hash": "d9652113882cfd83ac5e9920377a94b579ee468f83c875bc4d8e0b5afa994bc6",
         "status": "expired",
         "expired_session_ordinal": 19,
-        "transitions": ["expired"]
+        "transitions": [
+          "expired"
+        ]
       }
     },
     "double_bottom": {
       "structure": {
-        "candidate_id": "pat_5626b2e60e4362d81379",
-        "result_hash": "2fb78ace2193e232400b5b3e9936b742a68f5bb95a7ddfd180898ed7341eb4ee",
+        "candidate_id": "pat_0dad1fdc1080b1e66d78",
+        "result_hash": "5698d8802b34b35287c3fbe2efe0fb6f1b19238b83dee2bfc10e60dcffb20d5c",
         "status": "candidate",
         "direction_confirmation": "pending",
         "available_from_session_ordinal": 14
       },
       "confirmed": {
-        "candidate_id": "pat_5626b2e60e4362d81379",
-        "result_hash": "1921ed8c294c8378fe7e3d55907c4cd4e1349385f57513e280fa9922c13db15a",
+        "candidate_id": "pat_0dad1fdc1080b1e66d78",
+        "result_hash": "5309f5fc1879ffaadfeb80c2847bbf66e451f460750ee7bdd437a84b465e963c",
         "status": "confirmed",
         "direction_confirmation": "confirmed",
         "direction_observed_session_ordinal": 15,
-        "transitions": ["confirmed"]
+        "transitions": [
+          "confirmed"
+        ]
       },
       "neckline_invalidated": {
-        "candidate_id": "pat_5626b2e60e4362d81379",
-        "result_hash": "960032b7407d98c6bf06482234164f7e21b8d29a92f29133f28a8b629f06a410",
+        "candidate_id": "pat_0dad1fdc1080b1e66d78",
+        "result_hash": "cf2df50a530d39b239540d901ca4c2999e46c6ec57019d3f4a2755f699a29a3f",
         "status": "invalidated",
         "reason": "closed_session_failed_below_neckline",
         "observed_session_ordinal": 16,
-        "transitions": ["confirmed", "invalidated"]
+        "transitions": [
+          "confirmed",
+          "invalidated"
+        ]
       },
       "expired": {
-        "candidate_id": "pat_5626b2e60e4362d81379",
-        "result_hash": "0be595eae5fe8dc8a08fd8b01ac5edac8619c4ac85b23f66cca64c9238ba9fc4",
+        "candidate_id": "pat_0dad1fdc1080b1e66d78",
+        "result_hash": "fb63b79664311b3259876f82293ba462a2a0e0ec8bc1d3c186c2feadd9f2c3f6",
         "status": "expired",
         "expired_session_ordinal": 19,
-        "transitions": ["expired"]
+        "transitions": [
+          "expired"
+        ]
       }
     }
   },

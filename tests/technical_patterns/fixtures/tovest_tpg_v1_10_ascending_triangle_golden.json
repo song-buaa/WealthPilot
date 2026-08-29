@@ -21,8 +21,15 @@
   "tovest_oracle": {
     "triangle_id": "tri_2dfe7ee17c29aac706ba",
     "pattern_type": "ascending_triangle",
-    "source_pivot_ids": ["ah-1", "ah-2", "ah-3", "ah-4"],
-    "source_boundary_ids": ["a1-resistance"],
+    "source_pivot_ids": [
+      "ah-1",
+      "ah-2",
+      "ah-3",
+      "ah-4"
+    ],
+    "source_boundary_ids": [
+      "a1-resistance"
+    ],
     "upper_slope_per_bar": 0.01249999999999929,
     "lower_slope_per_bar": 0.5,
     "upper_slope_pct_per_bar": 0.0001178967224711086,
@@ -61,16 +68,18 @@
       "pattern_type": "ascending_triangle",
       "direction": "bullish",
       "status": "candidate",
-      "candidate_id": "pat_ec87c37aa51ab9876033",
-      "candidate_hash": "14e874e192356f7df7f66c38cf4b1a5161f25c60ed5f10e8787f0e89c5fedc4b",
-      "result_hash": "c2d31b57098a01a2827e2aa86921b60ded590c223dc51f0d9fd20985a02ffbc7",
+      "candidate_id": "pat_eaff5de42d8830d7c285",
+      "candidate_hash": "14f7153ab4d1177500f48262dd91f5ab8c19fae003a9b41ba4a980eda1947dd4",
+      "result_hash": "41a9cf24a2fc5d8e9a3f9efe06e613f0395476c6673b08af77a0c4cf738fb20e",
       "source_pivot_ids": [
         "pvt_fc36cc9e27f1cb7aac01",
         "pvt_f29d0ae8062e700ba7cc",
         "pvt_feed2cddd395073011ac",
         "pvt_86dcc9aef19d9ec33b9b"
       ],
-      "source_boundary_ids": ["bnd_8e492bc8afc0b229fd34"],
+      "source_boundary_ids": [
+        "bnd_8e492bc8afc0b229fd34"
+      ],
       "source_pivot_count": 4,
       "source_boundary_count": 1,
       "upper_slope_per_session": 0.01249999999999929,
@@ -102,28 +111,34 @@
       "lifecycle_transitions": []
     },
     "breakout_confirmed": {
-      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "candidate_id": "pat_eaff5de42d8830d7c285",
       "status": "confirmed",
       "direction_confirmation": "confirmed",
       "direction_reason": "closed_session_close_cleared_resistance",
       "direction_observed_session_ordinal": 15,
-      "transitions": ["confirmed"],
-      "result_hash": "3a1f998b520346c70a1bd4899630fc43cec8612e5c3f165f4a87e9791b1d4964"
+      "transitions": [
+        "confirmed"
+      ],
+      "result_hash": "6b59be68dccb1dc41b6802de6f4b29db024bb33e9442c4cc254b046c037277d9"
     },
     "invalidated": {
-      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "candidate_id": "pat_eaff5de42d8830d7c285",
       "status": "invalidated",
       "observed_session_ordinal": 15,
       "reason": "closed_session_below_rising_support",
-      "transitions": ["invalidated"],
-      "result_hash": "ac88bac98633275602518331574f7d1653a098217bdcfdcd0b62a8bd90447249"
+      "transitions": [
+        "invalidated"
+      ],
+      "result_hash": "e9512087a6e5438d2584d0a0654b7aa25f9d1d9998b19a283acceec901641a42"
     },
     "expired": {
-      "candidate_id": "pat_ec87c37aa51ab9876033",
+      "candidate_id": "pat_eaff5de42d8830d7c285",
       "status": "expired",
       "expired_session_ordinal": 19,
-      "transitions": ["expired"],
-      "result_hash": "91a27774bdf6acb64fa174a81f1e47c7d33d6e3e589c968f2fbd1730cb1f79c3"
+      "transitions": [
+        "expired"
+      ],
+      "result_hash": "79376913f35e680ea30e46a13b7c78152c455f53d945beadc74d3a1d7cbee2a7"
     }
   }
 }

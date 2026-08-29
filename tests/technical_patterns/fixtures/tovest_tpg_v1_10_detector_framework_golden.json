@@ -35,7 +35,7 @@
         "available_from": "2025-02-07",
         "available_from_session_ordinal": 4,
         "calibration_version": "fixture-v1",
-        "candidate_id": "pat_b4f2b711140f30b4e8f3",
+        "candidate_id": "pat_f15af09e51f97ebba7f6",
         "detector_version": "fixture-detector-v1",
         "direction": "bullish",
         "direction_confirmation_required": true,
@@ -49,11 +49,14 @@
             "available_from": "2025-02-07",
             "available_from_session_ordinal": 4,
             "code": "close_margin_pct",
-            "source_ids": ["bar-4", "boundary-1"],
+            "source_ids": [
+              "bar-4",
+              "boundary-1"
+            ],
             "value": 0.012
           }
         ],
-        "identity_version": "WP-PATTERN-CORE-IDENTITY-1.0",
+        "identity_version": "WP-PATTERN-CORE-IDENTITY-2.0",
         "indicator_layer_version": "fixture-indicators-v1",
         "instrument_id": "fixture:framework",
         "parameter_set_id": "cal_774384a4f0a11449b721",
@@ -81,7 +84,9 @@
             "available_from": "2025-02-07",
             "available_from_session_ordinal": 4,
             "code": "boundary_valid",
-            "source_ids": ["boundary-1"],
+            "source_ids": [
+              "boundary-1"
+            ],
             "value": true
           }
         ],
@@ -89,14 +94,16 @@
       },
       "confirmation": {
         "direction": {
-          "candidate_id": "pat_b4f2b711140f30b4e8f3",
+          "candidate_id": "pat_f15af09e51f97ebba7f6",
           "confirmation_type": "direction",
           "facts": [
             {
               "available_from": "2025-02-10",
               "available_from_session_ordinal": 5,
               "code": "direction_fact",
-              "source_ids": ["bar_c76bbb9b11288ff27f47"],
+              "source_ids": [
+                "bar_c76bbb9b11288ff27f47"
+              ],
               "value": true
             }
           ],
@@ -106,14 +113,16 @@
           "state": "confirmed"
         },
         "structure": {
-          "candidate_id": "pat_b4f2b711140f30b4e8f3",
+          "candidate_id": "pat_f15af09e51f97ebba7f6",
           "confirmation_type": "structure",
           "facts": [
             {
               "available_from": "2025-02-07",
               "available_from_session_ordinal": 4,
               "code": "structure_fact",
-              "source_ids": ["bar_762f1bf00aa823f1a238"],
+              "source_ids": [
+                "bar_762f1bf00aa823f1a238"
+              ],
               "value": true
             }
           ],
@@ -124,9 +133,9 @@
         }
       },
       "direction": "bullish",
-      "identity": "pat_b4f2b711140f30b4e8f3",
+      "identity": "pat_f15af09e51f97ebba7f6",
       "invalidation": {
-        "candidate_id": "pat_b4f2b711140f30b4e8f3",
+        "candidate_id": "pat_f15af09e51f97ebba7f6",
         "condition": "close_below_invalidation_boundary",
         "facts": [],
         "invalidated": false,
@@ -146,7 +155,7 @@
         "invalidated_on": null,
         "invalidated_session_ordinal": null,
         "lifecycle_version": "wp-pattern-technical-lifecycle-v1",
-        "pattern_id": "pat_b4f2b711140f30b4e8f3",
+        "pattern_id": "pat_f15af09e51f97ebba7f6",
         "state": "confirmed",
         "transitions": [
           {

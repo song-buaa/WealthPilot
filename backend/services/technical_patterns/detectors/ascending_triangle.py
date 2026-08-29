@@ -406,6 +406,11 @@ class AscendingTriangleDetector:
             direction_confirmation_required=True,
             expires_at_session_ordinal=available_ordinal
             + _integer(parameters, "expiry_sessions", minimum=1),
+            identity_anchors=tuple(
+                f"{pivot.pivot_type}:{bar_id}"
+                for pivot in source
+                for bar_id in pivot.source_bar_ids
+            ),
         )
 
 

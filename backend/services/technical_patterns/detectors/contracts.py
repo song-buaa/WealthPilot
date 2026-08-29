@@ -103,6 +103,7 @@ class CandidateProposal:
     structure_facts: tuple[EvidenceFact, ...]
     direction_confirmation_required: bool
     expires_at_session_ordinal: int | None = None
+    identity_anchors: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.formed_session_ordinal < 0 or self.available_from_session_ordinal < self.formed_session_ordinal:
@@ -115,6 +116,8 @@ class CandidateProposal:
             raise ValueError("source_boundaries may contain boundary references only")
         if self.expires_at_session_ordinal is not None and self.expires_at_session_ordinal < self.available_from_session_ordinal:
             raise ValueError("candidate expiry cannot precede availability")
+        if len(set(self.identity_anchors)) != len(self.identity_anchors):
+            raise ValueError("candidate identity anchors must be unique")
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,11 @@ from typing import Protocol
 
 from ..calibration import CalibrationKey, CalibrationProvider, DetectorParameterSet
 from ..core.contracts import PatternCoreInput
-from ..core.identity import stable_hash, stable_id
+from ..core.identity import (
+    PATTERN_CANDIDATE_IDENTITY_VERSION,
+    stable_hash,
+    stable_id,
+)
 from ..core.lifecycle import LifecycleCore, LifecycleSnapshot
 from ..indicators import CanonicalIndicatorLayer, IndicatorDefinition, IndicatorSeries
 from .contracts import (
@@ -262,17 +266,29 @@ class DetectorFramework:
         except KeyError as exc:
             raise CausalityViolation("candidate formation/availability is outside the causal bar prefix") from exc
         identity_material = {
+            "identity_schema_version": PATTERN_CANDIDATE_IDENTITY_VERSION,
             "instrument_id": context.core_input.instrument_id,
             "timeframe": context.core_input.timeframe,
             "pattern_family": descriptor.pattern_family,
             "pattern_type": descriptor.pattern_type,
             "direction": descriptor.direction,
-            "formed_session_ordinal": proposal.formed_session_ordinal,
-            "available_from_session_ordinal": proposal.available_from_session_ordinal,
-            "source_pivots": references[: len(proposal.source_pivots)],
-            "source_boundaries": proposal.source_boundaries,
-            "geometry_facts": proposal.geometry_facts,
-            "structure_facts": proposal.structure_facts,
+            "formed_on": formed_on,
+            "available_from": available_from,
+            "source_pivots": tuple(
+                {
+                    "source_type": item.source_type,
+                    "available_from": item.available_from,
+                }
+                for item in proposal.source_pivots
+            ),
+            "source_boundaries": tuple(
+                {
+                    "source_type": item.source_type,
+                    "available_from": item.available_from,
+                }
+                for item in proposal.source_boundaries
+            ),
+            "identity_anchors": proposal.identity_anchors,
             "detector_version": descriptor.detector_version,
             "parameter_set_id": parameters.parameter_set_id,
         }

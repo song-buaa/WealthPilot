@@ -61,16 +61,18 @@
       "break_close": 102.8,
       "break_edge": 100.15535714285714,
       "break_threshold": 100.29277306470797,
-      "candidate_hash": "26382572a67417b4fd68381da121234443846674fa76de65ce6e26da5abaa7ae",
-      "candidate_id": "pat_b11943a5b65ea6f12dc7",
+      "candidate_hash": "fcaa4de9007f32be58e348d2bc6003e55837e18ce08b174e756c0b155e78ef02",
+      "candidate_id": "pat_f667f6d0f823f67775a8",
       "direction": "bullish",
       "direction_confirmation": "confirmed",
       "ema_direction_aligned": true,
       "formed_session_ordinal": 80,
       "invalidation_boundary": 99.5,
-      "lifecycle_transitions": ["confirmed"],
+      "lifecycle_transitions": [
+        "confirmed"
+      ],
       "pattern_type": "breakout",
-      "result_hash": "c8d80f6118fb38259f8c099d1dce8d8b6ab906811e43a4b14a723a788b0db553",
+      "result_hash": "f86f89be9614291606425ecacc9480c4bbba5be12bb7353457c7d65e132a6eb9",
       "status": "confirmed",
       "structure_confirmation": "confirmed",
       "structure_observed_session_ordinal": 80,
@@ -93,16 +95,18 @@
       "break_close": 99.4,
       "break_edge": 100.5,
       "break_threshold": 100.5,
-      "candidate_hash": "6deb62cb99bc492cdbbb20307c02df027404a369ce7b6b008f96c4c630583b1b",
-      "candidate_id": "pat_6bcb48b94c51112b3fa6",
+      "candidate_hash": "341b31e622d00eab0de12d59b80c190fedc5da7db66b7c737834a195603df367",
+      "candidate_id": "pat_fe061aad89d3a242a372",
       "direction": "bearish",
       "direction_confirmation": "confirmed",
       "ema_direction_aligned": true,
       "formed_session_ordinal": 80,
       "invalidation_boundary": 101.3,
-      "lifecycle_transitions": ["confirmed"],
+      "lifecycle_transitions": [
+        "confirmed"
+      ],
       "pattern_type": "breakdown",
-      "result_hash": "095213e8149c16d8687f3749869905861e46e29ac3a30957a416873d68bb1098",
+      "result_hash": "2541bfff0143df17c8a01439a985e30196d0267c4e4038255978c69ccf3c6e37",
       "status": "confirmed",
       "structure_confirmation": "confirmed",
       "structure_observed_session_ordinal": 80,
@@ -116,34 +120,46 @@
   "wealthpilot_lifecycle_expected": {
     "breakout": {
       "invalidated": {
-        "candidate_id": "pat_b11943a5b65ea6f12dc7",
+        "candidate_id": "pat_f667f6d0f823f67775a8",
         "status": "invalidated",
         "observed_session_ordinal": 81,
-        "transitions": ["confirmed", "invalidated"],
-        "result_hash": "a8d4774e9ebaac0421d67fe8faa29a3d862b9ed1e87baf1042207e66c3267921"
+        "transitions": [
+          "confirmed",
+          "invalidated"
+        ],
+        "result_hash": "733f106a47c3c43010e04fbe39da81449efbd3aec7ed67d649c9fc16fe203b40"
       },
       "expired": {
-        "candidate_id": "pat_b11943a5b65ea6f12dc7",
+        "candidate_id": "pat_f667f6d0f823f67775a8",
         "status": "expired",
         "expired_session_ordinal": 92,
-        "transitions": ["confirmed", "expired"],
-        "result_hash": "dbdc751be3db96b49933ee4f0ddc387d4ac727cdd2ab1de923ab10e229f40413"
+        "transitions": [
+          "confirmed",
+          "expired"
+        ],
+        "result_hash": "6c1d169df4aa363116973cc62ae6f1c28d6d1ae7e45a566adf71773192cc9b5d"
       }
     },
     "breakdown": {
       "invalidated": {
-        "candidate_id": "pat_6bcb48b94c51112b3fa6",
+        "candidate_id": "pat_fe061aad89d3a242a372",
         "status": "invalidated",
         "observed_session_ordinal": 81,
-        "transitions": ["confirmed", "invalidated"],
-        "result_hash": "2caacb8e90454d11429baf18fbc58d5aaddbbf5a15842f9e43aede75c15a0157"
+        "transitions": [
+          "confirmed",
+          "invalidated"
+        ],
+        "result_hash": "03185d90b85e23f16cc87bb34f2d703194cc81b03cac72203ab0c455d9e7a120"
       },
       "expired": {
-        "candidate_id": "pat_6bcb48b94c51112b3fa6",
+        "candidate_id": "pat_fe061aad89d3a242a372",
         "status": "expired",
         "expired_session_ordinal": 92,
-        "transitions": ["confirmed", "expired"],
-        "result_hash": "8be64edbc06eb4bcc5b279da74590125441d2948d02afbc35a94d8552ad014f3"
+        "transitions": [
+          "confirmed",
+          "expired"
+        ],
+        "result_hash": "b063acf2133242ed1a7c0a3179af958ae45e1bad60569a8bb34d02d568339d98"
       }
     }
   }
