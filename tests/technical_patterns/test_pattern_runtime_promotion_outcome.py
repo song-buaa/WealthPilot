@@ -17,6 +17,7 @@ from backend.services.technical_patterns.calibration import (
 from backend.services.technical_patterns.runtime_provider import (
     PromotedIBKRPatternEvidenceProvider,
     RUNTIME_BAR_WINDOW,
+    RUNTIME_SCHEDULE_CAPACITY,
     _bounded_runtime_series,
 )
 
@@ -139,6 +140,13 @@ def test_runtime_provider_uses_current_data_with_a_deterministic_bounded_window(
     assert bounded.bars == captured.bars[-RUNTIME_BAR_WINDOW:]
     assert bounded.source_bar_hash == build_source_bar_hash(bounded.bars)
     assert bounded.source_bar_hash != captured.source_bar_hash
+
+
+def test_runtime_schedule_capacity_covers_a_full_two_year_response_before_trim():
+    # IBKR can return more than 500 US sessions for ``2 Y``.  The adapter's
+    # quality gate validates that full response before selecting the last 300.
+    assert RUNTIME_SCHEDULE_CAPACITY == 800
+    assert RUNTIME_SCHEDULE_CAPACITY > 2 * 252
 
 
 def test_capture_read_accounting_has_no_account_or_mutation_surface():

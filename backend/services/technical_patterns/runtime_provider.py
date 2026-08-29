@@ -25,6 +25,10 @@ from .real_review import _bindings
 
 
 RUNTIME_BAR_WINDOW = 300
+# A 2-year IBKR TRADES response can contain slightly more than 500 sessions.
+# The adapter validates every returned bar against SCHEDULE before trimming to
+# the runtime window, so its bounded schedule capacity must cover that response.
+RUNTIME_SCHEDULE_CAPACITY = 800
 
 
 class PromotedIBKRPatternEvidenceProvider:
@@ -63,7 +67,7 @@ class PromotedIBKRPatternEvidenceProvider:
                 config=IBKRPatternAdapterConfig(
                     target_bar_count=RUNTIME_BAR_WINDOW,
                     durations=("2 Y",),
-                    schedule_calendar_days=500,
+                    schedule_calendar_days=RUNTIME_SCHEDULE_CAPACITY,
                     schedule_page_sessions=365,
                 ),
             ).get_series(
