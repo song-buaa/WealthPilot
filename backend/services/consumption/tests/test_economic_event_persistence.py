@@ -10,9 +10,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from backend.services.consumption.economic_events import EventType, FxSource, ResolutionStatus
+from backend.services.consumption.economic_events import EventType, FxSource, ResolutionStatus, RuleSource
 from backend.services.consumption.models import (
     Account,
+    ConsumptionInterpretation,
     EconomicEvent,
     EconomicEventProjectionRevision,
     EventRawLink,
@@ -20,7 +21,7 @@ from backend.services.consumption.models import (
     RawTransaction,
 )
 from backend.services.consumption.normalization import EconomicEventNormalizer
-from backend.services.consumption.normalization.rules import classify_source
+from backend.services.consumption.normalization.rules import Evidence, classify_source
 
 
 @pytest.fixture
@@ -139,6 +140,10 @@ def test_u_multiple_internal_candidates_are_ambiguous_not_auto_paired(db_session
 
 @pytest.mark.parametrize(("description", "account_type", "expected"), [
     ("信用卡自动还款", "DEBIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("按卡转账还款", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("分期还款 本金", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("银联入账", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("分期手续费", "CREDIT_CARD", EventType.FEE_INTEREST),
     ("朝朝宝转出", "DEBIT_CARD", EventType.LIQUIDITY_SWEEP),
     ("基金快速赎回", "DEBIT_CARD", EventType.INVESTMENT_TRANSFER),
     ("住房公积金管理中心代发", "DEBIT_CARD", EventType.INCOME),
@@ -150,6 +155,70 @@ def test_u_multiple_internal_candidates_are_ambiguous_not_auto_paired(db_session
 ])
 def test_v_high_confidence_production_rules(description, account_type, expected):
     assert classify_source(raw_description=description, account_type=account_type).event_type == expected
+
+
+def test_replay_replaces_legacy_consumption_with_non_consumption_and_is_idempotent(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "legacy-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    result = EconomicEventNormalizer().replay(db_session)
+    replacement = _event(db_session, EventType.CREDIT_CARD_REPAYMENT, raw.id)
+    assert (result.corrected_non_consumption_count, legacy.is_active, replacement.is_active) == (1, False, True)
+    assert db_session.query(EventRawLink).filter_by(raw_transaction_id=raw.id, is_active=True).count() == 1
+    assert EconomicEventNormalizer().replay(db_session).corrected_non_consumption_count == 0
+
+
+def test_replay_skips_user_explicit_interpretation(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "protected-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    db_session.add(ConsumptionInterpretation(
+        event_id=legacy.id, eligibility_status="ELIGIBLE", eligibility_source="USER_CONFIRMATION",
+        eligibility_reason="TEST", classification_status="CLASSIFIED", primary_category="DAILY",
+        secondary_category="FOOD_DINING", classification_source="USER_CONFIRMATION",
+        classification_reason="TEST", user_confirmed=True, revision_number=1,
+        resolver_version="test",
+    ))
+    db_session.flush()
+    result = EconomicEventNormalizer().replay(db_session)
+    assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
+
+
+def test_replay_collapses_only_cross_batch_candidate_duplicates(db_session):
+    account = _account(db_session, "card")
+    first = _raw(
+        db_session, account, "duplicate-one", "[CONSUMPTION] repeated purchase", "-100",
+        dedup_status="CANDIDATE_DUPLICATE", match_fingerprint="cross-batch-match",
+    )
+    second = _raw(
+        db_session, account, "duplicate-two", "[CONSUMPTION] repeated purchase", "-100",
+        dedup_status="CANDIDATE_DUPLICATE", match_fingerprint="cross-batch-match",
+    )
+    normalizer = EconomicEventNormalizer()
+    normalizer.normalize(db_session, (first,))
+    normalizer.normalize(db_session, (second,))
+
+    result = normalizer.replay(db_session)
+    active = db_session.query(EconomicEvent).filter_by(is_active=True).all()
+    links = db_session.query(EventRawLink).filter_by(is_active=True).all()
+    assert (result.collapsed_cross_batch_duplicate_count, len(active), len(links)) == (1, 1, 2)
 
 
 def test_event_orm_decimal_fx_nullable_and_schema_relationships(db_session):
