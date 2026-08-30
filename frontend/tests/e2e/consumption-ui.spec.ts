@@ -1,0 +1,110 @@
+import { fileURLToPath } from 'node:url'
+
+import { expect, test, type Page } from '@playwright/test'
+import { createServer, type ViteDevServer } from 'vite'
+
+const root = fileURLToPath(new URL('../..', import.meta.url))
+let viteServer: ViteDevServer
+
+function point(month: string, total: string, coverage: 'COMPLETE' | 'PARTIAL' | 'SOURCE_LIMITED' | 'UNKNOWN' = 'COMPLETE') {
+  const value = Number(total)
+  return {
+    month,
+    total_spending_cny: total,
+    daily_cny: String(value * 0.5),
+    travel_cny: String(value * 0.2),
+    housing_cny: String(value * 0.1),
+    unclassified_eligible_cny: String(value * 0.2),
+    classified_eligible_cny: String(value * 0.8),
+    classification_coverage_rate: '0.8',
+    eligible_event_count: 4,
+    eligibility_review_count: 2,
+    classification_review_count: 1,
+    amount_unresolved_count: month === '2026-08-01' ? 1 : 0,
+    amount_unresolved_original_amount: month === '2026-08-01' ? '20' : '0',
+    amount_unresolved_by_currency: month === '2026-08-01' ? [{ currency: 'USD', amount: '20', event_count: 1 }] : [],
+    amount_complete: month !== '2026-08-01',
+    data_coverage_status: coverage,
+    is_partial_month: month === '2026-08-01',
+    as_of_date: month === '2026-08-01' ? '2026-08-20' : null,
+    comparison_available: month !== '2025-09-01' && month !== '2026-08-01',
+    comparison_reason: month === '2026-08-01' ? 'MONTH_NOT_COMPARABLE' : null,
+  }
+}
+
+const analyticsResponse = {
+  months: [
+    '2025-09-01', '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01',
+    '2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01',
+  ].map((month, index) => point(month, String(1000 + index * 100), month === '2026-07-01' ? 'SOURCE_LIMITED' : 'COMPLETE')),
+  secondary_breakdowns: [
+    { primary_category: 'DAILY', secondary_category: 'FOOD_DINING', amount_cny: '1200', event_count: 12, share_of_total: '0.2', share_within_primary: '0.5' },
+    { primary_category: 'TRAVEL', secondary_category: 'ACCOMMODATION', amount_cny: '600', event_count: 2, share_of_total: '0.1', share_within_primary: '0.5' },
+  ],
+  complete_month_average_cny: '1400',
+  complete_month_count: 10,
+  three_month_average: { amount_cny: '1500', months_used: 2 },
+  twelve_month_average: { amount_cny: '1400', months_used: 10 },
+}
+
+async function mockDemo(page: Page) {
+  await page.route('**/api/demo/status', route => route.fulfill({ json: { public_demo_mode: false, password_required: false } }))
+}
+
+test.beforeAll(async () => {
+  viteServer = await createServer({ root, appType: 'spa', logLevel: 'silent' })
+  await viteServer.listen()
+})
+
+test.afterAll(async () => { await viteServer.close() })
+
+test('renders analytics, coverage, reviews, and selected-month detail from one response', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.goto('/#/consumption')
+
+  await expect(page.getByText('消费分析', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('近 12 个月消费趋势')).toBeVisible()
+  await expect(page.getByText('日常消费', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('旅行消费', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('住房消费', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('待分类', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('部分外币消费尚未完成人民币金额换算，当前为已知金额。')).toBeVisible()
+  await expect(page.getByText('消费归属待确认')).toBeVisible()
+  await expect(page.getByText('分类待确认')).toBeVisible()
+  await expect(page.getByText('餐饮')).toBeVisible()
+
+  await page.getByRole('button', { name: '7月' }).click()
+  await expect(page.getByText('2026年7月消费结构')).toBeVisible()
+  await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
+})
+
+test('renders loading, empty, and safe error states', async ({ page }) => {
+  await mockDemo(page)
+  let release = () => undefined
+  const responseReady = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/consumption/analytics*', async route => {
+    await responseReady
+    await route.fulfill({ json: { ...analyticsResponse, months: [] } })
+  })
+  await page.goto('/#/consumption')
+  await expect(page.getByLabel('正在加载消费数据')).toBeVisible()
+  release()
+  await expect(page.getByText('暂无消费分析数据')).toBeVisible()
+
+  await page.unroute('**/api/consumption/analytics*')
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ status: 500, json: { detail: 'internal only' } }))
+  await page.reload()
+  await expect(page.getByText('消费数据加载失败')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+})
+
+test('renders unknown coverage without overstating completeness', async ({ page }) => {
+  await mockDemo(page)
+  const months = analyticsResponse.months.map(item => ({ ...item }))
+  months[months.length - 1].data_coverage_status = 'UNKNOWN'
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: { ...analyticsResponse, months } }))
+  await page.goto('/#/consumption')
+  await expect(page.getByText('数据覆盖未知').first()).toBeVisible()
+  await expect(page.getByText('部分预期账户尚无可验证的导入覆盖范围。')).toBeVisible()
+})

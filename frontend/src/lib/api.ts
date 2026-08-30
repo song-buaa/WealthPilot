@@ -33,6 +33,72 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 }
 
+// ── Consumption Analytics ───────────────────────────────
+
+export type ConsumptionCoverageStatus = 'COMPLETE' | 'PARTIAL' | 'SOURCE_LIMITED' | 'UNKNOWN'
+
+export interface ConsumptionUnresolvedAmount {
+  currency: string
+  amount: string
+  event_count: number
+}
+
+export interface ConsumptionMonthlyPoint {
+  month: string
+  total_spending_cny: string
+  daily_cny: string
+  travel_cny: string
+  housing_cny: string
+  unclassified_eligible_cny: string
+  classified_eligible_cny: string
+  classification_coverage_rate: string | null
+  eligible_event_count: number
+  eligibility_review_count: number
+  classification_review_count: number
+  amount_unresolved_count: number
+  amount_unresolved_original_amount: string
+  amount_unresolved_by_currency: ConsumptionUnresolvedAmount[]
+  amount_complete: boolean
+  data_coverage_status: ConsumptionCoverageStatus
+  is_partial_month: boolean
+  as_of_date: string | null
+  comparison_available: boolean
+  comparison_reason: string | null
+}
+
+export interface ConsumptionSecondaryBreakdown {
+  primary_category: 'DAILY' | 'TRAVEL' | 'HOUSING'
+  secondary_category: string
+  amount_cny: string
+  event_count: number
+  share_of_total: string | null
+  share_within_primary: string | null
+}
+
+export interface ConsumptionAverageMetric {
+  amount_cny: string | null
+  months_used: number
+}
+
+export interface ConsumptionAnalyticsSummary {
+  months: ConsumptionMonthlyPoint[]
+  secondary_breakdowns: ConsumptionSecondaryBreakdown[]
+  complete_month_average_cny: string | null
+  complete_month_count: number
+  three_month_average: ConsumptionAverageMetric
+  twelve_month_average: ConsumptionAverageMetric
+}
+
+export const consumptionApi = {
+  getAnalytics: (params: { asOf?: string; months?: number; accountIds?: string[] } = {}) => {
+    const query = new URLSearchParams()
+    if (params.asOf) query.set('as_of', params.asOf)
+    if (params.months) query.set('months', String(params.months))
+    params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
+    return request<ConsumptionAnalyticsSummary>(`/consumption/analytics${query.size ? `?${query}` : ''}`)
+  },
+}
+
 // ── Portfolio ────────────────────────────────────────────
 
 export const portfolioApi = {
