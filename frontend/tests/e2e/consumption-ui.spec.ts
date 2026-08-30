@@ -62,8 +62,28 @@ const analyticsResponse = {
   twelve_month_average: { amount_cny: '1400', months_used: 10 },
 }
 
+const eventsByMonth: Record<string, { month: string; items: Array<Record<string, string>>; total: number; limit: number; offset: number }> = {
+  '2026-08': {
+    month: '2026-08-01', total: 2, limit: 200, offset: 0,
+    items: [
+      { analytics_effective_date: '2026-08-20', display_description: '房租', account_display_name: 'CMB Debit ****', primary_category: 'HOUSING', secondary_category: 'RENT', classification_status: 'CLASSIFIED', amount_cny: '6500' },
+      { analytics_effective_date: '2026-08-18', display_description: '未识别消费', account_display_name: 'CMB Debit ****', primary_category: '', secondary_category: '', classification_status: 'NEEDS_REVIEW', amount_cny: '20' },
+    ],
+  },
+  '2026-07': {
+    month: '2026-07-01', total: 1, limit: 200, offset: 0,
+    items: [
+      { analytics_effective_date: '2026-07-15', display_description: '餐饮消费', account_display_name: 'CMB Debit ****', primary_category: 'DAILY', secondary_category: 'FOOD_DINING', classification_status: 'CLASSIFIED', amount_cny: '1000' },
+    ],
+  },
+}
+
 async function mockDemo(page: Page) {
   await page.route('**/api/demo/status', route => route.fulfill({ json: { public_demo_mode: false, password_required: false } }))
+  await page.route('**/api/consumption/events*', route => {
+    const month = new URL(route.request().url()).searchParams.get('month') ?? ''
+    return route.fulfill({ json: eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 } })
+  })
 }
 
 test.beforeAll(async () => {
@@ -73,7 +93,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await viteServer.close() })
 
-test('renders analytics, coverage, reviews, and selected-month detail from one response', async ({ page }) => {
+test('renders analytics, coverage, reviews, and selected-month detail', async ({ page }) => {
   await mockDemo(page)
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
   await page.goto('/#/consumption')
@@ -91,12 +111,18 @@ test('renders analytics, coverage, reviews, and selected-month detail from one r
   await expect(page.getByText('住宿')).toBeVisible()
   await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()
   await expect(page.getByText('本月数据截至', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('2026年8月消费明细')).toBeVisible()
+  await expect(page.getByText('房租').first()).toBeVisible()
+  await expect(page.getByText('CMB Debit ****').first()).toBeVisible()
+  await expect(page.getByText('共 2 条，按金额从高到低排列')).toBeVisible()
 
   await page.getByRole('button', { name: '7月' }).click()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
   await expect(page.getByText('2026年7月二级分类')).toBeVisible()
-  await expect(page.getByText('餐饮')).toBeVisible()
+  await expect(page.getByText('餐饮').first()).toBeVisible()
   await expect(page.getByText('住宿')).toHaveCount(0)
+  await expect(page.getByText('餐饮消费')).toBeVisible()
+  await expect(page.getByText('房租')).toHaveCount(0)
   await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
 })
 
@@ -133,6 +159,6 @@ for (const [status, label, detail] of [
     await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: { ...analyticsResponse, months } }))
     await page.goto('/#/consumption')
     await expect(page.getByText(label).first()).toBeVisible()
-    await expect(page.getByText(detail)).toBeVisible()
+    await expect(page.getByText(detail).first()).toBeVisible()
   })
 }

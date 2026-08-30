@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from backend.services.consumption.classification import ClassificationResolver
+from backend.scripts.apply_consumption_rule import apply_local_rule
 from backend.services.consumption.classification_design import (
     ClassificationStatus, EligibilityStatus, PrimaryCategory,
 )
@@ -212,3 +213,24 @@ def test_ae_matched_refund_reads_original_classification_and_unmatched_is_not_ap
     assert resolver.get_effective_classification(db_session, refund).id == source.id
     result = resolver.resolve_event(db_session, unmatched)
     assert (result.eligibility_status, result.classification_status) == ("INELIGIBLE", "NOT_APPLICABLE")
+
+
+def test_generic_local_rule_runner_is_idempotent_and_replays_without_user_specific_logic(db_session):
+    event = _event(db_session, "local-rule", EventType.OTHER, "synthetic recurring transfer", account_id="debit", amount="6500")
+    first, created, matched = apply_local_rule(
+        db_session, account_id="debit", match_text="recurring transfer", amount=Decimal("6500"),
+        amount_tolerance=Decimal("0"), effective_from=date(2026, 1, 1), effective_to=None,
+        eligibility_action=EligibilityStatus.ELIGIBLE, primary_category=PrimaryCategory.HOUSING,
+        secondary_category="RENT",
+    )
+    second, created_again, matched_again = apply_local_rule(
+        db_session, account_id="debit", match_text="recurring transfer", amount=Decimal("6500"),
+        amount_tolerance=Decimal("0"), effective_from=date(2026, 1, 1), effective_to=None,
+        eligibility_action=EligibilityStatus.ELIGIBLE, primary_category=PrimaryCategory.HOUSING,
+        secondary_category="RENT",
+    )
+    active = db_session.query(ConsumptionInterpretation).filter_by(event_id=event.id, is_active=True).one()
+    assert (created, created_again, first.id == second.id, matched, matched_again) == (True, False, True, 1, 1)
+    assert (active.eligibility_status, active.primary_category, active.secondary_category) == ("ELIGIBLE", "HOUSING", "RENT")
+    assert len(event.projection_revisions) == 1
+    assert event.projection_revisions[0].base_net_amount == Decimal("6500")

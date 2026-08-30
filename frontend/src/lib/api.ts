@@ -90,6 +90,24 @@ export interface ConsumptionAnalyticsSummary {
   twelve_month_average: ConsumptionAverageMetric
 }
 
+export interface ConsumptionEventDetail {
+  analytics_effective_date: string
+  display_description: string
+  account_display_name: string
+  primary_category: 'DAILY' | 'TRAVEL' | 'HOUSING' | null
+  secondary_category: string | null
+  classification_status: 'CLASSIFIED' | 'NEEDS_REVIEW'
+  amount_cny: string
+}
+
+export interface ConsumptionEventDetailPage {
+  month: string
+  items: ConsumptionEventDetail[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export const consumptionApi = {
   getAnalytics: (params: { asOf?: string; months?: number; accountIds?: string[] } = {}) => {
     const query = new URLSearchParams()
@@ -97,6 +115,13 @@ export const consumptionApi = {
     if (params.months) query.set('months', String(params.months))
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionAnalyticsSummary>(`/consumption/analytics${query.size ? `?${query}` : ''}`)
+  },
+  getEvents: (params: { month: string; limit?: number; offset?: number; accountIds?: string[] }) => {
+    const query = new URLSearchParams({ month: params.month })
+    if (params.limit != null) query.set('limit', String(params.limit))
+    if (params.offset != null) query.set('offset', String(params.offset))
+    params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
+    return request<ConsumptionEventDetailPage>(`/consumption/events?${query}`)
   },
 }
 

@@ -15,9 +15,10 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from backend.api import consumption as consumption_api
 from backend.services.consumption.analytics import ConsumptionAnalyticsService, ConsumptionAnalyticsQueryAdapter
+from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent, EconomicEventProjectionRevision,
-    EventRawLink, ImportBatch, RawTransaction,
+    EventRawLink, ImportBatch, RawTransaction, UserClassificationRule,
 )
 
 FIXTURES=Path(__file__).parents[4] / "tests" / "fixtures" / "consumption" / "analytics"
@@ -37,10 +38,10 @@ def _account(session, account_id="card"):
     session.add(item); session.flush(); return item
 
 
-def _event(session, event_id, *, account, event_type="CONSUMPTION", when=date(2026,7,3), amount="100", net="100", currency="CNY", eligibility="ELIGIBLE", classification="CLASSIFIED", primary="DAILY", secondary="FOOD_DINING", active=True):
+def _event(session, event_id, *, account, event_type="CONSUMPTION", when=date(2026,7,3), amount="100", net="100", currency="CNY", eligibility="ELIGIBLE", classification="CLASSIFIED", primary="DAILY", secondary="FOOD_DINING", active=True, description="synthetic"):
     period_start=when.replace(day=1); period_end=(date(period_start.year + (period_start.month == 12),1 if period_start.month == 12 else period_start.month+1,1)-timedelta(days=1))
     batch=ImportBatch(id=f"batch-{event_id}",account_id=account.id,source_format="TEST",institution="TEST",statement_type=account.account_type,source_file_hash=(event_id*64)[:64],parser_version="test",statement_period_start=period_start,statement_period_end=period_end,statement_period_availability="AVAILABLE",coverage_status="EXPLICIT",observed_transaction_start=period_start,observed_transaction_end=period_end,row_count=1)
-    raw=RawTransaction(id=f"raw-{event_id}",import_batch_id=batch.id,account_id=account.id,source_row_index=1,source_row_identity=f"row-{event_id}",source_row_fingerprint_candidate=f"source-{event_id}",match_fingerprint=f"match-{event_id}",dedup_status="UNIQUE",transaction_date=when,transaction_date_availability="AVAILABLE",posting_date=None,posting_date_availability="SOURCE_UNAVAILABLE",amount=Decimal(amount),currency=currency,raw_description="synthetic",parser_provenance="{}",source_field_availability="{}")
+    raw=RawTransaction(id=f"raw-{event_id}",import_batch_id=batch.id,account_id=account.id,source_row_index=1,source_row_identity=f"row-{event_id}",source_row_fingerprint_candidate=f"source-{event_id}",match_fingerprint=f"match-{event_id}",dedup_status="UNIQUE",transaction_date=when,transaction_date_availability="AVAILABLE",posting_date=None,posting_date_availability="SOURCE_UNAVAILABLE",amount=Decimal(amount),currency=currency,raw_description=description,parser_provenance="{}",source_field_availability="{}")
     event=EconomicEvent(id=event_id,semantic_key=f"key-{event_id}",event_type=event_type,event_date=when,analytics_effective_date=when,amount=Decimal(amount),currency=currency,economic_direction="OUTFLOW",base_currency="CNY",base_amount=Decimal(amount),fx_rate=Decimal("1"),fx_source="NATIVE_CNY",resolution_status="RESOLVED",normalizer_version="test",rule_sources="[]",provenance="{}",is_active=active)
     session.add_all((batch,raw,event)); session.flush(); session.add(EventRawLink(event_id=event.id,raw_transaction_id=raw.id,link_role="PRIMARY",rule_source="TEST",evidence="{}"))
     if net is not None:
@@ -159,3 +160,49 @@ def test_api_is_get_only_serializes_decimals_and_honors_account_filter(db_sessio
     }]
     assert body["three_month_average"]["months_used"] == 1
     assert {next(iter(route.methods)) for route in app.routes if getattr(route,"path","") == "/api/consumption/analytics"} == {"GET"}
+
+
+def test_monthly_detail_api_is_bounded_sorted_and_does_not_leak_raw_evidence(db_session, monkeypatch):
+    card=_account(db_session,"card")
+    card.display_name="CMB Debit ****1234"
+    _event(db_session,"largest",account=card,when=date(2026,7,10),amount="6500",net="6500",event_type="OTHER",primary="HOUSING",secondary="RENT",description="private landlord 123456789")
+    _event(db_session,"same-amount-later",account=card,when=date(2026,7,9),amount="90",net="90",description="private food source")
+    _event(db_session,"same-amount-earlier",account=card,when=date(2026,7,8),amount="90",net="90",description="private food source")
+    _event(db_session,"unclassified",account=card,when=date(2026,7,7),amount="30",net="30",classification="NEEDS_REVIEW",primary=None,secondary=None,description="private unknown")
+    _event(db_session,"ineligible",account=card,when=date(2026,7,6),amount="999",net="999",eligibility="INELIGIBLE",classification="NOT_APPLICABLE",primary=None,secondary=None)
+    _event(db_session,"review",account=card,when=date(2026,7,5),amount="888",net="888",event_type="OTHER",eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None)
+    _event(db_session,"refund",account=card,when=date(2026,7,4),amount="777",net="777",event_type="REFUND",eligibility="ELIGIBLE",classification="CLASSIFIED",primary="DAILY",secondary="FOOD_DINING")
+    db_session.commit()
+    monkeypatch.setattr(consumption_api,"get_session",lambda: db_session)
+    from fastapi import FastAPI
+    app=FastAPI(); app.include_router(consumption_api.router,prefix="/api/consumption")
+
+    response=TestClient(app).get("/api/consumption/events?month=2026-07&limit=2")
+    assert response.status_code == 200
+    body=response.json()
+    assert (body["total"],body["limit"],body["offset"]) == (4,2,0)
+    assert [item["amount_cny"] for item in body["items"]] == ["6500.00000000","90.00000000"]
+    assert [item["analytics_effective_date"] for item in body["items"]] == ["2026-07-10","2026-07-09"]
+    assert body["items"][0]["display_description"] == "房租"
+    assert body["items"][0]["account_display_name"] == "CMB Debit ****"
+    assert "raw_description" not in str(body)
+    assert "private landlord" not in str(body)
+    assert TestClient(app).get("/api/consumption/events?month=2026-07&limit=201").status_code == 422
+    second=ConsumptionAnalyticsService(db_session).monthly_detail(month=date(2026,7,1),limit=2,offset=2,account_ids=(card.id,))
+    assert [item.classification_status for item in second.items] == ["CLASSIFIED","NEEDS_REVIEW"]
+
+
+def test_local_rent_rule_replay_promotes_other_into_housing_analytics_and_detail(db_session):
+    debit=_account(db_session,"debit")
+    rent=_event(db_session,"rent",account=debit,event_type="OTHER",amount="6500",net="6500",description="synthetic fixed rent transfer")
+    property_fee=_event(db_session,"property",account=debit,amount="20",net="20",primary="HOUSING",secondary="PROPERTY_FEE",description="物业费")
+    rule=UserClassificationRule(eligibility_action="ELIGIBLE",primary_category="HOUSING",secondary_category="RENT",
+        account_id=debit.id,match_text="fixed rent",amount=Decimal("6500"),amount_tolerance=Decimal("0"),effective_from=date(2026,7,1))
+    db_session.add(rule); db_session.flush()
+    ClassificationResolver().replay(db_session,(rent.id,property_fee.id))
+    result=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,7,31),months=1,account_ids=(debit.id,))
+    point=result.months[0]
+    assert (point.total_spending_cny,point.housing_cny,point.eligibility_review_count) == (Decimal("6520"),Decimal("6520"),0)
+    assert [(item.secondary_category,item.amount_cny) for item in point.secondary_breakdowns] == [("RENT",Decimal("6500")),("PROPERTY_FEE",Decimal("20"))]
+    detail=ConsumptionAnalyticsService(db_session).monthly_detail(month=date(2026,7,1),account_ids=(debit.id,))
+    assert [(item.display_description,item.amount_cny) for item in detail.items] == [("房租",Decimal("6500")),("物业费",Decimal("20"))]

@@ -8,6 +8,13 @@ from backend.services.consumption.analytics import ConsumptionAnalyticsService
 
 router=APIRouter()
 
+
+def _month_start(value: str) -> date:
+    try:
+        return date.fromisoformat(f"{value}-01")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="month must use YYYY-MM") from exc
+
 def _value(value):
     if isinstance(value, Decimal): return format(value, "f")
     if isinstance(value, date): return value.isoformat()
@@ -25,6 +32,25 @@ def get_consumption_analytics(
     session=get_session()
     try:
         result=ConsumptionAnalyticsService(session).summary(as_of=as_of or date.today(),months=months,account_ids=tuple(account_ids) if account_ids else None)
+        return _serialize(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally: session.close()
+
+
+@router.get("/events")
+def get_consumption_events(
+    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    account_ids: list[str] | None = Query(default=None),
+):
+    session=get_session()
+    try:
+        result=ConsumptionAnalyticsService(session).monthly_detail(
+            month=_month_start(month), limit=limit, offset=offset,
+            account_ids=tuple(account_ids) if account_ids else None,
+        )
         return _serialize(result)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
