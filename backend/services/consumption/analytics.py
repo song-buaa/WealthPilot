@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+import csv
+from io import StringIO
 import re
 from decimal import Decimal
 from sqlalchemy import func
@@ -14,29 +16,11 @@ from backend.services.consumption.analytics_design import (
 )
 
 
-_DETAIL_DESCRIPTION = {
-    "FOOD_DINING": "餐饮消费",
-    "TRANSPORT_AUTO": "交通用车",
-    "SHOPPING": "购物消费",
-    "HOME_LIVING": "居家生活",
-    "DIGITAL_COMMUNICATION": "数字与通讯",
-    "HEALTH_INSURANCE": "健康保障",
-    "SPORTS_HOBBY": "运动兴趣",
-    "PET": "宠物消费",
-    "LONG_DISTANCE_TRANSPORT": "大交通",
-    "ACCOMMODATION": "住宿",
-    "LOCAL_TRANSPORT": "当地交通",
-    "ACTIVITIES_EXPERIENCES": "活动体验",
-    "TRAVEL_SHOPPING": "旅行购物",
-    "RENT": "房租",
-    "PROPERTY_FEE": "物业费",
-}
-
-
 @dataclass(frozen=True)
 class MonthlySpendingDetailItem:
+    event_id: str
     analytics_effective_date: date
-    display_description: str
+    raw_description: str
     account_display_name: str
     primary_category: str | None
     secondary_category: str | None
@@ -51,11 +35,6 @@ class MonthlySpendingDetailPage:
     total: int
     limit: int
     offset: int
-
-
-def _safe_detail_description(secondary_category: str | None) -> str:
-    """Return a bounded semantic label, never source-statement text."""
-    return _DETAIL_DESCRIPTION.get(secondary_category or "", "未识别消费")
 
 
 def _safe_account_display_name(value: str | None, institution: str) -> str:
@@ -174,15 +153,16 @@ class ConsumptionAnalyticsQueryAdapter:
             month=month,
             items=tuple(
                 MonthlySpendingDetailItem(
+                    event_id=event.id,
                     analytics_effective_date=event.analytics_effective_date,
-                    display_description=_safe_detail_description(interpretation.secondary_category),
+                    raw_description=raw.raw_description,
                     account_display_name=_safe_account_display_name(account.display_name, account.institution),
                     primary_category=interpretation.primary_category,
                     secondary_category=interpretation.secondary_category,
                     classification_status=interpretation.classification_status,
                     amount_cny=Decimal(projection.base_net_amount),
                 )
-                for event, projection, interpretation, _raw, account in rows
+                for event, projection, interpretation, raw, account in rows
             ),
             total=total,
             limit=limit,
@@ -215,3 +195,26 @@ class ConsumptionAnalyticsService:
         if offset < 0:
             raise ValueError("offset must not be negative")
         return self.adapter.monthly_detail(month, self.adapter.expected_account_ids(account_ids), limit=limit, offset=offset)
+
+    def export_monthly_detail_csv(
+        self,
+        *,
+        month: date,
+        account_ids: tuple[str, ...] | None = None,
+    ) -> str:
+        """Export the selected month's current detail projection as CSV."""
+        page = self.adapter.monthly_detail(
+            month, self.adapter.expected_account_ids(account_ids), limit=100_000, offset=0,
+        )
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["日期", "消费名称", "一级分类", "二级分类", "账户", "金额（CNY）", "分类状态"])
+        writer.writerows(
+            (
+                item.analytics_effective_date.isoformat(), item.raw_description,
+                item.primary_category or "", item.secondary_category or "",
+                item.account_display_name, format(item.amount_cny, "f"), item.classification_status,
+            )
+            for item in page.items
+        )
+        return output.getvalue()

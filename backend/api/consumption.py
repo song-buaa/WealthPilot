@@ -2,9 +2,17 @@
 from __future__ import annotations
 from datetime import date
 from decimal import Decimal
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel
 from app.database import get_session
 from backend.services.consumption.analytics import ConsumptionAnalyticsService
+from backend.services.consumption.classification import ClassificationResolver
+from backend.services.consumption.classification_design import (
+    DAILY_SECONDARY, HARD_INELIGIBLE, HOUSING_SECONDARY, TRAVEL_SECONDARY,
+    EligibilityStatus, PrimaryCategory,
+)
+from backend.services.consumption.economic_events import EventType
+from backend.services.consumption.models import ConsumptionInterpretation, EconomicEvent
 
 router=APIRouter()
 
@@ -22,6 +30,26 @@ def _value(value):
     if isinstance(value, tuple): return [_serialize(item) for item in value]
     return value
 def _serialize(item): return {key:_value(value) for key,value in item.__dict__.items()}
+
+
+class DetailClassificationUpdate(BaseModel):
+    primary_category: PrimaryCategory
+    secondary_category: str
+
+
+_SECONDARY_BY_PRIMARY = {
+    PrimaryCategory.DAILY: DAILY_SECONDARY,
+    PrimaryCategory.TRAVEL: TRAVEL_SECONDARY,
+    PrimaryCategory.HOUSING: HOUSING_SECONDARY,
+}
+
+
+def _csv_response(text: str, filename: str) -> Response:
+    return Response(
+        content="\ufeff".encode("utf-8") + text.encode("utf-8"),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @router.get("/analytics")
 def get_consumption_analytics(
@@ -53,5 +81,60 @@ def get_consumption_events(
         )
         return _serialize(result)
     except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally: session.close()
+
+
+@router.get("/events/export.csv")
+def export_consumption_events(
+    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    account_ids: list[str] | None = Query(default=None),
+):
+    session=get_session()
+    try:
+        return _csv_response(
+            ConsumptionAnalyticsService(session).export_monthly_detail_csv(
+                month=_month_start(month), account_ids=tuple(account_ids) if account_ids else None,
+            ),
+            f"consumption-events-{month}.csv",
+        )
+    finally: session.close()
+
+
+@router.put("/events/{event_id}/classification")
+def update_consumption_event_classification(event_id: str, update: DetailClassificationUpdate):
+    if update.secondary_category not in _SECONDARY_BY_PRIMARY[update.primary_category]:
+        raise HTTPException(status_code=422, detail="secondary category does not belong to primary category")
+    session=get_session()
+    try:
+        event=session.get(EconomicEvent,event_id)
+        current=session.query(ConsumptionInterpretation).filter_by(event_id=event_id,is_active=True).one_or_none()
+        if event is None or not event.is_active or current is None:
+            raise HTTPException(status_code=404, detail="consumption event not found")
+        event_type=EventType(event.event_type)
+        if event_type in HARD_INELIGIBLE or event_type == EventType.REFUND:
+            raise HTTPException(status_code=422, detail="hard-excluded events cannot be classified as consumption")
+        if current.eligibility_status != EligibilityStatus.ELIGIBLE.value:
+            raise HTTPException(status_code=409, detail="only eligible consumption detail events can be edited")
+        result=ClassificationResolver().confirm_event(
+            session, event_id,
+            eligibility_status=EligibilityStatus.ELIGIBLE,
+            primary_category=update.primary_category,
+            secondary_category=update.secondary_category,
+            reason="DETAIL_CLASSIFICATION_EDIT",
+        )
+        session.commit()
+        return {
+            "event_id": result.event_id,
+            "primary_category": result.primary_category,
+            "secondary_category": result.secondary_category,
+            "classification_status": result.classification_status,
+            "revision_number": result.revision_number,
+        }
+    except HTTPException:
+        session.rollback()
+        raise
+    except ValueError as exc:
+        session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally: session.close()

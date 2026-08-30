@@ -91,8 +91,9 @@ export interface ConsumptionAnalyticsSummary {
 }
 
 export interface ConsumptionEventDetail {
+  event_id: string
   analytics_effective_date: string
-  display_description: string
+  raw_description: string
   account_display_name: string
   primary_category: 'DAILY' | 'TRAVEL' | 'HOUSING' | null
   secondary_category: string | null
@@ -123,6 +124,12 @@ export const consumptionApi = {
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionEventDetailPage>(`/consumption/events?${query}`)
   },
+  getEventsExportUrl: (month: string) => `/api/consumption/events/export.csv?month=${encodeURIComponent(month)}`,
+  updateEventClassification: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
+    request<{ event_id: string; primary_category: string; secondary_category: string; classification_status: string; revision_number: number }>(
+      `/consumption/events/${encodeURIComponent(eventId)}/classification`,
+      { method: 'PUT', body: JSON.stringify({ primary_category: primaryCategory, secondary_category: secondaryCategory }) },
+    ),
 }
 
 // ── Portfolio ────────────────────────────────────────────

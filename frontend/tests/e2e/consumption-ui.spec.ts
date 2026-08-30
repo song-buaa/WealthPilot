@@ -66,14 +66,14 @@ const eventsByMonth: Record<string, { month: string; items: Array<Record<string,
   '2026-08': {
     month: '2026-08-01', total: 2, limit: 200, offset: 0,
     items: [
-      { analytics_effective_date: '2026-08-20', display_description: '房租', account_display_name: 'CMB Debit ****', primary_category: 'HOUSING', secondary_category: 'RENT', classification_status: 'CLASSIFIED', amount_cny: '6500' },
-      { analytics_effective_date: '2026-08-18', display_description: '未识别消费', account_display_name: 'CMB Debit ****', primary_category: '', secondary_category: '', classification_status: 'NEEDS_REVIEW', amount_cny: '20' },
+      { event_id: 'event-aug-rent', analytics_effective_date: '2026-08-20', raw_description: '原始账单描述：月度房租', account_display_name: 'CMB Debit ****', primary_category: 'HOUSING', secondary_category: 'RENT', classification_status: 'CLASSIFIED', amount_cny: '6500' },
+      { event_id: 'event-aug-unclassified', analytics_effective_date: '2026-08-18', raw_description: '原始账单描述：待确认交易', account_display_name: 'CMB Debit ****', primary_category: '', secondary_category: '', classification_status: 'NEEDS_REVIEW', amount_cny: '20' },
     ],
   },
   '2026-07': {
     month: '2026-07-01', total: 1, limit: 200, offset: 0,
     items: [
-      { analytics_effective_date: '2026-07-15', display_description: '餐饮消费', account_display_name: 'CMB Debit ****', primary_category: 'DAILY', secondary_category: 'FOOD_DINING', classification_status: 'CLASSIFIED', amount_cny: '1000' },
+      { event_id: 'event-jul-food', analytics_effective_date: '2026-07-15', raw_description: '原始账单描述：餐饮', account_display_name: 'CMB Debit ****', primary_category: 'DAILY', secondary_category: 'FOOD_DINING', classification_status: 'CLASSIFIED', amount_cny: '1000' },
     ],
   },
 }
@@ -112,16 +112,21 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()
   await expect(page.getByText('本月数据截至', { exact: false })).toHaveCount(0)
   await expect(page.getByText('2026年8月消费明细')).toBeVisible()
-  await expect(page.getByText('房租').first()).toBeVisible()
+  await expect(page.getByText('原始账单描述：月度房租')).toBeVisible()
   await expect(page.getByText('CMB Debit ****').first()).toBeVisible()
   await expect(page.getByText('共 2 条，按金额从高到低排列')).toBeVisible()
+  await expect(page.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08')
+  await page.getByLabel('一级分类 event-aug-rent').selectOption('DAILY')
+  await expect(page.getByLabel('二级分类 event-aug-rent')).toHaveValue('FOOD_DINING')
+  await page.getByLabel('二级分类 event-aug-rent').selectOption('SHOPPING')
+  await expect(page.getByLabel('保存分类 event-aug-rent')).toBeVisible()
 
   await page.getByRole('button', { name: '7月' }).click()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
   await expect(page.getByText('2026年7月二级分类')).toBeVisible()
   await expect(page.getByText('餐饮').first()).toBeVisible()
   await expect(page.getByText('住宿')).toHaveCount(0)
-  await expect(page.getByText('餐饮消费')).toBeVisible()
+  await expect(page.getByText('原始账单描述：餐饮')).toBeVisible()
   await expect(page.getByText('房租')).toHaveCount(0)
   await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
 })

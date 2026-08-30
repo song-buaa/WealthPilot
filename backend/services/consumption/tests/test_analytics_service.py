@@ -17,7 +17,7 @@ from backend.api import consumption as consumption_api
 from backend.services.consumption.analytics import ConsumptionAnalyticsService, ConsumptionAnalyticsQueryAdapter
 from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.models import (
-    Account, ConsumptionInterpretation, EconomicEvent, EconomicEventProjectionRevision,
+    Account, ConsumptionInterpretation, ConsumptionInterpretationAudit, EconomicEvent, EconomicEventProjectionRevision,
     EventRawLink, ImportBatch, RawTransaction, UserClassificationRule,
 )
 
@@ -162,8 +162,9 @@ def test_api_is_get_only_serializes_decimals_and_honors_account_filter(db_sessio
     assert {next(iter(route.methods)) for route in app.routes if getattr(route,"path","") == "/api/consumption/analytics"} == {"GET"}
 
 
-def test_monthly_detail_api_is_bounded_sorted_and_does_not_leak_raw_evidence(db_session, monkeypatch):
+def test_monthly_detail_api_is_bounded_sorted_exports_current_fields_and_reads_raw_description(db_session, monkeypatch):
     card=_account(db_session,"card")
+    card_id=card.id
     card.display_name="CMB Debit ****1234"
     _event(db_session,"largest",account=card,when=date(2026,7,10),amount="6500",net="6500",event_type="OTHER",primary="HOUSING",secondary="RENT",description="private landlord 123456789")
     _event(db_session,"same-amount-later",account=card,when=date(2026,7,9),amount="90",net="90",description="private food source")
@@ -183,11 +184,14 @@ def test_monthly_detail_api_is_bounded_sorted_and_does_not_leak_raw_evidence(db_
     assert (body["total"],body["limit"],body["offset"]) == (4,2,0)
     assert [item["amount_cny"] for item in body["items"]] == ["6500.00000000","90.00000000"]
     assert [item["analytics_effective_date"] for item in body["items"]] == ["2026-07-10","2026-07-09"]
-    assert body["items"][0]["display_description"] == "房租"
+    assert body["items"][0]["event_id"] == "largest"
+    assert body["items"][0]["raw_description"] == "private landlord 123456789"
     assert body["items"][0]["account_display_name"] == "CMB Debit ****"
-    assert "raw_description" not in str(body)
-    assert "private landlord" not in str(body)
     assert TestClient(app).get("/api/consumption/events?month=2026-07&limit=201").status_code == 422
+    export=TestClient(app).get("/api/consumption/events/export.csv?month=2026-07")
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    assert "消费名称" in export.content.decode("utf-8-sig") and "private landlord 123456789" in export.content.decode("utf-8-sig")
     second=ConsumptionAnalyticsService(db_session).monthly_detail(month=date(2026,7,1),limit=2,offset=2,account_ids=(card.id,))
     assert [item.classification_status for item in second.items] == ["CLASSIFIED","NEEDS_REVIEW"]
 
@@ -205,4 +209,25 @@ def test_local_rent_rule_replay_promotes_other_into_housing_analytics_and_detail
     assert (point.total_spending_cny,point.housing_cny,point.eligibility_review_count) == (Decimal("6520"),Decimal("6520"),0)
     assert [(item.secondary_category,item.amount_cny) for item in point.secondary_breakdowns] == [("RENT",Decimal("6500")),("PROPERTY_FEE",Decimal("20"))]
     detail=ConsumptionAnalyticsService(db_session).monthly_detail(month=date(2026,7,1),account_ids=(debit.id,))
-    assert [(item.display_description,item.amount_cny) for item in detail.items] == [("房租",Decimal("6500")),("物业费",Decimal("20"))]
+    assert [(item.raw_description,item.amount_cny) for item in detail.items] == [("synthetic fixed rent transfer",Decimal("6500")),("物业费",Decimal("20"))]
+
+
+def test_detail_classification_update_uses_user_confirmation_revision_and_updates_analytics(db_session, monkeypatch):
+    card=_account(db_session,"card")
+    card_id=card.id
+    event=_event(db_session,"editable",account=card,amount="100",net="100",primary="DAILY",secondary="FOOD_DINING")
+    event_id=event.id
+    excluded=_event(db_session,"excluded",account=card,event_type="CREDIT_CARD_REPAYMENT",amount="50",net="50")
+    monkeypatch.setattr(consumption_api,"get_session",lambda: db_session)
+    from fastapi import FastAPI
+    app=FastAPI(); app.include_router(consumption_api.router,prefix="/api/consumption")
+
+    response=TestClient(app).put("/api/consumption/events/editable/classification",json={"primary_category":"TRAVEL","secondary_category":"ACCOMMODATION"})
+    assert response.status_code == 200
+    assert response.json()["revision_number"] == 2
+    current=db_session.query(ConsumptionInterpretation).filter_by(event_id=event_id,is_active=True).one()
+    assert (current.user_confirmed,current.primary_category,current.secondary_category,current.revision_number) == (True,"TRAVEL","ACCOMMODATION",2)
+    assert db_session.query(ConsumptionInterpretationAudit).filter_by(event_id=event_id).count() == 1
+    point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,7,31),months=1,account_ids=(card_id,)).months[0]
+    assert (point.daily_cny,point.travel_cny) == (Decimal("0"),Decimal("100"))
+    assert TestClient(app).put("/api/consumption/events/excluded/classification",json={"primary_category":"DAILY","secondary_category":"FOOD_DINING"}).status_code == 422
