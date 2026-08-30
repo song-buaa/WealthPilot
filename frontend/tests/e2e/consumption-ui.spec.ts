@@ -93,7 +93,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await viteServer.close() })
 
-test('renders analytics, coverage, reviews, and selected-month detail', async ({ page }) => {
+test('renders analytics and selected-month detail without auxiliary cards', async ({ page }) => {
   await mockDemo(page)
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
   await page.goto('/#/consumption')
@@ -104,9 +104,9 @@ test('renders analytics, coverage, reviews, and selected-month detail', async ({
   await expect(page.getByText('旅行消费', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('住房消费', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('待分类', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('部分外币消费尚未完成人民币金额换算，当前为已知金额。')).toBeVisible()
-  await expect(page.getByText('消费归属待确认')).toBeVisible()
-  await expect(page.getByText('分类待确认')).toBeVisible()
+  await expect(page.getByText('部分外币消费尚未完成人民币金额换算，当前为已知金额。')).toHaveCount(0)
+  await expect(page.getByText('数据覆盖与金额状态')).toHaveCount(0)
+  await expect(page.getByText('待确认状态')).toHaveCount(0)
   await expect(page.getByText('2026年8月二级分类')).toBeVisible()
   await expect(page.getByText('住宿')).toBeVisible()
   await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()

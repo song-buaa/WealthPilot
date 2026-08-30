@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { AlertTriangle, CircleHelp, ReceiptText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ReceiptText, RefreshCw } from 'lucide-react'
 import EmptyState from '@/components/shared/EmptyState'
 import PageHeader from '@/components/shared/PageHeader'
 import {
@@ -148,7 +148,7 @@ export default function Consumption() {
       </div>
     </Card>
 
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(280px, 2fr)', gap: 16, alignItems: 'start', marginTop: 16 }}>
+    <div style={{ marginTop: 16 }}>
       <Card style={{ padding: 20 }}>
         <SectionTitle title={`${monthLabel(selected.month)}消费结构`} detail="待分类是已确认但尚未归类的消费状态，并非第四个业务分类。" />
         <div style={{ display: 'grid', gap: 12 }}>{CATEGORY_META.map(item => <CategoryRow key={item.key} label={item.label} color={item.color} amount={toNumber(selected[item.key])} share={categoryShare(selected, item.key)} />)}</div>
@@ -157,10 +157,6 @@ export default function Consumption() {
         <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅展示该月已完成分类的消费。</div>
         <div style={{ marginTop: 12 }}>{selected.secondary_breakdowns.length === 0 ? <LightEmpty text="该月暂无已完成分类的二级消费数据。" /> : <SecondaryBreakdowns breakdowns={selected.secondary_breakdowns} />}</div>
       </Card>
-      <div style={{ display: 'grid', gap: 16 }}>
-        <Card style={{ padding: 18 }}><SectionTitle title="数据覆盖与金额状态" /><div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6 }}>数据覆盖</div><CoverageBadge status={selected.data_coverage_status} /><p style={detailTextStyle}>{selectedCoverage.detail}</p>{!selected.amount_complete && <div style={noticeStyle}><CircleHelp size={15} /> 部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}</Card>
-        <Card style={{ padding: 18 }}><SectionTitle title="待确认状态" /><div style={{ display: 'grid', gap: 14 }}><ReviewLine label="消费归属待确认" value={`${selected.eligibility_review_count} 条记录待确认是否属于消费`} detail="这些记录不计入消费金额。" /><ReviewLine label="分类待确认" value={`${selected.classification_review_count} 笔已确认消费尚未分类`} detail={`${fmtCny(toNumber(selected.unclassified_eligible_cny))} 已计入本月总消费。`} /></div></Card>
-      </div>
     </div>
 
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
@@ -193,7 +189,6 @@ function MonthlyDetailTable({ items, total, loading, error }: { items: Consumpti
 
 function SectionTitle({ title, detail }: { title: string; detail?: string }) { return <div style={{ marginBottom: 14 }}><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>{title}</div>{detail && <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>{detail}</div>}</div> }
 function LightEmpty({ text }: { text: string }) { return <div style={{ padding: '18px 0', color: '#9CA3AF', fontSize: 12 }}>{text}</div> }
-function ReviewLine({ label, value, detail }: { label: string; value: string; detail: string }) { return <div><div style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>{label}</div><div style={{ fontSize: 13, color: '#1B2A4A', marginTop: 4 }}>{value}</div><div style={detailTextStyle}>{detail}</div></div> }
 
 const kpiGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(190px, 1fr) minmax(190px, 1fr)', gap: 12 }
 const heroStyle: React.CSSProperties = { minHeight: 100, borderRadius: 12, padding: '20px 24px', color: '#fff', background: 'linear-gradient(135deg, #1F2937, #111827)', boxShadow: 'var(--shadow-dark)' }
@@ -204,7 +199,6 @@ const detailTextStyle: React.CSSProperties = { fontSize: 11, lineHeight: 1.6, co
 const secondaryButtonStyle: React.CSSProperties = { marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: '#991B1B', border: '1px solid #FCA5A5', padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12 }
 const monthButtonStyle: React.CSSProperties = { border: '1px solid #E5E7EB', background: '#fff', color: '#6B7280', padding: '5px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11 }
 const selectedMonthButtonStyle: React.CSSProperties = { background: '#EFF6FF', border: '1px solid #93C5FD', color: '#1D4ED8', fontWeight: 700 }
-const noticeStyle: React.CSSProperties = { display: 'flex', gap: 7, alignItems: 'flex-start', fontSize: 12, lineHeight: 1.55, color: '#92400E', background: '#FFFBEB', borderRadius: 8, padding: '8px 9px', marginTop: 10 }
 const tableHeaderStyle: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 1, whiteSpace: 'nowrap', background: '#fff', borderBottom: '1px solid #E5E7EB', padding: '8px 10px', fontSize: 11, color: '#6B7280', fontWeight: 600 }
 const tableCellStyle: React.CSSProperties = { whiteSpace: 'nowrap', borderBottom: '1px solid #F3F4F6', padding: '9px 10px', fontSize: 12, color: '#4B5563' }
 const classifiedPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#047857', background: '#ECFDF5' }
