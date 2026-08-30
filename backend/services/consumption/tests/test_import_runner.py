@@ -147,7 +147,7 @@ def test_cli_dry_run_prints_safe_summary_without_fixture_transaction_text(capsys
     assert raw_fixture_text not in captured.out
 
 
-def test_explicit_archive_routes_eml_to_the_existing_ccb_adapter(tmp_path):
+def test_explicit_archive_or_nested_directory_routes_eml_to_the_existing_ccb_adapter(tmp_path):
     archive = tmp_path / "statements.zip"
     fixture = FIXTURES / "ccb_credit_card" / "input_redacted.eml"
     with ZipFile(archive, "w", ZIP_DEFLATED) as value:
@@ -156,3 +156,10 @@ def test_explicit_archive_routes_eml_to_the_existing_ccb_adapter(tmp_path):
     assert len(sources) == 1
     assert sources[0].kind == SourceKind.CCB_CREDIT
     assert sources[0].source_name == archive.name
+
+    nested = tmp_path / "source-directory" / "nested"
+    nested.mkdir(parents=True)
+    (nested / fixture.name).write_bytes(fixture.read_bytes())
+    sources = _archive_sources([nested.parent])
+    assert len(sources) == 1
+    assert sources[0].kind == SourceKind.CCB_CREDIT

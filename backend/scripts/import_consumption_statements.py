@@ -43,8 +43,11 @@ def _source_files(kind: SourceKind, paths: list[Path]) -> list[BootstrapSource]:
             continue
         if path.is_dir():
             files = sorted(
-                candidate for candidate in path.iterdir()
-                if candidate.is_file() and candidate.suffix.lower() in suffixes
+                candidate for candidate in path.rglob("*")
+                if candidate.is_file()
+                and "__MACOSX" not in candidate.parts
+                and not candidate.name.startswith(".")
+                and candidate.suffix.lower() in suffixes
             )
             if not files:
                 raise BootstrapError(f"{kind.value} source directory has no supported files")
@@ -88,8 +91,11 @@ def _archive_sources(paths: list[Path]) -> list[BootstrapSource]:
         if path.is_dir():
             entries = [
                 (candidate.read_bytes(), candidate.name)
-                for candidate in sorted(path.iterdir())
-                if candidate.is_file() and candidate.suffix.lower() in {".pdf", ".eml"}
+                for candidate in sorted(path.rglob("*"))
+                if candidate.is_file()
+                and "__MACOSX" not in candidate.parts
+                and not candidate.name.startswith(".")
+                and candidate.suffix.lower() in {".pdf", ".eml"}
             ]
         elif path.is_file() and path.suffix.lower() == ".zip":
             try:
@@ -230,11 +236,14 @@ def main(argv: list[str] | None = None) -> int:
             result = bootstrap_prepared_sources(None, prepared, dry_run=True)  # type: ignore[arg-type]
             print(f"Dry run: parsed statements: {result.source_statement_count}; raw rows: {result.parsed_row_count}; DB writes: NO")
             return 0
-        backup = None if args.no_backup else _backup_database(db_path)
-        if backup is not None:
-            print(f"Backup: created ({backup.name})")
+        if args.no_backup:
+            print("Backup: skipped by --no-backup")
         else:
-            print("Backup: not needed (target DB does not exist)")
+            backup = _backup_database(db_path)
+            if backup is not None:
+                print(f"Backup: created ({backup.name})")
+            else:
+                print("Backup: not needed (target DB does not exist)")
         database.init_db()
         session = database.get_session()
         try:

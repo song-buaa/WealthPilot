@@ -10,7 +10,7 @@
 | --- | --- |
 | Branch | `codex/consumption-ui-v1` |
 | Start HEAD | `8c8425f26f808f11a8b176acc5580ceda84f5fd6` |
-| Final HEAD | 包含本报告的本地 Bootstrap commit |
+| Final HEAD | 包含本报告与真实 Bootstrap 验证的本地 Bootstrap commit |
 | `main` / `origin/main` | `c0027b5ee091a1169910581a2e2d84c1f65386b4`（本轮未合并、未 push） |
 
 ## Runner
@@ -22,7 +22,7 @@
 - `--cmb-credit <PDF-or-directory-or-source-specific-ZIP>`
 - `--ccb-credit <EML-or-directory-or-source-specific-ZIP>`
 - `--cmb-debit <PDF-or-directory-or-source-specific-ZIP>`
-- `--archive <ZIP-or-directory>`：单个显式归档内的 EML 交给 CCB Adapter；PDF 只有在现有 CMB Credit / Debit Adapter 中恰好一个可验证解析时才接受。
+- `--archive <ZIP-or-directory>`：单个显式归档内（目录可递归）的 EML 交给 CCB Adapter；PDF 只有在现有 CMB Credit / Debit Adapter 中恰好一个可验证解析时才接受。
 
 例如：
 
@@ -78,11 +78,37 @@ Synthetic pipeline analytics 为 non-empty，且每个月都验证：`DAILY + TR
 
 ## Real Local Bootstrap 与 UI Validation
 
-此前提供的本地归档路径在本轮执行时不存在。按照任务的安全规则，未猜测路径、未扫描 Downloads 或其他磁盘位置，也未复制或保留真实账单。因此：
+用户随后明确提供了本地 `docs/statement/` 目录。该目录顶层没有来源文件，但在用户明确授权的目录内递归检查到 25 个支持文件；Runner 因此扩展为只递归处理显式传入的 source directory，不会扫描其他本地路径。
 
-- Real local bootstrap：**NOT RUN**；需要用户重新提供 `--archive` 路径，或三类显式 source path。
-- Real analytics validation：**NOT RUN**。
-- `/consumption` real dashboard validation：**NOT RUN**；不宣称真实数据已渲染。
+真实 Bootstrap 使用：
+
+```bash
+python -m backend.scripts.import_consumption_statements --archive docs/statement
+```
+
+结果（无真实金额、交易明细或账户标识）：
+
+| Item | Result |
+| --- | --- |
+| Target DB | `data/wealthpilot.db` |
+| Backup | PASS，首次真实写入前创建一份 ignored SQLite backup |
+| Parsed statements | 25 |
+| Raw rows | 3,430 |
+| Active Economic Events | 3,430 |
+| Eligibility | eligible 2,318; ineligible 556; needs review 556 |
+| Classification | classified 408; needs review 1,910; not applicable 1,112 |
+| Analytics non-empty | PASS |
+| 12-month invariant | PASS |
+
+以 `--no-backup` 安全复跑相同来源后，25 个 ImportBatch 与 3,430 条 RawTransaction 全部复用，新增 batch / RawTransaction 均为 0；active EconomicEvent 与 active ConsumptionInterpretation 未增加。
+
+本地 `/consumption` 已刷新并实际检查：
+
+- Empty State：**NO**
+- 真实消费分析 Dashboard：**YES**
+- 12 个月趋势、日常 / 旅行 / 住房 / 待分类四段、覆盖状态和两个 Review 状态：**YES**
+- 月份切换：**PASS**
+- Console fatal error：**NO**
 
 ## Privacy 与 Isolation
 
@@ -96,6 +122,6 @@ Synthetic pipeline analytics 为 non-empty，且每个月都验证：`DAILY + TR
 
 ## Open Items / Next Readiness
 
-唯一阻塞项：提供当前可访问的真实账单归档路径或三个来源路径，随后可先运行 `--dry-run`、再执行默认带 backup 的真实 Bootstrap，并刷新 `/consumption` 完成 UI 验收。
+无真实数据 Bootstrap 或 UI Review 阻塞项。
 
-**Next Readiness：`READY_WITH_OPEN_ITEMS`**。
+**Next Readiness：`READY_FOR_USER_UI_REVIEW`**。
