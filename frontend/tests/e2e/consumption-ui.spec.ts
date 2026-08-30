@@ -84,6 +84,9 @@ async function mockDemo(page: Page) {
     const month = new URL(route.request().url()).searchParams.get('month') ?? ''
     return route.fulfill({ json: eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 } })
   })
+  await page.route('**/api/consumption/events/*/classification', route => route.fulfill({
+    json: { event_id: 'event-aug-rent', primary_category: 'DAILY', secondary_category: 'SHOPPING', classification_status: 'CLASSIFIED', revision_number: 2 },
+  }))
 }
 
 test.beforeAll(async () => {
@@ -117,9 +120,11 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('共 2 条，按金额从高到低排列')).toBeVisible()
   await expect(page.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08')
   await page.getByLabel('一级分类 event-aug-rent').selectOption('DAILY')
-  await expect(page.getByLabel('二级分类 event-aug-rent')).toHaveValue('FOOD_DINING')
+  await expect(page.getByLabel('二级分类 event-aug-rent')).toHaveValue('')
   await page.getByLabel('二级分类 event-aug-rent').selectOption('SHOPPING')
-  await expect(page.getByLabel('保存分类 event-aug-rent')).toBeVisible()
+  await expect(page.getByLabel('保存分类 event-aug-rent')).toHaveCount(0)
+  await expect(page.getByText('保存中…')).toBeVisible()
+  await expect(page.getByText('已保存')).toBeVisible()
 
   await page.getByRole('button', { name: '7月' }).click()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()

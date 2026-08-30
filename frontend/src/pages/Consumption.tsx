@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { AlertTriangle, Check, Download, Loader2, ReceiptText, RefreshCw } from 'lucide-react'
 import EmptyState from '@/components/shared/EmptyState'
@@ -42,6 +42,7 @@ const EDITABLE_TAXONOMY = {
 type CategoryKey = (typeof CATEGORY_META)[number]['key']
 type EditablePrimary = keyof typeof EDITABLE_TAXONOMY
 type ClassificationDraft = { primary: EditablePrimary; secondary: string }
+type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
 
 function toNumber(value: string | null | undefined): number { return value == null ? 0 : Number(value) }
 function monthLabel(month: string): string { const [year, value] = month.split('-'); return `${year}年${Number(value)}月` }
@@ -74,12 +75,12 @@ export default function Consumption() {
   const [detailTotal, setDetailTotal] = useState(0)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
-  const [detailRefresh, setDetailRefresh] = useState(0)
   const [editing, setEditing] = useState<Record<string, ClassificationDraft>>({})
-  const [savingEventId, setSavingEventId] = useState<string | null>(null)
-  const [editError, setEditError] = useState<string | null>(null)
+  const [autosaveStates, setAutosaveStates] = useState<Record<string, AutosaveState>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const autosaveTimers = useRef<Record<string, number>>({})
+  const requestVersions = useRef<Record<string, number>>({})
 
   const load = () => {
     setLoading(true)
@@ -93,9 +94,19 @@ export default function Consumption() {
       .finally(() => setLoading(false))
   }
 
+  const refreshSummary = () => {
+    void consumptionApi.getAnalytics({ months: 12 })
+      .then(value => setSummary(value))
+      .catch(() => undefined)
+  }
+
   useEffect(() => {
     const task = window.setTimeout(load, 0)
     return () => window.clearTimeout(task)
+  }, [])
+
+  useEffect(() => () => {
+    Object.values(autosaveTimers.current).forEach(timer => window.clearTimeout(timer))
   }, [])
 
   useEffect(() => {
@@ -111,21 +122,40 @@ export default function Consumption() {
         .finally(() => { if (active) setDetailLoading(false) })
     })
     return () => { active = false }
-  }, [selectedMonth, detailRefresh])
+  }, [selectedMonth])
 
-  const saveClassification = async (item: ConsumptionEventDetail, draft: ClassificationDraft) => {
-    setSavingEventId(item.event_id)
-    setEditError(null)
+  const saveClassification = async (item: ConsumptionEventDetail, draft: ClassificationDraft, version: number) => {
     try {
-      await consumptionApi.updateEventClassification(item.event_id, draft.primary, draft.secondary)
+      const result = await consumptionApi.updateEventClassification(item.event_id, draft.primary, draft.secondary)
+      if (requestVersions.current[item.event_id] !== version) return
+      setDetails(current => current.map(row => row.event_id === item.event_id ? {
+        ...row,
+        primary_category: result.primary_category as ConsumptionEventDetail['primary_category'],
+        secondary_category: result.secondary_category,
+        classification_status: result.classification_status as ConsumptionEventDetail['classification_status'],
+      } : row))
       setEditing(current => { const next = { ...current }; delete next[item.event_id]; return next })
-      setDetailRefresh(value => value + 1)
-      load()
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : '分类保存失败')
-    } finally {
-      setSavingEventId(null)
+      setAutosaveStates(current => ({ ...current, [item.event_id]: { state: 'saved', draft } }))
+      refreshSummary()
+    } catch {
+      if (requestVersions.current[item.event_id] !== version) return
+      setAutosaveStates(current => ({ ...current, [item.event_id]: { state: 'error', draft } }))
     }
+  }
+
+  const scheduleClassificationSave = (item: ConsumptionEventDetail, draft: ClassificationDraft) => {
+    setEditing(current => ({ ...current, [item.event_id]: draft }))
+    window.clearTimeout(autosaveTimers.current[item.event_id])
+    const version = (requestVersions.current[item.event_id] ?? 0) + 1
+    requestVersions.current[item.event_id] = version
+    if (!draft.secondary) {
+      setAutosaveStates(current => { const next = { ...current }; delete next[item.event_id]; return next })
+      return
+    }
+    setAutosaveStates(current => ({ ...current, [item.event_id]: { state: 'saving', draft } }))
+    autosaveTimers.current[item.event_id] = window.setTimeout(() => {
+      void saveClassification(item, draft, version)
+    }, 300)
   }
 
   const selected = useMemo(
@@ -191,7 +221,7 @@ export default function Consumption() {
         <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>{monthLabel(selected.month)}消费明细</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅显示已确认纳入消费分析的记录；消费名称直接来自原始账单描述。</div></div>
         <a href={consumptionApi.getEventsExportUrl(selected.month.slice(0, 7))} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
       </div>
-      <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} savingEventId={savingEventId} editError={editError} onEdit={setEditing} onSave={saveClassification} />
+      <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
     </Card>
   </div>
 }
@@ -210,16 +240,17 @@ function SecondaryBreakdowns({ breakdowns }: { breakdowns: ConsumptionAnalyticsS
   return <div style={{ display: 'grid', gap: 14 }}>{groups.map(primary => { const items = breakdowns.filter(item => item.primary_category === primary); if (items.length === 0) return null; return <div key={primary}><div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 7 }}>{labels[primary]}</div><div style={{ display: 'grid', gap: 7 }}>{items.map(item => <div key={`${primary}-${item.secondary_category}`}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, color: '#4B5563' }}><span>{SECONDARY_LABELS[item.secondary_category] ?? item.secondary_category}</span><span className="tabular-nums">{fmtCny(toNumber(item.amount_cny))}</span></div><div style={{ height: 5, background: '#EEF2F7', borderRadius: 99, marginTop: 4 }}><div style={{ width: `${Math.min(100, toNumber(item.share_within_primary) * 100)}%`, height: '100%', background: '#60A5FA', borderRadius: 99 }} /></div></div>)}</div></div> })}</div>
 }
 
-function MonthlyDetailTable({ items, total, loading, error, editing, savingEventId, editError, onEdit, onSave }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; savingEventId: string | null; editError: string | null; onEdit: React.Dispatch<React.SetStateAction<Record<string, ClassificationDraft>>>; onSave: (item: ConsumptionEventDetail, draft: ClassificationDraft) => Promise<void> }) {
+function MonthlyDetailTable({ items, total, loading, error, editing, autosaveStates, onChange }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; autosaveStates: Record<string, AutosaveState>; onChange: (item: ConsumptionEventDetail, draft: ClassificationDraft) => void }) {
   if (loading) return <div aria-label="正在加载月度明细" style={{ height: 170, borderRadius: 8, background: '#F9FAFB' }} />
   if (error) return <div style={{ padding: '16px 0', fontSize: 12, color: '#B91C1C' }}>{error}</div>
   if (items.length === 0) return <LightEmpty text="该月暂无已确认纳入分析的消费记录。" />
-  return <><div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 9 }}>共 {total} 条，按金额从高到低排列</div>{editError && <div style={{ color: '#B91C1C', fontSize: 12, marginBottom: 9 }}>{editError}</div>}<div style={{ overflow: 'auto', maxHeight: 494, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['日期', '消费名称', '一级分类', '二级分类', '账户', '金额', '分类状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 5 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map((item, index) => {
+  return <><div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 9 }}>共 {total} 条，按金额从高到低排列</div><div style={{ overflow: 'auto', maxHeight: 494, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['日期', '消费名称', '一级分类', '二级分类', '账户', '金额', '分类状态', '保存状态'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 5 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map((item, index) => {
     const draft = editing[item.event_id]
     const primary = draft?.primary ?? item.primary_category ?? ''
     const secondary = draft?.secondary ?? item.secondary_category ?? ''
     const options = primary ? EDITABLE_TAXONOMY[primary as EditablePrimary] : []
-    return <tr key={`${item.event_id}-${index}`}><td style={tableCellStyle}>{item.analytics_effective_date}</td><td style={{ ...tableCellStyle, maxWidth: 250 }}><div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: '#374151' }}>{item.raw_description}</div></td><td style={tableCellStyle}><select aria-label={`一级分类 ${item.event_id}`} value={primary} onChange={event => { const nextPrimary = event.target.value as EditablePrimary; onEdit(current => ({ ...current, [item.event_id]: { primary: nextPrimary, secondary: EDITABLE_TAXONOMY[nextPrimary][0] } })) }} style={selectStyle}><option value="" disabled>待分类</option>{Object.entries({ DAILY: '日常消费', TRAVEL: '旅行消费', HOUSING: '住房消费' }).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td style={tableCellStyle}><select aria-label={`二级分类 ${item.event_id}`} value={secondary} disabled={!primary} onChange={event => onEdit(current => ({ ...current, [item.event_id]: { primary: primary as EditablePrimary, secondary: event.target.value } }))} style={selectStyle}><option value="" disabled>选择分类</option>{options.map(value => <option key={value} value={value}>{SECONDARY_LABELS[value] ?? value}</option>)}</select></td><td style={tableCellStyle}>{item.account_display_name}</td><td className="tabular-nums" style={{ ...tableCellStyle, textAlign: 'right', fontWeight: 700, color: '#1B2A4A' }}>{fmtCny(toNumber(item.amount_cny))}</td><td style={tableCellStyle}><span style={item.classification_status === 'CLASSIFIED' ? classifiedPillStyle : reviewPillStyle}>{item.classification_status === 'CLASSIFIED' ? '已分类' : '待分类'}</span></td><td style={tableCellStyle}>{draft && <button aria-label={`保存分类 ${item.event_id}`} onClick={() => void onSave(item, draft)} disabled={savingEventId === item.event_id} style={saveButtonStyle}>{savingEventId === item.event_id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} 保存</button>}</td></tr>
+    const state = autosaveStates[item.event_id]
+    return <tr key={`${item.event_id}-${index}`}><td style={tableCellStyle}>{item.analytics_effective_date}</td><td style={{ ...tableCellStyle, maxWidth: 250 }}><div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: '#374151' }}>{item.raw_description}</div></td><td style={tableCellStyle}><select aria-label={`一级分类 ${item.event_id}`} value={primary} onChange={event => { const nextPrimary = event.target.value as EditablePrimary; const currentSecondary = secondary; const nextSecondary = EDITABLE_TAXONOMY[nextPrimary].includes(currentSecondary as never) ? currentSecondary : ''; onChange(item, { primary: nextPrimary, secondary: nextSecondary }) }} style={selectStyle}><option value="" disabled>待分类</option>{Object.entries({ DAILY: '日常消费', TRAVEL: '旅行消费', HOUSING: '住房消费' }).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td style={tableCellStyle}><select aria-label={`二级分类 ${item.event_id}`} value={secondary} disabled={!primary} onChange={event => onChange(item, { primary: primary as EditablePrimary, secondary: event.target.value })} style={selectStyle}><option value="" disabled>选择分类</option>{options.map(value => <option key={value} value={value}>{SECONDARY_LABELS[value] ?? value}</option>)}</select></td><td style={tableCellStyle}>{item.account_display_name}</td><td className="tabular-nums" style={{ ...tableCellStyle, textAlign: 'right', fontWeight: 700, color: '#1B2A4A' }}>{fmtCny(toNumber(item.amount_cny))}</td><td style={tableCellStyle}><span style={item.classification_status === 'CLASSIFIED' ? classifiedPillStyle : reviewPillStyle}>{item.classification_status === 'CLASSIFIED' ? '已分类' : '待分类'}</span></td><td style={tableCellStyle}>{state?.state === 'saving' && <span style={autosaveSavingStyle}><Loader2 size={12} className="animate-spin" /> 保存中…</span>}{state?.state === 'saved' && <span style={autosaveSavedStyle}><Check size={12} /> 已保存</span>}{state?.state === 'error' && <button aria-label={`重试分类 ${item.event_id}`} onClick={() => onChange(item, state.draft)} style={retryButtonStyle}>保存失败 / 重试</button>}</td></tr>
   })}</tbody></table></div></>
 }
 
@@ -241,4 +272,6 @@ const classifiedPillStyle: React.CSSProperties = { display: 'inline-block', bord
 const reviewPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#B45309', background: '#FFFBEB' }
 const exportButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, border: '1px solid #E5E7EB', borderRadius: 6, padding: '5px 9px', color: '#4B5563', background: '#fff', fontSize: 11, textDecoration: 'none' }
 const selectStyle: React.CSSProperties = { maxWidth: 126, border: '1px solid #E5E7EB', borderRadius: 5, background: '#fff', color: '#374151', padding: '4px 6px', fontSize: 11 }
-const saveButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #BFDBFE', borderRadius: 5, background: '#EFF6FF', color: '#1D4ED8', padding: '4px 7px', cursor: 'pointer', fontSize: 11 }
+const autosaveSavingStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#6B7280', fontSize: 11 }
+const autosaveSavedStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#047857', fontSize: 11 }
+const retryButtonStyle: React.CSSProperties = { border: 'none', padding: 0, background: 'transparent', color: '#B91C1C', cursor: 'pointer', fontSize: 11 }
