@@ -163,8 +163,6 @@ def test_high_confidence_generic_merchant_semantics_use_raw_description(db_sessi
 
 
 @pytest.mark.parametrize("description", [
-    "拼多多支付-品牌好货",
-    "拼多多平台商户",
     "普通财付通商户",
     "支付宝普通商户",
     "某某科技有限公司",
@@ -176,6 +174,20 @@ def test_ambiguous_merchant_semantics_remain_needs_review(db_session, descriptio
     result = ClassificationResolver().resolve_event(db_session, event)
     assert (result.classification_status, result.primary_category, result.secondary_category) == (
         "NEEDS_REVIEW", None, None,
+    )
+
+
+@pytest.mark.parametrize(("description", "secondary"), [
+    ("拼多多支付-宠物用品店", "PET"),
+    ("拼多多支付-男装旗舰店", "SHOPPING"),
+    ("拼多多支付-品牌好货", "SHOPPING"),
+    ("拼多多平台商户", "SHOPPING"),
+])
+def test_pinduoduo_falls_back_to_shopping_after_more_specific_semantics(db_session, description, secondary):
+    event = _event(db_session, f"pdd-{description}", EventType.CONSUMPTION, description)
+    result = ClassificationResolver().resolve_event(db_session, event)
+    assert (result.classification_status, result.primary_category, result.secondary_category) == (
+        "CLASSIFIED", "DAILY", secondary,
     )
 
 

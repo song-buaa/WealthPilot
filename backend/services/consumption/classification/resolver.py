@@ -23,7 +23,7 @@ from backend.services.consumption.models import (
 )
 
 
-RESOLVER_VERSION = "consumption-classification-v2"
+RESOLVER_VERSION = "consumption-classification-v3"
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,10 @@ def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
     if any(word in value for word in ("冲浪", "健身", "运动")):
         return PrimaryCategory.DAILY, "SPORTS_HOBBY"
     if any(word in value for word in ("购物", "merchantx", "男装", "女装", "服饰", "专卖店")):
+        return PrimaryCategory.DAILY, "SHOPPING"
+    # Platform-only descriptors are not otherwise semantically specific.  This
+    # fallback intentionally follows every consumer-purpose keyword above.
+    if "拼多多" in value:
         return PrimaryCategory.DAILY, "SHOPPING"
     return None
 
