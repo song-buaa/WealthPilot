@@ -244,7 +244,7 @@ function MonthlyDetailTable({ items, total, loading, error, editing, autosaveSta
   if (loading) return <div aria-label="正在加载月度明细" style={{ height: 170, borderRadius: 8, background: '#F9FAFB' }} />
   if (error) return <div style={{ padding: '16px 0', fontSize: 12, color: '#B91C1C' }}>{error}</div>
   if (items.length === 0) return <LightEmpty text="该月暂无已确认纳入分析的消费记录。" />
-  return <><div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 9 }}>共 {total} 条，按金额从高到低排列</div><div style={{ overflow: 'auto', maxHeight: 494, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['日期', '消费名称', '一级分类', '二级分类', '账户', '金额', '分类状态', '保存状态'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 5 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map((item, index) => {
+  return <><div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 9 }}>共 {total} 条，按金额从高到低排列</div><div style={{ overflow: 'auto', maxHeight: 494, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['日期', '消费明细', '一级分类', '二级分类', '账户', '金额', '分类状态', '保存状态'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 5 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map((item, index) => {
     const draft = editing[item.event_id]
     const primary = draft?.primary ?? item.primary_category ?? ''
     const secondary = draft?.secondary ?? item.secondary_category ?? ''

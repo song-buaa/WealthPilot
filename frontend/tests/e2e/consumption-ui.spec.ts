@@ -115,6 +115,8 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()
   await expect(page.getByText('本月数据截至', { exact: false })).toHaveCount(0)
   await expect(page.getByText('2026年8月消费明细')).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '消费明细' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '消费名称' })).toHaveCount(0)
   await expect(page.getByText('原始账单描述：月度房租')).toBeVisible()
   await expect(page.getByText('CMB Debit ****').first()).toBeVisible()
   await expect(page.getByText('共 2 条，按金额从高到低排列')).toBeVisible()

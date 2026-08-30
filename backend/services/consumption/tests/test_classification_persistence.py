@@ -128,6 +128,71 @@ def test_u_eligible_unknown_is_persisted_and_schema_is_complete(db_session):
     assert {"consumption_interpretations", "consumption_interpretation_audits", "consumption_user_rules", "consumption_travel_contexts", "consumption_account_purpose_preferences"}.issubset(tables)
 
 
+@pytest.mark.parametrize(("description", "primary", "secondary"), [
+    ("兰州拉面", "DAILY", "FOOD_DINING"),
+    ("云南米粉", "DAILY", "FOOD_DINING"),
+    ("过桥米线", "DAILY", "FOOD_DINING"),
+    ("冒菜", "DAILY", "FOOD_DINING"),
+    ("麻辣烫", "DAILY", "FOOD_DINING"),
+    ("精品咖啡", "DAILY", "FOOD_DINING"),
+    ("快餐", "DAILY", "FOOD_DINING"),
+    ("特色小吃", "DAILY", "FOOD_DINING"),
+    ("包点", "DAILY", "FOOD_DINING"),
+    ("饭店", "DAILY", "FOOD_DINING"),
+    ("停车服务", "DAILY", "TRANSPORT_AUTO"),
+    ("快充服务", "DAILY", "TRANSPORT_AUTO"),
+    ("车辆充电", "DAILY", "TRANSPORT_AUTO"),
+    ("通行宝", "DAILY", "TRANSPORT_AUTO"),
+    ("顺易通", "DAILY", "TRANSPORT_AUTO"),
+    ("宠物用品", "DAILY", "PET"),
+    ("猫粮", "DAILY", "PET"),
+    ("猫砂", "DAILY", "PET"),
+    ("冲浪课程", "DAILY", "SPORTS_HOBBY"),
+    ("健身中心", "DAILY", "SPORTS_HOBBY"),
+    ("男装", "DAILY", "SHOPPING"),
+    ("女装", "DAILY", "SHOPPING"),
+    ("服饰", "DAILY", "SHOPPING"),
+    ("品牌专卖店", "DAILY", "SHOPPING"),
+])
+def test_high_confidence_generic_merchant_semantics_use_raw_description(db_session, description, primary, secondary):
+    event = _event(db_session, f"semantic-{description}", EventType.CONSUMPTION, description)
+    result = ClassificationResolver().resolve_event(db_session, event)
+    assert (result.classification_status, result.primary_category, result.secondary_category) == (
+        "CLASSIFIED", primary, secondary,
+    )
+
+
+@pytest.mark.parametrize("description", [
+    "拼多多支付-品牌好货",
+    "拼多多平台商户",
+    "普通财付通商户",
+    "支付宝普通商户",
+    "某某科技有限公司",
+    "个人收款",
+    "某品牌旗舰店",
+])
+def test_ambiguous_merchant_semantics_remain_needs_review(db_session, description):
+    event = _event(db_session, f"ambiguous-{description}", EventType.CONSUMPTION, description)
+    result = ClassificationResolver().resolve_event(db_session, event)
+    assert (result.classification_status, result.primary_category, result.secondary_category) == (
+        "NEEDS_REVIEW", None, None,
+    )
+
+
+@pytest.mark.parametrize(("description", "secondary"), [
+    ("咖啡", "FOOD_DINING"),
+    ("停车服务", "LOCAL_TRANSPORT"),
+])
+def test_travel_context_overrides_generic_food_and_transport_semantics(db_session, description, secondary):
+    db_session.add(TravelContext(destination="HK", start_date=date(2026, 7, 1), end_date=date(2026, 7, 3)))
+    db_session.flush()
+    event = _event(db_session, f"travel-{description}", EventType.CONSUMPTION, description, when=date(2026, 7, 2))
+    result = ClassificationResolver().resolve_event(db_session, event)
+    assert (result.primary_category, result.secondary_category, result.classification_source) == (
+        "TRAVEL", secondary, "TRAVEL_CONTEXT",
+    )
+
+
 def test_empty_and_existing_sqlite_initialization_is_idempotent(tmp_path, monkeypatch):
     from app import database
 

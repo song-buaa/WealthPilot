@@ -23,7 +23,7 @@ from backend.services.consumption.models import (
 )
 
 
-RESOLVER_VERSION = "consumption-classification-v1"
+RESOLVER_VERSION = "consumption-classification-v2"
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,8 @@ def _compact(value: str | None) -> str:
     return "".join((value or "").casefold().split())
 
 
-def _semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+def _specific_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+    """Return categories whose merchant semantics are more specific than travel context."""
     value = _compact(text)
     if any(word in value for word in ("物业", "物业费")):
         return PrimaryCategory.HOUSING, "PROPERTY_FEE"
@@ -55,13 +56,24 @@ def _semantic(text: str) -> tuple[PrimaryCategory, str] | None:
         return PrimaryCategory.TRAVEL, "ACCOMMODATION"
     if any(word in value for word in ("vercel", "cursor", "cloudflare", "googleone")):
         return PrimaryCategory.DAILY, "DIGITAL_COMMUNICATION"
-    if any(word in value for word in ("餐厅", "餐饮", "美团", "coffee")):
+    return None
+
+
+def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+    """Classify only merchant descriptions with an unambiguous consumer purpose."""
+    value = _compact(text)
+    if any(word in value for word in (
+        "餐厅", "餐饮", "美团", "coffee", "拉面", "米粉", "米线", "冒菜", "麻辣烫",
+        "咖啡", "快餐", "小吃", "包点", "饭店",
+    )):
         return PrimaryCategory.DAILY, "FOOD_DINING"
-    if any(word in value for word in ("滴滴", "出租车", "打车", "停车")):
+    if any(word in value for word in ("滴滴", "出租车", "打车", "停车", "快充", "充电", "通行宝", "顺易通")):
         return PrimaryCategory.DAILY, "TRANSPORT_AUTO"
-    if any(word in value for word in ("健身", "运动")):
+    if any(word in value for word in ("宠物", "猫粮", "猫砂")):
+        return PrimaryCategory.DAILY, "PET"
+    if any(word in value for word in ("冲浪", "健身", "运动")):
         return PrimaryCategory.DAILY, "SPORTS_HOBBY"
-    if "购物" in value or "merchantx" in value:
+    if any(word in value for word in ("购物", "merchantx", "男装", "女装", "服饰", "专卖店")):
         return PrimaryCategory.DAILY, "SHOPPING"
     return None
 
@@ -146,7 +158,12 @@ class ClassificationResolver:
             return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
                 ClassificationStatus.CLASSIFIED, PrimaryCategory(rule.primary_category), rule.secondary_category,
                 ClassificationSource.USER_RULE, "USER_RULE_SCOPE_MATCH", rule.id)
-        semantic = _semantic(descriptor)
+        specific_semantic = _specific_semantic(descriptor)
+        if specific_semantic:
+            return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
+                ClassificationStatus.CLASSIFIED, specific_semantic[0], specific_semantic[1],
+                ClassificationSource.MERCHANT_RULE, "HIGH_CONFIDENCE_SEMANTIC")
+        semantic = _generic_merchant_semantic(descriptor)
         travel = self._travel_applies(session, event.event_date)
         if semantic and travel and semantic in {(PrimaryCategory.DAILY, "FOOD_DINING"), (PrimaryCategory.DAILY, "TRANSPORT_AUTO")}:
             return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
