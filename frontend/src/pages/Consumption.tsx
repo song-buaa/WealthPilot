@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { AlertTriangle, CalendarDays, CircleHelp, ReceiptText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CircleHelp, ReceiptText, RefreshCw } from 'lucide-react'
 import EmptyState from '@/components/shared/EmptyState'
 import PageHeader from '@/components/shared/PageHeader'
 import {
@@ -20,7 +20,7 @@ const CATEGORY_META = [
 
 const COVERAGE_COPY: Record<ConsumptionCoverageStatus, { label: string; detail: string; color: string }> = {
   COMPLETE: { label: '数据完整', detail: '已接入账户的本月数据完整。', color: '#047857' },
-  PARTIAL: { label: '数据未完整', detail: '本月仍在进行中，金额会随导入更新。', color: '#B45309' },
+  PARTIAL: { label: '数据未完整', detail: '部分数据尚未完整覆盖，金额会随导入更新。', color: '#B45309' },
   SOURCE_LIMITED: { label: '来源无法确认完整性', detail: '招行信用卡账单未提供明确账单周期，当前基于已解析交易范围分析。', color: '#B45309' },
   UNKNOWN: { label: '数据覆盖未知', detail: '部分预期账户尚无可验证的导入覆盖范围。', color: '#B91C1C' },
 }
@@ -138,10 +138,10 @@ export default function Consumption() {
       <Card style={{ padding: '20px 22px', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div>
-            <div style={eyebrowStyle}>本月消费概览 · {monthLabel(selected.month)}</div>
+            <div style={eyebrowStyle}>月度消费概览 · {monthLabel(selected.month)}</div>
             <div className="tabular-nums" style={{ marginTop: 7, fontSize: 32, lineHeight: 1, fontWeight: 750, letterSpacing: '-1px', color: '#1B2A4A' }}>{fmtCny(toNumber(selected.total_spending_cny))}</div>
             <div style={{ fontSize: 12, color: '#6B7280', marginTop: 9 }}>
-              {selected.is_partial_month && selected.as_of_date ? `本月数据截至 ${selected.as_of_date}` : '已接入账户的已确认消费'}
+              {selected.as_of_date ? `分析日期：${selected.as_of_date}（不代表数据完整覆盖）` : '已接入账户的已确认消费'}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -184,16 +184,15 @@ export default function Consumption() {
             </div>
           </Card>
           <Card style={{ padding: 18 }}>
-            <SectionTitle title="近 12 个月二级分类" detail="仅展示已完成分类的消费；金额与占比由 Analytics API 返回。" />
-            {summary.secondary_breakdowns.length === 0 ? <LightEmpty text="当前范围内暂无已完成分类的二级消费数据。" /> : <SecondaryBreakdowns summary={summary} />}
+            <SectionTitle title={`${monthLabel(selected.month)}二级分类`} detail="仅展示该月已完成分类的消费；金额与占比由 Analytics API 返回。" />
+            {selected.secondary_breakdowns.length === 0 ? <LightEmpty text="该月暂无已完成分类的二级消费数据。" /> : <SecondaryBreakdowns breakdowns={selected.secondary_breakdowns} />}
           </Card>
         </div>
         <div style={{ display: 'grid', gap: 16 }}>
           <Card style={{ padding: 18 }}>
             <SectionTitle title="数据覆盖与金额状态" />
             <div style={{ display: 'grid', gap: 12 }}>
-              <div><CoverageBadge status={selected.data_coverage_status} /><p style={detailTextStyle}>{selectedCoverage.detail}</p></div>
-              {selected.is_partial_month && selected.as_of_date && <div style={noticeStyle}><CalendarDays size={15} /> 本月数据截至 {selected.as_of_date}</div>}
+              <div><div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6 }}>数据覆盖</div><CoverageBadge status={selected.data_coverage_status} /><p style={detailTextStyle}>{selectedCoverage.detail}</p></div>
               {!selected.amount_complete && <div style={noticeStyle}><CircleHelp size={15} /> 部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}
             </div>
           </Card>
@@ -234,12 +233,12 @@ function CategoryCard({ label, color, amount, share }: { label: string; color: s
   </div>
 }
 
-function SecondaryBreakdowns({ summary }: { summary: ConsumptionAnalyticsSummary }) {
+function SecondaryBreakdowns({ breakdowns }: { breakdowns: ConsumptionAnalyticsSummary['secondary_breakdowns'] }) {
   const groups = ['DAILY', 'TRAVEL', 'HOUSING'] as const
   const labels = { DAILY: '日常消费', TRAVEL: '旅行消费', HOUSING: '住房消费' }
   return <div style={{ display: 'grid', gap: 14 }}>
     {groups.map(primary => {
-      const items = summary.secondary_breakdowns.filter(item => item.primary_category === primary)
+      const items = breakdowns.filter(item => item.primary_category === primary)
       if (items.length === 0) return null
       return <div key={primary}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 7 }}>{labels[primary]}</div>

@@ -115,6 +115,7 @@ class MonthlySpendingPoint:
     comparison_available: bool
     comparison_reason: str | None
     amount_unresolved_by_currency: tuple[UnresolvedAmount, ...] = ()
+    secondary_breakdowns: tuple[SecondaryBreakdown, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,27 @@ def _coverage_status(month: date, as_of_date: date, inputs: Iterable[SourceCover
     return DataCoverageStatus.COMPLETE if rows or not expected_accounts else DataCoverageStatus.UNKNOWN
 
 
+def _secondary_breakdowns(
+    secondary: dict[tuple[PrimaryCategory, str], tuple[Decimal, int]],
+    *,
+    primary_totals: dict[PrimaryCategory, Decimal],
+    total: Decimal,
+) -> tuple[SecondaryBreakdown, ...]:
+    return tuple(
+        SecondaryBreakdown(
+            primary,
+            secondary_name,
+            amount,
+            count,
+            amount / total if total else None,
+            amount / primary_totals[primary] if primary_totals[primary] else None,
+        )
+        for (primary, secondary_name), (amount, count) in sorted(
+            secondary.items(), key=lambda item: (-item[1][0], item[0])
+        )
+    )
+
+
 def evaluate_spending(
     events: Iterable[ActiveEventProjection],
     interpretations: Iterable[ActiveInterpretation],
@@ -194,6 +216,7 @@ def evaluate_spending(
     secondary: dict[tuple[PrimaryCategory, str], tuple[Decimal, int]] = {}
     for month in windows:
         daily = travel = housing = unclassified = known_total = Decimal("0")
+        monthly_secondary: dict[tuple[PrimaryCategory, str], tuple[Decimal, int]] = {}
         unresolved_original = Decimal("0")
         unresolved_by_currency: dict[str, tuple[Decimal, int]] = {}
         eligible_count = eligibility_review = classification_review = unresolved_count = 0
@@ -235,7 +258,14 @@ def evaluate_spending(
                 key = (interpretation.primary_category, interpretation.secondary_category)
                 previous_amount, previous_count = secondary.get(key, (Decimal("0"), 0))
                 secondary[key] = (previous_amount + amount, previous_count + 1)
+                previous_amount, previous_count = monthly_secondary.get(key, (Decimal("0"), 0))
+                monthly_secondary[key] = (previous_amount + amount, previous_count + 1)
         classified = daily + travel + housing
+        monthly_primary_totals = {
+            PrimaryCategory.DAILY: daily,
+            PrimaryCategory.TRAVEL: travel,
+            PrimaryCategory.HOUSING: housing,
+        }
         coverage_rate = (classified / known_total) if known_total else None
         status = _coverage_status(month, as_of_date, coverage_values, expected)
         partial = status != DataCoverageStatus.COMPLETE
@@ -251,6 +281,11 @@ def evaluate_spending(
                 UnresolvedAmount(currency, amount, count)
                 for currency, (amount, count) in sorted(unresolved_by_currency.items())
             ),
+            _secondary_breakdowns(
+                monthly_secondary,
+                primary_totals=monthly_primary_totals,
+                total=known_total,
+            ),
         ))
     window_total = sum((point.total_spending_cny for point in points), Decimal("0"))
     primary_totals = {
@@ -258,12 +293,11 @@ def evaluate_spending(
         PrimaryCategory.TRAVEL: sum((point.travel_cny for point in points), Decimal("0")),
         PrimaryCategory.HOUSING: sum((point.housing_cny for point in points), Decimal("0")),
     }
-    breakdowns: list[SecondaryBreakdown] = []
-    for (primary, secondary_name), (amount, count) in sorted(secondary.items(), key=lambda item: (-item[1][0], item[0])):
-        primary_amount = primary_totals[primary]
-        breakdowns.append(SecondaryBreakdown(primary, secondary_name, amount, count,
-            amount / window_total if window_total else None,
-            amount / primary_amount if primary_amount else None))
+    breakdowns = _secondary_breakdowns(
+        secondary,
+        primary_totals=primary_totals,
+        total=window_total,
+    )
     def average(values: Iterable[MonthlySpendingPoint]) -> AverageMetric:
         complete = [
             item.total_spending_cny for item in values
@@ -276,6 +310,6 @@ def evaluate_spending(
 
     all_complete = average(points)
     return SpendingSummary(
-        tuple(points), tuple(breakdowns), all_complete.amount_cny, all_complete.months_used,
+        tuple(points), breakdowns, all_complete.amount_cny, all_complete.months_used,
         average(points[-3:]), average(points[-12:]),
     )

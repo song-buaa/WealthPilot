@@ -119,3 +119,36 @@ def test_secondary_breakdown_is_deterministic_and_uses_total_eligible_denominato
     assert [(item.secondary_category, item.share_of_total, item.share_within_primary) for item in result.secondary_breakdowns] == [
         ("ACCOMMODATION", Decimal("0.6"), Decimal("1")), ("FOOD_DINING", Decimal("0.4"), Decimal("1")),
     ]
+
+
+def test_monthly_secondary_breakdowns_are_scoped_to_their_selected_month():
+    events = (
+        ActiveEventProjection("food", EventType.CONSUMPTION, date(2026, 7, 10), "card", Decimal("40"), Decimal("40"), "NATIVE_CNY"),
+        ActiveEventProjection("hotel", EventType.CONSUMPTION, date(2026, 8, 10), "card", Decimal("60"), Decimal("60"), "NATIVE_CNY"),
+    )
+    interpretations = (
+        ActiveInterpretation("food", EligibilityStatus.ELIGIBLE, ClassificationStatus.CLASSIFIED, PrimaryCategory.DAILY, "FOOD_DINING"),
+        ActiveInterpretation("hotel", EligibilityStatus.ELIGIBLE, ClassificationStatus.CLASSIFIED, PrimaryCategory.TRAVEL, "ACCOMMODATION"),
+    )
+    coverage = (
+        SourceCoverageInput("card", date(2026, 7, 1), SourceCoverageStatus.EXPLICIT, date(2026, 7, 31)),
+        SourceCoverageInput("card", date(2026, 8, 1), SourceCoverageStatus.EXPLICIT, date(2026, 8, 31)),
+    )
+
+    result = evaluate_spending(events, interpretations, coverage, as_of_date=date(2026, 8, 31), expected_account_ids=("card",))
+    july = next(item for item in result.months if item.month == date(2026, 7, 1))
+    august = next(item for item in result.months if item.month == date(2026, 8, 1))
+
+    assert [(item.secondary_category, item.amount_cny) for item in july.secondary_breakdowns] == [("FOOD_DINING", Decimal("40"))]
+    assert [(item.secondary_category, item.amount_cny) for item in august.secondary_breakdowns] == [("ACCOMMODATION", Decimal("60"))]
+    for point in (july, august):
+        assert sum(item.amount_cny for item in point.secondary_breakdowns) <= point.classified_eligible_cny
+        for primary, amount in (
+            (PrimaryCategory.DAILY, point.daily_cny),
+            (PrimaryCategory.TRAVEL, point.travel_cny),
+            (PrimaryCategory.HOUSING, point.housing_cny),
+        ):
+            assert sum(item.amount_cny for item in point.secondary_breakdowns if item.primary_category == primary) <= amount
+    assert [(item.secondary_category, item.amount_cny) for item in result.secondary_breakdowns] == [
+        ("ACCOMMODATION", Decimal("60")), ("FOOD_DINING", Decimal("40")),
+    ]

@@ -6,7 +6,12 @@ import { createServer, type ViteDevServer } from 'vite'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 let viteServer: ViteDevServer
 
-function point(month: string, total: string, coverage: 'COMPLETE' | 'PARTIAL' | 'SOURCE_LIMITED' | 'UNKNOWN' = 'COMPLETE') {
+function point(
+  month: string,
+  total: string,
+  coverage: 'COMPLETE' | 'PARTIAL' | 'SOURCE_LIMITED' | 'UNKNOWN' = 'COMPLETE',
+  secondaryBreakdowns: Array<Record<string, string | number | null>> = [],
+) {
   const value = Number(total)
   return {
     month,
@@ -29,6 +34,7 @@ function point(month: string, total: string, coverage: 'COMPLETE' | 'PARTIAL' | 
     as_of_date: month === '2026-08-01' ? '2026-08-20' : null,
     comparison_available: month !== '2025-09-01' && month !== '2026-08-01',
     comparison_reason: month === '2026-08-01' ? 'MONTH_NOT_COMPARABLE' : null,
+    secondary_breakdowns: secondaryBreakdowns,
   }
 }
 
@@ -36,7 +42,16 @@ const analyticsResponse = {
   months: [
     '2025-09-01', '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01',
     '2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01',
-  ].map((month, index) => point(month, String(1000 + index * 100), month === '2026-07-01' ? 'SOURCE_LIMITED' : 'COMPLETE')),
+  ].map((month, index) => point(
+    month,
+    String(1000 + index * 100),
+    month === '2026-07-01' ? 'SOURCE_LIMITED' : month === '2026-08-01' ? 'PARTIAL' : 'COMPLETE',
+    month === '2026-07-01'
+      ? [{ primary_category: 'DAILY', secondary_category: 'FOOD_DINING', amount_cny: '1000', event_count: 4, share_of_total: '0.5', share_within_primary: '1' }]
+      : month === '2026-08-01'
+        ? [{ primary_category: 'TRAVEL', secondary_category: 'ACCOMMODATION', amount_cny: '420', event_count: 2, share_of_total: '0.21', share_within_primary: '1' }]
+        : [],
+  )),
   secondary_breakdowns: [
     { primary_category: 'DAILY', secondary_category: 'FOOD_DINING', amount_cny: '1200', event_count: 12, share_of_total: '0.2', share_within_primary: '0.5' },
     { primary_category: 'TRAVEL', secondary_category: 'ACCOMMODATION', amount_cny: '600', event_count: 2, share_of_total: '0.1', share_within_primary: '0.5' },
@@ -72,10 +87,16 @@ test('renders analytics, coverage, reviews, and selected-month detail from one r
   await expect(page.getByText('部分外币消费尚未完成人民币金额换算，当前为已知金额。')).toBeVisible()
   await expect(page.getByText('消费归属待确认')).toBeVisible()
   await expect(page.getByText('分类待确认')).toBeVisible()
-  await expect(page.getByText('餐饮')).toBeVisible()
+  await expect(page.getByText('2026年8月二级分类')).toBeVisible()
+  await expect(page.getByText('住宿')).toBeVisible()
+  await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()
+  await expect(page.getByText('本月数据截至', { exact: false })).toHaveCount(0)
 
   await page.getByRole('button', { name: '7月' }).click()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
+  await expect(page.getByText('2026年7月二级分类')).toBeVisible()
+  await expect(page.getByText('餐饮')).toBeVisible()
+  await expect(page.getByText('住宿')).toHaveCount(0)
   await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
 })
 
@@ -99,12 +120,19 @@ test('renders loading, empty, and safe error states', async ({ page }) => {
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
 })
 
-test('renders unknown coverage without overstating completeness', async ({ page }) => {
-  await mockDemo(page)
-  const months = analyticsResponse.months.map(item => ({ ...item }))
-  months[months.length - 1].data_coverage_status = 'UNKNOWN'
-  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: { ...analyticsResponse, months } }))
-  await page.goto('/#/consumption')
-  await expect(page.getByText('数据覆盖未知').first()).toBeVisible()
-  await expect(page.getByText('部分预期账户尚无可验证的导入覆盖范围。')).toBeVisible()
-})
+for (const [status, label, detail] of [
+  ['COMPLETE', '数据完整', '已接入账户的本月数据完整。'],
+  ['PARTIAL', '数据未完整', '部分数据尚未完整覆盖，金额会随导入更新。'],
+  ['SOURCE_LIMITED', '来源无法确认完整性', '招行信用卡账单未提供明确账单周期，当前基于已解析交易范围分析。'],
+  ['UNKNOWN', '数据覆盖未知', '部分预期账户尚无可验证的导入覆盖范围。'],
+] as const) {
+  test(`renders ${status} coverage without overstating completeness`, async ({ page }) => {
+    await mockDemo(page)
+    const months = analyticsResponse.months.map(item => ({ ...item }))
+    months[months.length - 1] = { ...months[months.length - 1], data_coverage_status: status }
+    await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: { ...analyticsResponse, months } }))
+    await page.goto('/#/consumption')
+    await expect(page.getByText(label).first()).toBeVisible()
+    await expect(page.getByText(detail)).toBeVisible()
+  })
+}

@@ -64,6 +64,7 @@ export interface ConsumptionMonthlyPoint {
   as_of_date: string | null
   comparison_available: boolean
   comparison_reason: string | null
+  secondary_breakdowns: ConsumptionSecondaryBreakdown[]
 }
 
 export interface ConsumptionSecondaryBreakdown {

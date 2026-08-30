@@ -153,5 +153,9 @@ def test_api_is_get_only_serializes_decimals_and_honors_account_filter(db_sessio
     response=TestClient(app).get("/api/consumption/analytics?as_of=2026-07-31&months=1&account_ids=card")
     assert response.status_code == 200
     body=response.json(); assert Decimal(body["months"][0]["total_spending_cny"]) == Decimal("12.50")
+    assert body["months"][0]["secondary_breakdowns"] == [{
+        "primary_category": "DAILY", "secondary_category": "FOOD_DINING", "amount_cny": "12.50000000",
+        "event_count": 1, "share_of_total": "1", "share_within_primary": "1",
+    }]
     assert body["three_month_average"]["months_used"] == 1
     assert {next(iter(route.methods)) for route in app.routes if getattr(route,"path","") == "/api/consumption/analytics"} == {"GET"}
