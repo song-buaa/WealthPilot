@@ -23,7 +23,7 @@ from backend.services.consumption.contracts import (
     source_file_hash,
 )
 
-PARSER_VERSION = "cmb-credit-card-pdf-spike-v1"
+PARSER_VERSION = "cmb-credit-card-pdf-spike-v2"
 _ROW_RE = re.compile(r"^(\d{1,2}/\d{1,2})\s+(\d{1,2}/\d{1,2})\s+(.+)$")
 
 
@@ -57,8 +57,16 @@ def parse_cmb_credit_card_pdf(
         },
     )
     transactions: list[NormalizedRawTransaction] = []
+    statement_section: str | None = None
     for line_index, raw_line in enumerate(text.splitlines(), start=1):
         line = normalized_text(raw_line)
+        if line in {"还款", "退款", "消费"}:
+            statement_section = {
+                "还款": "CREDIT_CARD_REPAYMENT",
+                "退款": "REFUND",
+                "消费": "CONSUMPTION",
+            }[line]
+            continue
         match = _ROW_RE.match(line)
         if not match:
             continue
@@ -74,7 +82,10 @@ def parse_cmb_credit_card_pdf(
         amounts = find_money_values(remainder)
         if not amounts:
             continue
-        amount = amounts[-2] if len(amounts) >= 2 else amounts[-1]
+        # The first monetary value is the statement's RMB amount.  The second
+        # value is often the card's last four digits, so it must never be used
+        # as a transaction amount.
+        amount = amounts[0]
         settlement_amount = amounts[-1] if len(amounts) >= 2 else None
         first_amount = re.search(r"[+-]?\d[\d,]*(?:\.\d{1,2})?", remainder)
         description = normalized_text(remainder[: first_amount.start()]) if first_amount else remainder
@@ -92,7 +103,11 @@ def parse_cmb_credit_card_pdf(
             account_masked=identity, instrument_masked=identity,
             settlement_amount=settlement_amount,
             settlement_currency="CNY" if settlement_amount is not None else None,
-            parser_provenance={"adapter": "cmb_credit_card_pdf", "source_row": str(line_index), "date_year_resolution": date_provenance},
+            parser_provenance={
+                "adapter": "cmb_credit_card_pdf", "source_row": str(line_index),
+                "date_year_resolution": date_provenance,
+                **({"statement_section": statement_section} if statement_section else {}),
+            },
             field_availability={
                 **unavailable_fields("balance", "counterparty", "mcc"),
                 "settlement_amount": FieldAvailability.AVAILABLE if settlement_amount is not None else FieldAvailability.SOURCE_UNAVAILABLE,

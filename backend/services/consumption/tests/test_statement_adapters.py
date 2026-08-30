@@ -11,6 +11,7 @@ from backend.services.consumption.adapters.cmb_debit_card_pdf import parse_cmb_d
 from backend.services.consumption.adapters.common import parse_month_day_in_period, parse_month_day_with_statement_anchor
 from backend.services.consumption.contracts import raw_row_fingerprint, source_file_hash
 from datetime import date
+from decimal import Decimal
 
 
 FIXTURES = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "consumption"
@@ -101,6 +102,42 @@ def test_credit_card_month_day_uses_the_proven_statement_period_year():
 def test_credit_card_month_day_falls_back_to_statement_anchor_without_claiming_a_period():
     assert parse_month_day_with_statement_anchor("12/20", anchor=date(2026, 1, 12)) == date(2025, 12, 20)
     assert parse_month_day_with_statement_anchor("01/02", anchor=date(2026, 1, 12)) == date(2026, 1, 2)
+
+
+def test_cmb_credit_parser_uses_rmb_amount_and_preserves_statement_section():
+    source = """账单日期：2026-06-12
+卡号：****1234
+退款
+05/23 05/24 支付宝-测试商户 -3684.10 4964 -3684.10(CN)
+消费
+05/23 05/24 支付宝-测试商户 3684.10 4964 3684.10(CN)
+""".encode("utf-8")
+    parsed = parse_cmb_credit_card_pdf(source, text_extractor=lambda value: value.decode("utf-8"))
+
+    assert [(row.amount, row.parser_provenance.get("statement_section")) for row in parsed.transactions] == [
+        (Decimal("-3684.10"), "REFUND"),
+        (Decimal("3684.10"), "CONSUMPTION"),
+    ]
+
+
+def test_ccb_credit_parser_discards_only_an_exact_mirrored_transaction_table():
+    source = b"""From: statement@example.test
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<table><tr><td>\xe3\x80\x90\xe4\xba\xa4\xe6\x98\x93\xe6\x98\x8e\xe7\xbb\x86\xe3\x80\x91</td></tr>
+<tr><td>2026-05-16</td><td>2026-05-17</td><td>1234</td><td>\xe6\xb5\x8b\xe8\xaf\x95\xe5\x95\x86\xe6\x88\xb7</td><td>CNY</td><td>2.80</td><td>CNY</td><td>2.80</td></tr>
+<tr><td>2026-05-16</td><td>2026-05-17</td><td>1234</td><td>\xe6\xb5\x8b\xe8\xaf\x95\xe5\x95\x86\xe6\x88\xb7</td><td>CNY</td><td>2.80</td><td>CNY</td><td>2.80</td></tr></table>
+<table><tr><td>\xe3\x80\x90\xe4\xba\xa4\xe6\x98\x93\xe6\x98\x8e\xe7\xbb\x86\xe3\x80\x91</td></tr>
+<tr><td>2026-05-16</td><td>2026-05-17</td><td>1234</td><td>\xe6\xb5\x8b\xe8\xaf\x95\xe5\x95\x86\xe6\x88\xb7</td><td>CNY</td><td>2.80</td><td>CNY</td><td>2.80</td></tr>
+<tr><td>2026-05-16</td><td>2026-05-17</td><td>1234</td><td>\xe6\xb5\x8b\xe8\xaf\x95\xe5\x95\x86\xe6\x88\xb7</td><td>CNY</td><td>2.80</td><td>CNY</td><td>2.80</td></tr></table>
+</body></html>"""
+    parsed = parse_ccb_credit_card_eml(source)
+
+    assert len(parsed.transactions) == 2
+    assert [row.source_row_identity for row in parsed.transactions] == [
+        "html-table-1-row-1", "html-table-1-row-2",
+    ]
 
 
 def test_committed_consumption_fixtures_do_not_contain_sensitive_source_extensions():

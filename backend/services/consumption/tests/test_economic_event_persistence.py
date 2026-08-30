@@ -157,6 +157,15 @@ def test_v_high_confidence_production_rules(description, account_type, expected)
     assert classify_source(raw_description=description, account_type=account_type).event_type == expected
 
 
+def test_credit_card_negative_merchant_entry_is_refund_only_when_source_semantics_allow_it():
+    assert classify_source(
+        raw_description="支付宝-测试商户", account_type="CREDIT_CARD", source_amount=Decimal("-50.50"),
+    ).event_type == EventType.REFUND
+    assert classify_source(
+        raw_description="支付宝-测试商户", account_type="DEBIT_CARD", source_amount=Decimal("-50.50"),
+    ).event_type == EventType.OTHER
+
+
 def test_replay_replaces_legacy_consumption_with_non_consumption_and_is_idempotent(db_session, monkeypatch):
     account = _account(db_session, "card")
     raw = _raw(db_session, account, "legacy-repayment", "按卡转账还款", "-100")

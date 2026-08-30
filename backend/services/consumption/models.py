@@ -130,7 +130,12 @@ class ImportBatch(Base):
 
 
 class RawTransaction(Base):
-    """An append-only observed source row, never an economic-event interpretation."""
+    """An append-only observed source row, never an economic-event interpretation.
+
+    ``is_active`` only retires an extraction that a newer parser can prove was a
+    duplicate presentation of the same source row.  The original row remains
+    available for audit and is never deleted by reconciliation.
+    """
 
     __tablename__ = "consumption_raw_transactions"
 
@@ -163,6 +168,9 @@ class RawTransaction(Base):
     mcc = Column(String(30), nullable=True)
     parser_provenance = Column(Text, nullable=False)
     source_field_availability = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    retired_reason = Column(String(100), nullable=True)
+    retired_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
     import_batch = relationship("ImportBatch", back_populates="raw_transactions")
@@ -174,6 +182,7 @@ class RawTransaction(Base):
         UniqueConstraint("import_batch_id", "source_row_identity", name="uq_consumption_raw_batch_row"),
         Index("ix_consumption_raw_account_transaction_date", "account_id", "transaction_date"),
         Index("ix_consumption_raw_match_fingerprint", "match_fingerprint"),
+        Index("ix_consumption_raw_active", "is_active"),
     )
 
 

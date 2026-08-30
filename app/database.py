@@ -67,6 +67,7 @@ def init_db():
     _ensure_conversation_message_metadata_column(engine)
     _ensure_execution_linkage_columns(engine)
     _ensure_consumption_account_ownership_column(engine)
+    _ensure_consumption_raw_lifecycle_columns(engine)
 
 
 def _ensure_position_ownership_columns(engine) -> None:
@@ -209,4 +210,37 @@ def _ensure_consumption_account_ownership_column(engine) -> None:
         connection.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_consumption_accounts_ownership "
             "ON consumption_accounts (ownership_status)"
+        ))
+
+
+def _ensure_consumption_raw_lifecycle_columns(engine) -> None:
+    """Retain superseded parser rows while keeping them out of active projections."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    if "consumption_raw_transactions" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("consumption_raw_transactions")
+    }
+    with engine.begin() as connection:
+        if "is_active" not in columns:
+            connection.execute(text(
+                "ALTER TABLE consumption_raw_transactions "
+                "ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"
+            ))
+        if "retired_reason" not in columns:
+            connection.execute(text(
+                "ALTER TABLE consumption_raw_transactions "
+                "ADD COLUMN retired_reason VARCHAR(100)"
+            ))
+        if "retired_at" not in columns:
+            connection.execute(text(
+                "ALTER TABLE consumption_raw_transactions "
+                "ADD COLUMN retired_at DATETIME"
+            ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_consumption_raw_active "
+            "ON consumption_raw_transactions (is_active)"
         ))

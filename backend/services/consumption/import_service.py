@@ -189,7 +189,10 @@ class ConsumptionImportService:
         for fingerprint in set(fingerprints):
             rows = (
                 session.query(RawTransaction)
-                .filter(RawTransaction.match_fingerprint == fingerprint)
+                .filter(
+                    RawTransaction.match_fingerprint == fingerprint,
+                    RawTransaction.is_active.is_(True),
+                )
                 .order_by(RawTransaction.import_batch_id, RawTransaction.source_row_index)
                 .all()
             )

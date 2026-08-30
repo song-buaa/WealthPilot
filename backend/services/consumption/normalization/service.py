@@ -36,7 +36,7 @@ from backend.services.consumption.normalization.rules import (
 )
 
 
-NORMALIZER_VERSION = "economic-event-orm-v2"
+NORMALIZER_VERSION = "economic-event-orm-v3"
 CONFIRMED_OWNED = "CONFIRMED_OWNED"
 _USER_EXPLICIT_SOURCES = {"USER_CONFIRMATION", "USER_RULE"}
 
@@ -64,6 +64,19 @@ def _magnitude(value: Decimal) -> Decimal:
 
 def _effective_date(raw: RawTransaction) -> date | None:
     return raw.transaction_date or raw.posting_date
+
+
+def _evidence_for(raw: RawTransaction) -> Evidence:
+    try:
+        source_section = json.loads(raw.parser_provenance).get("statement_section")
+    except (TypeError, ValueError):
+        source_section = None
+    return classify_source(
+        raw_description=raw.raw_description,
+        account_type=raw.account.account_type,
+        source_amount=Decimal(raw.amount),
+        source_section=source_section,
+    )
 
 
 def _semantic_key(event_type: EventType, raws: Iterable[RawTransaction]) -> str:
@@ -97,7 +110,7 @@ class EconomicEventNormalizer:
 
     def normalize(self, session: Session, raws: Iterable[RawTransaction] | None = None) -> NormalizationResult:
         rows = tuple(raws) if raws is not None else tuple(
-            session.query(RawTransaction).order_by(RawTransaction.id).all()
+            session.query(RawTransaction).filter_by(is_active=True).order_by(RawTransaction.id).all()
         )
         active_raw_ids = {
             item[0] for item in session.query(EventRawLink.raw_transaction_id)
@@ -161,7 +174,7 @@ class EconomicEventNormalizer:
                 duplicate_groups.setdefault(raw.match_fingerprint, []).append(raw)
         consumed: set[str] = set()
         for group in duplicate_groups.values():
-            first_evidence = classify_source(raw_description=group[0].raw_description, account_type=group[0].account.account_type)
+            first_evidence = _evidence_for(group[0])
             if len(group) > 1 and first_evidence.event_type != EventType.OTHER:
                 persist(first_evidence.event_type, group, Evidence(first_evidence.event_type, RuleSource.SOURCE_DEDUP))
                 consumed.update(item.id for item in group)
@@ -206,7 +219,7 @@ class EconomicEventNormalizer:
         for raw in pending:
             if raw.id in consumed:
                 continue
-            evidence = classify_source(raw_description=raw.raw_description, account_type=raw.account.account_type)
+            evidence = _evidence_for(raw)
             if evidence.event_type == EventType.REFUND:
                 refund_rows.append(raw)
                 continue
@@ -225,7 +238,7 @@ class EconomicEventNormalizer:
                     EventRawLink.is_active.is_(True),
                     EconomicEvent.event_type == EventType.CONSUMPTION.value,
                 ).one_or_none()
-            refund = persist(EventType.REFUND, [raw], classify_source(raw_description=raw.raw_description, account_type=raw.account.account_type), original_event=original, roles={raw.id: "REFUND_SOURCE"})
+            refund = persist(EventType.REFUND, [raw], _evidence_for(raw), original_event=original, roles={raw.id: "REFUND_SOURCE"})
             consumed.add(raw.id)
             if refund.original_event_id:
                 original_event = session.get(EconomicEvent, refund.original_event_id)
@@ -241,7 +254,9 @@ class EconomicEventNormalizer:
         duplicate) creates a replacement active Event.  User confirmations and
         user rules remain attached to their existing Event and are never moved.
         """
-        rows = tuple(session.query(RawTransaction).order_by(RawTransaction.id).all())
+        rows = tuple(
+            session.query(RawTransaction).filter_by(is_active=True).order_by(RawTransaction.id).all()
+        )
         groups = self._replay_groups(rows)
         active_links = (
             session.query(EventRawLink)
@@ -259,15 +274,13 @@ class EconomicEventNormalizer:
         new_event_ids: set[str] = set()
         for group in groups:
             raw_ids = {raw.id for raw in group}
-            evidence = classify_source(
-                raw_description=group[0].raw_description,
-                account_type=group[0].account.account_type,
-            )
+            evidence = _evidence_for(group[0])
             current_event_ids = {links_by_raw[raw_id].event_id for raw_id in raw_ids if raw_id in links_by_raw}
             current_events = [event_by_id[event_id] for event_id in current_event_ids]
             already_current = (
                 len(current_events) == 1
                 and current_events[0].event_type == evidence.event_type.value
+                and current_events[0].normalizer_version == NORMALIZER_VERSION
                 and raw_ids_by_event.get(current_events[0].id, set()) == raw_ids
             )
             if already_current:

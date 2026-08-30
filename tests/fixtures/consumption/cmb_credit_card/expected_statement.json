@@ -2,7 +2,7 @@
   "institution": "CMB",
   "statement_type": "CREDIT_CARD",
   "source_format": "PDF",
-  "parser_version": "cmb-credit-card-pdf-spike-v1",
+  "parser_version": "cmb-credit-card-pdf-spike-v2",
   "statement_period_start": null,
   "statement_period_end": null,
   "account_masked": "****1234",

@@ -28,6 +28,7 @@ from backend.services.consumption.import_service import (
     ConsumptionImportService,
 )
 from backend.services.consumption.models import Account, ImportBatch, PaymentInstrument, RawTransaction
+from backend.services.consumption.source_reconciliation import reconcile_parsed_statements
 
 
 FIXTURES = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "consumption"
@@ -180,6 +181,28 @@ def test_same_file_is_idempotently_reused_without_duplicate_rows(db_session):
     assert second.import_batch.id == first.import_batch.id
     assert db_session.query(ImportBatch).count() == 1
     assert db_session.query(RawTransaction).count() == 1
+
+
+def test_verified_reparse_retires_only_omitted_parser_mirror_rows(db_session):
+    account = _account(db_session)
+    original = _statement(source=b"mirrored-source", rows=(
+        _transaction(identity="html-table-1-row-1", amount="2.80"),
+        _transaction(identity="html-table-17-row-1", amount="2.80"),
+    ))
+    ConsumptionImportService().persist(db_session, account=account, parsed_statement=original)
+    corrected = _statement(source=b"mirrored-source", rows=(
+        _transaction(identity="html-table-1-row-1", amount="2.80"),
+    ))
+
+    result = reconcile_parsed_statements(db_session, (corrected,))
+    rows = {
+        row.source_row_identity: row
+        for row in db_session.query(RawTransaction).order_by(RawTransaction.source_row_identity)
+    }
+    assert (result.retired_duplicate_rows, len(rows)) == (1, 2)
+    assert rows["html-table-1-row-1"].is_active is True
+    assert rows["html-table-17-row-1"].is_active is False
+    assert rows["html-table-17-row-1"].retired_reason == "VERIFIED_PARSER_DUPLICATE_PRESENTATION"
 
 
 def test_duplicate_source_identity_in_one_batch_is_rejected_before_writing_rows(db_session):
