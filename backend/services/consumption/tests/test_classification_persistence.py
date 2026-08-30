@@ -13,6 +13,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from backend.services.consumption.classification import ClassificationResolver
+from backend.scripts.replay_consumption_classification import (
+    automatic_consumption_event_ids,
+    replay_automatic_consumption,
+)
 from backend.scripts.apply_consumption_rule import apply_local_rule
 from backend.services.consumption.classification_design import (
     ClassificationStatus, EligibilityStatus, PrimaryCategory,
@@ -252,6 +256,36 @@ def test_w_x_rule_replay_is_idempotent_and_cannot_override_confirmation(db_sessi
     confirmed = resolver.confirm_event(db_session, event.id, eligibility_status=EligibilityStatus.ELIGIBLE,
         primary_category=PrimaryCategory.DAILY, secondary_category="FOOD_DINING")
     assert resolver.replay(db_session, (event.id,))[0].id == confirmed.id
+
+
+def test_automatic_replay_skips_confirmations_and_user_rules_and_is_idempotent(db_session):
+    resolver = ClassificationResolver()
+    automatic = _event(db_session, "automatic", EventType.CONSUMPTION, "拼多多平台商户")
+    automatic_interpretation = resolver.resolve_event(db_session, automatic)
+    automatic_interpretation.resolver_version = "consumption-classification-v2"
+
+    confirmed = _event(db_session, "confirmed", EventType.CONSUMPTION, "拼多多平台商户")
+    confirmed_interpretation = resolver.confirm_event(
+        db_session, confirmed.id, eligibility_status=EligibilityStatus.ELIGIBLE,
+        primary_category=PrimaryCategory.DAILY, secondary_category="FOOD_DINING",
+    )
+
+    rule = UserClassificationRule(
+        eligibility_action="ELIGIBLE", primary_category="HOUSING", secondary_category="RENT",
+        match_text="规则保护", effective_from=date(2026, 1, 1),
+    )
+    db_session.add(rule)
+    db_session.flush()
+    ruled = _event(db_session, "ruled", EventType.CONSUMPTION, "规则保护")
+    ruled_interpretation = resolver.resolve_event(db_session, ruled)
+
+    assert automatic_consumption_event_ids(db_session) == (automatic.id,)
+    first = replay_automatic_consumption(db_session)
+    assert (first.target_event_count, first.updated_interpretation_count, first.skipped_user_explicit_count) == (1, 1, 2)
+    assert resolver.resolve_event(db_session, automatic).resolver_version == "consumption-classification-v3"
+    assert resolver.resolve_event(db_session, confirmed).id == confirmed_interpretation.id
+    assert resolver.resolve_event(db_session, ruled).id == ruled_interpretation.id
+    assert replay_automatic_consumption(db_session).updated_interpretation_count == 0
 
 
 def test_y_z_account_prior_is_weak_and_rule_dates_are_inclusive(db_session):
