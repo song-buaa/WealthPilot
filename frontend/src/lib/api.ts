@@ -115,6 +115,33 @@ export interface ConsumptionEventFilters {
   secondaryCategory?: string
 }
 
+export interface ConsumptionCandidate {
+  event_id: string
+  analytics_effective_date: string
+  raw_description: string
+  account_display_name: string
+  source_label: string
+  amount_cny: string | null
+  currency: string
+}
+
+export interface ConsumptionCandidatePage {
+  month: string | null
+  items: ConsumptionCandidate[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ConsumptionCandidateConfirmation {
+  event_id: string
+  eligibility_status: 'ELIGIBLE' | 'INELIGIBLE'
+  classification_status: 'CLASSIFIED' | 'NOT_APPLICABLE'
+  primary_category?: string | null
+  secondary_category?: string | null
+  revision_number: number
+}
+
 export const consumptionApi = {
   getAnalytics: (params: { asOf?: string; months?: number; accountIds?: string[] } = {}) => {
     const query = new URLSearchParams()
@@ -140,6 +167,20 @@ export const consumptionApi = {
     if (filters.secondaryCategory) query.set('secondary_category', filters.secondaryCategory)
     return `/api/consumption/events/export.csv?${query}`
   },
+  getCandidates: (params: { month?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.month) query.set('month', params.month)
+    if (params.limit != null) query.set('limit', String(params.limit))
+    if (params.offset != null) query.set('offset', String(params.offset))
+    return request<ConsumptionCandidatePage>(`/consumption/candidates${query.size ? `?${query}` : ''}`)
+  },
+  confirmCandidate: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
+    request<ConsumptionCandidateConfirmation>(
+      `/consumption/candidates/${encodeURIComponent(eventId)}/confirm`,
+      { method: 'PUT', body: JSON.stringify({ primary_category: primaryCategory, secondary_category: secondaryCategory }) },
+    ),
+  rejectCandidate: (eventId: string) =>
+    request<ConsumptionCandidateConfirmation>(`/consumption/candidates/${encodeURIComponent(eventId)}/reject`, { method: 'PUT' }),
   updateEventClassification: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
     request<{ event_id: string; primary_category: string; secondary_category: string; classification_status: string; revision_number: number }>(
       `/consumption/events/${encodeURIComponent(eventId)}/classification`,

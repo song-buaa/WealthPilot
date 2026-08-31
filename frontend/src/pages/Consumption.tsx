@@ -6,6 +6,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import {
   consumptionApi,
   type ConsumptionAnalyticsSummary,
+  type ConsumptionCandidate,
   type ConsumptionEventDetail,
   type ConsumptionMonthlyPoint,
   type ConsumptionSecondaryBreakdown,
@@ -37,6 +38,7 @@ type CategoryKey = (typeof CATEGORY_META)[number]['key']
 type EditablePrimary = keyof typeof EDITABLE_TAXONOMY
 type ClassificationDraft = { primary: EditablePrimary; secondary: string }
 type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
+type CandidateActionState = { state: 'confirming' | 'rejecting' | 'error'; draft?: ClassificationDraft }
 type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
 type KpiWindow = { endingMonth: string; summary: ConsumptionAnalyticsSummary }
 type ConsumptionStructureData = {
@@ -146,6 +148,12 @@ export default function Consumption() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
   const [kpiWindow, setKpiWindow] = useState<KpiWindow | null>(null)
   const [details, setDetails] = useState<ConsumptionEventDetail[]>([])
+  const [candidates, setCandidates] = useState<ConsumptionCandidate[]>([])
+  const [candidateTotal, setCandidateTotal] = useState(0)
+  const [candidateLoading, setCandidateLoading] = useState(false)
+  const [candidateActions, setCandidateActions] = useState<Record<string, CandidateActionState>>({})
+  const [candidateDrafts, setCandidateDrafts] = useState<Record<string, ClassificationDraft>>({})
+  const [detailReloadVersion, setDetailReloadVersion] = useState(0)
   const [detailTotal, setDetailTotal] = useState(0)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -221,7 +229,21 @@ export default function Consumption() {
         .finally(() => { if (active) setDetailLoading(false) })
     })
     return () => { active = false }
-  }, [selectedMonth, detailFilters])
+  }, [selectedMonth, detailFilters, detailReloadVersion])
+
+  useEffect(() => {
+    if (!selectedMonth) return
+    let active = true
+    void Promise.resolve().then(() => {
+      if (!active) return
+      setCandidateLoading(true)
+      return consumptionApi.getCandidates({ month: selectedMonth.slice(0, 7), limit: 100, offset: 0 })
+        .then(value => { if (active) { setCandidates(value.items); setCandidateTotal(value.total) } })
+        .catch(() => { if (active) { setCandidates([]); setCandidateTotal(0) } })
+        .finally(() => { if (active) setCandidateLoading(false) })
+    })
+    return () => { active = false }
+  }, [selectedMonth])
 
   const saveClassification = async (item: ConsumptionEventDetail, draft: ClassificationDraft, version: number) => {
     try {
@@ -258,6 +280,45 @@ export default function Consumption() {
     autosaveTimers.current[item.event_id] = window.setTimeout(() => {
       void saveClassification(item, draft, version)
     }, 300)
+  }
+
+  const updateCandidateDraft = (eventId: string, draft: ClassificationDraft) => {
+    setCandidateDrafts(current => ({ ...current, [eventId]: draft }))
+    setCandidateActions(current => { const next = { ...current }; delete next[eventId]; return next })
+  }
+
+  const confirmCandidate = async (candidate: ConsumptionCandidate) => {
+    const draft = candidateDrafts[candidate.event_id]
+    if (!draft?.secondary) {
+      setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'error', draft } }))
+      return
+    }
+    setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'confirming', draft } }))
+    try {
+      await consumptionApi.confirmCandidate(candidate.event_id, draft.primary, draft.secondary)
+      setCandidates(current => current.filter(item => item.event_id !== candidate.event_id))
+      setCandidateTotal(current => Math.max(0, current - 1))
+      setCandidateDrafts(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
+      setCandidateActions(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
+      setDetailReloadVersion(current => current + 1)
+      refreshSummary()
+    } catch {
+      setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'error', draft } }))
+    }
+  }
+
+  const rejectCandidate = async (candidate: ConsumptionCandidate) => {
+    setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'rejecting' } }))
+    try {
+      await consumptionApi.rejectCandidate(candidate.event_id)
+      setCandidates(current => current.filter(item => item.event_id !== candidate.event_id))
+      setCandidateTotal(current => Math.max(0, current - 1))
+      setCandidateDrafts(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
+      setCandidateActions(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
+      refreshSummary()
+    } catch {
+      setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'error' } }))
+    }
   }
 
   const chartData = useMemo(() => (summary?.months ?? []).map(item => ({
@@ -324,6 +385,19 @@ export default function Consumption() {
         </BarChart></ResponsiveContainer>
       </div>
     </Card>
+
+    <ConsumptionCandidateCard
+      month={selected.month}
+      items={candidates}
+      total={candidateTotal}
+      loading={candidateLoading}
+      drafts={candidateDrafts}
+      actions={candidateActions}
+      onDraftChange={updateCandidateDraft}
+      onCancel={eventId => setCandidateDrafts(current => { const next = { ...current }; delete next[eventId]; return next })}
+      onConfirm={confirmCandidate}
+      onReject={rejectCandidate}
+    />
 
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
@@ -407,6 +481,54 @@ function ConsumptionStructureCard({ data, testIdPrefix = '' }: { data: Consumpti
   </Card>
 }
 
+function ConsumptionCandidateCard({ month, items, total, loading, drafts, actions, onDraftChange, onCancel, onConfirm, onReject }: {
+  month: string
+  items: ConsumptionCandidate[]
+  total: number
+  loading: boolean
+  drafts: Record<string, ClassificationDraft>
+  actions: Record<string, CandidateActionState>
+  onDraftChange: (eventId: string, draft: ClassificationDraft) => void
+  onCancel: (eventId: string) => void
+  onConfirm: (candidate: ConsumptionCandidate) => void
+  onReject: (candidate: ConsumptionCandidate) => void
+}) {
+  return <Card style={{ padding: '18px 20px 16px', marginTop: 16 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+      <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>消费候选待确认</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>这些是用途尚不明确的资金流出；确认后才会进入消费分析。</div></div>
+      {!loading && total > 0 && <span style={candidateCountStyle}>{total} 笔</span>}
+    </div>
+    {loading ? <div aria-label="正在加载消费候选" style={{ height: 62, borderRadius: 8, background: '#F9FAFB', marginTop: 14 }} />
+      : items.length === 0 ? <LightEmpty text={`${monthLabel(month)}暂无待确认的消费候选`} />
+      : <div style={{ overflow: 'auto', marginTop: 14, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}><thead><tr>{['日期', '原始交易描述', '账户 / 来源', '金额', '当前状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 3 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map(candidate => {
+        const draft = drafts[candidate.event_id]
+        const action = actions[candidate.event_id]
+        const secondaryOptions = draft ? EDITABLE_TAXONOMY[draft.primary] : []
+        const busy = action?.state === 'confirming' || action?.state === 'rejecting'
+        return <tr key={candidate.event_id} data-testid={`consumption-candidate-${candidate.event_id}`}>
+          <td style={tableCellStyle}>{candidate.analytics_effective_date}</td>
+          <td style={{ ...tableCellStyle, maxWidth: 280 }}><div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: '#374151' }}>{candidate.raw_description}</div></td>
+          <td style={tableCellStyle}><div>{candidate.account_display_name}</div><div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>{candidate.source_label}</div></td>
+          <td className="tabular-nums" style={{ ...tableCellStyle, textAlign: 'right', fontWeight: 700, color: '#1B2A4A' }}>{candidate.amount_cny == null ? '金额待换算' : fmtCny(toNumber(candidate.amount_cny))}</td>
+          <td style={tableCellStyle}><span style={candidatePillStyle}>待确认</span></td>
+          <td style={tableCellStyle}>{draft ? <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+            <select aria-label={`候选一级分类 ${candidate.event_id}`} value={draft.primary} disabled={busy} onChange={event => {
+              const primary = event.target.value as EditablePrimary
+              const secondary = EDITABLE_TAXONOMY[primary].includes(draft.secondary as never) ? draft.secondary : ''
+              onDraftChange(candidate.event_id, { primary, secondary })
+            }} style={selectStyle}>{Object.entries({ DAILY: '日常消费', TRAVEL: '旅行消费', HOUSING: '住房消费' }).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <select aria-label={`候选二级分类 ${candidate.event_id}`} value={draft.secondary} disabled={busy} onChange={event => onDraftChange(candidate.event_id, { ...draft, secondary: event.target.value })} style={selectStyle}><option value="">选择分类</option>{secondaryOptions.map(value => <option key={value} value={value}>{SECONDARY_LABELS[value] ?? value}</option>)}</select>
+            <button type="button" disabled={busy || !draft.secondary} onClick={() => onConfirm(candidate)} style={candidateConfirmButtonStyle}>{action?.state === 'confirming' ? <><Loader2 size={12} className="animate-spin" /> 保存中…</> : '确认保存'}</button>
+            <button type="button" disabled={busy} onClick={() => onCancel(candidate.event_id)} style={candidateCancelButtonStyle}>取消</button>
+          </div> : <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <button type="button" disabled={busy} onClick={() => onDraftChange(candidate.event_id, { primary: 'DAILY', secondary: '' })} style={candidateConfirmButtonStyle}>确认为消费</button>
+            <button type="button" disabled={busy} onClick={() => onReject(candidate)} style={candidateRejectButtonStyle}>{action?.state === 'rejecting' ? <><Loader2 size={12} className="animate-spin" /> 保存中…</> : '非消费'}</button>
+          </div>}{action?.state === 'error' && <div style={candidateErrorStyle}>保存失败，请重试</div>}</td>
+        </tr>
+      })}</tbody></table></div>}
+  </Card>
+}
+
 function MonthlyDetailTable({ items, total, loading, error, editing, autosaveStates, onChange }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; autosaveStates: Record<string, AutosaveState>; onChange: (item: ConsumptionEventDetail, draft: ClassificationDraft) => void }) {
   if (loading) return <div aria-label="正在加载月度明细" style={{ height: 170, borderRadius: 8, background: '#F9FAFB' }} />
   if (error) return <div style={{ padding: '16px 0', fontSize: 12, color: '#B91C1C' }}>{error}</div>
@@ -435,6 +557,12 @@ const tableHeaderStyle: React.CSSProperties = { position: 'sticky', top: 0, zInd
 const tableCellStyle: React.CSSProperties = { whiteSpace: 'nowrap', borderBottom: '1px solid #F3F4F6', padding: '9px 10px', fontSize: 12, color: '#4B5563' }
 const classifiedPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#047857', background: '#ECFDF5' }
 const reviewPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#B45309', background: '#FFFBEB' }
+const candidatePillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#92400E', background: '#FEF3C7' }
+const candidateCountStyle: React.CSSProperties = { flexShrink: 0, borderRadius: 99, padding: '3px 8px', color: '#92400E', background: '#FFFBEB', fontSize: 11, fontWeight: 600 }
+const candidateConfirmButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #BFDBFE', borderRadius: 5, padding: '5px 7px', background: '#EFF6FF', color: '#1D4ED8', cursor: 'pointer', fontSize: 11, fontWeight: 600 }
+const candidateRejectButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #E5E7EB', borderRadius: 5, padding: '5px 7px', background: '#fff', color: '#6B7280', cursor: 'pointer', fontSize: 11 }
+const candidateCancelButtonStyle: React.CSSProperties = { border: 'none', padding: '4px 2px', background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 11 }
+const candidateErrorStyle: React.CSSProperties = { marginTop: 5, color: '#B91C1C', fontSize: 11 }
 const exportButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, border: '1px solid #E5E7EB', borderRadius: 6, padding: '5px 9px', color: '#4B5563', background: '#fff', fontSize: 11, textDecoration: 'none' }
 const detailFilterBarStyle: React.CSSProperties = { display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap', marginBottom: 14 }
 const detailFilterLabelStyle: React.CSSProperties = { display: 'grid', gap: 4, color: '#6B7280', fontSize: 11, fontWeight: 600 }

@@ -258,3 +258,78 @@ def test_detail_classification_update_uses_user_confirmation_revision_and_update
     point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,7,31),months=1,account_ids=(card_id,)).months[0]
     assert (point.daily_cny,point.travel_cny) == (Decimal("0"),Decimal("100"))
     assert TestClient(app).put("/api/consumption/events/excluded/classification",json={"primary_category":"DAILY","secondary_category":"FOOD_DINING"}).status_code == 422
+
+
+def test_candidate_review_api_promotes_only_ambiguous_outflow_and_creates_projection(db_session, monkeypatch):
+    debit=_account(db_session,"debit")
+    debit_id=debit.id
+    debit.account_type="DEBIT_CARD"; debit.institution="CMB"; debit.display_name="CMB Debit ****4964"
+    candidate=_event(
+        db_session,"wechat-candidate",account=debit,event_type="OTHER",when=date(2026,5,25),
+        amount="3900",net=None,eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",
+        primary=None,secondary=None,description="快捷支付 / 微信转账",
+    )
+    candidate_id=candidate.id
+    db_session.query(ImportBatch).filter_by(id="batch-wechat-candidate").update({"institution":"CMB"})
+    incoming=_event(
+        db_session,"incoming-other",account=debit,event_type="OTHER",when=date(2026,5,24),
+        amount="5000",net=None,eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",
+        primary=None,secondary=None,description="微信转账收入",
+    ); incoming.economic_direction="INFLOW"
+    _event(db_session,"repayment",account=debit,event_type="CREDIT_CARD_REPAYMENT",when=date(2026,5,23),amount="6000",net=None,eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None)
+    db_session.commit()
+    monkeypatch.setattr(consumption_api,"get_session",lambda: db_session)
+    from fastapi import FastAPI
+    app=FastAPI(); app.include_router(consumption_api.router,prefix="/api/consumption")
+    client=TestClient(app)
+
+    listed=client.get("/api/consumption/candidates?month=2026-05")
+    assert listed.status_code == 200
+    body=listed.json()
+    assert (body["total"], [item["event_id"] for item in body["items"]]) == (1,["wechat-candidate"])
+    assert body["items"][0] == {
+        "event_id":"wechat-candidate", "analytics_effective_date":"2026-05-25",
+        "raw_description":"快捷支付 / 微信转账", "account_display_name":"CMB Debit ****",
+        "source_label":"CMB Debit", "amount_cny":"3900.00000000", "currency":"CNY",
+    }
+
+    confirmed=client.put("/api/consumption/candidates/wechat-candidate/confirm",json={"primary_category":"DAILY","secondary_category":"HOME_LIVING"})
+    assert confirmed.status_code == 200
+    assert confirmed.json()["eligibility_status"] == "ELIGIBLE"
+    current=db_session.query(ConsumptionInterpretation).filter_by(event_id=candidate_id,is_active=True).one()
+    projection=db_session.query(EconomicEventProjectionRevision).filter_by(event_id=candidate_id,is_active=True).one()
+    assert (current.user_confirmed,current.primary_category,current.secondary_category,current.revision_number) == (True,"DAILY","HOME_LIVING",2)
+    assert (projection.revision_number,projection.base_net_amount,projection.rule_source) == (1,Decimal("3900"),"USER_CONFIRMATION")
+    assert db_session.query(ConsumptionInterpretationAudit).filter_by(event_id=candidate_id).count() == 1
+    assert client.get("/api/consumption/candidates?month=2026-05").json()["total"] == 0
+    detail=client.get("/api/consumption/events?month=2026-05").json()
+    assert [(item["event_id"],item["amount_cny"]) for item in detail["items"]] == [(candidate_id,"3900.00000000")]
+    point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,5,31),months=1,account_ids=(debit_id,)).months[0]
+    assert (point.total_spending_cny,point.daily_cny) == (Decimal("3900"),Decimal("3900"))
+    assert client.put("/api/consumption/candidates/wechat-candidate/confirm",json={"primary_category":"DAILY","secondary_category":"HOME_LIVING"}).status_code == 409
+
+
+def test_candidate_review_rejects_as_ineligible_without_entering_analytics(db_session, monkeypatch):
+    debit=_account(db_session,"debit")
+    debit_id=debit.id
+    candidate=_event(
+        db_session,"candidate-reject",account=debit,event_type="OTHER",when=date(2026,5,25),
+        amount="78",net=None,eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",
+        primary=None,secondary=None,description="快捷支付 / 微信转账",
+    )
+    candidate_id=candidate.id
+    db_session.commit()
+    monkeypatch.setattr(consumption_api,"get_session",lambda: db_session)
+    from fastapi import FastAPI
+    app=FastAPI(); app.include_router(consumption_api.router,prefix="/api/consumption")
+    client=TestClient(app)
+
+    response=client.put("/api/consumption/candidates/candidate-reject/reject")
+    assert response.status_code == 200
+    current=db_session.query(ConsumptionInterpretation).filter_by(event_id=candidate_id,is_active=True).one()
+    assert (current.user_confirmed,current.eligibility_status,current.classification_status,current.revision_number) == (True,"INELIGIBLE","NOT_APPLICABLE",2)
+    assert db_session.query(EconomicEventProjectionRevision).filter_by(event_id=candidate_id,is_active=True).count() == 0
+    assert db_session.query(ConsumptionInterpretationAudit).filter_by(event_id=candidate_id).count() == 1
+    assert client.get("/api/consumption/candidates?month=2026-05").json()["total"] == 0
+    point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,5,31),months=1,account_ids=(debit_id,)).months[0]
+    assert point.total_spending_cny == Decimal("0")
