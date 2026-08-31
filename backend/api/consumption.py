@@ -25,6 +25,20 @@ def _month_start(value: str) -> date:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="month must use YYYY-MM") from exc
 
+
+def _detail_period(month: str | None, start_month: str | None, end_month: str | None) -> tuple[date, date]:
+    if month is not None:
+        if start_month is not None or end_month is not None:
+            raise HTTPException(status_code=422, detail="month cannot be combined with start_month or end_month")
+        selected = _month_start(month)
+        return selected, selected
+    if start_month is None or end_month is None:
+        raise HTTPException(status_code=422, detail="month or both start_month and end_month are required")
+    start, end = _month_start(start_month), _month_start(end_month)
+    if end < start:
+        raise HTTPException(status_code=422, detail="end_month must not precede start_month")
+    return start, end
+
 def _value(value):
     if isinstance(value, Decimal): return format(value, "f")
     if isinstance(value, date): return value.isoformat()
@@ -81,7 +95,9 @@ def get_consumption_analytics(
 
 @router.get("/events")
 def get_consumption_events(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    start_month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    end_month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     account_ids: list[str] | None = Query(default=None),
@@ -92,8 +108,9 @@ def get_consumption_events(
     session=get_session()
     try:
         _validate_detail_filters(primary_category, secondary_category)
-        result=ConsumptionAnalyticsService(session).monthly_detail(
-            month=_month_start(month), limit=limit, offset=offset,
+        start, end = _detail_period(month, start_month, end_month)
+        result=ConsumptionAnalyticsService(session).detail_in_month_range(
+            start_month=start, end_month=end, limit=limit, offset=offset,
             account_ids=tuple(account_ids) if account_ids else None,
             classification_status=classification_status and ClassificationStatus(classification_status),
             primary_category=primary_category, secondary_category=secondary_category,
@@ -123,7 +140,9 @@ def get_consumption_candidates(
 
 @router.get("/events/export.csv")
 def export_consumption_events(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    start_month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    end_month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     account_ids: list[str] | None = Query(default=None),
     classification_status: Literal["CLASSIFIED", "NEEDS_REVIEW"] | None = Query(default=None),
     primary_category: PrimaryCategory | None = Query(default=None),
@@ -132,14 +151,18 @@ def export_consumption_events(
     session=get_session()
     try:
         _validate_detail_filters(primary_category, secondary_category)
+        start, end = _detail_period(month, start_month, end_month)
+        filename = f"consumption-events-{month}.csv" if month else f"consumption-events-{start_month}-to-{end_month}.csv"
         return _csv_response(
-            ConsumptionAnalyticsService(session).export_monthly_detail_csv(
-                month=_month_start(month), account_ids=tuple(account_ids) if account_ids else None,
+            ConsumptionAnalyticsService(session).export_detail_range_csv(
+                start_month=start, end_month=end, account_ids=tuple(account_ids) if account_ids else None,
                 classification_status=classification_status and ClassificationStatus(classification_status),
                 primary_category=primary_category, secondary_category=secondary_category,
             ),
-            f"consumption-events-{month}.csv",
+            filename,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally: session.close()
 
 

@@ -150,8 +150,11 @@ export const consumptionApi = {
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionAnalyticsSummary>(`/consumption/analytics${query.size ? `?${query}` : ''}`)
   },
-  getEvents: (params: { month: string; limit?: number; offset?: number; accountIds?: string[] } & ConsumptionEventFilters) => {
-    const query = new URLSearchParams({ month: params.month })
+  getEvents: (params: { month?: string; startMonth?: string; endMonth?: string; limit?: number; offset?: number; accountIds?: string[] } & ConsumptionEventFilters) => {
+    const query = new URLSearchParams()
+    if (params.month) query.set('month', params.month)
+    if (params.startMonth) query.set('start_month', params.startMonth)
+    if (params.endMonth) query.set('end_month', params.endMonth)
     if (params.limit != null) query.set('limit', String(params.limit))
     if (params.offset != null) query.set('offset', String(params.offset))
     if (params.classificationStatus) query.set('classification_status', params.classificationStatus)
@@ -160,8 +163,11 @@ export const consumptionApi = {
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionEventDetailPage>(`/consumption/events?${query}`)
   },
-  getEventsExportUrl: (month: string, filters: ConsumptionEventFilters = {}) => {
-    const query = new URLSearchParams({ month })
+  getEventsExportUrl: (period: { month?: string; startMonth?: string; endMonth?: string }, filters: ConsumptionEventFilters = {}) => {
+    const query = new URLSearchParams()
+    if (period.month) query.set('month', period.month)
+    if (period.startMonth) query.set('start_month', period.startMonth)
+    if (period.endMonth) query.set('end_month', period.endMonth)
     if (filters.classificationStatus) query.set('classification_status', filters.classificationStatus)
     if (filters.primaryCategory) query.set('primary_category', filters.primaryCategory)
     if (filters.secondaryCategory) query.set('secondary_category', filters.secondaryCategory)

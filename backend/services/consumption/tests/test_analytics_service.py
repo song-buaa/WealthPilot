@@ -224,6 +224,30 @@ def test_monthly_detail_filters_and_export_apply_the_same_classification_scope(d
     assert client.get("/api/consumption/events?month=2026-07&primary_category=DAILY&secondary_category=RENT").status_code == 422
 
 
+def test_detail_range_api_filters_sorts_and_exports_all_selected_months(db_session, monkeypatch):
+    card = _account(db_session, "range-card")
+    _event(db_session, "range-june-review", account=card, when=date(2026, 6, 20), amount="20", net="20", classification="NEEDS_REVIEW", primary=None, secondary=None, description="june review")
+    _event(db_session, "range-july-auto", account=card, when=date(2026, 7, 5), amount="90", net="90", primary="DAILY", secondary="TRANSPORT_AUTO", description="july transport")
+    _event(db_session, "range-july-rent", account=card, when=date(2026, 7, 9), amount="4500", net="4500", event_type="OTHER", primary="HOUSING", secondary="RENT", description="july rent")
+    _event(db_session, "range-aug-refund", account=card, when=date(2026, 8, 1), amount="999", net="999", event_type="REFUND", description="excluded refund")
+    db_session.commit()
+    monkeypatch.setattr(consumption_api, "get_session", lambda: db_session)
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(consumption_api.router, prefix="/api/consumption")
+    client = TestClient(app)
+
+    response = client.get("/api/consumption/events?start_month=2026-06&end_month=2026-07&limit=2")
+    assert response.status_code == 200
+    assert (response.json()["total"], [item["event_id"] for item in response.json()["items"]]) == (3, ["range-july-rent", "range-july-auto"])
+    assert client.get("/api/consumption/events?start_month=2026-06&end_month=2026-07&limit=2&offset=2").json()["items"][0]["event_id"] == "range-june-review"
+    assert client.get("/api/consumption/events?start_month=2026-06&end_month=2026-07&classification_status=NEEDS_REVIEW").json()["total"] == 1
+    exported = client.get("/api/consumption/events/export.csv?start_month=2026-06&end_month=2026-07&primary_category=HOUSING&secondary_category=RENT")
+    assert exported.status_code == 200
+    assert "july rent" in exported.content.decode("utf-8-sig") and "july transport" not in exported.content.decode("utf-8-sig")
+    assert client.get("/api/consumption/events?month=2026-07&start_month=2026-06&end_month=2026-07").status_code == 422
+    assert client.get("/api/consumption/events?start_month=2026-08&end_month=2026-07").status_code == 422
+
+
 def test_local_rent_rule_replay_promotes_other_into_housing_analytics_and_detail(db_session):
     debit=_account(db_session,"debit")
     rent=_event(db_session,"rent",account=debit,event_type="OTHER",amount="6500",net="6500",description="synthetic fixed rent transfer")

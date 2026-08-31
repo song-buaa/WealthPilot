@@ -40,6 +40,7 @@ type ClassificationDraft = { primary: EditablePrimary; secondary: string }
 type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
 type CandidateActionState = { state: 'confirming' | 'rejecting' | 'error'; draft?: ClassificationDraft }
 type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
+type DetailViewFilters = { classificationStatus?: 'CLASSIFIED' | 'NEEDS_REVIEW'; primaryCategory?: EditablePrimary; secondaryCategory?: string }
 type KpiWindow = { endingMonth: string; summary: ConsumptionAnalyticsSummary }
 type ConsumptionStructureData = {
   id: string
@@ -71,6 +72,28 @@ function monthEnd(month: string): string {
 function isOpenCalendarMonth(point: ConsumptionMonthlyPoint): boolean { return Boolean(point.as_of_date && point.as_of_date < monthEnd(point.month)) }
 function fmtChange(value: number): string { return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` }
 function coverageRate(point: ConsumptionMonthlyPoint): number | null { return point.classification_coverage_rate == null ? null : toNumber(point.classification_coverage_rate) * 100 }
+
+function updateVisibleDetail(
+  items: ConsumptionEventDetail[], eventId: string,
+  result: { primary_category: string; secondary_category: string; classification_status: string },
+  filters: DetailViewFilters,
+): ConsumptionEventDetail[] {
+  if (filters.classificationStatus === 'NEEDS_REVIEW') return items.filter(item => item.event_id !== eventId)
+  return items.map(item => item.event_id === eventId ? {
+    ...item,
+    primary_category: result.primary_category as ConsumptionEventDetail['primary_category'],
+    secondary_category: result.secondary_category,
+    classification_status: result.classification_status as ConsumptionEventDetail['classification_status'],
+  } : item)
+}
+
+async function loadAllDetailPages(params: Parameters<typeof consumptionApi.getEvents>[0]) {
+  const first = await consumptionApi.getEvents({ ...params, limit: 200, offset: 0 })
+  if (first.total <= first.items.length) return first
+  const offsets = Array.from({ length: Math.ceil((first.total - first.items.length) / 200) }, (_, index) => first.items.length + index * 200)
+  const pages = await Promise.all(offsets.map(offset => consumptionApi.getEvents({ ...params, limit: 200, offset })))
+  return { ...first, items: [...first.items, ...pages.flatMap(page => page.items)] }
+}
 
 function primaryAmounts(point: ConsumptionMonthlyPoint): Record<CategoryKey, number> {
   return {
@@ -148,18 +171,26 @@ export default function Consumption() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
   const [kpiWindow, setKpiWindow] = useState<KpiWindow | null>(null)
   const [details, setDetails] = useState<ConsumptionEventDetail[]>([])
+  const [rollingDetails, setRollingDetails] = useState<ConsumptionEventDetail[]>([])
   const [candidates, setCandidates] = useState<ConsumptionCandidate[]>([])
   const [candidateTotal, setCandidateTotal] = useState(0)
   const [candidateMonth, setCandidateMonth] = useState<string | null>(null)
   const [candidateActions, setCandidateActions] = useState<Record<string, CandidateActionState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, ClassificationDraft>>({})
   const [detailReloadVersion, setDetailReloadVersion] = useState(0)
+  const [rollingDetailReloadVersion, setRollingDetailReloadVersion] = useState(0)
   const [detailTotal, setDetailTotal] = useState(0)
+  const [rollingDetailTotal, setRollingDetailTotal] = useState(0)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [rollingDetailLoading, setRollingDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [rollingDetailError, setRollingDetailError] = useState<string | null>(null)
   const [detailClassificationFilter, setDetailClassificationFilter] = useState<DetailClassificationFilter>('ALL')
   const [detailPrimaryFilter, setDetailPrimaryFilter] = useState<EditablePrimary | ''>('')
   const [detailSecondaryFilter, setDetailSecondaryFilter] = useState('')
+  const [rollingDetailClassificationFilter, setRollingDetailClassificationFilter] = useState<DetailClassificationFilter>('ALL')
+  const [rollingDetailPrimaryFilter, setRollingDetailPrimaryFilter] = useState<EditablePrimary | ''>('')
+  const [rollingDetailSecondaryFilter, setRollingDetailSecondaryFilter] = useState('')
   const [editing, setEditing] = useState<Record<string, ClassificationDraft>>({})
   const [autosaveStates, setAutosaveStates] = useState<Record<string, AutosaveState>>({})
   const [loading, setLoading] = useState(true)
@@ -172,6 +203,11 @@ export default function Consumption() {
     primaryCategory: detailClassificationFilter === 'NEEDS_REVIEW' ? undefined : detailPrimaryFilter || undefined,
     secondaryCategory: detailClassificationFilter === 'NEEDS_REVIEW' ? undefined : detailSecondaryFilter || undefined,
   }), [detailClassificationFilter, detailPrimaryFilter, detailSecondaryFilter])
+  const rollingDetailFilters = useMemo(() => ({
+    classificationStatus: rollingDetailClassificationFilter === 'ALL' ? undefined : rollingDetailClassificationFilter,
+    primaryCategory: rollingDetailClassificationFilter === 'NEEDS_REVIEW' ? undefined : rollingDetailPrimaryFilter || undefined,
+    secondaryCategory: rollingDetailClassificationFilter === 'NEEDS_REVIEW' ? undefined : rollingDetailSecondaryFilter || undefined,
+  }), [rollingDetailClassificationFilter, rollingDetailPrimaryFilter, rollingDetailSecondaryFilter])
 
   const load = () => {
     setLoading(true)
@@ -196,6 +232,8 @@ export default function Consumption() {
     [selectedMonth, summary],
   )
   const rollingPoints = useMemo(() => summary?.months.slice(-12) ?? [], [summary])
+  const rollingDetailStartMonth = rollingPoints[0]?.month
+  const rollingDetailEndMonth = rollingPoints.at(-1)?.month
   const twelveMonthStructure = useMemo(() => rollingStructure(rollingPoints), [rollingPoints])
 
   useEffect(() => {
@@ -223,13 +261,31 @@ export default function Consumption() {
       if (!active) return
       setDetailLoading(true)
       setDetailError(null)
-      return consumptionApi.getEvents({ month: selectedMonth.slice(0, 7), limit: 200, offset: 0, ...detailFilters })
+      return loadAllDetailPages({ month: selectedMonth.slice(0, 7), ...detailFilters })
         .then(value => { if (active) { setDetails(value.items); setDetailTotal(value.total) } })
         .catch(() => { if (active) { setDetails([]); setDetailTotal(0); setDetailError('月度明细加载失败') } })
         .finally(() => { if (active) setDetailLoading(false) })
     })
     return () => { active = false }
   }, [selectedMonth, detailFilters, detailReloadVersion])
+
+  useEffect(() => {
+    if (!rollingDetailStartMonth || !rollingDetailEndMonth) return
+    let active = true
+    void Promise.resolve().then(() => {
+      if (!active) return
+      setRollingDetailLoading(true)
+      setRollingDetailError(null)
+      return loadAllDetailPages({
+        startMonth: rollingDetailStartMonth.slice(0, 7), endMonth: rollingDetailEndMonth.slice(0, 7),
+        ...rollingDetailFilters,
+      })
+        .then(value => { if (active) { setRollingDetails(value.items); setRollingDetailTotal(value.total) } })
+        .catch(() => { if (active) { setRollingDetails([]); setRollingDetailTotal(0); setRollingDetailError('近12个月明细加载失败') } })
+        .finally(() => { if (active) setRollingDetailLoading(false) })
+    })
+    return () => { active = false }
+  }, [rollingDetailStartMonth, rollingDetailEndMonth, rollingDetailFilters, rollingDetailReloadVersion])
 
   useEffect(() => {
     if (!selectedMonth) return
@@ -247,15 +303,10 @@ export default function Consumption() {
     try {
       const result = await consumptionApi.updateEventClassification(item.event_id, draft.primary, draft.secondary)
       if (requestVersions.current[item.event_id] !== version) return
-      setDetails(current => detailClassificationFilter === 'NEEDS_REVIEW'
-        ? current.filter(row => row.event_id !== item.event_id)
-        : current.map(row => row.event_id === item.event_id ? {
-        ...row,
-        primary_category: result.primary_category as ConsumptionEventDetail['primary_category'],
-        secondary_category: result.secondary_category,
-        classification_status: result.classification_status as ConsumptionEventDetail['classification_status'],
-      } : row))
-      if (detailClassificationFilter === 'NEEDS_REVIEW') setDetailTotal(current => Math.max(0, current - 1))
+      setDetails(current => updateVisibleDetail(current, item.event_id, result, detailFilters))
+      setRollingDetails(current => updateVisibleDetail(current, item.event_id, result, rollingDetailFilters))
+      if (detailClassificationFilter === 'NEEDS_REVIEW' && details.some(row => row.event_id === item.event_id)) setDetailTotal(current => Math.max(0, current - 1))
+      if (rollingDetailClassificationFilter === 'NEEDS_REVIEW' && rollingDetails.some(row => row.event_id === item.event_id)) setRollingDetailTotal(current => Math.max(0, current - 1))
       setEditing(current => { const next = { ...current }; delete next[item.event_id]; return next })
       setAutosaveStates(current => ({ ...current, [item.event_id]: { state: 'saved', draft } }))
       refreshSummary()
@@ -299,6 +350,7 @@ export default function Consumption() {
       setCandidateDrafts(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
       setCandidateActions(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
       setDetailReloadVersion(current => current + 1)
+      setRollingDetailReloadVersion(current => current + 1)
       refreshSummary()
     } catch {
       setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'error', draft } }))
@@ -313,6 +365,7 @@ export default function Consumption() {
       setCandidateTotal(current => Math.max(0, current - 1))
       setCandidateDrafts(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
       setCandidateActions(current => { const next = { ...current }; delete next[candidate.event_id]; return next })
+      setRollingDetailReloadVersion(current => current + 1)
       refreshSummary()
     } catch {
       setCandidateActions(current => ({ ...current, [candidate.event_id]: { state: 'error' } }))
@@ -398,21 +451,21 @@ export default function Consumption() {
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>{monthLabel(selected.month)}消费明细</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅显示已确认纳入消费分析的记录；消费名称直接来自原始账单描述。</div></div>
-        <a href={consumptionApi.getEventsExportUrl(selected.month.slice(0, 7), detailFilters)} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
+        <a href={consumptionApi.getEventsExportUrl({ month: selected.month.slice(0, 7) }, detailFilters)} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
       </div>
-      <div style={detailFilterBarStyle} aria-label="消费明细分类筛选">
-        <label style={detailFilterLabelStyle}>分类状态<select aria-label="分类状态筛选" value={detailClassificationFilter} onChange={event => {
-          const next = event.target.value as DetailClassificationFilter
-          setDetailClassificationFilter(next)
-          if (next === 'NEEDS_REVIEW') { setDetailPrimaryFilter(''); setDetailSecondaryFilter('') }
-        }} style={detailFilterSelectStyle}><option value="ALL">全部</option><option value="CLASSIFIED">已分类</option><option value="NEEDS_REVIEW">待分类</option></select></label>
-        <label style={detailFilterLabelStyle}>一级分类<select aria-label="一级分类筛选" value={detailPrimaryFilter} disabled={detailClassificationFilter === 'NEEDS_REVIEW'} onChange={event => { setDetailPrimaryFilter(event.target.value as EditablePrimary | ''); setDetailSecondaryFilter('') }} style={detailFilterSelectStyle}><option value="">全部</option><option value="DAILY">日常消费</option><option value="TRAVEL">旅行</option><option value="HOUSING">住房</option></select></label>
-        <label style={detailFilterLabelStyle}>二级分类<select aria-label="二级分类筛选" value={detailSecondaryFilter} disabled={detailClassificationFilter === 'NEEDS_REVIEW' || !detailPrimaryFilter} onChange={event => setDetailSecondaryFilter(event.target.value)} style={detailFilterSelectStyle}><option value="">全部</option>{detailPrimaryFilter && EDITABLE_TAXONOMY[detailPrimaryFilter].map(value => <option key={value} value={value}>{SECONDARY_LABELS[value]}</option>)}</select></label>
-      </div>
+      <DetailFilterBar classificationFilter={detailClassificationFilter} primaryFilter={detailPrimaryFilter} secondaryFilter={detailSecondaryFilter} onClassificationChange={setDetailClassificationFilter} onPrimaryChange={setDetailPrimaryFilter} onSecondaryChange={setDetailSecondaryFilter} />
       <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
     </Card>
 
     <ConsumptionStructureCard data={monthlyStructure(selected)} />
+    {rollingDetailStartMonth && rollingDetailEndMonth && <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+        <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>近12个月消费明细</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>统计区间：{monthLabel(rollingDetailStartMonth)} – {monthLabel(rollingDetailEndMonth)}</div></div>
+        <a href={consumptionApi.getEventsExportUrl({ startMonth: rollingDetailStartMonth.slice(0, 7), endMonth: rollingDetailEndMonth.slice(0, 7) }, rollingDetailFilters)} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
+      </div>
+      <DetailFilterBar prefix="近12个月" classificationFilter={rollingDetailClassificationFilter} primaryFilter={rollingDetailPrimaryFilter} secondaryFilter={rollingDetailSecondaryFilter} onClassificationChange={setRollingDetailClassificationFilter} onPrimaryChange={setRollingDetailPrimaryFilter} onSecondaryChange={setRollingDetailSecondaryFilter} />
+      <MonthlyDetailTable items={rollingDetails} total={rollingDetailTotal} loading={rollingDetailLoading} error={rollingDetailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
+    </Card>}
     {twelveMonthStructure && <ConsumptionStructureCard data={twelveMonthStructure} testIdPrefix="rolling-" />}
   </div>
 }
@@ -519,6 +572,27 @@ function ConsumptionCandidateCard({ items, total, drafts, actions, onDraftChange
         </tr>
       })}</tbody></table></div>
   </Card>
+}
+
+function DetailFilterBar({ prefix = '', classificationFilter, primaryFilter, secondaryFilter, onClassificationChange, onPrimaryChange, onSecondaryChange }: {
+  prefix?: string
+  classificationFilter: DetailClassificationFilter
+  primaryFilter: EditablePrimary | ''
+  secondaryFilter: string
+  onClassificationChange: (value: DetailClassificationFilter) => void
+  onPrimaryChange: (value: EditablePrimary | '') => void
+  onSecondaryChange: (value: string) => void
+}) {
+  const label = (value: string) => prefix ? `${prefix}明细${value.replace('筛选', '')}` : value
+  return <div style={detailFilterBarStyle} aria-label={label('消费明细分类筛选')}>
+    <label style={detailFilterLabelStyle}>分类状态<select aria-label={label('分类状态筛选')} value={classificationFilter} onChange={event => {
+      const next = event.target.value as DetailClassificationFilter
+      onClassificationChange(next)
+      if (next === 'NEEDS_REVIEW') { onPrimaryChange(''); onSecondaryChange('') }
+    }} style={detailFilterSelectStyle}><option value="ALL">全部</option><option value="CLASSIFIED">已分类</option><option value="NEEDS_REVIEW">待分类</option></select></label>
+    <label style={detailFilterLabelStyle}>一级分类<select aria-label={label('一级分类筛选')} value={primaryFilter} disabled={classificationFilter === 'NEEDS_REVIEW'} onChange={event => { onPrimaryChange(event.target.value as EditablePrimary | ''); onSecondaryChange('') }} style={detailFilterSelectStyle}><option value="">全部</option><option value="DAILY">日常消费</option><option value="TRAVEL">旅行</option><option value="HOUSING">住房</option></select></label>
+    <label style={detailFilterLabelStyle}>二级分类<select aria-label={label('二级分类筛选')} value={secondaryFilter} disabled={classificationFilter === 'NEEDS_REVIEW' || !primaryFilter} onChange={event => onSecondaryChange(event.target.value)} style={detailFilterSelectStyle}><option value="">全部</option>{primaryFilter && EDITABLE_TAXONOMY[primaryFilter].map(value => <option key={value} value={value}>{SECONDARY_LABELS[value]}</option>)}</select></label>
+  </div>
 }
 
 function MonthlyDetailTable({ items, total, loading, error, editing, autosaveStates, onChange }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; autosaveStates: Record<string, AutosaveState>; onChange: (item: ConsumptionEventDetail, draft: ClassificationDraft) => void }) {

@@ -103,7 +103,14 @@ async function mockDemo(page: Page) {
   await page.route('**/api/consumption/events*', route => {
     const query = new URL(route.request().url()).searchParams
     const month = query.get('month') ?? ''
-    const base = eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 }
+    const startMonth = query.get('start_month')
+    const endMonth = query.get('end_month')
+    const rangeItems = startMonth && endMonth
+      ? Object.entries(eventsByMonth).filter(([key]) => key >= startMonth && key <= endMonth).flatMap(([, value]) => value.items)
+      : null
+    const base = rangeItems == null
+      ? (eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 })
+      : { month: startMonth, items: rangeItems, total: rangeItems.length, limit: 200, offset: 0 }
     const items = base.items.filter(item => (
       (!query.get('classification_status') || item.classification_status === query.get('classification_status'))
       && (!query.get('primary_category') || item.primary_category === query.get('primary_category'))
@@ -173,7 +180,7 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
     await expect(page.getByTestId('structure-segment-tooltip')).toContainText(share)
   }
   await expect(page.getByText('近12个月消费结构', { exact: true })).toBeVisible()
-  await expect(page.getByText('统计区间：2025年9月 – 2026年8月')).toBeVisible()
+  await expect(page.getByText('统计区间：2025年9月 – 2026年8月').last()).toBeVisible()
   await expect(page.getByTestId('rolling-secondary-category-tab-DAILY')).toHaveAttribute('aria-selected', 'true')
   for (const [key, label, amount, share] of [
     ['daily_cny', '日常消费', '¥9,300', '50.0%'],
@@ -192,27 +199,29 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
   await expect(page.getByText('分类覆盖率', { exact: true })).toHaveCount(0)
   await expect(page.getByText('数据覆盖', { exact: true })).toHaveCount(0)
   await expect(page.getByText('2026年8月消费明细')).toBeVisible()
+  const monthlyDetailCard = page.getByText('2026年8月消费明细').locator('xpath=ancestor::section')
   const sectionTexts = await page.locator('section').allTextContents()
   expect(sectionTexts.findIndex(text => text.includes('2026年8月消费明细'))).toBeLessThan(
     sectionTexts.findIndex(text => text.includes('2026年8月消费结构')),
   )
-  await expect(page.getByRole('columnheader', { name: '消费明细' })).toBeVisible()
+  await expect(monthlyDetailCard.getByRole('columnheader', { name: '消费明细' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '消费名称' })).toHaveCount(0)
-  await expect(page.getByText('原始账单描述：月度房租')).toBeVisible()
-  await expect(page.getByText('CMB Debit ****').first()).toBeVisible()
-  await expect(page.getByText('共 2 条，按金额从高到低排列')).toBeVisible()
-  await expect(page.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08')
-  await page.getByLabel('一级分类 event-aug-rent').selectOption('DAILY')
-  await expect(page.getByLabel('二级分类 event-aug-rent')).toHaveValue('')
-  await page.getByLabel('二级分类 event-aug-rent').selectOption('SHOPPING')
-  await expect(page.getByLabel('保存分类 event-aug-rent')).toHaveCount(0)
-  await expect(page.getByText('保存中…')).toBeVisible()
-  await expect(page.getByText('已保存')).toBeVisible()
+  await expect(monthlyDetailCard.getByText('原始账单描述：月度房租')).toBeVisible()
+  await expect(monthlyDetailCard.getByText('CMB Debit ****').first()).toBeVisible()
+  await expect(monthlyDetailCard.getByText('共 2 条，按金额从高到低排列')).toBeVisible()
+  await expect(monthlyDetailCard.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08')
+  await monthlyDetailCard.getByLabel('一级分类 event-aug-rent').selectOption('DAILY')
+  await expect(monthlyDetailCard.getByLabel('二级分类 event-aug-rent')).toHaveValue('')
+  await monthlyDetailCard.getByLabel('二级分类 event-aug-rent').selectOption('SHOPPING')
+  await expect(monthlyDetailCard.getByLabel('保存分类 event-aug-rent')).toHaveCount(0)
+  await expect(monthlyDetailCard.getByText('保存中…')).toBeVisible()
+  await expect(monthlyDetailCard.getByText('已保存')).toBeVisible()
 
   await page.getByTestId('trend-bar-daily_cny-2026-08-01').hover()
   await expect(page.getByText('总消费：', { exact: false })).toBeVisible()
   await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
   await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
+  const julyDetailCard = page.getByText('2026年7月消费明细').locator('xpath=ancestor::section')
   await expect(page.getByText('¥18,600')).toBeVisible()
   await expect(page.getByText('月均 ¥1,550')).toBeVisible()
   await expect(page.getByText('¥17,400')).toHaveCount(0)
@@ -223,8 +232,8 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
   await expect(page.getByTestId('secondary-category-tab-DAILY')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('餐饮').first()).toBeVisible()
   await expect(page.getByText('住宿')).toHaveCount(0)
-  await expect(page.getByText('原始账单描述：餐饮')).toBeVisible()
-  await expect(page.getByText('房租')).toHaveCount(0)
+  await expect(julyDetailCard.getByText('原始账单描述：餐饮')).toBeVisible()
+  await expect(julyDetailCard.getByText('房租')).toHaveCount(0)
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('fill', '#1D4ED8')
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('font-weight', '700')
   await page.getByTestId('rolling-structure-segment-daily_cny').hover()
@@ -295,6 +304,28 @@ test('aggregates rolling secondary breakdowns from the same twelve-month window'
   await expect(rollingCard).toContainText('¥3,720100.0%')
 })
 
+test('keeps rolling transaction details anchored to the latest twelve-month window', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.goto('/#/consumption')
+
+  const rollingCard = page.getByText('近12个月消费明细', { exact: true }).locator('xpath=ancestor::section')
+  await expect(rollingCard).toContainText('统计区间：2025年9月 – 2026年8月')
+  await expect(rollingCard.getByText('原始账单描述：月度房租')).toBeVisible()
+  await expect(rollingCard.getByText('原始账单描述：餐饮')).toBeVisible()
+  await expect(rollingCard.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?start_month=2025-09&end_month=2026-08')
+
+  await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
+  await expect(page.getByText('2026年7月消费明细')).toBeVisible()
+  await expect(rollingCard.getByText('原始账单描述：月度房租')).toBeVisible()
+  await rollingCard.getByLabel('近12个月明细分类状态').selectOption('NEEDS_REVIEW')
+  await expect(rollingCard.getByText('原始账单描述：待确认交易')).toBeVisible()
+  await expect(rollingCard.getByText('原始账单描述：月度房租')).toHaveCount(0)
+  await rollingCard.getByLabel('一级分类 event-aug-unclassified').selectOption('DAILY')
+  await rollingCard.getByLabel('二级分类 event-aug-unclassified').selectOption('SHOPPING')
+  await expect(rollingCard.getByText('原始账单描述：待确认交易')).toHaveCount(0)
+})
+
 test('rolls the structure window forward when analytics receives a new latest month', async ({ page }) => {
   await mockDemo(page)
   const shiftedMonths = [
@@ -307,7 +338,7 @@ test('rolls the structure window forward when analytics receives a new latest mo
   await page.goto('/#/consumption')
 
   await expect(page.getByText('近12个月消费结构', { exact: true })).toBeVisible()
-  await expect(page.getByText('统计区间：2025年10月 – 2026年9月')).toBeVisible()
+  await expect(page.getByText('统计区间：2025年10月 – 2026年9月').last()).toBeVisible()
 })
 
 test('keeps an ultra-narrow primary segment hoverable', async ({ page }) => {
@@ -336,23 +367,24 @@ test('filters monthly details server-side and removes an autosaved review row', 
   await mockDemo(page)
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
   await page.goto('/#/consumption')
+  const monthlyDetailCard = page.getByText('2026年8月消费明细').locator('xpath=ancestor::section')
 
-  await page.getByLabel('分类状态筛选').selectOption('NEEDS_REVIEW')
-  await expect(page.getByLabel('一级分类筛选')).toBeDisabled()
-  await expect(page.getByLabel('二级分类筛选')).toBeDisabled()
-  await expect(page.getByText('原始账单描述：待确认交易')).toBeVisible()
-  await expect(page.getByText('原始账单描述：月度房租')).toHaveCount(0)
-  await expect(page.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08&classification_status=NEEDS_REVIEW')
+  await monthlyDetailCard.getByLabel('分类状态筛选').selectOption('NEEDS_REVIEW')
+  await expect(monthlyDetailCard.getByLabel('一级分类筛选')).toBeDisabled()
+  await expect(monthlyDetailCard.getByLabel('二级分类筛选')).toBeDisabled()
+  await expect(monthlyDetailCard.getByText('原始账单描述：待确认交易')).toBeVisible()
+  await expect(monthlyDetailCard.getByText('原始账单描述：月度房租')).toHaveCount(0)
+  await expect(monthlyDetailCard.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08&classification_status=NEEDS_REVIEW')
 
-  await page.getByLabel('一级分类 event-aug-unclassified').selectOption('DAILY')
-  await page.getByLabel('二级分类 event-aug-unclassified').selectOption('SHOPPING')
-  await expect(page.getByText('原始账单描述：待确认交易')).toHaveCount(0)
-  await expect(page.getByText('当前筛选条件下暂无消费明细')).toBeVisible()
+  await monthlyDetailCard.getByLabel('一级分类 event-aug-unclassified').selectOption('DAILY')
+  await monthlyDetailCard.getByLabel('二级分类 event-aug-unclassified').selectOption('SHOPPING')
+  await expect(monthlyDetailCard.getByText('原始账单描述：待确认交易')).toHaveCount(0)
+  await expect(monthlyDetailCard.getByText('当前筛选条件下暂无消费明细')).toBeVisible()
 
-  await page.getByLabel('分类状态筛选').selectOption('CLASSIFIED')
-  await page.getByLabel('一级分类筛选').selectOption('HOUSING')
-  await page.getByLabel('二级分类筛选').selectOption('RENT')
-  await expect(page.getByText('原始账单描述：月度房租')).toBeVisible()
+  await monthlyDetailCard.getByLabel('分类状态筛选').selectOption('CLASSIFIED')
+  await monthlyDetailCard.getByLabel('一级分类筛选').selectOption('HOUSING')
+  await monthlyDetailCard.getByLabel('二级分类筛选').selectOption('RENT')
+  await expect(monthlyDetailCard.getByText('原始账单描述：月度房租')).toBeVisible()
 })
 
 test('renders loading, empty, and safe error states', async ({ page }) => {

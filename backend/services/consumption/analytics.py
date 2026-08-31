@@ -116,6 +116,27 @@ class ConsumptionAnalyticsQueryAdapter:
     ) -> MonthlySpendingDetailPage:
         """Read a bounded selected-month view from active event projections only."""
         end = date(month.year + (month.month == 12), 1 if month.month == 12 else month.month + 1, 1)
+        return self.detail_in_period(
+            month, end, account_ids, limit=limit, offset=offset,
+            classification_status=classification_status, primary_category=primary_category,
+            secondary_category=secondary_category,
+        )
+
+    def detail_in_period(
+        self,
+        start: date,
+        end: date,
+        account_ids: tuple[str, ...],
+        *,
+        limit: int,
+        offset: int,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
+    ) -> MonthlySpendingDetailPage:
+        """Read a closed-start, open-end month range from active projections."""
+        if start >= end:
+            raise ValueError("detail range end must follow start")
         primary_link_id = (
             self.session.query(func.min(EventRawLink.id))
             .filter(EventRawLink.event_id == EconomicEvent.id, EventRawLink.is_active.is_(True))
@@ -148,7 +169,7 @@ class ConsumptionAnalyticsQueryAdapter:
                 EconomicEvent.event_type.in_((EventType.CONSUMPTION.value, EventType.OTHER.value)),
                 ConsumptionInterpretation.eligibility_status == EligibilityStatus.ELIGIBLE.value,
                 EconomicEventProjectionRevision.base_net_amount.is_not(None),
-                EconomicEvent.analytics_effective_date >= month,
+                EconomicEvent.analytics_effective_date >= start,
                 EconomicEvent.analytics_effective_date < end,
                 RawTransaction.account_id.in_(account_ids),
             )
@@ -180,7 +201,7 @@ class ConsumptionAnalyticsQueryAdapter:
                 EconomicEvent.event_type.in_((EventType.CONSUMPTION.value, EventType.OTHER.value)),
                 ConsumptionInterpretation.eligibility_status == EligibilityStatus.ELIGIBLE.value,
                 EconomicEventProjectionRevision.base_net_amount.is_not(None),
-                EconomicEvent.analytics_effective_date >= month,
+                EconomicEvent.analytics_effective_date >= start,
                 EconomicEvent.analytics_effective_date < end,
             )
         )
@@ -224,7 +245,7 @@ class ConsumptionAnalyticsQueryAdapter:
         items.sort(key=lambda item: (-item.amount_cny, -item.analytics_effective_date.toordinal(), item.event_id))
         total = len(items)
         return MonthlySpendingDetailPage(
-            month=month,
+            month=start,
             items=tuple(items[offset:offset + limit]),
             total=total,
             limit=limit,
@@ -265,6 +286,31 @@ class ConsumptionAnalyticsService:
             secondary_category=secondary_category,
         )
 
+    def detail_in_month_range(
+        self,
+        *,
+        start_month: date,
+        end_month: date,
+        limit: int = 100,
+        offset: int = 0,
+        account_ids: tuple[str, ...] | None = None,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
+    ) -> MonthlySpendingDetailPage:
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        if end_month < start_month:
+            raise ValueError("end_month must not precede start_month")
+        end = date(end_month.year + (end_month.month == 12), 1 if end_month.month == 12 else end_month.month + 1, 1)
+        return self.adapter.detail_in_period(
+            start_month, end, self.adapter.expected_account_ids(account_ids), limit=limit, offset=offset,
+            classification_status=classification_status, primary_category=primary_category,
+            secondary_category=secondary_category,
+        )
+
     def export_monthly_detail_csv(
         self,
         *,
@@ -275,8 +321,28 @@ class ConsumptionAnalyticsService:
         secondary_category: str | None = None,
     ) -> str:
         """Export the selected month's current detail projection as CSV."""
-        page = self.adapter.monthly_detail(
-            month, self.adapter.expected_account_ids(account_ids), limit=100_000, offset=0,
+        return self.export_detail_range_csv(
+            start_month=month, end_month=month, account_ids=account_ids,
+            classification_status=classification_status, primary_category=primary_category,
+            secondary_category=secondary_category,
+        )
+
+    def export_detail_range_csv(
+        self,
+        *,
+        start_month: date,
+        end_month: date,
+        account_ids: tuple[str, ...] | None = None,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
+    ) -> str:
+        """Export every current detail row in an inclusive natural-month range."""
+        if end_month < start_month:
+            raise ValueError("end_month must not precede start_month")
+        end = date(end_month.year + (end_month.month == 12), 1 if end_month.month == 12 else end_month.month + 1, 1)
+        page = self.adapter.detail_in_period(
+            start_month, end, self.adapter.expected_account_ids(account_ids), limit=100_000, offset=0,
             classification_status=classification_status, primary_category=primary_category,
             secondary_category=secondary_category,
         )
