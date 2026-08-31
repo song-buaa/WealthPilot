@@ -67,6 +67,21 @@ const julyKpiResponse = {
   months: [point('2025-08-01', '900'), ...analyticsResponse.months.slice(0, -1)],
 }
 
+const completeSecondaryResponse = {
+  ...analyticsResponse,
+  months: analyticsResponse.months.map(item => {
+    const total = Number(item.total_spending_cny)
+    return {
+      ...item,
+      secondary_breakdowns: [
+        { primary_category: 'DAILY', secondary_category: 'FOOD_DINING', amount_cny: item.daily_cny, event_count: 1, share_of_total: String(Number(item.daily_cny) / total), share_within_primary: '1' },
+        { primary_category: 'HOUSING', secondary_category: 'RENT', amount_cny: item.housing_cny, event_count: 1, share_of_total: String(Number(item.housing_cny) / total), share_within_primary: '1' },
+        { primary_category: 'TRAVEL', secondary_category: 'ACCOMMODATION', amount_cny: item.travel_cny, event_count: 1, share_of_total: String(Number(item.travel_cny) / total), share_within_primary: '1' },
+      ],
+    }
+  }),
+}
+
 const eventsByMonth: Record<string, { month: string; items: Array<Record<string, string>>; total: number; limit: number; offset: number }> = {
   '2026-08': {
     month: '2026-08-01', total: 2, limit: 200, offset: 0,
@@ -120,7 +135,7 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
   await expect(page.getByText('本月消费 · 2026年8月')).toBeVisible()
   await expect(page.getByText('¥2,100').first()).toBeVisible()
   await expect(page.getByText('截至 2026-08-20')).toBeVisible()
-  await expect(page.getByText('近12个月消费')).toBeVisible()
+  await expect(page.getByText('近12个月消费', { exact: true })).toBeVisible()
   await expect(page.getByText('¥18,600')).toBeVisible()
   await expect(page.getByText('月均 ¥1,550')).toBeVisible()
   await expect(page.getByText('本月消费环比')).toBeVisible()
@@ -157,6 +172,20 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
     await expect(page.getByTestId('structure-segment-tooltip')).toContainText(amount)
     await expect(page.getByTestId('structure-segment-tooltip')).toContainText(share)
   }
+  await expect(page.getByText('近12个月消费结构', { exact: true })).toBeVisible()
+  await expect(page.getByText('统计区间：2025年9月 – 2026年8月')).toBeVisible()
+  await expect(page.getByTestId('rolling-secondary-category-tab-DAILY')).toHaveAttribute('aria-selected', 'true')
+  for (const [key, label, amount, share] of [
+    ['daily_cny', '日常消费', '¥9,300', '50.0%'],
+    ['housing_cny', '住房消费', '¥1,860', '10.0%'],
+    ['travel_cny', '旅行消费', '¥3,720', '20.0%'],
+    ['unclassified_eligible_cny', '待分类', '¥3,720', '20.0%'],
+  ]) {
+    await page.getByTestId(`rolling-structure-segment-${key}`).hover()
+    await expect(page.getByTestId('rolling-structure-segment-tooltip')).toContainText(label)
+    await expect(page.getByTestId('rolling-structure-segment-tooltip')).toContainText(amount)
+    await expect(page.getByTestId('rolling-structure-segment-tooltip')).toContainText(share)
+  }
   await page.getByTestId('secondary-category-tab-TRAVEL').click()
   await expect(page.getByTestId('secondary-category-tab-TRAVEL')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('住宿')).toBeVisible()
@@ -190,6 +219,7 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
   await expect(page.getByText('+5.3%')).toBeVisible()
   await expect(page.getByText('较6月 · ¥1,900')).toBeVisible()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
+  await expect(page.getByText('近12个月消费结构', { exact: true })).toBeVisible()
   await expect(page.getByTestId('secondary-category-tab-DAILY')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('餐饮').first()).toBeVisible()
   await expect(page.getByText('住宿')).toHaveCount(0)
@@ -197,6 +227,8 @@ test('renders net-spending KPIs while keeping the rolling window anchored to the
   await expect(page.getByText('房租')).toHaveCount(0)
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('fill', '#1D4ED8')
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('font-weight', '700')
+  await page.getByTestId('rolling-structure-segment-daily_cny').hover()
+  await expect(page.getByTestId('rolling-structure-segment-tooltip')).toContainText('¥9,300')
 
   await page.getByTestId('trend-bar-daily_cny-2026-06-01').click()
   await expect(page.getByText('本月消费 · 2026年6月')).toBeVisible()
@@ -217,6 +249,42 @@ test('shows no month-over-month value when the prior month is zero or missing', 
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: missingPrevious }))
   await page.reload()
   await expect(page.getByText('暂无可比上月数据')).toBeVisible()
+})
+
+test('aggregates rolling secondary breakdowns from the same twelve-month window', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: completeSecondaryResponse }))
+  await page.goto('/#/consumption')
+
+  const rollingCard = page.getByText('近12个月消费结构', { exact: true }).locator('xpath=ancestor::section')
+  await expect(rollingCard).toContainText('¥9,300')
+  await expect(rollingCard).toContainText('¥1,860')
+  await expect(rollingCard).toContainText('¥3,720')
+  await expect(rollingCard).toContainText('餐饮')
+  await expect(rollingCard).toContainText('¥9,300100.0%')
+
+  await rollingCard.getByTestId('rolling-secondary-category-tab-HOUSING').click()
+  await expect(rollingCard).toContainText('房租')
+  await expect(rollingCard).toContainText('¥1,860100.0%')
+
+  await rollingCard.getByTestId('rolling-secondary-category-tab-TRAVEL').click()
+  await expect(rollingCard).toContainText('住宿')
+  await expect(rollingCard).toContainText('¥3,720100.0%')
+})
+
+test('rolls the structure window forward when analytics receives a new latest month', async ({ page }) => {
+  await mockDemo(page)
+  const shiftedMonths = [
+    '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01', '2026-03-01',
+    '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01',
+  ]
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({
+    json: { ...analyticsResponse, months: analyticsResponse.months.map((item, index) => ({ ...item, month: shiftedMonths[index] })) },
+  }))
+  await page.goto('/#/consumption')
+
+  await expect(page.getByText('近12个月消费结构', { exact: true })).toBeVisible()
+  await expect(page.getByText('统计区间：2025年10月 – 2026年9月')).toBeVisible()
 })
 
 test('keeps an ultra-narrow primary segment hoverable', async ({ page }) => {

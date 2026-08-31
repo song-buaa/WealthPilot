@@ -8,6 +8,7 @@ import {
   type ConsumptionAnalyticsSummary,
   type ConsumptionEventDetail,
   type ConsumptionMonthlyPoint,
+  type ConsumptionSecondaryBreakdown,
 } from '@/lib/api'
 import { fmtCny, fmtPct } from '@/lib/fmt'
 
@@ -38,12 +39,25 @@ type ClassificationDraft = { primary: EditablePrimary; secondary: string }
 type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
 type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
 type KpiWindow = { endingMonth: string; summary: ConsumptionAnalyticsSummary }
+type ConsumptionStructureData = {
+  id: string
+  title: string
+  detail: string
+  total: number
+  primaryAmounts: Record<CategoryKey, number>
+  secondaryBreakdowns: ConsumptionSecondaryBreakdown[]
+}
 
 const SECONDARY_TAB_META: Array<{ key: EditablePrimary; label: string }> = [
   { key: 'DAILY', label: '日常消费' },
   { key: 'HOUSING', label: '住房消费' },
   { key: 'TRAVEL', label: '旅行消费' },
 ]
+const PRIMARY_CATEGORY_KEYS: Record<EditablePrimary, CategoryKey> = {
+  DAILY: 'daily_cny',
+  HOUSING: 'housing_cny',
+  TRAVEL: 'travel_cny',
+}
 
 function toNumber(value: string | null | undefined): number { return value == null ? 0 : Number(value) }
 function monthLabel(month: string): string { const [year, value] = month.split('-'); return `${year}年${Number(value)}月` }
@@ -55,9 +69,66 @@ function monthEnd(month: string): string {
 function isOpenCalendarMonth(point: ConsumptionMonthlyPoint): boolean { return Boolean(point.as_of_date && point.as_of_date < monthEnd(point.month)) }
 function fmtChange(value: number): string { return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` }
 function coverageRate(point: ConsumptionMonthlyPoint): number | null { return point.classification_coverage_rate == null ? null : toNumber(point.classification_coverage_rate) * 100 }
-function categoryShare(point: ConsumptionMonthlyPoint, key: CategoryKey): number | null {
-  const total = toNumber(point.total_spending_cny)
-  return total > 0 ? toNumber(point[key]) / total * 100 : null
+
+function primaryAmounts(point: ConsumptionMonthlyPoint): Record<CategoryKey, number> {
+  return {
+    daily_cny: toNumber(point.daily_cny),
+    housing_cny: toNumber(point.housing_cny),
+    travel_cny: toNumber(point.travel_cny),
+    unclassified_eligible_cny: toNumber(point.unclassified_eligible_cny),
+  }
+}
+
+function monthlyStructure(point: ConsumptionMonthlyPoint): ConsumptionStructureData {
+  return {
+    id: `monthly-${point.month}`,
+    title: `${monthLabel(point.month)}消费结构`,
+    detail: '待分类是已确认但尚未归类的消费状态，并非第四个业务分类。',
+    total: toNumber(point.total_spending_cny),
+    primaryAmounts: primaryAmounts(point),
+    secondaryBreakdowns: point.secondary_breakdowns,
+  }
+}
+
+function rollingStructure(points: ConsumptionMonthlyPoint[]): ConsumptionStructureData | null {
+  if (points.length === 0) return null
+  const primary = points.reduce<Record<CategoryKey, number>>((totals, point) => {
+    const amounts = primaryAmounts(point)
+    for (const key of CATEGORY_META) totals[key.key] += amounts[key.key]
+    return totals
+  }, { daily_cny: 0, housing_cny: 0, travel_cny: 0, unclassified_eligible_cny: 0 })
+  const total = points.reduce((sum, point) => sum + toNumber(point.total_spending_cny), 0)
+  const secondary = new Map<string, { primary: ConsumptionSecondaryBreakdown['primary_category']; category: string; amount: number; count: number }>()
+  for (const point of points) for (const item of point.secondary_breakdowns) {
+    const key = `${item.primary_category}:${item.secondary_category}`
+    const current = secondary.get(key) ?? { primary: item.primary_category, category: item.secondary_category, amount: 0, count: 0 }
+    current.amount += toNumber(item.amount_cny)
+    current.count += item.event_count
+    secondary.set(key, current)
+  }
+  const primaryAmountByCategory = {
+    DAILY: primary.daily_cny,
+    HOUSING: primary.housing_cny,
+    TRAVEL: primary.travel_cny,
+  }
+  const secondaryBreakdowns = [...secondary.values()]
+    .map(item => ({
+      primary_category: item.primary,
+      secondary_category: item.category,
+      amount_cny: String(item.amount),
+      event_count: item.count,
+      share_of_total: total > 0 ? String(item.amount / total) : null,
+      share_within_primary: primaryAmountByCategory[item.primary] > 0 ? String(item.amount / primaryAmountByCategory[item.primary]) : null,
+    }))
+    .sort((left, right) => toNumber(right.amount_cny) - toNumber(left.amount_cny) || left.secondary_category.localeCompare(right.secondary_category))
+  return {
+    id: `rolling-${points.at(-1)?.month}`,
+    title: '近12个月消费结构',
+    detail: `统计区间：${monthLabel(points[0].month)} – ${monthLabel(points.at(-1)!.month)}`,
+    total,
+    primaryAmounts: primary,
+    secondaryBreakdowns,
+  }
 }
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -83,7 +154,6 @@ export default function Consumption() {
   const [detailSecondaryFilter, setDetailSecondaryFilter] = useState('')
   const [editing, setEditing] = useState<Record<string, ClassificationDraft>>({})
   const [autosaveStates, setAutosaveStates] = useState<Record<string, AutosaveState>>({})
-  const [secondaryTabSelection, setSecondaryTabSelection] = useState<{ month: string; primary: EditablePrimary } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const autosaveTimers = useRef<Record<string, number>>({})
@@ -117,22 +187,8 @@ export default function Consumption() {
     () => summary?.months.find(item => item.month === selectedMonth) ?? summary?.months.at(-1) ?? null,
     [selectedMonth, summary],
   )
-
-  const defaultSecondaryPrimary = useMemo<EditablePrimary | null>(() => {
-    if (!selected) return null
-    const amounts: Record<EditablePrimary, number> = {
-      DAILY: toNumber(selected.daily_cny),
-      HOUSING: toNumber(selected.housing_cny),
-      TRAVEL: toNumber(selected.travel_cny),
-    }
-    return SECONDARY_TAB_META
-      .filter(item => amounts[item.key] > 0)
-      .sort((left, right) => amounts[right.key] - amounts[left.key])[0]?.key ?? null
-  }, [selected])
-
-  const activeSecondaryPrimary = secondaryTabSelection?.month === selectedMonth
-    ? secondaryTabSelection.primary
-    : defaultSecondaryPrimary
+  const rollingPoints = useMemo(() => summary?.months.slice(-12) ?? [], [summary])
+  const twelveMonthStructure = useMemo(() => rollingStructure(rollingPoints), [rollingPoints])
 
   useEffect(() => {
     const task = window.setTimeout(load, 0)
@@ -224,7 +280,7 @@ export default function Consumption() {
 
   const selectedKpiSummary = summary.months.at(-1)?.month === selected.month ? summary : kpiWindow?.endingMonth === selected.month ? kpiWindow.summary : null
   const selectedKpiPoints = selectedKpiSummary?.months ?? null
-  const rollingTotal = summary.months.reduce((total, point) => total + toNumber(point.total_spending_cny), 0)
+  const rollingTotal = rollingPoints.reduce((total, point) => total + toNumber(point.total_spending_cny), 0)
   const rollingAverage = rollingTotal / 12
   const previousMonth = selectedKpiPoints?.at(-2)
   const previousAmount = previousMonth ? toNumber(previousMonth.total_spending_cny) : null
@@ -286,11 +342,8 @@ export default function Consumption() {
       <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
     </Card>
 
-    <ConsumptionStructureCard
-      point={selected}
-      activePrimary={activeSecondaryPrimary}
-      onSelectPrimary={primary => setSecondaryTabSelection({ month: selected.month, primary })}
-    />
+    <ConsumptionStructureCard data={monthlyStructure(selected)} />
+    {twelveMonthStructure && <ConsumptionStructureCard data={twelveMonthStructure} testIdPrefix="rolling-" />}
   </div>
 }
 
@@ -298,17 +351,21 @@ function TrendTooltip({ point, label }: { point: ConsumptionMonthlyPoint; label:
   return <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '9px 11px', boxShadow: '0 4px 12px rgba(15,30,53,0.12)', fontSize: 12, lineHeight: 1.8, color: '#374151' }}><div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 3 }}>{label}</div><div>总消费：<b>{fmtCny(toNumber(point.total_spending_cny))}</b></div>{CATEGORY_META.map(item => <div key={item.key}>{item.label}：{fmtCny(toNumber(point[item.key]))}</div>)}<div>分类覆盖率：{coverageRate(point) == null ? '—' : fmtPct(coverageRate(point))}</div>{!point.amount_complete && <div style={{ color: '#B45309', marginTop: 3 }}>部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}</div>
 }
 
-function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { point: ConsumptionMonthlyPoint; activePrimary: EditablePrimary | null; onSelectPrimary: (primary: EditablePrimary) => void }) {
+function ConsumptionStructureCard({ data, testIdPrefix = '' }: { data: ConsumptionStructureData; testIdPrefix?: string }) {
   const [hoveredPrimary, setHoveredPrimary] = useState<CategoryKey | null>(null)
-  const total = toNumber(point.total_spending_cny)
+  const [tabSelection, setTabSelection] = useState<{ structureId: string; primary: EditablePrimary } | null>(null)
   const primaryRows = CATEGORY_META.map(item => ({
     ...item,
-    amount: toNumber(point[item.key]),
-    share: categoryShare(point, item.key),
+    amount: data.primaryAmounts[item.key],
+    share: data.total > 0 ? data.primaryAmounts[item.key] / data.total * 100 : null,
   }))
+  const defaultPrimary = SECONDARY_TAB_META
+    .filter(item => data.primaryAmounts[PRIMARY_CATEGORY_KEYS[item.key]] > 0)
+    .sort((left, right) => data.primaryAmounts[PRIMARY_CATEGORY_KEYS[right.key]] - data.primaryAmounts[PRIMARY_CATEGORY_KEYS[left.key]])[0]?.key ?? null
+  const activePrimary = tabSelection?.structureId === data.id ? tabSelection.primary : defaultPrimary
   const secondaryItems = activePrimary == null
     ? []
-    : point.secondary_breakdowns.filter(item => item.primary_category === activePrimary)
+    : data.secondaryBreakdowns.filter(item => item.primary_category === activePrimary)
   const hoveredIndex = primaryRows.findIndex(item => item.key === hoveredPrimary)
   const hoveredRow = hoveredIndex < 0 ? null : primaryRows[hoveredIndex]
   const tooltipAnchor = hoveredRow == null
@@ -316,16 +373,16 @@ function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { p
     : primaryRows.slice(0, hoveredIndex).reduce((sum, item) => sum + (item.share ?? 0), 0) + (hoveredRow.share ?? 0) / 2
 
   return <Card style={{ padding: 20, marginTop: 16 }}>
-    <SectionTitle title={`${monthLabel(point.month)}消费结构`} detail="待分类是已确认但尚未归类的消费状态，并非第四个业务分类。" />
+    <SectionTitle title={data.title} detail={data.detail} />
     <div style={structureGridStyle}>
       <div style={primaryStructureStyle}>
         <div style={structureColumnTitleStyle}>一级分类总览</div>
         <div aria-label="一级分类占比" style={stackedBarStyle}>
-          {total > 0 && primaryRows.filter(item => item.amount > 0).map((item, index, items) => <div key={item.key} style={{ position: 'relative', width: `${item.share ?? 0}%`, height: '100%', flexShrink: 0 }}>
+          {data.total > 0 && primaryRows.filter(item => item.amount > 0).map((item, index, items) => <div key={item.key} style={{ position: 'relative', width: `${item.share ?? 0}%`, height: '100%', flexShrink: 0 }}>
             <div style={{ width: '100%', height: '100%', background: item.color, borderTopLeftRadius: index === 0 ? 99 : 0, borderBottomLeftRadius: index === 0 ? 99 : 0, borderTopRightRadius: index === items.length - 1 ? 99 : 0, borderBottomRightRadius: index === items.length - 1 ? 99 : 0, opacity: hoveredPrimary && hoveredPrimary !== item.key ? 0.82 : 1, transition: 'opacity 120ms ease' }} />
-            <div data-testid={`structure-segment-${item.key}`} aria-label={`${item.label}占比`} onMouseEnter={() => setHoveredPrimary(item.key)} onMouseLeave={() => setHoveredPrimary(null)} style={{ ...segmentHitAreaStyle, zIndex: 100 - Math.round(item.share ?? 0) }} />
+            <div data-testid={`${testIdPrefix}structure-segment-${item.key}`} aria-label={`${item.label}占比`} onMouseEnter={() => setHoveredPrimary(item.key)} onMouseLeave={() => setHoveredPrimary(null)} style={{ ...segmentHitAreaStyle, zIndex: 100 - Math.round(item.share ?? 0) }} />
           </div>)}
-          {hoveredRow && <div role="tooltip" data-testid="structure-segment-tooltip" style={{ ...structureTooltipStyle, left: `${Math.min(88, Math.max(12, tooltipAnchor))}%` }}><div style={{ color: '#1B2A4A', fontWeight: 700 }}>{hoveredRow.label}</div><div className="tabular-nums" style={structureTooltipValueStyle}><span>金额</span><b>{fmtCny(hoveredRow.amount)}</b></div><div className="tabular-nums" style={structureTooltipValueStyle}><span>占比</span><b>{hoveredRow.share == null ? '—' : fmtPct(hoveredRow.share)}</b></div></div>}
+          {hoveredRow && <div role="tooltip" data-testid={`${testIdPrefix}structure-segment-tooltip`} style={{ ...structureTooltipStyle, left: `${Math.min(88, Math.max(12, tooltipAnchor))}%` }}><div style={{ color: '#1B2A4A', fontWeight: 700 }}>{hoveredRow.label}</div><div className="tabular-nums" style={structureTooltipValueStyle}><span>金额</span><b>{fmtCny(hoveredRow.amount)}</b></div><div className="tabular-nums" style={structureTooltipValueStyle}><span>占比</span><b>{hoveredRow.share == null ? '—' : fmtPct(hoveredRow.share)}</b></div></div>}
         </div>
         <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
           {primaryRows.map(item => <div key={item.key} style={primaryLegendRowStyle}>
@@ -336,10 +393,10 @@ function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { p
       </div>
       <div>
         <div style={structureColumnTitleStyle}>二级分类明细</div>
-        <div role="tablist" aria-label="二级分类" style={secondaryTabListStyle}>
+        <div role="tablist" aria-label={`${data.title}二级分类`} style={secondaryTabListStyle}>
           {SECONDARY_TAB_META.map(item => {
             const active = activePrimary === item.key
-            return <button key={item.key} type="button" role="tab" aria-selected={active} data-testid={`secondary-category-tab-${item.key}`} onClick={() => onSelectPrimary(item.key)} style={{ ...secondaryTabStyle, ...(active ? secondaryTabActiveStyle : {}) }}>{item.label}</button>
+            return <button key={item.key} type="button" role="tab" aria-selected={active} data-testid={`${testIdPrefix}secondary-category-tab-${item.key}`} onClick={() => setTabSelection({ structureId: data.id, primary: item.key })} style={{ ...secondaryTabStyle, ...(active ? secondaryTabActiveStyle : {}) }}>{item.label}</button>
           })}
         </div>
         {activePrimary == null || secondaryItems.length === 0
