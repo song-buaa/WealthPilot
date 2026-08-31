@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { AlertTriangle, Check, Download, Loader2, ReceiptText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, Download, Loader2, ReceiptText, RefreshCw, WalletCards } from 'lucide-react'
 import EmptyState from '@/components/shared/EmptyState'
 import PageHeader from '@/components/shared/PageHeader'
 import {
@@ -184,13 +184,24 @@ export default function Consumption() {
 
   if (loading) return <Skeleton />
   if (error) return <Card style={{ padding: 20, color: '#991B1B' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}><AlertTriangle size={18} /> {error}</div><button onClick={load} style={secondaryButtonStyle}><RefreshCw size={14} /> 重试</button></Card>
-  if (!summary || !selected || summary.months.every(item => toNumber(item.total_spending_cny) === 0 && item.eligibility_review_count === 0)) return <div><PageHeader icon="¥" title="消费分析" subtitle="了解每个月花了多少钱、花在哪里，以及数据覆盖情况" /><Card><EmptyState icon={ReceiptText} title="暂无消费分析数据" desc="完成消费账户数据导入后，可在这里查看月度消费趋势。" /></Card></div>
+  if (!summary || !selected || summary.months.every(item => toNumber(item.total_spending_cny) === 0 && item.eligibility_review_count === 0)) {
+    return (
+      <div>
+        <PageHeader icon={<WalletCards size={17} strokeWidth={2.25} color="#fff" />} title="消费分析" subtitle="消费趋势 · 分类结构" />
+        <Card><EmptyState icon={ReceiptText} title="暂无消费分析数据" desc="完成消费账户数据导入后，可在这里查看月度消费趋势。" /></Card>
+      </div>
+    )
+  }
 
   const selectedCoverage = COVERAGE_COPY[selected.data_coverage_status]
   const selectedRate = coverageRate(selected)
 
   return <div style={{ paddingBottom: 24 }}>
-    <PageHeader icon="¥" title="消费分析" subtitle="基于已接入账户，查看月度消费趋势、结构与数据覆盖情况" />
+    <PageHeader
+      icon={<WalletCards size={17} strokeWidth={2.25} color="#fff" />}
+      title="消费分析"
+      subtitle="消费趋势 · 分类结构"
+    />
 
     <div style={kpiGridStyle}>
       <section style={heroStyle}>
