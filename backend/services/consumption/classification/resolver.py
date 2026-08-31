@@ -67,7 +67,10 @@ def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
         "咖啡", "快餐", "小吃", "包点", "饭店",
     )):
         return PrimaryCategory.DAILY, "FOOD_DINING"
-    if any(word in value for word in ("滴滴", "出租车", "打车", "停车", "快充", "充电", "通行宝", "顺易通")):
+    if any(word in value for word in (
+        "滴滴", "出租车", "打车", "停车", "快充", "充电", "通行宝", "顺易通",
+        "加油", "能源", "中国石化", "中国石油", "地铁", "停简单", "汽车",
+    )):
         return PrimaryCategory.DAILY, "TRANSPORT_AUTO"
     if any(word in value for word in ("宠物", "猫粮", "猫砂")):
         return PrimaryCategory.DAILY, "PET"

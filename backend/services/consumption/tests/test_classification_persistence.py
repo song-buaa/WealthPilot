@@ -148,6 +148,14 @@ def test_u_eligible_unknown_is_persisted_and_schema_is_complete(db_session):
     ("车辆充电", "DAILY", "TRANSPORT_AUTO"),
     ("通行宝", "DAILY", "TRANSPORT_AUTO"),
     ("顺易通", "DAILY", "TRANSPORT_AUTO"),
+    ("中国石化", "DAILY", "TRANSPORT_AUTO"),
+    ("中国石油", "DAILY", "TRANSPORT_AUTO"),
+    ("XX加油站", "DAILY", "TRANSPORT_AUTO"),
+    ("XX能源有限公司", "DAILY", "TRANSPORT_AUTO"),
+    ("地铁", "DAILY", "TRANSPORT_AUTO"),
+    ("停简单平台商户", "DAILY", "TRANSPORT_AUTO"),
+    ("停车场", "DAILY", "TRANSPORT_AUTO"),
+    ("理想汽车", "DAILY", "TRANSPORT_AUTO"),
     ("宠物用品", "DAILY", "PET"),
     ("猫粮", "DAILY", "PET"),
     ("猫砂", "DAILY", "PET"),
@@ -207,6 +215,24 @@ def test_travel_context_overrides_generic_food_and_transport_semantics(db_sessio
     assert (result.primary_category, result.secondary_category, result.classification_source) == (
         "TRAVEL", secondary, "TRAVEL_CONTEXT",
     )
+
+
+def test_generic_semantic_rules_are_month_invariant_and_replay_is_idempotent(db_session):
+    historical = _event(
+        db_session, "historic-transport", EventType.CONSUMPTION, "支付宝-中国石化加油站",
+        when=date(2025, 9, 10),
+    )
+    august = _event(
+        db_session, "august-transport", EventType.CONSUMPTION, "财付通-中国石化加油站",
+        when=date(2026, 8, 10),
+    )
+    resolver = ClassificationResolver()
+
+    first = resolver.replay(db_session, (historical.id, august.id))
+    assert {(item.primary_category, item.secondary_category) for item in first} == {
+        ("DAILY", "TRANSPORT_AUTO"),
+    }
+    assert resolver.replay(db_session, (historical.id, august.id)) == first
 
 
 def test_empty_and_existing_sqlite_initialization_is_idempotent(tmp_path, monkeypatch):
