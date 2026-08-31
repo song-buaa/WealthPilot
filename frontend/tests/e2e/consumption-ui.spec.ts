@@ -146,6 +146,17 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('2026年8月消费结构')).toBeVisible()
   await expect(page.getByTestId('secondary-category-tab-DAILY')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('当前分类暂无消费明细')).toBeVisible()
+  for (const [key, label, amount, share] of [
+    ['daily_cny', '日常消费', '¥1,050', '50.0%'],
+    ['housing_cny', '住房消费', '¥210', '10.0%'],
+    ['travel_cny', '旅行消费', '¥420', '20.0%'],
+    ['unclassified_eligible_cny', '待分类', '¥420', '20.0%'],
+  ]) {
+    await page.getByTestId(`structure-segment-${key}`).hover()
+    await expect(page.getByTestId('structure-segment-tooltip')).toContainText(label)
+    await expect(page.getByTestId('structure-segment-tooltip')).toContainText(amount)
+    await expect(page.getByTestId('structure-segment-tooltip')).toContainText(share)
+  }
   await page.getByTestId('secondary-category-tab-TRAVEL').click()
   await expect(page.getByTestId('secondary-category-tab-TRAVEL')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('住宿')).toBeVisible()
@@ -200,6 +211,28 @@ test('shows no month-over-month value when the prior month is zero or missing', 
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: missingPrevious }))
   await page.reload()
   await expect(page.getByText('暂无可比上月数据')).toBeVisible()
+})
+
+test('keeps an ultra-narrow primary segment hoverable', async ({ page }) => {
+  await mockDemo(page)
+  const narrowAugust = {
+    ...analyticsResponse.months.at(-1),
+    daily_cny: '1048',
+    housing_cny: '210',
+    travel_cny: '840',
+    unclassified_eligible_cny: '2',
+  }
+  const narrowResponse = {
+    ...analyticsResponse,
+    months: [...analyticsResponse.months.slice(0, -1), narrowAugust],
+  }
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: narrowResponse }))
+  await page.goto('/#/consumption')
+
+  await page.getByTestId('structure-segment-unclassified_eligible_cny').hover()
+  await expect(page.getByTestId('structure-segment-tooltip')).toContainText('待分类')
+  await expect(page.getByTestId('structure-segment-tooltip')).toContainText('¥2')
+  await expect(page.getByTestId('structure-segment-tooltip')).toContainText('0.1%')
 })
 
 test('filters monthly details server-side and removes an autosaved review row', async ({ page }) => {

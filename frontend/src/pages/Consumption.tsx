@@ -299,6 +299,7 @@ function TrendTooltip({ point, label }: { point: ConsumptionMonthlyPoint; label:
 }
 
 function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { point: ConsumptionMonthlyPoint; activePrimary: EditablePrimary | null; onSelectPrimary: (primary: EditablePrimary) => void }) {
+  const [hoveredPrimary, setHoveredPrimary] = useState<CategoryKey | null>(null)
   const total = toNumber(point.total_spending_cny)
   const primaryRows = CATEGORY_META.map(item => ({
     ...item,
@@ -308,6 +309,11 @@ function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { p
   const secondaryItems = activePrimary == null
     ? []
     : point.secondary_breakdowns.filter(item => item.primary_category === activePrimary)
+  const hoveredIndex = primaryRows.findIndex(item => item.key === hoveredPrimary)
+  const hoveredRow = hoveredIndex < 0 ? null : primaryRows[hoveredIndex]
+  const tooltipAnchor = hoveredRow == null
+    ? 50
+    : primaryRows.slice(0, hoveredIndex).reduce((sum, item) => sum + (item.share ?? 0), 0) + (hoveredRow.share ?? 0) / 2
 
   return <Card style={{ padding: 20, marginTop: 16 }}>
     <SectionTitle title={`${monthLabel(point.month)}消费结构`} detail="待分类是已确认但尚未归类的消费状态，并非第四个业务分类。" />
@@ -315,7 +321,11 @@ function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { p
       <div style={primaryStructureStyle}>
         <div style={structureColumnTitleStyle}>一级分类总览</div>
         <div aria-label="一级分类占比" style={stackedBarStyle}>
-          {total > 0 && primaryRows.filter(item => item.amount > 0).map(item => <div key={item.key} style={{ width: `${item.share ?? 0}%`, height: '100%', background: item.color }} />)}
+          {total > 0 && primaryRows.filter(item => item.amount > 0).map((item, index, items) => <div key={item.key} style={{ position: 'relative', width: `${item.share ?? 0}%`, height: '100%', flexShrink: 0 }}>
+            <div style={{ width: '100%', height: '100%', background: item.color, borderTopLeftRadius: index === 0 ? 99 : 0, borderBottomLeftRadius: index === 0 ? 99 : 0, borderTopRightRadius: index === items.length - 1 ? 99 : 0, borderBottomRightRadius: index === items.length - 1 ? 99 : 0, opacity: hoveredPrimary && hoveredPrimary !== item.key ? 0.82 : 1, transition: 'opacity 120ms ease' }} />
+            <div data-testid={`structure-segment-${item.key}`} aria-label={`${item.label}占比`} onMouseEnter={() => setHoveredPrimary(item.key)} onMouseLeave={() => setHoveredPrimary(null)} style={{ ...segmentHitAreaStyle, zIndex: 100 - Math.round(item.share ?? 0) }} />
+          </div>)}
+          {hoveredRow && <div role="tooltip" data-testid="structure-segment-tooltip" style={{ ...structureTooltipStyle, left: `${Math.min(88, Math.max(12, tooltipAnchor))}%` }}><div style={{ color: '#1B2A4A', fontWeight: 700 }}>{hoveredRow.label}</div><div className="tabular-nums" style={structureTooltipValueStyle}><span>金额</span><b>{fmtCny(hoveredRow.amount)}</b></div><div className="tabular-nums" style={structureTooltipValueStyle}><span>占比</span><b>{hoveredRow.share == null ? '—' : fmtPct(hoveredRow.share)}</b></div></div>}
         </div>
         <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
           {primaryRows.map(item => <div key={item.key} style={primaryLegendRowStyle}>
@@ -379,7 +389,10 @@ const retryButtonStyle: React.CSSProperties = { border: 'none', padding: 0, back
 const structureGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 0.92fr) minmax(0, 1.08fr)', gap: 24 }
 const primaryStructureStyle: React.CSSProperties = { paddingRight: 24, borderRight: '1px solid #F3F4F6' }
 const structureColumnTitleStyle: React.CSSProperties = { color: '#374151', fontSize: 12, fontWeight: 700 }
-const stackedBarStyle: React.CSSProperties = { display: 'flex', overflow: 'hidden', height: 10, marginTop: 13, borderRadius: 99, background: '#EEF2F7' }
+const stackedBarStyle: React.CSSProperties = { position: 'relative', display: 'flex', overflow: 'visible', height: 10, marginTop: 13, borderRadius: 99, background: '#EEF2F7' }
+const segmentHitAreaStyle: React.CSSProperties = { position: 'absolute', zIndex: 2, top: -5, bottom: -5, left: '50%', width: 'max(100%, 12px)', transform: 'translateX(-50%)' }
+const structureTooltipStyle: React.CSSProperties = { position: 'absolute', zIndex: 3, top: 19, minWidth: 132, transform: 'translateX(-50%)', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px', background: '#fff', boxShadow: '0 4px 12px rgba(15,30,53,0.12)', color: '#4B5563', fontSize: 11, lineHeight: 1.7, pointerEvents: 'none' }
+const structureTooltipValueStyle: React.CSSProperties = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 15 }
 const primaryLegendRowStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 12 }
 const secondaryTabListStyle: React.CSSProperties = { display: 'flex', gap: 5, marginTop: 9, borderBottom: '1px solid #F3F4F6' }
 const secondaryTabStyle: React.CSSProperties = { border: 'none', borderBottom: '2px solid transparent', padding: '6px 7px 8px', marginBottom: -1, background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 12, fontWeight: 600 }
