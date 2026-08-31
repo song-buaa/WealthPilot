@@ -22,6 +22,7 @@ from backend.services.consumption.models import (
 )
 from backend.services.consumption.normalization import EconomicEventNormalizer
 from backend.services.consumption.normalization.rules import Evidence, classify_source
+from backend.services.consumption.refund_matching import RefundMatcher
 
 
 @pytest.fixture
@@ -74,6 +75,59 @@ def _event(session, event_type: EventType, raw_id: str) -> EconomicEvent:
     return session.query(EconomicEvent).join(EventRawLink).filter(
         EconomicEvent.event_type == event_type.value, EventRawLink.raw_transaction_id == raw_id,
     ).one()
+
+
+def _statement_raw(session, account, raw_id, description, amount, *, section, day):
+    raw = _raw(session, account, raw_id, description, amount, day=day)
+    raw.parser_provenance = f'{{"statement_section":"{section}"}}'
+    return raw
+
+
+def test_refund_matcher_matches_full_and_partial_source_evidence_idempotently(db_session):
+    account = _account(db_session, "card", ownership="CONFIRMED_OWNED")
+    _statement_raw(db_session, account, "purchase-one", "支付宝-天津货拉拉科技有限公司", "3684.10", section="CONSUMPTION", day=date(2026, 5, 23))
+    _statement_raw(db_session, account, "purchase-two", "支付宝-天津货拉拉科技有限公司", "3684.10", section="CONSUMPTION", day=date(2026, 5, 23))
+    _statement_raw(db_session, account, "refund-one", "支付宝-天津货拉拉科技有限公司", "-3684.10", section="REFUND", day=date(2026, 6, 12))
+    _statement_raw(db_session, account, "refund-two", "支付宝-天津货拉拉科技有限公司", "-3684.10", section="REFUND", day=date(2026, 6, 12))
+    _statement_raw(db_session, account, "partial-purchase", "库仑充电", "50", section="CONSUMPTION", day=date(2026, 5, 10))
+    _statement_raw(db_session, account, "partial-refund", "库仑充电", "-43.90", section="REFUND", day=date(2026, 6, 12))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    assert (result.matched_refund_count, result.matched_refund_amount, result.unmatched_refund_count) == (3, Decimal("7412.10"), 0)
+    assert {Decimal(_event(db_session, EventType.CONSUMPTION, raw_id).projection_revisions[-1].net_amount) for raw_id in ("purchase-one", "purchase-two")} == {Decimal("0")}
+    partial = _event(db_session, EventType.CONSUMPTION, "partial-purchase")
+    assert Decimal(partial.projection_revisions[-1].net_amount) == Decimal("6.10")
+    assert len(partial.projection_revisions) == 2
+    assert RefundMatcher().replay(db_session).matched_refund_count == 0
+    assert len(partial.projection_revisions) == 2
+
+
+def test_refund_matcher_keeps_ambiguous_exact_refund_unmatched(db_session):
+    account = _account(db_session, "card")
+    for raw_id in ("purchase-one", "purchase-two"):
+        _statement_raw(db_session, account, raw_id, "拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 5, 1))
+    _statement_raw(db_session, account, "refund", "拼多多平台商户", "-349", section="REFUND", day=date(2026, 6, 1))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    refund = _event(db_session, EventType.REFUND, "refund")
+    assert (result.matched_refund_count, result.unmatched_refund_count) == (0, 1)
+    assert refund.original_event_id is None
+    assert all(Decimal(_event(db_session, EventType.CONSUMPTION, raw_id).projection_revisions[-1].net_amount) == Decimal("349") for raw_id in ("purchase-one", "purchase-two"))
+
+
+def test_refund_matcher_uses_unique_nearest_short_window_for_cross_statement_exact_match(db_session):
+    account = _account(db_session, "card")
+    _statement_raw(db_session, account, "old-purchase", "财付通-拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 4, 21))
+    _statement_raw(db_session, account, "recent-purchase", "财付通-拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 5, 8))
+    _statement_raw(db_session, account, "later-refund", "财付通-拼多多平台商户", "-349", section="REFUND", day=date(2026, 5, 15))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    assert result.matched_refund_count == 1
+    assert Decimal(_event(db_session, EventType.CONSUMPTION, "old-purchase").projection_revisions[-1].net_amount) == Decimal("349")
+    assert Decimal(_event(db_session, EventType.CONSUMPTION, "recent-purchase").projection_revisions[-1].net_amount) == Decimal("0")
 
 
 def test_q_multiple_partial_refunds_create_append_only_projection_revisions(db_session):
