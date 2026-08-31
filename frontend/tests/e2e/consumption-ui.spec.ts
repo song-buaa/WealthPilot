@@ -108,7 +108,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await viteServer.close() })
 
-test('renders net-spending KPIs and refreshes their rolling window with the selected month', async ({ page }) => {
+test('renders net-spending KPIs while keeping the rolling window anchored to the latest month', async ({ page }) => {
   await mockDemo(page)
   await page.route('**/api/consumption/analytics*', route => {
     const asOf = new URL(route.request().url()).searchParams.get('as_of')
@@ -184,8 +184,9 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('总消费：', { exact: false })).toBeVisible()
   await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
   await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
-  await expect(page.getByText('¥17,400')).toBeVisible()
-  await expect(page.getByText('月均 ¥1,450')).toBeVisible()
+  await expect(page.getByText('¥18,600')).toBeVisible()
+  await expect(page.getByText('月均 ¥1,550')).toBeVisible()
+  await expect(page.getByText('¥17,400')).toHaveCount(0)
   await expect(page.getByText('+5.3%')).toBeVisible()
   await expect(page.getByText('较6月 · ¥1,900')).toBeVisible()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
@@ -196,6 +197,11 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('房租')).toHaveCount(0)
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('fill', '#1D4ED8')
   await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('font-weight', '700')
+
+  await page.getByTestId('trend-bar-daily_cny-2026-06-01').click()
+  await expect(page.getByText('本月消费 · 2026年6月')).toBeVisible()
+  await expect(page.getByText('¥18,600')).toBeVisible()
+  await expect(page.getByText('月均 ¥1,550')).toBeVisible()
 })
 
 test('shows no month-over-month value when the prior month is zero or missing', async ({ page }) => {

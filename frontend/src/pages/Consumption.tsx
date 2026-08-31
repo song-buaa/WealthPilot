@@ -222,11 +222,11 @@ export default function Consumption() {
     )
   }
 
-  const kpiSummary = summary.months.at(-1)?.month === selected.month ? summary : kpiWindow?.endingMonth === selected.month ? kpiWindow.summary : null
-  const kpiPoints = kpiSummary?.months ?? null
-  const rollingTotal = kpiPoints?.reduce((total, point) => total + toNumber(point.total_spending_cny), 0) ?? null
-  const rollingAverage = rollingTotal != null && kpiPoints?.length ? rollingTotal / kpiPoints.length : null
-  const previousMonth = kpiPoints?.at(-2)
+  const selectedKpiSummary = summary.months.at(-1)?.month === selected.month ? summary : kpiWindow?.endingMonth === selected.month ? kpiWindow.summary : null
+  const selectedKpiPoints = selectedKpiSummary?.months ?? null
+  const rollingTotal = summary.months.reduce((total, point) => total + toNumber(point.total_spending_cny), 0)
+  const rollingAverage = rollingTotal / 12
+  const previousMonth = selectedKpiPoints?.at(-2)
   const previousAmount = previousMonth ? toNumber(previousMonth.total_spending_cny) : null
   const selectedIsOpen = isOpenCalendarMonth(selected)
   const monthOverMonth = !selectedIsOpen && previousAmount != null && previousAmount !== 0
