@@ -62,6 +62,11 @@ const analyticsResponse = {
   twelve_month_average: { amount_cny: '1400', months_used: 10 },
 }
 
+const julyKpiResponse = {
+  ...analyticsResponse,
+  months: [point('2025-08-01', '900'), ...analyticsResponse.months.slice(0, -1)],
+}
+
 const eventsByMonth: Record<string, { month: string; items: Array<Record<string, string>>; total: number; limit: number; offset: number }> = {
   '2026-08': {
     month: '2026-08-01', total: 2, limit: 200, offset: 0,
@@ -103,12 +108,23 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await viteServer.close() })
 
-test('renders analytics and selected-month detail without auxiliary cards', async ({ page }) => {
+test('renders net-spending KPIs and refreshes their rolling window with the selected month', async ({ page }) => {
   await mockDemo(page)
-  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.route('**/api/consumption/analytics*', route => {
+    const asOf = new URL(route.request().url()).searchParams.get('as_of')
+    return route.fulfill({ json: asOf === '2026-07-31' ? julyKpiResponse : analyticsResponse })
+  })
   await page.goto('/#/consumption')
 
   await expect(page.getByText('消费分析', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('本月消费 · 2026年8月')).toBeVisible()
+  await expect(page.getByText('¥2,100').first()).toBeVisible()
+  await expect(page.getByText('截至 2026-08-20')).toBeVisible()
+  await expect(page.getByText('近12个月消费')).toBeVisible()
+  await expect(page.getByText('¥18,600')).toBeVisible()
+  await expect(page.getByText('月均 ¥1,550')).toBeVisible()
+  await expect(page.getByText('本月消费环比')).toBeVisible()
+  await expect(page.getByText('本月尚未结束')).toBeVisible()
   await expect(page.getByText('近 12 个月消费趋势')).toBeVisible()
   await expect(page.getByText('日常消费', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('旅行消费', { exact: true }).first()).toBeVisible()
@@ -119,8 +135,8 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('待确认状态')).toHaveCount(0)
   await expect(page.getByText('2026年8月二级分类')).toBeVisible()
   await expect(page.getByText('住宿')).toBeVisible()
-  await expect(page.getByText('分析日期：2026-08-20（不代表数据完整覆盖）')).toBeVisible()
-  await expect(page.getByText('本月数据截至', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('分类覆盖率', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('数据覆盖', { exact: true })).toHaveCount(0)
   await expect(page.getByText('2026年8月消费明细')).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '消费明细' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '消费名称' })).toHaveCount(0)
@@ -136,13 +152,32 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('已保存')).toBeVisible()
 
   await page.getByRole('button', { name: '7月' }).click()
+  await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
+  await expect(page.getByText('¥17,400')).toBeVisible()
+  await expect(page.getByText('月均 ¥1,450')).toBeVisible()
+  await expect(page.getByText('+5.3%')).toBeVisible()
+  await expect(page.getByText('较6月 · ¥1,900')).toBeVisible()
   await expect(page.getByText('2026年7月消费结构')).toBeVisible()
   await expect(page.getByText('2026年7月二级分类')).toBeVisible()
   await expect(page.getByText('餐饮').first()).toBeVisible()
   await expect(page.getByText('住宿')).toHaveCount(0)
   await expect(page.getByText('原始账单描述：餐饮')).toBeVisible()
   await expect(page.getByText('房租')).toHaveCount(0)
-  await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
+})
+
+test('shows no month-over-month value when the prior month is zero or missing', async ({ page }) => {
+  await mockDemo(page)
+  const zeroPrevious = { ...analyticsResponse, months: [point('2026-06-01', '0'), point('2026-07-01', '1000')] }
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: zeroPrevious }))
+  await page.goto('/#/consumption')
+  await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
+  await expect(page.getByText('暂无可比上月数据')).toBeVisible()
+
+  await page.unroute('**/api/consumption/analytics*')
+  const missingPrevious = { ...analyticsResponse, months: [point('2026-07-01', '1000')] }
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: missingPrevious }))
+  await page.reload()
+  await expect(page.getByText('暂无可比上月数据')).toBeVisible()
 })
 
 test('filters monthly details server-side and removes an autosaved review row', async ({ page }) => {
@@ -187,20 +222,3 @@ test('renders loading, empty, and safe error states', async ({ page }) => {
   await expect(page.getByText('消费数据加载失败')).toBeVisible()
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
 })
-
-for (const [status, label, detail] of [
-  ['COMPLETE', '数据完整', '已接入账户的本月数据完整。'],
-  ['PARTIAL', '数据未完整', '部分数据尚未完整覆盖，金额会随导入更新。'],
-  ['SOURCE_LIMITED', '来源无法确认完整性', '招行信用卡账单未提供明确账单周期，当前基于已解析交易范围分析。'],
-  ['UNKNOWN', '数据覆盖未知', '部分预期账户尚无可验证的导入覆盖范围。'],
-] as const) {
-  test(`renders ${status} coverage without overstating completeness`, async ({ page }) => {
-    await mockDemo(page)
-    const months = analyticsResponse.months.map(item => ({ ...item }))
-    months[months.length - 1] = { ...months[months.length - 1], data_coverage_status: status }
-    await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: { ...analyticsResponse, months } }))
-    await page.goto('/#/consumption')
-    await expect(page.getByText(label).first()).toBeVisible()
-    await expect(page.getByText(detail).first()).toBeVisible()
-  })
-}

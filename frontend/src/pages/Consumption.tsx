@@ -6,7 +6,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import {
   consumptionApi,
   type ConsumptionAnalyticsSummary,
-  type ConsumptionCoverageStatus,
   type ConsumptionEventDetail,
   type ConsumptionMonthlyPoint,
 } from '@/lib/api'
@@ -18,13 +17,6 @@ const CATEGORY_META = [
   { key: 'housing_cny', label: '住房消费', color: '#10B981' },
   { key: 'unclassified_eligible_cny', label: '待分类', color: '#F59E0B' },
 ] as const
-
-const COVERAGE_COPY: Record<ConsumptionCoverageStatus, { label: string; detail: string; color: string }> = {
-  COMPLETE: { label: '数据完整', detail: '已接入账户的本月数据完整。', color: '#047857' },
-  PARTIAL: { label: '数据未完整', detail: '部分数据尚未完整覆盖，金额会随导入更新。', color: '#B45309' },
-  SOURCE_LIMITED: { label: '来源无法确认完整性', detail: '招行信用卡账单未提供明确账单周期，当前基于已解析交易范围分析。', color: '#B45309' },
-  UNKNOWN: { label: '数据覆盖未知', detail: '部分预期账户尚无可验证的导入覆盖范围。', color: '#B91C1C' },
-}
 
 const SECONDARY_LABELS: Record<string, string> = {
   FOOD_DINING: '餐饮', TRANSPORT_AUTO: '交通用车', SHOPPING: '购物', HOME_LIVING: '居家生活',
@@ -44,10 +36,17 @@ type EditablePrimary = keyof typeof EDITABLE_TAXONOMY
 type ClassificationDraft = { primary: EditablePrimary; secondary: string }
 type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
 type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
+type KpiWindow = { endingMonth: string; summary: ConsumptionAnalyticsSummary }
 
 function toNumber(value: string | null | undefined): number { return value == null ? 0 : Number(value) }
 function monthLabel(month: string): string { const [year, value] = month.split('-'); return `${year}年${Number(value)}月` }
 function shortMonth(month: string): string { return `${Number(month.slice(5, 7))}月` }
+function monthEnd(month: string): string {
+  const [year, value] = month.split('-').map(Number)
+  return `${year}-${String(value).padStart(2, '0')}-${String(new Date(year, value, 0).getDate()).padStart(2, '0')}`
+}
+function isOpenCalendarMonth(point: ConsumptionMonthlyPoint): boolean { return Boolean(point.as_of_date && point.as_of_date < monthEnd(point.month)) }
+function fmtChange(value: number): string { return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` }
 function coverageRate(point: ConsumptionMonthlyPoint): number | null { return point.classification_coverage_rate == null ? null : toNumber(point.classification_coverage_rate) * 100 }
 function categoryShare(point: ConsumptionMonthlyPoint, key: CategoryKey): number | null {
   const total = toNumber(point.total_spending_cny)
@@ -56,11 +55,6 @@ function categoryShare(point: ConsumptionMonthlyPoint, key: CategoryKey): number
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: 'var(--shadow-sm)', ...style }}>{children}</section>
-}
-
-function CoverageBadge({ status }: { status: ConsumptionCoverageStatus }) {
-  const item = COVERAGE_COPY[status]
-  return <span style={{ color: item.color, background: `${item.color}12`, borderRadius: 99, padding: '4px 8px', fontSize: 11, fontWeight: 600 }}>{item.label}</span>
 }
 
 function Skeleton() {
@@ -72,6 +66,7 @@ function Skeleton() {
 export default function Consumption() {
   const [summary, setSummary] = useState<ConsumptionAnalyticsSummary | null>(null)
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
+  const [kpiWindow, setKpiWindow] = useState<KpiWindow | null>(null)
   const [details, setDetails] = useState<ConsumptionEventDetail[]>([])
   const [detailTotal, setDetailTotal] = useState(0)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -110,6 +105,11 @@ export default function Consumption() {
       .catch(() => undefined)
   }
 
+  const selected = useMemo(
+    () => summary?.months.find(item => item.month === selectedMonth) ?? summary?.months.at(-1) ?? null,
+    [selectedMonth, summary],
+  )
+
   useEffect(() => {
     const task = window.setTimeout(load, 0)
     return () => window.clearTimeout(task)
@@ -118,6 +118,15 @@ export default function Consumption() {
   useEffect(() => () => {
     Object.values(autosaveTimers.current).forEach(timer => window.clearTimeout(timer))
   }, [])
+
+  useEffect(() => {
+    if (!summary || !selected || summary.months.at(-1)?.month === selected.month) return
+    let active = true
+    void consumptionApi.getAnalytics({ asOf: monthEnd(selected.month), months: 12 })
+      .then(value => { if (active) setKpiWindow({ endingMonth: selected.month, summary: value }) })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [selected, summary])
 
   useEffect(() => {
     if (!selectedMonth) return
@@ -171,10 +180,6 @@ export default function Consumption() {
     }, 300)
   }
 
-  const selected = useMemo(
-    () => summary?.months.find(item => item.month === selectedMonth) ?? summary?.months.at(-1) ?? null,
-    [selectedMonth, summary],
-  )
   const chartData = useMemo(() => (summary?.months ?? []).map(item => ({
     ...item,
     label: shortMonth(item.month),
@@ -193,8 +198,16 @@ export default function Consumption() {
     )
   }
 
-  const selectedCoverage = COVERAGE_COPY[selected.data_coverage_status]
-  const selectedRate = coverageRate(selected)
+  const kpiSummary = summary.months.at(-1)?.month === selected.month ? summary : kpiWindow?.endingMonth === selected.month ? kpiWindow.summary : null
+  const kpiPoints = kpiSummary?.months ?? null
+  const rollingTotal = kpiPoints?.reduce((total, point) => total + toNumber(point.total_spending_cny), 0) ?? null
+  const rollingAverage = rollingTotal != null && kpiPoints?.length ? rollingTotal / kpiPoints.length : null
+  const previousMonth = kpiPoints?.at(-2)
+  const previousAmount = previousMonth ? toNumber(previousMonth.total_spending_cny) : null
+  const selectedIsOpen = isOpenCalendarMonth(selected)
+  const monthOverMonth = !selectedIsOpen && previousAmount != null && previousAmount !== 0
+    ? (toNumber(selected.total_spending_cny) - previousAmount) / previousAmount * 100
+    : null
 
   return <div style={{ paddingBottom: 24 }}>
     <PageHeader
@@ -205,12 +218,12 @@ export default function Consumption() {
 
     <div style={kpiGridStyle}>
       <section style={heroStyle}>
-        <div style={{ fontSize: 12, color: '#C7D2FE', fontWeight: 600 }}>月度消费概览 · {monthLabel(selected.month)}</div>
+        <div style={{ fontSize: 12, color: '#C7D2FE', fontWeight: 600 }}>本月消费 · {monthLabel(selected.month)}</div>
         <div className="tabular-nums" style={{ marginTop: 8, fontSize: 32, lineHeight: 1, fontWeight: 750, letterSpacing: '-1px' }}>{fmtCny(toNumber(selected.total_spending_cny))}</div>
-        <div style={{ fontSize: 12, color: '#CBD5E1', marginTop: 10 }}>{selected.as_of_date ? `分析日期：${selected.as_of_date}（不代表数据完整覆盖）` : '已接入账户的已确认消费'}</div>
+        {selectedIsOpen && <div style={{ fontSize: 12, color: '#CBD5E1', marginTop: 10 }}>截至 {selected.as_of_date}</div>}
       </section>
-      <Card style={kpiCardStyle}><div style={kpiLabelStyle}>分类覆盖率</div><div className="tabular-nums" style={kpiValueStyle}>{selectedRate == null ? '—' : fmtPct(selectedRate)}</div><div style={detailTextStyle}>{fmtCny(toNumber(selected.unclassified_eligible_cny))} 待分类</div></Card>
-      <Card style={kpiCardStyle}><div style={kpiLabelStyle}>数据覆盖</div><div style={{ marginTop: 10 }}><CoverageBadge status={selected.data_coverage_status} /></div><div style={detailTextStyle}>{selectedCoverage.detail}</div></Card>
+      <Card style={kpiCardStyle}><div style={kpiLabelStyle}>近12个月消费</div><div className="tabular-nums" style={kpiValueStyle}>{rollingTotal == null ? '—' : fmtCny(rollingTotal)}</div><div style={detailTextStyle}>{rollingAverage == null ? '统计更新中' : `月均 ${fmtCny(rollingAverage)}`}</div></Card>
+      <Card style={kpiCardStyle}><div style={kpiLabelStyle}>本月消费环比</div><div className="tabular-nums" style={kpiValueStyle}>{monthOverMonth == null ? '—' : fmtChange(monthOverMonth)}</div><div style={detailTextStyle}>{selectedIsOpen ? '本月尚未结束' : previousAmount == null || previousAmount === 0 ? '暂无可比上月数据' : `较${shortMonth(previousMonth!.month)} · ${fmtCny(previousAmount)}`}</div></Card>
     </div>
 
     <Card style={{ padding: '18px 18px 12px', marginTop: 16 }}>
