@@ -13,8 +13,8 @@ import { fmtCny, fmtPct } from '@/lib/fmt'
 
 const CATEGORY_META = [
   { key: 'daily_cny', label: '日常消费', color: '#3B82F6' },
-  { key: 'travel_cny', label: '旅行消费', color: '#8B5CF6' },
   { key: 'housing_cny', label: '住房消费', color: '#10B981' },
+  { key: 'travel_cny', label: '旅行消费', color: '#8B5CF6' },
   { key: 'unclassified_eligible_cny', label: '待分类', color: '#F59E0B' },
 ] as const
 const STACK_RENDER_META = [...CATEGORY_META].reverse()
@@ -241,7 +241,7 @@ export default function Consumption() {
           {STACK_RENDER_META.map(item => <Bar key={item.key} dataKey={item.key} name={item.label} stackId="spending" fill={item.color} maxBarSize={42} cursor="pointer" onClick={(_, index) => {
             const month = chartData[index]?.month
             if (month) setSelectedMonth(month)
-          }}>{chartData.map(point => <Cell key={`${item.key}-${point.month}`} data-testid={`trend-bar-${item.key}-${point.month}`} fillOpacity={point.month === selected.month ? 1 : 0.72} />)}</Bar>)}
+          }}>{chartData.map(point => <Cell key={`${item.key}-${point.month}`} data-testid={`trend-bar-${item.key}-${point.month}`} fillOpacity={1} />)}</Bar>)}
         </BarChart></ResponsiveContainer>
       </div>
     </Card>
