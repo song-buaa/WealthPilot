@@ -121,6 +121,12 @@ async function mockDemo(page: Page) {
   await page.route('**/api/consumption/events/*/classification', route => route.fulfill({
     json: { event_id: 'event-aug-rent', primary_category: 'DAILY', secondary_category: 'SHOPPING', classification_status: 'CLASSIFIED', revision_number: 2 },
   }))
+  await page.route('**/api/consumption/events/*/note', async route => {
+    const eventId = route.request().url().split('/').at(-2)!
+    const body = route.request().postDataJSON() as { user_note?: string | null }
+    const note = body.user_note?.trim() || null
+    await route.fulfill({ json: { event_id: eventId, user_note: note } })
+  })
 }
 
 test.beforeAll(async () => {
@@ -324,6 +330,36 @@ test('keeps rolling transaction details anchored to the latest twelve-month wind
   await rollingCard.getByLabel('一级分类 event-aug-unclassified').selectOption('DAILY')
   await rollingCard.getByLabel('二级分类 event-aug-unclassified').selectOption('SHOPPING')
   await expect(rollingCard.getByText('原始账单描述：待确认交易')).toHaveCount(0)
+})
+
+test('autosaves one event-scoped note across monthly and rolling transaction details', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.goto('/#/consumption')
+
+  const monthlyCard = page.getByText('2026年8月消费明细').locator('xpath=ancestor::section')
+  const rollingCard = page.getByText('近12个月消费明细', { exact: true }).locator('xpath=ancestor::section')
+  await expect(monthlyCard.getByRole('columnheader', { name: '备注' })).toBeVisible()
+  await monthlyCard.getByLabel('备注 event-aug-rent').click()
+  const monthlyInput = monthlyCard.locator('input[aria-label="备注 event-aug-rent"]')
+  await expect(monthlyInput).toBeVisible()
+  await monthlyInput.fill('9月房租')
+  await monthlyInput.press('Enter')
+  await expect(monthlyCard.getByText('已保存')).toBeVisible()
+  await expect(rollingCard.getByText('9月房租')).toBeVisible()
+
+  await rollingCard.getByLabel('备注 event-aug-rent').click()
+  const rollingInput = rollingCard.locator('input[aria-label="备注 event-aug-rent"]')
+  await expect(rollingInput).toBeVisible()
+  await rollingInput.fill('搬家相关支出')
+  await rollingInput.press('Enter')
+  await expect(monthlyCard.getByText('搬家相关支出')).toBeVisible()
+
+  await monthlyCard.getByLabel('备注 event-aug-rent').click()
+  await expect(monthlyInput).toBeVisible()
+  await monthlyInput.fill('')
+  await monthlyInput.press('Enter')
+  await expect(rollingCard.getByLabel('备注 event-aug-rent')).toHaveText('添加备注')
 })
 
 test('rolls the structure window forward when analytics receives a new latest month', async ({ page }) => {

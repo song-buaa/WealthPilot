@@ -26,6 +26,7 @@ from backend.services.consumption.models import (
     EconomicEventProjectionRevision,
     EventRawLink,
     RawTransaction,
+    ConsumptionEventNote,
     ConsumptionInterpretation,
 )
 from backend.services.consumption.normalization.rules import (
@@ -285,7 +286,10 @@ class EconomicEventNormalizer:
             )
             if already_current:
                 continue
-            if self._has_user_explicit_interpretation(session, current_event_ids):
+            if (
+                self._has_user_explicit_interpretation(session, current_event_ids)
+                or self._has_user_note(session, current_event_ids)
+            ):
                 skipped += len(raw_ids)
                 continue
             if any(not raw_ids_by_event.get(event.id, set()).issubset(raw_ids) for event in current_events):
@@ -350,6 +354,12 @@ class EconomicEventNormalizer:
                 ConsumptionInterpretation.user_confirmed.is_(True),
                 ConsumptionInterpretation.classification_source.in_(_USER_EXPLICIT_SOURCES),
             ),
+        ).first())
+
+    @staticmethod
+    def _has_user_note(session: Session, event_ids: set[str]) -> bool:
+        return bool(event_ids and session.query(ConsumptionEventNote).filter(
+            ConsumptionEventNote.event_id.in_(event_ids)
         ).first())
 
     @staticmethod

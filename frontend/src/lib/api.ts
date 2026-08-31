@@ -99,6 +99,7 @@ export interface ConsumptionEventDetail {
   secondary_category: string | null
   classification_status: 'CLASSIFIED' | 'NEEDS_REVIEW'
   amount_cny: string
+  user_note: string | null
 }
 
 export interface ConsumptionEventDetailPage {
@@ -191,6 +192,11 @@ export const consumptionApi = {
     request<{ event_id: string; primary_category: string; secondary_category: string; classification_status: string; revision_number: number }>(
       `/consumption/events/${encodeURIComponent(eventId)}/classification`,
       { method: 'PUT', body: JSON.stringify({ primary_category: primaryCategory, secondary_category: secondaryCategory }) },
+    ),
+  updateEventNote: (eventId: string, userNote: string) =>
+    request<{ event_id: string; user_note: string | null }>(
+      `/consumption/events/${encodeURIComponent(eventId)}/note`,
+      { method: 'PATCH', body: JSON.stringify({ user_note: userNote }) },
     ),
 }
 

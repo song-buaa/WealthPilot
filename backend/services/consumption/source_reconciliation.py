@@ -20,6 +20,7 @@ from backend.services.consumption.contracts import (
 )
 from backend.services.consumption.import_service import ConsumptionImportService, _match_fingerprint
 from backend.services.consumption.models import (
+    ConsumptionEventNote,
     ConsumptionInterpretation,
     EconomicEvent,
     EventRawLink,
@@ -134,8 +135,8 @@ def reconcile_parsed_statements(
                 continue
             active_links = [link for link in raw.event_links if link.is_active]
             event_ids = {link.event_id for link in active_links}
-            if _has_user_explicit_interpretation(session, event_ids):
-                raise SourceReconciliationError("parser duplicate is protected by a user-explicit interpretation")
+            if _has_user_explicit_interpretation(session, event_ids) or _has_user_note(session, event_ids):
+                raise SourceReconciliationError("parser duplicate is protected by local user data")
             for link in active_links:
                 link.is_active = False
                 retired_event_ids.add(link.event_id)
@@ -212,4 +213,10 @@ def _has_user_explicit_interpretation(session: Session, event_ids: set[str]) -> 
             ConsumptionInterpretation.user_confirmed.is_(True)
             | ConsumptionInterpretation.classification_source.in_(_USER_EXPLICIT_SOURCES)
         ),
+    ).first())
+
+
+def _has_user_note(session: Session, event_ids: set[str]) -> bool:
+    return bool(event_ids and session.query(ConsumptionEventNote).filter(
+        ConsumptionEventNote.event_id.in_(event_ids)
     ).first())

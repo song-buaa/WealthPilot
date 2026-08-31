@@ -26,6 +26,7 @@ class MonthlySpendingDetailItem:
     secondary_category: str | None
     classification_status: str
     amount_cny: Decimal
+    user_note: str | None
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ from backend.services.consumption.classification_design import ClassificationSta
 from backend.services.consumption.economic_events import EventType
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent, EconomicEventProjectionRevision,
-    EventRawLink, ImportBatch, ManualConsumptionEntry, RawTransaction,
+    ConsumptionEventNote, EventRawLink, ImportBatch, ManualConsumptionEntry, RawTransaction,
 )
 
 
@@ -150,6 +151,7 @@ class ConsumptionAnalyticsQueryAdapter:
                 ConsumptionInterpretation,
                 RawTransaction,
                 Account,
+                ConsumptionEventNote,
             )
             .join(
                 EconomicEventProjectionRevision,
@@ -164,6 +166,7 @@ class ConsumptionAnalyticsQueryAdapter:
             .join(EventRawLink, EventRawLink.id == primary_link_id)
             .join(RawTransaction, RawTransaction.id == EventRawLink.raw_transaction_id)
             .join(Account, Account.id == RawTransaction.account_id)
+            .outerjoin(ConsumptionEventNote, ConsumptionEventNote.event_id == EconomicEvent.id)
             .filter(
                 EconomicEvent.is_active.is_(True),
                 EconomicEvent.event_type.in_((EventType.CONSUMPTION.value, EventType.OTHER.value)),
@@ -180,6 +183,7 @@ class ConsumptionAnalyticsQueryAdapter:
                 EconomicEventProjectionRevision,
                 ConsumptionInterpretation,
                 ManualConsumptionEntry,
+                ConsumptionEventNote,
             )
             .join(
                 EconomicEventProjectionRevision,
@@ -196,6 +200,7 @@ class ConsumptionAnalyticsQueryAdapter:
                 (ManualConsumptionEntry.event_id == EconomicEvent.id)
                 & ManualConsumptionEntry.is_active.is_(True),
             )
+            .outerjoin(ConsumptionEventNote, ConsumptionEventNote.event_id == EconomicEvent.id)
             .filter(
                 EconomicEvent.is_active.is_(True),
                 EconomicEvent.event_type.in_((EventType.CONSUMPTION.value, EventType.OTHER.value)),
@@ -226,8 +231,9 @@ class ConsumptionAnalyticsQueryAdapter:
                 secondary_category=interpretation.secondary_category,
                 classification_status=interpretation.classification_status,
                 amount_cny=Decimal(projection.base_net_amount),
+                user_note=note.note if note else None,
             )
-            for event, projection, interpretation, raw, account in raw_query.all()
+            for event, projection, interpretation, raw, account, note in raw_query.all()
         ]
         items.extend(
             MonthlySpendingDetailItem(
@@ -239,8 +245,9 @@ class ConsumptionAnalyticsQueryAdapter:
                 secondary_category=interpretation.secondary_category,
                 classification_status=interpretation.classification_status,
                 amount_cny=Decimal(projection.base_net_amount),
+                user_note=note.note if note else None,
             )
-            for event, projection, interpretation, entry in manual_query.all()
+            for event, projection, interpretation, entry, note in manual_query.all()
         )
         items.sort(key=lambda item: (-item.amount_cny, -item.analytics_effective_date.toordinal(), item.event_id))
         total = len(items)
@@ -348,12 +355,12 @@ class ConsumptionAnalyticsService:
         )
         output = StringIO()
         writer = csv.writer(output)
-        writer.writerow(["日期", "消费名称", "一级分类", "二级分类", "账户", "金额（CNY）", "分类状态"])
+        writer.writerow(["日期", "消费名称", "一级分类", "二级分类", "账户", "金额（CNY）", "备注", "分类状态"])
         writer.writerows(
             (
                 item.analytics_effective_date.isoformat(), item.raw_description,
                 item.primary_category or "", item.secondary_category or "",
-                item.account_display_name, format(item.amount_cny, "f"), item.classification_status,
+                item.account_display_name, format(item.amount_cny, "f"), item.user_note or "", item.classification_status,
             )
             for item in page.items
         )

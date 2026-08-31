@@ -27,8 +27,9 @@ from backend.services.consumption.import_service import (
     DEDUP_UNIQUE,
     ConsumptionImportService,
 )
-from backend.services.consumption.models import Account, ImportBatch, PaymentInstrument, RawTransaction
-from backend.services.consumption.source_reconciliation import reconcile_parsed_statements
+from backend.services.consumption.models import Account, ConsumptionEventNote, ImportBatch, PaymentInstrument, RawTransaction
+from backend.services.consumption.normalization.service import EconomicEventNormalizer
+from backend.services.consumption.source_reconciliation import SourceReconciliationError, reconcile_parsed_statements
 
 
 FIXTURES = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "consumption"
@@ -207,6 +208,27 @@ def test_verified_reparse_retires_only_omitted_parser_mirror_rows(db_session):
     assert rows["html-table-1-row-1"].is_active is True
     assert rows["html-table-17-row-1"].is_active is False
     assert rows["html-table-17-row-1"].retired_reason == "VERIFIED_PARSER_DUPLICATE_PRESENTATION"
+
+
+def test_verified_reparse_preserves_an_event_with_a_user_note(db_session):
+    account = _account(db_session)
+    original = _statement(source=b"noted-mirrored-source", rows=(
+        _transaction(identity="html-table-1-row-1", amount="2.80"),
+        _transaction(identity="html-table-17-row-1", amount="2.80"),
+    ))
+    ConsumptionImportService().persist(db_session, account=account, parsed_statement=original)
+    EconomicEventNormalizer().normalize(db_session)
+    noted_event = next(link.event for link in db_session.query(RawTransaction).filter_by(source_row_identity="html-table-17-row-1").one().event_links)
+    db_session.add(ConsumptionEventNote(event_id=noted_event.id, note="用户补充说明"))
+    db_session.flush()
+    corrected = _statement(source=b"noted-mirrored-source", rows=(
+        _transaction(identity="html-table-1-row-1", amount="2.80"),
+    ))
+
+    with pytest.raises(SourceReconciliationError, match="protected by local user data"):
+        reconcile_parsed_statements(db_session, (corrected,))
+
+    assert db_session.query(RawTransaction).filter_by(source_row_identity="html-table-17-row-1").one().is_active is True
 
 
 def test_verified_reparse_adds_a_source_row_omitted_by_the_old_parser(db_session):

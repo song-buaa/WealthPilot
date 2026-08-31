@@ -18,7 +18,7 @@ from backend.services.consumption.analytics import ConsumptionAnalyticsService, 
 from backend.services.consumption.candidate_review import ConsumptionCandidateReviewService
 from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.models import (
-    Account, ConsumptionInterpretation, ConsumptionInterpretationAudit, EconomicEvent, EconomicEventProjectionRevision,
+    Account, ConsumptionEventNote, ConsumptionInterpretation, ConsumptionInterpretationAudit, EconomicEvent, EconomicEventProjectionRevision,
     EventRawLink, ImportBatch, RawTransaction, UserClassificationRule,
 )
 
@@ -195,6 +195,31 @@ def test_monthly_detail_api_is_bounded_sorted_exports_current_fields_and_reads_r
     assert "消费名称" in export.content.decode("utf-8-sig") and "private landlord 123456789" in export.content.decode("utf-8-sig")
     second=ConsumptionAnalyticsService(db_session).monthly_detail(month=date(2026,7,1),limit=2,offset=2,account_ids=(card.id,))
     assert [item.classification_status for item in second.items] == ["CLASSIFIED","NEEDS_REVIEW"]
+
+
+def test_event_note_is_shared_by_month_range_detail_and_csv_export(db_session, monkeypatch):
+    card = _account(db_session, "note-card")
+    _event(db_session, "noted", account=card, when=date(2026, 7, 8), amount="4500", net="4500", description="支付宝房租")
+    db_session.commit()
+    monkeypatch.setattr(consumption_api, "get_session", lambda: db_session)
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(consumption_api.router, prefix="/api/consumption")
+    client = TestClient(app)
+
+    saved = client.patch("/api/consumption/events/noted/note", json={"user_note": "  9月房租  "})
+    assert saved.status_code == 200
+    assert saved.json() == {"event_id": "noted", "user_note": "9月房租"}
+    assert client.get("/api/consumption/events?month=2026-07").json()["items"][0]["user_note"] == "9月房租"
+    assert client.get("/api/consumption/events?start_month=2026-06&end_month=2026-07").json()["items"][0]["user_note"] == "9月房租"
+    exported = client.get("/api/consumption/events/export.csv?month=2026-07").content.decode("utf-8-sig")
+    assert "备注" in exported and "9月房租" in exported
+
+    updated = client.patch("/api/consumption/events/noted/note", json={"user_note": "搬家相关支出"})
+    assert updated.json()["user_note"] == "搬家相关支出"
+    cleared = client.patch("/api/consumption/events/noted/note", json={"user_note": "   "})
+    assert cleared.json()["user_note"] is None
+    assert db_session.query(ConsumptionEventNote).filter_by(event_id="noted").count() == 0
+    assert client.patch("/api/consumption/events/noted/note", json={"user_note": "x" * 201}).status_code == 422
 
 
 def test_monthly_detail_filters_and_export_apply_the_same_classification_scope(db_session, monkeypatch):

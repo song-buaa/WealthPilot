@@ -230,6 +230,9 @@ class EconomicEvent(Base):
     manual_entry = relationship(
         "ManualConsumptionEntry", back_populates="event", uselist=False, cascade="all, delete-orphan"
     )
+    user_note = relationship(
+        "ConsumptionEventNote", back_populates="event", uselist=False, cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("normalizer_version", "semantic_key", name="uq_consumption_event_semantic"),
@@ -237,6 +240,24 @@ class EconomicEvent(Base):
         Index("ix_consumption_events_original", "original_event_id"),
         Index("ix_consumption_events_resolution", "resolution_status"),
     )
+
+
+class ConsumptionEventNote(Base):
+    """A small local-user annotation attached to a stable EconomicEvent identity."""
+
+    __tablename__ = "consumption_event_notes"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    event_id = Column(
+        String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    note = Column(String(200), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    event = relationship("EconomicEvent", back_populates="user_note")
+
+    __table_args__ = (Index("ix_consumption_event_notes_event", "event_id"),)
 
 
 class ManualConsumptionEntry(Base):

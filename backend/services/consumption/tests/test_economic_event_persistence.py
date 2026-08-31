@@ -264,6 +264,28 @@ def test_replay_skips_user_explicit_interpretation(db_session, monkeypatch):
     assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
 
 
+def test_replay_preserves_event_identity_with_a_user_note(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "noted-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    from backend.services.consumption.models import ConsumptionEventNote
+    db_session.add(ConsumptionEventNote(event_id=legacy.id, note="保留这个说明"))
+    db_session.flush()
+
+    result = EconomicEventNormalizer().replay(db_session)
+
+    assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
+    assert db_session.query(ConsumptionEventNote).filter_by(event_id=legacy.id).one().note == "保留这个说明"
+
+
 def test_replay_collapses_only_cross_batch_candidate_duplicates(db_session):
     account = _account(db_session, "card")
     first = _raw(

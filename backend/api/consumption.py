@@ -14,7 +14,7 @@ from backend.services.consumption.classification_design import (
     ClassificationStatus, EligibilityStatus, PrimaryCategory,
 )
 from backend.services.consumption.economic_events import EventType
-from backend.services.consumption.models import ConsumptionInterpretation, EconomicEvent
+from backend.services.consumption.models import ConsumptionEventNote, ConsumptionInterpretation, EconomicEvent
 
 router=APIRouter()
 
@@ -51,6 +51,10 @@ def _serialize(item): return {key:_value(value) for key,value in item.__dict__.i
 class DetailClassificationUpdate(BaseModel):
     primary_category: PrimaryCategory
     secondary_category: str
+
+
+class DetailNoteUpdate(BaseModel):
+    user_note: str | None = None
 
 
 _SECONDARY_BY_PRIMARY = {
@@ -203,6 +207,39 @@ def update_consumption_event_classification(event_id: str, update: DetailClassif
         session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally: session.close()
+
+
+@router.patch("/events/{event_id}/note")
+def update_consumption_event_note(event_id: str, update: DetailNoteUpdate):
+    note = (update.user_note or "").strip()
+    if len(note) > 200:
+        raise HTTPException(status_code=422, detail="user_note must not exceed 200 characters")
+    session = get_session()
+    try:
+        event = session.get(EconomicEvent, event_id)
+        current = session.query(ConsumptionInterpretation).filter_by(event_id=event_id, is_active=True).one_or_none()
+        if event is None or not event.is_active or current is None:
+            raise HTTPException(status_code=404, detail="consumption event not found")
+        event_type = EventType(event.event_type)
+        if event_type in HARD_INELIGIBLE or event_type == EventType.REFUND:
+            raise HTTPException(status_code=404, detail="consumption event not found")
+        if current.eligibility_status != EligibilityStatus.ELIGIBLE.value:
+            raise HTTPException(status_code=404, detail="consumption event not found")
+        existing = session.query(ConsumptionEventNote).filter_by(event_id=event_id).one_or_none()
+        if not note:
+            if existing is not None:
+                session.delete(existing)
+        elif existing is None:
+            session.add(ConsumptionEventNote(event_id=event_id, note=note))
+        else:
+            existing.note = note
+        session.commit()
+        return {"event_id": event_id, "user_note": note or None}
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 @router.put("/candidates/{event_id}/confirm")
