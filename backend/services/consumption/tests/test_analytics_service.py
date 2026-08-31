@@ -196,6 +196,33 @@ def test_monthly_detail_api_is_bounded_sorted_exports_current_fields_and_reads_r
     assert [item.classification_status for item in second.items] == ["CLASSIFIED","NEEDS_REVIEW"]
 
 
+def test_monthly_detail_filters_and_export_apply_the_same_classification_scope(db_session, monkeypatch):
+    card = _account(db_session, "filter-card")
+    _event(db_session, "filter-food", account=card, when=date(2026, 7, 10), amount="100", net="100", primary="DAILY", secondary="FOOD_DINING", description="food")
+    _event(db_session, "filter-transport", account=card, when=date(2026, 7, 9), amount="90", net="90", primary="DAILY", secondary="TRANSPORT_AUTO", description="transport")
+    _event(db_session, "filter-travel", account=card, when=date(2026, 7, 8), amount="80", net="80", primary="TRAVEL", secondary="ACCOMMODATION", description="hotel")
+    _event(db_session, "filter-rent", account=card, when=date(2026, 7, 7), amount="70", net="70", primary="HOUSING", secondary="RENT", description="rent")
+    _event(db_session, "filter-review", account=card, when=date(2026, 7, 6), amount="60", net="60", classification="NEEDS_REVIEW", primary=None, secondary=None, description="review")
+    db_session.commit()
+    monkeypatch.setattr(consumption_api, "get_session", lambda: db_session)
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(consumption_api.router, prefix="/api/consumption")
+    client = TestClient(app)
+
+    review = client.get("/api/consumption/events?month=2026-07&classification_status=NEEDS_REVIEW")
+    assert [item["event_id"] for item in review.json()["items"]] == ["filter-review"]
+    transport = client.get("/api/consumption/events?month=2026-07&classification_status=CLASSIFIED&primary_category=DAILY&secondary_category=TRANSPORT_AUTO")
+    assert [item["event_id"] for item in transport.json()["items"]] == ["filter-transport"]
+    assert client.get("/api/consumption/events?month=2026-07&primary_category=TRAVEL&secondary_category=ACCOMMODATION").json()["total"] == 1
+    assert client.get("/api/consumption/events?month=2026-07&primary_category=HOUSING&secondary_category=RENT").json()["total"] == 1
+
+    exported = client.get("/api/consumption/events/export.csv?month=2026-07&classification_status=NEEDS_REVIEW")
+    content = exported.content.decode("utf-8-sig")
+    assert "review" in content and "transport" not in content
+    assert client.get("/api/consumption/events?month=2026-07&secondary_category=RENT").status_code == 422
+    assert client.get("/api/consumption/events?month=2026-07&primary_category=DAILY&secondary_category=RENT").status_code == 422
+
+
 def test_local_rent_rule_replay_promotes_other_into_housing_analytics_and_detail(db_session):
     debit=_account(db_session,"debit")
     rent=_event(db_session,"rent",account=debit,event_type="OTHER",amount="6500",net="6500",description="synthetic fixed rent transfer")

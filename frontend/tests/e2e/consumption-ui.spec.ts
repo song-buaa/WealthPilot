@@ -81,8 +81,15 @@ const eventsByMonth: Record<string, { month: string; items: Array<Record<string,
 async function mockDemo(page: Page) {
   await page.route('**/api/demo/status', route => route.fulfill({ json: { public_demo_mode: false, password_required: false } }))
   await page.route('**/api/consumption/events*', route => {
-    const month = new URL(route.request().url()).searchParams.get('month') ?? ''
-    return route.fulfill({ json: eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 } })
+    const query = new URL(route.request().url()).searchParams
+    const month = query.get('month') ?? ''
+    const base = eventsByMonth[month] ?? { month, items: [], total: 0, limit: 200, offset: 0 }
+    const items = base.items.filter(item => (
+      (!query.get('classification_status') || item.classification_status === query.get('classification_status'))
+      && (!query.get('primary_category') || item.primary_category === query.get('primary_category'))
+      && (!query.get('secondary_category') || item.secondary_category === query.get('secondary_category'))
+    ))
+    return route.fulfill({ json: { ...base, items, total: items.length } })
   })
   await page.route('**/api/consumption/events/*/classification', route => route.fulfill({
     json: { event_id: 'event-aug-rent', primary_category: 'DAILY', secondary_category: 'SHOPPING', classification_status: 'CLASSIFIED', revision_number: 2 },
@@ -136,6 +143,29 @@ test('renders analytics and selected-month detail without auxiliary cards', asyn
   await expect(page.getByText('原始账单描述：餐饮')).toBeVisible()
   await expect(page.getByText('房租')).toHaveCount(0)
   await expect(page.getByText('来源无法确认完整性').first()).toBeVisible()
+})
+
+test('filters monthly details server-side and removes an autosaved review row', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.goto('/#/consumption')
+
+  await page.getByLabel('分类状态筛选').selectOption('NEEDS_REVIEW')
+  await expect(page.getByLabel('一级分类筛选')).toBeDisabled()
+  await expect(page.getByLabel('二级分类筛选')).toBeDisabled()
+  await expect(page.getByText('原始账单描述：待确认交易')).toBeVisible()
+  await expect(page.getByText('原始账单描述：月度房租')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '导出 CSV' })).toHaveAttribute('href', '/api/consumption/events/export.csv?month=2026-08&classification_status=NEEDS_REVIEW')
+
+  await page.getByLabel('一级分类 event-aug-unclassified').selectOption('DAILY')
+  await page.getByLabel('二级分类 event-aug-unclassified').selectOption('SHOPPING')
+  await expect(page.getByText('原始账单描述：待确认交易')).toHaveCount(0)
+  await expect(page.getByText('当前筛选条件下暂无消费明细')).toBeVisible()
+
+  await page.getByLabel('分类状态筛选').selectOption('CLASSIFIED')
+  await page.getByLabel('一级分类筛选').selectOption('HOUSING')
+  await page.getByLabel('二级分类筛选').selectOption('RENT')
+  await expect(page.getByText('原始账单描述：月度房租')).toBeVisible()
 })
 
 test('renders loading, empty, and safe error states', async ({ page }) => {

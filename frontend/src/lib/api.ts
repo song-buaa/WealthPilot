@@ -109,6 +109,12 @@ export interface ConsumptionEventDetailPage {
   offset: number
 }
 
+export interface ConsumptionEventFilters {
+  classificationStatus?: 'CLASSIFIED' | 'NEEDS_REVIEW'
+  primaryCategory?: 'DAILY' | 'TRAVEL' | 'HOUSING'
+  secondaryCategory?: string
+}
+
 export const consumptionApi = {
   getAnalytics: (params: { asOf?: string; months?: number; accountIds?: string[] } = {}) => {
     const query = new URLSearchParams()
@@ -117,14 +123,23 @@ export const consumptionApi = {
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionAnalyticsSummary>(`/consumption/analytics${query.size ? `?${query}` : ''}`)
   },
-  getEvents: (params: { month: string; limit?: number; offset?: number; accountIds?: string[] }) => {
+  getEvents: (params: { month: string; limit?: number; offset?: number; accountIds?: string[] } & ConsumptionEventFilters) => {
     const query = new URLSearchParams({ month: params.month })
     if (params.limit != null) query.set('limit', String(params.limit))
     if (params.offset != null) query.set('offset', String(params.offset))
+    if (params.classificationStatus) query.set('classification_status', params.classificationStatus)
+    if (params.primaryCategory) query.set('primary_category', params.primaryCategory)
+    if (params.secondaryCategory) query.set('secondary_category', params.secondaryCategory)
     params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
     return request<ConsumptionEventDetailPage>(`/consumption/events?${query}`)
   },
-  getEventsExportUrl: (month: string) => `/api/consumption/events/export.csv?month=${encodeURIComponent(month)}`,
+  getEventsExportUrl: (month: string, filters: ConsumptionEventFilters = {}) => {
+    const query = new URLSearchParams({ month })
+    if (filters.classificationStatus) query.set('classification_status', filters.classificationStatus)
+    if (filters.primaryCategory) query.set('primary_category', filters.primaryCategory)
+    if (filters.secondaryCategory) query.set('secondary_category', filters.secondaryCategory)
+    return `/api/consumption/events/export.csv?${query}`
+  },
   updateEventClassification: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
     request<{ event_id: string; primary_category: string; secondary_category: string; classification_status: string; revision_number: number }>(
       `/consumption/events/${encodeURIComponent(eventId)}/classification`,

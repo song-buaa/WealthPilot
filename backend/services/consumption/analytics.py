@@ -98,6 +98,9 @@ class ConsumptionAnalyticsQueryAdapter:
         *,
         limit: int,
         offset: int,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
     ) -> MonthlySpendingDetailPage:
         """Read a bounded selected-month view from active event projections only."""
         end = date(month.year + (month.month == 12), 1 if month.month == 12 else month.month + 1, 1)
@@ -138,6 +141,12 @@ class ConsumptionAnalyticsQueryAdapter:
                 RawTransaction.account_id.in_(account_ids),
             )
         )
+        if classification_status is not None:
+            query = query.filter(ConsumptionInterpretation.classification_status == classification_status.value)
+        if primary_category is not None:
+            query = query.filter(ConsumptionInterpretation.primary_category == primary_category.value)
+        if secondary_category is not None:
+            query = query.filter(ConsumptionInterpretation.secondary_category == secondary_category)
         total = query.count()
         rows = (
             query.order_by(
@@ -189,22 +198,34 @@ class ConsumptionAnalyticsService:
         limit: int = 100,
         offset: int = 0,
         account_ids: tuple[str, ...] | None = None,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
     ) -> MonthlySpendingDetailPage:
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
         if offset < 0:
             raise ValueError("offset must not be negative")
-        return self.adapter.monthly_detail(month, self.adapter.expected_account_ids(account_ids), limit=limit, offset=offset)
+        return self.adapter.monthly_detail(
+            month, self.adapter.expected_account_ids(account_ids), limit=limit, offset=offset,
+            classification_status=classification_status, primary_category=primary_category,
+            secondary_category=secondary_category,
+        )
 
     def export_monthly_detail_csv(
         self,
         *,
         month: date,
         account_ids: tuple[str, ...] | None = None,
+        classification_status: ClassificationStatus | None = None,
+        primary_category: PrimaryCategory | None = None,
+        secondary_category: str | None = None,
     ) -> str:
         """Export the selected month's current detail projection as CSV."""
         page = self.adapter.monthly_detail(
             month, self.adapter.expected_account_ids(account_ids), limit=100_000, offset=0,
+            classification_status=classification_status, primary_category=primary_category,
+            secondary_category=secondary_category,
         )
         output = StringIO()
         writer = csv.writer(output)

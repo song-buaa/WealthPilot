@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 from app.database import get_session
@@ -9,7 +10,7 @@ from backend.services.consumption.analytics import ConsumptionAnalyticsService
 from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.classification_design import (
     DAILY_SECONDARY, HARD_INELIGIBLE, HOUSING_SECONDARY, TRAVEL_SECONDARY,
-    EligibilityStatus, PrimaryCategory,
+    ClassificationStatus, EligibilityStatus, PrimaryCategory,
 )
 from backend.services.consumption.economic_events import EventType
 from backend.services.consumption.models import ConsumptionInterpretation, EconomicEvent
@@ -51,6 +52,17 @@ def _csv_response(text: str, filename: str) -> Response:
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
+def _validate_detail_filters(
+    primary_category: PrimaryCategory | None, secondary_category: str | None,
+) -> None:
+    if secondary_category is None:
+        return
+    if primary_category is None:
+        raise HTTPException(status_code=422, detail="secondary_category requires primary_category")
+    if secondary_category not in _SECONDARY_BY_PRIMARY[primary_category]:
+        raise HTTPException(status_code=422, detail="secondary_category does not belong to primary_category")
+
 @router.get("/analytics")
 def get_consumption_analytics(
     as_of: date | None = Query(default=None),
@@ -72,12 +84,18 @@ def get_consumption_events(
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     account_ids: list[str] | None = Query(default=None),
+    classification_status: Literal["CLASSIFIED", "NEEDS_REVIEW"] | None = Query(default=None),
+    primary_category: PrimaryCategory | None = Query(default=None),
+    secondary_category: str | None = Query(default=None),
 ):
     session=get_session()
     try:
+        _validate_detail_filters(primary_category, secondary_category)
         result=ConsumptionAnalyticsService(session).monthly_detail(
             month=_month_start(month), limit=limit, offset=offset,
             account_ids=tuple(account_ids) if account_ids else None,
+            classification_status=classification_status and ClassificationStatus(classification_status),
+            primary_category=primary_category, secondary_category=secondary_category,
         )
         return _serialize(result)
     except ValueError as exc:
@@ -89,12 +107,18 @@ def get_consumption_events(
 def export_consumption_events(
     month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     account_ids: list[str] | None = Query(default=None),
+    classification_status: Literal["CLASSIFIED", "NEEDS_REVIEW"] | None = Query(default=None),
+    primary_category: PrimaryCategory | None = Query(default=None),
+    secondary_category: str | None = Query(default=None),
 ):
     session=get_session()
     try:
+        _validate_detail_filters(primary_category, secondary_category)
         return _csv_response(
             ConsumptionAnalyticsService(session).export_monthly_detail_csv(
                 month=_month_start(month), account_ids=tuple(account_ids) if account_ids else None,
+                classification_status=classification_status and ClassificationStatus(classification_status),
+                primary_category=primary_category, secondary_category=secondary_category,
             ),
             f"consumption-events-{month}.csv",
         )

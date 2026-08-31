@@ -43,6 +43,7 @@ type CategoryKey = (typeof CATEGORY_META)[number]['key']
 type EditablePrimary = keyof typeof EDITABLE_TAXONOMY
 type ClassificationDraft = { primary: EditablePrimary; secondary: string }
 type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: ClassificationDraft }
+type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
 
 function toNumber(value: string | null | undefined): number { return value == null ? 0 : Number(value) }
 function monthLabel(month: string): string { const [year, value] = month.split('-'); return `${year}年${Number(value)}月` }
@@ -75,12 +76,21 @@ export default function Consumption() {
   const [detailTotal, setDetailTotal] = useState(0)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [detailClassificationFilter, setDetailClassificationFilter] = useState<DetailClassificationFilter>('ALL')
+  const [detailPrimaryFilter, setDetailPrimaryFilter] = useState<EditablePrimary | ''>('')
+  const [detailSecondaryFilter, setDetailSecondaryFilter] = useState('')
   const [editing, setEditing] = useState<Record<string, ClassificationDraft>>({})
   const [autosaveStates, setAutosaveStates] = useState<Record<string, AutosaveState>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const autosaveTimers = useRef<Record<string, number>>({})
   const requestVersions = useRef<Record<string, number>>({})
+
+  const detailFilters = useMemo(() => ({
+    classificationStatus: detailClassificationFilter === 'ALL' ? undefined : detailClassificationFilter,
+    primaryCategory: detailClassificationFilter === 'NEEDS_REVIEW' ? undefined : detailPrimaryFilter || undefined,
+    secondaryCategory: detailClassificationFilter === 'NEEDS_REVIEW' ? undefined : detailSecondaryFilter || undefined,
+  }), [detailClassificationFilter, detailPrimaryFilter, detailSecondaryFilter])
 
   const load = () => {
     setLoading(true)
@@ -116,24 +126,27 @@ export default function Consumption() {
       if (!active) return
       setDetailLoading(true)
       setDetailError(null)
-      return consumptionApi.getEvents({ month: selectedMonth.slice(0, 7), limit: 200 })
+      return consumptionApi.getEvents({ month: selectedMonth.slice(0, 7), limit: 200, offset: 0, ...detailFilters })
         .then(value => { if (active) { setDetails(value.items); setDetailTotal(value.total) } })
         .catch(() => { if (active) { setDetails([]); setDetailTotal(0); setDetailError('月度明细加载失败') } })
         .finally(() => { if (active) setDetailLoading(false) })
     })
     return () => { active = false }
-  }, [selectedMonth])
+  }, [selectedMonth, detailFilters])
 
   const saveClassification = async (item: ConsumptionEventDetail, draft: ClassificationDraft, version: number) => {
     try {
       const result = await consumptionApi.updateEventClassification(item.event_id, draft.primary, draft.secondary)
       if (requestVersions.current[item.event_id] !== version) return
-      setDetails(current => current.map(row => row.event_id === item.event_id ? {
+      setDetails(current => detailClassificationFilter === 'NEEDS_REVIEW'
+        ? current.filter(row => row.event_id !== item.event_id)
+        : current.map(row => row.event_id === item.event_id ? {
         ...row,
         primary_category: result.primary_category as ConsumptionEventDetail['primary_category'],
         secondary_category: result.secondary_category,
         classification_status: result.classification_status as ConsumptionEventDetail['classification_status'],
       } : row))
+      if (detailClassificationFilter === 'NEEDS_REVIEW') setDetailTotal(current => Math.max(0, current - 1))
       setEditing(current => { const next = { ...current }; delete next[item.event_id]; return next })
       setAutosaveStates(current => ({ ...current, [item.event_id]: { state: 'saved', draft } }))
       refreshSummary()
@@ -219,7 +232,16 @@ export default function Consumption() {
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>{monthLabel(selected.month)}消费明细</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅显示已确认纳入消费分析的记录；消费名称直接来自原始账单描述。</div></div>
-        <a href={consumptionApi.getEventsExportUrl(selected.month.slice(0, 7))} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
+        <a href={consumptionApi.getEventsExportUrl(selected.month.slice(0, 7), detailFilters)} download style={exportButtonStyle}><Download size={13} /> 导出 CSV</a>
+      </div>
+      <div style={detailFilterBarStyle} aria-label="消费明细分类筛选">
+        <label style={detailFilterLabelStyle}>分类状态<select aria-label="分类状态筛选" value={detailClassificationFilter} onChange={event => {
+          const next = event.target.value as DetailClassificationFilter
+          setDetailClassificationFilter(next)
+          if (next === 'NEEDS_REVIEW') { setDetailPrimaryFilter(''); setDetailSecondaryFilter('') }
+        }} style={detailFilterSelectStyle}><option value="ALL">全部</option><option value="CLASSIFIED">已分类</option><option value="NEEDS_REVIEW">待分类</option></select></label>
+        <label style={detailFilterLabelStyle}>一级分类<select aria-label="一级分类筛选" value={detailPrimaryFilter} disabled={detailClassificationFilter === 'NEEDS_REVIEW'} onChange={event => { setDetailPrimaryFilter(event.target.value as EditablePrimary | ''); setDetailSecondaryFilter('') }} style={detailFilterSelectStyle}><option value="">全部</option><option value="DAILY">日常消费</option><option value="TRAVEL">旅行</option><option value="HOUSING">住房</option></select></label>
+        <label style={detailFilterLabelStyle}>二级分类<select aria-label="二级分类筛选" value={detailSecondaryFilter} disabled={detailClassificationFilter === 'NEEDS_REVIEW' || !detailPrimaryFilter} onChange={event => setDetailSecondaryFilter(event.target.value)} style={detailFilterSelectStyle}><option value="">全部</option>{detailPrimaryFilter && EDITABLE_TAXONOMY[detailPrimaryFilter].map(value => <option key={value} value={value}>{SECONDARY_LABELS[value]}</option>)}</select></label>
       </div>
       <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
     </Card>
@@ -243,7 +265,7 @@ function SecondaryBreakdowns({ breakdowns }: { breakdowns: ConsumptionAnalyticsS
 function MonthlyDetailTable({ items, total, loading, error, editing, autosaveStates, onChange }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; autosaveStates: Record<string, AutosaveState>; onChange: (item: ConsumptionEventDetail, draft: ClassificationDraft) => void }) {
   if (loading) return <div aria-label="正在加载月度明细" style={{ height: 170, borderRadius: 8, background: '#F9FAFB' }} />
   if (error) return <div style={{ padding: '16px 0', fontSize: 12, color: '#B91C1C' }}>{error}</div>
-  if (items.length === 0) return <LightEmpty text="该月暂无已确认纳入分析的消费记录。" />
+  if (items.length === 0) return <LightEmpty text="当前筛选条件下暂无消费明细" />
   return <><div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 9 }}>共 {total} 条，按金额从高到低排列</div><div style={{ overflow: 'auto', maxHeight: 494, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}><thead><tr>{['日期', '消费明细', '一级分类', '二级分类', '账户', '金额', '分类状态', '保存状态'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 5 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map((item, index) => {
     const draft = editing[item.event_id]
     const primary = draft?.primary ?? item.primary_category ?? ''
@@ -271,6 +293,9 @@ const tableCellStyle: React.CSSProperties = { whiteSpace: 'nowrap', borderBottom
 const classifiedPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#047857', background: '#ECFDF5' }
 const reviewPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#B45309', background: '#FFFBEB' }
 const exportButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, border: '1px solid #E5E7EB', borderRadius: 6, padding: '5px 9px', color: '#4B5563', background: '#fff', fontSize: 11, textDecoration: 'none' }
+const detailFilterBarStyle: React.CSSProperties = { display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap', marginBottom: 14 }
+const detailFilterLabelStyle: React.CSSProperties = { display: 'grid', gap: 4, color: '#6B7280', fontSize: 11, fontWeight: 600 }
+const detailFilterSelectStyle: React.CSSProperties = { minWidth: 128, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', color: '#374151', padding: '6px 8px', fontSize: 12 }
 const selectStyle: React.CSSProperties = { maxWidth: 126, border: '1px solid #E5E7EB', borderRadius: 5, background: '#fff', color: '#374151', padding: '4px 6px', fontSize: 11 }
 const autosaveSavingStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#6B7280', fontSize: 11 }
 const autosaveSavedStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#047857', fontSize: 11 }
