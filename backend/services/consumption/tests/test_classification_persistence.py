@@ -174,6 +174,25 @@ def test_high_confidence_generic_merchant_semantics_use_raw_description(db_sessi
     )
 
 
+@pytest.mark.parametrize(("description", "primary", "secondary"), [
+    ("App Store 订阅", "DAILY", "DIGITAL_COMMUNICATION"),
+    ("云上艾珀服务", "DAILY", "DIGITAL_COMMUNICATION"),
+    ("中国联通话费", "DAILY", "DIGITAL_COMMUNICATION"),
+    ("公共事业缴费", "DAILY", "HOME_LIVING"),
+    ("社保缴费", "DAILY", "HOME_LIVING"),
+    ("京东家政", "DAILY", "HOME_LIVING"),
+    ("城市体育中心", "DAILY", "SPORTS_HOBBY"),
+    ("中铁出行", "TRAVEL", "LONG_DISTANCE_TRANSPORT"),
+    ("天猫超市", "DAILY", "SHOPPING"),
+])
+def test_additional_high_confidence_semantics(db_session, description, primary, secondary):
+    event = _event(db_session, f"additional-{description}", EventType.CONSUMPTION, description)
+    result = ClassificationResolver().resolve_event(db_session, event)
+    assert (result.classification_status, result.primary_category, result.secondary_category) == (
+        "CLASSIFIED", primary, secondary,
+    )
+
+
 @pytest.mark.parametrize("description", [
     "普通财付通商户",
     "支付宝普通商户",
