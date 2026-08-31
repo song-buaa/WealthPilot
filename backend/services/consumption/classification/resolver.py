@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+import json
 
 from sqlalchemy.orm import Session
 
@@ -203,7 +204,14 @@ class ClassificationResolver:
         if link is None:
             return None, "", ""
         raw = session.get(RawTransaction, link.raw_transaction_id)
-        return raw, raw.account_id, " ".join(item for item in (raw.raw_description, raw.raw_counterparty) if item)
+        try:
+            parser_provenance = json.loads(raw.parser_provenance or "{}")
+        except json.JSONDecodeError:
+            parser_provenance = {}
+        source_type = parser_provenance.get("source_transaction_type")
+        return raw, raw.account_id, " ".join(
+            str(item) for item in (raw.raw_description, raw.raw_counterparty, source_type) if item
+        )
 
     @staticmethod
     def _current(session: Session, event_id: str | None) -> ConsumptionInterpretation | None:

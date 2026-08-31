@@ -55,7 +55,8 @@ def _account(session, account_id: str) -> Account:
 
 
 def _event(session, event_id: str, event_type: EventType, description: str, *, account_id: str = "card",
-           when: date = date(2026, 7, 1), amount: str = "88", original_event_id: str | None = None) -> EconomicEvent:
+           when: date = date(2026, 7, 1), amount: str = "88", original_event_id: str | None = None,
+           parser_provenance: str = "{}") -> EconomicEvent:
     account = _account(session, account_id)
     batch = ImportBatch(id=f"batch-{event_id}", account_id=account.id, source_format="TEST", institution="TEST",
         statement_type=account.account_type, source_file_hash=(event_id * 64)[:64], parser_version="test",
@@ -64,7 +65,7 @@ def _event(session, event_id: str, event_type: EventType, description: str, *, a
         source_row_index=1, source_row_identity=f"row-{event_id}", source_row_fingerprint_candidate=f"source-{event_id}",
         match_fingerprint=f"match-{event_id}", dedup_status="UNIQUE", transaction_date=when,
         transaction_date_availability="AVAILABLE", posting_date=None, posting_date_availability="SOURCE_UNAVAILABLE",
-        amount=Decimal(amount), currency="CNY", raw_description=description, parser_provenance="{}", source_field_availability="{}")
+        amount=Decimal(amount), currency="CNY", raw_description=description, parser_provenance=parser_provenance, source_field_availability="{}")
     event = EconomicEvent(id=event_id, semantic_key=f"key-{event_id}", event_type=event_type.value, event_date=when,
         analytics_effective_date=when, amount=abs(Decimal(amount)), currency="CNY", economic_direction="OUTFLOW",
         base_currency="CNY", base_amount=abs(Decimal(amount)), fx_rate=Decimal("1"), fx_source=FxSource.NATIVE_CNY.value,
@@ -411,3 +412,20 @@ def test_generic_local_rule_runner_is_idempotent_and_replays_without_user_specif
     assert (active.eligibility_status, active.primary_category, active.secondary_category) == ("ELIGIBLE", "HOUSING", "RENT")
     assert len(event.projection_revisions) == 1
     assert event.projection_revisions[0].base_net_amount == Decimal("6500")
+
+
+def test_user_rule_can_match_preserved_source_transaction_type(db_session):
+    event = _event(
+        db_session, "source-type", EventType.OTHER, "用途信息不足", account_id="debit",
+        parser_provenance=json.dumps({"source_transaction_type": "转账汇款"}),
+    )
+    _rule, _created, matched = apply_local_rule(
+        db_session, account_id=None, match_text="转账汇款", amount=None,
+        amount_tolerance=Decimal("0"), effective_from=None, effective_to=None,
+        eligibility_action=EligibilityStatus.INELIGIBLE, primary_category=None, secondary_category=None,
+    )
+    active = db_session.query(ConsumptionInterpretation).filter_by(event_id=event.id, is_active=True).one()
+    assert matched == 1
+    assert (active.eligibility_status, active.classification_status, active.classification_source) == (
+        "INELIGIBLE", "NOT_APPLICABLE", "USER_RULE",
+    )
