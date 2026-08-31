@@ -50,7 +50,7 @@ def _specific_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
     value = _compact(text)
     if any(word in value for word in ("物业", "物业费")):
         return PrimaryCategory.HOUSING, "PROPERTY_FEE"
-    if any(word in value for word in ("机票", "航空", "航班", "去哪儿网", "中铁")):
+    if any(word in value for word in ("机票", "航空", "航班", "去哪儿网", "中铁", "航旅纵横")):
         return PrimaryCategory.TRAVEL, "LONG_DISTANCE_TRANSPORT"
     if any(word in value for word in ("酒店", "hotel", "宾馆")):
         return PrimaryCategory.TRAVEL, "ACCOMMODATION"

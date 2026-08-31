@@ -185,6 +185,7 @@ def test_high_confidence_generic_merchant_semantics_use_raw_description(db_sessi
     ("电力缴费", "DAILY", "HOME_LIVING"),
     ("城市体育中心", "DAILY", "SPORTS_HOBBY"),
     ("中铁出行", "TRAVEL", "LONG_DISTANCE_TRANSPORT"),
+    ("航旅纵横会员服务", "TRAVEL", "LONG_DISTANCE_TRANSPORT"),
     ("天猫超市", "DAILY", "SHOPPING"),
 ])
 def test_additional_high_confidence_semantics(db_session, description, primary, secondary):
