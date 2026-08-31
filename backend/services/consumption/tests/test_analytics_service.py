@@ -166,7 +166,7 @@ def test_api_is_get_only_serializes_decimals_and_honors_account_filter(db_sessio
 def test_monthly_detail_api_is_bounded_sorted_exports_current_fields_and_reads_raw_description(db_session, monkeypatch):
     card=_account(db_session,"card")
     card_id=card.id
-    card.display_name="CMB Debit ****1234"
+    card.institution="CMB"; card.account_type="DEBIT_CARD"; card.display_name="CMB Debit ****1234"
     _event(db_session,"largest",account=card,when=date(2026,7,10),amount="6500",net="6500",event_type="OTHER",primary="HOUSING",secondary="RENT",description="private landlord 123456789")
     _event(db_session,"same-amount-later",account=card,when=date(2026,7,9),amount="90",net="90",description="private food source")
     _event(db_session,"same-amount-earlier",account=card,when=date(2026,7,8),amount="90",net="90",description="private food source")
@@ -187,7 +187,7 @@ def test_monthly_detail_api_is_bounded_sorted_exports_current_fields_and_reads_r
     assert [item["analytics_effective_date"] for item in body["items"]] == ["2026-07-10","2026-07-09"]
     assert body["items"][0]["event_id"] == "largest"
     assert body["items"][0]["raw_description"] == "private landlord 123456789"
-    assert body["items"][0]["account_display_name"] == "CMB Debit ****"
+    assert body["items"][0]["account_display_name"] == "招行借记卡 ****"
     assert TestClient(app).get("/api/consumption/events?month=2026-07&limit=201").status_code == 422
     export=TestClient(app).get("/api/consumption/events/export.csv?month=2026-07")
     assert export.status_code == 200
@@ -339,8 +339,8 @@ def test_candidate_review_api_promotes_only_ambiguous_outflow_and_creates_projec
     assert (body["total"], [item["event_id"] for item in body["items"]]) == (1,["wechat-candidate"])
     assert body["items"][0] == {
         "event_id":"wechat-candidate", "analytics_effective_date":"2026-05-25",
-        "raw_description":"快捷支付 / 微信转账", "account_display_name":"CMB Debit ****",
-        "source_label":"CMB Debit", "amount_cny":"3900.00000000", "currency":"CNY",
+        "raw_description":"快捷支付 / 微信转账", "account_display_name":"招行借记卡 ****",
+        "source_label":"招行借记卡", "amount_cny":"3900.00000000", "currency":"CNY",
     }
 
     confirmed=client.put("/api/consumption/candidates/wechat-candidate/confirm",json={"primary_category":"DAILY","secondary_category":"HOME_LIVING"})

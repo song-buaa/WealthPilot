@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 import csv
 from io import StringIO
-import re
 from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -38,15 +37,13 @@ class MonthlySpendingDetailPage:
     offset: int
 
 
-def _safe_account_display_name(value: str | None, institution: str) -> str:
-    label = " ".join((value or f"{institution}账户").split())[:40]
-    return re.sub(r"(?:\*{2,})?\d{2,}", "****", label) or f"{institution}账户"
 from backend.services.consumption.classification_design import ClassificationStatus, EligibilityStatus, PrimaryCategory
 from backend.services.consumption.economic_events import EventType
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent, EconomicEventProjectionRevision,
     ConsumptionEventNote, EventRawLink, ImportBatch, ManualConsumptionEntry, RawTransaction,
 )
+from backend.services.consumption.presentation import account_display_label
 
 
 class ConsumptionAnalyticsQueryAdapter:
@@ -226,7 +223,9 @@ class ConsumptionAnalyticsQueryAdapter:
                 event_id=event.id,
                 analytics_effective_date=event.analytics_effective_date,
                 raw_description=raw.raw_description,
-                account_display_name=_safe_account_display_name(account.display_name, account.institution),
+                account_display_name=account_display_label(
+                    account.display_name, account.institution, account.account_type,
+                ),
                 primary_category=interpretation.primary_category,
                 secondary_category=interpretation.secondary_category,
                 classification_status=interpretation.classification_status,

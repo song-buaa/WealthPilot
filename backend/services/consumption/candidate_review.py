@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-import re
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -25,6 +24,7 @@ from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent,
     EconomicEventProjectionRevision, EventRawLink, ImportBatch, RawTransaction,
 )
+from backend.services.consumption.presentation import account_display_label
 
 
 class CandidateReviewError(ValueError):
@@ -62,14 +62,8 @@ class CandidateBatchConfirmationSummary:
     needs_review_amount_cny: Decimal
 
 
-def _safe_account_display_name(value: str | None, institution: str) -> str:
-    label = " ".join((value or f"{institution}账户").split())[:40]
-    return re.sub(r"(?:\*{2,})?\d{2,}", "****", label) or f"{institution}账户"
-
-
 def _source_label(batch: ImportBatch, account: Account) -> str:
-    kind = {"DEBIT_CARD": "Debit", "CREDIT_CARD": "Credit"}.get(account.account_type, account.account_type)
-    return f"{batch.institution} {kind}"
+    return account_display_label(None, batch.institution, account.account_type, include_mask=False)
 
 
 class ConsumptionCandidateReviewService:
@@ -123,7 +117,9 @@ class ConsumptionCandidateReviewService:
                 event_id=event.id,
                 analytics_effective_date=event.analytics_effective_date,
                 raw_description=raw.raw_description,
-                account_display_name=_safe_account_display_name(account.display_name, account.institution),
+                account_display_name=account_display_label(
+                    account.display_name, account.institution, account.account_type,
+                ),
                 source_label=_source_label(batch, account),
                 amount_cny=Decimal(event.base_amount) if event.base_amount is not None else None,
                 currency=event.currency,
