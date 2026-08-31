@@ -500,7 +500,7 @@ function ConsumptionCandidateCard({ month, items, total, loading, drafts, action
     </div>
     {loading ? <div aria-label="正在加载消费候选" style={{ height: 62, borderRadius: 8, background: '#F9FAFB', marginTop: 14 }} />
       : items.length === 0 ? <LightEmpty text={`${monthLabel(month)}暂无待确认的消费候选`} />
-      : <div style={{ overflow: 'auto', marginTop: 14, border: '1px solid #F3F4F6', borderRadius: 6 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}><thead><tr>{['日期', '原始交易描述', '账户 / 来源', '金额', '当前状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 3 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map(candidate => {
+      : <div style={candidateTableScrollStyle}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}><thead><tr>{['日期', '原始交易描述', '账户 / 来源', '金额', '当前状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 3 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map(candidate => {
         const draft = drafts[candidate.event_id]
         const action = actions[candidate.event_id]
         const secondaryOptions = draft ? EDITABLE_TAXONOMY[draft.primary] : []
@@ -563,6 +563,7 @@ const candidateConfirmButtonStyle: React.CSSProperties = { display: 'inline-flex
 const candidateRejectButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #E5E7EB', borderRadius: 5, padding: '5px 7px', background: '#fff', color: '#6B7280', cursor: 'pointer', fontSize: 11 }
 const candidateCancelButtonStyle: React.CSSProperties = { border: 'none', padding: '4px 2px', background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 11 }
 const candidateErrorStyle: React.CSSProperties = { marginTop: 5, color: '#B91C1C', fontSize: 11 }
+const candidateTableScrollStyle: React.CSSProperties = { overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(34px + 10 * 44px)', marginTop: 14, border: '1px solid #F3F4F6', borderRadius: 6 }
 const exportButtonStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, border: '1px solid #E5E7EB', borderRadius: 6, padding: '5px 9px', color: '#4B5563', background: '#fff', fontSize: 11, textDecoration: 'none' }
 const detailFilterBarStyle: React.CSSProperties = { display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap', marginBottom: 14 }
 const detailFilterLabelStyle: React.CSSProperties = { display: 'grid', gap: 4, color: '#6B7280', fontSize: 11, fontWeight: 600 }
