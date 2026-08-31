@@ -163,6 +163,10 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
 
   await page.getByTestId('trend-bar-daily_cny-2026-08-01').hover()
   await expect(page.getByText('总消费：', { exact: false })).toBeVisible()
+  await expect(page.getByTestId('trend-tooltip-key-daily_cny')).toHaveCSS('background-color', 'rgb(111, 143, 184)')
+  await expect(page.getByTestId('trend-tooltip-key-housing_cny')).toHaveCSS('background-color', 'rgb(120, 169, 149)')
+  await expect(page.getByTestId('trend-tooltip-key-travel_cny')).toHaveCSS('background-color', 'rgb(160, 140, 184)')
+  await expect(page.getByTestId('trend-tooltip-key-unclassified_eligible_cny')).toHaveCSS('background-color', 'rgb(214, 167, 106)')
   await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
   await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
   await expect(page.getByText('¥17,400')).toBeVisible()
