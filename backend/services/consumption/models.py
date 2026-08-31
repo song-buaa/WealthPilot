@@ -227,12 +227,41 @@ class EconomicEvent(Base):
         "ConsumptionInterpretation", back_populates="event", cascade="all, delete-orphan",
         foreign_keys="ConsumptionInterpretation.event_id"
     )
+    manual_entry = relationship(
+        "ManualConsumptionEntry", back_populates="event", uselist=False, cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("normalizer_version", "semantic_key", name="uq_consumption_event_semantic"),
         Index("ix_consumption_events_type_date", "event_type", "event_date"),
         Index("ix_consumption_events_original", "original_event_id"),
         Index("ix_consumption_events_resolution", "resolution_status"),
+    )
+
+
+class ManualConsumptionEntry(Base):
+    """A user-provided spending fact that is intentionally not a bank RawTransaction."""
+
+    __tablename__ = "consumption_manual_entries"
+
+    id = Column(String(80), primary_key=True)
+    event_id = Column(
+        String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    occurred_on = Column(Date, nullable=False)
+    description = Column(Text, nullable=False)
+    amount = Column(Numeric(20, 8), nullable=False)
+    currency = Column(String(3), nullable=False, default="CNY")
+    source = Column(String(40), nullable=False, default="USER_PROVIDED")
+    provenance = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    event = relationship("EconomicEvent", back_populates="manual_entry")
+
+    __table_args__ = (
+        Index("ix_consumption_manual_entries_date", "occurred_on"),
+        Index("ix_consumption_manual_entries_active", "is_active"),
     )
 
 

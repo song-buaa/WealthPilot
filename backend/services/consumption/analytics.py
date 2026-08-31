@@ -44,7 +44,7 @@ from backend.services.consumption.classification_design import ClassificationSta
 from backend.services.consumption.economic_events import EventType
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent, EconomicEventProjectionRevision,
-    EventRawLink, ImportBatch, RawTransaction,
+    EventRawLink, ImportBatch, ManualConsumptionEntry, RawTransaction,
 )
 
 
@@ -58,21 +58,33 @@ class ConsumptionAnalyticsQueryAdapter:
         return tuple(row.id for row in self.session.query(Account).filter_by(status="ACTIVE").order_by(Account.id))
 
     def active_events(self, account_ids: tuple[str, ...], start: date, end: date):
-        if not account_ids:
-            return ()
-        rows = (self.session.query(EconomicEvent, EconomicEventProjectionRevision, ConsumptionInterpretation, RawTransaction.account_id)
-            .outerjoin(EconomicEventProjectionRevision, (EconomicEventProjectionRevision.event_id == EconomicEvent.id) & EconomicEventProjectionRevision.is_active.is_(True))
-            .join(ConsumptionInterpretation, (ConsumptionInterpretation.event_id == EconomicEvent.id) & ConsumptionInterpretation.is_active.is_(True))
-            .join(EventRawLink, (EventRawLink.event_id == EconomicEvent.id) & EventRawLink.is_active.is_(True))
-            .join(RawTransaction, RawTransaction.id == EventRawLink.raw_transaction_id)
-            .filter(EconomicEvent.is_active.is_(True), EconomicEvent.analytics_effective_date >= start, EconomicEvent.analytics_effective_date <= end)
-            .order_by(EconomicEvent.id, RawTransaction.id).all())
         output=[]; seen=set()
-        for event, projection, interpretation, account_id in rows:
-            if event.id in seen or account_id not in account_ids: continue
+        if account_ids:
+            rows = (self.session.query(EconomicEvent, EconomicEventProjectionRevision, ConsumptionInterpretation, RawTransaction.account_id)
+                .outerjoin(EconomicEventProjectionRevision, (EconomicEventProjectionRevision.event_id == EconomicEvent.id) & EconomicEventProjectionRevision.is_active.is_(True))
+                .join(ConsumptionInterpretation, (ConsumptionInterpretation.event_id == EconomicEvent.id) & ConsumptionInterpretation.is_active.is_(True))
+                .join(EventRawLink, (EventRawLink.event_id == EconomicEvent.id) & EventRawLink.is_active.is_(True))
+                .join(RawTransaction, RawTransaction.id == EventRawLink.raw_transaction_id)
+                .filter(EconomicEvent.is_active.is_(True), EconomicEvent.analytics_effective_date >= start, EconomicEvent.analytics_effective_date <= end)
+                .order_by(EconomicEvent.id, RawTransaction.id).all())
+            for event, projection, interpretation, account_id in rows:
+                if event.id in seen or account_id not in account_ids: continue
+                seen.add(event.id)
+                output.append((
+                    ActiveEventProjection(event.id, EventType(event.event_type), event.analytics_effective_date, account_id, event.amount, projection.base_net_amount if projection else None, event.fx_source, event.currency),
+                    ActiveInterpretation(event.id, EligibilityStatus(interpretation.eligibility_status), ClassificationStatus(interpretation.classification_status), PrimaryCategory(interpretation.primary_category) if interpretation.primary_category else None, interpretation.secondary_category),
+                ))
+        manual_rows = (self.session.query(EconomicEvent, EconomicEventProjectionRevision, ConsumptionInterpretation, ManualConsumptionEntry)
+            .join(EconomicEventProjectionRevision, (EconomicEventProjectionRevision.event_id == EconomicEvent.id) & EconomicEventProjectionRevision.is_active.is_(True))
+            .join(ConsumptionInterpretation, (ConsumptionInterpretation.event_id == EconomicEvent.id) & ConsumptionInterpretation.is_active.is_(True))
+            .join(ManualConsumptionEntry, (ManualConsumptionEntry.event_id == EconomicEvent.id) & ManualConsumptionEntry.is_active.is_(True))
+            .filter(EconomicEvent.is_active.is_(True), EconomicEvent.analytics_effective_date >= start, EconomicEvent.analytics_effective_date <= end)
+            .order_by(EconomicEvent.id).all())
+        for event, projection, interpretation, entry in manual_rows:
+            if event.id in seen: continue
             seen.add(event.id)
             output.append((
-                ActiveEventProjection(event.id, EventType(event.event_type), event.analytics_effective_date, account_id, event.amount, projection.base_net_amount if projection else None, event.fx_source, event.currency),
+                ActiveEventProjection(event.id, EventType(event.event_type), event.analytics_effective_date, f"manual:{entry.id}", event.amount, projection.base_net_amount, event.fx_source, event.currency),
                 ActiveInterpretation(event.id, EligibilityStatus(interpretation.eligibility_status), ClassificationStatus(interpretation.classification_status), PrimaryCategory(interpretation.primary_category) if interpretation.primary_category else None, interpretation.secondary_category),
             ))
         return tuple(output)
@@ -110,7 +122,7 @@ class ConsumptionAnalyticsQueryAdapter:
             .correlate(EconomicEvent)
             .scalar_subquery()
         )
-        query = (
+        raw_query = (
             self.session.query(
                 EconomicEvent,
                 EconomicEventProjectionRevision,
@@ -141,38 +153,79 @@ class ConsumptionAnalyticsQueryAdapter:
                 RawTransaction.account_id.in_(account_ids),
             )
         )
-        if classification_status is not None:
-            query = query.filter(ConsumptionInterpretation.classification_status == classification_status.value)
-        if primary_category is not None:
-            query = query.filter(ConsumptionInterpretation.primary_category == primary_category.value)
-        if secondary_category is not None:
-            query = query.filter(ConsumptionInterpretation.secondary_category == secondary_category)
-        total = query.count()
-        rows = (
-            query.order_by(
-                EconomicEventProjectionRevision.base_net_amount.desc(),
-                EconomicEvent.analytics_effective_date.desc(),
-                EconomicEvent.id.asc(),
+        manual_query = (
+            self.session.query(
+                EconomicEvent,
+                EconomicEventProjectionRevision,
+                ConsumptionInterpretation,
+                ManualConsumptionEntry,
             )
-            .offset(offset)
-            .limit(limit)
-            .all()
+            .join(
+                EconomicEventProjectionRevision,
+                (EconomicEventProjectionRevision.event_id == EconomicEvent.id)
+                & EconomicEventProjectionRevision.is_active.is_(True),
+            )
+            .join(
+                ConsumptionInterpretation,
+                (ConsumptionInterpretation.event_id == EconomicEvent.id)
+                & ConsumptionInterpretation.is_active.is_(True),
+            )
+            .join(
+                ManualConsumptionEntry,
+                (ManualConsumptionEntry.event_id == EconomicEvent.id)
+                & ManualConsumptionEntry.is_active.is_(True),
+            )
+            .filter(
+                EconomicEvent.is_active.is_(True),
+                EconomicEvent.event_type.in_((EventType.CONSUMPTION.value, EventType.OTHER.value)),
+                ConsumptionInterpretation.eligibility_status == EligibilityStatus.ELIGIBLE.value,
+                EconomicEventProjectionRevision.base_net_amount.is_not(None),
+                EconomicEvent.analytics_effective_date >= month,
+                EconomicEvent.analytics_effective_date < end,
+            )
         )
+        def apply_detail_filters(query):
+            if classification_status is not None:
+                query = query.filter(ConsumptionInterpretation.classification_status == classification_status.value)
+            if primary_category is not None:
+                query = query.filter(ConsumptionInterpretation.primary_category == primary_category.value)
+            if secondary_category is not None:
+                query = query.filter(ConsumptionInterpretation.secondary_category == secondary_category)
+            return query
+
+        raw_query = apply_detail_filters(raw_query)
+        manual_query = apply_detail_filters(manual_query)
+        items = [
+            MonthlySpendingDetailItem(
+                event_id=event.id,
+                analytics_effective_date=event.analytics_effective_date,
+                raw_description=raw.raw_description,
+                account_display_name=_safe_account_display_name(account.display_name, account.institution),
+                primary_category=interpretation.primary_category,
+                secondary_category=interpretation.secondary_category,
+                classification_status=interpretation.classification_status,
+                amount_cny=Decimal(projection.base_net_amount),
+            )
+            for event, projection, interpretation, raw, account in raw_query.all()
+        ]
+        items.extend(
+            MonthlySpendingDetailItem(
+                event_id=event.id,
+                analytics_effective_date=event.analytics_effective_date,
+                raw_description=entry.description,
+                account_display_name="人工补录",
+                primary_category=interpretation.primary_category,
+                secondary_category=interpretation.secondary_category,
+                classification_status=interpretation.classification_status,
+                amount_cny=Decimal(projection.base_net_amount),
+            )
+            for event, projection, interpretation, entry in manual_query.all()
+        )
+        items.sort(key=lambda item: (-item.amount_cny, -item.analytics_effective_date.toordinal(), item.event_id))
+        total = len(items)
         return MonthlySpendingDetailPage(
             month=month,
-            items=tuple(
-                MonthlySpendingDetailItem(
-                    event_id=event.id,
-                    analytics_effective_date=event.analytics_effective_date,
-                    raw_description=raw.raw_description,
-                    account_display_name=_safe_account_display_name(account.display_name, account.institution),
-                    primary_category=interpretation.primary_category,
-                    secondary_category=interpretation.secondary_category,
-                    classification_status=interpretation.classification_status,
-                    amount_cny=Decimal(projection.base_net_amount),
-                )
-                for event, projection, interpretation, raw, account in rows
-            ),
+            items=tuple(items[offset:offset + limit]),
             total=total,
             limit=limit,
             offset=offset,
