@@ -36,6 +36,8 @@ class StatementMetadata:
     statement_type: str
     source_format: str
     parser_version: str
+    statement_date: date | None = None
+    payment_due_date: date | None = None
     statement_period_start: date | None = None
     statement_period_end: date | None = None
     account_masked: str | None = None
@@ -47,6 +49,8 @@ class StatementMetadata:
         return {
             "institution": self.institution, "statement_type": self.statement_type,
             "source_format": self.source_format, "parser_version": self.parser_version,
+            "statement_date": _date_text(self.statement_date),
+            "payment_due_date": _date_text(self.payment_due_date),
             "statement_period_start": _date_text(self.statement_period_start),
             "statement_period_end": _date_text(self.statement_period_end),
             "account_masked": self.account_masked, "instrument_masked": self.instrument_masked,

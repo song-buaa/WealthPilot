@@ -11,6 +11,7 @@ from backend.scripts.import_consumption_statements import _archive_sources, _bac
 from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.import_runner import prepare_sources
 from backend.services.consumption.normalization import EconomicEventNormalizer
+from backend.services.consumption.refund_matching import RefundMatcher
 from backend.services.consumption.source_reconciliation import (
     SourceReconciliationError,
     reconcile_parsed_statements,
@@ -42,8 +43,13 @@ def main(argv: list[str] | None = None) -> int:
                 session, tuple(item.parsed_statement for item in prepared),
             )
             event_result = EconomicEventNormalizer().replay(session)
-            if event_result.new_event_ids:
-                ClassificationResolver().replay(session, event_result.new_event_ids)
+            # The resolver protects USER_CONFIRMATION / USER_RULE revisions;
+            # replaying after corrected source facts updates only deterministic
+            # system interpretations.
+            ClassificationResolver().replay(session)
+            refund_result = RefundMatcher().replay(session)
+            if refund_result.matched_refund_event_ids:
+                ClassificationResolver().replay(session, refund_result.matched_refund_event_ids)
             session.commit()
         except Exception:
             session.rollback()
@@ -52,10 +58,13 @@ def main(argv: list[str] | None = None) -> int:
             session.close()
         print(f"Reconciled batches: {source_result.reconciled_batches}")
         print(f"Corrected parser rows: {source_result.corrected_raw_rows}")
+        print(f"Inserted parser-missed rows: {source_result.inserted_raw_rows}")
+        print(f"Relocated source batches: {source_result.relocated_batch_count}")
         print(f"Retired parser-duplicate rows: {source_result.retired_duplicate_rows}")
         print(f"Replayed active Raw facts: {event_result.replayed_raw_count}")
         print(f"Corrected to non-consumption: {event_result.corrected_non_consumption_count}")
         print(f"User-explicit results skipped: {event_result.skipped_user_explicit_count}")
+        print(f"Refund matches applied: {refund_result.matched_refund_count}")
         return 0
     except (SourceReconciliationError, ValueError) as exc:
         print(f"Source reconciliation blocked: {exc}", file=sys.stderr)

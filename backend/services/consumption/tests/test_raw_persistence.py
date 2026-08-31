@@ -59,6 +59,7 @@ def _account(session, account_type: str = "CREDIT_CARD") -> Account:
 def _transaction(
     *, identity: str = "row-1", description: str = "Merchant X", amount: str = "100.00",
     transaction_date: date | None = date(2026, 7, 30), posting_date: date | None = date(2026, 7, 31),
+    instrument_masked: str = "****1234",
 ) -> NormalizedRawTransaction:
     return NormalizedRawTransaction(
         source_row_index=1,
@@ -74,17 +75,20 @@ def _transaction(
         amount=Decimal(amount),
         currency="CNY",
         raw_description=description,
-        account_masked="****1234",
-        instrument_masked="****1234",
+        account_masked=instrument_masked,
+        instrument_masked=instrument_masked,
         parser_provenance={"adapter": "synthetic"},
     )
 
 
-def _statement(*, source: bytes, rows: tuple[NormalizedRawTransaction, ...]) -> ParsedStatement:
+def _statement(
+    *, source: bytes, rows: tuple[NormalizedRawTransaction, ...], account_masked: str | None = None,
+) -> ParsedStatement:
     return ParsedStatement(
         metadata=StatementMetadata(
             institution="CMB", statement_type="CREDIT_CARD", source_format="PDF",
             parser_version="synthetic-v1", source_file_hash=source_file_hash(source),
+            account_masked=account_masked,
         ),
         transactions=rows,
     )
@@ -203,6 +207,50 @@ def test_verified_reparse_retires_only_omitted_parser_mirror_rows(db_session):
     assert rows["html-table-1-row-1"].is_active is True
     assert rows["html-table-17-row-1"].is_active is False
     assert rows["html-table-17-row-1"].retired_reason == "VERIFIED_PARSER_DUPLICATE_PRESENTATION"
+
+
+def test_verified_reparse_adds_a_source_row_omitted_by_the_old_parser(db_session):
+    account = _account(db_session)
+    original = _statement(source=b"parser-missed-row", rows=(
+        _transaction(identity="pdf-line-2", amount="20.00"),
+    ))
+    ConsumptionImportService().persist(db_session, account=account, parsed_statement=original)
+    corrected = _statement(source=b"parser-missed-row", rows=(
+        _transaction(identity="pdf-line-2", amount="20.00"),
+        _transaction(identity="pdf-line-3", amount="-11.00", posting_date=None),
+    ))
+
+    result = reconcile_parsed_statements(db_session, (corrected,))
+    rows = db_session.query(RawTransaction).order_by(RawTransaction.source_row_identity).all()
+    assert (result.inserted_raw_rows, result.retired_duplicate_rows, len(rows)) == (1, 0, 2)
+    assert rows[-1].is_active is True
+
+
+def test_verified_reparse_relocates_corrected_card_tail_and_is_idempotent(db_session):
+    original_account = _account(db_session)
+    original = _statement(
+        source=b"corrected-card-tail", rows=(_transaction(identity="pdf-line-2"),),
+        account_masked="****1234",
+    )
+    ConsumptionImportService().persist(db_session, account=original_account, parsed_statement=original)
+    corrected = _statement(
+        source=b"corrected-card-tail",
+        rows=(_transaction(identity="pdf-line-2", instrument_masked="****4964"),),
+        account_masked="****4964",
+    )
+
+    first = reconcile_parsed_statements(db_session, (corrected,))
+    raw = db_session.query(RawTransaction).one()
+    assert (first.relocated_batch_count, raw.account.masked_account_identifier) == (1, "****4964")
+    assert raw.payment_instrument.masked_identifier == "****4964"
+
+    second = reconcile_parsed_statements(db_session, (corrected,))
+    assert (
+        second.corrected_raw_rows,
+        second.inserted_raw_rows,
+        second.relocated_batch_count,
+        second.retired_duplicate_rows,
+    ) == (0, 0, 0, 0)
 
 
 def test_duplicate_source_identity_in_one_batch_is_rejected_before_writing_rows(db_session):

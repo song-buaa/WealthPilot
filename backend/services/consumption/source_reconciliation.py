@@ -24,6 +24,8 @@ from backend.services.consumption.models import (
     EconomicEvent,
     EventRawLink,
     ImportBatch,
+    Account,
+    PaymentInstrument,
     RawTransaction,
 )
 
@@ -40,6 +42,8 @@ class SourceReconciliationError(RuntimeError):
 class SourceReconciliationResult:
     reconciled_batches: int
     corrected_raw_rows: int
+    inserted_raw_rows: int
+    relocated_batch_count: int
     retired_duplicate_rows: int
     retired_event_ids: tuple[str, ...]
 
@@ -54,24 +58,40 @@ def reconcile_parsed_statements(
     repair.  Rows no longer emitted by the parser are retained and marked
     inactive only after checking that no user-explicit interpretation exists.
     """
-    corrected = retired = 0
+    corrected = retired = inserted = relocated = 0
     retired_event_ids: set[str] = set()
     for statement in statements:
         source_hash = statement.metadata.source_file_hash
         batch = session.query(ImportBatch).filter_by(source_file_hash=source_hash).one_or_none()
         if batch is None:
             raise SourceReconciliationError("source file is not an existing ImportBatch")
+        target_account = _target_account(session, batch, statement)
+        if batch.account_id != target_account.id:
+            batch.account_id = target_account.id
+            for raw in batch.raw_transactions:
+                raw.account_id = target_account.id
+            relocated += 1
         parsed = {item.source_row_identity: item for item in statement.transactions}
         if len(parsed) != len(statement.transactions):
             raise SourceReconciliationError("parser returned duplicate source row identities")
         existing = {item.source_row_identity: item for item in batch.raw_transactions}
         unknown = set(parsed) - set(existing)
-        if unknown:
-            raise SourceReconciliationError("parser introduced source rows absent from the existing batch")
+        for identity in sorted(unknown):
+            transaction = parsed[identity]
+            instrument = _instrument_for(session, target_account, transaction.instrument_masked)
+            raw = ConsumptionImportService._raw_transaction(
+                batch=batch, account=target_account, payment_instrument=instrument, transaction=transaction,
+            )
+            session.add(raw)
+            existing[identity] = raw
+            inserted += 1
 
         for identity, transaction in parsed.items():
             raw = existing[identity]
+            instrument = _instrument_for(session, target_account, transaction.instrument_masked)
             values = {
+                "account_id": target_account.id,
+                "payment_instrument_id": instrument.id if instrument else None,
                 "source_row_index": transaction.source_row_index,
                 "transaction_date": transaction.transaction_date,
                 "transaction_date_availability": transaction.transaction_date_availability.value,
@@ -96,7 +116,7 @@ def reconcile_parsed_statements(
                 ),
                 "match_fingerprint": _match_fingerprint(
                     account_id=raw.account_id,
-                    payment_instrument_id=raw.payment_instrument_id,
+                    payment_instrument_id=instrument.id if instrument else None,
                     institution=batch.institution,
                     transaction=transaction,
                 ),
@@ -140,9 +160,46 @@ def reconcile_parsed_statements(
     return SourceReconciliationResult(
         reconciled_batches=len(statements),
         corrected_raw_rows=corrected,
+        inserted_raw_rows=inserted,
+        relocated_batch_count=relocated,
         retired_duplicate_rows=retired,
         retired_event_ids=tuple(sorted(retired_event_ids)),
     )
+
+
+def _target_account(session: Session, batch: ImportBatch, statement: ParsedStatement) -> Account:
+    masked = statement.metadata.account_masked
+    if not masked:
+        return batch.account
+    account = session.query(Account).filter_by(
+        institution=batch.institution, account_type=batch.statement_type,
+        masked_account_identifier=masked,
+    ).one_or_none()
+    if account is not None:
+        return account
+    account = Account(
+        institution=batch.institution, account_type=batch.statement_type,
+        display_name=batch.account.display_name, masked_account_identifier=masked,
+    )
+    session.add(account)
+    session.flush()
+    return account
+
+
+def _instrument_for(session: Session, account: Account, masked: str | None) -> PaymentInstrument | None:
+    if not masked:
+        return None
+    instrument = session.query(PaymentInstrument).filter_by(
+        account_id=account.id, masked_identifier=masked,
+    ).one_or_none()
+    if instrument is not None:
+        return instrument
+    instrument = PaymentInstrument(
+        account_id=account.id, instrument_type="PHYSICAL_CARD", masked_identifier=masked,
+    )
+    session.add(instrument)
+    session.flush()
+    return instrument
 
 
 def _has_user_explicit_interpretation(session: Session, event_ids: set[str]) -> bool:

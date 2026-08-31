@@ -23,7 +23,7 @@ from backend.services.consumption.contracts import (
     source_file_hash,
 )
 
-PARSER_VERSION = "ccb-credit-card-eml-spike-v2"
+PARSER_VERSION = "ccb-credit-card-eml-v3"
 
 
 def _html_tables(html: str) -> list[list[list[str]]]:
@@ -127,6 +127,7 @@ def _table_transactions(
     indices = _header_index(table[0])
     transactions: list[NormalizedRawTransaction] = []
     for row_offset, cells in enumerate(table[1:], start=1):
+        row_instrument: str | None = None
         if "description" in indices and "amount" in indices:
             amount = _money_from_cell(_cell(cells, indices, "amount"))
             description = normalized_text(_cell(cells, indices, "description") or "")
@@ -135,16 +136,20 @@ def _table_transactions(
             currency = normalized_text(_cell(cells, indices, "currency") or "CNY").upper()
             settlement_amount = _money_from_cell(_cell(cells, indices, "settlement_amount"))
             settlement_currency = normalized_text(_cell(cells, indices, "settlement_currency") or "") or None
+            row_instrument = _cell(cells, indices, "instrument")
         else:
             structured = _fallback_transaction_cells(cells)
             if structured is None:
                 continue
             description, amount, currency, settlement_amount, settlement_currency = structured
             transaction_date, posting_date = parse_full_date(cells[0]), parse_full_date(cells[1])
+            # CCB's unheaded nested detail table is structurally stable: the
+            # third cell is the card's own tail, not statement metadata.
+            row_instrument = cells[2]
         if amount is None or not description:
             continue
         row_identity = f"html-table-{table_index}-row-{row_offset}"
-        instrument = mask_identity(_cell(cells, indices, "instrument")) or identity
+        instrument = mask_identity(row_instrument) or identity
         transactions.append(NormalizedRawTransaction(
             source_row_index=len(transactions) + 1, source_row_identity=row_identity,
             transaction_date=transaction_date,
