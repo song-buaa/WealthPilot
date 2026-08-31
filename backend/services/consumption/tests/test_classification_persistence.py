@@ -143,6 +143,18 @@ def test_u_eligible_unknown_is_persisted_and_schema_is_complete(db_session):
     ("特色小吃", "DAILY", "FOOD_DINING"),
     ("包点", "DAILY", "FOOD_DINING"),
     ("饭店", "DAILY", "FOOD_DINING"),
+    ("小湘厨木桶饭", "DAILY", "FOOD_DINING"),
+    ("柳螺记螺蛳粉", "DAILY", "FOOD_DINING"),
+    ("隆江猪脚饭", "DAILY", "FOOD_DINING"),
+    ("川浩麻辣香锅", "DAILY", "FOOD_DINING"),
+    ("湖南常德牛肉粉", "DAILY", "FOOD_DINING"),
+    ("徐掌柜煲仔饭", "DAILY", "FOOD_DINING"),
+    ("八角面馆", "DAILY", "FOOD_DINING"),
+    ("田金花卤味", "DAILY", "FOOD_DINING"),
+    ("鲜猪杂汤粉王", "DAILY", "FOOD_DINING"),
+    ("十里鸡公煲", "DAILY", "FOOD_DINING"),
+    ("浙里食局", "DAILY", "FOOD_DINING"),
+    ("欧粑粑", "DAILY", "FOOD_DINING"),
     ("停车服务", "DAILY", "TRANSPORT_AUTO"),
     ("快充服务", "DAILY", "TRANSPORT_AUTO"),
     ("车辆充电", "DAILY", "TRANSPORT_AUTO"),
@@ -180,10 +192,13 @@ def test_high_confidence_generic_merchant_semantics_use_raw_description(db_sessi
     ("中国联通话费", "DAILY", "DIGITAL_COMMUNICATION"),
     ("中国移动话费", "DAILY", "DIGITAL_COMMUNICATION"),
     ("公共事业缴费", "DAILY", "HOME_LIVING"),
+    ("公用事业缴费", "DAILY", "HOME_LIVING"),
+    ("水费缴纳", "DAILY", "HOME_LIVING"),
     ("社保缴费", "DAILY", "HOME_LIVING"),
     ("京东家政", "DAILY", "HOME_LIVING"),
     ("电力缴费", "DAILY", "HOME_LIVING"),
     ("城市体育中心", "DAILY", "SPORTS_HOBBY"),
+    ("杭州乐刻网络技术有限公司", "DAILY", "SPORTS_HOBBY"),
     ("中铁出行", "TRAVEL", "LONG_DISTANCE_TRANSPORT"),
     ("航旅纵横会员服务", "TRAVEL", "LONG_DISTANCE_TRANSPORT"),
     ("天猫超市", "DAILY", "SHOPPING"),
@@ -202,6 +217,7 @@ def test_additional_high_confidence_semantics(db_session, description, primary, 
     "某某科技有限公司",
     "个人收款",
     "某品牌旗舰店",
+    "阿宝果业",
 ])
 def test_ambiguous_merchant_semantics_remain_needs_review(db_session, description):
     event = _event(db_session, f"ambiguous-{description}", EventType.CONSUMPTION, description)
@@ -228,6 +244,8 @@ def test_pinduoduo_falls_back_to_shopping_after_more_specific_semantics(db_sessi
 @pytest.mark.parametrize(("description", "secondary"), [
     ("咖啡", "FOOD_DINING"),
     ("停车服务", "LOCAL_TRANSPORT"),
+    ("柳螺记螺蛳粉", "FOOD_DINING"),
+    ("小湘厨木桶饭", "FOOD_DINING"),
 ])
 def test_travel_context_overrides_generic_food_and_transport_semantics(db_session, description, secondary):
     db_session.add(TravelContext(destination="HK", start_date=date(2026, 7, 1), end_date=date(2026, 7, 3)))

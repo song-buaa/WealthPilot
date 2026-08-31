@@ -66,7 +66,8 @@ def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
     value = _compact(text)
     if any(word in value for word in (
         "餐厅", "餐饮", "美团", "coffee", "拉面", "米粉", "米线", "冒菜", "麻辣烫",
-        "咖啡", "快餐", "小吃", "包点", "饭店",
+        "咖啡", "快餐", "小吃", "包点", "饭店", "木桶饭", "螺蛳粉", "猪脚饭",
+        "麻辣香锅", "牛肉粉", "煲仔饭", "面馆", "卤味", "汤粉", "鸡公煲", "浙里食局", "欧粑粑",
     )):
         return PrimaryCategory.DAILY, "FOOD_DINING"
     if any(word in value for word in (
@@ -76,9 +77,9 @@ def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
         return PrimaryCategory.DAILY, "TRANSPORT_AUTO"
     if any(word in value for word in ("宠物", "猫粮", "猫砂")):
         return PrimaryCategory.DAILY, "PET"
-    if any(word in value for word in ("公共事业缴费", "社保缴费", "京东家政", "电力")):
+    if any(word in value for word in ("公共事业缴费", "公用事业缴费", "水费缴纳", "社保缴费", "京东家政", "电力")):
         return PrimaryCategory.DAILY, "HOME_LIVING"
-    if any(word in value for word in ("冲浪", "健身", "运动", "体育")):
+    if any(word in value for word in ("冲浪", "健身", "运动", "体育", "杭州乐刻")):
         return PrimaryCategory.DAILY, "SPORTS_HOBBY"
     if any(word in value for word in ("购物", "merchantx", "男装", "女装", "服饰", "专卖店", "天猫")):
         return PrimaryCategory.DAILY, "SHOPPING"
