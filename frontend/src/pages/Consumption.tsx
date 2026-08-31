@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { AlertTriangle, Check, Download, Loader2, ReceiptText, RefreshCw, WalletCards } from 'lucide-react'
 import EmptyState from '@/components/shared/EmptyState'
 import PageHeader from '@/components/shared/PageHeader'
@@ -230,15 +230,18 @@ export default function Consumption() {
       <SectionTitle title="近 12 个月消费趋势" detail="按自然月展示，柱高为后端已确认的月度总消费。" />
       <div style={{ width: '100%', height: 310, minWidth: 0 }}>
         <ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} axisLine={false} tickLine={false} />
+          <XAxis dataKey="label" tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
+            const isSelected = payload.value === shortMonth(selected.month)
+            return <text data-testid={`trend-month-${payload.value}`} x={x} y={y + 14} textAnchor="middle" fill={isSelected ? '#1D4ED8' : '#6B7280'} fontSize={11} fontWeight={isSelected ? 700 : 400}>{payload.value}</text>
+          }} axisLine={false} tickLine={false} />
           <YAxis tickFormatter={value => `¥${Math.round(value / 1000)}k`} tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} width={42} />
           <Tooltip content={({ active, payload, label }) => { const point = payload?.[0]?.payload as ConsumptionMonthlyPoint | undefined; return active && point ? <TrendTooltip point={point} label={label as string} /> : null }} />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-          {CATEGORY_META.map(item => <Bar key={item.key} dataKey={item.key} name={item.label} stackId="spending" fill={item.color} maxBarSize={42} cursor="pointer" />)}
+          {CATEGORY_META.map(item => <Bar key={item.key} dataKey={item.key} name={item.label} stackId="spending" fill={item.color} maxBarSize={42} cursor="pointer" onClick={(_, index) => {
+            const month = chartData[index]?.month
+            if (month) setSelectedMonth(month)
+          }}>{chartData.map(point => <Cell key={`${item.key}-${point.month}`} data-testid={`trend-bar-${item.key}-${point.month}`} fillOpacity={point.month === selected.month ? 1 : 0.72} />)}</Bar>)}
         </BarChart></ResponsiveContainer>
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '8px 4px 0' }} aria-label="选择月份查看详情">
-        {summary.months.map(item => <button key={item.month} onClick={() => setSelectedMonth(item.month)} aria-pressed={selected.month === item.month} style={{ ...monthButtonStyle, ...(selected.month === item.month ? selectedMonthButtonStyle : {}) }}>{shortMonth(item.month)}</button>)}
       </div>
     </Card>
 
@@ -310,8 +313,6 @@ const kpiLabelStyle: React.CSSProperties = { fontSize: 11, color: '#6B7280', fon
 const kpiValueStyle: React.CSSProperties = { fontSize: 25, lineHeight: 1, color: '#1B2A4A', fontWeight: 750, marginTop: 8 }
 const detailTextStyle: React.CSSProperties = { fontSize: 11, lineHeight: 1.6, color: '#9CA3AF', marginTop: 5 }
 const secondaryButtonStyle: React.CSSProperties = { marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: '#991B1B', border: '1px solid #FCA5A5', padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12 }
-const monthButtonStyle: React.CSSProperties = { border: '1px solid #E5E7EB', background: '#fff', color: '#6B7280', padding: '5px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 11 }
-const selectedMonthButtonStyle: React.CSSProperties = { background: '#EFF6FF', border: '1px solid #93C5FD', color: '#1D4ED8', fontWeight: 700 }
 const tableHeaderStyle: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 1, whiteSpace: 'nowrap', background: '#fff', borderBottom: '1px solid #E5E7EB', padding: '8px 10px', fontSize: 11, color: '#6B7280', fontWeight: 600 }
 const tableCellStyle: React.CSSProperties = { whiteSpace: 'nowrap', borderBottom: '1px solid #F3F4F6', padding: '9px 10px', fontSize: 12, color: '#4B5563' }
 const classifiedPillStyle: React.CSSProperties = { display: 'inline-block', borderRadius: 99, padding: '3px 7px', fontSize: 11, color: '#047857', background: '#ECFDF5' }

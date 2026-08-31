@@ -126,6 +126,9 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('本月消费环比')).toBeVisible()
   await expect(page.getByText('本月尚未结束')).toBeVisible()
   await expect(page.getByText('近 12 个月消费趋势')).toBeVisible()
+  await expect(page.getByRole('button', { name: '7月' })).toHaveCount(0)
+  await expect(page.getByTestId('trend-month-8月')).toHaveAttribute('fill', '#1D4ED8')
+  await expect(page.getByTestId('trend-month-8月')).toHaveAttribute('font-weight', '700')
   await expect(page.getByText('日常消费', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('旅行消费', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('住房消费', { exact: true }).first()).toBeVisible()
@@ -151,7 +154,9 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('保存中…')).toBeVisible()
   await expect(page.getByText('已保存')).toBeVisible()
 
-  await page.getByRole('button', { name: '7月' }).click()
+  await page.getByTestId('trend-bar-daily_cny-2026-08-01').hover()
+  await expect(page.getByText('总消费：', { exact: false })).toBeVisible()
+  await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
   await expect(page.getByText('本月消费 · 2026年7月')).toBeVisible()
   await expect(page.getByText('¥17,400')).toBeVisible()
   await expect(page.getByText('月均 ¥1,450')).toBeVisible()
@@ -163,6 +168,8 @@ test('renders net-spending KPIs and refreshes their rolling window with the sele
   await expect(page.getByText('住宿')).toHaveCount(0)
   await expect(page.getByText('原始账单描述：餐饮')).toBeVisible()
   await expect(page.getByText('房租')).toHaveCount(0)
+  await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('fill', '#1D4ED8')
+  await expect(page.getByTestId('trend-month-7月')).toHaveAttribute('font-weight', '700')
 })
 
 test('shows no month-over-month value when the prior month is zero or missing', async ({ page }) => {
