@@ -51,6 +51,17 @@ class ConsumptionCandidatePage:
     offset: int
 
 
+@dataclass(frozen=True)
+class CandidateBatchConfirmationSummary:
+    """Outcome of one bounded historical candidate-confirmation run."""
+    candidate_count: int
+    candidate_amount_cny: Decimal
+    classified_count: int
+    classified_amount_cny: Decimal
+    needs_review_count: int
+    needs_review_amount_cny: Decimal
+
+
 def _safe_account_display_name(value: str | None, institution: str) -> str:
     label = " ".join((value or f"{institution}账户").split())[:40]
     return re.sub(r"(?:\*{2,})?\d{2,}", "****", label) or f"{institution}账户"
@@ -145,6 +156,74 @@ class ConsumptionCandidateReviewService:
             reason="CANDIDATE_REJECTED_NON_CONSUMPTION",
         )
 
+    def confirm_candidates_in_period(
+        self, *, start_date: date, end_date: date,
+    ) -> CandidateBatchConfirmationSummary:
+        """Confirm the *current* queue in a closed date range exactly once.
+
+        This is intentionally a bounded historical operation rather than a
+        rule: future ambiguous OTHER outflows continue entering the review
+        queue.  Each item first receives a USER_CONFIRMATION for eligibility,
+        then the established deterministic category ladder is evaluated.
+        """
+        if end_date < start_date:
+            raise ValueError("end_date must not precede start_date")
+        event_ids = self._candidate_event_ids(start_date=start_date, end_date=end_date)
+        resolver = ClassificationResolver()
+        classified_count = 0
+        classified_amount = Decimal("0")
+        needs_review_count = 0
+        needs_review_amount = Decimal("0")
+        candidate_amount = Decimal("0")
+        for event_id in event_ids:
+            event, _current = self._current_candidate(event_id)
+            amount = Decimal(event.base_amount) if event.base_amount is not None else Decimal("0")
+            candidate_amount += amount
+            resolver.confirm_event(
+                self.session,
+                event_id,
+                eligibility_status=EligibilityStatus.ELIGIBLE,
+                reason="BATCH_CANDIDATE_CONFIRMED_CONSUMPTION",
+            )
+            self._ensure_consumption_projection(event, reason="BATCH_CANDIDATE_CONFIRMED_CONSUMPTION")
+            interpretation = resolver.classify_confirmed_candidate(self.session, event_id)
+            if interpretation.classification_status == "CLASSIFIED":
+                classified_count += 1
+                classified_amount += amount
+            else:
+                needs_review_count += 1
+                needs_review_amount += amount
+        return CandidateBatchConfirmationSummary(
+            candidate_count=len(event_ids),
+            candidate_amount_cny=candidate_amount,
+            classified_count=classified_count,
+            classified_amount_cny=classified_amount,
+            needs_review_count=needs_review_count,
+            needs_review_amount_cny=needs_review_amount,
+        )
+
+    def _candidate_event_ids(self, *, start_date: date, end_date: date) -> tuple[str, ...]:
+        return tuple(
+            row[0]
+            for row in (
+                self.session.query(EconomicEvent.id)
+                .join(
+                    ConsumptionInterpretation,
+                    (ConsumptionInterpretation.event_id == EconomicEvent.id)
+                    & ConsumptionInterpretation.is_active.is_(True),
+                )
+                .filter(
+                    EconomicEvent.is_active.is_(True),
+                    EconomicEvent.event_type == EventType.OTHER.value,
+                    EconomicEvent.economic_direction == EconomicDirection.OUTFLOW.value,
+                    EconomicEvent.analytics_effective_date >= start_date,
+                    EconomicEvent.analytics_effective_date <= end_date,
+                    ConsumptionInterpretation.eligibility_status == EligibilityStatus.NEEDS_REVIEW.value,
+                )
+                .order_by(EconomicEvent.analytics_effective_date, EconomicEvent.id)
+            )
+        )
+
     def _current_candidate(self, event_id: str) -> tuple[EconomicEvent, ConsumptionInterpretation]:
         event = self.session.get(EconomicEvent, event_id)
         current = self.session.query(ConsumptionInterpretation).filter_by(event_id=event_id, is_active=True).one_or_none()
@@ -159,7 +238,7 @@ class ConsumptionCandidateReviewService:
             raise CandidateReviewError("event is not an active consumption candidate")
         return event, current
 
-    def _ensure_consumption_projection(self, event: EconomicEvent) -> None:
+    def _ensure_consumption_projection(self, event: EconomicEvent, *, reason: str = "CANDIDATE_CONFIRMED_CONSUMPTION") -> None:
         """Create the projection required by Analytics without mutating event facts."""
         gross = Decimal(event.amount)
         base_net = Decimal(event.base_amount) if event.base_amount is not None else None
@@ -180,7 +259,7 @@ class ConsumptionCandidateReviewService:
             net_amount=gross,
             base_currency=event.base_currency,
             base_net_amount=base_net,
-            reason="CANDIDATE_CONFIRMED_CONSUMPTION",
+            reason=reason,
             rule_source=ClassificationSource.USER_CONFIRMATION.value,
             supersedes_revision_id=current.id if current else None,
         ))

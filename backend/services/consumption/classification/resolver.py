@@ -143,6 +143,45 @@ class ClassificationResolver:
             session.flush()
         return created
 
+    def classify_confirmed_candidate(self, session: Session, event_id: str) -> ConsumptionInterpretation:
+        """Apply automatic category evidence after a user confirms eligibility.
+
+        Candidate review deliberately lets a local user answer the upstream
+        question ("is this a consumption?") without turning that answer into a
+        blanket category override.  This keeps eligibility as a protected user
+        confirmation while reusing the ordinary deterministic category ladder.
+        """
+        event = session.get(EconomicEvent, event_id)
+        if event is None:
+            raise ValueError("EconomicEvent not found")
+        current = self._current(session, event_id)
+        if (
+            current is None
+            or not current.user_confirmed
+            or current.eligibility_status != EligibilityStatus.ELIGIBLE.value
+            or current.primary_category is not None
+            or current.secondary_category is not None
+        ):
+            raise ValueError("event is not an unclassified user-confirmed consumption candidate")
+        if EventType(event.event_type) != EventType.OTHER:
+            raise ValueError("event is not a candidate-backed OTHER event")
+
+        _raw, account_id, descriptor = self._evidence(session, event)
+        automatic = self._resolve_consumption_classification(session, event, account_id, descriptor)
+        resolution = Resolution(
+            EligibilityStatus.ELIGIBLE,
+            ClassificationSource.USER_CONFIRMATION,
+            current.eligibility_reason,
+            automatic.classification_status,
+            automatic.primary_category,
+            automatic.secondary_category,
+            automatic.classification_source,
+            automatic.classification_reason,
+            automatic.rule_id,
+            user_confirmed=True,
+        )
+        return self._append_if_changed(session, event_id, resolution, current=current)
+
     def get_effective_classification(self, session: Session, event: EconomicEvent | str) -> ConsumptionInterpretation | None:
         target = session.get(EconomicEvent, event) if isinstance(event, str) else event
         if target is None:
@@ -166,6 +205,12 @@ class ClassificationResolver:
                     None, None, ClassificationSource.UNKNOWN, "OTHER_CONSUMPTION_SEMANTICS_UNCONFIRMED")
             return self._from_rule(rule, other=True)
         # Remaining event type is CONSUMPTION. Rules only influence category, never hard eligibility.
+        return self._resolve_consumption_classification(session, event, account_id, descriptor)
+
+    def _resolve_consumption_classification(
+        self, session: Session, event: EconomicEvent, account_id: str, descriptor: str,
+    ) -> Resolution:
+        """Resolve only the category ladder for an eligible consumption fact."""
         rule = self._matching_rule(session, account_id, descriptor, Decimal(event.amount), event.event_date)
         if rule and rule.primary_category and rule.secondary_category:
             return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",

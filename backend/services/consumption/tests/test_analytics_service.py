@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from backend.api import consumption as consumption_api
 from backend.services.consumption.analytics import ConsumptionAnalyticsService, ConsumptionAnalyticsQueryAdapter
+from backend.services.consumption.candidate_review import ConsumptionCandidateReviewService
 from backend.services.consumption.classification import ClassificationResolver
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, ConsumptionInterpretationAudit, EconomicEvent, EconomicEventProjectionRevision,
@@ -333,3 +334,49 @@ def test_candidate_review_rejects_as_ineligible_without_entering_analytics(db_se
     assert client.get("/api/consumption/candidates?month=2026-05").json()["total"] == 0
     point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,5,31),months=1,account_ids=(debit_id,)).months[0]
     assert point.total_spending_cny == Decimal("0")
+
+
+def test_bounded_candidate_backfill_confirms_only_current_queue_and_reuses_category_rules(db_session):
+    debit=_account(db_session,"batch-debit")
+    auto=_event(
+        db_session,"candidate-auto",account=debit,event_type="OTHER",when=date(2026,7,11),amount="88",net=None,
+        eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None,description="本地拉面店",
+    )
+    unknown=_event(
+        db_session,"candidate-unknown",account=debit,event_type="OTHER",when=date(2026,7,12),amount="12",net=None,
+        eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None,description="用途证据不足",
+    )
+    excluded=_event(
+        db_session,"candidate-user-rule",account=debit,event_type="OTHER",when=date(2026,7,13),amount="50",net=None,
+        eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None,description="明确非消费",
+    )
+    db_session.add(UserClassificationRule(
+        rule_type="TEXT_AMOUNT_SCOPE",eligibility_action="INELIGIBLE",match_text="明确非消费",amount_tolerance=Decimal("0"),status="ACTIVE",
+    ))
+    ClassificationResolver().resolve_event(db_session,excluded)
+    future=_event(
+        db_session,"future-candidate",account=debit,event_type="OTHER",when=date(2026,8,1),amount="9",net=None,
+        eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None,description="未来用途待确认",
+    )
+    db_session.flush()
+
+    service=ConsumptionCandidateReviewService(db_session)
+    summary=service.confirm_candidates_in_period(start_date=date(2026,7,1),end_date=date(2026,7,31))
+    assert summary == type(summary)(
+        candidate_count=2,candidate_amount_cny=Decimal("100"),classified_count=1,classified_amount_cny=Decimal("88"),
+        needs_review_count=1,needs_review_amount_cny=Decimal("12"),
+    )
+    current_auto=db_session.query(ConsumptionInterpretation).filter_by(event_id=auto.id,is_active=True).one()
+    current_unknown=db_session.query(ConsumptionInterpretation).filter_by(event_id=unknown.id,is_active=True).one()
+    current_excluded=db_session.query(ConsumptionInterpretation).filter_by(event_id=excluded.id,is_active=True).one()
+    assert (current_auto.user_confirmed,current_auto.eligibility_source,current_auto.primary_category,current_auto.secondary_category) == (True,"USER_CONFIRMATION","DAILY","FOOD_DINING")
+    assert (current_unknown.user_confirmed,current_unknown.eligibility_source,current_unknown.classification_status) == (True,"USER_CONFIRMATION","NEEDS_REVIEW")
+    assert (current_excluded.eligibility_status,current_excluded.eligibility_source,current_excluded.user_confirmed) == ("INELIGIBLE","USER_RULE",False)
+    assert db_session.query(ConsumptionInterpretationAudit).filter(ConsumptionInterpretationAudit.event_id.in_((auto.id,unknown.id))).count() == 2
+    assert db_session.query(EconomicEventProjectionRevision).filter_by(event_id=auto.id,is_active=True).one().base_net_amount == Decimal("88")
+    point=ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,7,31),months=1,account_ids=(debit.id,)).months[0]
+    assert (point.total_spending_cny,point.daily_cny,point.unclassified_eligible_cny) == (Decimal("100"),Decimal("88"),Decimal("12"))
+    assert service.list_candidates(month=date(2026,7,1)).total == 0
+    assert service.list_candidates(month=date(2026,8,1)).total == 1
+    assert service.confirm_candidates_in_period(start_date=date(2026,7,1),end_date=date(2026,7,31)).candidate_count == 0
+    assert db_session.query(ConsumptionInterpretation).filter_by(event_id=future.id,is_active=True).one().eligibility_status == "NEEDS_REVIEW"
