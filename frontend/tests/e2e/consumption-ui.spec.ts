@@ -251,6 +251,29 @@ test('shows no month-over-month value when the prior month is zero or missing', 
   await expect(page.getByText('暂无可比上月数据')).toBeVisible()
 })
 
+test('hides the candidate review module when the selected month has no candidates', async ({ page }) => {
+  await mockDemo(page)
+  await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: analyticsResponse }))
+  await page.route('**/api/consumption/candidates*', route => {
+    const month = new URL(route.request().url()).searchParams.get('month')
+    return route.fulfill({ json: month === '2026-07'
+      ? {
+          month: '2026-07-01', total: 1, limit: 100, offset: 0,
+          items: [{ event_id: 'candidate-july', analytics_effective_date: '2026-07-16', raw_description: '用途待确认', account_display_name: 'CMB Debit ****', source_label: 'CMB Debit', amount_cny: '88', currency: 'CNY' }],
+        }
+      : { month: `${month}-01`, total: 0, limit: 100, offset: 0, items: [] },
+    })
+  })
+  await page.goto('/#/consumption')
+
+  await expect(page.getByText('消费候选待确认', { exact: true })).toHaveCount(0)
+  await page.getByTestId('trend-bar-daily_cny-2026-07-01').click()
+  await expect(page.getByText('消费候选待确认', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('consumption-candidate-candidate-july')).toBeVisible()
+  await page.getByTestId('trend-bar-daily_cny-2026-08-01').click()
+  await expect(page.getByText('消费候选待确认', { exact: true })).toHaveCount(0)
+})
+
 test('aggregates rolling secondary breakdowns from the same twelve-month window', async ({ page }) => {
   await mockDemo(page)
   await page.route('**/api/consumption/analytics*', route => route.fulfill({ json: completeSecondaryResponse }))

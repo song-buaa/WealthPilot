@@ -150,7 +150,7 @@ export default function Consumption() {
   const [details, setDetails] = useState<ConsumptionEventDetail[]>([])
   const [candidates, setCandidates] = useState<ConsumptionCandidate[]>([])
   const [candidateTotal, setCandidateTotal] = useState(0)
-  const [candidateLoading, setCandidateLoading] = useState(false)
+  const [candidateMonth, setCandidateMonth] = useState<string | null>(null)
   const [candidateActions, setCandidateActions] = useState<Record<string, CandidateActionState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, ClassificationDraft>>({})
   const [detailReloadVersion, setDetailReloadVersion] = useState(0)
@@ -236,11 +236,9 @@ export default function Consumption() {
     let active = true
     void Promise.resolve().then(() => {
       if (!active) return
-      setCandidateLoading(true)
       return consumptionApi.getCandidates({ month: selectedMonth.slice(0, 7), limit: 100, offset: 0 })
-        .then(value => { if (active) { setCandidates(value.items); setCandidateTotal(value.total) } })
-        .catch(() => { if (active) { setCandidates([]); setCandidateTotal(0) } })
-        .finally(() => { if (active) setCandidateLoading(false) })
+        .then(value => { if (active) { setCandidates(value.items); setCandidateTotal(value.total); setCandidateMonth(selectedMonth) } })
+        .catch(() => { if (active) { setCandidates([]); setCandidateTotal(0); setCandidateMonth(selectedMonth) } })
     })
     return () => { active = false }
   }, [selectedMonth])
@@ -386,18 +384,16 @@ export default function Consumption() {
       </div>
     </Card>
 
-    <ConsumptionCandidateCard
-      month={selected.month}
+    {candidateMonth === selectedMonth && candidateTotal > 0 && candidates.length > 0 && <ConsumptionCandidateCard
       items={candidates}
       total={candidateTotal}
-      loading={candidateLoading}
       drafts={candidateDrafts}
       actions={candidateActions}
       onDraftChange={updateCandidateDraft}
       onCancel={eventId => setCandidateDrafts(current => { const next = { ...current }; delete next[eventId]; return next })}
       onConfirm={confirmCandidate}
       onReject={rejectCandidate}
-    />
+    />}
 
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
@@ -481,11 +477,9 @@ function ConsumptionStructureCard({ data, testIdPrefix = '' }: { data: Consumpti
   </Card>
 }
 
-function ConsumptionCandidateCard({ month, items, total, loading, drafts, actions, onDraftChange, onCancel, onConfirm, onReject }: {
-  month: string
+function ConsumptionCandidateCard({ items, total, drafts, actions, onDraftChange, onCancel, onConfirm, onReject }: {
   items: ConsumptionCandidate[]
   total: number
-  loading: boolean
   drafts: Record<string, ClassificationDraft>
   actions: Record<string, CandidateActionState>
   onDraftChange: (eventId: string, draft: ClassificationDraft) => void
@@ -494,13 +488,11 @@ function ConsumptionCandidateCard({ month, items, total, loading, drafts, action
   onReject: (candidate: ConsumptionCandidate) => void
 }) {
   return <Card style={{ padding: '18px 20px 16px', marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
       <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>消费候选待确认</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>这些是用途尚不明确的资金流出；确认后才会进入消费分析。</div></div>
-      {!loading && total > 0 && <span style={candidateCountStyle}>{total} 笔</span>}
+      <span style={candidateCountStyle}>{total} 笔</span>
     </div>
-    {loading ? <div aria-label="正在加载消费候选" style={{ height: 62, borderRadius: 8, background: '#F9FAFB', marginTop: 14 }} />
-      : items.length === 0 ? <LightEmpty text={`${monthLabel(month)}暂无待确认的消费候选`} />
-      : <div style={candidateTableScrollStyle}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}><thead><tr>{['日期', '原始交易描述', '账户 / 来源', '金额', '当前状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 3 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map(candidate => {
+    <div style={candidateTableScrollStyle}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}><thead><tr>{['日期', '原始交易描述', '账户 / 来源', '金额', '当前状态', '操作'].map((label, index) => <th key={label} style={{ ...tableHeaderStyle, textAlign: index === 3 ? 'right' : 'left' }}>{label}</th>)}</tr></thead><tbody>{items.map(candidate => {
         const draft = drafts[candidate.event_id]
         const action = actions[candidate.event_id]
         const secondaryOptions = draft ? EDITABLE_TAXONOMY[draft.primary] : []
@@ -525,7 +517,7 @@ function ConsumptionCandidateCard({ month, items, total, loading, drafts, action
             <button type="button" disabled={busy} onClick={() => onReject(candidate)} style={candidateRejectButtonStyle}>{action?.state === 'rejecting' ? <><Loader2 size={12} className="animate-spin" /> 保存中…</> : '非消费'}</button>
           </div>}{action?.state === 'error' && <div style={candidateErrorStyle}>保存失败，请重试</div>}</td>
         </tr>
-      })}</tbody></table></div>}
+      })}</tbody></table></div>
   </Card>
 }
 
