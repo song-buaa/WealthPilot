@@ -12,10 +12,10 @@ import {
 import { fmtCny, fmtPct } from '@/lib/fmt'
 
 const CATEGORY_META = [
-  { key: 'daily_cny', label: '日常消费', color: '#6F8FB8' },
-  { key: 'housing_cny', label: '住房消费', color: '#78A995' },
-  { key: 'travel_cny', label: '旅行消费', color: '#A08CB8' },
-  { key: 'unclassified_eligible_cny', label: '待分类', color: '#D6A76A' },
+  { key: 'daily_cny', label: '日常消费', color: '#3B82F6' },
+  { key: 'housing_cny', label: '住房消费', color: '#10B981' },
+  { key: 'travel_cny', label: '旅行消费', color: '#8B5CF6' },
+  { key: 'unclassified_eligible_cny', label: '待分类', color: '#F59E0B' },
 ] as const
 const STACK_RENDER_META = [...CATEGORY_META].reverse()
 
@@ -277,7 +277,7 @@ export default function Consumption() {
 }
 
 function TrendTooltip({ point, label }: { point: ConsumptionMonthlyPoint; label: string }) {
-  return <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '9px 11px', boxShadow: '0 4px 12px rgba(15,30,53,0.12)', fontSize: 12, lineHeight: 1.8, color: '#374151' }}><div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 3 }}>{label}</div><div>总消费：<b>{fmtCny(toNumber(point.total_spending_cny))}</b></div>{CATEGORY_META.map(item => <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span data-testid={`trend-tooltip-key-${item.key}`} style={{ width: 6, height: 6, borderRadius: 99, background: item.color }} />{item.label}：{fmtCny(toNumber(point[item.key]))}</div>)}<div>分类覆盖率：{coverageRate(point) == null ? '—' : fmtPct(coverageRate(point))}</div>{!point.amount_complete && <div style={{ color: '#B45309', marginTop: 3 }}>部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}</div>
+  return <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '9px 11px', boxShadow: '0 4px 12px rgba(15,30,53,0.12)', fontSize: 12, lineHeight: 1.8, color: '#374151' }}><div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 3 }}>{label}</div><div>总消费：<b>{fmtCny(toNumber(point.total_spending_cny))}</b></div>{CATEGORY_META.map(item => <div key={item.key}>{item.label}：{fmtCny(toNumber(point[item.key]))}</div>)}<div>分类覆盖率：{coverageRate(point) == null ? '—' : fmtPct(coverageRate(point))}</div>{!point.amount_complete && <div style={{ color: '#B45309', marginTop: 3 }}>部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}</div>
 }
 
 function CategoryRow({ label, color, amount, share }: { label: string; color: string; amount: number; share: number | null }) {
