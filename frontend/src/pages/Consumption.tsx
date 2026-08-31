@@ -17,6 +17,7 @@ const CATEGORY_META = [
   { key: 'housing_cny', label: '住房消费', color: '#10B981' },
   { key: 'unclassified_eligible_cny', label: '待分类', color: '#F59E0B' },
 ] as const
+const STACK_RENDER_META = [...CATEGORY_META].reverse()
 
 const SECONDARY_LABELS: Record<string, string> = {
   FOOD_DINING: '餐饮', TRANSPORT_AUTO: '交通用车', SHOPPING: '购物', HOME_LIVING: '居家生活',
@@ -236,8 +237,8 @@ export default function Consumption() {
           }} axisLine={false} tickLine={false} />
           <YAxis tickFormatter={value => `¥${Math.round(value / 1000)}k`} tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} width={42} />
           <Tooltip content={({ active, payload, label }) => { const point = payload?.[0]?.payload as ConsumptionMonthlyPoint | undefined; return active && point ? <TrendTooltip point={point} label={label as string} /> : null }} />
-          <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-          {CATEGORY_META.map(item => <Bar key={item.key} dataKey={item.key} name={item.label} stackId="spending" fill={item.color} maxBarSize={42} cursor="pointer" onClick={(_, index) => {
+          <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} payload={CATEGORY_META.map(item => ({ id: item.key, value: item.label, type: 'circle', color: item.color }))} />
+          {STACK_RENDER_META.map(item => <Bar key={item.key} dataKey={item.key} name={item.label} stackId="spending" fill={item.color} maxBarSize={42} cursor="pointer" onClick={(_, index) => {
             const month = chartData[index]?.month
             if (month) setSelectedMonth(month)
           }}>{chartData.map(point => <Cell key={`${item.key}-${point.month}`} data-testid={`trend-bar-${item.key}-${point.month}`} fillOpacity={point.month === selected.month ? 1 : 0.72} />)}</Bar>)}
