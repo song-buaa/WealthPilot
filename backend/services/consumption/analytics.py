@@ -55,6 +55,18 @@ class ConsumptionAnalyticsQueryAdapter:
             return tuple(sorted(set(selected)))
         return tuple(row.id for row in self.session.query(Account).filter_by(status="ACTIVE").order_by(Account.id))
 
+    def latest_consumption_date(self, account_ids: tuple[str, ...]) -> date | None:
+        """Return the latest actual eligible consumption fact, never a calendar placeholder."""
+        events = self.active_events(account_ids, date.min, date.max)
+        dates = [
+            projection.analytics_effective_date
+            for projection, interpretation in events
+            if projection.event_type in {EventType.CONSUMPTION, EventType.OTHER}
+            and interpretation.eligibility_status == EligibilityStatus.ELIGIBLE
+            and projection.base_net_amount is not None
+        ]
+        return max(dates, default=None)
+
     def active_events(self, account_ids: tuple[str, ...], start: date, end: date):
         output=[]; seen=set()
         if account_ids:
@@ -263,13 +275,14 @@ class ConsumptionAnalyticsService:
     """Read-only deterministic service. No LLM, network, Raw aggregation, or mutation."""
     def __init__(self, session: Session): self.adapter=ConsumptionAnalyticsQueryAdapter(session)
 
-    def summary(self, *, as_of: date, months: int = 12, account_ids: tuple[str, ...] | None = None) -> SpendingSummary:
+    def summary(self, *, as_of: date | None = None, months: int = 12, account_ids: tuple[str, ...] | None = None) -> SpendingSummary:
         if not 1 <= months <= 24: raise ValueError("months must be between 1 and 24")
         accounts=self.adapter.expected_account_ids(account_ids)
-        start=date(as_of.year, as_of.month, 1)
+        effective_as_of = as_of or self.adapter.latest_consumption_date(accounts) or date.today()
+        start=date(effective_as_of.year, effective_as_of.month, 1)
         for _ in range(months-1): start=date(start.year - (start.month == 1), 12 if start.month == 1 else start.month-1, 1)
-        pairs=self.adapter.active_events(accounts,start,as_of)
-        return evaluate_spending((item[0] for item in pairs),(item[1] for item in pairs),self.adapter.coverage(accounts,start,as_of),as_of_date=as_of,expected_account_ids=accounts,month_count=months)
+        pairs=self.adapter.active_events(accounts,start,effective_as_of)
+        return evaluate_spending((item[0] for item in pairs),(item[1] for item in pairs),self.adapter.coverage(accounts,start,effective_as_of),as_of_date=effective_as_of,expected_account_ids=accounts,month_count=months)
 
     def monthly_detail(
         self,

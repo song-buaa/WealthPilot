@@ -77,6 +77,29 @@ def test_scope_coverage_partial_and_bounded_months(db_session):
     with pytest.raises(ValueError): ConsumptionAnalyticsService(db_session).summary(as_of=date(2026,8,10),months=25)
 
 
+def test_default_summary_window_anchors_to_latest_actual_consumption_month(db_session, monkeypatch):
+    card = _account(db_session, "latest-card")
+    _event(db_session, "august-consumption", account=card, when=date(2026, 8, 20), amount="100", net="100")
+    monkeypatch.setattr(consumption_api, "get_session", lambda: db_session)
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(consumption_api.router, prefix="/api/consumption")
+    client = TestClient(app)
+
+    august_window = client.get("/api/consumption/analytics?months=12")
+    assert august_window.status_code == 200
+    assert [item["month"] for item in august_window.json()["months"]] == [
+        f"{year:04d}-{month:02d}-01"
+        for year, month in ((2025, 9), (2025, 10), (2025, 11), (2025, 12), (2026, 1), (2026, 2), (2026, 3), (2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8))
+    ]
+
+    _event(db_session, "september-consumption", account=card, when=date(2026, 9, 1), amount="80", net="80")
+    db_session.commit()
+    september_window = client.get("/api/consumption/analytics?months=12")
+    assert (september_window.json()["months"][0]["month"], september_window.json()["months"][-1]["month"]) == (
+        "2025-10-01", "2026-09-01",
+    )
+
+
 def test_production_case_v_inactive_interpretation_is_ignored(db_session):
     card=_account(db_session); event=_event(db_session,"interpretation",account=card)
     old=db_session.query(ConsumptionInterpretation).filter_by(event_id=event.id,is_active=True).one(); old.is_active=False
