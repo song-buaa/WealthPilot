@@ -39,6 +39,12 @@ type AutosaveState = { state: 'saving' | 'saved' | 'error'; draft: Classificatio
 type DetailClassificationFilter = 'ALL' | 'CLASSIFIED' | 'NEEDS_REVIEW'
 type KpiWindow = { endingMonth: string; summary: ConsumptionAnalyticsSummary }
 
+const SECONDARY_TAB_META: Array<{ key: EditablePrimary; label: string }> = [
+  { key: 'DAILY', label: '日常消费' },
+  { key: 'HOUSING', label: '住房消费' },
+  { key: 'TRAVEL', label: '旅行消费' },
+]
+
 function toNumber(value: string | null | undefined): number { return value == null ? 0 : Number(value) }
 function monthLabel(month: string): string { const [year, value] = month.split('-'); return `${year}年${Number(value)}月` }
 function shortMonth(month: string): string { return `${Number(month.slice(5, 7))}月` }
@@ -77,6 +83,7 @@ export default function Consumption() {
   const [detailSecondaryFilter, setDetailSecondaryFilter] = useState('')
   const [editing, setEditing] = useState<Record<string, ClassificationDraft>>({})
   const [autosaveStates, setAutosaveStates] = useState<Record<string, AutosaveState>>({})
+  const [secondaryTabSelection, setSecondaryTabSelection] = useState<{ month: string; primary: EditablePrimary } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const autosaveTimers = useRef<Record<string, number>>({})
@@ -110,6 +117,22 @@ export default function Consumption() {
     () => summary?.months.find(item => item.month === selectedMonth) ?? summary?.months.at(-1) ?? null,
     [selectedMonth, summary],
   )
+
+  const defaultSecondaryPrimary = useMemo<EditablePrimary | null>(() => {
+    if (!selected) return null
+    const amounts: Record<EditablePrimary, number> = {
+      DAILY: toNumber(selected.daily_cny),
+      HOUSING: toNumber(selected.housing_cny),
+      TRAVEL: toNumber(selected.travel_cny),
+    }
+    return SECONDARY_TAB_META
+      .filter(item => amounts[item.key] > 0)
+      .sort((left, right) => amounts[right.key] - amounts[left.key])[0]?.key ?? null
+  }, [selected])
+
+  const activeSecondaryPrimary = secondaryTabSelection?.month === selectedMonth
+    ? secondaryTabSelection.primary
+    : defaultSecondaryPrimary
 
   useEffect(() => {
     const task = window.setTimeout(load, 0)
@@ -246,17 +269,6 @@ export default function Consumption() {
       </div>
     </Card>
 
-    <div style={{ marginTop: 16 }}>
-      <Card style={{ padding: 20 }}>
-        <SectionTitle title={`${monthLabel(selected.month)}消费结构`} detail="待分类是已确认但尚未归类的消费状态，并非第四个业务分类。" />
-        <div style={{ display: 'grid', gap: 12 }}>{CATEGORY_META.map(item => <CategoryRow key={item.key} label={item.label} color={item.color} amount={toNumber(selected[item.key])} share={categoryShare(selected, item.key)} />)}</div>
-        <div style={{ borderTop: '1px solid #F3F4F6', margin: '18px 0 14px' }} />
-        <div style={{ fontSize: 13, color: '#1B2A4A', fontWeight: 700 }}>{monthLabel(selected.month)}二级分类</div>
-        <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅展示该月已完成分类的消费。</div>
-        <div style={{ marginTop: 12 }}>{selected.secondary_breakdowns.length === 0 ? <LightEmpty text="该月暂无已完成分类的二级消费数据。" /> : <SecondaryBreakdowns breakdowns={selected.secondary_breakdowns} />}</div>
-      </Card>
-    </div>
-
     <Card style={{ padding: '20px 20px 16px', marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div><div style={{ fontSize: 14, color: '#1B2A4A', fontWeight: 700 }}>{monthLabel(selected.month)}消费明细</div><div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>仅显示已确认纳入消费分析的记录；消费名称直接来自原始账单描述。</div></div>
@@ -273,6 +285,12 @@ export default function Consumption() {
       </div>
       <MonthlyDetailTable items={details} total={detailTotal} loading={detailLoading} error={detailError} editing={editing} autosaveStates={autosaveStates} onChange={scheduleClassificationSave} />
     </Card>
+
+    <ConsumptionStructureCard
+      point={selected}
+      activePrimary={activeSecondaryPrimary}
+      onSelectPrimary={primary => setSecondaryTabSelection({ month: selected.month, primary })}
+    />
   </div>
 }
 
@@ -280,14 +298,46 @@ function TrendTooltip({ point, label }: { point: ConsumptionMonthlyPoint; label:
   return <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '9px 11px', boxShadow: '0 4px 12px rgba(15,30,53,0.12)', fontSize: 12, lineHeight: 1.8, color: '#374151' }}><div style={{ fontWeight: 700, color: '#1B2A4A', marginBottom: 3 }}>{label}</div><div>总消费：<b>{fmtCny(toNumber(point.total_spending_cny))}</b></div>{CATEGORY_META.map(item => <div key={item.key}>{item.label}：{fmtCny(toNumber(point[item.key]))}</div>)}<div>分类覆盖率：{coverageRate(point) == null ? '—' : fmtPct(coverageRate(point))}</div>{!point.amount_complete && <div style={{ color: '#B45309', marginTop: 3 }}>部分外币消费尚未完成人民币金额换算，当前为已知金额。</div>}</div>
 }
 
-function CategoryRow({ label, color, amount, share }: { label: string; color: string; amount: number; share: number | null }) {
-  return <div><div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#4B5563' }}><span style={{ width: 8, height: 8, borderRadius: 99, background: color }} />{label}</div><div className="tabular-nums" style={{ fontSize: 14, fontWeight: 700, color: '#1B2A4A' }}>{fmtCny(amount)}</div></div><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}><div style={{ height: 6, background: '#EEF2F7', borderRadius: 99, flex: 1 }}><div style={{ width: `${Math.min(100, share ?? 0)}%`, height: '100%', background: color, borderRadius: 99 }} /></div><span style={{ minWidth: 38, textAlign: 'right', fontSize: 11, color: '#9CA3AF' }}>{share == null ? '—' : fmtPct(share)}</span></div></div>
-}
+function ConsumptionStructureCard({ point, activePrimary, onSelectPrimary }: { point: ConsumptionMonthlyPoint; activePrimary: EditablePrimary | null; onSelectPrimary: (primary: EditablePrimary) => void }) {
+  const total = toNumber(point.total_spending_cny)
+  const primaryRows = CATEGORY_META.map(item => ({
+    ...item,
+    amount: toNumber(point[item.key]),
+    share: categoryShare(point, item.key),
+  }))
+  const secondaryItems = activePrimary == null
+    ? []
+    : point.secondary_breakdowns.filter(item => item.primary_category === activePrimary)
 
-function SecondaryBreakdowns({ breakdowns }: { breakdowns: ConsumptionAnalyticsSummary['secondary_breakdowns'] }) {
-  const groups = ['DAILY', 'TRAVEL', 'HOUSING'] as const
-  const labels = { DAILY: '日常消费', TRAVEL: '旅行消费', HOUSING: '住房消费' }
-  return <div style={{ display: 'grid', gap: 14 }}>{groups.map(primary => { const items = breakdowns.filter(item => item.primary_category === primary); if (items.length === 0) return null; return <div key={primary}><div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 7 }}>{labels[primary]}</div><div style={{ display: 'grid', gap: 7 }}>{items.map(item => <div key={`${primary}-${item.secondary_category}`}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, color: '#4B5563' }}><span>{SECONDARY_LABELS[item.secondary_category] ?? item.secondary_category}</span><span className="tabular-nums">{fmtCny(toNumber(item.amount_cny))}</span></div><div style={{ height: 5, background: '#EEF2F7', borderRadius: 99, marginTop: 4 }}><div style={{ width: `${Math.min(100, toNumber(item.share_within_primary) * 100)}%`, height: '100%', background: '#60A5FA', borderRadius: 99 }} /></div></div>)}</div></div> })}</div>
+  return <Card style={{ padding: 20, marginTop: 16 }}>
+    <SectionTitle title={`${monthLabel(point.month)}消费结构`} detail="待分类是已确认但尚未归类的消费状态，并非第四个业务分类。" />
+    <div style={structureGridStyle}>
+      <div style={primaryStructureStyle}>
+        <div style={structureColumnTitleStyle}>一级分类总览</div>
+        <div aria-label="一级分类占比" style={stackedBarStyle}>
+          {total > 0 && primaryRows.filter(item => item.amount > 0).map(item => <div key={item.key} style={{ width: `${item.share ?? 0}%`, height: '100%', background: item.color }} />)}
+        </div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+          {primaryRows.map(item => <div key={item.key} style={primaryLegendRowStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 7 }}><span style={{ width: 8, height: 8, flexShrink: 0, borderRadius: 99, background: item.color }} /><span style={{ fontSize: 12, color: '#4B5563' }}>{item.label}</span></div>
+            <div className="tabular-nums" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'end', gap: 9 }}><span style={{ fontSize: 13, fontWeight: 700, color: '#1B2A4A' }}>{fmtCny(item.amount)}</span><span style={{ width: 40, textAlign: 'right', fontSize: 11, color: '#9CA3AF' }}>{item.share == null ? '—' : fmtPct(item.share)}</span></div>
+          </div>)}
+        </div>
+      </div>
+      <div>
+        <div style={structureColumnTitleStyle}>二级分类明细</div>
+        <div role="tablist" aria-label="二级分类" style={secondaryTabListStyle}>
+          {SECONDARY_TAB_META.map(item => {
+            const active = activePrimary === item.key
+            return <button key={item.key} type="button" role="tab" aria-selected={active} data-testid={`secondary-category-tab-${item.key}`} onClick={() => onSelectPrimary(item.key)} style={{ ...secondaryTabStyle, ...(active ? secondaryTabActiveStyle : {}) }}>{item.label}</button>
+          })}
+        </div>
+        {activePrimary == null || secondaryItems.length === 0
+          ? <LightEmpty text="当前分类暂无消费明细" />
+          : <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>{secondaryItems.map(item => <div key={`${item.primary_category}-${item.secondary_category}`}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B5563', fontSize: 12 }}><span>{SECONDARY_LABELS[item.secondary_category] ?? item.secondary_category}</span><span className="tabular-nums" style={{ display: 'flex', gap: 9 }}><b style={{ color: '#1B2A4A' }}>{fmtCny(toNumber(item.amount_cny))}</b><span style={{ width: 40, textAlign: 'right', color: '#9CA3AF' }}>{fmtPct(toNumber(item.share_within_primary) * 100)}</span></span></div><div style={{ height: 5, overflow: 'hidden', borderRadius: 99, background: '#EEF2F7', marginTop: 5 }}><div style={{ width: `${Math.min(100, toNumber(item.share_within_primary) * 100)}%`, height: '100%', borderRadius: 99, background: '#60A5FA' }} /></div></div>)}</div>}
+      </div>
+    </div>
+  </Card>
 }
 
 function MonthlyDetailTable({ items, total, loading, error, editing, autosaveStates, onChange }: { items: ConsumptionEventDetail[]; total: number; loading: boolean; error: string | null; editing: Record<string, ClassificationDraft>; autosaveStates: Record<string, AutosaveState>; onChange: (item: ConsumptionEventDetail, draft: ClassificationDraft) => void }) {
@@ -326,3 +376,11 @@ const selectStyle: React.CSSProperties = { maxWidth: 126, border: '1px solid #E5
 const autosaveSavingStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#6B7280', fontSize: 11 }
 const autosaveSavedStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, color: '#047857', fontSize: 11 }
 const retryButtonStyle: React.CSSProperties = { border: 'none', padding: 0, background: 'transparent', color: '#B91C1C', cursor: 'pointer', fontSize: 11 }
+const structureGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 0.92fr) minmax(0, 1.08fr)', gap: 24 }
+const primaryStructureStyle: React.CSSProperties = { paddingRight: 24, borderRight: '1px solid #F3F4F6' }
+const structureColumnTitleStyle: React.CSSProperties = { color: '#374151', fontSize: 12, fontWeight: 700 }
+const stackedBarStyle: React.CSSProperties = { display: 'flex', overflow: 'hidden', height: 10, marginTop: 13, borderRadius: 99, background: '#EEF2F7' }
+const primaryLegendRowStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 12 }
+const secondaryTabListStyle: React.CSSProperties = { display: 'flex', gap: 5, marginTop: 9, borderBottom: '1px solid #F3F4F6' }
+const secondaryTabStyle: React.CSSProperties = { border: 'none', borderBottom: '2px solid transparent', padding: '6px 7px 8px', marginBottom: -1, background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 12, fontWeight: 600 }
+const secondaryTabActiveStyle: React.CSSProperties = { borderBottomColor: '#3B82F6', color: '#1D4ED8' }
