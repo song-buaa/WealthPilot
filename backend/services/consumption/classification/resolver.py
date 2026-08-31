@@ -55,7 +55,7 @@ def _specific_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
     if any(word in value for word in ("酒店", "hotel", "宾馆")):
         return PrimaryCategory.TRAVEL, "ACCOMMODATION"
     if any(word in value for word in (
-        "vercel", "cursor", "cloudflare", "googleone", "appstore", "云上艾珀", "中国联通",
+        "vercel", "cursor", "cloudflare", "googleone", "appstore", "云上艾珀", "中国联通", "中国移动",
     )):
         return PrimaryCategory.DAILY, "DIGITAL_COMMUNICATION"
     return None
@@ -76,7 +76,7 @@ def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
         return PrimaryCategory.DAILY, "TRANSPORT_AUTO"
     if any(word in value for word in ("宠物", "猫粮", "猫砂")):
         return PrimaryCategory.DAILY, "PET"
-    if any(word in value for word in ("公共事业缴费", "社保缴费", "京东家政")):
+    if any(word in value for word in ("公共事业缴费", "社保缴费", "京东家政", "电力")):
         return PrimaryCategory.DAILY, "HOME_LIVING"
     if any(word in value for word in ("冲浪", "健身", "运动", "体育")):
         return PrimaryCategory.DAILY, "SPORTS_HOBBY"
