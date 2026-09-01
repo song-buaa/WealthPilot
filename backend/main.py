@@ -28,6 +28,7 @@ from backend.api import philosophy as philosophy_api
 from backend.api import execution_plan as execution_plan_api
 from backend.api import execution_batch as execution_batch_api
 from backend.api import consumption as consumption_api
+from backend.api import wealth as wealth_api
 
 
 @asynccontextmanager
@@ -193,6 +194,7 @@ app.include_router(
     tags=["execution-batches"],
 )
 app.include_router(consumption_api.router, prefix="/api/consumption", tags=["consumption"])
+app.include_router(wealth_api.router, prefix="/api/wealth", tags=["wealth"])
 
 # Demo API
 from backend.api import demo as demo_api
