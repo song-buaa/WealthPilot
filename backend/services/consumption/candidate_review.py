@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+import json
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -23,6 +24,10 @@ from backend.services.consumption.economic_events import EconomicDirection, Even
 from backend.services.consumption.models import (
     Account, ConsumptionInterpretation, EconomicEvent,
     EconomicEventProjectionRevision, EventRawLink, ImportBatch, RawTransaction,
+)
+from backend.services.consumption.normalization.rules import (
+    classify_source,
+    has_explicit_internal_transfer_marker,
 )
 from backend.services.consumption.presentation import account_display_label
 
@@ -125,6 +130,7 @@ class ConsumptionCandidateReviewService:
                 currency=event.currency,
             )
             for event, _interpretation, raw, account, batch in rows
+            if self._source_facts_support_candidate(event)
         )
         return ConsumptionCandidatePage(month=month, items=items[offset:offset + limit], total=len(items), limit=limit, offset=offset)
 
@@ -199,9 +205,8 @@ class ConsumptionCandidateReviewService:
         )
 
     def _candidate_event_ids(self, *, start_date: date, end_date: date) -> tuple[str, ...]:
-        return tuple(
-            row[0]
-            for row in (
+        event_ids = tuple(
+            row[0] for row in (
                 self.session.query(EconomicEvent.id)
                 .join(
                     ConsumptionInterpretation,
@@ -219,6 +224,7 @@ class ConsumptionCandidateReviewService:
                 .order_by(EconomicEvent.analytics_effective_date, EconomicEvent.id)
             )
         )
+        return tuple(event_id for event_id in event_ids if self._source_facts_support_candidate_id(event_id))
 
     def _current_candidate(self, event_id: str) -> tuple[EconomicEvent, ConsumptionInterpretation]:
         event = self.session.get(EconomicEvent, event_id)
@@ -230,9 +236,53 @@ class ConsumptionCandidateReviewService:
             or event.event_type != EventType.OTHER.value
             or event.economic_direction != EconomicDirection.OUTFLOW.value
             or current.eligibility_status != EligibilityStatus.NEEDS_REVIEW.value
+            or not self._source_facts_support_candidate(event)
         ):
             raise CandidateReviewError("event is not an active consumption candidate")
         return event, current
+
+    def _source_facts_support_candidate_id(self, event_id: str) -> bool:
+        event = self.session.get(EconomicEvent, event_id)
+        return event is not None and self._source_facts_support_candidate(event)
+
+    def _source_facts_support_candidate(self, event: EconomicEvent) -> bool:
+        """Allow review only for source-ambiguous outgoing facts.
+
+        Candidate confirmation is intentionally not an override for a source
+        statement's explicit economic semantics.  This rechecks active Raw
+        evidence at read, single-confirm, and batch-confirm boundaries so a
+        stale ``OTHER`` Event cannot promote a refund, repayment, transfer,
+        fee, income, or other source-supported non-consumption fact.
+        """
+        raws = (
+            self.session.query(RawTransaction)
+            .join(EventRawLink, EventRawLink.raw_transaction_id == RawTransaction.id)
+            .filter(
+                EventRawLink.event_id == event.id,
+                EventRawLink.is_active.is_(True),
+                RawTransaction.is_active.is_(True),
+            )
+            .all()
+        )
+        if not raws:
+            return False
+        for raw in raws:
+            try:
+                source_section = json.loads(raw.parser_provenance or "{}").get("statement_section")
+            except (TypeError, ValueError):
+                source_section = None
+            evidence = classify_source(
+                raw_description=raw.raw_description,
+                account_type=raw.account.account_type,
+                source_amount=Decimal(raw.amount),
+                source_section=source_section,
+            )
+            if (
+                evidence.event_type != EventType.OTHER
+                or has_explicit_internal_transfer_marker(raw.raw_description)
+            ):
+                return False
+        return True
 
     def _ensure_consumption_projection(self, event: EconomicEvent, *, reason: str = "CANDIDATE_CONFIRMED_CONSUMPTION") -> None:
         """Create the projection required by Analytics without mutating event facts."""

@@ -286,9 +286,21 @@ class EconomicEventNormalizer:
             )
             if already_current:
                 continue
+            # A user category may refine an otherwise valid consumption fact,
+            # but it cannot turn an explicit bank-statement refund or
+            # repayment section into consumption.  This narrowly lets a
+            # corrected source fact supersede a stale Event even if that stale
+            # Event was subsequently annotated or classified by a user.
+            source_semantics_override = evidence.reason in {
+                "SOURCE_STATEMENT_REFUND_SECTION",
+                "SOURCE_STATEMENT_REPAYMENT_SECTION",
+            }
             if (
-                self._has_user_explicit_interpretation(session, current_event_ids)
-                or self._has_user_note(session, current_event_ids)
+                not source_semantics_override
+                and (
+                    self._has_user_explicit_interpretation(session, current_event_ids)
+                    or self._has_user_note(session, current_event_ids)
+                )
             ):
                 skipped += len(raw_ids)
                 continue

@@ -264,6 +264,48 @@ def test_replay_skips_user_explicit_interpretation(db_session, monkeypatch):
     assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
 
 
+def test_replay_source_refund_overrides_stale_manual_consumption_and_matches_purchase(db_session, monkeypatch):
+    """A corrected source refund must never remain a manually classified purchase."""
+    account = _account(db_session, "card")
+    purchase = _statement_raw(
+        db_session, account, "aifuqu-purchase", "支付宝-爱芙趣商贸（上海）有限公司", "374",
+        section="CONSUMPTION", day=date(2026, 7, 31),
+    )
+    refund = _statement_raw(
+        db_session, account, "aifuqu-refund", "支付宝-爱芙趣商贸（上海）有限公司", "-374",
+        section="REFUND", day=date(2026, 8, 4),
+    )
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session)
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+
+    stale = _event(db_session, EventType.CONSUMPTION, refund.id)
+    db_session.add(ConsumptionInterpretation(
+        event_id=stale.id, eligibility_status="ELIGIBLE", eligibility_source="USER_CONFIRMATION",
+        eligibility_reason="DETAIL_CLASSIFICATION_EDIT", classification_status="CLASSIFIED",
+        primary_category="DAILY", secondary_category="SHOPPING",
+        classification_source="USER_CONFIRMATION", classification_reason="DETAIL_CLASSIFICATION_EDIT",
+        user_confirmed=True, revision_number=1, resolver_version="test",
+    ))
+    db_session.flush()
+
+    result = EconomicEventNormalizer().replay(db_session)
+    corrected_refund = _event(db_session, EventType.REFUND, refund.id)
+    assert (result.corrected_non_consumption_count, stale.is_active, corrected_refund.is_active) == (1, False, True)
+    assert RefundMatcher().replay(db_session).matched_refund_count == 1
+    active_purchase = _event(db_session, EventType.CONSUMPTION, purchase.id)
+    projection = next(item for item in active_purchase.projection_revisions if item.is_active)
+    assert (Decimal(projection.gross_amount), Decimal(projection.refund_amount), Decimal(projection.net_amount)) == (
+        Decimal("374"), Decimal("374"), Decimal("0"),
+    )
+    assert EconomicEventNormalizer().replay(db_session).corrected_non_consumption_count == 0
+
+
 def test_replay_preserves_event_identity_with_a_user_note(db_session, monkeypatch):
     account = _account(db_session, "card")
     raw = _raw(db_session, account, "noted-repayment", "按卡转账还款", "-100")

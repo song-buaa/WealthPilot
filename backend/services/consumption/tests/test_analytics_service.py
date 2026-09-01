@@ -384,6 +384,7 @@ def test_candidate_review_api_promotes_only_ambiguous_outflow_and_creates_projec
 
 def test_candidate_review_rejects_as_ineligible_without_entering_analytics(db_session, monkeypatch):
     debit=_account(db_session,"debit")
+    debit.account_type="DEBIT_CARD"
     debit_id=debit.id
     candidate=_event(
         db_session,"candidate-reject",account=debit,event_type="OTHER",when=date(2026,5,25),
@@ -408,8 +409,37 @@ def test_candidate_review_rejects_as_ineligible_without_entering_analytics(db_se
     assert point.total_spending_cny == Decimal("0")
 
 
+def test_candidate_review_rejects_source_explicit_refunds_at_list_and_confirm_boundaries(db_session, monkeypatch):
+    card = _account(db_session, "refund-card")
+    card.account_type = "CREDIT_CARD"
+    stale = _event(
+        db_session, "source-refund", account=card, event_type="OTHER", when=date(2026, 8, 4),
+        amount="374", net=None, eligibility="NEEDS_REVIEW", classification="NOT_APPLICABLE",
+        primary=None, secondary=None, description="支付宝-测试商贸有限公司",
+    )
+    raw = db_session.query(RawTransaction).join(EventRawLink).filter(EventRawLink.event_id == stale.id).one()
+    raw.amount = Decimal("-374")
+    raw.parser_provenance = '{"statement_section":"REFUND"}'
+    db_session.commit()
+    monkeypatch.setattr(consumption_api, "get_session", lambda: db_session)
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(consumption_api.router, prefix="/api/consumption")
+    client = TestClient(app)
+
+    assert client.get("/api/consumption/candidates?month=2026-08").json()["total"] == 0
+    assert client.put(
+        "/api/consumption/candidates/source-refund/confirm",
+        json={"primary_category": "DAILY", "secondary_category": "SHOPPING"},
+    ).status_code == 409
+    summary = ConsumptionCandidateReviewService(db_session).confirm_candidates_in_period(
+        start_date=date(2026, 8, 1), end_date=date(2026, 8, 31),
+    )
+    assert summary.candidate_count == 0
+
+
 def test_bounded_candidate_backfill_confirms_only_current_queue_and_reuses_category_rules(db_session):
     debit=_account(db_session,"batch-debit")
+    debit.account_type="DEBIT_CARD"
     auto=_event(
         db_session,"candidate-auto",account=debit,event_type="OTHER",when=date(2026,7,11),amount="88",net=None,
         eligibility="NEEDS_REVIEW",classification="NOT_APPLICABLE",primary=None,secondary=None,description="本地拉面店",
