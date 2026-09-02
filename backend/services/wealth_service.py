@@ -23,13 +23,16 @@ ASSET_TYPES: dict[str, tuple[str, bool]] = {
     "housing_fund": ("retirement_long_term", True),
     # 企业缴费及收益是否已完全归属个人取决于原单位方案；在明确已归属金额前，仅展示。
     "enterprise_annuity": ("retirement_long_term", False),
-    "personal_pension": ("retirement_long_term", True),
-    "pension_insurance": ("retirement_long_term", True),
-    # Pension entitlement belongs to the retirement category, while remaining
-    # deliberately opt-in for the core net-worth calculation.
+    # These retirement products have a material pre-retirement withdrawal
+    # restriction, so the core balance sheet treats them as display-only.
+    "personal_pension": ("retirement_long_term", False),
+    "pension_insurance": ("retirement_long_term", False),
     "basic_pension": ("retirement_long_term", False),
     "other_asset": ("other_assets", True),
 }
+PENSION_SECURITY_ITEM_TYPES = frozenset({
+    "enterprise_annuity", "personal_pension", "pension_insurance", "basic_pension",
+})
 LIABILITY_TYPES: dict[str, tuple[str, bool]] = {
     "credit_card": ("credit_card", True),
     "consumer_loan": ("consumer_loan", True),
@@ -46,10 +49,6 @@ def _item_to_dict(item: WealthItem) -> dict[str, Any]:
     today = date.today()
     age_days = max((today - item.updated_at.date()).days, 0)
     freshness = "latest" if age_days <= 30 else "suggested_update" if age_days <= 90 else "long_unupdated"
-    # `already_investment_accounted` only controls how the item is aggregated:
-    # a personal pension balance can be part of the investment source of truth,
-    # while still being a core-net-worth asset.  Expose inclusion semantics to
-    # the UI separately so it is not presented as a supplementary benefit.
     effective_included = bool(item.included_in_net_worth)
     return {
         "id": item.id,
@@ -259,6 +258,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
         non_investment_assets = 0.0
         pension_benefit_value = 0.0
         reclassified_investment_assets = 0.0
+        investment_linked_assets = 0.0
         liabilities = 0.0
         by_category: dict[str, float] = {}
         liability_categories: dict[str, float] = {}
@@ -266,7 +266,13 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
             value = float(item.current_value or 0)
             effective = item.included_in_net_worth and not item.already_investment_accounted
             if item.kind == "ASSET":
-                if item.item_type in {"basic_pension", "enterprise_annuity"} and not effective:
+                if item.already_investment_accounted:
+                    # The investment module remains the source of the value.
+                    # Remove its amount from ordinary investment assets before
+                    # either reclassifying it as a core manual asset or showing
+                    # it as a non-core retirement security benefit.
+                    investment_linked_assets += value
+                if item.item_type in PENSION_SECURITY_ITEM_TYPES and not item.included_in_net_worth:
                     pension_benefit_value += value
                 if item.already_investment_accounted and item.included_in_net_worth:
                     # This is a classification link to an investment-account
@@ -285,6 +291,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
             "non_investment_assets": non_investment_assets,
             "pension_benefit_value": pension_benefit_value,
             "reclassified_investment_assets": reclassified_investment_assets,
+            "investment_linked_assets": investment_linked_assets,
             "liabilities": liabilities,
             "asset_categories": by_category,
             "liability_categories": liability_categories,
@@ -298,9 +305,10 @@ def _current_totals(portfolio_id: int) -> dict[str, Any]:
     manual = _manual_totals(portfolio_id)
     gross_investment_assets = float(investment.get("total_assets") or 0)
     reclassified = manual["reclassified_investment_assets"]
-    if reclassified > gross_investment_assets:
+    investment_linked = manual["investment_linked_assets"]
+    if investment_linked > gross_investment_assets:
         raise ValueError("投资账户重分类金额不能超过投资资产总额")
-    investment_assets = gross_investment_assets - reclassified
+    investment_assets = gross_investment_assets - investment_linked
     # Reclassified values are already present in the investment source of
     # truth; add them back only under their retirement classification.
     total_assets = investment_assets + manual["non_investment_assets"] + reclassified
@@ -311,6 +319,7 @@ def _current_totals(portfolio_id: int) -> dict[str, Any]:
         "investment_profit_loss": investment.get("total_profit_loss"),
         "gross_investment_assets": gross_investment_assets,
         "reclassified_investment_assets": reclassified,
+        "investment_linked_assets": investment_linked,
         "non_investment_assets": manual["non_investment_assets"],
         "pension_benefit_value": manual["pension_benefit_value"],
         "total_assets": total_assets,
@@ -394,7 +403,11 @@ def _trend(portfolio_id: int, totals: dict[str, Any], days: int | None) -> list[
             by_day[point.recorded_at.date().isoformat()] = point
         result = [{"date": day, "net_worth": round(value.net_worth, 2)} for day, value in by_day.items()]
         today_key = date.today().isoformat()
-        if not result or result[-1]["date"] != today_key:
+        if result and result[-1]["date"] == today_key:
+            # Preserve the stored snapshot for audit history while rendering
+            # today's current calculation under the latest accounting scope.
+            result[-1]["net_worth"] = round(totals["net_worth"], 2)
+        else:
             result.append({"date": today_key, "net_worth": round(totals["net_worth"], 2)})
         return result
     finally:
@@ -456,7 +469,7 @@ def _category_label(category: str) -> str:
     return {
         "cash_deposits": "现金及存款",
         "retirement_long_term": "养老与长期权益",
-        "pension_benefit": "基本养老保险权益",
+        "pension_benefit": "养老保障权益",
         "other_assets": "其他资产",
         "credit_card": "信用卡",
         "consumer_loan": "信用贷",

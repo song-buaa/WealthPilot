@@ -50,26 +50,28 @@ def test_wealth_totals_reuse_investment_once_and_exclude_duplicate(wealth_db):
     summary = wealth_service.get_summary(1)
 
     assert summary["investment"]["total_assets"] == 700
-    assert summary["total_assets"] == 1200
+    assert summary["total_assets"] == 900
     assert summary["total_liabilities"] == 40
-    assert summary["net_worth"] == 1160
+    assert summary["net_worth"] == 860
+    assert summary["pension_benefit"] == 300
     assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
-        "投资资产": 700.0, "养老与长期权益": 500.0,
+        "投资资产": 700.0, "养老与长期权益": 200.0,
     }
 
 
-def test_personal_pension_reclassification_preserves_total_assets(wealth_db):
+def test_personal_pension_linked_to_investment_is_display_only_and_not_double_counted(wealth_db):
     pension = _create("asset", "personal_pension", 300, already_investment_accounted=True)
 
     summary = wealth_service.get_summary(1)
 
     assert summary["investment"]["total_assets"] == 700
-    assert summary["total_assets"] == 1000
-    assert summary["net_worth"] == 1000
-    assert pension["included_in_net_worth"] is True
-    assert pension["effective_included_in_net_worth"] is True
+    assert summary["total_assets"] == 700
+    assert summary["net_worth"] == 700
+    assert summary["pension_benefit"] == 300
+    assert pension["included_in_net_worth"] is False
+    assert pension["effective_included_in_net_worth"] is False
     assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
-        "投资资产": 700.0, "养老与长期权益": 300.0,
+        "投资资产": 700.0,
     }
 
 
@@ -87,6 +89,48 @@ def test_enterprise_annuity_is_supplementary_pension_benefit(wealth_db):
     assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
         "投资资产": 1000.0, "养老与长期权益": 300.0,
     }
+
+
+def test_all_retirement_security_assets_are_display_only(wealth_db):
+    _create("asset", "enterprise_annuity", 100)
+    _create("asset", "personal_pension", 200)
+    _create("asset", "pension_insurance", 300)
+    _create("asset", "basic_pension", 400)
+    _create("asset", "housing_fund", 500)
+
+    summary = wealth_service.get_summary(1)
+
+    assert summary["pension_benefit"] == 1000
+    assert summary["total_assets"] == 1500
+    assert summary["net_worth"] == 1500
+    assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
+        "投资资产": 1000.0, "养老与长期权益": 500.0,
+    }
+
+
+def test_today_trend_point_uses_current_scope_without_rewriting_snapshot(wealth_db):
+    _create("asset", "personal_pension", 300, already_investment_accounted=True)
+    session = wealth_db()
+    try:
+        old_snapshot = WealthSnapshot(
+            portfolio_id=1, total_assets=1000, total_liabilities=0, net_worth=1000,
+            investment_assets=1000, investment_profit_loss=10, non_investment_assets=0,
+            pension_benefit_value=0,
+        )
+        session.add(old_snapshot)
+        session.commit()
+        old_snapshot_id = old_snapshot.id
+    finally:
+        session.close()
+
+    summary = wealth_service.get_summary(1)
+
+    assert summary["trend"][-1] == {"date": date.today().isoformat(), "net_worth": 700.0}
+    session = wealth_db()
+    try:
+        assert session.query(WealthSnapshot).filter_by(id=old_snapshot_id).one().net_worth == 1000
+    finally:
+        session.close()
 
 
 def test_foreign_currency_asset_keeps_source_amount_and_uses_shared_fx(wealth_db, monkeypatch):
