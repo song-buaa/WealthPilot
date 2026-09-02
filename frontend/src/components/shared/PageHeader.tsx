@@ -5,8 +5,10 @@
  * 标题：20px/700/#1B2A4A
  * 副标题：12px/400/#9CA3AF
  */
+import type { ReactNode } from 'react'
+
 interface PageHeaderProps {
-  icon: string
+  icon: ReactNode
   title: string
   subtitle?: string
 }

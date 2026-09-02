@@ -90,6 +90,10 @@ export interface WealthItem {
   category: string
   source_type: 'MANUAL' | 'PDF' | 'SCREENSHOT'
   current_value: number
+  currency: string
+  original_value: number
+  fx_rate_to_cny: number
+  fx_rate_date?: string | null
   included_in_net_worth: boolean
   already_investment_accounted: boolean
   effective_included_in_net_worth: boolean

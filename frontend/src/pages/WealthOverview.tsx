@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Edit3, Ellipsis, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Edit3, Ellipsis, Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
@@ -38,7 +38,6 @@ export default function WealthOverview() {
   const [range, setRange] = useState(365)
   const [form, setForm] = useState<FormState | null>(null)
   const [detailFilter, setDetailFilter] = useState<DetailFilter>('all')
-  const [showAllDetails, setShowAllDetails] = useState(false)
 
   const refresh = (days = range) => {
     setLoading(true); setError(null)
@@ -69,13 +68,12 @@ export default function WealthOverview() {
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
   const allDetails = useMemo(() => [...assets, ...liabilities].sort((a, b) => b.current_value - a.current_value), [assets, liabilities])
   const filteredDetails = useMemo(() => detailFilter === 'all' ? allDetails : allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
-  const visibleDetails = showAllDetails ? filteredDetails : filteredDetails.slice(0, 5)
   const baseline = summary?.monthly_net_worth_change == null ? null : summary.net_worth - summary.monthly_net_worth_change
   const monthlyPct = baseline && baseline !== 0 && summary?.monthly_net_worth_change != null
     ? summary.monthly_net_worth_change / baseline * 100 : null
 
   const changeRange = (days: number) => { setRange(days); refresh(days) }
-  const switchDetailFilter = (filter: DetailFilter) => { setDetailFilter(filter); setShowAllDetails(false) }
+  const switchDetailFilter = (filter: DetailFilter) => setDetailFilter(filter)
   const openAllLiabilities = () => { switchDetailFilter('liability'); document.getElementById('wealth-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!form) return
@@ -99,11 +97,11 @@ export default function WealthOverview() {
 
   return (
     <div>
-      <PageHeader icon="◈" title="财富总览" />
+      <PageHeader icon={<WalletCards size={19} strokeWidth={2.2} color="#DBEAFE" />} title="财富总览" subtitle="个人资产负债与财富变化" />
       {error && <div style={errorStyle}>{error}</div>}
       {loading || !summary ? <Loading /> : <>
         <section aria-label="财富核心概览" style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1.75fr) repeat(3, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-          <Kpi label="净资产" value={fmtCny(summary.net_worth)} primary />
+          <Kpi label="净资产" value={fmtCny(summary.net_worth)} primary detail={`总资产 ${fmtCny(summary.total_assets)} · 总负债 ${fmtCny(summary.total_liabilities)}`} />
           <Kpi label="总资产" value={fmtCny(summary.total_assets)} />
           <Kpi label="总负债" value={fmtCny(summary.total_liabilities)} />
           <Kpi label="本月净资产变化" value={summary.monthly_net_worth_change === null ? '—' : fmtCnySigned(summary.monthly_net_worth_change)} tone={changeTone(summary.monthly_net_worth_change)} detail={summary.monthly_net_worth_change === null ? '尚未形成月初基线' : `${signedPct(monthlyPct)} 较月初`} />
@@ -122,16 +120,15 @@ export default function WealthOverview() {
           <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} onViewAll={openAllLiabilities} />
         </section>
 
-        <section id="wealth-details" aria-label="资产与负债明细" style={card()}>
+        <section id="wealth-details" aria-label="资产与负债明细" style={{ ...card(), padding: '20px 20px 16px' }}>
           <div style={{ ...sectionHeader, flexWrap: 'wrap' }}>
             <span>资产与负债明细</span>
             <button type="button" onClick={() => setForm(emptyForm())} style={primaryButton}><Plus size={14} /> 更新财富数据</button>
           </div>
-          <div style={{ display: 'flex', gap: 6, margin: '14px 0 6px' }}>
+          <div style={{ display: 'flex', gap: 6, margin: '14px 0 12px' }}>
             {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={{ ...filterButton, background: detailFilter === filter ? '#EFF6FF' : '#fff', color: detailFilter === filter ? '#2563EB' : '#6B7280', borderColor: detailFilter === filter ? '#BFDBFE' : '#E5E7EB' }}>{label}</button>)}
           </div>
-          {visibleDetails.length ? <div style={{ marginTop: 2 }}>{visibleDetails.map(item => <DetailRow key={`${item.kind}-${item.id}`} item={item} onEdit={edit} onDelete={remove} />)}</div> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
-          {filteredDetails.length > 5 && <button type="button" style={{ ...textButton, marginTop: 14 }} onClick={() => setShowAllDetails(value => !value)}>{showAllDetails ? '收起明细 ↑' : `查看全部 ${filteredDetails.length} 条 →`}</button>}
+          {filteredDetails.length ? <DetailTable items={filteredDetails} onEdit={edit} onDelete={remove} /> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
         </section>
       </>}
       {form && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
@@ -161,11 +158,11 @@ function AttributionStrip({ summary }: { summary: WealthSummary }) {
 function AssetStructure({ summary, items, pieData, onOpenDashboard }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ name: string; value: number }>; onOpenDashboard: () => void }) {
   return <div style={card()}>
     <div style={sectionHeader}><span>资产结构</span><button type="button" style={textButton} onClick={onOpenDashboard}>查看投资账户总览 →</button></div>
-    <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 12, alignItems: 'center', marginTop: 10 }}>
-      <div style={{ height: 190 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={76} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
-      <div>{items.map((item, index) => <div key={item.key} style={{ padding: '10px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 3, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginTop: 6 }}>
+      <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
+      <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
     </div>
-    {summary.pension_benefit > 0 && <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 12 }}>其中 {fmtCny(summary.pension_benefit)} 为养老保障权益，当前不计入核心净资产。</div>}
+    {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '7px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11 }}>其中 {fmtCny(summary.pension_benefit)} 为养老保障权益，当前不计入核心净资产。</div>}
   </div>
 }
 
@@ -178,15 +175,29 @@ function LiabilityOverview({ total, liabilities, onViewAll }: { total: number; l
   const mainCategory = categoryCount[0]
   return <div style={card()}>
     <div style={sectionHeader}><span>负债概览</span><button type="button" style={textButton} onClick={onViewAll}>查看全部负债 →</button></div>
-    {liabilities.length ? <><div style={{ marginTop: 18 }}><div style={mutedLabel}>总负债</div><div style={{ ...bigValue, marginTop: 5 }}>{fmtCny(total)}</div><div style={{ color: '#6B7280', fontSize: 12, marginTop: 6 }}>{mainCategory ? `${liabilities.length} 笔${categoryLabel(mainCategory[0])}` : `${liabilities.length} 笔负债`}</div></div><div style={{ marginTop: 16 }}><div style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 600, letterSpacing: '.3px' }}>金额最高的负债</div>{liabilities.slice(0, 3).map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 10, fontSize: 13 }}><span style={{ color: '#4B5563', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong></div>)}</div></> : <CompactEmptyState text="暂无录入负债。" />}
+    {liabilities.length ? <><div style={{ marginTop: 12 }}><div style={mutedLabel}>总负债</div><div style={{ ...bigValue, marginTop: 3 }}>{fmtCny(total)}</div><div style={{ color: '#6B7280', fontSize: 12, marginTop: 3 }}>{mainCategory ? `${liabilities.length} 笔${categoryLabel(mainCategory[0])}` : `${liabilities.length} 笔负债`}</div></div><div style={{ marginTop: 12 }}><div style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 600, letterSpacing: '.3px' }}>金额最高的负债</div>{liabilities.slice(0, 3).map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 8, fontSize: 13 }}><span style={{ color: '#4B5563', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong></div>)}</div></> : <CompactEmptyState text="暂无录入负债。" />}
   </div>
 }
 
-function DetailRow({ item, onEdit, onDelete }: { item: WealthItem; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', alignItems: 'center', gap: 14, padding: '13px 0', borderBottom: '1px solid #F1F5F9' }}>
-    <div style={{ minWidth: 0 }}><div style={{ color: '#64748B', fontSize: 11, fontWeight: 600 }}>{categoryLabel(item.category)} · {itemTypeLabel(item.item_type)}</div><div style={{ marginTop: 4, color: '#1F2937', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name} {!item.effective_included_in_net_worth && <span style={{ color: '#9CA3AF', fontWeight: 400 }}>（仅展示）</span>}</div><div style={{ marginTop: 4, color: item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11 }}>{freshnessText(item)}</div></div>
-    <strong style={{ color: '#1F2937', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong>
-    <details style={{ position: 'relative' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details>
+function DetailTable({ items, onEdit, onDelete }: { items: WealthItem[]; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
+  return <div style={detailTableScroll}>
+    <table style={detailTable}>
+      <colgroup>
+        <col style={{ width: 72 }} /><col /><col style={{ width: 108 }} /><col style={{ width: 120 }} />
+        <col style={{ width: 122 }} /><col style={{ width: 96 }} /><col style={{ width: 104 }} /><col style={{ width: 34 }} />
+      </colgroup>
+      <thead><tr>{['类型', '名称', '分类', '原币金额', '折合人民币', '计入净资产', '更新时间', ''].map((heading, index) => <th key={`${heading}-${index}`} style={{ ...detailTh, textAlign: index >= 3 ? 'right' : 'left' }}>{heading}</th>)}</tr></thead>
+      <tbody>{items.map(item => <tr key={`${item.kind}-${item.id}`} onMouseEnter={event => { event.currentTarget.style.background = '#F9FAFB' }} onMouseLeave={event => { event.currentTarget.style.background = '' }}>
+        <td style={detailTd}><span style={tag(item.kind === 'asset' ? '#DBEAFE' : '#FEE2E2', item.kind === 'asset' ? '#1E40AF' : '#991B1B')}>{item.kind === 'asset' ? '资产' : '负债'}</span></td>
+        <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{item.name}</td>
+        <td style={detailTd}><span style={tag('#F3F4F6', '#4B5563')}>{itemTypeLabel(item.item_type)}</span></td>
+        <td style={{ ...detailTd, textAlign: 'right', color: item.currency === 'CNY' ? '#4B5563' : '#1F2937', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtOriginalAmount(item)}</td>
+        <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
+        <td style={{ ...detailTd, textAlign: 'right' }}><span style={tag(item.effective_included_in_net_worth ? '#DCFCE7' : '#F3F4F6', item.effective_included_in_net_worth ? '#166534' : '#6B7280')}>{item.effective_included_in_net_worth ? '计入' : '仅展示'}</span></td>
+        <td style={{ ...detailTd, textAlign: 'right', color: item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11, whiteSpace: 'nowrap' }}>{freshnessText(item)}</td>
+        <td style={{ ...detailTd, textAlign: 'right' }}><details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details></td>
+      </tr>)}</tbody>
+    </table>
   </div>
 }
 
@@ -202,8 +213,13 @@ function EmptyTrend() { return <div style={{ height: 220, display: 'grid', place
 function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
 
 function categoryLabel(category: string) { return ({ cash_deposits: '现金及存款', retirement_long_term: '养老与长期权益', pension_benefit: '养老与长期权益', other_assets: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[category] ?? category }
-function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
+function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', pension_insurance: '养老保险', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
 function freshnessText(item: WealthItem) { return item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新${item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}` }
+function fmtOriginalAmount(item: WealthItem) {
+  const value = item.original_value ?? item.current_value
+  if (item.currency === 'CNY') return fmtCny(value)
+  return `${item.currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 function changeTone(value: number | null): 'positive' | 'negative' | undefined { return value === null || value === 0 ? undefined : value > 0 ? 'positive' : 'negative' }
 function moneyTone(value: number | null): string { return value === null || value === 0 ? '#6B7280' : value > 0 ? '#059669' : '#DC2626' }
 function signedPct(value: number | null) { return value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` }
@@ -215,6 +231,10 @@ const errorStyle = { marginBottom: 16, padding: '10px 13px', background: '#FEF2F
 const attributionStyle = { display: 'flex', gap: 14, marginTop: 8, padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: 9, background: '#F8FAFC', color: '#64748B', fontSize: 12, lineHeight: 1.6, flexWrap: 'wrap' } as const
 const textButton = { border: 'none', background: 'transparent', padding: 0, color: '#2563EB', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const filterButton = { border: '1px solid #E5E7EB', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
+const detailTableScroll = { maxHeight: 470, overflowY: 'auto' as const, overflowX: 'auto' as const, borderRadius: 6, border: '1px solid #F1F5F9' } as const
+const detailTable = { width: '100%', minWidth: 860, borderCollapse: 'collapse' as const, fontSize: 13, tableLayout: 'fixed' as const } as const
+const detailTh = { padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' as const, background: '#fff', position: 'sticky' as const, top: 0, zIndex: 1 } as const
+const detailTd = { padding: '9px 10px', color: '#374151', borderBottom: '1px solid #F3F4F6', verticalAlign: 'middle' as const } as const
 const primaryButton = { border: '1px solid #1D4ED8', background: '#2563EB', color: '#fff', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const
 const secondaryButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
@@ -224,3 +244,4 @@ const dialogStyle = { width: 'min(550px, 100%)', maxHeight: 'calc(100vh - 36px)'
 const moreButton = { listStyle: 'none', cursor: 'pointer', color: '#64748B', padding: 4, display: 'flex', alignItems: 'center' } as const
 const moreMenu = { position: 'absolute' as const, zIndex: 2, top: 28, right: 0, width: 86, padding: 4, border: '1px solid #E5E7EB', borderRadius: 8, background: '#fff', boxShadow: '0 8px 18px rgba(15,23,42,.12)' } as const
 const menuButton = { width: '100%', border: 'none', background: 'transparent', padding: '7px 8px', display: 'flex', gap: 6, alignItems: 'center', color: '#374151', cursor: 'pointer', fontSize: 12, textAlign: 'left' as const } as const
+function tag(background: string, color: string) { return { display: 'inline-block', padding: '3px 6px', borderRadius: 4, background, color, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' as const } }
