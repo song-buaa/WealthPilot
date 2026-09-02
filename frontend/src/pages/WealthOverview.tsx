@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ChangeEvent, FormEvent, ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import type { FormEvent, ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Edit3, FileUp, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Edit3, Loader2, Plus, Trash2 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
@@ -41,11 +41,9 @@ export default function WealthOverview() {
   const save = async (event: FormEvent) => { event.preventDefault(); if (!form) return; setSaving(true); setError(null); const { id, ...payload } = form; try { if (id) await wealthApi.updateItem(id, payload); else await wealthApi.createItem(payload); setForm(null); refresh() } catch (e) { setError(e instanceof Error ? e.message : '保存失败') } finally { setSaving(false) } }
   const edit = (item: WealthItem) => setForm({ id: item.id, kind: item.kind, name: item.name, item_type: item.item_type, current_value: item.current_value, value_as_of: item.value_as_of, included_in_net_worth: item.included_in_net_worth, already_investment_accounted: item.already_investment_accounted, source_type: item.source_type, notes: item.notes ?? '' })
   const remove = async (item: WealthItem) => { if (!window.confirm(`删除“${item.name}”？历史快照也会一并删除。`)) return; try { await wealthApi.deleteItem(item.id); refresh() } catch (e) { setError(e instanceof Error ? e.message : '删除失败') } }
-  const upload = async (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setSaving(true); setError(null); try { const preview = await wealthApi.previewImport(file); const draft = preview.draft; setForm({ ...emptyForm(draft.kind === 'liability' ? 'liability' : 'asset'), ...draft, source_type: preview.source_type, current_value: draft.current_value ?? 0 }) } catch (e) { setError(e instanceof Error ? e.message : '文件解析失败') } finally { setSaving(false) } }
   return (
     <div>
       <PageHeader icon="◈" title="财富总览" subtitle="汇总投资账户、现金、养老金等资产与负债，统一查看个人财富变化。" />
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}><div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>投资资产与 <Link to="/dashboard" style={{ color: '#2563EB', fontWeight: 600 }}>投资账户总览</Link> 保持一致；其他项目按最近确认值持续计入。</div><div style={{ display: 'flex', gap: 8 }}><label style={buttonStyle(false)}><FileUp size={15} /> 上传 PDF / 截图<input type="file" accept="application/pdf,image/*" hidden onChange={upload} /></label><button type="button" style={buttonStyle(true)} onClick={() => setForm(emptyForm())}><Plus size={15} /> 更新财富数据</button></div></div>
       {error && <div style={{ marginBottom: 16, padding: '10px 13px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', borderRadius: 8, fontSize: 13 }}>{error}</div>}
       {loading || !summary ? <Loading /> : <>
         <section style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1.7fr) repeat(3, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}><Kpi label="净资产" value={fmtCny(summary.net_worth)} primary detail={summary.monthly_net_worth_change === null ? '本月变化待建立基线' : `本月 ${fmtCnySigned(summary.monthly_net_worth_change)}`} /><Kpi label="总资产" value={fmtCny(summary.total_assets)} /><Kpi label="总负债" value={fmtCny(summary.total_liabilities)} /><Kpi label="本月净资产变化" value={summary.monthly_net_worth_change === null ? '—' : fmtCnySigned(summary.monthly_net_worth_change)} tone={changeTone(summary.monthly_net_worth_change)} /></section>
