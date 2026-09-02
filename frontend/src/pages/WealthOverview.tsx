@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Edit3, Ellipsis, Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
+import { Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
@@ -25,6 +25,17 @@ const card = (primary = false) => ({
   border: primary ? 'none' : '1px solid #E5E7EB', borderRadius: 14,
   padding: primary ? '24px 26px' : '20px 22px', boxShadow: primary ? 'var(--shadow-dark)' : 'var(--shadow-sm)',
 })
+
+function csvCell(value: string | number | boolean | null | undefined) {
+  const text = String(value ?? '')
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+}
+
+function wealthCsvFilename() {
+  const now = new Date()
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-')
+  return `wealth_details_${date}.csv`
+}
 
 export default function WealthOverview() {
   const [summary, setSummary] = useState<WealthSummary | null>(null)
@@ -90,6 +101,21 @@ export default function WealthOverview() {
     if (!window.confirm(`删除“${item.name}”？历史快照也会一并删除。`)) return
     try { await wealthApi.deleteItem(item.id); refresh() } catch (e) { setError(e instanceof Error ? e.message : '删除失败') }
   }
+  const exportDetails = () => {
+    const headers = ['类型', '名称', '分类', '原币金额', '币种', '折合人民币', '是否计入核心资产', '数据日期', '最后更新时间', '数据来源', '备注']
+    const rows = filteredDetails.map(item => [
+      item.kind === 'asset' ? '资产' : '负债', item.name, itemTypeLabel(item.item_type),
+      item.original_value ?? item.current_value, item.currency, item.current_value,
+      item.effective_included_in_net_worth ? '计入' : '仅展示', item.value_as_of, item.updated_at, item.source_type, item.notes,
+    ])
+    const csv = '\uFEFF' + [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = wealthCsvFilename()
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div>
@@ -117,14 +143,18 @@ export default function WealthOverview() {
         </section>
 
         <section id="wealth-details" aria-label="资产与负债明细" style={{ ...card(), padding: '20px 20px 16px' }}>
-          <div style={{ ...sectionHeader, flexWrap: 'wrap' }}>
-            <span>资产与负债明细</span>
-            <button type="button" onClick={() => setForm(emptyForm())} style={primaryButton}><Plus size={14} /> 更新财富数据</button>
-          </div>
+          <div style={sectionHeader}><span>资产与负债明细</span></div>
           <div style={{ display: 'flex', gap: 6, margin: '14px 0 12px' }}>
             {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={{ ...filterButton, background: detailFilter === filter ? '#EFF6FF' : '#fff', color: detailFilter === filter ? '#2563EB' : '#6B7280', borderColor: detailFilter === filter ? '#BFDBFE' : '#E5E7EB' }}>{label}</button>)}
           </div>
           {filteredDetails.length ? <DetailTable items={filteredDetails} onEdit={edit} onDelete={remove} /> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
+          <div style={detailActionBar}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ color: '#64748B', fontSize: 12, fontWeight: 600 }}>财富数据管理</span>
+              <button type="button" onClick={() => setForm(emptyForm())} style={dataActionButton}><RefreshCw size={13} /> 更新财富数据</button>
+            </div>
+            <button type="button" onClick={exportDetails} style={dataActionButton}><Download size={13} /> 导出 CSV</button>
+          </div>
         </section>
       </>}
       {form && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
@@ -231,6 +261,8 @@ const detailTableScroll = { maxHeight: 470, overflowY: 'auto' as const, overflow
 const detailTable = { width: '100%', minWidth: 860, borderCollapse: 'collapse' as const, fontSize: 13, tableLayout: 'fixed' as const } as const
 const detailTh = { padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' as const, background: '#fff', position: 'sticky' as const, top: 0, zIndex: 1 } as const
 const detailTd = { padding: '9px 10px', color: '#374151', borderBottom: '1px solid #F3F4F6', verticalAlign: 'middle' as const } as const
+const detailActionBar = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as const, marginTop: 12, padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: 8, background: '#F9FAFB' } as const
+const dataActionButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#475569', borderRadius: 7, padding: '6px 9px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 } as const
 const primaryButton = { border: '1px solid #1D4ED8', background: '#2563EB', color: '#fff', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const
 const secondaryButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
