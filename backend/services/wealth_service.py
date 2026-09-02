@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import inspect
 
+from app.fx_service import fx_service
 from app.models import WealthItem, WealthItemSnapshot, WealthSnapshot, get_session
 from backend.services import portfolio_service
 
@@ -22,8 +23,10 @@ ASSET_TYPES: dict[str, tuple[str, bool]] = {
     "housing_fund": ("retirement_long_term", True),
     "enterprise_annuity": ("retirement_long_term", True),
     "personal_pension": ("retirement_long_term", True),
-    # Pension entitlement is visible separately and is deliberately opt-in for net worth.
-    "basic_pension": ("pension_benefit", False),
+    "pension_insurance": ("retirement_long_term", True),
+    # Pension entitlement belongs to the retirement category, while remaining
+    # deliberately opt-in for the core net-worth calculation.
+    "basic_pension": ("retirement_long_term", False),
     "other_asset": ("other_assets", True),
 }
 LIABILITY_TYPES: dict[str, tuple[str, bool]] = {
@@ -53,6 +56,9 @@ def _item_to_dict(item: WealthItem) -> dict[str, Any]:
         "sync_mode": item.sync_mode,
         "current_value": round(float(item.current_value or 0), 2),
         "currency": item.currency,
+        "original_value": round(float(item.original_value if item.original_value is not None else item.current_value or 0), 2),
+        "fx_rate_to_cny": round(float(item.fx_rate_to_cny or 1), 8),
+        "fx_rate_date": item.fx_rate_date,
         "included_in_net_worth": bool(item.included_in_net_worth),
         "already_investment_accounted": bool(item.already_investment_accounted),
         "effective_included_in_net_worth": effective_included,
@@ -97,11 +103,41 @@ def _validate_payload(payload: dict[str, Any]) -> tuple[str, str, str, bool]:
     return kind, item_type, category, default_included
 
 
+def _base_currency_value(amount: float, currency: str) -> tuple[float, float, str]:
+    """Convert an asset fact to CNY through the shared FX service."""
+    normalized_currency = (currency or "CNY").upper()
+    if normalized_currency == "CNY":
+        return amount, 1.0, "latest"
+    converted, rate, rate_date = fx_service.convert(amount, normalized_currency, "CNY")
+    return converted, rate, rate_date
+
+
+def _currency_payload_values(payload: dict[str, Any], existing: WealthItem | None = None) -> tuple[float, str, float, float, str]:
+    """Return CNY value plus preserved source-currency facts.
+
+    Legacy callers only provide ``current_value`` and therefore retain their
+    CNY behaviour. New callers may provide a source ``currency`` and
+    ``original_value``; the CNY aggregation value is then derived here.
+    """
+    currency = str(payload.get("currency", existing.currency if existing else "CNY") or "CNY").upper()
+    if "original_value" in payload:
+        original_value = float(payload["original_value"])
+    elif existing and currency == existing.currency and "current_value" not in payload:
+        original_value = float(existing.original_value if existing.original_value is not None else existing.current_value)
+    else:
+        original_value = float(payload.get("current_value", existing.current_value if existing else 0))
+    if original_value < 0:
+        raise ValueError("金额不能小于 0")
+    cny_value, fx_rate, fx_rate_date = _base_currency_value(original_value, currency)
+    return cny_value, currency, original_value, fx_rate, fx_rate_date
+
+
 def create_item(portfolio_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     kind, item_type, category, default_included = _validate_payload(payload)
     as_of = payload.get("value_as_of") or date.today()
     if isinstance(as_of, str):
         as_of = date.fromisoformat(as_of)
+    cny_value, currency, original_value, fx_rate, fx_rate_date = _currency_payload_values(payload)
     now = _now()
     item = WealthItem(
         portfolio_id=portfolio_id,
@@ -111,8 +147,11 @@ def create_item(portfolio_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         category=category,
         source_type=str(payload.get("source_type") or "MANUAL").upper(),
         sync_mode="MANUAL",
-        current_value=float(payload["current_value"]),
-        currency="CNY",
+        current_value=cny_value,
+        currency=currency,
+        original_value=original_value,
+        fx_rate_to_cny=fx_rate,
+        fx_rate_date=fx_rate_date,
         included_in_net_worth=bool(payload.get("included_in_net_worth", default_included)),
         already_investment_accounted=bool(payload.get("already_investment_accounted", False)),
         value_as_of=as_of,
@@ -160,7 +199,12 @@ def update_item(portfolio_id: int, item_id: int, payload: dict[str, Any]) -> dic
             as_of = date.fromisoformat(as_of)
         item.kind, item.item_type, item.category = kind, item_type, category
         item.name = str(merged["name"]).strip()
-        item.current_value = float(merged["current_value"])
+        cny_value, currency, original_value, fx_rate, fx_rate_date = _currency_payload_values(payload, item)
+        item.current_value = cny_value
+        item.currency = currency
+        item.original_value = original_value
+        item.fx_rate_to_cny = fx_rate
+        item.fx_rate_date = fx_rate_date
         item.value_as_of = as_of
         item.included_in_net_worth = bool(payload.get("included_in_net_worth", item.included_in_net_worth))
         item.already_investment_accounted = bool(payload.get("already_investment_accounted", item.already_investment_accounted))
@@ -209,6 +253,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
         items = session.query(WealthItem).filter_by(portfolio_id=portfolio_id).all()
         non_investment_assets = 0.0
         pension_benefit_value = 0.0
+        reclassified_investment_assets = 0.0
         liabilities = 0.0
         by_category: dict[str, float] = {}
         liability_categories: dict[str, float] = {}
@@ -216,8 +261,15 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
             value = float(item.current_value or 0)
             effective = item.included_in_net_worth and not item.already_investment_accounted
             if item.kind == "ASSET":
-                if item.category == "pension_benefit":
+                if item.item_type == "basic_pension" and not effective:
                     pension_benefit_value += value
+                if item.already_investment_accounted and item.included_in_net_worth:
+                    # This is a classification link to an investment-account
+                    # fact, not a second asset. Shift it out of the ordinary
+                    # investment bucket while keeping the global total intact.
+                    reclassified_investment_assets += value
+                    by_category[item.category] = by_category.get(item.category, 0.0) + value
+                    continue
                 if effective:
                     non_investment_assets += value
                     by_category[item.category] = by_category.get(item.category, 0.0) + value
@@ -227,6 +279,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
         return {
             "non_investment_assets": non_investment_assets,
             "pension_benefit_value": pension_benefit_value,
+            "reclassified_investment_assets": reclassified_investment_assets,
             "liabilities": liabilities,
             "asset_categories": by_category,
             "liability_categories": liability_categories,
@@ -238,13 +291,21 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
 def _current_totals(portfolio_id: int) -> dict[str, Any]:
     investment = _investment_summary(portfolio_id)
     manual = _manual_totals(portfolio_id)
-    investment_assets = float(investment.get("total_assets") or 0)
-    total_assets = investment_assets + manual["non_investment_assets"]
+    gross_investment_assets = float(investment.get("total_assets") or 0)
+    reclassified = manual["reclassified_investment_assets"]
+    if reclassified > gross_investment_assets:
+        raise ValueError("投资账户重分类金额不能超过投资资产总额")
+    investment_assets = gross_investment_assets - reclassified
+    # Reclassified values are already present in the investment source of
+    # truth; add them back only under their retirement classification.
+    total_assets = investment_assets + manual["non_investment_assets"] + reclassified
     total_liabilities = manual["liabilities"]
     return {
         "investment": investment,
         "investment_assets": investment_assets,
         "investment_profit_loss": investment.get("total_profit_loss"),
+        "gross_investment_assets": gross_investment_assets,
+        "reclassified_investment_assets": reclassified,
         "non_investment_assets": manual["non_investment_assets"],
         "pension_benefit_value": manual["pension_benefit_value"],
         "total_assets": total_assets,
@@ -366,6 +427,7 @@ def get_summary(portfolio_id: int, trend_days: int | None = None) -> dict[str, A
             "source": "portfolio_summary",
         },
         "pension_benefit": round(totals["pension_benefit_value"], 2),
+        "total_wealth_including_pension_benefit": round(totals["total_assets"] + totals["pension_benefit_value"], 2),
         "asset_breakdown": assets,
         "liability_breakdown": [
             {"category": category, "label": _category_label(category), "value": value}

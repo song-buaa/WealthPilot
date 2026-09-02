@@ -49,13 +49,36 @@ def test_wealth_totals_reuse_investment_once_and_exclude_duplicate(wealth_db):
 
     summary = wealth_service.get_summary(1)
 
-    assert summary["investment"]["total_assets"] == 1000
+    assert summary["investment"]["total_assets"] == 700
     assert summary["total_assets"] == 1200
     assert summary["total_liabilities"] == 40
     assert summary["net_worth"] == 1160
     assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
-        "投资资产": 1000.0, "养老与长期权益": 200.0,
+        "投资资产": 700.0, "养老与长期权益": 500.0,
     }
+
+
+def test_personal_pension_reclassification_preserves_total_assets(wealth_db):
+    _create("asset", "personal_pension", 300, already_investment_accounted=True)
+
+    summary = wealth_service.get_summary(1)
+
+    assert summary["investment"]["total_assets"] == 700
+    assert summary["total_assets"] == 1000
+    assert summary["net_worth"] == 1000
+    assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
+        "投资资产": 700.0, "养老与长期权益": 300.0,
+    }
+
+
+def test_foreign_currency_asset_keeps_source_amount_and_uses_shared_fx(wealth_db, monkeypatch):
+    monkeypatch.setattr(wealth_service.fx_service, "convert", lambda amount, *_: (amount * 2, 2.0, "2026-09-01"))
+    item = _create("asset", "bank_cash", 0, currency="HKD", original_value=10)
+
+    assert item["currency"] == "HKD"
+    assert item["original_value"] == 10
+    assert item["current_value"] == 20
+    assert item["fx_rate_to_cny"] == 2
 
 
 def test_manual_update_keeps_item_history_and_old_value_remains_effective(wealth_db):

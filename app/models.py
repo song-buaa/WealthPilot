@@ -173,8 +173,15 @@ class WealthItem(Base):
     category = Column(String(50), nullable=False)
     source_type = Column(String(20), nullable=False, default="MANUAL")  # MANUAL | PDF | SCREENSHOT
     sync_mode = Column(String(20), nullable=False, default="MANUAL")
+    # ``current_value`` is always the CNY base-currency value used by wealth
+    # aggregation.  Keep the source-currency fact and the conversion snapshot
+    # alongside it so a foreign-currency cash balance is never reduced to a
+    # manually maintained CNY number.
     current_value = Column(Float, nullable=False, default=0)
     currency = Column(String(10), nullable=False, default="CNY")
+    original_value = Column(Float, nullable=True)
+    fx_rate_to_cny = Column(Float, nullable=False, default=1.0)
+    fx_rate_date = Column(String(20), nullable=True)
     included_in_net_worth = Column(Boolean, nullable=False, default=True)
     # 用户明确说明该项的底层资产已经包含在投资账户后，仍可展示，但不得再次计入。
     already_investment_accounted = Column(Boolean, nullable=False, default=False)

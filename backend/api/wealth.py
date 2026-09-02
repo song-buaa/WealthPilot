@@ -22,6 +22,8 @@ class WealthItemWrite(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     item_type: str
     current_value: float = Field(ge=0)
+    currency: str = Field(default="CNY", min_length=3, max_length=10)
+    original_value: float | None = Field(default=None, ge=0)
     value_as_of: date | None = None
     included_in_net_worth: bool | None = None
     already_investment_accounted: bool = False
@@ -34,6 +36,8 @@ class WealthItemPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     item_type: str | None = None
     current_value: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=10)
+    original_value: float | None = Field(default=None, ge=0)
     value_as_of: date | None = None
     included_in_net_worth: bool | None = None
     already_investment_accounted: bool | None = None
