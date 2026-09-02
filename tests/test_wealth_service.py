@@ -59,13 +59,15 @@ def test_wealth_totals_reuse_investment_once_and_exclude_duplicate(wealth_db):
 
 
 def test_personal_pension_reclassification_preserves_total_assets(wealth_db):
-    _create("asset", "personal_pension", 300, already_investment_accounted=True)
+    pension = _create("asset", "personal_pension", 300, already_investment_accounted=True)
 
     summary = wealth_service.get_summary(1)
 
     assert summary["investment"]["total_assets"] == 700
     assert summary["total_assets"] == 1000
     assert summary["net_worth"] == 1000
+    assert pension["included_in_net_worth"] is True
+    assert pension["effective_included_in_net_worth"] is True
     assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
         "投资资产": 700.0, "养老与长期权益": 300.0,
     }

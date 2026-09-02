@@ -12,7 +12,7 @@ const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用
 
 type FormState = WealthItemWrite & { id?: number }
 type DetailFilter = 'all' | 'asset' | 'liability'
-type StructureItem = { key: string; label: string; value: number; coreValue: number }
+type StructureItem = { key: string; label: string; coreValue: number }
 
 const emptyForm = (kind: 'asset' | 'liability' = 'asset'): FormState => ({
   kind, name: '', item_type: kind === 'asset' ? 'bank_cash' : 'credit_card', current_value: 0,
@@ -55,11 +55,10 @@ export default function WealthOverview() {
     const investment = summary?.investment.total_assets ?? 0
     const cash = categoryValues.get('cash_deposits') ?? 0
     const retirementCore = categoryValues.get('retirement_long_term') ?? 0
-    const pensionBenefit = summary?.pension_benefit ?? 0
     return [
-      { key: 'investment', label: '投资资产', value: investment, coreValue: investment },
-      { key: 'cash_deposits', label: '现金及存款', value: cash, coreValue: cash },
-      { key: 'retirement_long_term', label: '养老与长期权益', value: retirementCore + pensionBenefit, coreValue: retirementCore },
+      { key: 'investment', label: '投资资产', coreValue: investment },
+      { key: 'cash_deposits', label: '现金及存款', coreValue: cash },
+      { key: 'retirement_long_term', label: '养老与长期权益', coreValue: retirementCore },
     ]
   }, [categoryValues, summary])
   const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
@@ -157,9 +156,9 @@ function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; i
     <div style={sectionHeader}><span>资产结构</span></div>
     <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginTop: 6 }}>
       <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
-      <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
+      <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.coreValue)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>计入核心资产 · 核心总资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
     </div>
-    {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '7px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11 }}>另有补充养老权益 {fmtCny(summary.pension_benefit)}，暂不计入核心净资产。</div>}
+    {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '8px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11, lineHeight: 1.55 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#475569' }}><span>补充养老权益</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(summary.pension_benefit)}</strong></div><div style={{ marginTop: 2 }}>企业年金及基本养老保险个人账户 · 不计入核心总资产</div></div>}
   </div>
 }
 

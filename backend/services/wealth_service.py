@@ -46,7 +46,11 @@ def _item_to_dict(item: WealthItem) -> dict[str, Any]:
     today = date.today()
     age_days = max((today - item.updated_at.date()).days, 0)
     freshness = "latest" if age_days <= 30 else "suggested_update" if age_days <= 90 else "long_unupdated"
-    effective_included = bool(item.included_in_net_worth and not item.already_investment_accounted)
+    # `already_investment_accounted` only controls how the item is aggregated:
+    # a personal pension balance can be part of the investment source of truth,
+    # while still being a core-net-worth asset.  Expose inclusion semantics to
+    # the UI separately so it is not presented as a supplementary benefit.
+    effective_included = bool(item.included_in_net_worth)
     return {
         "id": item.id,
         "kind": item.kind.lower(),
