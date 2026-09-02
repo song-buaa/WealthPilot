@@ -71,6 +71,22 @@ def test_personal_pension_reclassification_preserves_total_assets(wealth_db):
     }
 
 
+def test_enterprise_annuity_is_supplementary_pension_benefit(wealth_db):
+    annuity = _create("asset", "enterprise_annuity", 200)
+    _create("asset", "housing_fund", 300)
+
+    summary = wealth_service.get_summary(1)
+
+    assert annuity["effective_included_in_net_worth"] is False
+    assert summary["total_assets"] == 1300
+    assert summary["net_worth"] == 1300
+    assert summary["pension_benefit"] == 200
+    assert summary["total_wealth_including_pension_benefit"] == 1500
+    assert {item["label"]: item["value"] for item in summary["asset_breakdown"]} == {
+        "投资资产": 1000.0, "养老与长期权益": 300.0,
+    }
+
+
 def test_foreign_currency_asset_keeps_source_amount_and_uses_shared_fx(wealth_db, monkeypatch):
     monkeypatch.setattr(wealth_service.fx_service, "convert", lambda amount, *_: (amount * 2, 2.0, "2026-09-01"))
     item = _create("asset", "bank_cash", 0, currency="HKD", original_value=10)

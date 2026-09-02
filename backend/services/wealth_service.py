@@ -21,7 +21,8 @@ ASSET_TYPES: dict[str, tuple[str, bool]] = {
     "bank_cash": ("cash_deposits", True),
     "time_deposit": ("cash_deposits", True),
     "housing_fund": ("retirement_long_term", True),
-    "enterprise_annuity": ("retirement_long_term", True),
+    # 企业缴费及收益是否已完全归属个人取决于原单位方案；在明确已归属金额前，仅展示。
+    "enterprise_annuity": ("retirement_long_term", False),
     "personal_pension": ("retirement_long_term", True),
     "pension_insurance": ("retirement_long_term", True),
     # Pension entitlement belongs to the retirement category, while remaining
@@ -261,7 +262,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
             value = float(item.current_value or 0)
             effective = item.included_in_net_worth and not item.already_investment_accounted
             if item.kind == "ASSET":
-                if item.item_type == "basic_pension" and not effective:
+                if item.item_type in {"basic_pension", "enterprise_annuity"} and not effective:
                     pension_benefit_value += value
                 if item.already_investment_accounted and item.included_in_net_worth:
                     # This is a classification link to an investment-account

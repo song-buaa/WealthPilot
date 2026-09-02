@@ -159,7 +159,7 @@ function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; i
       <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
       <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
     </div>
-    {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '7px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11 }}>其中 {fmtCny(summary.pension_benefit)} 为养老保障权益，当前不计入核心净资产。</div>}
+    {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '7px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11 }}>另有补充养老权益 {fmtCny(summary.pension_benefit)}，暂不计入核心净资产。</div>}
   </div>
 }
 
