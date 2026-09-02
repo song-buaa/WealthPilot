@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Edit3, Ellipsis, Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
@@ -28,7 +27,6 @@ const card = (primary = false) => ({
 })
 
 export default function WealthOverview() {
-  const navigate = useNavigate()
   const [summary, setSummary] = useState<WealthSummary | null>(null)
   const [assets, setAssets] = useState<WealthItem[]>([])
   const [liabilities, setLiabilities] = useState<WealthItem[]>([])
@@ -74,7 +72,6 @@ export default function WealthOverview() {
 
   const changeRange = (days: number) => { setRange(days); refresh(days) }
   const switchDetailFilter = (filter: DetailFilter) => setDetailFilter(filter)
-  const openAllLiabilities = () => { switchDetailFilter('liability'); document.getElementById('wealth-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!form) return
     setSaving(true); setError(null)
@@ -116,8 +113,8 @@ export default function WealthOverview() {
         </section>
 
         <section aria-label="资产与负债结构" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, .85fr)', gap: 16, marginBottom: 20 }}>
-          <AssetStructure summary={summary} items={assetStructure} pieData={pieData} onOpenDashboard={() => navigate('/dashboard')} />
-          <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} onViewAll={openAllLiabilities} />
+          <AssetStructure summary={summary} items={assetStructure} pieData={pieData} />
+          <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} />
         </section>
 
         <section id="wealth-details" aria-label="资产与负债明细" style={{ ...card(), padding: '20px 20px 16px' }}>
@@ -155,9 +152,9 @@ function AttributionStrip({ summary }: { summary: WealthSummary }) {
   return <div style={{ ...attributionStyle, alignItems: 'center' }}><strong>本月财富变化归因</strong><div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>{values.map(([value, label]) => <span key={label as string} style={{ color: '#64748B' }}>{label as string} <b style={{ color: moneyTone(value as number | null), marginLeft: 4 }}>{value === null ? '—' : fmtCnySigned(Number(value))}</b></span>)}</div></div>
 }
 
-function AssetStructure({ summary, items, pieData, onOpenDashboard }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ name: string; value: number }>; onOpenDashboard: () => void }) {
+function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ name: string; value: number }> }) {
   return <div style={card()}>
-    <div style={sectionHeader}><span>资产结构</span><button type="button" style={textButton} onClick={onOpenDashboard}>查看投资账户总览 →</button></div>
+    <div style={sectionHeader}><span>资产结构</span></div>
     <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginTop: 6 }}>
       <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
       <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
@@ -166,7 +163,7 @@ function AssetStructure({ summary, items, pieData, onOpenDashboard }: { summary:
   </div>
 }
 
-function LiabilityOverview({ total, liabilities, onViewAll }: { total: number; liabilities: WealthItem[]; onViewAll: () => void }) {
+function LiabilityOverview({ total, liabilities }: { total: number; liabilities: WealthItem[] }) {
   const categoryCount = useMemo(() => {
     const counts = new Map<string, number>()
     liabilities.forEach(item => counts.set(item.category, (counts.get(item.category) ?? 0) + 1))
@@ -174,7 +171,7 @@ function LiabilityOverview({ total, liabilities, onViewAll }: { total: number; l
   }, [liabilities])
   const mainCategory = categoryCount[0]
   return <div style={card()}>
-    <div style={sectionHeader}><span>负债概览</span><button type="button" style={textButton} onClick={onViewAll}>查看全部负债 →</button></div>
+    <div style={sectionHeader}><span>负债概览</span></div>
     {liabilities.length ? <><div style={{ marginTop: 12 }}><div style={mutedLabel}>总负债</div><div style={{ ...bigValue, marginTop: 3 }}>{fmtCny(total)}</div><div style={{ color: '#6B7280', fontSize: 12, marginTop: 3 }}>{mainCategory ? `${liabilities.length} 笔${categoryLabel(mainCategory[0])}` : `${liabilities.length} 笔负债`}</div></div><div style={{ marginTop: 12 }}><div style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 600, letterSpacing: '.3px' }}>金额最高的负债</div>{liabilities.slice(0, 3).map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 8, fontSize: 13 }}><span style={{ color: '#4B5563', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong></div>)}</div></> : <CompactEmptyState text="暂无录入负债。" />}
   </div>
 }
