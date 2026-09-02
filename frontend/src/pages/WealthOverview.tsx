@@ -1,18 +1,31 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Edit3, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Edit3, Ellipsis, Loader2, Plus, Trash2 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
 
-const COLORS = ['#2563EB', '#14B8A6', '#8B5CF6', '#F59E0B', '#EC4899', '#64748B']
+const COLORS = ['#2563EB', '#14B8A6', '#8B5CF6']
 const ASSET_TYPES = [['bank_cash', '银行现金 / 活期'], ['time_deposit', '定期存款 / 大额存单'], ['housing_fund', '住房公积金'], ['enterprise_annuity', '企业年金'], ['personal_pension', '个人养老金'], ['basic_pension', '基本养老保险权益'], ['other_asset', '其他资产']] as const
 const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用贷'], ['mortgage', '房贷'], ['other_liability', '其他负债']] as const
+
 type FormState = WealthItemWrite & { id?: number }
-const emptyForm = (kind: 'asset' | 'liability' = 'asset'): FormState => ({ kind, name: '', item_type: kind === 'asset' ? 'bank_cash' : 'credit_card', current_value: 0, value_as_of: new Date().toISOString().slice(0, 10), included_in_net_worth: true, already_investment_accounted: false, source_type: 'MANUAL', notes: '' })
-const card = (primary = false) => ({ background: primary ? 'linear-gradient(135deg, #1F2937, #111827)' : '#fff', border: primary ? 'none' : '1px solid #E5E7EB', borderRadius: 12, padding: '18px 20px', boxShadow: primary ? 'var(--shadow-dark)' : 'var(--shadow-sm)' })
+type DetailFilter = 'all' | 'asset' | 'liability'
+type StructureItem = { key: string; label: string; value: number; coreValue: number }
+
+const emptyForm = (kind: 'asset' | 'liability' = 'asset'): FormState => ({
+  kind, name: '', item_type: kind === 'asset' ? 'bank_cash' : 'credit_card', current_value: 0,
+  value_as_of: new Date().toISOString().slice(0, 10), included_in_net_worth: true,
+  already_investment_accounted: false, source_type: 'MANUAL', notes: '',
+})
+
+const card = (primary = false) => ({
+  background: primary ? 'linear-gradient(135deg, #1F2937, #111827)' : '#fff',
+  border: primary ? 'none' : '1px solid #E5E7EB', borderRadius: 14,
+  padding: primary ? '24px 26px' : '20px 22px', boxShadow: primary ? 'var(--shadow-dark)' : 'var(--shadow-sm)',
+})
 
 export default function WealthOverview() {
   const navigate = useNavigate()
@@ -24,6 +37,9 @@ export default function WealthOverview() {
   const [error, setError] = useState<string | null>(null)
   const [range, setRange] = useState(365)
   const [form, setForm] = useState<FormState | null>(null)
+  const [detailFilter, setDetailFilter] = useState<DetailFilter>('all')
+  const [showAllDetails, setShowAllDetails] = useState(false)
+
   const refresh = (days = range) => {
     setLoading(true); setError(null)
     Promise.all([wealthApi.getSummary(days), wealthApi.getItems('asset'), wealthApi.getItems('liability')])
@@ -31,54 +47,180 @@ export default function WealthOverview() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : '财富数据加载失败'))
       .finally(() => setLoading(false))
   }
+
   useEffect(() => {
     const timer = window.setTimeout(() => refresh(), 0)
     return () => window.clearTimeout(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const assetPie = useMemo(() => summary?.asset_breakdown.filter(item => item.value > 0) ?? [], [summary])
-  const liabilityPie = useMemo(() => summary?.liability_breakdown.filter(item => item.value > 0) ?? [], [summary])
-  const sortedAssets = useMemo(() => [...assets].sort((a, b) => b.current_value - a.current_value), [assets])
+
+  const categoryValues = useMemo(() => new Map(summary?.asset_breakdown.map(item => [item.category, item.value]) ?? []), [summary])
+  const assetStructure = useMemo<StructureItem[]>(() => {
+    const investment = summary?.investment.total_assets ?? 0
+    const cash = categoryValues.get('cash_deposits') ?? 0
+    const retirementCore = categoryValues.get('retirement_long_term') ?? 0
+    const pensionBenefit = summary?.pension_benefit ?? 0
+    return [
+      { key: 'investment', label: '投资资产', value: investment, coreValue: investment },
+      { key: 'cash_deposits', label: '现金及存款', value: cash, coreValue: cash },
+      { key: 'retirement_long_term', label: '养老与长期权益', value: retirementCore + pensionBenefit, coreValue: retirementCore },
+    ]
+  }, [categoryValues, summary])
+  const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
+  const allDetails = useMemo(() => [...assets, ...liabilities].sort((a, b) => b.current_value - a.current_value), [assets, liabilities])
+  const filteredDetails = useMemo(() => detailFilter === 'all' ? allDetails : allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
+  const visibleDetails = showAllDetails ? filteredDetails : filteredDetails.slice(0, 5)
+  const baseline = summary?.monthly_net_worth_change == null ? null : summary.net_worth - summary.monthly_net_worth_change
+  const monthlyPct = baseline && baseline !== 0 && summary?.monthly_net_worth_change != null
+    ? summary.monthly_net_worth_change / baseline * 100 : null
+
   const changeRange = (days: number) => { setRange(days); refresh(days) }
-  const save = async (event: FormEvent) => { event.preventDefault(); if (!form) return; setSaving(true); setError(null); const { id, ...payload } = form; try { if (id) await wealthApi.updateItem(id, payload); else await wealthApi.createItem(payload); setForm(null); refresh() } catch (e) { setError(e instanceof Error ? e.message : '保存失败') } finally { setSaving(false) } }
-  const edit = (item: WealthItem) => setForm({ id: item.id, kind: item.kind, name: item.name, item_type: item.item_type, current_value: item.current_value, value_as_of: item.value_as_of, included_in_net_worth: item.included_in_net_worth, already_investment_accounted: item.already_investment_accounted, source_type: item.source_type, notes: item.notes ?? '' })
-  const remove = async (item: WealthItem) => { if (!window.confirm(`删除“${item.name}”？历史快照也会一并删除。`)) return; try { await wealthApi.deleteItem(item.id); refresh() } catch (e) { setError(e instanceof Error ? e.message : '删除失败') } }
+  const switchDetailFilter = (filter: DetailFilter) => { setDetailFilter(filter); setShowAllDetails(false) }
+  const openAllLiabilities = () => { switchDetailFilter('liability'); document.getElementById('wealth-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); if (!form) return
+    setSaving(true); setError(null)
+    const { id, ...payload } = form
+    try {
+      if (id) await wealthApi.updateItem(id, payload)
+      else await wealthApi.createItem(payload)
+      setForm(null); refresh()
+    } catch (e) { setError(e instanceof Error ? e.message : '保存失败') } finally { setSaving(false) }
+  }
+  const edit = (item: WealthItem) => setForm({
+    id: item.id, kind: item.kind, name: item.name, item_type: item.item_type, current_value: item.current_value,
+    value_as_of: item.value_as_of, included_in_net_worth: item.included_in_net_worth,
+    already_investment_accounted: item.already_investment_accounted, source_type: item.source_type, notes: item.notes ?? '',
+  })
+  const remove = async (item: WealthItem) => {
+    if (!window.confirm(`删除“${item.name}”？历史快照也会一并删除。`)) return
+    try { await wealthApi.deleteItem(item.id); refresh() } catch (e) { setError(e instanceof Error ? e.message : '删除失败') }
+  }
+
   return (
     <div>
-      <PageHeader icon="◈" title="财富总览" subtitle="汇总投资账户、现金、养老金等资产与负债，统一查看个人财富变化。" />
-      {error && <div style={{ marginBottom: 16, padding: '10px 13px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', borderRadius: 8, fontSize: 13 }}>{error}</div>}
+      <PageHeader icon="◈" title="财富总览" />
+      {error && <div style={errorStyle}>{error}</div>}
       {loading || !summary ? <Loading /> : <>
-        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1.7fr) repeat(3, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}><Kpi label="净资产" value={fmtCny(summary.net_worth)} primary detail={summary.monthly_net_worth_change === null ? '本月变化待建立基线' : `本月 ${fmtCnySigned(summary.monthly_net_worth_change)}`} /><Kpi label="总资产" value={fmtCny(summary.total_assets)} /><Kpi label="总负债" value={fmtCny(summary.total_liabilities)} /><Kpi label="本月净资产变化" value={summary.monthly_net_worth_change === null ? '—' : fmtCnySigned(summary.monthly_net_worth_change)} tone={changeTone(summary.monthly_net_worth_change)} /></section>
-        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(280px, 1fr)', gap: 16, marginBottom: 16 }}><div style={card()}><div style={sectionHeader}><span>净资产历史趋势</span><div style={{ display: 'flex', gap: 4 }}>{[[30, '1M'], [90, '3M'], [365, '1Y'], [0, 'ALL']].map(([days, label]) => <button key={label} onClick={() => changeRange(days as number)} style={{ ...tabStyle, background: range === days ? '#EFF6FF' : 'transparent', color: range === days ? '#2563EB' : '#6B7280' }}>{label}</button>)}</div></div>{summary.trend.length > 1 ? <div style={{ height: 245 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={summary.trend}><XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={v => v.slice(5)} /><YAxis tick={{ fontSize: 11 }} width={70} tickFormatter={v => `${Math.round(v / 10000)}万`} /><Tooltip formatter={(value: number) => fmtCny(value)} /><Line type="monotone" dataKey="net_worth" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></div> : <EmptyTrend />}</div><Attribution summary={summary} /></section>
-        <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}><Breakdown title="资产构成" data={assetPie} total={summary.total_assets} empty="添加资产后将在此展示构成" /><Breakdown title="负债构成" data={liabilityPie} total={summary.total_liabilities} empty="暂无纳入净资产的负债" /></section>
-        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 16 }}><div style={card()}><div style={sectionHeader}><span>投资资产摘要</span><button style={linkButton} onClick={() => navigate('/dashboard')}>进入投资账户总览 →</button></div><div style={{ display: 'flex', alignItems: 'end', gap: 20, margin: '12px 0 16px' }}><div><div style={mutedLabel}>当前投资资产</div><div style={bigValue}>{fmtCny(summary.investment.total_assets)}</div></div><div><div style={mutedLabel}>累计浮动盈亏</div><div style={{ ...valueStyle, color: moneyTone(summary.investment.total_profit_loss) }}>{summary.investment.total_profit_loss === null ? '—' : fmtCnySigned(summary.investment.total_profit_loss)}</div></div></div><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(summary.investment.allocation).filter(([, value]) => value.value > 0).map(([key, value]) => <span key={key} style={{ padding: '5px 8px', borderRadius: 6, background: '#F3F4F6', color: '#4B5563', fontSize: 12 }}>{allocationLabel(key)} {fmtPct(value.pct)}</span>)}</div></div><SupplementaryBenefit value={summary.pension_benefit} /></section>
-        <section style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><ItemList title="其他资产" items={sortedAssets} onCreate={() => setForm(emptyForm('asset'))} onEdit={edit} onDelete={remove} /><ItemList title="负债" items={sortedLiabilities} onCreate={() => setForm(emptyForm('liability'))} onEdit={edit} onDelete={remove} /></section>
+        <section aria-label="财富核心概览" style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1.75fr) repeat(3, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <Kpi label="净资产" value={fmtCny(summary.net_worth)} primary />
+          <Kpi label="总资产" value={fmtCny(summary.total_assets)} />
+          <Kpi label="总负债" value={fmtCny(summary.total_liabilities)} />
+          <Kpi label="本月净资产变化" value={summary.monthly_net_worth_change === null ? '—' : fmtCnySigned(summary.monthly_net_worth_change)} tone={changeTone(summary.monthly_net_worth_change)} detail={summary.monthly_net_worth_change === null ? '尚未形成月初基线' : `${signedPct(monthlyPct)} 较月初`} />
+        </section>
+
+        <section aria-label="财富趋势" style={{ marginBottom: 20 }}>
+          <div style={card()}>
+            <div style={sectionHeader}><span>净资产历史趋势</span><RangeTabs range={range} onChange={changeRange} /></div>
+            {summary.trend.length > 1 ? <div style={{ height: 292, marginTop: 12 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={summary.trend}><XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={value => value.slice(5)} /><YAxis tick={{ fontSize: 11 }} width={76} tickFormatter={value => `${Math.round(value / 10000)}万`} /><Tooltip formatter={(value: number) => fmtCny(value)} /><Line type="monotone" dataKey="net_worth" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></div> : <EmptyTrend />}
+          </div>
+          <AttributionStrip summary={summary} />
+        </section>
+
+        <section aria-label="资产与负债结构" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, .85fr)', gap: 16, marginBottom: 20 }}>
+          <AssetStructure summary={summary} items={assetStructure} pieData={pieData} onOpenDashboard={() => navigate('/dashboard')} />
+          <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} onViewAll={openAllLiabilities} />
+        </section>
+
+        <section id="wealth-details" aria-label="资产与负债明细" style={card()}>
+          <div style={{ ...sectionHeader, flexWrap: 'wrap' }}>
+            <span>资产与负债明细</span>
+            <button type="button" onClick={() => setForm(emptyForm())} style={primaryButton}><Plus size={14} /> 更新财富数据</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, margin: '14px 0 6px' }}>
+            {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={{ ...filterButton, background: detailFilter === filter ? '#EFF6FF' : '#fff', color: detailFilter === filter ? '#2563EB' : '#6B7280', borderColor: detailFilter === filter ? '#BFDBFE' : '#E5E7EB' }}>{label}</button>)}
+          </div>
+          {visibleDetails.length ? <div style={{ marginTop: 2 }}>{visibleDetails.map(item => <DetailRow key={`${item.kind}-${item.id}`} item={item} onEdit={edit} onDelete={remove} />)}</div> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
+          {filteredDetails.length > 5 && <button type="button" style={{ ...textButton, marginTop: 14 }} onClick={() => setShowAllDetails(value => !value)}>{showAllDetails ? '收起明细 ↑' : `查看全部 ${filteredDetails.length} 条 →`}</button>}
+        </section>
       </>}
       {form && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
     </div>
   )
 }
 
-function Kpi({ label, value, primary, detail, tone }: { label: string; value: string; primary?: boolean; detail?: string; tone?: 'positive' | 'negative' }) { return <div style={card(primary)}><div style={{ ...mutedLabel, color: primary ? 'rgba(255,255,255,.55)' : '#9CA3AF' }}>{label}</div><div style={{ fontSize: primary ? 30 : 23, lineHeight: 1.2, fontWeight: 700, letterSpacing: '-.6px', color: primary ? '#fff' : tone === 'negative' ? '#DC2626' : tone === 'positive' ? '#059669' : '#1F2937', marginTop: 12, fontVariantNumeric: 'tabular-nums' }}>{value}</div>{detail && <div style={{ color: primary ? 'rgba(255,255,255,.7)' : '#6B7280', fontSize: 12, marginTop: 8 }}>{detail}</div>}</div> }
-function Attribution({ summary }: { summary: WealthSummary }) { const a = summary.attribution; const rows = [[a.cash_surplus, a.cashflow_available ? '收支结余（已导入账单）' : '收支结余（待接入）'], [a.investment_return, a.investment_return_available ? '投资收益（快照期间）' : '投资收益（待建立基线）'], [a.other_adjustment, '其他资产 / 负债变化']]; return <div style={card()}><div style={sectionHeader}><span>本月财富变化归因</span></div>{!a.baseline_available ? <CompactEmptyState text="确认一次资产或负债更新后，即可建立本月变化归因基线。" /> : <div style={{ marginTop: 12 }}>{rows.map(([value, label]) => <div key={String(label)} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '11px 0', borderBottom: '1px solid #F3F4F6', fontSize: 13 }}><span style={{ color: '#6B7280' }}>{label}</span><strong style={{ color: moneyTone(value as number | null) }}>{value === null ? '—' : fmtCnySigned(Number(value))}</strong></div>)}</div>}</div> }
-function Breakdown({ title, data, total, empty }: { title: string; data: Array<{ label: string; value: number }>; total: number; empty: string }) { return <div style={card()}><div style={sectionHeader}><span>{title}</span><strong style={{ fontSize: 13, color: total === 0 ? '#6B7280' : '#1F2937' }}>{fmtCny(total)}</strong></div>{data.length ? <div style={{ height: 240 }}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} dataKey="value" nameKey="label" innerRadius={55} outerRadius={84} paddingAngle={2}>{data.map((item, index) => <Cell key={item.label} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /><Legend formatter={(value: string) => <span style={{ color: '#4B5563', fontSize: 12 }}>{value}</span>} /></PieChart></ResponsiveContainer></div> : <CompactEmptyState text={empty} />}</div> }
-function ItemList({ title, items, onCreate, onEdit, onDelete }: { title: string; items: WealthItem[]; onCreate: () => void; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) { return <div style={card()}><div style={sectionHeader}><span>{title}</span><button onClick={onCreate} style={linkButton}><Plus size={14} /> 新增</button></div>{items.length ? <div style={{ marginTop: 8 }}>{items.map(item => <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 10, padding: '12px 0', borderBottom: '1px solid #F3F4F6', alignItems: 'center' }}><div><div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{item.name} {!item.effective_included_in_net_worth && <span style={{ fontWeight: 500, color: '#9CA3AF' }}>（仅展示）</span>}</div><div style={{ marginTop: 4, fontSize: 11, color: item.freshness === 'latest' ? '#6B7280' : '#D97706' }}>{item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新`}{item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}</div></div><strong style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong><span style={{ display: 'flex', gap: 4 }}><button aria-label={`编辑${item.name}`} onClick={() => onEdit(item)} style={iconButton}><Edit3 size={14} /></button><button aria-label={`删除${item.name}`} onClick={() => onDelete(item)} style={{ ...iconButton, color: '#DC2626' }}><Trash2 size={14} /></button></span></div>)}</div> : <CompactEmptyState text={`暂未录入${title}`} />}</div> }
-function SupplementaryBenefit({ value }: { value: number }) { return <div style={{ ...card(), padding: '15px 16px', background: '#F8FAFC', borderColor: '#E2E8F0', boxShadow: 'none', alignSelf: 'start' }}><div style={sectionHeader}><span style={{ color: '#475569' }}>补充权益</span></div>{value > 0 ? <><div style={{ fontSize: 19, fontWeight: 700, color: '#334155', marginTop: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(value)}</div><p style={{ color: '#64748B', fontSize: 12, lineHeight: 1.6, margin: '8px 0 0' }}>默认不计入核心净资产。</p></> : <CompactEmptyState text="暂无补充权益；基本养老保险权益默认单列展示。" />}</div> }
-function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
-function ItemDialog({ form, setForm, saving, onSubmit, onClose }: { form: FormState; setForm: (form: FormState) => void; saving: boolean; onSubmit: (event: FormEvent) => void; onClose: () => void }) { const types = form.kind === 'asset' ? ASSET_TYPES : LIABILITY_TYPES; const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm({ ...form, [key]: value }); return <div style={{ position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(17,24,39,.45)', display: 'grid', placeItems: 'center', padding: 18 }}><form onSubmit={onSubmit} style={{ width: 'min(550px, 100%)', maxHeight: 'calc(100vh - 36px)', overflow: 'auto', background: '#fff', borderRadius: 14, padding: 22, boxShadow: '0 24px 70px rgba(0,0,0,.25)' }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}><h2 style={{ fontSize: 18, margin: 0, color: '#1F2937' }}>{form.id ? '更新财富项目' : '新增财富项目'}</h2><button type="button" onClick={onClose} style={linkButton}>关闭</button></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><Field label="类型"><select value={form.kind} onChange={e => setForm(emptyForm(e.target.value as 'asset' | 'liability'))} style={inputStyle}><option value="asset">资产</option><option value="liability">负债</option></select></Field><Field label="项目分类"><select value={form.item_type} onChange={e => set('item_type', e.target.value)} style={inputStyle}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field></div><Field label="名称"><input required value={form.name} onChange={e => set('name', e.target.value)} placeholder="例如：招商银行活期" style={inputStyle} /></Field><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><Field label="当前金额（元）"><input required min="0" step="0.01" type="number" value={form.current_value} onChange={e => set('current_value', Number(e.target.value))} style={inputStyle} /></Field><Field label="数据日期"><input required type="date" value={form.value_as_of ?? ''} onChange={e => set('value_as_of', e.target.value)} style={inputStyle} /></Field></div><Field label="备注（可选）"><textarea value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>{form.kind === 'asset' && <label style={checkStyle}><input type="checkbox" checked={form.already_investment_accounted ?? false} onChange={e => set('already_investment_accounted', e.target.checked)} /> 该资产已在投资账户总览中统计（仅展示，不重复计入净资产）</label>}<label style={checkStyle}><input type="checkbox" checked={form.included_in_net_worth ?? true} onChange={e => set('included_in_net_worth', e.target.checked)} disabled={form.already_investment_accounted} /> 计入净资产</label><div style={{ display: 'flex', justifyContent: 'end', gap: 8, marginTop: 20 }}><button type="button" onClick={onClose} style={buttonStyle(false)}>取消</button><button disabled={saving} type="submit" style={buttonStyle(true)}>{saving && <Loader2 size={14} className="animate-spin" />}{form.source_type !== 'MANUAL' ? '确认并保存' : '保存更新'}</button></div></form></div> }
+function Kpi({ label, value, primary, tone, detail }: { label: string; value: string; primary?: boolean; tone?: 'positive' | 'negative'; detail?: string }) {
+  return <div style={{ ...card(primary), minHeight: primary ? 122 : 104, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+    <div style={{ ...mutedLabel, color: primary ? 'rgba(255,255,255,.55)' : '#9CA3AF' }}>{label}</div>
+    <div style={{ fontSize: primary ? 34 : 22, lineHeight: 1.15, fontWeight: 700, letterSpacing: '-.8px', color: primary ? '#fff' : tone === 'positive' ? '#059669' : tone === 'negative' ? '#DC2626' : '#1F2937', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    {detail && <div style={{ fontSize: 12, color: primary ? 'rgba(255,255,255,.68)' : tone ? tone === 'positive' ? '#059669' : '#DC2626' : '#9CA3AF' }}>{detail}</div>}
+  </div>
+}
+
+function RangeTabs({ range, onChange }: { range: number; onChange: (days: number) => void }) {
+  return <div style={{ display: 'flex', gap: 4 }}>{[[30, '1M'], [90, '3M'], [365, '1Y'], [0, 'ALL']].map(([days, label]) => <button key={label} onClick={() => onChange(days as number)} style={{ ...filterButton, padding: '4px 8px', background: range === days ? '#EFF6FF' : 'transparent', color: range === days ? '#2563EB' : '#6B7280', borderColor: range === days ? '#BFDBFE' : 'transparent' }}>{label}</button>)}</div>
+}
+
+function AttributionStrip({ summary }: { summary: WealthSummary }) {
+  const a = summary.attribution
+  if (!a.baseline_available) return <div style={attributionStyle}><strong>本月财富变化归因</strong><span>尚未形成完整月度基线，下一次资产或负债更新后开始生成变化归因。</span></div>
+  const values = [[a.cash_surplus, '收支结余'], [a.investment_return, '投资收益'], [a.other_adjustment, '其他调整']]
+  return <div style={{ ...attributionStyle, alignItems: 'center' }}><strong>本月财富变化归因</strong><div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>{values.map(([value, label]) => <span key={label as string} style={{ color: '#64748B' }}>{label as string} <b style={{ color: moneyTone(value as number | null), marginLeft: 4 }}>{value === null ? '—' : fmtCnySigned(Number(value))}</b></span>)}</div></div>
+}
+
+function AssetStructure({ summary, items, pieData, onOpenDashboard }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ name: string; value: number }>; onOpenDashboard: () => void }) {
+  return <div style={card()}>
+    <div style={sectionHeader}><span>资产结构</span><button type="button" style={textButton} onClick={onOpenDashboard}>查看投资账户总览 →</button></div>
+    <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 12, alignItems: 'center', marginTop: 10 }}>
+      <div style={{ height: 190 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={76} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
+      <div>{items.map((item, index) => <div key={item.key} style={{ padding: '10px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.value)}</strong></div><div style={{ marginTop: 3, color: '#9CA3AF', fontSize: 11 }}>核心净资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
+    </div>
+    {summary.pension_benefit > 0 && <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 12 }}>其中 {fmtCny(summary.pension_benefit)} 为养老保障权益，当前不计入核心净资产。</div>}
+  </div>
+}
+
+function LiabilityOverview({ total, liabilities, onViewAll }: { total: number; liabilities: WealthItem[]; onViewAll: () => void }) {
+  const categoryCount = useMemo(() => {
+    const counts = new Map<string, number>()
+    liabilities.forEach(item => counts.set(item.category, (counts.get(item.category) ?? 0) + 1))
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [liabilities])
+  const mainCategory = categoryCount[0]
+  return <div style={card()}>
+    <div style={sectionHeader}><span>负债概览</span><button type="button" style={textButton} onClick={onViewAll}>查看全部负债 →</button></div>
+    {liabilities.length ? <><div style={{ marginTop: 18 }}><div style={mutedLabel}>总负债</div><div style={{ ...bigValue, marginTop: 5 }}>{fmtCny(total)}</div><div style={{ color: '#6B7280', fontSize: 12, marginTop: 6 }}>{mainCategory ? `${liabilities.length} 笔${categoryLabel(mainCategory[0])}` : `${liabilities.length} 笔负债`}</div></div><div style={{ marginTop: 16 }}><div style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 600, letterSpacing: '.3px' }}>金额最高的负债</div>{liabilities.slice(0, 3).map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 10, fontSize: 13 }}><span style={{ color: '#4B5563', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong></div>)}</div></> : <CompactEmptyState text="暂无录入负债。" />}
+  </div>
+}
+
+function DetailRow({ item, onEdit, onDelete }: { item: WealthItem; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', alignItems: 'center', gap: 14, padding: '13px 0', borderBottom: '1px solid #F1F5F9' }}>
+    <div style={{ minWidth: 0 }}><div style={{ color: '#64748B', fontSize: 11, fontWeight: 600 }}>{categoryLabel(item.category)} · {itemTypeLabel(item.item_type)}</div><div style={{ marginTop: 4, color: '#1F2937', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name} {!item.effective_included_in_net_worth && <span style={{ color: '#9CA3AF', fontWeight: 400 }}>（仅展示）</span>}</div><div style={{ marginTop: 4, color: item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11 }}>{freshnessText(item)}</div></div>
+    <strong style={{ color: '#1F2937', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong>
+    <details style={{ position: 'relative' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details>
+  </div>
+}
+
+function ItemDialog({ form, setForm, saving, onSubmit, onClose }: { form: FormState; setForm: (form: FormState) => void; saving: boolean; onSubmit: (event: FormEvent) => void; onClose: () => void }) {
+  const types = form.kind === 'asset' ? ASSET_TYPES : LIABILITY_TYPES
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm({ ...form, [key]: value })
+  return <div style={dialogBackdrop}><form onSubmit={onSubmit} style={dialogStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}><h2 style={{ fontSize: 18, margin: 0, color: '#1F2937' }}>{form.id ? '更新财富项目' : '更新财富数据'}</h2><button type="button" onClick={onClose} style={textButton}>关闭</button></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><Field label="类型"><select value={form.kind} onChange={event => setForm(emptyForm(event.target.value as 'asset' | 'liability'))} style={inputStyle}><option value="asset">资产</option><option value="liability">负债</option></select></Field><Field label="项目分类"><select value={form.item_type} onChange={event => set('item_type', event.target.value)} style={inputStyle}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field></div><Field label="名称"><input required value={form.name} onChange={event => set('name', event.target.value)} placeholder="例如：招商银行活期" style={inputStyle} /></Field><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><Field label="当前金额（元）"><input required min="0" step="0.01" type="number" value={form.current_value} onChange={event => set('current_value', Number(event.target.value))} style={inputStyle} /></Field><Field label="数据日期"><input required type="date" value={form.value_as_of ?? ''} onChange={event => set('value_as_of', event.target.value)} style={inputStyle} /></Field></div><Field label="备注（可选）"><textarea value={form.notes ?? ''} onChange={event => set('notes', event.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>{form.kind === 'asset' && <label style={checkStyle}><input type="checkbox" checked={form.already_investment_accounted ?? false} onChange={event => set('already_investment_accounted', event.target.checked)} /> 该资产已在投资账户总览中统计（仅展示，不重复计入净资产）</label>}<label style={checkStyle}><input type="checkbox" checked={form.included_in_net_worth ?? true} onChange={event => set('included_in_net_worth', event.target.checked)} disabled={form.already_investment_accounted} /> 计入净资产</label><div style={{ display: 'flex', justifyContent: 'end', gap: 8, marginTop: 20 }}><button type="button" onClick={onClose} style={secondaryButton}>取消</button><button disabled={saving} type="submit" style={primaryButton}>{saving && <Loader2 size={14} className="animate-spin" />}保存更新</button></div></form></div>
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label style={{ display: 'block', marginBottom: 13, color: '#4B5563', fontSize: 12, fontWeight: 600 }}>{label}<div style={{ marginTop: 6 }}>{children}</div></label> }
 function Loading() { return <div style={{ height: 280, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', color: '#6B7280', fontSize: 13 }}><Loader2 size={17} className="animate-spin" />加载财富数据…</div> }
-function EmptyTrend() { return <div style={{ height: 220, display: 'grid', placeItems: 'center', textAlign: 'center', color: '#6B7280', fontSize: 13, lineHeight: 1.7 }}>确认一次手工资产或负债更新后，即可开始积累净资产趋势。<br />未更新的项目会持续沿用最近确认值。</div> }
-const sectionHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 14, fontWeight: 700, color: '#1F2937' } as const
-const mutedLabel = { fontSize: 11, fontWeight: 600, letterSpacing: '.35px', textTransform: 'uppercase' as const } as const
-const bigValue = { fontSize: 24, fontWeight: 700, letterSpacing: '-.5px', color: '#1F2937', fontVariantNumeric: 'tabular-nums' } as const
-const valueStyle = { fontSize: 16, fontWeight: 700, marginTop: 7, fontVariantNumeric: 'tabular-nums' } as const
-const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
-const checkStyle = { display: 'block', color: '#4B5563', fontSize: 13, marginTop: 10 } as const
-const tabStyle = { border: 'none', borderRadius: 6, padding: '4px 7px', cursor: 'pointer', fontSize: 11, fontWeight: 600 } as const
-const linkButton = { border: 'none', background: 'transparent', padding: 0, color: '#2563EB', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 } as const
-const iconButton = { border: 'none', background: 'transparent', padding: 4, cursor: 'pointer', color: '#6B7280' } as const
-function buttonStyle(primary: boolean) { return { border: primary ? '1px solid #1D4ED8' : '1px solid #D1D5DB', background: primary ? '#2563EB' : '#fff', color: primary ? '#fff' : '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const }
-function allocationLabel(key: string) { return ({ equity: '权益', fixed_income: '固收', monetary: '货币', alternative: '另类', derivative: '衍生' } as Record<string, string>)[key] ?? key }
+function EmptyTrend() { return <div style={{ height: 220, display: 'grid', placeItems: 'center', textAlign: 'center', color: '#6B7280', fontSize: 13, lineHeight: 1.7 }}>确认一次资产或负债更新后，即可开始积累净资产趋势。<br />未更新的项目会持续沿用最近确认值。</div> }
+function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
+
+function categoryLabel(category: string) { return ({ cash_deposits: '现金及存款', retirement_long_term: '养老与长期权益', pension_benefit: '养老与长期权益', other_assets: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[category] ?? category }
+function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
+function freshnessText(item: WealthItem) { return item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新${item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}` }
 function changeTone(value: number | null): 'positive' | 'negative' | undefined { return value === null || value === 0 ? undefined : value > 0 ? 'positive' : 'negative' }
 function moneyTone(value: number | null): string { return value === null || value === 0 ? '#6B7280' : value > 0 ? '#059669' : '#DC2626' }
+function signedPct(value: number | null) { return value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` }
+
+const sectionHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 15, fontWeight: 700, color: '#1F2937' } as const
+const mutedLabel = { fontSize: 11, fontWeight: 600, letterSpacing: '.35px', textTransform: 'uppercase' as const } as const
+const bigValue = { fontSize: 27, fontWeight: 700, letterSpacing: '-.6px', color: '#1F2937', fontVariantNumeric: 'tabular-nums' } as const
+const errorStyle = { marginBottom: 16, padding: '10px 13px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', borderRadius: 8, fontSize: 13 } as const
+const attributionStyle = { display: 'flex', gap: 14, marginTop: 8, padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: 9, background: '#F8FAFC', color: '#64748B', fontSize: 12, lineHeight: 1.6, flexWrap: 'wrap' } as const
+const textButton = { border: 'none', background: 'transparent', padding: 0, color: '#2563EB', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
+const filterButton = { border: '1px solid #E5E7EB', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
+const primaryButton = { border: '1px solid #1D4ED8', background: '#2563EB', color: '#fff', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const
+const secondaryButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
+const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
+const checkStyle = { display: 'block', color: '#4B5563', fontSize: 13, marginTop: 10 } as const
+const dialogBackdrop = { position: 'fixed' as const, inset: 0, zIndex: 30, background: 'rgba(17,24,39,.45)', display: 'grid', placeItems: 'center', padding: 18 } as const
+const dialogStyle = { width: 'min(550px, 100%)', maxHeight: 'calc(100vh - 36px)', overflow: 'auto', background: '#fff', borderRadius: 14, padding: 22, boxShadow: '0 24px 70px rgba(0,0,0,.25)' } as const
+const moreButton = { listStyle: 'none', cursor: 'pointer', color: '#64748B', padding: 4, display: 'flex', alignItems: 'center' } as const
+const moreMenu = { position: 'absolute' as const, zIndex: 2, top: 28, right: 0, width: 86, padding: 4, border: '1px solid #E5E7EB', borderRadius: 8, background: '#fff', boxShadow: '0 8px 18px rgba(15,23,42,.12)' } as const
+const menuButton = { width: '100%', border: 'none', background: 'transparent', padding: '7px 8px', display: 'flex', gap: 6, alignItems: 'center', color: '#374151', cursor: 'pointer', fontSize: 12, textAlign: 'left' as const } as const
