@@ -23,6 +23,7 @@ import { allocationApi } from '@/lib/allocation-api'
 import EmptyState from '@/components/shared/EmptyState'
 import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
 import DataTip from '@/components/shared/DataTip'
+import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 
 // ── 调色板（与原版一致）──────────────────────────────────────
 const CHART_PALETTE = [
@@ -625,17 +626,12 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <button onClick={onToggle} style={{
-        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: '#fff', border: '1px solid #E5E7EB', borderRadius: open ? '12px 12px 0 0' : 12,
-        padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#374151', cursor: 'pointer',
-        boxShadow: 'var(--shadow-sm)',
-      }}>
+      <button onClick={onToggle} style={dataManagementBarStyle(open)}>
         <span>📥  导入 / 导出数据（持仓）</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!open && (
             <a href="/api/portfolio/export/positions.csv" download onClick={e => e.stopPropagation()}
-               style={{ ...btnSecondary, fontSize: 11, padding: '3px 10px' }}>
+               style={dataManagementExportButtonStyle}>
               <Download size={11} /> 导出 CSV
             </a>
           )}
@@ -778,17 +774,12 @@ function LiabImportSection({ open, onToggle, onRefresh }: { open: boolean; onTog
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <button onClick={onToggle} style={{
-        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: '#fff', border: '1px solid #E5E7EB', borderRadius: open ? '12px 12px 0 0' : 12,
-        padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#374151', cursor: 'pointer',
-        boxShadow: 'var(--shadow-sm)',
-      }}>
+      <button onClick={onToggle} style={dataManagementBarStyle(open)}>
         <span>📥  导入 / 导出数据（负债）</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!open && (
             <a href="/api/portfolio/export/liabilities.csv" download onClick={e => e.stopPropagation()}
-               style={{ ...btnSecondary, fontSize: 11, padding: '3px 10px' }}>
+               style={dataManagementExportButtonStyle}>
               <Download size={11} /> 导出 CSV
             </a>
           )}

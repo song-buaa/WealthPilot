@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
+import { ChevronDown, Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
+import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
 
@@ -142,18 +143,20 @@ export default function WealthOverview() {
           <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} />
         </section>
 
-        <section id="wealth-details" aria-label="资产与负债明细" style={{ ...card(), padding: '20px 20px 16px' }}>
-          <div style={sectionHeader}><span>资产与负债明细</span></div>
-          <div style={{ display: 'flex', gap: 6, margin: '14px 0 12px' }}>
-            {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={{ ...filterButton, background: detailFilter === filter ? '#EFF6FF' : '#fff', color: detailFilter === filter ? '#2563EB' : '#6B7280', borderColor: detailFilter === filter ? '#BFDBFE' : '#E5E7EB' }}>{label}</button>)}
+        <section id="wealth-details" aria-label="资产与负债明细" style={detailCard}>
+          <div style={detailTitle}><span>📋 资产与负债明细</span><span style={detailCount}>{filteredDetails.length} 条</span></div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={detailTabStyle(detailFilter === filter)}>{label}</button>)}
           </div>
           {filteredDetails.length ? <DetailTable items={filteredDetails} onEdit={edit} onDelete={remove} /> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
-          <div style={detailActionBar}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ color: '#64748B', fontSize: 12, fontWeight: 600 }}>财富数据管理</span>
-              <button type="button" onClick={() => setForm(emptyForm())} style={dataActionButton}><RefreshCw size={13} /> 更新财富数据</button>
+        </section>
+        <section aria-label="财富数据管理" style={{ marginBottom: 16 }}>
+          <div style={dataManagementBarStyle()}>
+            <button type="button" onClick={() => setForm(emptyForm())} style={dataManagementEntryButton}><RefreshCw size={14} /> 更新 / 导出财富数据</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出 CSV</button>
+              <ChevronDown size={16} color="#9CA3AF" aria-hidden="true" />
             </div>
-            <button type="button" onClick={exportDetails} style={dataActionButton}><Download size={13} /> 导出 CSV</button>
           </div>
         </section>
       </>}
@@ -209,17 +212,17 @@ function DetailTable({ items, onEdit, onDelete }: { items: WealthItem[]; onEdit:
   return <div style={detailTableScroll}>
     <table style={detailTable}>
       <colgroup>
-        <col style={{ width: 72 }} /><col /><col style={{ width: 108 }} /><col style={{ width: 120 }} />
+        <col style={{ width: 60 }} /><col /><col style={{ width: 104 }} /><col style={{ width: 112 }} />
         <col style={{ width: 122 }} /><col style={{ width: 96 }} /><col style={{ width: 104 }} /><col style={{ width: 34 }} />
       </colgroup>
-      <thead><tr>{['类型', '名称', '分类', '原币金额', '折合人民币', '计入净资产', '更新时间', ''].map((heading, index) => <th key={`${heading}-${index}`} style={{ ...detailTh, textAlign: index >= 3 ? 'right' : 'left' }}>{heading}</th>)}</tr></thead>
+      <thead><tr>{['类型', '名称', '分类', '原币金额', '折合人民币', '核心资产状态', '更新时间', ''].map((heading, index) => <th key={`${heading}-${index}`} style={{ ...detailTh, textAlign: index >= 3 ? 'right' : 'left' }}>{heading}</th>)}</tr></thead>
       <tbody>{items.map(item => <tr key={`${item.kind}-${item.id}`} onMouseEnter={event => { event.currentTarget.style.background = '#F9FAFB' }} onMouseLeave={event => { event.currentTarget.style.background = '' }}>
-        <td style={detailTd}><span style={tag(item.kind === 'asset' ? '#DBEAFE' : '#FEE2E2', item.kind === 'asset' ? '#1E40AF' : '#991B1B')}>{item.kind === 'asset' ? '资产' : '负债'}</span></td>
+        <td style={{ ...detailTd, color: '#6B7280', fontSize: 12 }}>{item.kind === 'asset' ? '资产' : '负债'}</td>
         <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{item.name}</td>
         <td style={detailTd}><span style={tag('#F3F4F6', '#4B5563')}>{itemTypeLabel(item.item_type)}</span></td>
         <td style={{ ...detailTd, textAlign: 'right', color: item.currency === 'CNY' ? '#4B5563' : '#1F2937', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtOriginalAmount(item)}</td>
         <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
-        <td style={{ ...detailTd, textAlign: 'right' }}><span style={tag(item.effective_included_in_net_worth ? '#DCFCE7' : '#F3F4F6', item.effective_included_in_net_worth ? '#166534' : '#6B7280')}>{item.effective_included_in_net_worth ? '计入' : '仅展示'}</span></td>
+        <td style={{ ...detailTd, textAlign: 'right', fontSize: 12 }}>{item.effective_included_in_net_worth ? <span style={{ color: '#16A34A', fontWeight: 500 }}>● 计入</span> : <span style={{ color: '#9CA3AF' }}>仅展示</span>}</td>
         <td style={{ ...detailTd, textAlign: 'right', color: item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11, whiteSpace: 'nowrap' }}>{freshnessText(item)}</td>
         <td style={{ ...detailTd, textAlign: 'right' }}><details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details></td>
       </tr>)}</tbody>
@@ -243,7 +246,7 @@ function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_d
 function freshnessText(item: WealthItem) { return item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新${item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}` }
 function fmtOriginalAmount(item: WealthItem) {
   const value = item.original_value ?? item.current_value
-  if (item.currency === 'CNY') return fmtCny(value)
+  if (item.currency === 'CNY') return '—'
   return `${item.currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 function changeTone(value: number | null): 'positive' | 'negative' | undefined { return value === null || value === 0 ? undefined : value > 0 ? 'positive' : 'negative' }
@@ -257,12 +260,14 @@ const errorStyle = { marginBottom: 16, padding: '10px 13px', background: '#FEF2F
 const attributionStyle = { display: 'flex', gap: 14, marginTop: 8, padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: 9, background: '#F8FAFC', color: '#64748B', fontSize: 12, lineHeight: 1.6, flexWrap: 'wrap' } as const
 const textButton = { border: 'none', background: 'transparent', padding: 0, color: '#2563EB', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const filterButton = { border: '1px solid #E5E7EB', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
-const detailTableScroll = { maxHeight: 470, overflowY: 'auto' as const, overflowX: 'auto' as const, borderRadius: 6, border: '1px solid #F1F5F9' } as const
+const detailCard = { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '20px 20px 16px', marginBottom: 16, boxShadow: 'var(--shadow-sm)' } as const
+const detailTitle = { fontSize: 13, fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 } as const
+const detailCount = { marginLeft: 'auto', fontSize: 11, fontWeight: 400, color: '#9CA3AF' } as const
+const detailTableScroll = { maxHeight: 494, overflowY: 'auto' as const, overflowX: 'auto' as const, borderRadius: 6 } as const
 const detailTable = { width: '100%', minWidth: 860, borderCollapse: 'collapse' as const, fontSize: 13, tableLayout: 'fixed' as const } as const
 const detailTh = { padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' as const, background: '#fff', position: 'sticky' as const, top: 0, zIndex: 1 } as const
-const detailTd = { padding: '9px 10px', color: '#374151', borderBottom: '1px solid #F3F4F6', verticalAlign: 'middle' as const } as const
-const detailActionBar = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as const, marginTop: 12, padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: 8, background: '#F9FAFB' } as const
-const dataActionButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#475569', borderRadius: 7, padding: '6px 9px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 } as const
+const detailTd = { padding: '9px 10px', color: '#374151', borderBottom: '1px solid #F3F4F6', verticalAlign: 'middle' as const, whiteSpace: 'nowrap' as const } as const
+const dataManagementEntryButton = { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', padding: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit' } as const
 const primaryButton = { border: '1px solid #1D4ED8', background: '#2563EB', color: '#fff', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const
 const secondaryButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
@@ -272,4 +277,10 @@ const dialogStyle = { width: 'min(550px, 100%)', maxHeight: 'calc(100vh - 36px)'
 const moreButton = { listStyle: 'none', cursor: 'pointer', color: '#64748B', padding: 4, display: 'flex', alignItems: 'center' } as const
 const moreMenu = { position: 'absolute' as const, zIndex: 2, top: 28, right: 0, width: 86, padding: 4, border: '1px solid #E5E7EB', borderRadius: 8, background: '#fff', boxShadow: '0 8px 18px rgba(15,23,42,.12)' } as const
 const menuButton = { width: '100%', border: 'none', background: 'transparent', padding: '7px 8px', display: 'flex', gap: 6, alignItems: 'center', color: '#374151', cursor: 'pointer', fontSize: 12, textAlign: 'left' as const } as const
-function tag(background: string, color: string) { return { display: 'inline-block', padding: '3px 6px', borderRadius: 4, background, color, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' as const } }
+function detailTabStyle(active: boolean) {
+  return {
+    padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+    background: active ? '#3B82F6' : '#F3F4F6', color: active ? '#fff' : '#6B7280',
+  } as const
+}
+function tag(background: string, color: string) { return { display: 'inline-block', padding: '1px 7px', borderRadius: 4, background, color, fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap' as const } }
