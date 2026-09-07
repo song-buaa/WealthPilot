@@ -2,7 +2,9 @@
   "institution": "CMB",
   "statement_type": "CREDIT_CARD",
   "source_format": "PDF",
-  "parser_version": "cmb-credit-card-pdf-spike-v1",
+  "parser_version": "cmb-credit-card-pdf-v2",
+  "statement_date": "2026-08-03",
+  "payment_due_date": null,
   "statement_period_start": null,
   "statement_period_end": null,
   "account_masked": "****1234",
@@ -11,6 +13,8 @@
   "field_availability": {
     "account_masked": "AVAILABLE",
     "instrument_masked": "AVAILABLE",
+    "payment_due_date": "SOURCE_UNAVAILABLE",
+    "statement_date": "AVAILABLE",
     "statement_period": "SOURCE_UNAVAILABLE"
   }
 }

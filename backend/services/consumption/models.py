@@ -130,7 +130,12 @@ class ImportBatch(Base):
 
 
 class RawTransaction(Base):
-    """An append-only observed source row, never an economic-event interpretation."""
+    """An append-only observed source row, never an economic-event interpretation.
+
+    ``is_active`` only retires an extraction that a newer parser can prove was a
+    duplicate presentation of the same source row.  The original row remains
+    available for audit and is never deleted by reconciliation.
+    """
 
     __tablename__ = "consumption_raw_transactions"
 
@@ -163,6 +168,9 @@ class RawTransaction(Base):
     mcc = Column(String(30), nullable=True)
     parser_provenance = Column(Text, nullable=False)
     source_field_availability = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    retired_reason = Column(String(100), nullable=True)
+    retired_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
     import_batch = relationship("ImportBatch", back_populates="raw_transactions")
@@ -174,6 +182,7 @@ class RawTransaction(Base):
         UniqueConstraint("import_batch_id", "source_row_identity", name="uq_consumption_raw_batch_row"),
         Index("ix_consumption_raw_account_transaction_date", "account_id", "transaction_date"),
         Index("ix_consumption_raw_match_fingerprint", "match_fingerprint"),
+        Index("ix_consumption_raw_active", "is_active"),
     )
 
 
@@ -218,12 +227,62 @@ class EconomicEvent(Base):
         "ConsumptionInterpretation", back_populates="event", cascade="all, delete-orphan",
         foreign_keys="ConsumptionInterpretation.event_id"
     )
+    manual_entry = relationship(
+        "ManualConsumptionEntry", back_populates="event", uselist=False, cascade="all, delete-orphan"
+    )
+    user_note = relationship(
+        "ConsumptionEventNote", back_populates="event", uselist=False, cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("normalizer_version", "semantic_key", name="uq_consumption_event_semantic"),
         Index("ix_consumption_events_type_date", "event_type", "event_date"),
         Index("ix_consumption_events_original", "original_event_id"),
         Index("ix_consumption_events_resolution", "resolution_status"),
+    )
+
+
+class ConsumptionEventNote(Base):
+    """A small local-user annotation attached to a stable EconomicEvent identity."""
+
+    __tablename__ = "consumption_event_notes"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    event_id = Column(
+        String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    note = Column(String(200), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    event = relationship("EconomicEvent", back_populates="user_note")
+
+    __table_args__ = (Index("ix_consumption_event_notes_event", "event_id"),)
+
+
+class ManualConsumptionEntry(Base):
+    """A user-provided spending fact that is intentionally not a bank RawTransaction."""
+
+    __tablename__ = "consumption_manual_entries"
+
+    id = Column(String(80), primary_key=True)
+    event_id = Column(
+        String(36), ForeignKey("consumption_economic_events.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    occurred_on = Column(Date, nullable=False)
+    description = Column(Text, nullable=False)
+    amount = Column(Numeric(20, 8), nullable=False)
+    currency = Column(String(3), nullable=False, default="CNY")
+    source = Column(String(40), nullable=False, default="USER_PROVIDED")
+    provenance = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    event = relationship("EconomicEvent", back_populates="manual_entry")
+
+    __table_args__ = (
+        Index("ix_consumption_manual_entries_date", "occurred_on"),
+        Index("ix_consumption_manual_entries_active", "is_active"),
     )
 
 

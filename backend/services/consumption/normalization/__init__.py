@@ -1,5 +1,5 @@
 """Deterministic, offline EconomicEvent persistence normalization."""
 
-from .service import EconomicEventNormalizer, NormalizationResult
+from .service import EconomicEventNormalizer, NormalizationResult, ReNormalizationResult
 
-__all__ = ["EconomicEventNormalizer", "NormalizationResult"]
+__all__ = ["EconomicEventNormalizer", "NormalizationResult", "ReNormalizationResult"]

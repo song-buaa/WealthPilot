@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+import json
 
 from sqlalchemy.orm import Session
 
@@ -23,7 +24,7 @@ from backend.services.consumption.models import (
 )
 
 
-RESOLVER_VERSION = "consumption-classification-v1"
+RESOLVER_VERSION = "consumption-classification-v3"
 
 
 @dataclass(frozen=True)
@@ -45,23 +46,47 @@ def _compact(value: str | None) -> str:
     return "".join((value or "").casefold().split())
 
 
-def _semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+def _specific_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+    """Return categories whose merchant semantics are more specific than travel context."""
     value = _compact(text)
     if any(word in value for word in ("物业", "物业费")):
         return PrimaryCategory.HOUSING, "PROPERTY_FEE"
-    if any(word in value for word in ("机票", "航空", "航班", "去哪儿网")):
+    if any(word in value for word in ("机票", "航空", "航班", "去哪儿网", "中铁", "航旅纵横")):
         return PrimaryCategory.TRAVEL, "LONG_DISTANCE_TRANSPORT"
     if any(word in value for word in ("酒店", "hotel", "宾馆")):
         return PrimaryCategory.TRAVEL, "ACCOMMODATION"
-    if any(word in value for word in ("vercel", "cursor", "cloudflare", "googleone")):
+    if any(word in value for word in (
+        "vercel", "cursor", "cloudflare", "googleone", "appstore", "云上艾珀", "中国联通", "中国移动",
+    )):
         return PrimaryCategory.DAILY, "DIGITAL_COMMUNICATION"
-    if any(word in value for word in ("餐厅", "餐饮", "美团", "coffee")):
+    return None
+
+
+def _generic_merchant_semantic(text: str) -> tuple[PrimaryCategory, str] | None:
+    """Classify only merchant descriptions with an unambiguous consumer purpose."""
+    value = _compact(text)
+    if any(word in value for word in (
+        "餐厅", "餐饮", "美团", "coffee", "拉面", "米粉", "米线", "冒菜", "麻辣烫",
+        "咖啡", "快餐", "小吃", "包点", "饭店", "木桶饭", "螺蛳粉", "猪脚饭",
+        "麻辣香锅", "牛肉粉", "煲仔饭", "面馆", "卤味", "汤粉", "鸡公煲", "浙里食局", "欧粑粑",
+    )):
         return PrimaryCategory.DAILY, "FOOD_DINING"
-    if any(word in value for word in ("滴滴", "出租车", "打车", "停车")):
+    if any(word in value for word in (
+        "滴滴", "出租车", "打车", "停车", "快充", "充电", "通行宝", "顺易通",
+        "加油", "能源", "中国石化", "中国石油", "地铁", "停简单", "汽车",
+    )):
         return PrimaryCategory.DAILY, "TRANSPORT_AUTO"
-    if any(word in value for word in ("健身", "运动")):
+    if any(word in value for word in ("宠物", "猫粮", "猫砂")):
+        return PrimaryCategory.DAILY, "PET"
+    if any(word in value for word in ("公共事业缴费", "公用事业缴费", "水费缴纳", "社保缴费", "京东家政", "电力")):
+        return PrimaryCategory.DAILY, "HOME_LIVING"
+    if any(word in value for word in ("冲浪", "健身", "运动", "体育", "杭州乐刻")):
         return PrimaryCategory.DAILY, "SPORTS_HOBBY"
-    if "购物" in value or "merchantx" in value:
+    if any(word in value for word in ("购物", "merchantx", "男装", "女装", "服饰", "专卖店", "天猫")):
+        return PrimaryCategory.DAILY, "SHOPPING"
+    # Platform-only descriptors are not otherwise semantically specific.  This
+    # fallback intentionally follows every consumer-purpose keyword above.
+    if "拼多多" in value:
         return PrimaryCategory.DAILY, "SHOPPING"
     return None
 
@@ -118,6 +143,45 @@ class ClassificationResolver:
             session.flush()
         return created
 
+    def classify_confirmed_candidate(self, session: Session, event_id: str) -> ConsumptionInterpretation:
+        """Apply automatic category evidence after a user confirms eligibility.
+
+        Candidate review deliberately lets a local user answer the upstream
+        question ("is this a consumption?") without turning that answer into a
+        blanket category override.  This keeps eligibility as a protected user
+        confirmation while reusing the ordinary deterministic category ladder.
+        """
+        event = session.get(EconomicEvent, event_id)
+        if event is None:
+            raise ValueError("EconomicEvent not found")
+        current = self._current(session, event_id)
+        if (
+            current is None
+            or not current.user_confirmed
+            or current.eligibility_status != EligibilityStatus.ELIGIBLE.value
+            or current.primary_category is not None
+            or current.secondary_category is not None
+        ):
+            raise ValueError("event is not an unclassified user-confirmed consumption candidate")
+        if EventType(event.event_type) != EventType.OTHER:
+            raise ValueError("event is not a candidate-backed OTHER event")
+
+        _raw, account_id, descriptor = self._evidence(session, event)
+        automatic = self._resolve_consumption_classification(session, event, account_id, descriptor)
+        resolution = Resolution(
+            EligibilityStatus.ELIGIBLE,
+            ClassificationSource.USER_CONFIRMATION,
+            current.eligibility_reason,
+            automatic.classification_status,
+            automatic.primary_category,
+            automatic.secondary_category,
+            automatic.classification_source,
+            automatic.classification_reason,
+            automatic.rule_id,
+            user_confirmed=True,
+        )
+        return self._append_if_changed(session, event_id, resolution, current=current)
+
     def get_effective_classification(self, session: Session, event: EconomicEvent | str) -> ConsumptionInterpretation | None:
         target = session.get(EconomicEvent, event) if isinstance(event, str) else event
         if target is None:
@@ -141,12 +205,23 @@ class ClassificationResolver:
                     None, None, ClassificationSource.UNKNOWN, "OTHER_CONSUMPTION_SEMANTICS_UNCONFIRMED")
             return self._from_rule(rule, other=True)
         # Remaining event type is CONSUMPTION. Rules only influence category, never hard eligibility.
+        return self._resolve_consumption_classification(session, event, account_id, descriptor)
+
+    def _resolve_consumption_classification(
+        self, session: Session, event: EconomicEvent, account_id: str, descriptor: str,
+    ) -> Resolution:
+        """Resolve only the category ladder for an eligible consumption fact."""
         rule = self._matching_rule(session, account_id, descriptor, Decimal(event.amount), event.event_date)
         if rule and rule.primary_category and rule.secondary_category:
             return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
                 ClassificationStatus.CLASSIFIED, PrimaryCategory(rule.primary_category), rule.secondary_category,
                 ClassificationSource.USER_RULE, "USER_RULE_SCOPE_MATCH", rule.id)
-        semantic = _semantic(descriptor)
+        specific_semantic = _specific_semantic(descriptor)
+        if specific_semantic:
+            return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
+                ClassificationStatus.CLASSIFIED, specific_semantic[0], specific_semantic[1],
+                ClassificationSource.MERCHANT_RULE, "HIGH_CONFIDENCE_SEMANTIC")
+        semantic = _generic_merchant_semantic(descriptor)
         travel = self._travel_applies(session, event.event_date)
         if semantic and travel and semantic in {(PrimaryCategory.DAILY, "FOOD_DINING"), (PrimaryCategory.DAILY, "TRANSPORT_AUTO")}:
             return Resolution(EligibilityStatus.ELIGIBLE, ClassificationSource.SYSTEM_RULE, "CONSUMPTION_EVENT",
@@ -174,7 +249,14 @@ class ClassificationResolver:
         if link is None:
             return None, "", ""
         raw = session.get(RawTransaction, link.raw_transaction_id)
-        return raw, raw.account_id, " ".join(item for item in (raw.raw_description, raw.raw_counterparty) if item)
+        try:
+            parser_provenance = json.loads(raw.parser_provenance or "{}")
+        except json.JSONDecodeError:
+            parser_provenance = {}
+        source_type = parser_provenance.get("source_transaction_type")
+        return raw, raw.account_id, " ".join(
+            str(item) for item in (raw.raw_description, raw.raw_counterparty, source_type) if item
+        )
 
     @staticmethod
     def _current(session: Session, event_id: str | None) -> ConsumptionInterpretation | None:

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 /**
  * PageHeader — 页面标题三件套（按 WealthPilot UI 设计规范第四节）
  *
@@ -6,7 +8,7 @@
  * 副标题：12px/400/#9CA3AF
  */
 interface PageHeaderProps {
-  icon: string
+  icon: ReactNode
   title: string
   subtitle?: string
 }

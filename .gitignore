@@ -2,6 +2,7 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/backups/
 
 # Local bank statements are sensitive. Committed consumption fixtures are redacted text/JSON only.
 *.eml

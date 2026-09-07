@@ -23,7 +23,7 @@ from backend.services.consumption.contracts import (
     source_file_hash,
 )
 
-PARSER_VERSION = "ccb-credit-card-eml-spike-v1"
+PARSER_VERSION = "ccb-credit-card-eml-v3"
 
 
 def _html_tables(html: str) -> list[list[list[str]]]:
@@ -120,6 +120,72 @@ def _fallback_transaction_cells(cells: list[str]) -> tuple[str, Decimal, str, De
     )
 
 
+def _table_transactions(
+    table: list[list[str]], table_index: int, identity: str | None,
+) -> list[NormalizedRawTransaction]:
+    """Parse one rendered table without inferring whether rows are unique facts."""
+    indices = _header_index(table[0])
+    transactions: list[NormalizedRawTransaction] = []
+    for row_offset, cells in enumerate(table[1:], start=1):
+        row_instrument: str | None = None
+        if "description" in indices and "amount" in indices:
+            amount = _money_from_cell(_cell(cells, indices, "amount"))
+            description = normalized_text(_cell(cells, indices, "description") or "")
+            transaction_date = parse_full_date(_cell(cells, indices, "transaction_date") or "")
+            posting_date = parse_full_date(_cell(cells, indices, "posting_date") or "")
+            currency = normalized_text(_cell(cells, indices, "currency") or "CNY").upper()
+            settlement_amount = _money_from_cell(_cell(cells, indices, "settlement_amount"))
+            settlement_currency = normalized_text(_cell(cells, indices, "settlement_currency") or "") or None
+            row_instrument = _cell(cells, indices, "instrument")
+        else:
+            structured = _fallback_transaction_cells(cells)
+            if structured is None:
+                continue
+            description, amount, currency, settlement_amount, settlement_currency = structured
+            transaction_date, posting_date = parse_full_date(cells[0]), parse_full_date(cells[1])
+            # CCB's unheaded nested detail table is structurally stable: the
+            # third cell is the card's own tail, not statement metadata.
+            row_instrument = cells[2]
+        if amount is None or not description:
+            continue
+        row_identity = f"html-table-{table_index}-row-{row_offset}"
+        instrument = mask_identity(row_instrument) or identity
+        transactions.append(NormalizedRawTransaction(
+            source_row_index=len(transactions) + 1, source_row_identity=row_identity,
+            transaction_date=transaction_date,
+            transaction_date_availability=FieldAvailability.AVAILABLE if transaction_date else FieldAvailability.SOURCE_UNAVAILABLE,
+            posting_date=posting_date,
+            posting_date_availability=FieldAvailability.AVAILABLE if posting_date else FieldAvailability.SOURCE_UNAVAILABLE,
+            amount=amount, currency=currency, raw_description=description,
+            account_masked=identity, instrument_masked=instrument,
+            settlement_amount=settlement_amount, settlement_currency=settlement_currency,
+            parser_provenance={"adapter": "ccb_credit_card_eml", "source_row": row_identity},
+            field_availability={
+                **unavailable_fields("balance", "counterparty", "mcc"),
+                "settlement_amount": FieldAvailability.AVAILABLE if settlement_amount is not None else FieldAvailability.SOURCE_UNAVAILABLE,
+                "settlement_currency": FieldAvailability.AVAILABLE if settlement_currency else FieldAvailability.SOURCE_UNAVAILABLE,
+            },
+        ))
+    return transactions
+
+
+def _table_signature(rows: list[NormalizedRawTransaction]) -> tuple[tuple[object, ...], ...]:
+    """Identity of one rendered transaction table, retaining row multiplicity.
+
+    Some CCB messages carry an exact mirror of the entire detail table in a
+    second HTML table.  We discard only a full-table mirror; repeated rows
+    inside a single source table remain separate source facts.
+    """
+    return tuple(
+        (
+            row.transaction_date, row.posting_date, row.amount, row.currency,
+            row.raw_description, row.settlement_amount, row.settlement_currency,
+            row.instrument_masked,
+        )
+        for row in rows
+    )
+
+
 def parse_ccb_credit_card_eml(
     source_bytes: bytes,
     source_metadata: dict[str, str] | None = None,
@@ -145,42 +211,15 @@ def parse_ccb_credit_card_eml(
         },
     )
     transactions: list[NormalizedRawTransaction] = []
+    seen_table_signatures: set[tuple[tuple[object, ...], ...]] = set()
     for table_index, table in enumerate(_html_tables(html), start=1):
-        indices = _header_index(table[0])
-        for row_offset, cells in enumerate(table[1:], start=1):
-            structured = None
-            if "description" in indices and "amount" in indices:
-                amount = _money_from_cell(_cell(cells, indices, "amount"))
-                description = normalized_text(_cell(cells, indices, "description") or "")
-                transaction_date = parse_full_date(_cell(cells, indices, "transaction_date") or "")
-                posting_date = parse_full_date(_cell(cells, indices, "posting_date") or "")
-                currency = normalized_text(_cell(cells, indices, "currency") or "CNY").upper()
-                settlement_amount = _money_from_cell(_cell(cells, indices, "settlement_amount"))
-                settlement_currency = normalized_text(_cell(cells, indices, "settlement_currency") or "") or None
-            else:
-                structured = _fallback_transaction_cells(cells)
-                if structured is None:
-                    continue
-                description, amount, currency, settlement_amount, settlement_currency = structured
-                transaction_date, posting_date = parse_full_date(cells[0]), parse_full_date(cells[1])
-            if amount is None or not description:
-                continue
-            row_identity = f"html-table-{table_index}-row-{row_offset}"
-            instrument = mask_identity(_cell(cells, indices, "instrument")) or identity
+        table_rows = _table_transactions(table, table_index, identity)
+        signature = _table_signature(table_rows)
+        if not table_rows or signature in seen_table_signatures:
+            continue
+        seen_table_signatures.add(signature)
+        for row in table_rows:
             transactions.append(NormalizedRawTransaction(
-                source_row_index=len(transactions) + 1, source_row_identity=row_identity,
-                transaction_date=transaction_date,
-                transaction_date_availability=FieldAvailability.AVAILABLE if transaction_date else FieldAvailability.SOURCE_UNAVAILABLE,
-                posting_date=posting_date,
-                posting_date_availability=FieldAvailability.AVAILABLE if posting_date else FieldAvailability.SOURCE_UNAVAILABLE,
-                amount=amount, currency=currency, raw_description=description,
-                account_masked=identity, instrument_masked=instrument,
-                settlement_amount=settlement_amount, settlement_currency=settlement_currency,
-                parser_provenance={"adapter": "ccb_credit_card_eml", "source_row": row_identity},
-                field_availability={
-                    **unavailable_fields("balance", "counterparty", "mcc"),
-                    "settlement_amount": FieldAvailability.AVAILABLE if settlement_amount is not None else FieldAvailability.SOURCE_UNAVAILABLE,
-                    "settlement_currency": FieldAvailability.AVAILABLE if settlement_currency else FieldAvailability.SOURCE_UNAVAILABLE,
-                },
+                **{**row.__dict__, "source_row_index": len(transactions) + 1}
             ))
     return ParsedStatement(metadata=metadata, transactions=tuple(transactions))

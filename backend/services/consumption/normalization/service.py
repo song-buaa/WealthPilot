@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 from typing import Iterable
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.services.consumption.contracts import canonical_json
@@ -25,6 +26,8 @@ from backend.services.consumption.models import (
     EconomicEventProjectionRevision,
     EventRawLink,
     RawTransaction,
+    ConsumptionEventNote,
+    ConsumptionInterpretation,
 )
 from backend.services.consumption.normalization.rules import (
     Evidence,
@@ -34,8 +37,9 @@ from backend.services.consumption.normalization.rules import (
 )
 
 
-NORMALIZER_VERSION = "economic-event-orm-v1"
+NORMALIZER_VERSION = "economic-event-orm-v3"
 CONFIRMED_OWNED = "CONFIRMED_OWNED"
+_USER_EXPLICIT_SOURCES = {"USER_CONFIRMATION", "USER_RULE"}
 
 
 @dataclass(frozen=True)
@@ -46,12 +50,34 @@ class NormalizationResult:
     created_revisions: int
 
 
+@dataclass(frozen=True)
+class ReNormalizationResult:
+    replayed_raw_count: int
+    corrected_non_consumption_count: int
+    collapsed_cross_batch_duplicate_count: int
+    skipped_user_explicit_count: int
+    new_event_ids: tuple[str, ...]
+
+
 def _magnitude(value: Decimal) -> Decimal:
     return abs(Decimal(value)).quantize(Decimal("0.00000001"))
 
 
 def _effective_date(raw: RawTransaction) -> date | None:
     return raw.transaction_date or raw.posting_date
+
+
+def _evidence_for(raw: RawTransaction) -> Evidence:
+    try:
+        source_section = json.loads(raw.parser_provenance).get("statement_section")
+    except (TypeError, ValueError):
+        source_section = None
+    return classify_source(
+        raw_description=raw.raw_description,
+        account_type=raw.account.account_type,
+        source_amount=Decimal(raw.amount),
+        source_section=source_section,
+    )
 
 
 def _semantic_key(event_type: EventType, raws: Iterable[RawTransaction]) -> str:
@@ -85,7 +111,7 @@ class EconomicEventNormalizer:
 
     def normalize(self, session: Session, raws: Iterable[RawTransaction] | None = None) -> NormalizationResult:
         rows = tuple(raws) if raws is not None else tuple(
-            session.query(RawTransaction).order_by(RawTransaction.id).all()
+            session.query(RawTransaction).filter_by(is_active=True).order_by(RawTransaction.id).all()
         )
         active_raw_ids = {
             item[0] for item in session.query(EventRawLink.raw_transaction_id)
@@ -149,7 +175,7 @@ class EconomicEventNormalizer:
                 duplicate_groups.setdefault(raw.match_fingerprint, []).append(raw)
         consumed: set[str] = set()
         for group in duplicate_groups.values():
-            first_evidence = classify_source(raw_description=group[0].raw_description, account_type=group[0].account.account_type)
+            first_evidence = _evidence_for(group[0])
             if len(group) > 1 and first_evidence.event_type != EventType.OTHER:
                 persist(first_evidence.event_type, group, Evidence(first_evidence.event_type, RuleSource.SOURCE_DEDUP))
                 consumed.update(item.id for item in group)
@@ -194,7 +220,7 @@ class EconomicEventNormalizer:
         for raw in pending:
             if raw.id in consumed:
                 continue
-            evidence = classify_source(raw_description=raw.raw_description, account_type=raw.account.account_type)
+            evidence = _evidence_for(raw)
             if evidence.event_type == EventType.REFUND:
                 refund_rows.append(raw)
                 continue
@@ -213,7 +239,7 @@ class EconomicEventNormalizer:
                     EventRawLink.is_active.is_(True),
                     EconomicEvent.event_type == EventType.CONSUMPTION.value,
                 ).one_or_none()
-            refund = persist(EventType.REFUND, [raw], classify_source(raw_description=raw.raw_description, account_type=raw.account.account_type), original_event=original, roles={raw.id: "REFUND_SOURCE"})
+            refund = persist(EventType.REFUND, [raw], _evidence_for(raw), original_event=original, roles={raw.id: "REFUND_SOURCE"})
             consumed.add(raw.id)
             if refund.original_event_id:
                 original_event = session.get(EconomicEvent, refund.original_event_id)
@@ -221,6 +247,132 @@ class EconomicEventNormalizer:
 
         session.flush()
         return NormalizationResult(created_events, reused_events, created_links, created_revisions)
+
+    def replay(self, session: Session) -> ReNormalizationResult:
+        """Re-evaluate all persisted Raw facts without mutating them.
+
+        Only changed production evidence (or an already-marked cross-batch
+        duplicate) creates a replacement active Event.  User confirmations and
+        user rules remain attached to their existing Event and are never moved.
+        """
+        rows = tuple(
+            session.query(RawTransaction).filter_by(is_active=True).order_by(RawTransaction.id).all()
+        )
+        groups = self._replay_groups(rows)
+        active_links = (
+            session.query(EventRawLink)
+            .join(EconomicEvent, EconomicEvent.id == EventRawLink.event_id)
+            .filter(EventRawLink.is_active.is_(True), EconomicEvent.is_active.is_(True))
+            .all()
+        )
+        event_by_id = {event.id: event for event in session.query(EconomicEvent).filter_by(is_active=True)}
+        links_by_raw = {link.raw_transaction_id: link for link in active_links}
+        raw_ids_by_event: dict[str, set[str]] = {}
+        for link in active_links:
+            raw_ids_by_event.setdefault(link.event_id, set()).add(link.raw_transaction_id)
+
+        corrected = collapsed = skipped = 0
+        new_event_ids: set[str] = set()
+        for group in groups:
+            raw_ids = {raw.id for raw in group}
+            evidence = _evidence_for(group[0])
+            current_event_ids = {links_by_raw[raw_id].event_id for raw_id in raw_ids if raw_id in links_by_raw}
+            current_events = [event_by_id[event_id] for event_id in current_event_ids]
+            already_current = (
+                len(current_events) == 1
+                and current_events[0].event_type == evidence.event_type.value
+                and current_events[0].normalizer_version == NORMALIZER_VERSION
+                and raw_ids_by_event.get(current_events[0].id, set()) == raw_ids
+            )
+            if already_current:
+                continue
+            # A user category may refine an otherwise valid consumption fact,
+            # but it cannot turn an explicit bank-statement refund or
+            # repayment section into consumption.  This narrowly lets a
+            # corrected source fact supersede a stale Event even if that stale
+            # Event was subsequently annotated or classified by a user.
+            source_semantics_override = evidence.reason in {
+                "SOURCE_STATEMENT_REFUND_SECTION",
+                "SOURCE_STATEMENT_REPAYMENT_SECTION",
+            }
+            if (
+                not source_semantics_override
+                and (
+                    self._has_user_explicit_interpretation(session, current_event_ids)
+                    or self._has_user_note(session, current_event_ids)
+                )
+            ):
+                skipped += len(raw_ids)
+                continue
+            if any(not raw_ids_by_event.get(event.id, set()).issubset(raw_ids) for event in current_events):
+                # A partial historical Event is insufficient evidence to detach.
+                continue
+
+            old_types = {event.event_type for event in current_events}
+            for raw_id in raw_ids:
+                link = links_by_raw.get(raw_id)
+                if link:
+                    link.is_active = False
+            session.flush()
+            for event in current_events:
+                if not session.query(EventRawLink).filter_by(event_id=event.id, is_active=True).first():
+                    event.is_active = False
+            session.flush()
+
+            self.normalize(session, group)
+            created_ids = {
+                row[0]
+                for row in session.query(EventRawLink.event_id).filter(
+                    EventRawLink.raw_transaction_id.in_(raw_ids), EventRawLink.is_active.is_(True),
+                ).distinct()
+            }
+            new_event_ids.update(created_ids)
+            if EventType.CONSUMPTION.value in old_types and evidence.event_type != EventType.CONSUMPTION:
+                corrected += len(raw_ids)
+            if len(group) > 1:
+                collapsed += len(group) - 1
+
+        return ReNormalizationResult(
+            replayed_raw_count=len(rows),
+            corrected_non_consumption_count=corrected,
+            collapsed_cross_batch_duplicate_count=collapsed,
+            skipped_user_explicit_count=skipped,
+            new_event_ids=tuple(sorted(new_event_ids)),
+        )
+
+    @staticmethod
+    def _replay_groups(rows: tuple[RawTransaction, ...]) -> tuple[tuple[RawTransaction, ...], ...]:
+        candidates: dict[str, list[RawTransaction]] = {}
+        for row in rows:
+            if row.dedup_status == "CANDIDATE_DUPLICATE":
+                candidates.setdefault(row.match_fingerprint, []).append(row)
+        grouped_ids: set[str] = set()
+        groups: list[tuple[RawTransaction, ...]] = []
+        for group in candidates.values():
+            if len(group) > 1 and len({row.import_batch_id for row in group}) > 1:
+                groups.append(tuple(sorted(group, key=lambda row: row.id)))
+                grouped_ids.update(row.id for row in group)
+        groups.extend((row,) for row in rows if row.id not in grouped_ids)
+        return tuple(groups)
+
+    @staticmethod
+    def _has_user_explicit_interpretation(session: Session, event_ids: set[str]) -> bool:
+        if not event_ids:
+            return False
+        return bool(session.query(ConsumptionInterpretation).filter(
+            ConsumptionInterpretation.event_id.in_(event_ids),
+            ConsumptionInterpretation.is_active.is_(True),
+            or_(
+                ConsumptionInterpretation.user_confirmed.is_(True),
+                ConsumptionInterpretation.classification_source.in_(_USER_EXPLICIT_SOURCES),
+            ),
+        ).first())
+
+    @staticmethod
+    def _has_user_note(session: Session, event_ids: set[str]) -> bool:
+        return bool(event_ids and session.query(ConsumptionEventNote).filter(
+            ConsumptionEventNote.event_id.in_(event_ids)
+        ).first())
 
     @staticmethod
     def _append_projection_if_changed(session: Session, event: EconomicEvent, reason: str, rule_source: RuleSource) -> int:

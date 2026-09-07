@@ -10,9 +10,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from backend.services.consumption.economic_events import EventType, FxSource, ResolutionStatus
+from backend.services.consumption.economic_events import EventType, FxSource, ResolutionStatus, RuleSource
 from backend.services.consumption.models import (
     Account,
+    ConsumptionInterpretation,
     EconomicEvent,
     EconomicEventProjectionRevision,
     EventRawLink,
@@ -20,7 +21,8 @@ from backend.services.consumption.models import (
     RawTransaction,
 )
 from backend.services.consumption.normalization import EconomicEventNormalizer
-from backend.services.consumption.normalization.rules import classify_source
+from backend.services.consumption.normalization.rules import Evidence, classify_source
+from backend.services.consumption.refund_matching import RefundMatcher
 
 
 @pytest.fixture
@@ -73,6 +75,59 @@ def _event(session, event_type: EventType, raw_id: str) -> EconomicEvent:
     return session.query(EconomicEvent).join(EventRawLink).filter(
         EconomicEvent.event_type == event_type.value, EventRawLink.raw_transaction_id == raw_id,
     ).one()
+
+
+def _statement_raw(session, account, raw_id, description, amount, *, section, day):
+    raw = _raw(session, account, raw_id, description, amount, day=day)
+    raw.parser_provenance = f'{{"statement_section":"{section}"}}'
+    return raw
+
+
+def test_refund_matcher_matches_full_and_partial_source_evidence_idempotently(db_session):
+    account = _account(db_session, "card", ownership="CONFIRMED_OWNED")
+    _statement_raw(db_session, account, "purchase-one", "支付宝-天津货拉拉科技有限公司", "3684.10", section="CONSUMPTION", day=date(2026, 5, 23))
+    _statement_raw(db_session, account, "purchase-two", "支付宝-天津货拉拉科技有限公司", "3684.10", section="CONSUMPTION", day=date(2026, 5, 23))
+    _statement_raw(db_session, account, "refund-one", "支付宝-天津货拉拉科技有限公司", "-3684.10", section="REFUND", day=date(2026, 6, 12))
+    _statement_raw(db_session, account, "refund-two", "支付宝-天津货拉拉科技有限公司", "-3684.10", section="REFUND", day=date(2026, 6, 12))
+    _statement_raw(db_session, account, "partial-purchase", "库仑充电", "50", section="CONSUMPTION", day=date(2026, 5, 10))
+    _statement_raw(db_session, account, "partial-refund", "库仑充电", "-43.90", section="REFUND", day=date(2026, 6, 12))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    assert (result.matched_refund_count, result.matched_refund_amount, result.unmatched_refund_count) == (3, Decimal("7412.10"), 0)
+    assert {Decimal(_event(db_session, EventType.CONSUMPTION, raw_id).projection_revisions[-1].net_amount) for raw_id in ("purchase-one", "purchase-two")} == {Decimal("0")}
+    partial = _event(db_session, EventType.CONSUMPTION, "partial-purchase")
+    assert Decimal(partial.projection_revisions[-1].net_amount) == Decimal("6.10")
+    assert len(partial.projection_revisions) == 2
+    assert RefundMatcher().replay(db_session).matched_refund_count == 0
+    assert len(partial.projection_revisions) == 2
+
+
+def test_refund_matcher_keeps_ambiguous_exact_refund_unmatched(db_session):
+    account = _account(db_session, "card")
+    for raw_id in ("purchase-one", "purchase-two"):
+        _statement_raw(db_session, account, raw_id, "拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 5, 1))
+    _statement_raw(db_session, account, "refund", "拼多多平台商户", "-349", section="REFUND", day=date(2026, 6, 1))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    refund = _event(db_session, EventType.REFUND, "refund")
+    assert (result.matched_refund_count, result.unmatched_refund_count) == (0, 1)
+    assert refund.original_event_id is None
+    assert all(Decimal(_event(db_session, EventType.CONSUMPTION, raw_id).projection_revisions[-1].net_amount) == Decimal("349") for raw_id in ("purchase-one", "purchase-two"))
+
+
+def test_refund_matcher_uses_unique_nearest_short_window_for_cross_statement_exact_match(db_session):
+    account = _account(db_session, "card")
+    _statement_raw(db_session, account, "old-purchase", "财付通-拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 4, 21))
+    _statement_raw(db_session, account, "recent-purchase", "财付通-拼多多平台商户", "349", section="CONSUMPTION", day=date(2026, 5, 8))
+    _statement_raw(db_session, account, "later-refund", "财付通-拼多多平台商户", "-349", section="REFUND", day=date(2026, 5, 15))
+    EconomicEventNormalizer().normalize(db_session)
+
+    result = RefundMatcher().replay(db_session)
+    assert result.matched_refund_count == 1
+    assert Decimal(_event(db_session, EventType.CONSUMPTION, "old-purchase").projection_revisions[-1].net_amount) == Decimal("349")
+    assert Decimal(_event(db_session, EventType.CONSUMPTION, "recent-purchase").projection_revisions[-1].net_amount) == Decimal("0")
 
 
 def test_q_multiple_partial_refunds_create_append_only_projection_revisions(db_session):
@@ -139,6 +194,10 @@ def test_u_multiple_internal_candidates_are_ambiguous_not_auto_paired(db_session
 
 @pytest.mark.parametrize(("description", "account_type", "expected"), [
     ("信用卡自动还款", "DEBIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("按卡转账还款", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("分期还款 本金", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("银联入账", "CREDIT_CARD", EventType.CREDIT_CARD_REPAYMENT),
+    ("分期手续费", "CREDIT_CARD", EventType.FEE_INTEREST),
     ("朝朝宝转出", "DEBIT_CARD", EventType.LIQUIDITY_SWEEP),
     ("基金快速赎回", "DEBIT_CARD", EventType.INVESTMENT_TRANSFER),
     ("住房公积金管理中心代发", "DEBIT_CARD", EventType.INCOME),
@@ -150,6 +209,143 @@ def test_u_multiple_internal_candidates_are_ambiguous_not_auto_paired(db_session
 ])
 def test_v_high_confidence_production_rules(description, account_type, expected):
     assert classify_source(raw_description=description, account_type=account_type).event_type == expected
+
+
+def test_credit_card_negative_merchant_entry_is_refund_only_when_source_semantics_allow_it():
+    assert classify_source(
+        raw_description="支付宝-测试商户", account_type="CREDIT_CARD", source_amount=Decimal("-50.50"),
+    ).event_type == EventType.REFUND
+    assert classify_source(
+        raw_description="支付宝-测试商户", account_type="DEBIT_CARD", source_amount=Decimal("-50.50"),
+    ).event_type == EventType.OTHER
+
+
+def test_replay_replaces_legacy_consumption_with_non_consumption_and_is_idempotent(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "legacy-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    result = EconomicEventNormalizer().replay(db_session)
+    replacement = _event(db_session, EventType.CREDIT_CARD_REPAYMENT, raw.id)
+    assert (result.corrected_non_consumption_count, legacy.is_active, replacement.is_active) == (1, False, True)
+    assert db_session.query(EventRawLink).filter_by(raw_transaction_id=raw.id, is_active=True).count() == 1
+    assert EconomicEventNormalizer().replay(db_session).corrected_non_consumption_count == 0
+
+
+def test_replay_skips_user_explicit_interpretation(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "protected-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    db_session.add(ConsumptionInterpretation(
+        event_id=legacy.id, eligibility_status="ELIGIBLE", eligibility_source="USER_CONFIRMATION",
+        eligibility_reason="TEST", classification_status="CLASSIFIED", primary_category="DAILY",
+        secondary_category="FOOD_DINING", classification_source="USER_CONFIRMATION",
+        classification_reason="TEST", user_confirmed=True, revision_number=1,
+        resolver_version="test",
+    ))
+    db_session.flush()
+    result = EconomicEventNormalizer().replay(db_session)
+    assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
+
+
+def test_replay_source_refund_overrides_stale_manual_consumption_and_matches_purchase(db_session, monkeypatch):
+    """A corrected source refund must never remain a manually classified purchase."""
+    account = _account(db_session, "card")
+    purchase = _statement_raw(
+        db_session, account, "aifuqu-purchase", "支付宝-爱芙趣商贸（上海）有限公司", "374",
+        section="CONSUMPTION", day=date(2026, 7, 31),
+    )
+    refund = _statement_raw(
+        db_session, account, "aifuqu-refund", "支付宝-爱芙趣商贸（上海）有限公司", "-374",
+        section="REFUND", day=date(2026, 8, 4),
+    )
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session)
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+
+    stale = _event(db_session, EventType.CONSUMPTION, refund.id)
+    db_session.add(ConsumptionInterpretation(
+        event_id=stale.id, eligibility_status="ELIGIBLE", eligibility_source="USER_CONFIRMATION",
+        eligibility_reason="DETAIL_CLASSIFICATION_EDIT", classification_status="CLASSIFIED",
+        primary_category="DAILY", secondary_category="SHOPPING",
+        classification_source="USER_CONFIRMATION", classification_reason="DETAIL_CLASSIFICATION_EDIT",
+        user_confirmed=True, revision_number=1, resolver_version="test",
+    ))
+    db_session.flush()
+
+    result = EconomicEventNormalizer().replay(db_session)
+    corrected_refund = _event(db_session, EventType.REFUND, refund.id)
+    assert (result.corrected_non_consumption_count, stale.is_active, corrected_refund.is_active) == (1, False, True)
+    assert RefundMatcher().replay(db_session).matched_refund_count == 1
+    active_purchase = _event(db_session, EventType.CONSUMPTION, purchase.id)
+    projection = next(item for item in active_purchase.projection_revisions if item.is_active)
+    assert (Decimal(projection.gross_amount), Decimal(projection.refund_amount), Decimal(projection.net_amount)) == (
+        Decimal("374"), Decimal("374"), Decimal("0"),
+    )
+    assert EconomicEventNormalizer().replay(db_session).corrected_non_consumption_count == 0
+
+
+def test_replay_preserves_event_identity_with_a_user_note(db_session, monkeypatch):
+    account = _account(db_session, "card")
+    raw = _raw(db_session, account, "noted-repayment", "按卡转账还款", "-100")
+    from backend.services.consumption.normalization import service as normalization_service
+    original = normalization_service.classify_source
+    monkeypatch.setattr(
+        normalization_service, "classify_source",
+        lambda **_kwargs: Evidence(EventType.CONSUMPTION, RuleSource.DESCRIPTION_RULE),
+    )
+    EconomicEventNormalizer().normalize(db_session, (raw,))
+    monkeypatch.setattr(normalization_service, "classify_source", original)
+    legacy = _event(db_session, EventType.CONSUMPTION, raw.id)
+    from backend.services.consumption.models import ConsumptionEventNote
+    db_session.add(ConsumptionEventNote(event_id=legacy.id, note="保留这个说明"))
+    db_session.flush()
+
+    result = EconomicEventNormalizer().replay(db_session)
+
+    assert (result.corrected_non_consumption_count, result.skipped_user_explicit_count, legacy.is_active) == (0, 1, True)
+    assert db_session.query(ConsumptionEventNote).filter_by(event_id=legacy.id).one().note == "保留这个说明"
+
+
+def test_replay_collapses_only_cross_batch_candidate_duplicates(db_session):
+    account = _account(db_session, "card")
+    first = _raw(
+        db_session, account, "duplicate-one", "[CONSUMPTION] repeated purchase", "-100",
+        dedup_status="CANDIDATE_DUPLICATE", match_fingerprint="cross-batch-match",
+    )
+    second = _raw(
+        db_session, account, "duplicate-two", "[CONSUMPTION] repeated purchase", "-100",
+        dedup_status="CANDIDATE_DUPLICATE", match_fingerprint="cross-batch-match",
+    )
+    normalizer = EconomicEventNormalizer()
+    normalizer.normalize(db_session, (first,))
+    normalizer.normalize(db_session, (second,))
+
+    result = normalizer.replay(db_session)
+    active = db_session.query(EconomicEvent).filter_by(is_active=True).all()
+    links = db_session.query(EventRawLink).filter_by(is_active=True).all()
+    assert (result.collapsed_cross_batch_duplicate_count, len(active), len(links)) == (1, 1, 2)
 
 
 def test_event_orm_decimal_fx_nullable_and_schema_relationships(db_session):

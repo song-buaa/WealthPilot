@@ -1,0 +1,312 @@
+"""Explicit local review queue for ambiguous outgoing economic events.
+
+The queue deliberately sits before consumption classification: an item here is
+an ``OTHER`` outflow whose *eligibility* is not yet known. A local user can
+either promote it into an eligible, classified consumption projection or
+explicitly exclude it. Neither action changes immutable RawTransaction or
+EconomicEvent facts.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+import json
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from backend.services.consumption.classification import ClassificationResolver
+from backend.services.consumption.classification_design import (
+    ClassificationSource, EligibilityStatus, PrimaryCategory,
+)
+from backend.services.consumption.economic_events import EconomicDirection, EventType
+from backend.services.consumption.models import (
+    Account, ConsumptionInterpretation, EconomicEvent,
+    EconomicEventProjectionRevision, EventRawLink, ImportBatch, RawTransaction,
+)
+from backend.services.consumption.normalization.rules import (
+    classify_source,
+    has_explicit_internal_transfer_marker,
+)
+from backend.services.consumption.presentation import account_display_label
+
+
+class CandidateReviewError(ValueError):
+    """Raised when an event is not currently eligible for candidate review."""
+
+
+@dataclass(frozen=True)
+class ConsumptionCandidateItem:
+    event_id: str
+    analytics_effective_date: date
+    raw_description: str
+    account_display_name: str
+    source_label: str
+    amount_cny: Decimal | None
+    currency: str
+
+
+@dataclass(frozen=True)
+class ConsumptionCandidatePage:
+    month: date | None
+    items: tuple[ConsumptionCandidateItem, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class CandidateBatchConfirmationSummary:
+    """Outcome of one bounded historical candidate-confirmation run."""
+    candidate_count: int
+    candidate_amount_cny: Decimal
+    classified_count: int
+    classified_amount_cny: Decimal
+    needs_review_count: int
+    needs_review_amount_cny: Decimal
+
+
+def _source_label(batch: ImportBatch, account: Account) -> str:
+    return account_display_label(None, batch.institution, account.account_type, include_mask=False)
+
+
+class ConsumptionCandidateReviewService:
+    """Read and resolve only ambiguous OTHER outflows using existing audit models."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_candidates(
+        self, *, month: date | None = None, limit: int = 100, offset: int = 0,
+    ) -> ConsumptionCandidatePage:
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        primary_link_id = (
+            self.session.query(func.min(EventRawLink.id))
+            .filter(EventRawLink.event_id == EconomicEvent.id, EventRawLink.is_active.is_(True))
+            .correlate(EconomicEvent)
+            .scalar_subquery()
+        )
+        query = (
+            self.session.query(EconomicEvent, ConsumptionInterpretation, RawTransaction, Account, ImportBatch)
+            .join(ConsumptionInterpretation, (ConsumptionInterpretation.event_id == EconomicEvent.id) & ConsumptionInterpretation.is_active.is_(True))
+            .join(EventRawLink, EventRawLink.id == primary_link_id)
+            .join(RawTransaction, RawTransaction.id == EventRawLink.raw_transaction_id)
+            .join(Account, Account.id == RawTransaction.account_id)
+            .join(ImportBatch, ImportBatch.id == RawTransaction.import_batch_id)
+            .filter(
+                EconomicEvent.is_active.is_(True),
+                EconomicEvent.event_type == EventType.OTHER.value,
+                EconomicEvent.economic_direction == EconomicDirection.OUTFLOW.value,
+                EconomicEvent.analytics_effective_date.is_not(None),
+                ConsumptionInterpretation.eligibility_status == EligibilityStatus.NEEDS_REVIEW.value,
+            )
+        )
+        if month is not None:
+            next_month = date(month.year + (month.month == 12), 1 if month.month == 12 else month.month + 1, 1)
+            query = query.filter(
+                EconomicEvent.analytics_effective_date >= month,
+                EconomicEvent.analytics_effective_date < next_month,
+            )
+        rows = query.order_by(
+            EconomicEvent.base_amount.desc().nullslast(),
+            EconomicEvent.amount.desc(),
+            EconomicEvent.analytics_effective_date.desc(),
+            EconomicEvent.id,
+        ).all()
+        items = tuple(
+            ConsumptionCandidateItem(
+                event_id=event.id,
+                analytics_effective_date=event.analytics_effective_date,
+                raw_description=raw.raw_description,
+                account_display_name=account_display_label(
+                    account.display_name, account.institution, account.account_type,
+                ),
+                source_label=_source_label(batch, account),
+                amount_cny=Decimal(event.base_amount) if event.base_amount is not None else None,
+                currency=event.currency,
+            )
+            for event, _interpretation, raw, account, batch in rows
+            if self._source_facts_support_candidate(event)
+        )
+        return ConsumptionCandidatePage(month=month, items=items[offset:offset + limit], total=len(items), limit=limit, offset=offset)
+
+    def confirm_as_consumption(
+        self, event_id: str, *, primary_category: PrimaryCategory, secondary_category: str,
+    ) -> ConsumptionInterpretation:
+        event, _current = self._current_candidate(event_id)
+        interpretation = ClassificationResolver().confirm_event(
+            self.session,
+            event_id,
+            eligibility_status=EligibilityStatus.ELIGIBLE,
+            primary_category=primary_category,
+            secondary_category=secondary_category,
+            reason="CANDIDATE_CONFIRMED_CONSUMPTION",
+        )
+        self._ensure_consumption_projection(event)
+        return interpretation
+
+    def reject_as_non_consumption(self, event_id: str) -> ConsumptionInterpretation:
+        self._current_candidate(event_id)
+        return ClassificationResolver().confirm_event(
+            self.session,
+            event_id,
+            eligibility_status=EligibilityStatus.INELIGIBLE,
+            reason="CANDIDATE_REJECTED_NON_CONSUMPTION",
+        )
+
+    def confirm_candidates_in_period(
+        self, *, start_date: date, end_date: date,
+    ) -> CandidateBatchConfirmationSummary:
+        """Confirm the *current* queue in a closed date range exactly once.
+
+        This is intentionally a bounded historical operation rather than a
+        rule: future ambiguous OTHER outflows continue entering the review
+        queue.  Each item first receives a USER_CONFIRMATION for eligibility,
+        then the established deterministic category ladder is evaluated.
+        """
+        if end_date < start_date:
+            raise ValueError("end_date must not precede start_date")
+        event_ids = self._candidate_event_ids(start_date=start_date, end_date=end_date)
+        resolver = ClassificationResolver()
+        classified_count = 0
+        classified_amount = Decimal("0")
+        needs_review_count = 0
+        needs_review_amount = Decimal("0")
+        candidate_amount = Decimal("0")
+        for event_id in event_ids:
+            event, _current = self._current_candidate(event_id)
+            amount = Decimal(event.base_amount) if event.base_amount is not None else Decimal("0")
+            candidate_amount += amount
+            resolver.confirm_event(
+                self.session,
+                event_id,
+                eligibility_status=EligibilityStatus.ELIGIBLE,
+                reason="BATCH_CANDIDATE_CONFIRMED_CONSUMPTION",
+            )
+            self._ensure_consumption_projection(event, reason="BATCH_CANDIDATE_CONFIRMED_CONSUMPTION")
+            interpretation = resolver.classify_confirmed_candidate(self.session, event_id)
+            if interpretation.classification_status == "CLASSIFIED":
+                classified_count += 1
+                classified_amount += amount
+            else:
+                needs_review_count += 1
+                needs_review_amount += amount
+        return CandidateBatchConfirmationSummary(
+            candidate_count=len(event_ids),
+            candidate_amount_cny=candidate_amount,
+            classified_count=classified_count,
+            classified_amount_cny=classified_amount,
+            needs_review_count=needs_review_count,
+            needs_review_amount_cny=needs_review_amount,
+        )
+
+    def _candidate_event_ids(self, *, start_date: date, end_date: date) -> tuple[str, ...]:
+        event_ids = tuple(
+            row[0] for row in (
+                self.session.query(EconomicEvent.id)
+                .join(
+                    ConsumptionInterpretation,
+                    (ConsumptionInterpretation.event_id == EconomicEvent.id)
+                    & ConsumptionInterpretation.is_active.is_(True),
+                )
+                .filter(
+                    EconomicEvent.is_active.is_(True),
+                    EconomicEvent.event_type == EventType.OTHER.value,
+                    EconomicEvent.economic_direction == EconomicDirection.OUTFLOW.value,
+                    EconomicEvent.analytics_effective_date >= start_date,
+                    EconomicEvent.analytics_effective_date <= end_date,
+                    ConsumptionInterpretation.eligibility_status == EligibilityStatus.NEEDS_REVIEW.value,
+                )
+                .order_by(EconomicEvent.analytics_effective_date, EconomicEvent.id)
+            )
+        )
+        return tuple(event_id for event_id in event_ids if self._source_facts_support_candidate_id(event_id))
+
+    def _current_candidate(self, event_id: str) -> tuple[EconomicEvent, ConsumptionInterpretation]:
+        event = self.session.get(EconomicEvent, event_id)
+        current = self.session.query(ConsumptionInterpretation).filter_by(event_id=event_id, is_active=True).one_or_none()
+        if (
+            event is None
+            or not event.is_active
+            or current is None
+            or event.event_type != EventType.OTHER.value
+            or event.economic_direction != EconomicDirection.OUTFLOW.value
+            or current.eligibility_status != EligibilityStatus.NEEDS_REVIEW.value
+            or not self._source_facts_support_candidate(event)
+        ):
+            raise CandidateReviewError("event is not an active consumption candidate")
+        return event, current
+
+    def _source_facts_support_candidate_id(self, event_id: str) -> bool:
+        event = self.session.get(EconomicEvent, event_id)
+        return event is not None and self._source_facts_support_candidate(event)
+
+    def _source_facts_support_candidate(self, event: EconomicEvent) -> bool:
+        """Allow review only for source-ambiguous outgoing facts.
+
+        Candidate confirmation is intentionally not an override for a source
+        statement's explicit economic semantics.  This rechecks active Raw
+        evidence at read, single-confirm, and batch-confirm boundaries so a
+        stale ``OTHER`` Event cannot promote a refund, repayment, transfer,
+        fee, income, or other source-supported non-consumption fact.
+        """
+        raws = (
+            self.session.query(RawTransaction)
+            .join(EventRawLink, EventRawLink.raw_transaction_id == RawTransaction.id)
+            .filter(
+                EventRawLink.event_id == event.id,
+                EventRawLink.is_active.is_(True),
+                RawTransaction.is_active.is_(True),
+            )
+            .all()
+        )
+        if not raws:
+            return False
+        for raw in raws:
+            try:
+                source_section = json.loads(raw.parser_provenance or "{}").get("statement_section")
+            except (TypeError, ValueError):
+                source_section = None
+            evidence = classify_source(
+                raw_description=raw.raw_description,
+                account_type=raw.account.account_type,
+                source_amount=Decimal(raw.amount),
+                source_section=source_section,
+            )
+            if (
+                evidence.event_type != EventType.OTHER
+                or has_explicit_internal_transfer_marker(raw.raw_description)
+            ):
+                return False
+        return True
+
+    def _ensure_consumption_projection(self, event: EconomicEvent, *, reason: str = "CANDIDATE_CONFIRMED_CONSUMPTION") -> None:
+        """Create the projection required by Analytics without mutating event facts."""
+        gross = Decimal(event.amount)
+        base_net = Decimal(event.base_amount) if event.base_amount is not None else None
+        current = self.session.query(EconomicEventProjectionRevision).filter_by(event_id=event.id, is_active=True).one_or_none()
+        expected = (gross, Decimal("0"), gross, base_net)
+        if current and (
+            Decimal(current.gross_amount), Decimal(current.refund_amount), Decimal(current.net_amount),
+            Decimal(current.base_net_amount) if current.base_net_amount is not None else None,
+        ) == expected:
+            return
+        if current is not None:
+            current.is_active = False
+        self.session.add(EconomicEventProjectionRevision(
+            event_id=event.id,
+            revision_number=current.revision_number + 1 if current else 1,
+            gross_amount=gross,
+            refund_amount=Decimal("0"),
+            net_amount=gross,
+            base_currency=event.base_currency,
+            base_net_amount=base_net,
+            reason=reason,
+            rule_source=ClassificationSource.USER_CONFIRMATION.value,
+            supersedes_revision_id=current.id if current else None,
+        ))
+        self.session.flush()

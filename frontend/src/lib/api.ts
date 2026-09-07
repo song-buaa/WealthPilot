@@ -33,6 +33,173 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 }
 
+// ── Consumption Analytics ───────────────────────────────
+
+export type ConsumptionCoverageStatus = 'COMPLETE' | 'PARTIAL' | 'SOURCE_LIMITED' | 'UNKNOWN'
+
+export interface ConsumptionUnresolvedAmount {
+  currency: string
+  amount: string
+  event_count: number
+}
+
+export interface ConsumptionMonthlyPoint {
+  month: string
+  total_spending_cny: string
+  daily_cny: string
+  travel_cny: string
+  housing_cny: string
+  unclassified_eligible_cny: string
+  classified_eligible_cny: string
+  classification_coverage_rate: string | null
+  eligible_event_count: number
+  eligibility_review_count: number
+  classification_review_count: number
+  amount_unresolved_count: number
+  amount_unresolved_original_amount: string
+  amount_unresolved_by_currency: ConsumptionUnresolvedAmount[]
+  amount_complete: boolean
+  data_coverage_status: ConsumptionCoverageStatus
+  is_partial_month: boolean
+  as_of_date: string | null
+  comparison_available: boolean
+  comparison_reason: string | null
+  secondary_breakdowns: ConsumptionSecondaryBreakdown[]
+}
+
+export interface ConsumptionSecondaryBreakdown {
+  primary_category: 'DAILY' | 'TRAVEL' | 'HOUSING'
+  secondary_category: string
+  amount_cny: string
+  event_count: number
+  share_of_total: string | null
+  share_within_primary: string | null
+}
+
+export interface ConsumptionAverageMetric {
+  amount_cny: string | null
+  months_used: number
+}
+
+export interface ConsumptionAnalyticsSummary {
+  months: ConsumptionMonthlyPoint[]
+  secondary_breakdowns: ConsumptionSecondaryBreakdown[]
+  complete_month_average_cny: string | null
+  complete_month_count: number
+  three_month_average: ConsumptionAverageMetric
+  twelve_month_average: ConsumptionAverageMetric
+}
+
+export interface ConsumptionEventDetail {
+  event_id: string
+  analytics_effective_date: string
+  raw_description: string
+  account_display_name: string
+  primary_category: 'DAILY' | 'TRAVEL' | 'HOUSING' | null
+  secondary_category: string | null
+  classification_status: 'CLASSIFIED' | 'NEEDS_REVIEW'
+  amount_cny: string
+  user_note: string | null
+}
+
+export interface ConsumptionEventDetailPage {
+  month: string
+  items: ConsumptionEventDetail[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ConsumptionEventFilters {
+  classificationStatus?: 'CLASSIFIED' | 'NEEDS_REVIEW'
+  primaryCategory?: 'DAILY' | 'TRAVEL' | 'HOUSING'
+  secondaryCategory?: string
+}
+
+export interface ConsumptionCandidate {
+  event_id: string
+  analytics_effective_date: string
+  raw_description: string
+  account_display_name: string
+  source_label: string
+  amount_cny: string | null
+  currency: string
+}
+
+export interface ConsumptionCandidatePage {
+  month: string | null
+  items: ConsumptionCandidate[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ConsumptionCandidateConfirmation {
+  event_id: string
+  eligibility_status: 'ELIGIBLE' | 'INELIGIBLE'
+  classification_status: 'CLASSIFIED' | 'NOT_APPLICABLE'
+  primary_category?: string | null
+  secondary_category?: string | null
+  revision_number: number
+}
+
+export const consumptionApi = {
+  getAnalytics: (params: { asOf?: string; months?: number; accountIds?: string[] } = {}) => {
+    const query = new URLSearchParams()
+    if (params.asOf) query.set('as_of', params.asOf)
+    if (params.months) query.set('months', String(params.months))
+    params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
+    return request<ConsumptionAnalyticsSummary>(`/consumption/analytics${query.size ? `?${query}` : ''}`)
+  },
+  getEvents: (params: { month?: string; startMonth?: string; endMonth?: string; limit?: number; offset?: number; accountIds?: string[] } & ConsumptionEventFilters) => {
+    const query = new URLSearchParams()
+    if (params.month) query.set('month', params.month)
+    if (params.startMonth) query.set('start_month', params.startMonth)
+    if (params.endMonth) query.set('end_month', params.endMonth)
+    if (params.limit != null) query.set('limit', String(params.limit))
+    if (params.offset != null) query.set('offset', String(params.offset))
+    if (params.classificationStatus) query.set('classification_status', params.classificationStatus)
+    if (params.primaryCategory) query.set('primary_category', params.primaryCategory)
+    if (params.secondaryCategory) query.set('secondary_category', params.secondaryCategory)
+    params.accountIds?.forEach(accountId => query.append('account_ids', accountId))
+    return request<ConsumptionEventDetailPage>(`/consumption/events?${query}`)
+  },
+  getEventsExportUrl: (period: { month?: string; startMonth?: string; endMonth?: string }, filters: ConsumptionEventFilters = {}) => {
+    const query = new URLSearchParams()
+    if (period.month) query.set('month', period.month)
+    if (period.startMonth) query.set('start_month', period.startMonth)
+    if (period.endMonth) query.set('end_month', period.endMonth)
+    if (filters.classificationStatus) query.set('classification_status', filters.classificationStatus)
+    if (filters.primaryCategory) query.set('primary_category', filters.primaryCategory)
+    if (filters.secondaryCategory) query.set('secondary_category', filters.secondaryCategory)
+    return `/api/consumption/events/export.csv?${query}`
+  },
+  getCandidates: (params: { month?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.month) query.set('month', params.month)
+    if (params.limit != null) query.set('limit', String(params.limit))
+    if (params.offset != null) query.set('offset', String(params.offset))
+    return request<ConsumptionCandidatePage>(`/consumption/candidates${query.size ? `?${query}` : ''}`)
+  },
+  confirmCandidate: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
+    request<ConsumptionCandidateConfirmation>(
+      `/consumption/candidates/${encodeURIComponent(eventId)}/confirm`,
+      { method: 'PUT', body: JSON.stringify({ primary_category: primaryCategory, secondary_category: secondaryCategory }) },
+    ),
+  rejectCandidate: (eventId: string) =>
+    request<ConsumptionCandidateConfirmation>(`/consumption/candidates/${encodeURIComponent(eventId)}/reject`, { method: 'PUT' }),
+  updateEventClassification: (eventId: string, primaryCategory: 'DAILY' | 'TRAVEL' | 'HOUSING', secondaryCategory: string) =>
+    request<{ event_id: string; primary_category: string; secondary_category: string; classification_status: string; revision_number: number }>(
+      `/consumption/events/${encodeURIComponent(eventId)}/classification`,
+      { method: 'PUT', body: JSON.stringify({ primary_category: primaryCategory, secondary_category: secondaryCategory }) },
+    ),
+  updateEventNote: (eventId: string, userNote: string) =>
+    request<{ event_id: string; user_note: string | null }>(
+      `/consumption/events/${encodeURIComponent(eventId)}/note`,
+      { method: 'PATCH', body: JSON.stringify({ user_note: userNote }) },
+    ),
+}
+
 // ── Portfolio ────────────────────────────────────────────
 
 export const portfolioApi = {
