@@ -6,9 +6,9 @@ WealthPilot - 数据库模型定义
 """
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -151,6 +151,72 @@ class Liability(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     portfolio = relationship("Portfolio", back_populates="liabilities")
+
+
+# ──────────────────────────────────────────────
+# 财富总览（v0.1）
+# ──────────────────────────────────────────────
+
+class WealthItem(Base):
+    """非投资账户的手工资产或负债。
+
+    投资资产始终从 ``Position`` / portfolio summary 读取，不能写入本表，
+    从根源上避免财富总览形成第二套投资资产事实。
+    """
+    __tablename__ = "wealth_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False, index=True)
+    kind = Column(String(12), nullable=False)  # ASSET | LIABILITY
+    name = Column(String(200), nullable=False)
+    item_type = Column(String(50), nullable=False)
+    category = Column(String(50), nullable=False)
+    source_type = Column(String(20), nullable=False, default="MANUAL")  # MANUAL | PDF | SCREENSHOT
+    sync_mode = Column(String(20), nullable=False, default="MANUAL")
+    # ``current_value`` is always the CNY base-currency value used by wealth
+    # aggregation.  Keep the source-currency fact and the conversion snapshot
+    # alongside it so a foreign-currency cash balance is never reduced to a
+    # manually maintained CNY number.
+    current_value = Column(Float, nullable=False, default=0)
+    currency = Column(String(10), nullable=False, default="CNY")
+    original_value = Column(Float, nullable=True)
+    fx_rate_to_cny = Column(Float, nullable=False, default=1.0)
+    fx_rate_date = Column(String(20), nullable=True)
+    included_in_net_worth = Column(Boolean, nullable=False, default=True)
+    # 用户明确说明该项的底层资产已经包含在投资账户后，仍可展示，但不得再次计入。
+    already_investment_accounted = Column(Boolean, nullable=False, default=False)
+    value_as_of = Column(Date, nullable=False, default=date.today)
+    last_verified_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    notes = Column(Text, nullable=True)
+
+
+class WealthItemSnapshot(Base):
+    """每次手工确认时保留的单项历史值。"""
+    __tablename__ = "wealth_item_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, ForeignKey("wealth_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    value = Column(Float, nullable=False)
+    value_as_of = Column(Date, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class WealthSnapshot(Base):
+    """财富总览聚合快照，用于趋势和月度变化归因的可复核基线。"""
+    __tablename__ = "wealth_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False, index=True)
+    recorded_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    total_assets = Column(Float, nullable=False)
+    total_liabilities = Column(Float, nullable=False)
+    net_worth = Column(Float, nullable=False)
+    investment_assets = Column(Float, nullable=False)
+    investment_profit_loss = Column(Float, nullable=True)
+    non_investment_assets = Column(Float, nullable=False)
+    pension_benefit_value = Column(Float, nullable=False, default=0)
 
 
 class DecisionLog(Base):

@@ -64,6 +64,7 @@ def init_db():
     Base.metadata.create_all(engine)
     _ensure_position_ownership_columns(engine)
     _ensure_asset_classification_columns(engine)
+    _ensure_wealth_item_currency_columns(engine)
     _ensure_conversation_message_metadata_column(engine)
     _ensure_execution_linkage_columns(engine)
     _ensure_consumption_account_ownership_column(engine)
@@ -133,6 +134,37 @@ def _ensure_asset_classification_columns(engine) -> None:
                     connection.execute(text(
                         f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"
                     ))
+
+
+def _ensure_wealth_item_currency_columns(engine) -> None:
+    """Add base-value conversion fields to existing manual wealth records."""
+    if engine.dialect.name != "sqlite":
+        return
+    if "wealth_items" not in inspect(engine).get_table_names():
+        return
+    existing = {column["name"] for column in inspect(engine).get_columns("wealth_items")}
+    additions = {
+        "original_value": "FLOAT",
+        "fx_rate_to_cny": "FLOAT NOT NULL DEFAULT 1.0",
+        "fx_rate_date": "VARCHAR(20)",
+    }
+    with engine.begin() as connection:
+        for name, sql_type in additions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE wealth_items ADD COLUMN {name} {sql_type}"))
+        # Existing records were CNY-only. Backfill them once so the source
+        # amount remains explicit after this additive migration.
+        connection.execute(text(
+            "UPDATE wealth_items SET original_value = current_value "
+            "WHERE original_value IS NULL AND currency = 'CNY'"
+        ))
+        # v0.1 originally stored basic-pension entitlements in a separate
+        # category.  They belong to the unified retirement classification,
+        # while their inclusion in core net worth remains a separate flag.
+        connection.execute(text(
+            "UPDATE wealth_items SET category = 'retirement_long_term' "
+            "WHERE item_type = 'basic_pension' AND category <> 'retirement_long_term'"
+        ))
 
 
 def _ensure_conversation_message_metadata_column(engine) -> None:

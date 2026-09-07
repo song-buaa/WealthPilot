@@ -99,6 +99,16 @@ GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：�
 1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
 2. 对前端大 bundle 做按路由/重组件拆分。
 
+### 财富总览 v0.1 已知限制与验收范围（2026-09-07）
+
+- 状态：**刷新一致性问题已完成**。按用户本轮确认的范围收口；不是对养老金账户/持仓级精确去重的验收。
+- 个人养老金的 `already_investment_accounted` 当前属于金额级去重：从实时 Portfolio 汇总中扣除已登记金额，不代表已建立账户或持仓身份映射。
+- 底层养老金持仓净值变化时，登记金额与实际 Portfolio 养老金资产可能产生小额偏差。用户已明确接受此限制，不阻塞本版本收口。
+- 后续建设账户级 / holding-level mapping 时统一解决精确去重；本轮不新增账户映射、持仓映射或其他数据模型。
+- “刷新一致性问题”与精确去重分别验收：同步完成后自动获取最新 Portfolio 数据、两页各自 API/UI 一致、SPA 进入及 focus / visibility / 同步通知触发刷新，无须手工刷新浏览器，也不增加财富页投资同步入口。
+- 刷新验收证据由 `frontend/tests/e2e/wealth-portfolio-consistency.spec.ts`（临时 SQLite、真实 Portfolio/Wealth service）与 `wealth-refresh.spec.ts` 覆盖；真实金额对账证据保留在仓库外私有审计报告，不提交个人财务数据。
+- 本轮复验：两个浏览器测试通过，真实服务测试逐项验证 focus、visibilitychange、portfolio-updated 都产生新的 summary 请求并显示正确金额；frontend lint/build 通过。未修改后端业务代码，沿用上一轮后端全量 892 passed、7 skipped 及 Offline M5 18/18 结果。
+
 ## 8. 文档权威与仓库卫生
 
 - 当前事实优先级：运行代码与测试证据 → 本文 → `README.md` / `AGENTS.md` / `CHANGELOG.md` → 当前 PRD。

@@ -105,6 +105,9 @@ export default function AssetAllocationCard({ allocation, cashRange }: Props) {
             </div>
           )
         })}
+        {(allocation.unknown?.value ?? 0) > 0 && <div style={{ padding: '10px 0', color: '#6B7280', fontSize: 12 }}>
+          未分类 {fmtCny(allocation.unknown.value)} · {fmtPct(allocation.unknown.pct)}（已计入总资产，分类待核对）
+        </div>}
       </div>
     </div>
   )

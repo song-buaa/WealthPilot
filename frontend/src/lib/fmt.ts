@@ -6,7 +6,8 @@
 /** 金额：千分位，0 位小数，前缀 ¥ */
 export function fmtCny(v: number | null | undefined): string {
   if (v == null) return '—'
-  return '¥' + Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+  const amount = Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+  return v < 0 ? `-¥${amount}` : `¥${amount}`
 }
 
 /** 金额带符号（盈亏专用）：正 +¥xxx 绿，负 -¥xxx 红 */

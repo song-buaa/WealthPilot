@@ -247,6 +247,76 @@ export const portfolioApi = {
   deletePositions: () => request<{ message: string }>('/portfolio/positions', { method: 'DELETE' }),
 }
 
+// ── 财富总览 ─────────────────────────────────────────────
+
+export interface WealthItem {
+  id: number
+  kind: 'asset' | 'liability'
+  name: string
+  item_type: string
+  category: string
+  source_type: 'MANUAL' | 'PDF' | 'SCREENSHOT'
+  current_value: number
+  currency: string
+  original_value: number
+  fx_rate_to_cny: number
+  fx_rate_date?: string | null
+  included_in_net_worth: boolean
+  already_investment_accounted: boolean
+  effective_included_in_net_worth: boolean
+  value_as_of: string
+  updated_at: string
+  age_days: number
+  freshness: 'latest' | 'suggested_update' | 'long_unupdated'
+  notes?: string | null
+}
+
+export interface WealthSummary {
+  net_worth: number
+  total_assets: number
+  total_liabilities: number
+  monthly_net_worth_change: number | null
+  investment: {
+    total_assets: number; total_profit_loss: number | null; allocation: Record<string, { value: number; pct: number }>
+    allocation_scope?: string
+    portfolio_total_assets?: number
+    holding_links_verified?: boolean
+    adjustments?: Array<{ wealth_item_id: number; name: string; value: number; treatment: string; holding_link_verified: boolean }>
+  }
+  pension_benefit: number
+  asset_breakdown: Array<{ category: string; label: string; value: number; source: string }>
+  liability_breakdown: Array<{ category: string; label: string; value: number }>
+  attribution: {
+    cash_surplus: number | null; cashflow_available: boolean; cashflow_income: number | null; cashflow_expense: number | null
+    investment_return: number | null; investment_return_available: boolean; other_adjustment: number | null; baseline_available: boolean
+  }
+  trend: Array<{ date: string; net_worth: number }>
+}
+
+export interface WealthItemWrite {
+  kind: 'asset' | 'liability'
+  name: string
+  item_type: string
+  current_value: number
+  value_as_of?: string
+  included_in_net_worth?: boolean
+  already_investment_accounted?: boolean
+  source_type?: 'MANUAL' | 'PDF' | 'SCREENSHOT'
+  notes?: string
+}
+
+export const wealthApi = {
+  getSummary: (days?: number) => request<WealthSummary>(`/wealth/summary${days ? `?days=${days}` : ''}`, { cache: 'no-store' }),
+  getItems: (kind?: 'asset' | 'liability') => request<PagedResult<WealthItem>>(`/wealth/items${kind ? `?kind=${kind}` : ''}`),
+  createItem: (data: WealthItemWrite) => request<WealthItem>('/wealth/items', { method: 'POST', body: JSON.stringify(data) }),
+  updateItem: (id: number, data: Partial<WealthItemWrite>) => request<WealthItem>(`/wealth/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteItem: (id: number) => request<void>(`/wealth/items/${id}`, { method: 'DELETE' }),
+  previewImport: (file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return request<{ requires_confirmation: boolean; source_type: 'PDF' | 'SCREENSHOT'; draft: Partial<WealthItemWrite>; message: string }>('/wealth/import/preview', { method: 'POST', headers: {}, body: fd })
+  },
+}
+
 // ── Discipline ───────────────────────────────────────────
 
 export const disciplineApi = {

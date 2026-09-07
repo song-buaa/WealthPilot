@@ -9,7 +9,7 @@
  *   6. 负债明细表格
  *   7. 负债导入/导出
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, ImageIcon, RefreshCw } from 'lucide-react'
 import { BrokerSyncTab } from '@/components/BrokerSyncTab'
@@ -23,6 +23,7 @@ import { allocationApi } from '@/lib/allocation-api'
 import EmptyState from '@/components/shared/EmptyState'
 import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
 import DataTip from '@/components/shared/DataTip'
+import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 
 // ── 调色板（与原版一致）──────────────────────────────────────
 const CHART_PALETTE = [
@@ -73,7 +74,9 @@ export default function Dashboard() {
   const [importOpen, setImportOpen]         = useState(false)
   const [liabImportOpen, setLiabImportOpen] = useState(false)
 
-  const fetchAll = () => {
+  const requestVersion = useRef(0)
+  const fetchAll = useCallback(() => {
+    const version = ++requestVersion.current
     setLoading(true)
     setError(null)
     Promise.all([
@@ -83,6 +86,7 @@ export default function Dashboard() {
       allocationApi.getTargets().catch(() => []),
     ])
       .then(([s, p, l, targets]) => {
+        if (version !== requestVersion.current) return
         setSummary(s)
         setPositions(p.items)
         setLiabilities(l.items)
@@ -91,32 +95,23 @@ export default function Dashboard() {
           setCashRange({ min: ct.cash_min_amount, max: ct.cash_max_amount })
         }
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : '加载失败'))
-      .finally(() => setLoading(false))
-  }
+      .catch((e: unknown) => { if (version === requestVersion.current) setError(e instanceof Error ? e.message : '加载失败') })
+      .finally(() => { if (version === requestVersion.current) setLoading(false) })
+  }, [])
 
   useEffect(() => {
-    let active = true
-    Promise.all([
-      portfolioApi.getSummary(),
-      portfolioApi.getPositions(),
-      portfolioApi.getLiabilities(),
-      allocationApi.getTargets().catch(() => []),
-    ])
-      .then(([s, p, l, targets]) => {
-        if (!active) return
-        setSummary(s)
-        setPositions(p.items)
-        setLiabilities(l.items)
-        const ct = targets.find((t: { asset_class: string }) => t.asset_class === 'cash')
-        if (ct?.cash_min_amount != null && ct?.cash_max_amount != null) {
-          setCashRange({ min: ct.cash_min_amount, max: ct.cash_max_amount })
-        }
-      })
-      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : '加载失败') })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
+    const versionRef = requestVersion
+    const timer = window.setTimeout(fetchAll, 0)
+    const refetch = () => { if (document.visibilityState === 'visible') fetchAll() }
+    window.addEventListener('focus', refetch)
+    document.addEventListener('visibilitychange', refetch)
+    return () => {
+      ++versionRef.current
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', refetch)
+      document.removeEventListener('visibilitychange', refetch)
+    }
+  }, [fetchAll])
 
   // ── 加载中 ──
   if (loading) {
@@ -625,17 +620,12 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <button onClick={onToggle} style={{
-        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: '#fff', border: '1px solid #E5E7EB', borderRadius: open ? '12px 12px 0 0' : 12,
-        padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#374151', cursor: 'pointer',
-        boxShadow: 'var(--shadow-sm)',
-      }}>
+      <button onClick={onToggle} style={dataManagementBarStyle(open)}>
         <span>📥  导入 / 导出数据（持仓）</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!open && (
             <a href="/api/portfolio/export/positions.csv" download onClick={e => e.stopPropagation()}
-               style={{ ...btnSecondary, fontSize: 11, padding: '3px 10px' }}>
+               style={dataManagementExportButtonStyle}>
               <Download size={11} /> 导出 CSV
             </a>
           )}
@@ -778,17 +768,12 @@ function LiabImportSection({ open, onToggle, onRefresh }: { open: boolean; onTog
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <button onClick={onToggle} style={{
-        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: '#fff', border: '1px solid #E5E7EB', borderRadius: open ? '12px 12px 0 0' : 12,
-        padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#374151', cursor: 'pointer',
-        boxShadow: 'var(--shadow-sm)',
-      }}>
+      <button onClick={onToggle} style={dataManagementBarStyle(open)}>
         <span>📥  导入 / 导出数据（负债）</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!open && (
             <a href="/api/portfolio/export/liabilities.csv" download onClick={e => e.stopPropagation()}
-               style={{ ...btnSecondary, fontSize: 11, padding: '3px 10px' }}>
+               style={dataManagementExportButtonStyle}>
               <Download size={11} /> 导出 CSV
             </a>
           )}
