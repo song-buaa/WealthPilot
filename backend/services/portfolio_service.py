@@ -168,6 +168,7 @@ def get_summary(portfolio_id: int) -> dict:
         bs.monetary_value += tiger_cash_cny
         bs.total_assets += tiger_cash_cny
         bs.net_worth = bs.total_assets - bs.total_liabilities
+        bs.platform_distribution["老虎证券"] = bs.platform_distribution.get("老虎证券", 0.0) + tiger_cash_cny
         # 重算占比
         if bs.total_assets > 0:
             bs.equity_pct = round(bs.equity_value / bs.total_assets * 100, 1)
@@ -192,6 +193,8 @@ def get_summary(portfolio_id: int) -> dict:
             "monetary":     {"value": bs.monetary_value,      "pct": bs.monetary_pct},
             "alternative":  {"value": bs.alternative_value,   "pct": bs.alternative_pct},
             "derivative":   {"value": bs.derivative_value,    "pct": bs.derivative_pct},
+            "unknown":      {"value": max(0.0, bs.total_assets - bs.equity_value - bs.fixed_income_value - bs.monetary_value - bs.alternative_value - bs.derivative_value),
+                             "pct": round(max(0.0, bs.total_assets - bs.equity_value - bs.fixed_income_value - bs.monetary_value - bs.alternative_value - bs.derivative_value) / bs.total_assets * 100, 1) if bs.total_assets else 0.0},
         },
         "platform_distribution": bs.platform_distribution,
         "concentration": bs.concentration,

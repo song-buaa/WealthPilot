@@ -259,6 +259,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
         pension_benefit_value = 0.0
         reclassified_investment_assets = 0.0
         investment_linked_assets = 0.0
+        investment_adjustments = []
         liabilities = 0.0
         by_category: dict[str, float] = {}
         liability_categories: dict[str, float] = {}
@@ -272,6 +273,12 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
                     # either reclassifying it as a core manual asset or showing
                     # it as a non-core retirement security benefit.
                     investment_linked_assets += value
+                    investment_adjustments.append({
+                        "wealth_item_id": item.id, "name": item.name,
+                        "value": round(value, 2), "item_type": item.item_type,
+                        "treatment": "reclassified" if item.included_in_net_worth else "excluded",
+                        "value_source": "manual_confirmed", "holding_link_verified": False,
+                    })
                 if item.item_type in PENSION_SECURITY_ITEM_TYPES and not item.included_in_net_worth:
                     pension_benefit_value += value
                 if item.already_investment_accounted and item.included_in_net_worth:
@@ -292,6 +299,7 @@ def _manual_totals(portfolio_id: int) -> dict[str, float]:
             "pension_benefit_value": pension_benefit_value,
             "reclassified_investment_assets": reclassified_investment_assets,
             "investment_linked_assets": investment_linked_assets,
+            "investment_adjustments": investment_adjustments,
             "liabilities": liabilities,
             "asset_categories": by_category,
             "liability_categories": liability_categories,
@@ -320,6 +328,7 @@ def _current_totals(portfolio_id: int) -> dict[str, Any]:
         "gross_investment_assets": gross_investment_assets,
         "reclassified_investment_assets": reclassified,
         "investment_linked_assets": investment_linked,
+        "investment_adjustments": manual["investment_adjustments"],
         "non_investment_assets": manual["non_investment_assets"],
         "pension_benefit_value": manual["pension_benefit_value"],
         "total_assets": total_assets,
@@ -454,6 +463,10 @@ def get_summary(portfolio_id: int, trend_days: int | None = None) -> dict[str, A
             "total_assets": round(totals["investment_assets"], 2),
             "total_profit_loss": investment.get("total_profit_loss"),
             "allocation": investment.get("allocation", {}),
+            "allocation_scope": "portfolio_before_wealth_adjustments",
+            "portfolio_total_assets": round(totals["gross_investment_assets"], 2),
+            "adjustments": totals["investment_adjustments"],
+            "holding_links_verified": not totals["investment_adjustments"],
             "source": "portfolio_summary",
         },
         "pension_benefit": round(totals["pension_benefit_value"], 2),

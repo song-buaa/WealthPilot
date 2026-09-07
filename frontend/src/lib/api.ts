@@ -109,7 +109,13 @@ export interface WealthSummary {
   total_assets: number
   total_liabilities: number
   monthly_net_worth_change: number | null
-  investment: { total_assets: number; total_profit_loss: number | null; allocation: Record<string, { value: number; pct: number }> }
+  investment: {
+    total_assets: number; total_profit_loss: number | null; allocation: Record<string, { value: number; pct: number }>
+    allocation_scope?: string
+    portfolio_total_assets?: number
+    holding_links_verified?: boolean
+    adjustments?: Array<{ wealth_item_id: number; name: string; value: number; treatment: string; holding_link_verified: boolean }>
+  }
   pension_benefit: number
   asset_breakdown: Array<{ category: string; label: string; value: number; source: string }>
   liability_breakdown: Array<{ category: string; label: string; value: number }>

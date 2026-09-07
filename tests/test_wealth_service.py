@@ -224,11 +224,12 @@ def test_latest_portfolio_positions_drive_wealth_not_snapshots(wealth_db, monkey
                              asset_class="权益", market_value_cny=1000))
         session.commit()
     _create("asset", "personal_pension", 100, already_investment_accounted=True)
+    _create("asset", "enterprise_annuity", 50, already_investment_accounted=True)
     _create("asset", "housing_fund", 200)
     _create("liability", "credit_card", 1500)
     before = wealth_service.get_summary(1)
-    assert before["total_assets"] == 1100
-    assert before["net_worth"] == -400
+    assert before["total_assets"] == 1050
+    assert before["net_worth"] == -450
     with wealth_db() as session:
         count = session.query(WealthSnapshot).count()
     wealth_service.get_summary(1)
@@ -239,11 +240,29 @@ def test_latest_portfolio_positions_drive_wealth_not_snapshots(wealth_db, monkey
         session.commit()
     after = wealth_service.get_summary(1)
     assert live_portfolio_summary(1)["total_assets"] == 1400
-    assert after["investment"]["total_assets"] == 1300
-    assert after["total_assets"] == 1500
-    assert after["net_worth"] == 0
-    assert after["pension_benefit"] == 100
+    assert after["investment"]["total_assets"] == 1250
+    assert after["investment"]["portfolio_total_assets"] == 1400
+    assert sum(row["value"] for row in after["investment"]["adjustments"]) == 150
+    assert after["investment"]["holding_links_verified"] is False
+    assert after["total_assets"] == 1450
+    assert after["net_worth"] == -50
+    assert after["pension_benefit"] == 150
     assert sum(row["value"] for row in after["asset_breakdown"]) == after["total_assets"]
     with wealth_db() as session:
         assert session.query(WealthSnapshot).count() == count + 1
-        assert session.query(WealthSnapshot).order_by(WealthSnapshot.id.desc()).first().net_worth == 0
+        assert session.query(WealthSnapshot).order_by(WealthSnapshot.id.desc()).first().net_worth == -50
+
+
+def test_portfolio_allocation_and_platform_include_unknown_and_live_cash(wealth_db, monkeypatch):
+    from app import analyzer
+    from app.models import Position
+    monkeypatch.setattr(analyzer, "get_session", wealth_db)
+    monkeypatch.setattr(wealth_service.portfolio_service, "_get_tiger_account_cash", lambda: (52.21, []))
+    with wealth_db() as session:
+        session.add(Position(portfolio_id=1, name="unknown fixture", platform="fixture",
+                             segment="投资", asset_class="未分类", market_value_cny=100))
+        session.commit()
+    summary = live_portfolio_summary(1)
+    assert summary["allocation"]["unknown"]["value"] == 100
+    assert sum(row["value"] for row in summary["allocation"].values()) == summary["total_assets"]
+    assert sum(summary["platform_distribution"].values()) == summary["total_assets"]
