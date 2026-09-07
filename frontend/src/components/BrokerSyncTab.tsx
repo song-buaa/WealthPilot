@@ -40,13 +40,13 @@ export function BrokerSyncTab({ onRefresh }: Props) {
     setMessage(null)
 
     // 记录触发前的时间戳,用于检测是否有新 run
-    const brokersToCheck = broker === 'all' ? ['tiger', 'futu', 'snowball'] : [broker]
     const prevTimes = Object.fromEntries(
-      brokersToCheck.map(b => [b, status.find(s => s.broker === b)?.last_sync_time])
+      status.map(s => [s.broker, s.last_sync_time])
     )
 
     try {
-      await triggerSync(broker)
+      const { brokers_triggered: brokersToCheck } = await triggerSync(broker)
+      if (!brokersToCheck.length) throw new Error('没有可同步的投资账户')
       setMessage('⏳ 同步中...')
 
       // 轮询最多 30 秒,每 2 秒检查一次
@@ -60,13 +60,15 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
         const allUpdated = brokersToCheck.every(b => {
           const item = newStatus.brokers.find(s => s.broker === b)
-          return item && item.last_sync_time !== prevTimes[b]
+          return item && item.last_sync_time !== prevTimes[b] && ['success', 'failed'].includes(item.last_sync_status ?? '')
         })
 
         if (allUpdated) {
-          setMessage('✅ 同步完成')
+          const failed = newStatus.brokers.filter(s => brokersToCheck.includes(s.broker) && s.last_sync_status === 'failed')
+          setMessage(failed.length ? '⚠️ 部分账户同步失败，请查看账户状态' : '✅ 同步完成')
+          window.dispatchEvent(new Event('portfolio-updated'))
           onRefresh()
-          break
+          return
         }
       }
 

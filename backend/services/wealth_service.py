@@ -330,10 +330,21 @@ def _current_totals(portfolio_id: int) -> dict[str, Any]:
     }
 
 
-def _record_aggregate_snapshot(portfolio_id: int) -> None:
-    totals = _current_totals(portfolio_id)
+def _record_aggregate_snapshot(portfolio_id: int, totals: dict[str, Any] | None = None) -> None:
+    totals = _current_totals(portfolio_id) if totals is None else totals
     session = get_session()
     try:
+        # Append current observations without rewriting historical scope. Repeated
+        # reads of unchanged values on the same day must not create duplicates.
+        latest = session.query(WealthSnapshot).filter_by(portfolio_id=portfolio_id).order_by(
+            WealthSnapshot.recorded_at.desc(), WealthSnapshot.id.desc()
+        ).first()
+        fields = ("total_assets", "total_liabilities", "net_worth", "investment_assets",
+                  "investment_profit_loss", "non_investment_assets", "pension_benefit_value")
+        if latest and latest.recorded_at.date() == date.today() and all(
+            getattr(latest, field) == totals[field] for field in fields
+        ):
+            return
         session.add(WealthSnapshot(
             portfolio_id=portfolio_id,
             total_assets=totals["total_assets"],
@@ -416,6 +427,7 @@ def _trend(portfolio_id: int, totals: dict[str, Any], days: int | None) -> list[
 
 def get_summary(portfolio_id: int, trend_days: int | None = None) -> dict[str, Any]:
     totals = _current_totals(portfolio_id)
+    _record_aggregate_snapshot(portfolio_id, totals)
     today = date.today()
     baseline = _month_start_snapshot(portfolio_id, today)
     monthly_change = round(totals["net_worth"] - baseline.net_worth, 2) if baseline else None

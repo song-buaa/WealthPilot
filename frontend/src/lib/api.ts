@@ -133,7 +133,7 @@ export interface WealthItemWrite {
 }
 
 export const wealthApi = {
-  getSummary: (days?: number) => request<WealthSummary>(`/wealth/summary${days ? `?days=${days}` : ''}`),
+  getSummary: (days?: number) => request<WealthSummary>(`/wealth/summary${days ? `?days=${days}` : ''}`, { cache: 'no-store' }),
   getItems: (kind?: 'asset' | 'liability') => request<PagedResult<WealthItem>>(`/wealth/items${kind ? `?kind=${kind}` : ''}`),
   createItem: (data: WealthItemWrite) => request<WealthItem>('/wealth/items', { method: 'POST', body: JSON.stringify(data) }),
   updateItem: (id: number, data: Partial<WealthItemWrite>) => request<WealthItem>(`/wealth/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

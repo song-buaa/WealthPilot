@@ -11,6 +11,7 @@ from app.database import Base
 from app.models import Portfolio, WealthItemSnapshot, WealthSnapshot
 from backend.api import wealth as wealth_api
 from backend.services import wealth_service
+from backend.services.portfolio_service import get_summary as live_portfolio_summary
 
 
 @pytest.fixture()
@@ -209,3 +210,40 @@ def test_wealth_api_create_and_update(wealth_db, monkeypatch):
     summary = client.get("/api/wealth/summary")
     assert summary.status_code == 200
     assert summary.json()["total_liabilities"] == 60
+
+
+def test_latest_portfolio_positions_drive_wealth_not_snapshots(wealth_db, monkeypatch):
+    from app import analyzer
+    from app.models import Position
+
+    monkeypatch.setattr(analyzer, "get_session", wealth_db)
+    monkeypatch.setattr(wealth_service.portfolio_service, "get_summary", live_portfolio_summary)
+    monkeypatch.setattr(wealth_service.portfolio_service, "_get_tiger_account_cash", lambda: (0, []))
+    with wealth_db() as session:
+        session.add(Position(portfolio_id=1, name="fixture", platform="fixture", segment="投资",
+                             asset_class="权益", market_value_cny=1000))
+        session.commit()
+    _create("asset", "personal_pension", 100, already_investment_accounted=True)
+    _create("asset", "housing_fund", 200)
+    _create("liability", "credit_card", 1500)
+    before = wealth_service.get_summary(1)
+    assert before["total_assets"] == 1100
+    assert before["net_worth"] == -400
+    with wealth_db() as session:
+        count = session.query(WealthSnapshot).count()
+    wealth_service.get_summary(1)
+    with wealth_db() as session:
+        assert session.query(WealthSnapshot).count() == count
+        # Same committed business-table update produced by broker synchronization.
+        session.query(Position).one().market_value_cny = 1400
+        session.commit()
+    after = wealth_service.get_summary(1)
+    assert live_portfolio_summary(1)["total_assets"] == 1400
+    assert after["investment"]["total_assets"] == 1300
+    assert after["total_assets"] == 1500
+    assert after["net_worth"] == 0
+    assert after["pension_benefit"] == 100
+    assert sum(row["value"] for row in after["asset_breakdown"]) == after["total_assets"]
+    with wealth_db() as session:
+        assert session.query(WealthSnapshot).count() == count + 1
+        assert session.query(WealthSnapshot).order_by(WealthSnapshot.id.desc()).first().net_worth == 0

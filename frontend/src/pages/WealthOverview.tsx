@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChevronDown, Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
@@ -48,19 +48,32 @@ export default function WealthOverview() {
   const [range, setRange] = useState(365)
   const [form, setForm] = useState<FormState | null>(null)
   const [detailFilter, setDetailFilter] = useState<DetailFilter>('all')
+  const requestVersion = useRef(0)
 
-  const refresh = (days = range) => {
+  const refresh = useCallback((days = range) => {
+    const version = ++requestVersion.current
     setLoading(true); setError(null)
     Promise.all([wealthApi.getSummary(days), wealthApi.getItems('asset'), wealthApi.getItems('liability')])
-      .then(([s, a, l]) => { setSummary(s); setAssets(a.items); setLiabilities(l.items) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : '财富数据加载失败'))
-      .finally(() => setLoading(false))
-  }
+      .then(([s, a, l]) => { if (version === requestVersion.current) { setSummary(s); setAssets(a.items); setLiabilities(l.items) } })
+      .catch((e: unknown) => { if (version === requestVersion.current) setError(e instanceof Error ? e.message : '财富数据加载失败') })
+      .finally(() => { if (version === requestVersion.current) setLoading(false) })
+  }, [range])
 
   useEffect(() => {
+    const versionRef = requestVersion
     const timer = window.setTimeout(() => refresh(), 0)
-    return () => window.clearTimeout(timer)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const refetch = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refetch)
+    document.addEventListener('visibilitychange', refetch)
+    window.addEventListener('portfolio-updated', refetch)
+    return () => {
+      window.clearTimeout(timer)
+      ++versionRef.current
+      window.removeEventListener('focus', refetch)
+      document.removeEventListener('visibilitychange', refetch)
+      window.removeEventListener('portfolio-updated', refetch)
+    }
+  }, [refresh])
 
   const categoryValues = useMemo(() => new Map(summary?.asset_breakdown.map(item => [item.category, item.value]) ?? []), [summary])
   const assetStructure = useMemo<StructureItem[]>(() => {
@@ -81,7 +94,7 @@ export default function WealthOverview() {
   const monthlyPct = baseline && baseline !== 0 && summary?.monthly_net_worth_change != null
     ? summary.monthly_net_worth_change / baseline * 100 : null
 
-  const changeRange = (days: number) => { setRange(days); refresh(days) }
+  const changeRange = (days: number) => setRange(days)
   const switchDetailFilter = (filter: DetailFilter) => setDetailFilter(filter)
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!form) return
