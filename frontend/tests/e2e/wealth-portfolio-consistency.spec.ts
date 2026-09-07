@@ -37,6 +37,17 @@ test('real service + SQLite: A minus B minus C, before and after committed sync'
   expect(wealth.total_assets).toBe(1450)
   expect(wealth.net_worth).toBe(-50)
   expect(wealth.pension_benefit).toBe(150)
+  // Exercise each refresh trigger against the real service, without reloading.
+  for (const event of ['focus', 'visibilitychange', 'portfolio-updated']) {
+    const refreshed = page.waitForResponse(response => response.url().includes('/api/wealth/summary') && response.ok())
+    await page.evaluate(name => {
+      if (name === 'visibilitychange') document.dispatchEvent(new Event(name))
+      else window.dispatchEvent(new Event(name))
+    }, event)
+    expect((await (await refreshed).json()).investment.total_assets).toBe(1250)
+    await expect(page.getByRole('region', { name: '财富核心概览' })).toContainText('-¥50')
+  }
+  await expect(page.getByRole('button', { name: /同步投资账户|刷新券商数据/ })).toHaveCount(0)
   await page.getByRole('link', { name: '投资账户总览', exact: true }).click()
   await expect(page.getByText('¥1,400', { exact: true }).first()).toBeVisible()
 })
