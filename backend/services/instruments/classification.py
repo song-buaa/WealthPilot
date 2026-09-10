@@ -21,6 +21,7 @@ CLASSIFICATION_VERSION = "canonical-v1"
 
 class VehicleType(StrEnum):
     COMMON_STOCK = "COMMON_STOCK"
+    ADR = "ADR"
     ETF = "ETF"
     BOND = "BOND"
     FUND = "FUND"
@@ -109,6 +110,7 @@ class AssetClassification:
 
 
 _VEHICLE_ALIASES = {
+    "ADR": VehicleType.ADR,
     "COMMON": VehicleType.COMMON_STOCK,
     "COMMON_STOCK": VehicleType.COMMON_STOCK,
     "EQUITY": VehicleType.COMMON_STOCK,
@@ -254,6 +256,7 @@ def classify_instrument(evidence: AssetClassificationEvidence) -> AssetClassific
         )
 
     deterministic = {
+        VehicleType.ADR: EconomicAssetClass.EQUITY,
         VehicleType.COMMON_STOCK: EconomicAssetClass.EQUITY,
         VehicleType.BOND: EconomicAssetClass.FIXED_INCOME,
         VehicleType.CASH: EconomicAssetClass.CASH,
@@ -336,6 +339,7 @@ def broker_position_classification_fields(
     ``economic_asset_class``.
     """
     legacy_vehicle = {
+        VehicleType.ADR: "equity",
         VehicleType.COMMON_STOCK: "equity",
         VehicleType.ETF: "etf",
         VehicleType.BOND: "bond",

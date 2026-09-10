@@ -63,6 +63,25 @@ def test_common_stock_is_equity():
     assert result.economic_asset_class is EconomicAssetClass.EQUITY
 
 
+@pytest.mark.parametrize("stock_type", ["ADR", "adr"])
+def test_adr_is_equity_without_treating_bare_stk_as_equity(stock_type):
+    from backend.services.instruments.classification import (
+        business_position_classification_fields, broker_position_classification_fields,
+    )
+    evidence = AssetClassificationEvidence(
+        broker="snowball", broker_security_type="STK", stock_type=stock_type,
+    )
+    result = classify_instrument(evidence)
+    assert result.vehicle_type is VehicleType.ADR
+    assert result.economic_asset_class is EconomicAssetClass.EQUITY
+    assert result.classification_source == "BROKER_DETERMINISTIC_METADATA"
+    assert business_position_classification_fields(result, evidence=evidence)["asset_class"] == "权益"
+    assert broker_position_classification_fields(result, evidence=evidence)["asset_class"] == "equity"
+    assert classify_instrument(AssetClassificationEvidence(
+        broker_security_type="STK",
+    )).economic_asset_class is EconomicAssetClass.UNKNOWN
+
+
 def test_verified_equity_etf_is_equity():
     result = classify_instrument(AssetClassificationEvidence(
         broker_security_type="STK", stock_type="ETF",
@@ -70,6 +89,19 @@ def test_verified_equity_etf_is_equity():
     ))
     assert result.vehicle_type is VehicleType.ETF
     assert result.economic_asset_class is EconomicAssetClass.EQUITY
+
+
+def test_ibkr_adapter_preserves_adr_identity_and_equity_exposure():
+    from backend.services.broker_sync.snowball.adapter import IBKRPortfolioAdapter
+    evidence = IBKRPortfolioAdapter.classification_evidence({
+        "sec_type": "STK", "stock_type": "ADR", "currency": "USD",
+    })
+    result = classify_instrument(evidence)
+    assert result.vehicle_type is VehicleType.ADR
+    assert result.economic_asset_class is EconomicAssetClass.EQUITY
+    assert IBKRPortfolioAdapter.map_asset_class({
+        "sec_type": "STK", "stock_type": "ADR",
+    }) == "equity"
 
 
 @pytest.mark.parametrize(
