@@ -1,11 +1,12 @@
 /**
  * Sidebar — 侧边栏导航
  *
- * IA Shell 只在既有投资入口外增加一级模块与「投资规划」分组；
- * 投资入口的名称、顺序、route 与页面能力保持不变。
+ * 分组 / 一级模块 / 二级页面分别呈现；保留既有顺序、route 与页面能力。
  */
+import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { Compass } from 'lucide-react'
+import { ChevronDown, Compass } from 'lucide-react'
+import './Sidebar.css'
 
 // ── 类型 ──────────────────────────────────────────────────
 
@@ -25,12 +26,12 @@ const SHOW_PROFIT_ANALYSIS = false   // 收益分析（模块建设中）
 const SHOW_FINANCE_PLANNING = false  // 财务规划分组
 const SHOW_BALANCE_SHEET = false     // 资产负债总览分组
 
-// ── 投资主线：名称、顺序、route 为当前产品 Source of Truth ──────────
+// ── 投资主线：仅调整展示名，顺序与 route 保持不变 ──────────
 const INVEST_ITEMS: NavItemDef[] = [
   { label: '用户画像',       to: '/profile' },
   { label: '投资账户总览',   to: '/dashboard' },
   { label: '投资纪律',       to: '/discipline' },
-  { label: '投研观点',       to: '/research' },
+  { label: '投资观点',       to: '/research' },
   { label: '投资决策',       to: '/decision' },
   { label: '投资行动',       to: '/action' },
   ...(SHOW_PROFIT_ANALYSIS ? [{ label: '收益分析', to: '/placeholder/收益分析' }] : []),
@@ -76,62 +77,44 @@ const NAV_GROUPS: NavGroupDef[] = [
 export default function Sidebar() {
   const { pathname } = useLocation()
   const investmentActive = INVEST_ITEMS.some((item) => item.to === pathname)
+  const [expanded, setExpanded] = useState(true)
+  const investmentOpen = investmentActive || expanded
 
   return (
-    <aside
-      style={{
-        width: 'var(--sidebar-w)',
-        flexShrink: 0,
-        background: '#1F2937',
-        display: 'flex',
-        flexDirection: 'column',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-      }}
-    >
+    <aside className="wp-sidebar">
       {/* ── Brand 区 ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '20px 16px 16px',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            width: 36, height: 36,
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.16)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <Compass size={20} color="#F9FAFB" strokeWidth={2} />
+      <div className="wp-sidebar-brand">
+        <div className="wp-sidebar-logo">
+          <Compass size={20} strokeWidth={1.8} />
         </div>
         <div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#F9FAFB' }}>WealthPilot</div>
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)', marginTop: 1 }}>
+          <div className="wp-sidebar-title">WealthPilot</div>
+          <div className="wp-sidebar-subtitle">
             个人财富规划系统
           </div>
         </div>
       </div>
 
       {/* ── 导航 ── */}
-      <nav style={{ flex: 1, paddingBottom: 16 }} aria-label="主导航">
-        <div style={{ padding: '20px 14px 6px' }}>
+      <nav className="wp-sidebar-nav" aria-label="主导航">
+        <section aria-labelledby="sidebar-overview">
+          <h2 id="sidebar-overview" className="wp-sidebar-group">总览</h2>
           {PRIMARY_ITEMS.slice(0, 2).map((item) => (
             <NavItem key={item.to} item={item} />
           ))}
-
-          <div style={{ margin: '14px 0 6px' }}>
-            <div style={{ padding: '8px 16px', borderRadius: 8, background: investmentActive ? 'rgba(255,255,255,0.08)' : 'transparent' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: investmentActive ? '#F9FAFB' : 'rgba(255,255,255,0.85)' }}>
-                投资规划
-              </span>
-            </div>
-            <div style={{ paddingLeft: 12 }}>
+        </section>
+        <section aria-labelledby="sidebar-finance">
+          <h2 id="sidebar-finance" className="wp-sidebar-group">财富管理</h2>
+          <div>
+            <button type="button" className="wp-sidebar-item wp-sidebar-parent"
+              aria-expanded={investmentOpen} aria-controls="sidebar-investment"
+              aria-disabled={investmentActive}
+              title={investmentActive ? '当前位于投资规划内，保持展开' : undefined}
+              onClick={() => { if (!investmentActive) setExpanded(value => !value) }}>
+              <span>投资规划</span>
+              <ChevronDown size={14} className={investmentOpen ? 'wp-sidebar-chevron open' : 'wp-sidebar-chevron'} />
+            </button>
+            <div id="sidebar-investment" className="wp-sidebar-children" hidden={!investmentOpen}>
               {INVEST_ITEMS.map((item) => (
                 <NavItem key={item.to} item={item} nested />
               ))}
@@ -141,33 +124,24 @@ export default function Sidebar() {
           {PRIMARY_ITEMS.slice(2).map((item) => (
             <NavItem key={item.to} item={item} />
           ))}
-        </div>
+        </section>
 
         {/* 保持既有隐藏分组的实现与开关语义。 */}
         {NAV_GROUPS.map((group) => (
-          <div key={group.title}>
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '6px 12px' }} />
-            <div style={{ padding: '14px 12px 6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px' }}>
-                <span style={{ fontSize: 14 }}>{group.icon}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)', letterSpacing: 0.1 }}>
-                  {group.title}
-                </span>
-              </div>
-              {group.items.map((item) => (
-                <NavItem key={item.to} item={item} />
-              ))}
-            </div>
-          </div>
+          <section key={group.title}>
+            <h2 className="wp-sidebar-group">{group.title}</h2>
+            {group.items.map((item) => (
+              <NavItem key={item.to} item={item} />
+            ))}
+          </section>
         ))}
 
-        <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '10px 12px 6px' }} />
-        <div style={{ padding: '8px 22px 4px', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.42)', letterSpacing: 0.4 }}>系统</div>
-        <div style={{ padding: '0 14px 6px' }}>
+        <section className="wp-sidebar-system" aria-labelledby="sidebar-system">
+          <h2 id="sidebar-system" className="wp-sidebar-group">系统</h2>
           {SYSTEM_ITEMS.map((item) => (
             <NavItem key={item.to} item={item} />
           ))}
-        </div>
+        </section>
       </nav>
     </aside>
   )
@@ -180,25 +154,7 @@ function NavItem({ item, nested = false }: { item: NavItemDef; nested?: boolean 
     <NavLink
       to={item.to}
       end
-      style={({ isActive }) => ({
-        display: 'flex',
-        alignItems: 'center',
-        padding: nested ? '8px 16px' : '9px 16px',
-        borderRadius: 8,
-        fontSize: 13,
-        fontWeight: 500,
-        color: isActive ? '#FFFFFF' : '#9CA3AF',
-        textDecoration: 'none',
-        marginBottom: 2,
-        whiteSpace: 'nowrap' as const,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        transition: 'all 0.14s',
-        background: isActive ? 'rgba(255,255,255,0.10)' : 'transparent',
-        cursor: 'pointer',
-      })}
-      onMouseEnter={e => { if (!e.currentTarget.classList.contains('active')) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)' }}
-      onMouseLeave={e => { if (!e.currentTarget.classList.contains('active')) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+      className={({ isActive }) => `wp-sidebar-item${nested ? ' wp-sidebar-secondary' : ''}${isActive ? ' is-active' : ''}`}
     >
       {item.label}
     </NavLink>
