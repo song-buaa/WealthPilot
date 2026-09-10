@@ -14,6 +14,12 @@ interface Props {
   onRefresh: () => void
 }
 
+type VisibleBroker = 'tiger' | 'snowball' | 'guojin'
+const VISIBLE_BROKERS: readonly VisibleBroker[] = ['tiger', 'snowball', 'guojin']
+function visibleSyncStatus(items: SyncStatusItem[]): SyncStatusItem[] {
+  return items.filter(item => VISIBLE_BROKERS.includes(item.broker as VisibleBroker))
+}
+
 const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
   success: { icon: <CheckCircle size={12} />, color: '#059669', text: '同步成功' },
   failed:  { icon: <XCircle size={12} />,    color: '#DC2626', text: '同步失败' },
@@ -30,12 +36,12 @@ export function BrokerSyncTab({ onRefresh }: Props) {
   useEffect(() => {
     let active = true
     getSyncStatus()
-      .then(res => { if (active) setStatus(res.brokers) })
+      .then(res => { if (active) setStatus(visibleSyncStatus(res.brokers)) })
       .catch(e => console.error('获取同步状态失败', e))
     return () => { active = false }
   }, [])
 
-  const handleSync = async (broker: 'tiger' | 'futu' | 'snowball' | 'guojin' | 'all') => {
+  const handleSync = async (broker: VisibleBroker | 'all') => {
     setSyncing(broker)
     setMessage(null)
 
@@ -45,7 +51,10 @@ export function BrokerSyncTab({ onRefresh }: Props) {
     )
 
     try {
-      const { brokers_triggered: brokersToCheck } = await triggerSync(broker)
+      // UI “all” means only the visible brokers, not the backend's broader all.
+      const targets = broker === 'all' ? VISIBLE_BROKERS : [broker]
+      const results = await Promise.all(targets.map(target => triggerSync(target)))
+      const brokersToCheck = [...new Set(results.flatMap(result => result.brokers_triggered))]
       if (!brokersToCheck.length) throw new Error('没有可同步的投资账户')
       setMessage('⏳ 同步中...')
 
@@ -56,7 +65,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
         await new Promise(r => setTimeout(r, 2000))
         attempts++
         const newStatus = await getSyncStatus()
-        setStatus(newStatus.brokers)
+        setStatus(visibleSyncStatus(newStatus.brokers))
 
         const allUpdated = brokersToCheck.every(b => {
           const item = newStatus.brokers.find(s => s.broker === b)
@@ -130,7 +139,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                 )}
               </div>
               <button
-                onClick={() => handleSync(item.broker as 'tiger' | 'futu' | 'snowball' | 'guojin')}
+                onClick={() => handleSync(item.broker as VisibleBroker)}
                 disabled={isSyncing || syncing === 'all'}
                 style={{ ...btnSync, ...(isSyncing || syncing === 'all' ? btnDisabled : {}) }}
               >
