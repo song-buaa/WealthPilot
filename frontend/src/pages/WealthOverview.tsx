@@ -12,7 +12,7 @@ const ASSET_TYPES = [['bank_cash', '银行现金 / 活期'], ['time_deposit', '�
 const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用贷'], ['mortgage', '房贷'], ['other_liability', '其他负债']] as const
 
 type FormState = WealthItemWrite & { id?: number }
-type DetailFilter = 'all' | 'asset' | 'liability'
+type DetailFilter = 'asset' | 'liability'
 type StructureItem = { key: string; label: string; coreValue: number }
 
 const emptyForm = (kind: 'asset' | 'liability' = 'asset'): FormState => ({
@@ -47,7 +47,7 @@ export default function WealthOverview() {
   const [error, setError] = useState<string | null>(null)
   const [range, setRange] = useState(365)
   const [form, setForm] = useState<FormState | null>(null)
-  const [detailFilter, setDetailFilter] = useState<DetailFilter>('all')
+  const [detailFilter, setDetailFilter] = useState<DetailFilter>('asset')
   const requestVersion = useRef(0)
 
   const refresh = useCallback((days = range) => {
@@ -89,7 +89,7 @@ export default function WealthOverview() {
   const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
   const allDetails = useMemo(() => [...assets, ...liabilities].sort((a, b) => b.current_value - a.current_value), [assets, liabilities])
-  const filteredDetails = useMemo(() => detailFilter === 'all' ? allDetails : allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
+  const filteredDetails = useMemo(() => allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
   const baseline = summary?.monthly_net_worth_change == null ? null : summary.net_worth - summary.monthly_net_worth_change
   const monthlyPct = baseline && baseline !== 0 && summary?.monthly_net_worth_change != null
     ? summary.monthly_net_worth_change / baseline * 100 : null
@@ -151,7 +151,7 @@ export default function WealthOverview() {
         <section id="wealth-details" aria-label="资产与负债明细" style={detailCard}>
           <div style={detailTitle}><span>📋 资产与负债明细</span><span style={detailCount}>{filteredDetails.length} 条</span></div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            {([['all', '全部'], ['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={detailTabStyle(detailFilter === filter)}>{label}</button>)}
+            {([['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={detailTabStyle(detailFilter === filter)}>{label}</button>)}
           </div>
           {filteredDetails.length ? <DetailTable items={filteredDetails} onEdit={edit} onDelete={remove} /> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
         </section>
