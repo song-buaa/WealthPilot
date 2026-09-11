@@ -4,26 +4,27 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-ocean-800);
-  border-right: 1px solid color-mix(in srgb, var(--color-ocean-900) 52%, transparent);
+  /* Exact pre-refinement Sidebar palette: neutral charcoal blue. */
+  background: #1F2937;
+  border-right: 0;
   overflow: hidden;
 }
 .wp-sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 22px 18px 30px; flex-shrink: 0; }
-.wp-sidebar-logo { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: var(--color-ocean-700); color: var(--color-gray-50); flex-shrink: 0; }
-.wp-sidebar-title { color: var(--color-gray-50); font-size: 16px; font-weight: 650; line-height: 22px; }
-.wp-sidebar-subtitle { color: color-mix(in srgb, var(--color-gray-300) 63%, transparent); font-size: 11px; line-height: 16px; }
+.wp-sidebar-logo { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: rgba(255,255,255,0.16); color: #F9FAFB; flex-shrink: 0; }
+.wp-sidebar-title { color: #F9FAFB; font-size: 16px; font-weight: 650; line-height: 22px; }
+.wp-sidebar-subtitle { color: rgba(255,255,255,0.40); font-size: 11px; line-height: 16px; }
 .wp-sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 20px; overscroll-behavior: contain; }
 .wp-sidebar-nav section + section { margin-top: 20px; }
-.wp-sidebar-group { font-size: 11px; font-weight: 400; color: color-mix(in srgb, var(--color-gray-300) 48%, transparent); padding: 0 10px 7px; line-height: 16px; }
-.wp-sidebar-item { position: relative; display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px; margin-bottom: 2px; border: 0; border-radius: 4px; background: transparent; color: color-mix(in srgb, var(--color-gray-100) 82%, transparent); font-family: inherit; font-size: 13px; font-weight: 500; line-height: 20px; text-align: left; text-decoration: none; cursor: pointer; transition: background-color 120ms, color 120ms; }
-.wp-sidebar-item:hover { background: color-mix(in srgb, var(--color-gray-50) 7%, transparent); color: var(--color-gray-50); }
+.wp-sidebar-group { font-size: 11px; font-weight: 400; color: rgba(255,255,255,0.42); padding: 0 10px 7px; line-height: 16px; }
+.wp-sidebar-item { position: relative; display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px; margin-bottom: 2px; border: 0; border-radius: 4px; background: transparent; color: #9CA3AF; font-family: inherit; font-size: 13px; font-weight: 500; line-height: 20px; text-align: left; text-decoration: none; cursor: pointer; transition: background-color 120ms, color 120ms; }
+.wp-sidebar-item:hover { background: rgba(255,255,255,0.06); color: #F9FAFB; }
 .wp-sidebar-item:focus-visible { outline: 2px solid var(--color-blue-500); outline-offset: -2px; }
 .wp-sidebar-children { margin-left: 18px; }
-.wp-sidebar-secondary, .wp-sidebar-system .wp-sidebar-item { min-height: 30px; padding-block: 5px; font-size: 12px; line-height: 20px; font-weight: 400; color: color-mix(in srgb, var(--color-gray-300) 68%, transparent); }
-.wp-sidebar-item.is-active { background: color-mix(in srgb, var(--color-blue-500) 17%, transparent); color: var(--color-gray-50); font-weight: 600; }
+.wp-sidebar-secondary, .wp-sidebar-system .wp-sidebar-item { min-height: 30px; padding-block: 5px; font-size: 12px; line-height: 20px; font-weight: 400; color: #9CA3AF; }
+.wp-sidebar-item.is-active { background: rgba(255,255,255,0.10); color: #FFFFFF; font-weight: 600; }
 .wp-sidebar-item.is-active::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--color-blue-500); }
 .wp-sidebar-parent { justify-content: space-between; }
 .wp-sidebar-parent[aria-disabled='true'] { cursor: default; }
-.wp-sidebar-chevron { color: color-mix(in srgb, var(--color-gray-300) 66%, transparent); transform: rotate(-90deg); transition: transform 120ms; }
+.wp-sidebar-chevron { color: #9CA3AF; transform: rotate(-90deg); transition: transform 120ms; }
 .wp-sidebar-chevron.open { transform: rotate(0); }
 @media (prefers-reduced-motion: reduce) { .wp-sidebar-item, .wp-sidebar-chevron { transition: none; } }
