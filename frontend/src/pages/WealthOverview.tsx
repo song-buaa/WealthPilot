@@ -5,9 +5,9 @@ import { ChevronDown, Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, Wal
 import PageHeader from '@/components/shared/PageHeader'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
+import { chartPalette } from '@/components/shared/chartPalette'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
-import { wealthAssetColorMap, wealthLiabilityPalette } from './wealthChartPalette'
 
 const ASSET_TYPES = [['bank_cash', '银行现金 / 活期'], ['time_deposit', '定期存款 / 大额存单'], ['housing_fund', '住房公积金'], ['enterprise_annuity', '企业年金'], ['personal_pension', '个人养老金'], ['pension_insurance', '养老保险'], ['basic_pension', '基本养老保险权益'], ['other_asset', '其他资产']] as const
 const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用贷'], ['mortgage', '房贷'], ['other_liability', '其他负债']] as const
@@ -87,7 +87,7 @@ export default function WealthOverview() {
       { key: 'retirement_long_term', label: '住房公积金', coreValue: retirementCore },
     ]
   }, [categoryValues, summary])
-  const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ key: item.key, name: item.label, value: item.coreValue })), [assetStructure])
+  const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
   const allDetails = useMemo(() => [...assets, ...liabilities].sort((a, b) => b.current_value - a.current_value), [assets, liabilities])
   const filteredDetails = useMemo(() => allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
@@ -198,7 +198,7 @@ function AttributionStrip({ summary }: { summary: WealthSummary }) {
   return <div style={{ ...attributionStyle, alignItems: 'center' }}><strong>本月财富变化归因</strong><div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>{values.map(([value, label]) => <span key={label as string} style={{ color: '#64748B' }}>{label as string} <b style={{ color: moneyTone(value as number | null), marginLeft: 4 }}>{value === null ? '—' : fmtCnySigned(Number(value))}</b></span>)}</div></div>
 }
 
-function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ key: string; name: string; value: number }> }) {
+function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; items: StructureItem[]; pieData: Array<{ name: string; value: number }> }) {
   const precise = (value: number) => value.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })
   return <div style={card()}>
     <div style={sectionHeader}><span>资产结构</span></div>
@@ -209,7 +209,7 @@ function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; i
       <div>按已登记关联金额扣除；底层持仓关联待核对。</div>
     </div>}
     <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginTop: 6 }}>
-      <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map(item => <Cell key={item.name} fill={wealthAssetColorMap[item.key] ?? wealthAssetColorMap.other_assets} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
+      <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={chartPalette[index % chartPalette.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
       <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.coreValue)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>计入核心资产 · 核心总资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
     </div>
     {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '8px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11, lineHeight: 1.55 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#475569' }}><span>养老保障权益</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(summary.pension_benefit)}</strong></div><div style={{ marginTop: 2 }}>企业年金、个人养老金、养老险及基本养老保险个人账户 · 不计入核心总资产</div></div>}
@@ -223,7 +223,6 @@ function LiabilityOverview({ total, liabilities }: { total: number; liabilities:
     entries={liabilities.map(item => ({ name: item.name, value: item.current_value }))}
     emptyText="暂无负债"
     valueLabel="余额"
-    palette={wealthLiabilityPalette}
     style={card()}
     titleStyle={sectionHeader}
   />
