@@ -143,14 +143,6 @@ export default function WealthOverview() {
           <Kpi label="本月净资产变化" value={summary.monthly_net_worth_change === null ? '—' : fmtCnySigned(summary.monthly_net_worth_change)} tone={changeTone(summary.monthly_net_worth_change)} detail={summary.monthly_net_worth_change === null ? '尚未形成月初基线' : `${signedPct(monthlyPct)} 较月初`} />
         </section>
 
-        <section aria-label="财富趋势" style={{ marginBottom: 20 }}>
-          <div style={card()}>
-            <div style={sectionHeader}><span>净资产历史趋势</span><RangeTabs range={range} onChange={changeRange} /></div>
-            {summary.trend.length > 1 ? <div style={{ height: 292, marginTop: 12 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={summary.trend}><XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={value => value.slice(5)} /><YAxis tick={{ fontSize: 11 }} width={76} tickFormatter={value => `${Math.round(value / 10000)}万`} /><Tooltip formatter={(value: number) => fmtCny(value)} /><Line type="monotone" dataKey="net_worth" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></div> : <EmptyTrend />}
-          </div>
-          <AttributionStrip summary={summary} />
-        </section>
-
         <section aria-label="资产与负债结构" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, .85fr)', gap: 16, marginBottom: 20 }}>
           <AssetStructure summary={summary} items={assetStructure} pieData={pieData} />
           <LiabilityOverview total={summary.total_liabilities} liabilities={sortedLiabilities} />
@@ -171,6 +163,14 @@ export default function WealthOverview() {
               <ChevronDown size={16} color="#9CA3AF" aria-hidden="true" />
             </div>
           </div>
+        </section>
+
+        <section aria-label="财富趋势" style={{ marginBottom: 20 }}>
+          <div style={card()}>
+            <div style={sectionHeader}><span>净资产历史趋势</span><RangeTabs range={range} onChange={changeRange} /></div>
+            {summary.trend.length > 1 ? <div style={{ height: 292, marginTop: 12 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={summary.trend}><XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={value => value.slice(5)} /><YAxis tick={{ fontSize: 11 }} width={76} tickFormatter={value => `${Math.round(value / 10000)}万`} /><Tooltip formatter={(value: number) => fmtCny(value)} /><Line type="monotone" dataKey="net_worth" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></div> : <EmptyTrend />}
+          </div>
+          <AttributionStrip summary={summary} />
         </section>
       </>}
       {form && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
