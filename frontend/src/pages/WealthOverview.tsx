@@ -246,7 +246,7 @@ function DetailTable({ items, onEdit, onDelete }: { items: DetailRow[]; onEdit: 
         const isPortfolioSummary = item.kind === 'portfolio_summary'
         return <tr key={isPortfolioSummary ? item.kind : `${item.kind}-${item.id}`} onMouseEnter={event => { event.currentTarget.style.background = '#F9FAFB' }} onMouseLeave={event => { event.currentTarget.style.background = '' }}>
           <td style={{ ...detailTd, color: '#6B7280', fontSize: 12 }}>{isPortfolioSummary || item.kind === 'asset' ? '资产' : '负债'}</td>
-          <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{isPortfolioSummary ? <a href="#/dashboard" style={{ color: '#1D4ED8', textDecoration: 'none' }} title="查看投资账户总览">{item.name}</a> : item.name}</td>
+          <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{isPortfolioSummary ? <a href="#/dashboard" style={{ color: 'inherit', textDecoration: 'none' }} title="查看投资账户总览">{item.name}</a> : item.name}</td>
           <td style={detailTd}><span style={tag('#F3F4F6', '#4B5563')}>{isPortfolioSummary ? '投资资产' : itemTypeLabel(item.item_type)}</span></td>
           <td style={{ ...detailTd, textAlign: 'right', color: '#4B5563', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{isPortfolioSummary ? '—' : fmtOriginalAmount(item)}</td>
           <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
