@@ -4,6 +4,7 @@ import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAx
 import { ChevronDown, Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
+import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
 
@@ -216,16 +217,15 @@ function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; i
 }
 
 function LiabilityOverview({ total, liabilities }: { total: number; liabilities: WealthItem[] }) {
-  const categoryCount = useMemo(() => {
-    const counts = new Map<string, number>()
-    liabilities.forEach(item => counts.set(item.category, (counts.get(item.category) ?? 0) + 1))
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])
-  }, [liabilities])
-  const mainCategory = categoryCount[0]
-  return <div style={card()}>
-    <div style={sectionHeader}><span>负债概览</span></div>
-    {liabilities.length ? <><div style={{ marginTop: 12 }}><div style={mutedLabel}>总负债</div><div style={{ ...bigValue, marginTop: 3 }}>{fmtCny(total)}</div><div style={{ color: '#6B7280', fontSize: 12, marginTop: 3 }}>{mainCategory ? `${liabilities.length} 笔${categoryLabel(mainCategory[0])}` : `${liabilities.length} 笔负债`}</div></div><div style={{ marginTop: 12 }}><div style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 600, letterSpacing: '.3px' }}>金额最高的负债</div>{liabilities.slice(0, 3).map(item => <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 8, fontSize: 13 }}><span style={{ color: '#4B5563', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.current_value)}</strong></div>)}</div></> : <CompactEmptyState text="暂无录入负债。" />}
-  </div>
+  return <DonutDistributionCard
+    title="负债结构"
+    titleRight={<span style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 500 }}>总负债 {fmtCny(total)}</span>}
+    entries={liabilities.map(item => ({ name: item.name, value: item.current_value }))}
+    emptyText="暂无负债"
+    valueLabel="余额"
+    style={card()}
+    titleStyle={sectionHeader}
+  />
 }
 
 function DetailTable({ items, onEdit, onDelete }: { items: WealthItem[]; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
@@ -261,7 +261,6 @@ function Loading() { return <div style={{ height: 280, display: 'flex', gap: 8, 
 function EmptyTrend() { return <div style={{ height: 220, display: 'grid', placeItems: 'center', textAlign: 'center', color: '#6B7280', fontSize: 13, lineHeight: 1.7 }}>确认一次资产或负债更新后，即可开始积累净资产趋势。<br />未更新的项目会持续沿用最近确认值。</div> }
 function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
 
-function categoryLabel(category: string) { return ({ cash_deposits: '现金及存款', retirement_long_term: '养老与长期权益', pension_benefit: '养老与长期权益', other_assets: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[category] ?? category }
 function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', pension_insurance: '养老保险', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
 function freshnessText(item: WealthItem) { return item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新${item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}` }
 function fmtOriginalAmount(item: WealthItem) {
@@ -275,7 +274,6 @@ function signedPct(value: number | null) { return value === null ? '—' : `${va
 
 const sectionHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 15, fontWeight: 700, color: '#1F2937' } as const
 const mutedLabel = { fontSize: 11, fontWeight: 600, letterSpacing: '.35px', textTransform: 'uppercase' as const } as const
-const bigValue = { fontSize: 27, fontWeight: 700, letterSpacing: '-.6px', color: '#1F2937', fontVariantNumeric: 'tabular-nums' } as const
 const errorStyle = { marginBottom: 16, padding: '10px 13px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', borderRadius: 8, fontSize: 13 } as const
 const attributionStyle = { display: 'flex', gap: 14, marginTop: 8, padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: 9, background: '#F8FAFC', color: '#64748B', fontSize: 12, lineHeight: 1.6, flexWrap: 'wrap' } as const
 const textButton = { border: 'none', background: 'transparent', padding: 0, color: '#2563EB', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const

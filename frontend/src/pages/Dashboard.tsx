@@ -10,7 +10,6 @@
  *   7. 负债导入/导出
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { PieChart, Pie, Cell, Sector, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { Upload, Download, AlertTriangle, Loader2, ChevronDown, ChevronUp, ImageIcon, RefreshCw } from 'lucide-react'
 import { BrokerSyncTab } from '@/components/BrokerSyncTab'
 import { FundEImportTab } from '@/components/FundEImportTab'
@@ -24,12 +23,7 @@ import EmptyState from '@/components/shared/EmptyState'
 import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
 import DataTip from '@/components/shared/DataTip'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
-
-// ── 调色板（与原版一致）──────────────────────────────────────
-const CHART_PALETTE = [
-  '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6',
-  '#EF4444', '#06B6D4', '#84CC16', '#F97316',
-]
+import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
 
 // ── 杠杆分级 ──────────────────────────────────────────────────
 function leverageGrade(mult: number) {
@@ -433,85 +427,7 @@ function PageHeader() {
 
 /** 平台分布环形图（hover 放大扇区，复刻 ECharts emphasis 效果）*/
 function PlatformCard({ platEntries }: { platEntries: [string, number][] }) {
-  const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
-  const platTotal = platEntries.reduce((s, [, v]) => s + v, 0)
-  const pieData   = platEntries.map(([name, value]) => ({ name, value }))
-
-  // hover 扇区：外径 +8px，加轻阴影，模拟 ECharts emphasis
-  const renderActiveShape = (props: unknown) => {
-    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props as {
-      cx: number; cy: number; innerRadius: number; outerRadius: number
-      startAngle: number; endAngle: number; fill: string
-    }
-    return (
-      <Sector
-        cx={cx} cy={cy}
-        innerRadius={innerRadius}
-        outerRadius={(outerRadius as number) + 8}
-        startAngle={startAngle}
-        endAngle={endAngle}
-        fill={fill}
-        style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.08))' }}
-      />
-    )
-  }
-
-  return (
-    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '16px 14px 8px', boxShadow: 'var(--shadow-sm)' }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>🏦 平台分布</div>
-      {platEntries.length === 0 ? (
-        <div style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 12, padding: '40px 0' }}>暂无数据</div>
-      ) : (
-        <ResponsiveContainer width="100%" height={230}>
-          <PieChart>
-            <Pie
-              data={pieData} cx="40%" cy="50%"
-              innerRadius={52} outerRadius={82} paddingAngle={2}
-              dataKey="value"
-              startAngle={90} endAngle={-270}
-              activeIndex={activeIndex}
-              activeShape={renderActiveShape}
-              onMouseEnter={(_, index) => setActiveIndex(index)}
-              onMouseLeave={() => setActiveIndex(undefined)}
-            >
-              {pieData.map((_, i) => (
-                <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null
-                const { name, value } = payload[0] as { name: string; value: number }
-                const pct = platTotal > 0 ? (value / platTotal * 100).toFixed(2) : '0.00'
-                return (
-                  <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#1F2937', boxShadow: '0 3px 10px rgba(0,0,0,0.1)', lineHeight: 1.8 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 2 }}>{name}</div>
-                    <div>市值: <b>{fmtCny(value)}</b></div>
-                    <div>占比: <b>{pct}%</b></div>
-                  </div>
-                )
-              }}
-            />
-            <Legend
-              layout="vertical" align="right" verticalAlign="middle"
-              iconType="circle" iconSize={8}
-              formatter={(name: string, entry) => {
-                const val = (entry.payload as { value?: number }).value ?? 0
-                return (
-                  <span style={{ fontSize: 11, color: '#6B7280' }}>
-                    {name}{'  '}
-                    <span style={{ color: '#9CA3AF' }}>
-                      {((val / platTotal) * 100).toFixed(1)}%
-                    </span>
-                  </span>
-                )
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      )}
-    </div>
-  )
+  return <DonutDistributionCard title="🏦 平台分布" entries={platEntries.map(([name, value]) => ({ name, value }))} emptyText="暂无数据" valueLabel="市值" tooltipPrecision={2} />
 }
 
 /** 大类资产配置偏差视图（复刻原版4列 grid 结构）*/
