@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Download, Edit3, Ellipsis, Loader2, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
-import { chartPalette } from '@/components/shared/chartPalette'
+import DonutDistributionChart from '@/components/shared/DonutDistributionChart'
 import { getSyncStatus } from '@/lib/broker-sync-api'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
@@ -211,7 +211,7 @@ function AssetStructure({ summary, items, pieData }: { summary: WealthSummary; i
       <div>按已登记关联金额扣除；底层持仓关联待核对。</div>
     </div>}
     <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginTop: 6 }}>
-      <div style={{ height: 164 }}>{pieData.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={43} outerRadius={66} paddingAngle={2}>{pieData.map((item, index) => <Cell key={item.name} fill={chartPalette[index % chartPalette.length]} />)}</Pie><Tooltip formatter={(value: number) => fmtCny(value)} /></PieChart></ResponsiveContainer> : <CompactEmptyState text="暂无资产结构" />}</div>
+      <div style={{ height: 164 }}>{pieData.length ? <DonutDistributionChart entries={pieData} valueLabel="金额" height={164} innerRadius={43} outerRadius={66} /> : <CompactEmptyState text="暂无资产结构" />}</div>
       <div>{items.map((item, index) => <div key={item.key} style={{ padding: '7px 0', borderBottom: index < items.length - 1 ? '1px solid #F1F5F9' : 'none' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#374151', fontSize: 13 }}><span>{item.label}</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(item.coreValue)}</strong></div><div style={{ marginTop: 2, color: '#9CA3AF', fontSize: 11 }}>计入核心资产 · 核心总资产占比 {summary.total_assets ? fmtPct(item.coreValue / summary.total_assets * 100) : '—'}</div></div>)}</div>
     </div>
     {summary.pension_benefit > 0 && <div style={{ marginTop: 5, padding: '8px 9px', borderRadius: 7, background: '#F8FAFC', color: '#64748B', fontSize: 11, lineHeight: 1.55 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#475569' }}><span>养老保障权益</span><strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtCny(summary.pension_benefit)}</strong></div><div style={{ marginTop: 2 }}>企业年金、个人养老金、养老险及基本养老保险个人账户 · 不计入核心总资产</div></div>}
