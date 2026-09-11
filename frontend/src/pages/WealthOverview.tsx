@@ -89,7 +89,7 @@ export default function WealthOverview() {
       { key: 'investment', label: '投资资产', coreValue: investment },
       { key: 'cash_deposits', label: '现金及存款', coreValue: cash },
       { key: 'retirement_long_term', label: '住房公积金', coreValue: retirementCore },
-    ]
+    ].sort((a, b) => b.coreValue - a.coreValue)
   }, [categoryValues, summary])
   const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
