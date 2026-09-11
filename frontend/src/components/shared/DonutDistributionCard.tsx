@@ -18,10 +18,11 @@ type DonutDistributionCardProps = {
   style?: React.CSSProperties
   titleStyle?: React.CSSProperties
   tooltipPrecision?: number
+  palette?: string[]
 }
 
 /** Reusable chart shell for the investment platform and wealth liability distributions. */
-export default function DonutDistributionCard({ title, entries, emptyText, valueLabel, titleRight, style, titleStyle, tooltipPrecision = 1 }: DonutDistributionCardProps) {
+export default function DonutDistributionCard({ title, entries, emptyText, valueLabel, titleRight, style, titleStyle, tooltipPrecision = 1, palette = CHART_PALETTE }: DonutDistributionCardProps) {
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
   const total = entries.reduce((sum, entry) => sum + entry.value, 0)
 
@@ -40,7 +41,7 @@ export default function DonutDistributionCard({ title, entries, emptyText, value
     {entries.length === 0 ? <div style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 12, padding: '40px 0' }}>{emptyText}</div> : <ResponsiveContainer width="100%" height={230}>
       <PieChart>
         <Pie data={entries} cx="40%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2} dataKey="value" startAngle={90} endAngle={-270} activeIndex={activeIndex} activeShape={renderActiveShape} onMouseEnter={(_, index) => setActiveIndex(index)} onMouseLeave={() => setActiveIndex(undefined)}>
-          {entries.map((entry, index) => <Cell key={entry.name} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />)}
+          {entries.map((entry, index) => <Cell key={entry.name} fill={palette[index % palette.length]} />)}
         </Pie>
         <Tooltip content={({ active, payload }) => {
           if (!active || !payload?.length) return null
