@@ -6,6 +6,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
 import { chartPalette } from '@/components/shared/chartPalette'
+import { getSyncStatus } from '@/lib/broker-sync-api'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
 
@@ -15,6 +16,8 @@ const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用
 type FormState = WealthItemWrite & { id?: number }
 type DetailFilter = 'asset' | 'liability'
 type StructureItem = { key: string; label: string; coreValue: number }
+type PortfolioSummaryDetail = { kind: 'portfolio_summary'; name: string; current_value: number; updated_at: string | null }
+type DetailRow = WealthItem | PortfolioSummaryDetail
 
 const emptyForm = (kind: 'asset' | 'liability' = 'asset'): FormState => ({
   kind, name: '', item_type: kind === 'asset' ? 'bank_cash' : 'credit_card', current_value: 0,
@@ -49,13 +52,14 @@ export default function WealthOverview() {
   const [range, setRange] = useState(365)
   const [form, setForm] = useState<FormState | null>(null)
   const [detailFilter, setDetailFilter] = useState<DetailFilter>('asset')
+  const [portfolioUpdatedAt, setPortfolioUpdatedAt] = useState<string | null>(null)
   const requestVersion = useRef(0)
 
   const refresh = useCallback((days = range) => {
     const version = ++requestVersion.current
     setLoading(true); setError(null)
-    Promise.all([wealthApi.getSummary(days), wealthApi.getItems('asset'), wealthApi.getItems('liability')])
-      .then(([s, a, l]) => { if (version === requestVersion.current) { setSummary(s); setAssets(a.items); setLiabilities(l.items) } })
+    Promise.all([wealthApi.getSummary(days), wealthApi.getItems('asset'), wealthApi.getItems('liability'), getSyncStatus().catch(() => null)])
+      .then(([s, a, l, syncStatus]) => { if (version === requestVersion.current) { setSummary(s); setAssets(a.items); setLiabilities(l.items); setPortfolioUpdatedAt(latestSuccessfulSync(syncStatus?.brokers ?? [])) } })
       .catch((e: unknown) => { if (version === requestVersion.current) setError(e instanceof Error ? e.message : '财富数据加载失败') })
       .finally(() => { if (version === requestVersion.current) setLoading(false) })
   }, [range])
@@ -89,8 +93,12 @@ export default function WealthOverview() {
   }, [categoryValues, summary])
   const pieData = useMemo(() => assetStructure.filter(item => item.coreValue > 0).map(item => ({ name: item.label, value: item.coreValue })), [assetStructure])
   const sortedLiabilities = useMemo(() => [...liabilities].sort((a, b) => b.current_value - a.current_value), [liabilities])
-  const allDetails = useMemo(() => [...assets, ...liabilities].sort((a, b) => b.current_value - a.current_value), [assets, liabilities])
-  const filteredDetails = useMemo(() => allDetails.filter(item => item.kind === detailFilter), [allDetails, detailFilter])
+  const investmentSummaryDetail = useMemo<PortfolioSummaryDetail | null>(() => summary ? { kind: 'portfolio_summary', name: '投资资产汇总', current_value: summary.investment.total_assets, updated_at: portfolioUpdatedAt } : null, [portfolioUpdatedAt, summary])
+  const assetDetails = useMemo<DetailRow[]>(() => [
+    ...(investmentSummaryDetail ? [investmentSummaryDetail] : []),
+    ...[...assets].sort((a, b) => b.current_value - a.current_value),
+  ], [assets, investmentSummaryDetail])
+  const filteredDetails = useMemo<DetailRow[]>(() => detailFilter === 'asset' ? assetDetails : sortedLiabilities, [assetDetails, detailFilter, sortedLiabilities])
   const baseline = summary?.monthly_net_worth_change == null ? null : summary.net_worth - summary.monthly_net_worth_change
   const monthlyPct = baseline && baseline !== 0 && summary?.monthly_net_worth_change != null
     ? summary.monthly_net_worth_change / baseline * 100 : null
@@ -118,11 +126,9 @@ export default function WealthOverview() {
   }
   const exportDetails = () => {
     const headers = ['类型', '名称', '分类', '原币金额', '币种', '折合人民币', '是否计入核心资产', '数据日期', '最后更新时间', '数据来源', '备注']
-    const rows = filteredDetails.map(item => [
-      item.kind === 'asset' ? '资产' : '负债', item.name, itemTypeLabel(item.item_type),
-      item.original_value ?? item.current_value, item.currency, item.current_value,
-      item.effective_included_in_net_worth ? '计入' : '仅展示', item.value_as_of, item.updated_at, item.source_type, item.notes,
-    ])
+    const rows = filteredDetails.map(item => item.kind === 'portfolio_summary'
+      ? ['资产', item.name, '投资资产', '—', 'CNY', item.current_value, '计入', item.updated_at ?? '', item.updated_at ?? '', 'portfolio_summary', '来自投资账户汇总']
+      : [item.kind === 'asset' ? '资产' : '负债', item.name, itemTypeLabel(item.item_type), item.original_value ?? item.current_value, item.currency, item.current_value, item.effective_included_in_net_worth ? '计入' : '仅展示', item.value_as_of, item.updated_at, item.source_type, item.notes])
     const csv = '\uFEFF' + [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
@@ -228,7 +234,7 @@ function LiabilityOverview({ total, liabilities }: { total: number; liabilities:
   />
 }
 
-function DetailTable({ items, onEdit, onDelete }: { items: WealthItem[]; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
+function DetailTable({ items, onEdit, onDelete }: { items: DetailRow[]; onEdit: (item: WealthItem) => void; onDelete: (item: WealthItem) => void }) {
   return <div style={detailTableScroll}>
     <table style={detailTable}>
       <colgroup>
@@ -236,16 +242,19 @@ function DetailTable({ items, onEdit, onDelete }: { items: WealthItem[]; onEdit:
         <col style={{ width: 122 }} /><col style={{ width: 96 }} /><col style={{ width: 104 }} /><col style={{ width: 34 }} />
       </colgroup>
       <thead><tr>{['类型', '名称', '分类', '原币金额', '折合人民币', '核心资产状态', '更新时间', ''].map((heading, index) => <th key={`${heading}-${index}`} style={{ ...detailTh, textAlign: index >= 3 ? 'right' : 'left' }}>{heading}</th>)}</tr></thead>
-      <tbody>{items.map(item => <tr key={`${item.kind}-${item.id}`} onMouseEnter={event => { event.currentTarget.style.background = '#F9FAFB' }} onMouseLeave={event => { event.currentTarget.style.background = '' }}>
-        <td style={{ ...detailTd, color: '#6B7280', fontSize: 12 }}>{item.kind === 'asset' ? '资产' : '负债'}</td>
-        <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{item.name}</td>
-        <td style={detailTd}><span style={tag('#F3F4F6', '#4B5563')}>{itemTypeLabel(item.item_type)}</span></td>
-        <td style={{ ...detailTd, textAlign: 'right', color: item.currency === 'CNY' ? '#4B5563' : '#1F2937', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtOriginalAmount(item)}</td>
-        <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
-        <td style={{ ...detailTd, textAlign: 'right', fontSize: 12 }}>{item.effective_included_in_net_worth ? <span style={{ color: '#16A34A', fontWeight: 500 }}>● 计入</span> : <span style={{ color: '#9CA3AF' }}>仅展示</span>}</td>
-        <td style={{ ...detailTd, textAlign: 'right', color: item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11, whiteSpace: 'nowrap' }}>{freshnessText(item)}</td>
-        <td style={{ ...detailTd, textAlign: 'right' }}><details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details></td>
-      </tr>)}</tbody>
+      <tbody>{items.map(item => {
+        const isPortfolioSummary = item.kind === 'portfolio_summary'
+        return <tr key={isPortfolioSummary ? item.kind : `${item.kind}-${item.id}`} onMouseEnter={event => { event.currentTarget.style.background = '#F9FAFB' }} onMouseLeave={event => { event.currentTarget.style.background = '' }}>
+          <td style={{ ...detailTd, color: '#6B7280', fontSize: 12 }}>{isPortfolioSummary || item.kind === 'asset' ? '资产' : '负债'}</td>
+          <td style={{ ...detailTd, color: '#1B2A4A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>{isPortfolioSummary ? <a href="#/dashboard" style={{ color: '#1D4ED8', textDecoration: 'none' }} title="查看投资账户总览">{item.name}</a> : item.name}</td>
+          <td style={detailTd}><span style={tag('#F3F4F6', '#4B5563')}>{isPortfolioSummary ? '投资资产' : itemTypeLabel(item.item_type)}</span></td>
+          <td style={{ ...detailTd, textAlign: 'right', color: '#4B5563', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{isPortfolioSummary ? '—' : fmtOriginalAmount(item)}</td>
+          <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
+          <td style={{ ...detailTd, textAlign: 'right', fontSize: 12 }}>{isPortfolioSummary || item.effective_included_in_net_worth ? <span style={{ color: '#16A34A', fontWeight: 500 }}>● 计入</span> : <span style={{ color: '#9CA3AF' }}>仅展示</span>}</td>
+          <td style={{ ...detailTd, textAlign: 'right', color: isPortfolioSummary || item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11, whiteSpace: 'nowrap' }}>{isPortfolioSummary ? portfolioSyncText(item.updated_at) : freshnessText(item)}</td>
+          <td style={{ ...detailTd, textAlign: 'right' }}>{isPortfolioSummary ? null : <details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details>}</td>
+        </tr>
+      })}</tbody>
     </table>
   </div>
 }
@@ -262,6 +271,16 @@ function EmptyTrend() { return <div style={{ height: 220, display: 'grid', place
 function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
 
 function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', pension_insurance: '养老保险', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
+function latestSuccessfulSync(brokers: Array<{ last_sync_time: string | null; last_sync_status: string | null }>) {
+  return brokers.filter(item => item.last_sync_status === 'success' && item.last_sync_time).map(item => item.last_sync_time as string).sort().at(-1) ?? null
+}
+function portfolioSyncText(updatedAt: string | null) {
+  if (!updatedAt) return '投资账户汇总'
+  const updated = new Date(updatedAt)
+  if (Number.isNaN(updated.getTime())) return '已同步'
+  const ageDays = Math.max(0, Math.floor((Date.now() - updated.getTime()) / 86_400_000))
+  return ageDays === 0 ? '今天同步' : `${ageDays} 天前同步`
+}
 function freshnessText(item: WealthItem) { return item.age_days === 0 ? '今天更新' : `${item.age_days} 天前更新${item.freshness === 'suggested_update' ? ' · 建议更新' : item.freshness === 'long_unupdated' ? ' · 长期未更新' : ''}` }
 function fmtOriginalAmount(item: WealthItem) {
   const value = item.original_value ?? item.current_value
