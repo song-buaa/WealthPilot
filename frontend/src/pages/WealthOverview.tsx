@@ -160,7 +160,7 @@ export default function WealthOverview() {
             <span>📋 资产与负债明细</span>
             <div style={detailActions}>
               <button type="button" onClick={() => setForm(emptyForm(detailFilter))} style={dataManagementExportButtonStyle}>新增{detailFilter === 'asset' ? '资产' : '负债'}</button>
-              <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出{detailFilter === 'asset' ? '资产' : '负债'} CSV</button>
+              <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出{detailFilter === 'asset' ? '资产' : '负债'}</button>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
