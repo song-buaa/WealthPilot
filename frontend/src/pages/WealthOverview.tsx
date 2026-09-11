@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ChevronDown, Download, Edit3, Ellipsis, Loader2, RefreshCw, Trash2, WalletCards } from 'lucide-react'
+import { Download, Edit3, Ellipsis, Loader2, Trash2, WalletCards } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
-import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
+import { dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
 import { chartPalette } from '@/components/shared/chartPalette'
 import { getSyncStatus } from '@/lib/broker-sync-api'
@@ -36,10 +36,10 @@ function csvCell(value: string | number | boolean | null | undefined) {
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-function wealthCsvFilename() {
+function wealthCsvFilename(kind: DetailFilter) {
   const now = new Date()
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-')
-  return `wealth_details_${date}.csv`
+  return `wealth_${kind === 'asset' ? 'assets' : 'liabilities'}_${date}.csv`
 }
 
 export default function WealthOverview() {
@@ -133,7 +133,7 @@ export default function WealthOverview() {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = wealthCsvFilename()
+    link.download = wealthCsvFilename(detailFilter)
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -156,22 +156,18 @@ export default function WealthOverview() {
         </section>
 
         <section id="wealth-details" aria-label="资产与负债明细" style={detailCard}>
-          <div style={detailTitle}><span>📋 资产与负债明细</span><span style={detailCount}>{filteredDetails.length} 条</span></div>
+          <div style={detailTitle}>
+            <span>📋 资产与负债明细</span>
+            <div style={detailActions}>
+              <button type="button" onClick={() => setForm(emptyForm(detailFilter))} style={dataManagementExportButtonStyle}>新增{detailFilter === 'asset' ? '资产' : '负债'}</button>
+              <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出{detailFilter === 'asset' ? '资产' : '负债'} CSV</button>
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {([['asset', '资产'], ['liability', '负债']] as const).map(([filter, label]) => <button key={filter} type="button" onClick={() => switchDetailFilter(filter)} style={detailTabStyle(detailFilter === filter)}>{label}</button>)}
           </div>
           {filteredDetails.length ? <DetailTable items={filteredDetails} onEdit={edit} onDelete={remove} /> : <CompactEmptyState text="暂无符合条件的资产或负债。" />}
         </section>
-        <section aria-label="财富数据管理" style={{ marginBottom: 16 }}>
-          <div style={dataManagementBarStyle()}>
-            <button type="button" onClick={() => setForm(emptyForm())} style={dataManagementEntryButton}><RefreshCw size={14} /> 更新 / 导出财富数据</button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出 CSV</button>
-              <ChevronDown size={16} color="#9CA3AF" aria-hidden="true" />
-            </div>
-          </div>
-        </section>
-
         <section aria-label="财富趋势" style={{ marginBottom: 20 }}>
           <div style={card()}>
             <div style={sectionHeader}><span>净资产历史趋势</span><RangeTabs range={range} onChange={changeRange} /></div>
@@ -299,12 +295,11 @@ const textButton = { border: 'none', background: 'transparent', padding: 0, colo
 const filterButton = { border: '1px solid #E5E7EB', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const detailCard = { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '20px 20px 16px', marginBottom: 16, boxShadow: 'var(--shadow-sm)' } as const
 const detailTitle = { fontSize: 13, fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 } as const
-const detailCount = { marginLeft: 'auto', fontSize: 11, fontWeight: 400, color: '#9CA3AF' } as const
+const detailActions = { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } as const
 const detailTableScroll = { maxHeight: 494, overflowY: 'auto' as const, overflowX: 'auto' as const, borderRadius: 6 } as const
 const detailTable = { width: '100%', minWidth: 860, borderCollapse: 'collapse' as const, fontSize: 13, tableLayout: 'fixed' as const } as const
 const detailTh = { padding: '8px 10px', fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '.4px', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' as const, background: '#fff', position: 'sticky' as const, top: 0, zIndex: 1 } as const
 const detailTd = { padding: '9px 10px', color: '#374151', borderBottom: '1px solid #F3F4F6', verticalAlign: 'middle' as const, whiteSpace: 'nowrap' as const } as const
-const dataManagementEntryButton = { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', padding: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit' } as const
 const primaryButton = { border: '1px solid #1D4ED8', background: '#2563EB', color: '#fff', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 } as const
 const secondaryButton = { border: '1px solid #D1D5DB', background: '#fff', color: '#374151', borderRadius: 8, padding: '8px 11px', cursor: 'pointer', fontSize: 12, fontWeight: 600 } as const
 const inputStyle = { width: '100%', boxSizing: 'border-box' as const, padding: '9px 10px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, color: '#1F2937', background: '#fff' } as const
