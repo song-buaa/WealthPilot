@@ -32,10 +32,18 @@ router = APIRouter()
 class SyncStatusItem(BaseModel):
     broker: str
     platform: str
+    # 兼容旧客户端：这三个字段表示最近一次尝试，而非最近一次成功。
     last_sync_time: Optional[str] = None
     last_sync_status: Optional[str] = None
     last_position_count: Optional[int] = None
     error_message: Optional[str] = None
+    # 明确区分最近尝试与最近成功，避免失败后继续把历史成功显示为当前状态。
+    last_attempt_time: Optional[str] = None
+    last_attempt_status: Optional[str] = None
+    last_attempt_position_count: Optional[int] = None
+    last_attempt_error_message: Optional[str] = None
+    last_successful_sync_time: Optional[str] = None
+    last_successful_position_count: Optional[int] = None
 
 
 class SyncStatusResponse(BaseModel):
@@ -75,6 +83,20 @@ def _get_last_run(db, broker: str):
     )
 
 
+def _get_last_successful_run(db, broker: str):
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    from services.broker_sync.models import PositionSnapshotRun
+    return (
+        db.query(PositionSnapshotRun)
+        .filter_by(broker=broker, status="success")
+        .order_by(desc(PositionSnapshotRun.started_at))
+        .first()
+    )
+
+
 @router.get("/status", response_model=SyncStatusResponse)
 def get_sync_status():
     """查询各 broker 最近同步状态。"""
@@ -96,15 +118,27 @@ def get_sync_status():
     try:
         brokers = []
         for broker, platform in BROKER_PLATFORM_MAP.items():
-            run = _get_last_run(db, broker)
-            if run:
+            attempt = _get_last_run(db, broker)
+            successful_run = _get_last_successful_run(db, broker)
+            if attempt:
                 brokers.append(SyncStatusItem(
                     broker=broker,
                     platform=platform,
-                    last_sync_time=_format_beijing_time(run.started_at),
-                    last_sync_status=run.status,
-                    last_position_count=run.position_count,
-                    error_message=run.error_message,
+                    last_sync_time=_format_beijing_time(attempt.started_at),
+                    last_sync_status=attempt.status,
+                    last_position_count=attempt.position_count,
+                    error_message=attempt.error_message,
+                    last_attempt_time=_format_beijing_time(attempt.started_at),
+                    last_attempt_status=attempt.status,
+                    last_attempt_position_count=attempt.position_count,
+                    last_attempt_error_message=attempt.error_message,
+                    last_successful_sync_time=(
+                        _format_beijing_time(successful_run.started_at)
+                        if successful_run else None
+                    ),
+                    last_successful_position_count=(
+                        successful_run.position_count if successful_run else None
+                    ),
                 ))
             else:
                 brokers.append(SyncStatusItem(

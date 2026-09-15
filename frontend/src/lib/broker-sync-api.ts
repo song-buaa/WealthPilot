@@ -9,6 +9,12 @@ export interface SyncStatusItem {
   last_sync_status: string | null;  // "success" | "failed" | "running" | "never"
   last_position_count: number | null;
   error_message: string | null;
+  last_attempt_time: string | null;
+  last_attempt_status: string | null;
+  last_attempt_position_count: number | null;
+  last_attempt_error_message: string | null;
+  last_successful_sync_time: string | null;
+  last_successful_position_count: number | null;
 }
 
 export interface SyncStatusResponse {

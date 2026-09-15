@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
+from app import models as _app_models  # noqa: F401
 from services.broker_sync import models as _broker_sync_models  # noqa: F401
 from services.broker_sync.tiger.sync_service import TigerSyncService
 
@@ -77,6 +78,25 @@ def test_sync_and_persist_data_error_no_retry(db_session, mock_service):
     run = db_session.query(PositionSnapshotRun).first()
     assert run.status == "failed"
     assert run.retry_count == 0
+
+
+def test_missing_credentials_are_recorded_as_a_failed_run(db_session, monkeypatch):
+    """凭证在同步尝试时缺失，也必须留下 failed run，不能沿用旧成功状态。"""
+    from core.config import settings
+    from services.broker_sync.models import PositionSnapshotRun
+
+    monkeypatch.setattr(settings, "tiger_id", None)
+    monkeypatch.setattr(settings, "tiger_account", None)
+    monkeypatch.setattr(settings, "tiger_private_key_path", None)
+    service = TigerSyncService()
+
+    with pytest.raises(RuntimeError, match="TIGER_ID 未配置"):
+        service.sync_and_persist(db_session)
+
+    run = db_session.query(PositionSnapshotRun).one()
+    assert run.status == "failed"
+    assert run.account_id == "__unconfigured__"
+    assert run.error_message == "数据格式错误(不重试): RuntimeError: TIGER_ID 未配置"
 
 
 def test_sync_and_persist_network_error_retries(db_session, mock_service):

@@ -42,14 +42,26 @@ class TigerSyncService:
     """老虎持仓同步主服务。"""
 
     def __init__(self):
+        # 不在构造阶段抛配置异常：同步尝试必须先留下 run 记录，才能避免
+        # 前端把历史成功状态误认为本次同步成功。
+        self.account_id = settings.tiger_account or "__unconfigured__"
+        self.adapter = TigerAdapter(account_id=self.account_id)
+        self._trade_client: Optional[ReadOnlyTradeClient] = None
+
+    @staticmethod
+    def _validate_configuration() -> None:
         if not settings.tiger_id:
             raise RuntimeError("TIGER_ID 未配置")
         if not settings.tiger_account:
             raise RuntimeError("TIGER_ACCOUNT 未配置")
+        if not settings.tiger_private_key_path:
+            raise RuntimeError("TIGER_PRIVATE_KEY_PATH 未配置")
 
-        self.account_id = settings.tiger_account
-        self.adapter = TigerAdapter(account_id=self.account_id)
-        self._trade_client = self._build_trade_client()
+    def _ensure_trade_client(self) -> ReadOnlyTradeClient:
+        if self._trade_client is None:
+            self._validate_configuration()
+            self._trade_client = self._build_trade_client()
+        return self._trade_client
 
     def _build_trade_client(self) -> ReadOnlyTradeClient:
         project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -66,11 +78,12 @@ class TigerSyncService:
     def fetch_positions(self) -> list[Position]:
         """拉取持仓 → 转换为统一 Position 列表。"""
         snapshot_time = datetime.now(timezone.utc)
+        trade_client = self._ensure_trade_client()
         # 老虎 SDK 默认 sec_type=STK,基金需要单独查询(API 不支持 sec_type=ALL)
-        stk_positions = self._trade_client.get_positions(
+        stk_positions = trade_client.get_positions(
             account=self.account_id, sec_type="STK"
         ) or []
-        fund_positions = self._trade_client.get_positions(
+        fund_positions = trade_client.get_positions(
             account=self.account_id, sec_type="FUND"
         ) or []
         sdk_positions = list(stk_positions) + list(fund_positions)
@@ -82,7 +95,7 @@ class TigerSyncService:
 
     def fetch_account_summary(self) -> dict:
         """拉取账户资产摘要（净值、购买力等）。"""
-        assets = self._trade_client.get_assets(account=self.account_id)
+        assets = self._ensure_trade_client().get_assets(account=self.account_id)
         return {
             "raw": str(assets),
             "snapshot_time": datetime.now(timezone.utc).isoformat(),

@@ -267,8 +267,12 @@ function EmptyTrend() { return <div style={{ height: 220, display: 'grid', place
 function CompactEmptyState({ text }: { text: string }) { return <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '18px 0 4px', color: '#9CA3AF', fontSize: 12, lineHeight: 1.6 }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#CBD5E1', flexShrink: 0 }} />{text}</div> }
 
 function itemTypeLabel(itemType: string) { return ({ bank_cash: '活期', time_deposit: '定期存款', housing_fund: '住房公积金', enterprise_annuity: '企业年金', personal_pension: '个人养老金', pension_insurance: '养老保险', basic_pension: '基本养老保险权益', other_asset: '其他资产', credit_card: '信用卡', consumer_loan: '信用贷', mortgage: '房贷', other_liability: '其他负债' } as Record<string, string>)[itemType] ?? itemType }
-function latestSuccessfulSync(brokers: Array<{ last_sync_time: string | null; last_sync_status: string | null }>) {
-  return brokers.filter(item => item.last_sync_status === 'success' && item.last_sync_time).map(item => item.last_sync_time as string).sort().at(-1) ?? null
+function latestSuccessfulSync(brokers: Array<{ last_sync_time: string | null; last_sync_status: string | null; last_successful_sync_time?: string | null }>) {
+  return brokers
+    .map(item => item.last_successful_sync_time ?? (item.last_sync_status === 'success' ? item.last_sync_time : null))
+    .filter((time): time is string => Boolean(time))
+    .sort()
+    .at(-1) ?? null
 }
 function portfolioSyncText(updatedAt: string | null) {
   if (!updatedAt) return '投资账户汇总'

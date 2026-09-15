@@ -47,7 +47,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
     // 记录触发前的时间戳,用于检测是否有新 run
     const prevTimes = Object.fromEntries(
-      status.map(s => [s.broker, s.last_sync_time])
+      status.map(s => [s.broker, s.last_attempt_time ?? s.last_sync_time])
     )
 
     try {
@@ -69,11 +69,13 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
         const allUpdated = brokersToCheck.every(b => {
           const item = newStatus.brokers.find(s => s.broker === b)
-          return item && item.last_sync_time !== prevTimes[b] && ['success', 'failed'].includes(item.last_sync_status ?? '')
+          const attemptedAt = item?.last_attempt_time ?? item?.last_sync_time
+          const attemptedStatus = item?.last_attempt_status ?? item?.last_sync_status
+          return item && attemptedAt !== prevTimes[b] && ['success', 'failed'].includes(attemptedStatus ?? '')
         })
 
         if (allUpdated) {
-          const failed = newStatus.brokers.filter(s => brokersToCheck.includes(s.broker) && s.last_sync_status === 'failed')
+          const failed = newStatus.brokers.filter(s => brokersToCheck.includes(s.broker) && (s.last_attempt_status ?? s.last_sync_status) === 'failed')
           setMessage(failed.length ? '⚠️ 部分账户同步失败，请查看账户状态' : '✅ 同步完成')
           window.dispatchEvent(new Event('portfolio-updated'))
           onRefresh()
@@ -111,7 +113,11 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {status.map(item => {
-          const cfg = STATUS_CONFIG[item.last_sync_status ?? 'never'] ?? STATUS_CONFIG.never
+          const attemptStatus = item.last_attempt_status ?? item.last_sync_status ?? 'never'
+          const attemptTime = item.last_attempt_time ?? item.last_sync_time
+          const attemptCount = item.last_attempt_position_count ?? item.last_position_count
+          const attemptError = item.last_attempt_error_message ?? item.error_message
+          const cfg = STATUS_CONFIG[attemptStatus] ?? STATUS_CONFIG.never
           const isSyncing = syncing === item.broker || syncing === 'all'
           return (
             <div key={item.broker} style={{
@@ -128,13 +134,18 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                   </span>
                 </div>
                 <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>
-                  {item.last_sync_time
-                    ? `上次: ${item.last_sync_time}${item.last_position_count != null ? ` · ${item.last_position_count} 条` : ''}`
+                  {attemptTime
+                    ? `最近尝试: ${attemptTime}${attemptCount != null ? ` · ${attemptCount} 条` : ''}`
                     : '尚未同步过'}
                 </div>
-                {item.error_message && (
+                {attemptStatus === 'failed' && item.last_successful_sync_time && (
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                    最近成功: {item.last_successful_sync_time}{item.last_successful_position_count != null ? ` · ${item.last_successful_position_count} 条` : ''}
+                  </div>
+                )}
+                {attemptError && (
                   <div style={{ fontSize: 11, color: '#DC2626', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.error_message}
+                    同步失败：{attemptError}
                   </div>
                 )}
               </div>
