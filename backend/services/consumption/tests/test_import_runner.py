@@ -121,6 +121,7 @@ def test_overlapping_statement_import_collapses_cross_batch_duplicates_before_an
 
     assert result.new_batch_count == 1
     assert db_session.query(RawTransaction).count() == 4
+    assert db_session.query(RawTransaction).filter_by(is_active=True).count() == 2
     assert db_session.query(EconomicEvent).filter_by(is_active=True).count() == events_before
 
 

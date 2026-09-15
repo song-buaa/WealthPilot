@@ -37,6 +37,9 @@ from backend.services.consumption.models import (
     RawTransaction,
 )
 from backend.services.consumption.normalization import EconomicEventNormalizer
+from backend.services.consumption.source_reconciliation import (
+    retire_cross_batch_source_duplicates,
+)
 
 
 class SourceKind(StrEnum):
@@ -249,13 +252,12 @@ def bootstrap_prepared_sources(
                     inserted_raw_rows += persisted.import_batch.row_count
                     inserted_rows.extend(persisted.import_batch.raw_transactions)
 
-            normalizer = EconomicEventNormalizer()
-            normalizer.normalize(session, inserted_rows)
-            # Statement ranges may overlap. Preserve every bank-source row for
-            # audit, then immediately collapse deterministic cross-batch source
-            # matches before analytics or classification can count them twice.
-            normalizer.replay(session)
-            raw_ids = tuple(row.id for row in inserted_rows)
+            duplicate_result = retire_cross_batch_source_duplicates(
+                session, raw_rows=inserted_rows,
+            )
+            active_inserted_rows = [row for row in inserted_rows if row.is_active]
+            EconomicEventNormalizer().normalize(session, active_inserted_rows)
+            raw_ids = tuple(row.id for row in active_inserted_rows)
             if raw_ids:
                 event_ids = tuple(
                     row[0]

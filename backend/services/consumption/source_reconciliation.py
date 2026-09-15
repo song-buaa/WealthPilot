@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -40,6 +41,14 @@ class SourceReconciliationError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class CrossBatchDuplicateRetirementResult:
+    """Auditable outcome for exact source rows repeated by overlapping statements."""
+
+    retired_raw_rows: int
+    retired_event_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class SourceReconciliationResult:
     reconciled_batches: int
     corrected_raw_rows: int
@@ -47,6 +56,85 @@ class SourceReconciliationResult:
     relocated_batch_count: int
     retired_duplicate_rows: int
     retired_event_ids: tuple[str, ...]
+
+
+def retire_cross_batch_source_duplicates(
+    session: Session,
+    *,
+    raw_rows: Iterable[RawTransaction] | None = None,
+) -> CrossBatchDuplicateRetirementResult:
+    """Retire the later presentation of an exact cross-batch source fact.
+
+    ``CANDIDATE_DUPLICATE`` is produced only when the same account, instrument,
+    date, amount, currency, and normalized description occur in different import
+    batches.  The source row remains in the database for audit, but only one
+    active fact may feed economic events and analytics.  When local review data
+    exists, retain that event in preference to import chronology.
+    """
+    candidates = tuple(raw_rows) if raw_rows is not None else tuple(
+        session.query(RawTransaction).filter(
+            RawTransaction.is_active.is_(True),
+            RawTransaction.dedup_status == "CANDIDATE_DUPLICATE",
+        ).all()
+    )
+    fingerprints = {row.match_fingerprint for row in candidates if row.is_active}
+    retired_raws = 0
+    retired_event_ids: set[str] = set()
+    for fingerprint in fingerprints:
+        group = (
+            session.query(RawTransaction)
+            .filter(
+                RawTransaction.match_fingerprint == fingerprint,
+                RawTransaction.is_active.is_(True),
+            )
+            .all()
+        )
+        batches = {row.import_batch_id for row in group}
+        if len(group) < 2 or len(batches) < 2:
+            continue
+        keeper = max(group, key=lambda row: (_retention_priority(session, row), -row.import_batch.imported_at.timestamp()))
+        for row in group:
+            if row.id == keeper.id:
+                continue
+            active_links = [link for link in row.event_links if link.is_active]
+            for link in active_links:
+                link.is_active = False
+                retired_event_ids.add(link.event_id)
+            row.is_active = False
+            row.retired_reason = "CROSS_BATCH_SOURCE_DUPLICATE"
+            row.retired_at = datetime.utcnow()
+            retired_raws += 1
+
+    session.flush()
+    for event_id in retired_event_ids:
+        event = session.get(EconomicEvent, event_id)
+        if event and not session.query(EventRawLink).filter_by(event_id=event.id, is_active=True).first():
+            event.is_active = False
+    ConsumptionImportService._refresh_match_statuses(
+        session,
+        (row.match_fingerprint for row in session.query(RawTransaction).filter_by(is_active=True)),
+    )
+    session.flush()
+    return CrossBatchDuplicateRetirementResult(
+        retired_raw_rows=retired_raws,
+        retired_event_ids=tuple(sorted(retired_event_ids)),
+    )
+
+
+def _retention_priority(session: Session, raw: RawTransaction) -> tuple[int, int]:
+    """Prefer an event with local notes, then a user confirmation."""
+    event_ids = [link.event_id for link in raw.event_links if link.is_active]
+    if not event_ids:
+        return (0, 0)
+    has_note = bool(session.query(ConsumptionEventNote).filter(
+        ConsumptionEventNote.event_id.in_(event_ids)
+    ).first())
+    has_confirmation = bool(session.query(ConsumptionInterpretation).filter(
+        ConsumptionInterpretation.event_id.in_(event_ids),
+        ConsumptionInterpretation.is_active.is_(True),
+        ConsumptionInterpretation.user_confirmed.is_(True),
+    ).first())
+    return (int(has_note), int(has_confirmation))
 
 
 def reconcile_parsed_statements(
