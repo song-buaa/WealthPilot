@@ -8,21 +8,28 @@
 import os
 from dataclasses import dataclass, field
 
+from backend.core.env import normalized_optional_env
+
 
 @dataclass
 class Settings:
     """应用配置,字段值从环境变量读取（dotenv 已在 main.py 加载）。"""
 
     # Tiger Brokers OpenAPI
-    tiger_id: str | None = field(default_factory=lambda: os.environ.get("TIGER_ID"))
+    tiger_id: str | None = field(default_factory=lambda: normalized_optional_env("TIGER_ID"))
     tiger_license: str = field(default_factory=lambda: os.environ.get("TIGER_LICENSE", "TBNZ"))
-    tiger_private_key_path: str | None = field(default_factory=lambda: os.environ.get("TIGER_PRIVATE_KEY_PATH"))
-    tiger_account: str | None = field(default_factory=lambda: os.environ.get("TIGER_ACCOUNT"))
+    tiger_private_key_path: str | None = field(default_factory=lambda: normalized_optional_env("TIGER_PRIVATE_KEY_PATH"))
+    tiger_account: str | None = field(default_factory=lambda: normalized_optional_env("TIGER_ACCOUNT"))
     tiger_env: str = field(default_factory=lambda: os.environ.get("TIGER_ENV", "PROD"))
     tiger_language: str = field(default_factory=lambda: os.environ.get("TIGER_LANGUAGE", "zh_CN"))
     tiger_read_only_mode: bool = field(
         default_factory=lambda: os.environ.get("TIGER_READ_ONLY_MODE", "true").lower() == "true"
     )
+
+    @property
+    def tiger_credentials_loaded(self) -> bool:
+        """仅用于安全状态展示，绝不返回或记录具体凭证。"""
+        return bool(self.tiger_id and self.tiger_account and self.tiger_private_key_path)
 
     # Futu Brokers OpenAPI
     futu_account: str | None = field(default_factory=lambda: os.environ.get("FUTU_ACCOUNT"))

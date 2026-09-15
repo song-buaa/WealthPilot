@@ -8,10 +8,17 @@ WealthPilot — FastAPI 入口
 """
 
 import os as _os
-from dotenv import load_dotenv
+from backend.core.env import load_project_environment
 # 显式指定 .env 路径，避免从 worktree 等非项目根目录启动时找不到
 _project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-load_dotenv(_os.path.join(_project_root, ".env"))
+load_project_environment(_os.path.join(_project_root, ".env"))
+
+from backend.core.config import settings as _settings
+print(
+    "[startup] Tiger credentials: "
+    + ("loaded" if _settings.tiger_credentials_loaded else "missing"),
+    flush=True,
+)
 
 from contextlib import asynccontextmanager
 
