@@ -43,7 +43,7 @@ class Position(BaseModel):
     ] = "unknown"
     broker_security_type: str = ""
     vehicle_type: Literal[
-        "COMMON_STOCK", "ETF", "BOND", "FUND", "REIT", "ETN", "CASH",
+        "COMMON_STOCK", "ADR", "ETF", "BOND", "FUND", "REIT", "ETN", "CASH",
         "OPTION", "FUTURE", "WARRANT", "OTHER", "UNKNOWN",
     ] = "UNKNOWN"
     economic_asset_class: Literal[

@@ -1,4 +1,5 @@
 """Canonical asset-classification contract and release regression matrix."""
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,25 @@ def test_ibkr_adapter_preserves_adr_identity_and_equity_exposure():
     assert IBKRPortfolioAdapter.map_asset_class({
         "sec_type": "STK", "stock_type": "ADR",
     }) == "equity"
+
+
+def test_ibkr_adapter_serializes_adr_into_the_broker_position_contract():
+    from backend.services.broker_sync.snowball.adapter import IBKRPortfolioAdapter
+
+    position = IBKRPortfolioAdapter("U-TEST").security_to_position({
+        "symbol": "LI",
+        "sec_type": "STK",
+        "stock_type": "ADR",
+        "currency": "USD",
+        "quantity": "1",
+        "average_cost": "20",
+        "current_price": "18",
+        "market_value": "18",
+        "unrealized_pnl": "-2",
+    }, datetime.now(timezone.utc))
+
+    assert position.vehicle_type == "ADR"
+    assert position.economic_asset_class == "EQUITY"
 
 
 @pytest.mark.parametrize(
