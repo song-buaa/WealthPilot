@@ -201,6 +201,8 @@ export default function Consumption() {
   const [error, setError] = useState<string | null>(null)
   const autosaveTimers = useRef<Record<string, number>>({})
   const requestVersions = useRef<Record<string, number>>({})
+  const detailRequestVersion = useRef(0)
+  const rollingDetailRequestVersion = useRef(0)
 
   const detailFilters = useMemo(() => ({
     classificationStatus: detailClassificationFilter === 'ALL' ? undefined : detailClassificationFilter,
@@ -261,14 +263,15 @@ export default function Consumption() {
   useEffect(() => {
     if (!selectedMonth) return
     let active = true
+    const requestVersion = ++detailRequestVersion.current
     void Promise.resolve().then(() => {
       if (!active) return
       setDetailLoading(true)
       setDetailError(null)
       return loadAllDetailPages({ month: selectedMonth.slice(0, 7), ...detailFilters })
-        .then(value => { if (active) { setDetails(value.items); setDetailTotal(value.total) } })
-        .catch(() => { if (active) { setDetails([]); setDetailTotal(0); setDetailError('月度明细加载失败') } })
-        .finally(() => { if (active) setDetailLoading(false) })
+        .then(value => { if (active && detailRequestVersion.current === requestVersion) { setDetails(value.items); setDetailTotal(value.total) } })
+        .catch(() => { if (active && detailRequestVersion.current === requestVersion) { setDetails([]); setDetailTotal(0); setDetailError('月度明细加载失败') } })
+        .finally(() => { if (active && detailRequestVersion.current === requestVersion) setDetailLoading(false) })
     })
     return () => { active = false }
   }, [selectedMonth, detailFilters, detailReloadVersion])
@@ -276,6 +279,7 @@ export default function Consumption() {
   useEffect(() => {
     if (!rollingDetailStartMonth || !rollingDetailEndMonth) return
     let active = true
+    const requestVersion = ++rollingDetailRequestVersion.current
     void Promise.resolve().then(() => {
       if (!active) return
       setRollingDetailLoading(true)
@@ -284,9 +288,9 @@ export default function Consumption() {
         startMonth: rollingDetailStartMonth.slice(0, 7), endMonth: rollingDetailEndMonth.slice(0, 7),
         ...rollingDetailFilters,
       })
-        .then(value => { if (active) { setRollingDetails(value.items); setRollingDetailTotal(value.total) } })
-        .catch(() => { if (active) { setRollingDetails([]); setRollingDetailTotal(0); setRollingDetailError('近12个月明细加载失败') } })
-        .finally(() => { if (active) setRollingDetailLoading(false) })
+        .then(value => { if (active && rollingDetailRequestVersion.current === requestVersion) { setRollingDetails(value.items); setRollingDetailTotal(value.total) } })
+        .catch(() => { if (active && rollingDetailRequestVersion.current === requestVersion) { setRollingDetails([]); setRollingDetailTotal(0); setRollingDetailError('近12个月明细加载失败') } })
+        .finally(() => { if (active && rollingDetailRequestVersion.current === requestVersion) setRollingDetailLoading(false) })
     })
     return () => { active = false }
   }, [rollingDetailStartMonth, rollingDetailEndMonth, rollingDetailFilters, rollingDetailReloadVersion])
@@ -307,8 +311,14 @@ export default function Consumption() {
     try {
       const result = await consumptionApi.updateEventClassification(item.event_id, draft.primary, draft.secondary)
       if (requestVersions.current[item.event_id] !== version) return
+      // 分类保存的本地结果比尚未完成的旧列表请求更新，避免旧响应把已移除的
+      // NEEDS_REVIEW 行重新写回页面。
+      detailRequestVersion.current++
+      rollingDetailRequestVersion.current++
       setDetails(current => updateVisibleDetail(current, item.event_id, result, detailFilters))
       setRollingDetails(current => updateVisibleDetail(current, item.event_id, result, rollingDetailFilters))
+      setDetailLoading(false)
+      setRollingDetailLoading(false)
       if (detailClassificationFilter === 'NEEDS_REVIEW' && details.some(row => row.event_id === item.event_id)) setDetailTotal(current => Math.max(0, current - 1))
       if (rollingDetailClassificationFilter === 'NEEDS_REVIEW' && rollingDetails.some(row => row.event_id === item.event_id)) setRollingDetailTotal(current => Math.max(0, current - 1))
       setEditing(current => { const next = { ...current }; delete next[item.event_id]; return next })
