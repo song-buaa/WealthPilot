@@ -249,7 +249,12 @@ def bootstrap_prepared_sources(
                     inserted_raw_rows += persisted.import_batch.row_count
                     inserted_rows.extend(persisted.import_batch.raw_transactions)
 
-            EconomicEventNormalizer().normalize(session, inserted_rows)
+            normalizer = EconomicEventNormalizer()
+            normalizer.normalize(session, inserted_rows)
+            # Statement ranges may overlap. Preserve every bank-source row for
+            # audit, then immediately collapse deterministic cross-batch source
+            # matches before analytics or classification can count them twice.
+            normalizer.replay(session)
             raw_ids = tuple(row.id for row in inserted_rows)
             if raw_ids:
                 event_ids = tuple(

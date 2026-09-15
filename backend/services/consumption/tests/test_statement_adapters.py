@@ -7,6 +7,7 @@ import pytest
 
 from backend.services.consumption.adapters.ccb_credit_card_eml import parse_ccb_credit_card_eml
 from backend.services.consumption.adapters.cmb_credit_card_pdf import parse_cmb_credit_card_pdf
+from backend.services.consumption.adapters.cmb_credit_card_eml import parse_cmb_credit_card_eml
 from backend.services.consumption.adapters.cmb_debit_card_pdf import parse_cmb_debit_card_pdf
 from backend.services.consumption.adapters.common import parse_month_day_in_period, parse_month_day_with_statement_anchor
 from backend.services.consumption.contracts import raw_row_fingerprint, source_file_hash
@@ -142,6 +143,25 @@ def test_cmb_credit_parser_anchors_values_at_the_tail_and_keeps_single_date_repa
     assert parsed.transactions[0].posting_date is None
     assert parsed.metadata.account_masked == "****4964"
     assert (parsed.metadata.statement_date, parsed.metadata.payment_due_date) == (date(2026, 7, 12), date(2026, 8, 1))
+
+
+def test_cmb_credit_email_parser_reads_html_statement_rows_and_sections():
+    source = b"""From: statement@example.test
+Content-Type: text/html; charset=utf-8
+
+<html><body>2026/08/13-2026/09/12<br/>
+\xe8\xbf\x98\xe6\xac\xbe<br/>0901<br/>\xe6\x89\x8b\xe6\x9c\xba\xe9\x93\xb6\xe8\xa1\x8c\xe8\xbf\x98\xe6\xac\xbe<br/>\xc2\xa5 -100.00<br/>4964<br/>-100.00<br/>
+\xe9\x80\x80\xe6\xac\xbe<br/>0825<br/>0826<br/>\xe6\xb5\x8b\xe8\xaf\x95\xe5\x95\x86\xe6\x88\xb7<br/>\xc2\xa5 -20.00<br/>4964<br/>CN<br/>-20.00<br/>
+\xe6\xb6\x88\xe8\xb4\xb9<br/>0826<br/>0827<br/>\xe6\xb5\x8b\xe8\xaf\x95\xe6\xb6\x88\xe8\xb4\xb9<br/>\xc2\xa5 20.00<br/>4964<br/>CN<br/>20.00</body></html>"""
+    parsed = parse_cmb_credit_card_eml(source)
+
+    assert [(row.transaction_date, row.posting_date, row.amount, row.parser_provenance["statement_section"]) for row in parsed.transactions] == [
+        (date(2026, 9, 1), None, Decimal("-100.00"), "CREDIT_CARD_REPAYMENT"),
+        (date(2026, 8, 25), date(2026, 8, 26), Decimal("-20.00"), "REFUND"),
+        (date(2026, 8, 26), date(2026, 8, 27), Decimal("20.00"), "CONSUMPTION"),
+    ]
+    assert parsed.metadata.source_format == "EML"
+    assert parsed.metadata.account_masked == "****4964"
 
 
 def test_cmb_debit_parser_merges_continuation_and_preserves_source_type():

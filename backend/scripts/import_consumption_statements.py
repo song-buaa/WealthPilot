@@ -18,10 +18,13 @@ from backend.services.consumption.import_runner import (
     bootstrap_prepared_sources,
     prepare_sources,
 )
+from backend.services.consumption.adapters.cmb_credit_card_eml import (
+    parse_cmb_credit_card_eml,
+)
 
 
 SOURCE_SUFFIXES = {
-    SourceKind.CMB_CREDIT: {".pdf"},
+    SourceKind.CMB_CREDIT: {".pdf", ".eml"},
     SourceKind.CCB_CREDIT: {".eml"},
     SourceKind.CMB_DEBIT: {".pdf"},
 }
@@ -39,7 +42,8 @@ def _source_files(kind: SourceKind, paths: list[Path]) -> list[BootstrapSource]:
         if not path.exists():
             raise BootstrapError(f"{kind.value} source path is unavailable")
         if path.is_file() and path.suffix.lower() in suffixes:
-            values.append(BootstrapSource(kind, path.read_bytes(), path.name))
+            parser = parse_cmb_credit_card_eml if kind is SourceKind.CMB_CREDIT and path.suffix.lower() == ".eml" else None
+            values.append(BootstrapSource(kind, path.read_bytes(), path.name, parser=parser))
             continue
         if path.is_dir():
             files = sorted(
@@ -51,7 +55,13 @@ def _source_files(kind: SourceKind, paths: list[Path]) -> list[BootstrapSource]:
             )
             if not files:
                 raise BootstrapError(f"{kind.value} source directory has no supported files")
-            values.extend(BootstrapSource(kind, candidate.read_bytes(), candidate.name) for candidate in files)
+            values.extend(
+                BootstrapSource(
+                    kind, candidate.read_bytes(), candidate.name,
+                    parser=parse_cmb_credit_card_eml if kind is SourceKind.CMB_CREDIT and candidate.suffix.lower() == ".eml" else None,
+                )
+                for candidate in files
+            )
             continue
         if path.is_file() and path.suffix.lower() == ".zip":
             try:
@@ -66,7 +76,10 @@ def _source_files(kind: SourceKind, paths: list[Path]) -> list[BootstrapSource]:
                     if not members:
                         raise BootstrapError(f"{kind.value} ZIP has no supported files")
                     values.extend(
-                        BootstrapSource(kind, archive.read(member), path.name)
+                        BootstrapSource(
+                            kind, archive.read(member), path.name,
+                            parser=parse_cmb_credit_card_eml if kind is SourceKind.CMB_CREDIT and Path(member.filename).suffix.lower() == ".eml" else None,
+                        )
                         for member in members
                     )
             except BootstrapError:

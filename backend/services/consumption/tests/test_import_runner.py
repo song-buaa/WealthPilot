@@ -106,6 +106,24 @@ def test_three_source_runner_reuses_production_pipeline_and_is_idempotent(db_ses
     )
 
 
+def test_overlapping_statement_import_collapses_cross_batch_duplicates_before_analytics(db_session):
+    source = (FIXTURES / "cmb_credit_card" / "input_redacted.txt").read_bytes()
+
+    def parser(value: bytes):
+        return parse_cmb_credit_card_pdf(value, text_extractor=lambda text: text.decode("utf-8"))
+
+    first = BootstrapSource(SourceKind.CMB_CREDIT, source, "first.pdf", parser=parser)
+    second = BootstrapSource(SourceKind.CMB_CREDIT, source + b"\n", "overlap.pdf", parser=parser)
+    bootstrap_sources(db_session, (first,), as_of=date(2026, 7, 31))
+    events_before = db_session.query(EconomicEvent).filter_by(is_active=True).count()
+
+    result = bootstrap_sources(db_session, (second,), as_of=date(2026, 7, 31))
+
+    assert result.new_batch_count == 1
+    assert db_session.query(RawTransaction).count() == 4
+    assert db_session.query(EconomicEvent).filter_by(is_active=True).count() == events_before
+
+
 def test_parse_failure_happens_before_any_consumption_write(db_session):
     broken = BootstrapSource(
         SourceKind.CMB_CREDIT,
