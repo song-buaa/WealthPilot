@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 import platform
 import socket
+import shutil
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+GIT = shutil.which("git") or "/usr/bin/git"
 
 
 def require(condition, code):
@@ -70,7 +72,7 @@ def check_revision(code, expected):
     require(len(expected) == 40 and all(c in "0123456789abcdef" for c in expected), "FULL_GIT_SHA_REQUIRED")
     # sudo switch reads the nonroot user's checkout. Trust this explicit local
     # checkout for these read-only calls only; do not change global Git config.
-    git = ["/usr/bin/git", "-c", "safe.directory=" + str(Path(code).resolve())]
+    git = [GIT, "-c", "safe.directory=" + str(Path(code).resolve())]
     require(run(git + ["rev-parse", "HEAD"], cwd=code).stdout.strip() == expected, "REVISION_MISMATCH")
     run(git + ["diff", "--exit-code", "HEAD"], cwd=code)
     require(not run(git + ["ls-files", "--others", "--exclude-standard"], cwd=code).stdout.strip(), "UNTRACKED_DEPLOYMENT_FILES_REFUSED")

@@ -49,8 +49,8 @@
 | 项目 | 状态 | 证据与范围 |
 |---|---|---|
 | 原工作树/PoC 基线保持 | PASS | [保留核对](../pocs/poc03_mac_mini/evidence/baseline-preservation-check.json)，SHA/分支/HEAD/文件集合与 tracked status 均一致。 |
-| 部署/备份/恢复/范围脚本 | PASS | 新增 24/24；使用临时库、fake launchctl 和 fake API，不操作系统 jobs/远程账号。[测试输出](../pocs/poc03_mac_mini/evidence/deployment-reader-tests.txt)。 |
-| 原 PoC 02 读取回归 | PASS | 17/17，合计上述测试 41/41；写入拒绝、金额口径及过期/未知/来源失败保留。 |
+| 部署/备份/恢复/范围脚本 | PASS | 新增 25/25；使用临时库、临时 Git repo、fake launchctl 和 fake API，不操作系统 jobs/远程账号。[测试输出](../pocs/poc03_mac_mini/evidence/deployment-reader-tests.txt)。 |
+| 原 PoC 02 读取回归 | PASS | 17/17，合计上述测试 42/42；写入拒绝、金额口径及过期/未知/来源失败保留。 |
 | 原 PoC 02 MCP HTTP | PASS | [9/9](../pocs/poc03_mac_mini/evidence/mcp-http-tests.txt)；仅本机隔离环境和合成 fixture。 |
 | M5 工程纪律 | PASS | [18/18](../pocs/poc03_mac_mini/evidence/m5-offline.md)，离线 public_network_attempts=0，临时数据库。不是完整发布质量 Gate。 |
 | 全新最小业务环境 | PASS | [compatibility](../pocs/poc03_mac_mini/evidence/minimal-business-compatibility.json)：Python 3.11.15 x86_64；fixture 金额正确、数据库写入拒绝、无禁用模块导入、禁网络。 |
@@ -66,6 +66,8 @@
 | PoC 02 密钥展示事故 | FAIL | 原事故与用户拒绝轮换的历史保持；没有将其标记撤销、解决或补救完成。 |
 
 ARM 资产准备中曾遇到未固定 cryptography 的源码/Rust 构建失败（MacBook x86 Python 与 ARM 编译工具链不匹配）；现已采用 PoC 02 已验证的 cryptography 46.0.3 二进制版本，准备和离线哈希解析通过。没有修改系统 Python/编译工具链。tigeropen 3.5.8 上游只提供源包，本轮由官方源包构建纯 Python `py3-none-any` wheel，源 URL/SHA 记录在资产清单；设备安装不会重新编译，ARM SDK 实际 import 仍需验证。
+
+实际打包还发现 MacBook x86 Python 不能调用 ARM-only Apple Git 工具链；部署工具现使用可信本机 PATH 可用的 Git，设备 audit 实际执行 git --version，不只检查文件存在。没有安装或改动系统工具链；Mac Mini 原生环境仍须实测。
 
 ## 5. 第二阶段阻塞项与交接
 

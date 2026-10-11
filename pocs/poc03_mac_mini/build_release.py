@@ -6,12 +6,12 @@ import subprocess
 import zipfile
 import json
 
-from common import ROOT, check_revision, digest, require, run, safe_cli
+from common import GIT, ROOT, check_revision, digest, require, run, safe_cli
 from deploy import TUNNEL_SHA
 
 
 def build(output, wheels, tunnel_zip):
-    revision = run(["/usr/bin/git", "rev-parse", "HEAD"], cwd=ROOT).stdout.strip()
+    revision = run([GIT, "rev-parse", "HEAD"], cwd=ROOT).stdout.strip()
     check_revision(ROOT, revision)
     output = Path(output).absolute()
     require(not output.resolve().is_relative_to(ROOT) and not output.exists(), "FRESH_EXTERNAL_PACKAGE_DIRECTORY_REQUIRED")
@@ -19,12 +19,12 @@ def build(output, wheels, tunnel_zip):
     output.mkdir(parents=True, mode=0o700)
     refs = ["HEAD"]
     try:
-        refs.append(run(["/usr/bin/git", "symbolic-ref", "--quiet", "HEAD"], cwd=ROOT).stdout.strip())
+        refs.append(run([GIT, "symbolic-ref", "--quiet", "HEAD"], cwd=ROOT).stdout.strip())
     except subprocess.CalledProcessError:
         pass  # Rebuilding from a detached, verified deployment revision is valid.
-    run(["/usr/bin/git", "bundle", "create", output / "source.bundle", *refs], cwd=ROOT)
-    run(["/usr/bin/git", "bundle", "verify", output / "source.bundle"], cwd=ROOT)
-    run(["/usr/bin/git", "archive", "--format=tar.gz", "--output=" + str(output / "source.tar.gz"), revision], cwd=ROOT)
+    run([GIT, "bundle", "create", output / "source.bundle", *refs], cwd=ROOT)
+    run([GIT, "bundle", "verify", output / "source.bundle"], cwd=ROOT)
+    run([GIT, "archive", "--format=tar.gz", "--output=" + str(output / "source.tar.gz"), revision], cwd=ROOT)
     shutil.copyfile(tunnel_zip, output / "tunnel-client-darwin-arm64.zip")
     wheel_files = sorted(Path(wheels).glob("*.whl"))
     require(bool(wheel_files), "ARM_WHEELS_REQUIRED")

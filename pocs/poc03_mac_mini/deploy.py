@@ -14,7 +14,7 @@ import subprocess
 import sys
 import zipfile
 
-from common import check_revision, digest, host_guard, private_dir, private_json, require, run, safe_cli, write_json
+from common import GIT, check_revision, digest, host_guard, private_dir, private_json, require, run, safe_cli, write_json
 from runner import PROOF_FIELDS
 
 LABELS = {"mcp": "com.wealthpilot.readonly-mcp", "tunnel": "com.wealthpilot.secure-tunnel"}
@@ -30,7 +30,8 @@ def audit(root):
               "macos": platform.mac_ver()[0], "python": platform.python_version(),
               "python_architecture": platform.machine(), "native_arm64": platform.machine() == "arm64",
               "storage_free_bytes": disk.free, "minimum_5gib_free": disk.free >= 5 * 1024 ** 3,
-              "git_available": Path("/usr/bin/git").exists(), "ssh_client_available": Path("/usr/bin/ssh").exists(),
+              "git_available": subprocess.run([GIT, "--version"], capture_output=True, timeout=5).returncode == 0,
+              "ssh_client_available": Path("/usr/bin/ssh").exists(),
               "ssh_server_remote_reachability": "NOT_TESTED", "outbound_https": "NOT_TESTED",
               "filevault_cold_boot_unlock": "NOT_TESTED", "sleep_power_recovery": "NOT_TESTED",
               "mac_mini_hardware_identity": "OPERATOR_MUST_VERIFY",
@@ -80,8 +81,8 @@ def install_release(root, package, revision, python):
     release = root / "releases" / revision
     require(not release.exists(), "RELEASE_ALREADY_EXISTS")
     release.mkdir(mode=0o700)
-    run(["/usr/bin/git", "clone", "--no-hardlinks", str(Path(package) / "source.bundle"), str(release / "code")])
-    run(["/usr/bin/git", "checkout", "--detach", revision], cwd=release / "code")
+    run([GIT, "clone", "--no-hardlinks", str(Path(package) / "source.bundle"), str(release / "code")])
+    run([GIT, "checkout", "--detach", revision], cwd=release / "code")
     check_revision(release / "code", revision)
     assets = release / "tunnel"; assets.mkdir(mode=0o700)
     with zipfile.ZipFile(Path(package) / "tunnel-client-darwin-arm64.zip") as archive:

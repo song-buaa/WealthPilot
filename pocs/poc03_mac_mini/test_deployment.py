@@ -219,6 +219,23 @@ def test_host_guard_rejects_rosetta(monkeypatch):
         common.host_guard("fixture-mini")
 
 
+def test_real_git_revision_check_rejects_dirty_or_untracked_checkout(tmp_path):
+    code = tmp_path / "code"; code.mkdir()
+    common.run([common.GIT, "init", code])
+    file = code / "entry.txt"; file.write_text("fixture")
+    common.run([common.GIT, "add", "entry.txt"], cwd=code)
+    common.run([common.GIT, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "-m", "fixture"], cwd=code)
+    revision = common.run([common.GIT, "rev-parse", "HEAD"], cwd=code).stdout.strip()
+    common.check_revision(code, revision)
+    extra = code / "untracked.txt"; extra.write_text("fixture")
+    with pytest.raises(ValueError, match="UNTRACKED"):
+        common.check_revision(code, revision)
+    extra.unlink(); file.write_text("changed")
+    with pytest.raises(subprocess.CalledProcessError):
+        common.check_revision(code, revision)
+
+
 def test_runner_discards_raw_child_output(runtime, monkeypatch):
     root, _ = runtime
     fake_secret = "PRIVATE_FIXTURE_SHOULD_NOT_BE_LOGGED"
