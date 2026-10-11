@@ -304,3 +304,101 @@ def test_scope_probe_does_not_pass_extra_workspace():
         return (200, {"organization_ids": ["org"], "workspace_ids": ["one", "other"]}) if credential == "fixture" else (401, None)
     result = access_check.probe("fixture", "fixture", {"organization_ids": ["org"], "workspace_ids": ["one"]}, fake)
     assert result["result"] == "FAIL" and result["expected_private_scope_equal"] is False
+
+
+@pytest.fixture
+def broad_key_proof(runtime):
+    root, _ = runtime
+    (root / 'credentials/runtime-key').write_text('noncredential-test-fixture')
+    (root / 'credentials/runtime-key').chmod(0o600)
+    proof = {k: True for k in runner.PROOF_FIELDS}
+    proof['minimal_permissions_verified'] = False
+    common.write_json(root / 'config/access-evidence.json', proof)
+    return root, proof
+
+
+def test_owner_exception_preserves_facts_and_is_bound_to_key(broad_key_proof):
+    root, before = broad_key_proof
+    assert deploy.accept_runtime_key_risk(root, True, True, True) == {
+        'risk_acceptance_recorded': True, 'minimal_permissions_verified': False, 'real_activated': False}
+    after = common.private_json(root / 'config/access-evidence.json')
+    assert {k: after[k] for k in runner.PROOF_FIELDS} == before
+    assert runner.verify_real_access(root, after) == 'broad_permissions_owner_exception'
+    assert common.private_json(root / 'config/runtime.json')['mode'] == 'synthetic'
+    (root / 'credentials/runtime-key').write_text('changed-noncredential-test-fixture')
+    with pytest.raises(ValueError, match='CREDENTIAL_MISMATCH'):
+        runner.verify_real_access(root, after)
+
+
+@pytest.mark.parametrize('field', [k for k in runner.PROOF_FIELDS if k != 'minimal_permissions_verified'])
+def test_exception_never_waives_another_gate(broad_key_proof, field, monkeypatch):
+    root, _ = broad_key_proof
+    deploy.accept_runtime_key_risk(root, True, True, True)
+    proof = common.private_json(root / 'config/access-evidence.json'); proof[field] = False
+    common.write_json(root / 'config/access-evidence.json', proof)
+    state = common.private_json(root / 'config/runtime.json'); state['mode'] = 'real'
+    common.write_json(root / 'config/runtime.json', state)
+    monkeypatch.setattr(runner, 'host_guard', lambda _: None)
+    monkeypatch.setattr(runner, 'check_revision', lambda *a: None)
+    with pytest.raises(ValueError, match='REAL_ACCESS_NOT_VERIFIED'):
+        runner.child_command(root, 'mcp')
+    with pytest.raises(ValueError, match='REAL_ACCESS_NOT_VERIFIED'):
+        deploy.switch_mode_or_revision(root, state['revision'], 'real', False)
+
+
+@pytest.mark.parametrize('flags', [(False, True, True), (True, False, True), (True, True, False)])
+def test_exception_requires_all_explicit_acknowledgements(broad_key_proof, flags):
+    root, before = broad_key_proof
+    with pytest.raises(ValueError, match='EXPLICIT_PERSONAL'):
+        deploy.accept_runtime_key_risk(root, *flags)
+    assert common.private_json(root / 'config/access-evidence.json') == before
+
+
+@pytest.mark.parametrize('value', [None, 0, 'false'])
+def test_missing_or_untyped_minimal_fact_cannot_use_exception(broad_key_proof, value):
+    root, _ = broad_key_proof
+    deploy.accept_runtime_key_risk(root, True, True, True)
+    proof = common.private_json(root / 'config/access-evidence.json')
+    proof['minimal_permissions_verified'] = value
+    with pytest.raises(ValueError, match='REAL_ACCESS_NOT_VERIFIED'):
+        runner.verify_real_access(root, proof)
+
+
+@pytest.mark.parametrize('field,value', [('scope', 'shared-workspace'), ('ordinary_key', False),
+    ('single_member_organization', False), ('personal_workspace', False),
+    ('broad_permissions_risk_accepted_by_owner', 1), ('accepted_at', '')])
+def test_exception_rejects_unaccepted_or_nonpersonal_scope(broad_key_proof, field, value):
+    root, _ = broad_key_proof
+    deploy.accept_runtime_key_risk(root, True, True, True)
+    proof = common.private_json(root / 'config/access-evidence.json')
+    proof['personal_runtime_key_exception'][field] = value
+    with pytest.raises(ValueError, match='REAL_ACCESS_NOT_VERIFIED'):
+        runner.verify_real_access(root, proof)
+
+
+def test_broad_key_without_exception_still_blocks(broad_key_proof):
+    root, proof = broad_key_proof
+    with pytest.raises(ValueError, match='REAL_ACCESS_NOT_VERIFIED'):
+        runner.verify_real_access(root, proof)
+    proof['minimal_permissions_verified'] = True
+    assert runner.verify_real_access(root, proof) == 'minimal_permissions_verified'
+
+
+def test_exception_used_by_real_runner_and_switch_without_reconfiguration(broad_key_proof, monkeypatch):
+    root, _ = broad_key_proof
+    deploy.accept_runtime_key_risk(root, True, True, True)
+    (root / 'data/wealthpilot.db').write_bytes(b'nonfinancial-fixture')
+    common.write_json(root / 'data/migration-reference.json', {
+        'database_sha256': common.digest(root / 'data/wealthpilot.db'), 'cash_reference': {'configured': False}})
+    common.write_json(root / 'config/wealth.json', {'database_path': str(root / 'data/wealthpilot.db'), 'portfolio_id': 1})
+    state = common.private_json(root / 'config/runtime.json'); state['mode'] = 'real'
+    common.write_json(root / 'config/runtime.json', state)
+    monkeypatch.setattr(runner, 'host_guard', lambda _: None)
+    monkeypatch.setattr(runner, 'check_revision', lambda *a: None)
+    monkeypatch.setattr(deploy, 'check_revision', lambda *a: None)
+    before = {p: p.read_bytes() for p in (root / 'data/wealthpilot.db', root / 'config/runtime.json', root / 'config/access-evidence.json')}
+    command, config = runner.child_command(root, 'mcp')
+    assert '--real-config' in command
+    assert config['credential_permission_status'] == 'broad_permissions_owner_exception'
+    assert deploy.switch_mode_or_revision(root, state['revision'], 'real', False)['apply'] is False
+    assert all(p.read_bytes() == data for p, data in before.items())

@@ -10,7 +10,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - 当前 main 在 v3.15.1 后持续增加财富、消费分析、账单导入/刷新一致性、技术形态证据等能力；产品版本以 Git/CI 和实际验收记录为准。
 - 固定 Phase 0 审计、PoC 01 合成跨端调用、PoC 02 私人 Tunnel 真实财富只读查询及 PoC 03 部署准备成果。
 - PoC 03 Stage 1.5：GitHub PR/CI/main 为主要发布路径，新增指定完整 Commit 安装、固定哈希 ARM 依赖及 MCP PoC CI；离线包应急保留。
-- 4.0 尚未生产上线，Mac Mini Stage 2 未执行；PoC 02 凭证展示事故仍 FAIL，未标记已补救。
+- 4.0 尚未生产上线，Mac Mini Stage 2 未完成；PoC 02 凭证展示事故仍 FAIL，未标记已补救。
+- 修复固定 Tunnel v0.0.16 的 JSON 启动入口（`run --config`），加入真实固定二进制 loopback 回归；增加个人独立普通运行 Key 的显式宽权限风险接受记录，最小权限事实保持 false，其余 Gate 不变。
 - 本轮不改变财富统计、投资分析或交易逻辑，不运行真实库迁移或设备部署。
 
 ## [3.15.1] - 2026-08-18

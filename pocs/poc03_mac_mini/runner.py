@@ -15,6 +15,34 @@ PROOF_FIELDS = ("access_scope_confirmed", "synthetic_web_pass", "anonymous_denie
                 "migration_verified", "native_business_smoke_pass")
 
 
+def production_key_digest(root):
+    key = Path(root) / "credentials/runtime-key"
+    require(key.is_file() and not key.is_symlink() and key.stat().st_mode & 0o077 == 0,
+            "PRIVATE_PRODUCTION_KEY_REQUIRED")
+    require(bool(key.read_bytes().strip()), "EMPTY_KEY_REFUSED")
+    return digest(key)
+
+
+def verify_real_access(root, proof):
+    # An operator exception never changes the observed least-privilege fact.
+    require(all(proof.get(k) is True for k in PROOF_FIELDS if k != "minimal_permissions_verified"),
+            "REAL_ACCESS_NOT_VERIFIED")
+    if proof.get("minimal_permissions_verified") is True:
+        return "minimal_permissions_verified"
+    exception = proof.get("personal_runtime_key_exception", {})
+    require(proof.get("minimal_permissions_verified") is False and isinstance(exception, dict),
+            "REAL_ACCESS_NOT_VERIFIED")
+    expected = {"scope": "personal-production-runtime-key", "ordinary_key": True,
+                "single_member_organization": True, "personal_workspace": True,
+                "broad_permissions_risk_accepted_by_owner": True}
+    require(all(type(exception.get(k)) is type(v) and exception[k] == v for k, v in expected.items())
+            and isinstance(exception.get("accepted_at"), str) and bool(exception["accepted_at"]),
+            "REAL_ACCESS_NOT_VERIFIED")
+    require(exception.get("credential_sha256") == production_key_digest(root),
+            "RUNTIME_KEY_EXCEPTION_CREDENTIAL_MISMATCH")
+    return "broad_permissions_owner_exception"
+
+
 def child_command(root, role):
     root = Path(root).resolve()
     config = private_json(root / "config/runtime.json")
@@ -30,7 +58,7 @@ def child_command(root, role):
                 "--port", "8788", "--events", root / "run/completions.jsonl"]
         if config["mode"] == "real":
             proof = private_json(root / "config/access-evidence.json")
-            require(all(proof.get(k) is True for k in PROOF_FIELDS), "REAL_ACCESS_NOT_VERIFIED")
+            config["credential_permission_status"] = verify_real_access(root, proof)
             wealth = private_json(root / "config/wealth.json")
             require(Path(wealth["database_path"]).resolve() == (root / "data/wealthpilot.db").resolve(), "PRODUCTION_DATABASE_PATH_MISMATCH")
             reference = private_json(root / "data/migration-reference.json")
@@ -43,11 +71,9 @@ def child_command(root, role):
             require(config["mode"] == "synthetic", "INVALID_MODE")
     else:
         require(role == "tunnel", "INVALID_ROLE")
-        key = root / "credentials/runtime-key"
-        require(key.is_file() and not key.is_symlink() and key.stat().st_mode & 0o077 == 0,
-                "PRIVATE_PRODUCTION_KEY_REQUIRED")
-        args = [release / "tunnel/tunnel-client", "run", "--profile-file", root / "config/tunnel.json",
-                "--log.file", "stdout", "--log.level", "warn", "--admin-ui.log-buffer-events", "1"]
+        production_key_digest(root)
+        args = [release / "tunnel/tunnel-client", "run", "--config", root / "config/tunnel.json",
+                "--log.file", "", "--log.level", "warn", "--admin-ui.log-buffer-events", "1"]
     return [str(x) for x in args], config
 
 
@@ -72,7 +98,8 @@ def main():
                        "ENABLE_IBKR_LIVE_TRADING": "false", "BROKER_MODE": "mock"}
         child = subprocess.Popen(command, cwd=Path(args.root) / "current/code", env=environment,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        log.info(json.dumps({"event": "child_started", "role": args.role, "pid": child.pid}))
+        log.info(json.dumps({"event": "child_started", "role": args.role, "pid": child.pid,
+                             "credential_permission_status": config.get("credential_permission_status", "not_applicable")}))
         def stop(signum, frame):
             try:
                 os.killpg(child.pid, signal.SIGTERM)

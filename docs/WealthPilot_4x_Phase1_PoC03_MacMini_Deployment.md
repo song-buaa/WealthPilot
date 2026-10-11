@@ -1,10 +1,10 @@
 # WealthPilot PoC 03 · Mac Mini 第二阶段执行说明
 
-> Stage 1.5 更新：MacBook Dev → GitHub PR/CI/main → Mac Mini Prod 拉取完整 Commit 为主要路线。尚未部署 Mini，第二阶段由设备端 Codex 执行。原离线包仅应急保留；PoC 02 凭证事故仍 FAIL，新 Key 不表示旧 Key 已撤销。代码发布不等于 4.0 生产上线。
+> Tunnel 兼容修复更新：MacBook Dev → GitHub PR/CI/main → Mac Mini Prod 拉取完整 Commit 为主要路线。设备交接报告 ARM 安装、数据迁移及本地 synthetic MCP 已通过；Tunnel 启动阻塞，两个 system jobs 已停止，real 尚未启用。继续执行由设备端 Codex 完成，本轮 Dev 不操作 Mini。原离线包仅应急保留；PoC 02 凭证事故仍 FAIL，新 Key 不表示旧 Key 已撤销。代码发布不等于 4.0 生产上线。
 
 ## 1. 第二阶段入口与目录
 
-Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明和 PoC 03 报告。确认这台机器为目标 Mac Mini、使用哪一个非 root 本机用户及其真实 hostname，再执行；当前阶段不要把任何设备验收写成 PASS。
+Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明和 PoC 03 报告。确认这台机器为目标 Mac Mini、使用哪一个非 root 本机用户及其真实 hostname，再执行；分别记录已有设备证据与本轮重新验收；Dev 回归测试不能替代设备 PASS。
 
 目标：macOS 13+、**原生 arm64 CPython 3.11**。MacBook 现有 x86_64 Python 不适合作为生产解释器。选择可信官方 Python 安装或已有原生解释器，由设备端核实；不要复制 MacBook venv。生产依赖从固定哈希 ARM wheels 安装，不在设备重新解析最新版本或编译源包。
 
@@ -115,7 +115,7 @@ chmod 600 "$WP_ROOT/evidence/migration-amount-check.json"
 
 ## 5. 独立凭证与合成私有连接（Mac Mini + 用户账号授权）
 
-用户在 Platform 创建**独立生产普通运行 Key**，只授予 Tunnels Read + Use；不使用 Admin Key，不复用 PoC 02 Key，不把新 Key 发给 Codex/聊天。创建、输入及确认凭证由用户完成，关闭密钥弹窗后再让浏览器工具观察安全页面。创建/修改 Tunnel 范围需要 Read + Manage；运行 Key 不需要 Manage。[OpenAI Docs：Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+默认使用**独立生产普通运行 Key**，只授予 Tunnels Read + Use；不使用 Admin Key，不复用 PoC 02 Key，不把新 Key 发给 Codex/聊天。创建、输入及确认凭证由用户完成，关闭密钥弹窗后再让浏览器工具观察安全页面。创建/修改 Tunnel 范围需要 Read + Manage；运行 Key 不需要 Manage。[OpenAI Docs：Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 
 优先创建单独的生产 Tunnel，仅关联目标个人组织/个人 ChatGPT workspace，停止 MacBook 旧客户端。不要让两台机器同时轮询同一 Tunnel，以免请求落到开发机。**新 Key/新 Tunnel 不自动撤销旧 Key，也不自动隔离同组织的旧权限**；PoC 02 事故仍 FAIL。设备阶段应核对暴露旧 Key 对生产范围的影响，并记录用户处理决定，不能将新凭证创建写成旧事故已补救。
 
@@ -141,11 +141,11 @@ curl --fail --silent http://127.0.0.1:8789/readyz
 
 Scope probe 使用认证 metadata GET 与四项匿名/无效凭证 GET；不模拟其他人的账号，不能代替用户确认成员范围或最小权限。未通过时停留合成，不开启真实。核实 lsof 只有 127.0.0.1:8788/8789，无公网监听；TLS/证书问题应修正可信 CA，不能关闭验证。实际网络须允许 outbound `api.openai.com:443`、Tiger 和所需 FX 服务；不安装公网反向代理。[OpenAI 网络要求](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 
-用户在 ChatGPT Web 添加/连接生产 Tunnel 的自定义 MCP，并发起合成 CNY 请求，取得 Mini 的真实完成记录和投递证据。账号连接/授权由用户确认；不要仅凭“已连接”标记工具调用通过。若新 Key 最小权限无法设置/验证，记录 BLOCKED；不得改用旧 Key 作为生产凭证。
+用户在 ChatGPT Web 添加/连接生产 Tunnel 的自定义 MCP，并发起合成 CNY 请求，取得 Mini 的真实完成记录和投递证据。账号连接/授权由用户确认；不要仅凭“已连接”标记工具调用通过。若最小权限未验证，保持 `minimal_permissions_verified=false`。默认阻塞 real；仅个人生产普通 Key 可按下文记录用户明确接受宽权限风险的例外。例外不证明最小权限通过，也不得复用旧 Key、使用 Admin Key 或放宽访问范围。
 
 ## 6. 真实模式与端到端验收
 
-全部实际证据完成后，在 Mini 本地建立 `config/access-evidence.json`，0600。字段必须由第二阶段根据真实观察填写，未完成填 false；八项均 true 才允许真实模式：
+全部实际证据完成后，在 Mini 本地建立 `config/access-evidence.json`，0600。字段必须由第二阶段根据真实观察填写，未完成填 false；默认八项均 true 才允许真实模式；个人宽权限例外仅替代其中最小权限门槛，其余七项必须真实为 true：
 
 ```json
 {
@@ -160,7 +160,7 @@ Scope probe 使用认证 metadata GET 与四项匿名/无效凭证 GET；不模�
 }
 ```
 
-这是操作者防误启用门槛，**不是认证协议**；真实安全边界由 Tunnel 的控制面授权、组织/工作区范围及可信本机环境实施。不要把样例 false 批量改成 true 替代实际验收。当前第一阶段这些生产项全部待验证。
+这是操作者防误启用门槛，**不是认证协议**；真实安全边界由 Tunnel 的控制面授权、组织/工作区范围及可信本机环境实施。不要把样例 false 批量改成 true 替代实际验收。这些字段只依据设备实际证据，不依据 Dev 的临时测试填写。
 
 ```bash
 sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
@@ -201,7 +201,7 @@ sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
 
 日志仅记录启动/退出和 PID，原始子进程输出丢弃；每服务轮转总上限约 4MiB。工具完成记录需运营期定期归档（不含金额），控制磁盘增长。首次生产候选目标是有限只读基础环境，7×24 可用性、网络重连、休眠和备份保存周期须在第二阶段取得实际证据；本阶段不加入调度同步、监控平台或 CI/CD。
 
-保留最小权限独立生产凭证，凭证变更由用户完成；任何退回匿名公网、复用旧事故 Key、启用交易、修改业务代码或放宽权限均超出本包范围。不要把设备阶段的临时修复直接留在 Prod 代码中；必要变更回 Dev 短期分支，再以新的 Git SHA 重新打包。
+优先保留最小权限独立生产凭证；个人宽权限例外只按第 9 节记录，凭证变更由用户完成。任何退回匿名公网、复用旧事故 Key、启用交易、修改业务代码或放宽其他访问范围均超出本包范围。不要把设备阶段的临时修复直接留在 Prod 代码中；必要变更回 Dev 短期分支，再以新的 Git SHA 重新打包。
 
 ## 8. 后续更新与离线应急
 
@@ -216,3 +216,35 @@ sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
 ```
 
 离线安装不能联网核对 CI，操作者必须保存可信 main/CI 记录并匹配 SHA。原 56aa7ed 包仅为 Stage 1 准备资产，不作为本轮已完成完整发布 Gate 的首次 Prod 候选。应急安装同样不自动开通真实，Stage 2 实测不得省略。
+
+
+## 9. Tunnel v0.0.16 修复后继续执行（已有配置、数据和 Key 保留）
+
+根因：`--profile-file` 指定 profile YAML，拒绝 `.json` 后缀；`--config` 是通用配置入口。固定 v0.0.16 实测可加载 deploy.py 生成的同一 JSON，并解析 `file:` Key 引用。runner 将该参数改为 `--config`，同时将 `--log.file` 设为空值：v0.0.16 将非空 `stdout` 当文件名，空值才使用标准输出，由现有 wrapper 丢弃，避免创建文件使 Git checkout 变脏。未转换 YAML、升级客户端或增加 OAuth。doctor 的配置子检查 PASS 不表示整体 readyz/OAuth/远程调用 PASS；验收依据实际运行。[官方 Tunnel 指引](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+
+1. 使用本轮发布的完整 main SHA，在新的干净 bootstrap checkout 按第 2–3 节 `install-github`，保留旧 release、current、data、config 和 credentials；**不再执行 prepare/configure/save-key/restore，也不重新迁移数据库**。安装后更新 `WP_CODE`、`WP_BIZ`、`WP_MCP`、`WP_TOOLS` 至新 release，重跑原生 smoke。先核对已有私有文件及数据库摘要，证据存于 Mini 的 evidence，勿打印内容或金额。
+2. 交接指出两个 jobs 已停用。只在 Mini 上、核对 label 属于本部署后执行下列 enable，再审阅 synthetic switch 计划并应用；switch 使用原 runtime 的用户/hostname、保留现有 JSON、数据库和 Key。不要改生产源代码。
+
+```bash
+sudo launchctl enable system/com.wealthpilot.readonly-mcp
+sudo launchctl enable system/com.wealthpilot.secure-tunnel
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
+  --revision "$WP_REV" --mode synthetic --expected-hostname "$WP_HOST"
+sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
+  --revision "$WP_REV" --mode synthetic --apply --expected-hostname "$WP_HOST"
+"$WP_MCP" "$WP_TOOLS/validate.py" --expect synthetic --output "$WP_ROOT/evidence/local-synthetic-after-fix.json"
+curl --fail --silent http://127.0.0.1:8789/readyz
+```
+
+3. 实测 loopback listeners、认证 metadata 与四项拒绝检查、个人范围、Web 新合成请求和 Mini 完成记录。旧暴露 Key 对新生产 Tunnel 的权限仍须核对；未完成或存在未解决的访问隔离问题，保持 `access_scope_confirmed=false`，停留 synthetic。不能用宽权限例外豁免此项；旧 PoC 02 事故永久保留 FAIL，例外与事故补救无关。不传旧 Key 到 Mini，不让旧客户端轮询生产 Tunnel。
+4. 仅当用户已明确选择独立的宽权限**普通**生产 Key、组织只有本人、workspace 为本人个人空间，且本机 `access_scope_confirmed` / `independent_production_credential` 已根据证据为 true，才能记录例外。将原有 `config/access-evidence.json` 的 `minimal_permissions_verified` 保持 false；不要批量改验收字段。以非 root 运行用户执行以下命令，原文件其他字段原样保留：
+
+```bash
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" accept-runtime-key-risk \
+  --personal-single-user --ordinary-key --accept-broad-permissions --expected-hostname "$WP_HOST"
+```
+
+此命令在既有私有 evidence JSON 增加 `personal_runtime_key_exception`：个人/单成员/普通 Key 的明确声明、owner 风险接受、UTC 时间以及当前生产 Key 的 SHA-256 绑定；不显示 Key 或摘要，不启动服务，不替操作者验证 Key 的 Platform 权限。宽权限可能允许更多 API 操作，泄露影响大于 Read + Use；本工具仍只有财富只读入口。声明为人工证据，不是新认证机制。Shared workspace、其他成员组织、Admin Key、缺少明确接受不适用。Key 内容变化时旧例外失效，须重新核对并记录。
+
+5. 其余七项真实通过后，按第 6 节审阅 real switch 再应用。switch 与每次 MCP 启动共同校验例外，生命周期只记录 `broad_permissions_owner_exception`，不改写最小权限事实；失败保持/退回 synthetic。继续真实本地、Web/iOS、MacBook 关闭、进程退出、设备重启与恢复演练。未完成不得宣称 7×24 或 4.0 生产上线。
+6. 出现健康失败，先停止两服务，按第 7 节回退已安装版本的 synthetic/停止状态；旧 34bdce4 Tunnel 参数已知失败，不作为可用 Tunnel 恢复证明。回滚不修改数据库；旧版本不识别宽权限例外，会再次阻塞 real，这是预期行为。

@@ -15,7 +15,7 @@ import sys
 import zipfile
 
 from common import GIT, check_revision, digest, host_guard, private_dir, private_json, require, run, safe_cli, write_json
-from runner import PROOF_FIELDS
+from runner import production_key_digest, verify_real_access
 
 LABELS = {"mcp": "com.wealthpilot.readonly-mcp", "tunnel": "com.wealthpilot.secure-tunnel"}
 TUNNEL_SHA = "a160820d45089b5253d8d671fe2a689bde0f73d78c135d1497a7b33f28a3ac62"
@@ -223,7 +223,7 @@ def switch_mode_or_revision(root, revision, mode, apply):
     runtime = private_json(root / "config/runtime.json")
     if mode == "real":
         proof = private_json(root / "config/access-evidence.json")
-        require(all(proof.get(k) is True for k in PROOF_FIELDS), "REAL_ACCESS_NOT_VERIFIED")
+        verify_real_access(root, proof)
         require((root / "data/wealthpilot.db").is_file(), "PRODUCTION_DATABASE_MISSING")
     check_revision(root / "releases" / revision / "code", revision)
     if not apply:
@@ -241,6 +241,25 @@ def switch_mode_or_revision(root, revision, mode, apply):
     return {"apply": True, "revision": revision, "mode": mode, "data_restored": False}
 
 
+def accept_runtime_key_risk(root, personal_single_user, ordinary_key, accept_broad_permissions):
+    require(personal_single_user and ordinary_key and accept_broad_permissions,
+            "EXPLICIT_PERSONAL_ORDINARY_KEY_RISK_ACCEPTANCE_REQUIRED")
+    proof = private_json(root / "config/access-evidence.json")
+    require(proof.get("minimal_permissions_verified") is False,
+            "MINIMAL_PERMISSIONS_FACT_MUST_REMAIN_FALSE")
+    require(proof.get("access_scope_confirmed") is True and
+            proof.get("independent_production_credential") is True, "PERSONAL_PRODUCTION_SCOPE_NOT_VERIFIED")
+    proof["personal_runtime_key_exception"] = {
+        "scope": "personal-production-runtime-key", "ordinary_key": True,
+        "single_member_organization": True, "personal_workspace": True,
+        "broad_permissions_risk_accepted_by_owner": True,
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+        "credential_sha256": production_key_digest(root)}
+    write_json(root / "config/access-evidence.json", proof)
+    return {"risk_acceptance_recorded": True, "minimal_permissions_verified": False,
+            "real_activated": False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True)
@@ -251,6 +270,9 @@ def main():
     p = commands.add_parser("install-github"); p.add_argument("--revision", required=True); p.add_argument("--python", required=True); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("configure"); p.add_argument("--revision", required=True); p.add_argument("--wealth-input", required=True); p.add_argument("--tunnel-id-file", required=True); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("save-key"); p.add_argument("--expected-hostname", required=True)
+    p = commands.add_parser("accept-runtime-key-risk"); p.add_argument("--expected-hostname", required=True)
+    p.add_argument("--personal-single-user", action="store_true"); p.add_argument("--ordinary-key", action="store_true")
+    p.add_argument("--accept-broad-permissions", action="store_true")
     p = commands.add_parser("services"); p.add_argument("action", choices=("install", "start", "stop", "restart")); p.add_argument("--apply", action="store_true"); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("switch"); p.add_argument("--revision", required=True); p.add_argument("--mode", choices=("synthetic", "real"), required=True); p.add_argument("--apply", action="store_true"); p.add_argument("--expected-hostname", required=True)
     args = parser.parse_args()
@@ -273,6 +295,8 @@ def main():
         with (root / "credentials/runtime-key").open("x") as output:
             os.chmod(output.name, 0o600); output.write(secret)
         result = {"new_key_saved": True}
+    elif args.command == "accept-runtime-key-risk":
+        result = accept_runtime_key_risk(root, args.personal_single_user, args.ordinary_key, args.accept_broad_permissions)
     elif args.command == "services":
         result = service_action(root, args.action, args.apply)
     else:

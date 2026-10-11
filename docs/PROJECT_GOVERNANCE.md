@@ -12,7 +12,7 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 
 `main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.1` 是历史最后一个 SemVer 稳定发布，后续 functional milestone Tags 与 main 提交不自动构成新的 SemVer 产品版本。`v3.15.0` / `v3.14.0` 保持历史不可变，原 Tag 不移动、不重建。frontend 0.0.0 / FastAPI 1.0.0 不是当前产品版本。
 
-当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；PoC 03 Stage 2 尚未执行，不宣称正式生产上线。
+当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；PoC 03 Stage 2 已有部分设备证据，Tunnel/远程及恢复验收待完成，不宣称正式生产上线。
 
 ## 2. 运行模式
 
@@ -105,12 +105,12 @@ GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：�
 3. 本机运行相称的全量 pytest、frontend lint/build、Offline M5、PoC 专项；精确暂存提交，push 开发分支，创建 PR。检查 exact HEAD 的四项 Actions 结果，任何失败/未解决代码发布阻塞都不能合并。
 4. 重新核对 origin/main 和 base；按现有 linear-history/strict Gates 发布。当前允许在 PR/CI 全绿后 fast-forward 推送相同 HEAD 到 main（无 bypass，GitHub 自动识别 PR 已合入）；不制造违反 linear-history 的 merge commit。base 变化时重新形成可审查候选并重跑 Gate，不强推历史。
 5. 验证 GitHub PR 状态、remote main、local main、origin/main 和预期 SHA 一致，记录 CI/PR/完整 revision。普通 main 发布不自动创建稳定 Tag 或 GitHub Release，不代表生产验收。
-6. Mac Mini 上的 Codex 在 Stage 2 以个人操作者确认的完整 SHA 使用 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。独立最小权限运行 Key、真实数据和配置在代码外，先合成、再证据门槛、后真实验收。
+6. Mac Mini 上的 Codex 在 Stage 2 以个人操作者确认的完整 SHA 使用 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。独立普通运行 Key（默认最小权限，个人例外见下文）、真实数据和配置在代码外，先合成、再证据门槛、后真实验收。
 7. 新 release 安装不启动/切换服务；复用既有 launchd、健康检查和版本回滚。先合成检查，再实际本地/Web/iOS、迁移金额、MacBook 关闭、退出/重启、无业务写入及恢复验收。Prod 禁止直接改业务代码；修复回 Dev 发布新的 SHA。
 
 MacBook 为 Dev，Mac Mini 为 Prod；本机仓库发布操作不得暗含 SSH/设备部署授权。离线包保留为网络/GitHub不可用时的应急材料，依赖与 revision 仍需核对；不能用未完成生产验收的 Stage 1 包冒充已通过 Stage 2。
 
-PoC 02 凭证事故维持 FAIL；代码发布与生产开通分开。新的生产 Key 不自动补救/撤销旧 Key，旧权限对生产范围的影响仍是 Stage 2 边界核对事项。当前没有生产部署、数据迁移或新增交易授权。
+PoC 02 凭证事故维持 FAIL；代码发布与生产开通分开。新的生产 Key 不自动补救/撤销旧 Key，旧权限对生产范围的影响仍是 Stage 2 边界核对事项。本轮 Dev 发布不执行生产部署、数据迁移或新增交易授权。
 
 ## 7. 精简技术债 Backlog
 
@@ -133,3 +133,7 @@ PoC 02 凭证事故维持 FAIL；代码发布与生产开通分开。新的生�
 - `docs/CODEX_WEALTHPILOT_HANDOVER_AUDIT.md` 已封存，只用于追溯接管过程；`docs/archive/` 不是当前运行说明。
 - 重复副本、导出物和临时报告不得留在仓库。删除前先确认无运行时引用，并在仓库外备份需要保留的材料。
 - 收尾目标是 `git status` 完全干净，tracked 文件中不含凭证、真实账户标识或数据库。
+
+### PoC 03 个人宽权限运行凭证例外
+
+默认最小权限 Read + Use；用户可明确接受独立普通生产 Key 的宽权限风险，仅适用单成员个人组织及本人个人 workspace。使用既有 deploy.py 的 `accept-runtime-key-risk` 记录时间和当前 Key 绑定，`minimal_permissions_verified=false` 不得改写；其余七项生产 Gate 不可豁免。例外不解决 PoC 02 旧凭证事故（仍 FAIL），不豁免旧 Key 对新范围的隔离核对，不授权交易或共享访问。执行步骤见 [部署说明第 9 节](WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md#9-tunnel-v0016-修复后继续执行已有配置数据和-key-保留)。

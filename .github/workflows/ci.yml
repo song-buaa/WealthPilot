@@ -129,6 +129,14 @@ jobs:
         run: |
           python -m compileall -q pocs
           python -m pytest -q pocs/poc02_wealth_mcp/test_reader.py pocs/poc03_mac_mini/test_deployment.py pocs/poc03_mac_mini/test_github_release.py
+      - name: Verify pinned Tunnel CLI config contract on loopback
+        run: |
+          curl --fail --location --retry 2 https://github.com/openai/tunnel-client/releases/download/v0.0.16/tunnel-client-v0.0.16-linux-amd64.zip --output "$RUNNER_TEMP/tunnel-client.zip"
+          echo "d60cdba019bce451bcc3a15478cc5b9cb11270b049f5b56ea39a80b517f8b117  $RUNNER_TEMP/tunnel-client.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/tunnel-client.zip" -d "$RUNNER_TEMP/tunnel-cli"
+          export TUNNEL_CLIENT_BINARY="$(find "$RUNNER_TEMP/tunnel-cli" -type f -name tunnel-client)"
+          chmod 700 "$TUNNEL_CLIENT_BINARY"
+          python -m pytest -q pocs/poc03_mac_mini/test_tunnel_contract.py
       - name: Test both MCP HTTP servers in an independent environment
         run: |
           python -m venv "$RUNNER_TEMP/wealthpilot-mcp-poc"

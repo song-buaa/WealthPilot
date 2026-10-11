@@ -16,11 +16,11 @@
 | PoC 01 | 合成 MCP 工具，ChatGPT Web / iOS 实际调用通过。 |
 | PoC 02 | 真实财富查询通过个人 Secure MCP Tunnel，复用原财富计算，与原 Web 口径一致；凭证展示事故仍为 **FAIL**，未补救。 |
 | PoC 03 Stage 1 / 1.5 | 常驻部署工具、GitHub 指定 Commit 安装、离线应急包和 CI 准备；Mac Mini 实测仍留 Stage 2。 |
-| PoC 03 Stage 2 | **未执行**：原生 ARM、数据迁移、独立生产凭证、远程查询、MacBook 关闭和重启恢复均不能标记 PASS。 |
+| PoC 03 Stage 2 | 设备交接报告 ARM、数据迁移、独立凭证和本地 synthetic 已通过；Tunnel 启动阻塞，real 未启用。Web/iOS、MacBook 关闭和恢复验收待完成。 |
 
 标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
 
-入口：[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布 Gate](docs/PROJECT_GOVERNANCE.md)、[Mac Mini Stage 2 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)、[Stage 1.5 发布整理记录](docs/WealthPilot_4x_PoC03_Stage15_Publication.md)。历史 PoC 报告保留当轮事实，不代表已完成设备生产验收。
+入口：[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布 Gate](docs/PROJECT_GOVERNANCE.md)、[Mac Mini Stage 2 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)、[Stage 1.5 发布整理记录](docs/WealthPilot_4x_PoC03_Stage15_Publication.md)。历史 PoC 报告保留当轮事实，不代表已完成设备生产验收。固定客户端参数修复、个人宽权限凭证例外及 Dev 测试见 [Tunnel 兼容修复记录](docs/WealthPilot_4x_PoC03_Tunnel_Compatibility_Fix.md)。
 
 ## 项目简介
 
