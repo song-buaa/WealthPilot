@@ -1,0 +1,37 @@
+{
+  "result": "PASS",
+  "checks": {
+    "original": {
+      "untracked_files_checked": 29,
+      "all_hashes_equal": true,
+      "untracked_file_set_unchanged": true,
+      "branch_unchanged": true,
+      "head_unchanged": true,
+      "tracked_changes_unchanged": true
+    },
+    "poc02": {
+      "untracked_files_checked": 56,
+      "all_hashes_equal": true,
+      "untracked_file_set_unchanged": true,
+      "branch_unchanged": true,
+      "head_unchanged": true,
+      "tracked_changes_unchanged": true
+    },
+    "other_audit": {
+      "untracked_files_checked": 0,
+      "all_hashes_equal": true,
+      "untracked_file_set_unchanged": true,
+      "branch_unchanged": true,
+      "head_unchanged": true,
+      "tracked_changes_unchanged": true
+    },
+    "poc01_including_ignored_cache": {
+      "files_checked": 32,
+      "all_hashes_equal": true
+    },
+    "frozen_poc_files": {
+      "files_checked": 85,
+      "all_hashes_equal": true
+    }
+  }
+}

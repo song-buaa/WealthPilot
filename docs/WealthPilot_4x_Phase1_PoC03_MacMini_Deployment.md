@@ -1,0 +1,202 @@
+# WealthPilot PoC 03 · Mac Mini 第二阶段执行说明
+
+> 本包由 MacBook 完成准备；尚未部署到 Mac Mini。第二阶段由 Mac Mini 上的 Codex 执行。保留 PoC 02 凭证事故 FAIL，独立生产 Key 不表示旧 Key 已撤销。生产代码以包内 `release.json` 的完整 Git SHA 为准，不合并 main，不创建发布 Tag。
+
+## 1. 第二阶段入口与目录
+
+Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明和 PoC 03 报告。确认这台机器为目标 Mac Mini、使用哪一个非 root 本机用户及其真实 hostname，再执行；当前阶段不要把任何设备验收写成 PASS。
+
+目标：macOS 13+、**原生 arm64 CPython 3.11**。MacBook 现有 x86_64 Python 不适合作为生产解释器。选择可信官方 Python 安装或已有原生解释器，由设备端核实；不要复制 MacBook venv。生产依赖从包内 ARM wheels 离线安装，不在设备重新解析最新版本或编译源包。
+
+建议在运行用户的目录分离以下内容（脚本支持带空格的绝对路径）：
+
+```text
+~/Library/Application Support/WealthPilotProd/
+  releases/<git-sha>/code/          Git checkout，原业务代码只读使用
+  releases/<git-sha>/envs/{mcp,business}/
+  releases/<git-sha>/tunnel/        固定 v0.0.16 官方 ARM binary
+  current -> releases/<git-sha>/
+  data/wealthpilot.db              迁入的一致性副本，0400
+  data/migration-reference.json    金额参考，0600，含私人金额
+  backups/                        不可覆盖的源备份和恢复前备份
+  config/                         运行参数/范围证明，0600
+  credentials/                    独立生产 Tunnel Key、所需 Tiger 私钥，0600
+  logs/                           每服务最多 4×1MiB 生命周期元数据
+  run/                            私有工具完成记录（需运营期定期归档）
+  plists/                         待安装 launchd 配置
+  evidence/                       设备侧私有验收记录
+```
+
+父目录 0700，配置及凭证不得置于 Git/代码目录。不会自动安装原 FastAPI 后端、Web、IBKR Gateway、同步任务、订单轮询或交易执行。Tiger 只使用既有 `get_prime_assets` 现金查询，是否需要该配置以迁移源参考为准；不默默丢弃现金。Web 展示比对已在 PoC 02 验证，本包不增加生产 Web 服务。
+
+## 2. 校验包与设备审查（Mac Mini）
+
+把部署包通过可信文件传输交给 Mac Mini。包不包含真实数据库、运行配置或密钥。先从交付记录核对完整 revision 及包 SHA-256，再运行包内校验；仅核对包内自带摘要不能独立建立来源信任。
+
+```bash
+WP_PACKAGE="/absolute/path/to/unpacked-deployment-package"
+WP_PY="/absolute/path/to/native/python3.11"
+WP_ROOT="$HOME/Library/Application Support/WealthPilotProd"
+WP_BOOTSTRAP="$HOME/WealthPilot-PoC03-bootstrap"
+cd "$WP_PACKAGE"
+shasum -a 256 -c SHA256SUMS
+mkdir -m 700 "$WP_BOOTSTRAP"
+tar -xzf "$WP_PACKAGE/source.tar.gz" -C "$WP_BOOTSTRAP"
+WP_TOOLS="$WP_BOOTSTRAP/pocs/poc03_mac_mini"
+WP_REV=$("$WP_PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' "$WP_PACKAGE/release.json")
+"$WP_PY" -c 'import platform,socket; print(platform.machine(),platform.python_version()); print(socket.gethostname())'
+# 以下值必须来自目标 Mac Mini 的实际观察
+WP_HOST="REPLACE_WITH_ACTUAL_MAC_MINI_HOSTNAME"
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" audit
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" prepare --expected-hostname "$WP_HOST"
+```
+
+审查 macOS、剩余磁盘（至少 5GiB）、磁盘故障/备份条件、网络/HTTPS、SSH Remote Login、休眠及断电重启设置。audit 只读观察，部分系统状态需管理员权限；UNKNOWN 必须继续人工核实，不等于通过。由已授权的另一设备测试 SSH，**不要依赖在同一台 Mini 上找到 ssh 客户端作为远程可达证明**。不要自动开放公网端口或修改系统安全设置。
+
+普通用户 LaunchAgent 依赖登录；本方案使用 `/Library/LaunchDaemons` 的 system-domain jobs，通过 `UserName` 以非 root 用户运行，支持解除磁盘锁定后的系统启动。**FileVault 冷启动可能需要现场用户解锁，launchd 无法代替解锁；不能据此承诺无人值守冷重启自动恢复。** 留给第二阶段分别验证进程恢复、解锁后的重启恢复和断电恢复。需要修改休眠/电源策略时由设备操作者审阅，第一阶段不修改这些设置。[Apple launchd 文档](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+
+## 3. 离线安装与原生兼容（Mac Mini）
+
+```bash
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" install-release \
+  --package "$WP_PACKAGE" --revision "$WP_REV" --python "$WP_PY" --expected-hostname "$WP_HOST"
+WP_CODE="$WP_ROOT/releases/$WP_REV/code"
+WP_BIZ="$WP_ROOT/releases/$WP_REV/envs/business/bin/python"
+WP_MCP="$WP_ROOT/releases/$WP_REV/envs/mcp/bin/python"
+WP_TOOLS="$WP_CODE/pocs/poc03_mac_mini"
+"$WP_BIZ" "$WP_TOOLS/compatibility.py" > "$WP_ROOT/evidence/native-business-smoke.json"
+chmod 600 "$WP_ROOT/evidence/native-business-smoke.json"
+```
+
+安装失败保留该 release 供诊断，不标记安装完成、不要修改锁文件绕过哈希/架构检查。重试使用新的空部署根或经审阅清理失败的未激活 release；不要删除已运行版本。实际 arm64 import、SQLite/SQLAlchemy、OpenAI SDK 被动导入及 Tiger `get_prime_assets` 方法导入均需通过；smoke 的临时库、禁网络与禁后端/交易模块边界不可取消。此时尚未启动任何生产进程。
+
+## 4. 生成迁移材料（MacBook 源端，第二阶段协调执行）
+
+本阶段没有执行真实库导出。设备部署阶段在 MacBook 用固定 Git 版本的工具生成一致性备份，**不要 cp 在线数据库或只复制主文件漏掉已提交 WAL**。本脚本用 read transaction + SQLite backup 捕获同一快照，验证完整性和全部表行摘要；不会调用 init_db/get_summary，也不会写入源库。[Python SQLite backup](https://docs.python.org/3.11/library/sqlite3.html#sqlite3.Connection.backup)
+
+```bash
+WP_SRC_CODE="/Users/songbin/.codex/worktrees/poc03-mac-mini-prep/WealthPilot"
+WP_SRC_PY="/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python"
+WP_EXPORT="$HOME/WealthPilot-private-transfer/poc03-export"
+mkdir -p -m 700 "$WP_EXPORT"
+"$WP_SRC_PY" "$WP_SRC_CODE/pocs/poc03_mac_mini/snapshot.py" backup \
+  --source /Users/songbin/Documents/GitHub/WealthPilot/data/wealthpilot.db \
+  --destination "$WP_EXPORT/wealthpilot.db"
+# source-config.json：由源端本地配置提取 portfolio_id 及原 Tiger 三字段，0600；不含 Tunnel Key
+"$WP_SRC_PY" "$WP_SRC_CODE/pocs/poc03_mac_mini/snapshot.py" reference \
+  --database "$WP_EXPORT/wealthpilot.db" --config "$WP_EXPORT/source-config.json" \
+  --output "$WP_EXPORT/migration-reference.json"
+```
+
+`migration-reference.json` 含真实三项金额及当时查询到的现金参考；仅保留在私有目录、通过可信加密传输到同一用户的 Mac Mini。不要提交、上传聊天或写入普通报告。现金读取失败会阻止生成参考。源库和原备份均保留；检查实际 portfolio_id，沿用财富页核心净资产口径。
+
+使用现有可信加密传输或经用户确认的 SSH，传递三个文件：`wealthpilot.db`、`wealthpilot.db.manifest.json`、`migration-reference.json`。仅按实际需要另外传输 Tiger 私钥至 Mini 的 credentials 目录；不要把源端 `.env` 整份迁过去，也不要传旧 PoC Tunnel Key。生产 Tiger 配置路径改为 Mini 本地私钥绝对路径，并确认账户权限与现金来源；不连接 IBKR 或加载交易适配器。
+
+Mac Mini 上将闭合备份放进私有 `backups/source-import/` 目录；校验后导入：
+
+```bash
+WP_IMPORT="$WP_ROOT/backups/source-import"
+"$WP_PY" "$WP_TOOLS/snapshot.py" verify --database "$WP_IMPORT/wealthpilot.db" \
+  --manifest "$WP_IMPORT/wealthpilot.db.manifest.json"
+# 首次没有已启动服务；已有部署时须先按第 7 节停止，证明端口/进程消失
+"$WP_PY" "$WP_TOOLS/snapshot.py" restore --backup "$WP_IMPORT/wealthpilot.db" \
+  --manifest "$WP_IMPORT/wealthpilot.db.manifest.json" --target "$WP_ROOT/data/wealthpilot.db" \
+  --archive-dir "$WP_ROOT/backups" --services-stopped
+cp "$WP_IMPORT/migration-reference.json" "$WP_ROOT/data/migration-reference.json"
+chmod 600 "$WP_ROOT/data/migration-reference.json"
+"$WP_BIZ" "$WP_TOOLS/snapshot.py" check-reference --database "$WP_ROOT/data/wealthpilot.db" \
+  --reference "$WP_ROOT/data/migration-reference.json" > "$WP_ROOT/evidence/migration-amount-check.json"
+chmod 600 "$WP_ROOT/evidence/migration-amount-check.json"
+```
+
+该金额检查重放**同一份迁移现金参考**，复用原财富计算，不重新实现加总；它证明数据库迁移及统计口径一致，不证明 Mini 此刻的实时现金/FX 与源端采集时相同。后面的实际工具查询会使用原现金读取并独立比对；变化必须解释或重新建立经授权的时点参考，不能把差异改成 PASS。`check-reference` 对不一致返回失败且不输出金额。
+
+## 5. 独立凭证与合成私有连接（Mac Mini + 用户账号授权）
+
+用户在 Platform 创建**独立生产普通运行 Key**，只授予 Tunnels Read + Use；不使用 Admin Key，不复用 PoC 02 Key，不把新 Key 发给 Codex/聊天。创建、输入及确认凭证由用户完成，关闭密钥弹窗后再让浏览器工具观察安全页面。创建/修改 Tunnel 范围需要 Read + Manage；运行 Key 不需要 Manage。[OpenAI Docs：Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+
+优先创建单独的生产 Tunnel，仅关联目标个人组织/个人 ChatGPT workspace，停止 MacBook 旧客户端。不要让两台机器同时轮询同一 Tunnel，以免请求落到开发机。**新 Key/新 Tunnel 不自动撤销旧 Key，也不自动隔离同组织的旧权限**；PoC 02 事故仍 FAIL。设备阶段应核对暴露旧 Key 对生产范围的影响，并记录用户处理决定，不能将新凭证创建写成旧事故已补救。
+
+在 Mini 私有目录准备以下输入，不提供任何实际值到 Git：
+
+- `config/wealth-input.json`：`portfolio_id`（正整数）；必要时 `tiger_cash` 精确三个字段 `TIGER_ID`、`TIGER_ACCOUNT`、`TIGER_PRIVATE_KEY_PATH`。输入不接受任意数据库位置，生产库固定在 data。
+- `config/tunnel-id`：生产 Tunnel ID，0600。
+- `config/expected-scope.json`：`organization_ids` 与 `workspace_ids` 各为期望的私有 ID 数组，0600，不在报告打印。
+
+```bash
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" save-key --expected-hostname "$WP_HOST"
+# 由用户在隐藏提示中输入新生产 Key，脚本拒绝覆盖旧文件
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" configure --revision "$WP_REV" \
+  --wealth-input "$WP_ROOT/config/wealth-input.json" --tunnel-id-file "$WP_ROOT/config/tunnel-id" \
+  --expected-hostname "$WP_HOST"
+"$WP_PY" "$WP_TOOLS/access_check.py" --root "$WP_ROOT" --expected-scope "$WP_ROOT/config/expected-scope.json"
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" services install --expected-hostname "$WP_HOST"
+# 审阅生成的两个 plist 和计划；以下是实际系统安装，仅第二阶段执行
+sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" services install --apply --expected-hostname "$WP_HOST"
+"$WP_MCP" "$WP_TOOLS/validate.py" --expect synthetic --output "$WP_ROOT/evidence/local-synthetic.json"
+curl --fail --silent http://127.0.0.1:8789/readyz
+```
+
+Scope probe 使用认证 metadata GET 与四项匿名/无效凭证 GET；不模拟其他人的账号，不能代替用户确认成员范围或最小权限。未通过时停留合成，不开启真实。核实 lsof 只有 127.0.0.1:8788/8789，无公网监听；TLS/证书问题应修正可信 CA，不能关闭验证。实际网络须允许 outbound `api.openai.com:443`、Tiger 和所需 FX 服务；不安装公网反向代理。[OpenAI 网络要求](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+
+用户在 ChatGPT Web 添加/连接生产 Tunnel 的自定义 MCP，并发起合成 CNY 请求，取得 Mini 的真实完成记录和投递证据。账号连接/授权由用户确认；不要仅凭“已连接”标记工具调用通过。若新 Key 最小权限无法设置/验证，记录 BLOCKED；不得改用旧 Key 作为生产凭证。
+
+## 6. 真实模式与端到端验收
+
+全部实际证据完成后，在 Mini 本地建立 `config/access-evidence.json`，0600。字段必须由第二阶段根据真实观察填写，未完成填 false；八项均 true 才允许真实模式：
+
+```json
+{
+  "access_scope_confirmed": false,
+  "synthetic_web_pass": false,
+  "anonymous_denied": false,
+  "no_public_listener": false,
+  "independent_production_credential": false,
+  "minimal_permissions_verified": false,
+  "migration_verified": false,
+  "native_business_smoke_pass": false
+}
+```
+
+这是操作者防误启用门槛，**不是认证协议**；真实安全边界由 Tunnel 的控制面授权、组织/工作区范围及可信本机环境实施。不要把样例 false 批量改成 true 替代实际验收。当前第一阶段这些生产项全部待验证。
+
+```bash
+sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
+  --revision "$WP_REV" --mode real --apply --expected-hostname "$WP_HOST"
+"$WP_MCP" "$WP_TOOLS/validate.py" --expect real \
+  --reference "$WP_ROOT/data/migration-reference.json" --output "$WP_ROOT/evidence/local-real.json"
+```
+
+真实启动还检查数据库摘要与迁移参考一致、现金配置存在性一致和 Git 无改动；不修改业务代码。仅一个 `get_wealth_overview(currency=CNY)` 工具，返回整数分/scale=2，保留 partial、过期和未知日期。金额差异或来源 unavailable 时验收 FAIL/BLOCKED，先停止 Tunnel/切回合成，再查明来源；不打开同步/交易能力修补数据。
+
+依次验收并保存**不含真实金额/凭证**的摘要证据：
+
+1. Mini 本地真实工具：发现唯一只读工具，三个金额与参考逐分一致，原库无业务写入。
+2. ChatGPT Web 新请求：专门时间窗口，Mini `run/completions.jsonl` 的 synthetic=false、partial/ok 和 Tunnel 投递对应；确认三个金额、CNY 分换算及质量提示。
+3. 真实 iOS App 新聊天调用生产插件：独立时间窗口，记录实际 App 版本、用户对比结论和 Mini 记录，不用同步旧聊天代替发起请求。
+4. 关闭 MacBook 后再从 Web/iOS 发起请求，Mini 出现新完成记录；证明运行代码、数据库、Tiger 私钥和 Tunnel Key 均来自 Mini。关闭 MacBook 前确认不能再通过开发机转发。
+5. 用户审阅后仅终止本服务的子进程，等待 launchd 重建 worker-wrapper/child，观察新 PID 和再查询成功；不要使用 pkill python 或停止其他服务。
+6. 用户协调实际重启 Mini，解锁 FileVault 后验证 system-domain jobs、Tunnel ready 与远程查询；分别记录有无现场解锁，未验证冷启动不能声称无人值守恢复通过。
+7. 本轮数据库与 WAL 字节无变化，log 只有元数据，没有 broker-sync/order-poller/交易入口或完整 FastAPI 后端进程。静态入口限制和临时 smoke 的模块阻断是证据，不能单靠 BROKER_MODE=mock 宣称禁止全部交易。
+8. 先停止服务，再在独立恢复副本演练 snapshot restore/verify/check-reference；保留源导出及恢复前备份，只有实际恢复并重新读取通过才写备份恢复 PASS。
+
+将执行记录填写到设备端 `evidence/`；更新验收报告时区分脚本 PASS、设备 PASS 和 BLOCKED。真实数据过期/未知仍显示 partial 是正确行为，本轮不自动刷新持仓。
+
+## 7. 停止、回滚与运行边界
+
+```bash
+# 停止顺序：Tunnel → MCP，默认没有 --apply 只出计划
+sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" services stop --apply --expected-hostname "$WP_HOST"
+# 代码回滚：选择已安装、经校验的旧完整 SHA；首次部署只有本版本时使用 synthetic 模式
+WP_OLD_REV="REPLACE_WITH_PREVIOUS_INSTALLED_FULL_GIT_SHA"
+sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
+  --revision "$WP_OLD_REV" --mode synthetic --apply --expected-hostname "$WP_HOST"
+```
+
+代码/模式回滚不自动回退数据，旧版本需保留。`backups/previous-runtime.json` 记录上次 revision/mode。数据恢复先停止两服务，用第 4 节 restore 命令选择经验证的不可变备份；脚本先保留当前库，再原子替换，拒绝未审阅 WAL/SHM/journal 侧文件。不要删除真实侧文件绕过失败。恢复后重新核对 manifest、三项金额和现金参考，再启动/授权真实模式。
+
+若 bootstrap 失败，脚本停止两服务以避免半启动的私有入口。已有相同 label 但属于其他目录/用户/命令的 jobs 会拒绝覆盖和停止。bootstrap 并不证明服务健康；必须继续 readyz 和实际查询验证。launchd 没有 TCP 依赖排序：Tunnel 可在 MCP 暂不可达时重试，恢复行为仍需设备端验证。
+
+日志仅记录启动/退出和 PID，原始子进程输出丢弃；每服务轮转总上限约 4MiB。工具完成记录需运营期定期归档（不含金额），控制磁盘增长。首次生产候选目标是有限只读基础环境，7×24 可用性、网络重连、休眠和备份保存周期须在第二阶段取得实际证据；本阶段不加入调度同步、监控平台或 CI/CD。
+
+保留最小权限独立生产凭证，凭证变更由用户完成；任何退回匿名公网、复用旧事故 Key、启用交易、修改业务代码或放宽权限均超出本包范围。不要把设备阶段的临时修复直接留在 Prod 代码中；必要变更回 Dev 短期分支，再以新的 Git SHA 重新打包。

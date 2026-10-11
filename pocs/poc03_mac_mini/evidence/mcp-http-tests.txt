@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/songbin/.codex/worktrees/poc03-mac-mini-prep/WealthPilot
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collected 9 items
+
+pocs/poc02_wealth_mcp/test_http.py .........                             [100%]
+
+============================== 9 passed in 3.35s ===============================

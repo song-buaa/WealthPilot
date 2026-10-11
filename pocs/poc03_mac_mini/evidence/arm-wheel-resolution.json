@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "business_locked_packages": 46,
+  "mcp_locked_packages": 29,
+  "offline_arm_wheel_resolution_and_hashes": true,
+  "native_installation": "BLOCKED_STAGE2",
+  "mac_mini_access": false,
+  "source_builds_at_deployment": false
+}

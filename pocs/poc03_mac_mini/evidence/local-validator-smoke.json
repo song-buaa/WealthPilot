@@ -1,0 +1,13 @@
+{
+  "schema": "poc03.mcp-validation.v1",
+  "result": "PASS",
+  "one_readonly_tool": true,
+  "contract_valid": true,
+  "synthetic": true,
+  "status": "partial",
+  "issues": [
+    "SYNTHETIC_FIXTURE"
+  ],
+  "amounts_equal_to_migration_reference": null,
+  "comparison_note": "Live cash/FX may change after migration; a difference needs review, not an automatic PASS."
+}

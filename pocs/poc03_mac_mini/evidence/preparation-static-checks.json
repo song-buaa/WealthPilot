@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "python_scripts_compiled": 9,
+  "plist_lint_pass": 2,
+  "real_launchctl_executed": false,
+  "ssh_or_mac_mini_contact": false,
+  "real_database_accessed": false,
+  "current_source_secret_pattern_candidates": [],
+  "full_reachable_git_history_sensitive_file_paths": [],
+  "scan_limit": "File-name and credential-pattern checks are not an exhaustive historical secret audit."
+}

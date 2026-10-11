@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ExitTimeOut</key>
+	<integer>20</integer>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.wealthpilot.secure-tunnel</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/REPLACE/WealthPilotProd/current/envs/mcp/bin/python</string>
+		<string>/REPLACE/WealthPilotProd/current/code/pocs/poc03_mac_mini/runner.py</string>
+		<string>--root</string>
+		<string>/REPLACE/WealthPilotProd</string>
+		<string>--role</string>
+		<string>tunnel</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/dev/null</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>UserName</key>
+	<string>REPLACE_WITH_SERVICE_USER</string>
+	<key>WorkingDirectory</key>
+	<string>/REPLACE/WealthPilotProd</string>
+</dict>
+</plist>

@@ -1,0 +1,30 @@
+{
+  "schema": "poc03.stage2-record.v1",
+  "stage1_result": "PASS_PREPARATION_ONLY",
+  "production_result": "BLOCKED_STAGE2_NOT_EXECUTED",
+  "revision": null,
+  "device": {"hardware_verified_mac_mini": null, "macos_version": null, "python_version": null, "python_architecture": null, "filevault_unlock_required_after_reboot": null},
+  "checks": {
+    "environment_storage_ssh_network_power": {"status": "BLOCKED", "evidence": []},
+    "offline_arm_install_and_native_smoke": {"status": "BLOCKED", "evidence": []},
+    "consistent_source_backup_and_migration": {"status": "BLOCKED", "evidence": []},
+    "three_amounts_equal_to_source_reference": {"status": "BLOCKED", "evidence": []},
+    "independent_runtime_key_minimal_read_use_permissions": {"status": "BLOCKED", "evidence": []},
+    "personal_scope_and_anonymous_denial": {"status": "BLOCKED", "evidence": []},
+    "synthetic_web_before_real_activation": {"status": "BLOCKED", "evidence": []},
+    "local_real_mcp_contract_and_amounts": {"status": "BLOCKED", "evidence": []},
+    "chatgpt_web_new_real_request": {"status": "BLOCKED", "evidence": []},
+    "chatgpt_ios_new_real_request": {"status": "BLOCKED", "app_version": null, "evidence": []},
+    "macbook_powered_off_remote_query": {"status": "BLOCKED", "evidence": []},
+    "child_exit_launchd_recovery": {"status": "BLOCKED", "evidence": []},
+    "reboot_recovery_after_disk_unlock": {"status": "BLOCKED", "evidence": []},
+    "unattended_cold_boot_power_loss": {"status": "BLOCKED", "evidence": []},
+    "network_disconnect_reconnect": {"status": "BLOCKED", "evidence": []},
+    "no_trade_sync_orders_or_full_backend": {"status": "BLOCKED", "evidence": []},
+    "real_database_and_wal_no_business_writes": {"status": "BLOCKED", "evidence": []},
+    "isolated_verified_restore_and_reread": {"status": "BLOCKED", "evidence": []},
+    "stale_unknown_sources_still_partial": {"status": "BLOCKED", "evidence": []}
+  },
+  "poc02_credential_incident": {"status": "FAIL", "remediated": false, "new_key_does_not_revoke_old_key": true, "production_scope_impact_review": "BLOCKED_STAGE2", "user_decision_recorded": false},
+  "recording_rule": "Metadata, comparison booleans and timestamps only. No keys, tokens, IDs, account names or financial payloads. Never replace pending status with PASS without actual device evidence."
+}
