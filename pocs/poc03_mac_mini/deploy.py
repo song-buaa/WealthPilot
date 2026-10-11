@@ -248,6 +248,7 @@ def main():
     commands.add_parser("audit")
     p = commands.add_parser("prepare"); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("install-release"); p.add_argument("--package", required=True); p.add_argument("--revision", required=True); p.add_argument("--python", required=True); p.add_argument("--expected-hostname", required=True)
+    p = commands.add_parser("install-github"); p.add_argument("--revision", required=True); p.add_argument("--python", required=True); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("configure"); p.add_argument("--revision", required=True); p.add_argument("--wealth-input", required=True); p.add_argument("--tunnel-id-file", required=True); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("save-key"); p.add_argument("--expected-hostname", required=True)
     p = commands.add_parser("services"); p.add_argument("action", choices=("install", "start", "stop", "restart")); p.add_argument("--apply", action="store_true"); p.add_argument("--expected-hostname", required=True)
@@ -261,6 +262,9 @@ def main():
         layout(root); result = {"prepared": True}
     elif args.command == "install-release":
         install_release(root, args.package, args.revision, args.python); result = {"installed": True}
+    elif args.command == "install-github":
+        from github_release import install_github
+        install_github(root, args.revision, args.python); result = {"installed": True, "source": "GitHub", "activated": False}
     elif args.command == "configure":
         configure(root, args.revision, args.expected_hostname, args.wealth_input, args.tunnel_id_file); result = {"configured": True, "mode": "synthetic"}
     elif args.command == "save-key":

@@ -99,3 +99,39 @@ jobs:
           python -m pip install -r requirements.txt pytest
       - name: Run deterministic offline decision gate
         run: python scripts/m5_e2e_18_cases.py --mode offline
+
+  mcp-poc-tests:
+    name: MCP PoC tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      WEALTHPILOT_DB_PATH: /tmp/wealthpilot-${{ github.run_id }}-${{ github.run_attempt }}-poc.db
+      PUBLIC_DEMO_MODE: "true"
+      DEMO_ACCESS_PASSWORD: ci-offline-only
+      DEMO_ALLOW_MARKET_DATA: "false"
+      BROKER_MODE: mock
+      IBKR_READ_ONLY_MODE: "true"
+      ENABLE_IBKR_LIVE_TRADING: "false"
+      ENABLE_TIGER_LIVE_TRADING: "false"
+      FUTU_READ_ONLY_MODE: "true"
+      AV_DEV_MOCK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install business test dependencies
+        run: python -m pip install -r requirements.txt pytest==8.4.2
+      - name: Compile and test readonly adapter and deployment guards
+        run: |
+          python -m compileall -q pocs
+          python -m pytest -q pocs/poc02_wealth_mcp/test_reader.py pocs/poc03_mac_mini/test_deployment.py pocs/poc03_mac_mini/test_github_release.py
+      - name: Test both MCP HTTP servers in an independent environment
+        run: |
+          python -m venv "$RUNNER_TEMP/wealthpilot-mcp-poc"
+          "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pip install -r pocs/poc01_private_mcp/requirements-dev.txt
+          "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pytest -q pocs/poc01_private_mcp/tests/test_http.py
+          "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pytest -q pocs/poc02_wealth_mcp/test_http.py
