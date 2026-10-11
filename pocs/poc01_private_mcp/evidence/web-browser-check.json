@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-11",
+  "source": "cua_repl documented browser APIs; follow-up after user clarification",
+  "user_reported": {
+    "logged_in": true,
+    "browser": "Codex in-app browser"
+  },
+  "observed_tab_metadata": {
+    "title": "ChatGPT",
+    "url": "https://chatgpt.com/"
+  },
+  "operations": [
+    {"operation": "tabs.list", "result": "SUCCESS"},
+    {"operation": "cua.getTab", "timeout_seconds": 15, "result": "TIMEOUT"},
+    {"operation": "tabs.get plus playwright.domSnapshot", "timeout_seconds": 15, "result": "TIMEOUT"},
+    {"operation": "tabs.get plus screenshot", "timeout_seconds": 15, "result": "TIMEOUT"}
+  ],
+  "status": "BLOCKED",
+  "reason": "No readable or operable logged-in page; metadata and user login report do not prove MCP discovery or invocation in ChatGPT.",
+  "account_permissions_changed": false,
+  "chatgpt_mcp_connection_created": false
+}

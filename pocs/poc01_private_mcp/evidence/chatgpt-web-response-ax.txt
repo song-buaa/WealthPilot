@@ -1,0 +1,343 @@
+container 对话
+											280 container
+												281 标题 你说：, Value: 4
+													282 文本 你说：
+												283 文本 请使用 WealthPilot PoC 01 (synthetic only) 调用 get_synthetic_wealth_summary，参数 currency 为 CNY。展示工具返回的原始 JSON，并据此列出总资产、总负债、净资产及金额单位，明确说明这是合成测试数据。不要使用其他插件或真实账户数据。
+												284 按钮 复制消息
+												285 按钮 共享提示
+												286 按钮 编辑消息
+												287 container
+													288 按钮 思考了 4s
+													289 文本 思考了 4s
+												290 文本 获取合成财富摘要
+												291 标题 ChatGPT 说：, Value: 4
+													292 文本 ChatGPT 说：
+												293 container
+													294 text 已成功调用  WealthPilot  PoC  01  (synthetic  only) 的  get_synthetic_wealth_summary 接口，参数为  currency:  "CNY" 。
+												295 container
+													296 text 接口返回成功。以下数据全部来自固定的合成测试样本， 不包含任何真实账户或个人财务信息 。
+												297 标题 1. 工具返回的原始 JSON, Value: 2
+													298 text 1.  工具返回的原始  JSON
+												299 container
+													300 文本 JSON
+													301 切换按钮 启用自动换行, Value: 0
+													302 按钮 复制
+													303 container
+														304 text 
+{
+  "schema_version":  "poc01.wealth-summary.v1" ,
+  "synthetic":  true ,
+  "source":  "hardcoded_fixture" ,
+  "as_of":  "2026-01-01T00:00:00Z" ,
+  "currency":  "CNY" ,
+  "amount_unit":  "minor" ,
+  "minor_unit_scale":  2 ,
+  "total_assets_minor":  100000000 ,
+  "total_liabilities_minor":  10000000 ,
+  "net_worth_minor":  90000000 ,
+  "assets": [
+    {
+      "category":  "cash" ,
+      "amount_minor":  20000000 
+    },
+    {
+      "category":  "fixed_income" ,
+      "amount_minor":  40000000 
+    },
+    {
+      "category":  "equity" ,
+      "amount_minor":  30000000 
+    },
+    {
+      "category":  "other" ,
+      "amount_minor":  10000000 
+    }
+  ],
+  "notice":  "SYNTHETIC TEST DATA ONLY — not the user's financial information." 
+}
+
+												305 标题 2. 财富汇总, Value: 2
+													306 text 2.  财富汇总
+												307 文本 总资产
+												308 标题 ¥100万, Value: 1
+													309 文本 ¥100万
+												310 文本 总负债
+												311 标题 ¥10万, Value: 1
+													312 文本 ¥10万
+												313 文本 净资产
+												314 标题 ¥90万, Value: 1
+													315 文本 ¥90万
+												316 表格
+													317 row
+														318 列标题
+															319 文本 指标
+														320 列标题
+															321 文本 原始数值（分）
+														322 列标题
+															323 文本 换算金额（元）
+													324 row
+														325 单元格
+															326 文本 总资产
+														327 单元格
+															328 文本 100,000,000
+														329 单元格
+															330 文本 ¥1,000,000.00
+													331 row
+														332 单元格
+															333 文本 总负债
+														334 单元格
+															335 文本 10,000,000
+														336 单元格
+															337 文本 ¥100,000.00
+													338 row
+														339 单元格
+															340 文本 净资产
+														341 单元格
+															342 文本 90,000,000
+														343 单元格
+															344 文本 ¥900,000.00
+												345 文本 金额单位说明：
+												346 内容列表
+													347 container
+														348 AXListMarker • 
+														349 container
+															350 text currency:  CNY
+														351 文本 ：人民币
+													352 container
+														353 AXListMarker • 
+														354 container
+															355 text amount_unit:  minor
+														356 文本 ：金额使用最小货币单位，即分
+													357 container
+														358 AXListMarker • 
+														359 container
+															360 text minor_unit_scale:  2
+														361 text ：换算成人民币元时除以  100
+												362 标题 3. 资产结构, Value: 2
+													363 text 3.  资产结构
+												364 container
+													365 container 资产类别分布
+														366 文本 资产类别分布
+														367 文本 合成测试数据，单位：人民币元
+														368 container
+															369 图像 资产类别分布 图表
+															370 内容列表
+																371 文本 现金: 20万
+																372 文本 固定收益: 40万
+																373 文本 权益资产: 30万
+																374 文本 其他资产: 10万
+													375 按钮 共享
+													376 按钮 图表选项
+												377 表格
+													378 row
+														379 列标题
+															380 文本 资产类型
+														381 列标题
+															382 文本 金额
+														383 列标题
+															384 文本 占总资产比例
+													385 row
+														386 单元格
+															387 文本 现金（cash）
+														388 单元格
+															389 文本 ¥200,000
+														390 单元格
+															391 文本 20%
+													392 row
+														393 单元格
+															394 文本 固定收益（fixed_income）
+														395 单元格
+															396 文本 ¥400,000
+														397 单元格
+															398 文本 40%
+													399 row
+														400 单元格
+															401 文本 权益资产（equity）
+														402 单元格
+															403 文本 ¥300,000
+														404 单元格
+															405 文本 30%
+													406 row
+														407 单元格
+															408 文本 其他资产（other）
+														409 单元格
+															410 文本 ¥100,000
+														411 单元格
+															412 文本 10%
+												413 标题 4. 数据性质与验证结论, Value: 2
+													414 text 4.  数据性质与验证结论
+												415 表格
+													416 row
+														417 列标题
+															418 文本 检查项
+														419 列标题
+															420 文本 结果
+													421 row
+														422 单元格
+															423 文本 接口调用
+														424 单元格
+															425 container
+																426 图像
+																427 文本 成功
+													428 row
+														429 单元格
+															430 文本 请求币种
+														431 单元格
+															432 文本 CNY
+													433 row
+														434 单元格
+															435 文本 合成数据标志
+														436 单元格
+															437 container
+																438 text synthetic:  true
+													439 row
+														440 单元格
+															441 文本 数据来源
+														442 单元格
+															443 文本 hardcoded_fixture
+													444 row
+														445 单元格
+															446 文本 数据基准时间
+														447 单元格
+															448 container
+																449 text 2026-01-01  00:00:00  UTC
+													450 row
+														451 单元格
+															452 文本 资产负债计算
+														453 单元格
+															454 container
+																455 text ¥100万  −  ¥10万  =  ¥90万，正确
+													456 row
+														457 单元格
+															458 文本 资产分类加总
+														459 单元格
+															460 文本 ¥100万，与总资产一致
+													461 row
+														462 单元格
+															463 文本 真实账户访问
+														464 单元格
+															465 文本 未使用
+												466 container
+													467 text 结论： WealthPilot  PoC  01  的合成财富汇总接口调用成功，返回数据结构完整，金额单位明确，资产与负债之间的算术关系一致。
+												468 文本 本次仅调用了指定的合成测试接口，没有使用其他插件、真实银行账户、投资账户或实际资产数据。
+												469 按钮 复制
+												470 按钮 评价回复
+												471 按钮 分享
+												472 切换按钮 朗读, Value: 0
+												473 弹出式按钮 重新生成回复
+												474 弹出式按钮 更多操作
+												475 标题 你说：, Value: 4
+													476 文本 你说：
+												477 文本 调用 get_synthetic_wealth_summary，currency=CNY，返回合成结果
+												478 按钮 复制消息
+												479 按钮 共享提示
+												480 按钮 编辑消息
+												481 container
+													482 按钮 思考了几秒
+													483 文本 思考了几秒
+												484 标题 ChatGPT 说：, Value: 4
+													485 文本 ChatGPT 说：
+												486 container
+													487 text 已成功调用  WealthPilot  PoC  01  (synthetic  only) 的  get_synthetic_wealth_summary ，请求参数为  currency=CNY 。
+												488 标题 原始 JSON 返回结果, Value: 2
+													489 text 原始  JSON  返回结果
+												490 container
+													491 文本 JSON
+													492 切换按钮 启用自动换行, Value: 0
+													493 按钮 复制
+													494 container
+														495 text 
+{
+  "schema_version":  "poc01.wealth-summary.v1" ,
+  "synthetic":  true ,
+  "source":  "hardcoded_fixture" ,
+  "as_of":  "2026-01-01T00:00:00Z" ,
+  "currency":  "CNY" ,
+  "amount_unit":  "minor" ,
+  "minor_unit_scale":  2 ,
+  "total_assets_minor":  100000000 ,
+  "total_liabilities_minor":  10000000 ,
+  "net_worth_minor":  90000000 ,
+  "assets": [
+    {
+      "category":  "cash" ,
+      "amount_minor":  20000000 
+    },
+    {
+      "category":  "fixed_income" ,
+      "amount_minor":  40000000 
+    },
+    {
+      "category":  "equity" ,
+      "amount_minor":  30000000 
+    },
+    {
+      "category":  "other" ,
+      "amount_minor":  10000000 
+    }
+  ],
+  "notice":  "SYNTHETIC TEST DATA ONLY — not the user's financial information." 
+}
+
+												496 标题 财富汇总, Value: 2
+													497 文本 财富汇总
+												498 文本 总资产
+												499 标题 ¥100万, Value: 1
+													500 文本 ¥100万
+												501 文本 总负债
+												502 标题 ¥10万, Value: 1
+													503 文本 ¥10万
+												504 文本 净资产
+												505 标题 ¥90万, Value: 1
+													506 文本 ¥90万
+												507 表格
+													508 row
+														509 列标题
+															510 文本 资产类别
+														511 列标题
+															512 文本 金额（人民币元）
+													513 row
+														514 单元格
+															515 文本 现金
+														516 单元格
+															517 文本 ¥200,000
+													518 row
+														519 单元格
+															520 文本 固定收益
+														521 单元格
+															522 文本 ¥400,000
+													523 row
+														524 单元格
+															525 文本 权益资产
+														526 单元格
+															527 文本 ¥300,000
+													528 row
+														529 单元格
+															530 文本 其他资产
+														531 单元格
+															532 文本 ¥100,000
+												533 container
+													534 text 单位说明： 原始  JSON  使用人民币最小单位「分」，换算成人民币元需除以  100。
+												535 container
+													536 text 数据性质： synthetic=true ， source=hardcoded_fixture 。这是一组固定的合成测试数据，不是真实用户的财务信息。本次未访问任何真实账户。
+												537 按钮 复制
+												538 按钮 评价回复
+												539 按钮 分享
+												540 切换按钮 朗读, Value: 0
+												541 弹出式按钮 重新生成回复
+												542 弹出式按钮 更多操作
+											543 container
+												544 文本 ChatGPT 可能会出错。请核查重要信息。
+											545 container
+												546 按钮 滚动到底部
+												547 标题 最新一条回复, Value: 4
+													548 文本 最新一条回复
+												549 container
+													550 按钮 添加文件等内容
+													551 文本输入区 (settable) 询问 ChatGPT, Value: 询问 ChatGPT
+
+														552 文本 询问 ChatGPT
+													553 弹出式按钮 选择 ChatGPT 模型
+													554 按钮 听写
+													555 按钮 开始语音
+							556 

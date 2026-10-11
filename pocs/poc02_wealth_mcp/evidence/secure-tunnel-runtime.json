@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-10-11T07:31:06.504315+00:00",
+  "client_version": "0.0.16+5f99daabd4aa4a77049e6d81d54a0d8c18335397",
+  "authorized_metadata_http_status": 200,
+  "organization_associations": 1,
+  "workspace_associations": 1,
+  "control_plane_status": "ok",
+  "control_plane_consecutive_failures": 0,
+  "local_listener_addresses": [
+    "127.0.0.1:8788",
+    "127.0.0.1:8789"
+  ],
+  "public_listener": false,
+  "cloudflared_enabled": false,
+  "runtime_key_in_repository": false,
+  "runtime_key_file_mode": "0o600",
+  "raw_http_logging_enabled": false,
+  "payload_capture_enabled": false,
+  "download_sha256": "a160820d45089b5253d8d671fe2a689bde0f73d78c135d1497a7b33f28a3ac62",
+  "checksum_source": "https://github.com/openai/tunnel-client/releases/download/v0.0.16/SHA256SUMS.txt"
+}

@@ -1,0 +1,12 @@
+{
+  "original": {
+    "files_checked": 32,
+    "differences": [],
+    "pass": true
+  },
+  "poc02_copy": {
+    "files_checked": 32,
+    "differences": [],
+    "pass": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "mutation_methods_http": {
+    "POST": 405,
+    "PATCH": 405,
+    "DELETE": 405,
+    "PUT": 405
+  },
+  "mutation_methods_denied": true,
+  "served_unmodified_build_index": true,
+  "production_database_and_wal_unchanged": true,
+  "only_clone_written": true,
+  "frontend_build_pass": true,
+  "frontend_build_warning": "existing bundle exceeds 500 kB; no scope expansion"
+}

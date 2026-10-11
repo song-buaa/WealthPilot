@@ -1,0 +1,29 @@
+{
+  "snapshot_at": "2026-10-11T07:52:17.301794Z",
+  "ready": true,
+  "dispatcher": {
+    "active": 0,
+    "pool_limit": 10,
+    "last_start": "2026-10-11T07:49:52.468136Z",
+    "last_completion": "2026-10-11T07:49:57.42935Z",
+    "oldest_active_age_seconds": 0,
+    "completed": 1,
+    "failures": 0,
+    "timeouts": 0,
+    "accepting": true
+  },
+  "response_delivery": {
+    "in_progress": 0,
+    "last_accepted": "2026-10-11T07:49:57.42929Z",
+    "last_completed": "2026-10-11T07:49:57.42929Z",
+    "disposition": "accepted",
+    "http_status": 200,
+    "attempts": 1,
+    "retries": 0,
+    "accepted": 1,
+    "completed": 1,
+    "terminal_failures": 0
+  },
+  "control_plane_consecutive_failures": 0,
+  "cloudflared_enabled": false
+}

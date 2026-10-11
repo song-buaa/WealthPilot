@@ -1,0 +1,21 @@
+{
+  "baseline_calls": 1,
+  "baseline_source": "independent local probe, not ChatGPT",
+  "observation": "Python profile return events, server fixture function only",
+  "business_code_modified": false,
+  "observer_location": "temporary sitecustomize via isolated PYTHONPATH",
+  "web_call_status": "PASS",
+  "phone_call_status": "PASS",
+  "note": "No further independent probe calls during account tests; user actions requested sequentially.",
+  "web_call_index_after_control": 1,
+  "web_observed_at_utc": "2026-10-11T04:59:58Z",
+  "web_correlation": "Only local control then requested Chrome retry; new request and same result visible in native AX. No other probe calls in this interval. Not an authenticated client identity or request-ID correlation.",
+  "phone_call_index_after_control": 2,
+  "phone_observed_at_utc": "2026-10-11T05:01:18Z",
+  "total_observed_returns": 3,
+  "phone_correlation": "User confirmed phone sent after Web confirmation; third return in next time window; no independent probe requests.",
+  "isolation": {
+    "violations": [],
+    "business_modules_loaded": []
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "completion": {
+    "time": "2026-10-11T07:49:57.086457+00:00",
+    "tool": "get_wealth_overview",
+    "synthetic": false,
+    "status": "partial",
+    "returned": true
+  },
+  "reply_vs_existing_web_summary_exact_cny": {
+    "total_assets": true,
+    "total_liabilities": true,
+    "net_worth": true
+  },
+  "unit_cny_displayed": true,
+  "partial_warning_visible": true,
+  "synthetic_false_visible": true,
+  "source": "native Chrome AX read privately; exact Decimal comparison; no balances retained"
+}

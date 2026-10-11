@@ -1,0 +1,4 @@
+# Independent environment only; do not install into WealthPilot's business env.
+mcp==2.3.0
+# Binary wheel available for the audited Intel Python on macOS ARM.
+cryptography==46.0.3

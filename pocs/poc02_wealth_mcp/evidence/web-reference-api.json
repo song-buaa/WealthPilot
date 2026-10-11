@@ -1,0 +1,11 @@
+{
+  "existing_summary_service": true,
+  "unmodified_frontend_build": true,
+  "private_clone": true,
+  "preflight_matches": {
+    "total_assets": true,
+    "total_liabilities": true,
+    "net_worth": true
+  },
+  "production_summary_writes": false
+}

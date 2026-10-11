@@ -1,0 +1,39 @@
+{
+  "observed_at_utc": "2026-10-11T05:01:18Z",
+  "tool": "get_synthetic_wealth_summary",
+  "arguments": {
+    "currency": "CNY"
+  },
+  "result": {
+    "schema_version": "poc01.wealth-summary.v1",
+    "synthetic": true,
+    "source": "hardcoded_fixture",
+    "as_of": "2026-01-01T00:00:00Z",
+    "currency": "CNY",
+    "amount_unit": "minor",
+    "minor_unit_scale": 2,
+    "total_assets_minor": 100000000,
+    "total_liabilities_minor": 10000000,
+    "net_worth_minor": 90000000,
+    "assets": [
+      {
+        "category": "cash",
+        "amount_minor": 20000000
+      },
+      {
+        "category": "fixed_income",
+        "amount_minor": 40000000
+      },
+      {
+        "category": "equity",
+        "amount_minor": 30000000
+      },
+      {
+        "category": "other",
+        "amount_minor": 10000000
+      }
+    ],
+    "notice": "SYNTHETIC TEST DATA ONLY — not the user's financial information."
+  },
+  "source": "Python profile return event in isolated server"
+}

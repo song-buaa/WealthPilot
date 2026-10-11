@@ -1,0 +1,31 @@
+{
+  "source_route_evidence": "https://github.com/openai/tunnel-client/blob/v0.0.16/pkg/controlplane/internal/tunnel_service_client.go#L40",
+  "checks": [
+    {
+      "route": "metadata",
+      "method": "GET",
+      "authentication": "none",
+      "http_status": 401
+    },
+    {
+      "route": "poll",
+      "method": "GET",
+      "authentication": "none",
+      "http_status": 401
+    },
+    {
+      "route": "metadata",
+      "method": "GET",
+      "authentication": "invalid",
+      "http_status": 401
+    },
+    {
+      "route": "poll",
+      "method": "GET",
+      "authentication": "invalid",
+      "http_status": 401
+    }
+  ],
+  "all_denied": true,
+  "scope": "Control-plane authentication denial; second ChatGPT workspace access not impersonated. Initial POST poll attempt returned 405 and was not counted as an authentication PASS."
+}

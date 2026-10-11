@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "completion": {
+    "time": "2026-10-11T07:54:44.573298+00:00",
+    "tool": "get_wealth_overview",
+    "synthetic": false,
+    "status": "partial",
+    "returned": true
+  },
+  "device": "real iOS ChatGPT App",
+  "invocation": "user reports new chat with PoC 02 selected, independent from Web",
+  "three_amounts_match_web": "user confirmed",
+  "synthetic_false_and_partial": "server completion confirmed; native phone UI was not inspected by agent",
+  "client_attribution": "separate requested time window plus user confirmation; no cryptographic client-type claim",
+  "app_version": "1.2026.258 reported by user during PoC 01 earlier on this date; not re-read in PoC 02",
+  "payload_retained_in_git": false
+}

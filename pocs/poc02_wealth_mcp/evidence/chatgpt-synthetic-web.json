@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "user_channel": "Chrome Web",
+  "user_report": "Synthetic Web request sent",
+  "tool_completions": [
+    {
+      "time": "2026-10-11T07:39:31.821404+00:00",
+      "tool": "get_wealth_overview",
+      "synthetic": true,
+      "status": "partial",
+      "returned": true
+    }
+  ],
+  "response_delivery_http_status": 200,
+  "response_delivery_accepted": true,
+  "attribution": "Single user-directed time window, no local tool-call probe; not cryptographic client identity.",
+  "personal_access_scope_user_confirmed": true,
+  "private_data_enabled": false
+}

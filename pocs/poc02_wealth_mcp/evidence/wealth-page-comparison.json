@@ -1,0 +1,24 @@
+{
+  "wealth_page_displayed": true,
+  "source": "native Chrome AX, private local snapshot; unchanged WealthOverview and fmtCny",
+  "kpi_checks": {
+    "total_assets": {
+      "page_matches_existing_formatter": true,
+      "chat_matches_underlying_summary": true,
+      "chat_formatted_matches_page": true
+    },
+    "total_liabilities": {
+      "page_matches_existing_formatter": true,
+      "chat_matches_underlying_summary": true,
+      "chat_formatted_matches_page": true
+    },
+    "net_worth": {
+      "page_matches_existing_formatter": true,
+      "chat_matches_underlying_summary": true,
+      "chat_formatted_matches_page": true
+    }
+  },
+  "api_precision": "2 decimals compared exactly in separate Web evidence",
+  "page_precision": "existing formatter rounds to whole CNY",
+  "production_web_backend_started": false
+}

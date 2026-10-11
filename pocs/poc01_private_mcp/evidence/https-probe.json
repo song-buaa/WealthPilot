@@ -1,0 +1,184 @@
+{
+  "status": "PASS",
+  "tools": [
+    {
+      "name": "get_synthetic_wealth_summary",
+      "title": "Synthetic wealth summary",
+      "description": "Return a fixed synthetic wealth summary for MCP connectivity testing. No real accounts, database, market data, or trading. Only CNY is supported. Amounts are integer minor units (100 = CNY 1.00); this is not investment advice.",
+      "inputSchema": {
+        "properties": {
+          "currency": {
+            "const": "CNY",
+            "default": "CNY",
+            "description": "Fixed fixture currency; no FX conversion.",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "title": "get_synthetic_wealth_summaryArguments"
+      },
+      "outputSchema": {
+        "properties": {
+          "schema_version": {
+            "const": "poc01.wealth-summary.v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "synthetic": {
+            "const": true,
+            "title": "Synthetic",
+            "type": "boolean"
+          },
+          "source": {
+            "const": "hardcoded_fixture",
+            "title": "Source",
+            "type": "string"
+          },
+          "as_of": {
+            "const": "2026-01-01T00:00:00Z",
+            "title": "As Of",
+            "type": "string"
+          },
+          "currency": {
+            "const": "CNY",
+            "title": "Currency",
+            "type": "string"
+          },
+          "amount_unit": {
+            "const": "minor",
+            "title": "Amount Unit",
+            "type": "string"
+          },
+          "minor_unit_scale": {
+            "const": 2,
+            "title": "Minor Unit Scale",
+            "type": "integer"
+          },
+          "total_assets_minor": {
+            "minimum": 0,
+            "title": "Total Assets Minor",
+            "type": "integer"
+          },
+          "total_liabilities_minor": {
+            "minimum": 0,
+            "title": "Total Liabilities Minor",
+            "type": "integer"
+          },
+          "net_worth_minor": {
+            "title": "Net Worth Minor",
+            "type": "integer"
+          },
+          "assets": {
+            "items": {
+              "$ref": "#/$defs/AssetBucket"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "synthetic",
+          "source",
+          "as_of",
+          "currency",
+          "amount_unit",
+          "minor_unit_scale",
+          "total_assets_minor",
+          "total_liabilities_minor",
+          "net_worth_minor",
+          "assets",
+          "notice"
+        ],
+        "type": "object",
+        "$defs": {
+          "AssetBucket": {
+            "additionalProperties": false,
+            "properties": {
+              "category": {
+                "enum": [
+                  "cash",
+                  "fixed_income",
+                  "equity",
+                  "other"
+                ],
+                "title": "Category",
+                "type": "string"
+              },
+              "amount_minor": {
+                "minimum": 0,
+                "title": "Amount Minor",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "category",
+              "amount_minor"
+            ],
+            "title": "AssetBucket",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "title": "WealthSummary"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "securitySchemes": [
+          {
+            "type": "noauth"
+          }
+        ]
+      }
+    }
+  ],
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"schema_version\": \"poc01.wealth-summary.v1\",\n  \"synthetic\": true,\n  \"source\": \"hardcoded_fixture\",\n  \"as_of\": \"2026-01-01T00:00:00Z\",\n  \"currency\": \"CNY\",\n  \"amount_unit\": \"minor\",\n  \"minor_unit_scale\": 2,\n  \"total_assets_minor\": 100000000,\n  \"total_liabilities_minor\": 10000000,\n  \"net_worth_minor\": 90000000,\n  \"assets\": [\n    {\n      \"category\": \"cash\",\n      \"amount_minor\": 20000000\n    },\n    {\n      \"category\": \"fixed_income\",\n      \"amount_minor\": 40000000\n    },\n    {\n      \"category\": \"equity\",\n      \"amount_minor\": 30000000\n    },\n    {\n      \"category\": \"other\",\n      \"amount_minor\": 10000000\n    }\n  ],\n  \"notice\": \"SYNTHETIC TEST DATA ONLY — not the user's financial information.\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "schema_version": "poc01.wealth-summary.v1",
+      "synthetic": true,
+      "source": "hardcoded_fixture",
+      "as_of": "2026-01-01T00:00:00Z",
+      "currency": "CNY",
+      "amount_unit": "minor",
+      "minor_unit_scale": 2,
+      "total_assets_minor": 100000000,
+      "total_liabilities_minor": 10000000,
+      "net_worth_minor": 90000000,
+      "assets": [
+        {
+          "category": "cash",
+          "amount_minor": 20000000
+        },
+        {
+          "category": "fixed_income",
+          "amount_minor": 40000000
+        },
+        {
+          "category": "equity",
+          "amount_minor": 30000000
+        },
+        {
+          "category": "other",
+          "amount_minor": 10000000
+        }
+      ],
+      "notice": "SYNTHETIC TEST DATA ONLY — not the user's financial information."
+    },
+    "isError": false,
+    "resultType": "complete"
+  }
+}

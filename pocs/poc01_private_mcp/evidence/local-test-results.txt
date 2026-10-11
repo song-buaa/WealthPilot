@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/songbin/Documents/GitHub/WealthPilot/pocs/poc01_private_mcp
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collected 11 items
+
+pocs/poc01_private_mcp/tests/test_http.py ...........                    [100%]
+
+------------- generated xml file: /tmp/wealthpilot-poc01-junit.xml -------------
+============================== 11 passed in 1.62s ==============================

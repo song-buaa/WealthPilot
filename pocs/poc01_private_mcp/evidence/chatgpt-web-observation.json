@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-11",
+  "browser": "Chrome",
+  "source": "cua_repl native AX state and screenshot",
+  "logged_in_ui_observed": true,
+  "navigation": [
+    "Plugins",
+    "Add",
+    "Add custom MCP server"
+  ],
+  "connection_options": [
+    "Server URL",
+    "Tunnel"
+  ],
+  "authentication_options": [
+    "OAuth",
+    "No authentication",
+    "OAuth or No authentication"
+  ],
+  "test_plugin_name": "WealthPilot PoC 01 (synthetic only)",
+  "selected_authentication": "No authentication",
+  "synthetic_https_probe": "PASS",
+  "observed_result": "Plugin details page with Connected badge and Try in chat button",
+  "connection_confirmation": "PASS",
+  "chatgpt_tool_call": "PASS: server function return event plus new Chrome request/response",
+  "screenshots": [
+    "/tmp/wealthpilot-poc01-chatgpt-create.png",
+    "/tmp/wealthpilot-poc01-chatgpt-connect.png",
+    "/tmp/wealthpilot-poc01-chatgpt-selected.png"
+  ],
+  "no_sensitive_credentials_used": true,
+  "connected_ui_observed": true,
+  "user_connection_confirmation": "已连接",
+  "plugin_selected_in_new_chat": true,
+  "automated_composer_input": "No visible text inserted",
+  "response_fixture_equal": true,
+  "response_amount_interpretation": "PASS",
+  "mobile_plugin_discovery": {
+    "status": "PASS_USER_REPORTED",
+    "user_statement": "能找到，跟PC网页版是同步的",
+    "phone_originated_call": "PASS_USER_REPORT_AND_SERVER_OBSERVATION",
+    "os_app_version": "iOS / ChatGPT 1.2026.258; iOS version not provided"
+  },
+  "expanded_raw_tool_trace": "Not exported; self-description alone not used as evidence",
+  "user_expansion_statement": "已成功调用 WealthPilot PoC 01 (synthetic only) 的 get_synthetic_wealth_summary 接口，参数为 currency: \"CNY\"。"
+}

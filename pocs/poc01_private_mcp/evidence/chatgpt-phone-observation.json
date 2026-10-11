@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-11",
+  "status": "PASS",
+  "evidence_level": "User-operated real App plus sequential server function return observation; no mobile UI automation or raw platform trace export",
+  "platform": "iOS",
+  "os_version": "not provided",
+  "chatgpt_app_version": "1.2026.258",
+  "plugin_discovery": "User reported visible and synced with PC Web",
+  "first_test_user_statement": "已发送，是从手机APP另起一个新对话发起的，能返回工具结果",
+  "observed_retry_user_statement": "手机已发送",
+  "server_call_index_after_control": 2,
+  "server_observed_at_utc": "2026-10-11T05:01:18Z",
+  "server_fixture_equal": true,
+  "phone_rendered_json_independently_captured": false,
+  "limits": "One account, one iOS App version, anonymous remote HTTPS fixture; no Android, other plans/workspaces, OAuth or imported Desktop-only manifests tested."
+}

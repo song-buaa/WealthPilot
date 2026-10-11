@@ -1,0 +1,18 @@
+{
+  "synthetic": false,
+  "status": "partial",
+  "issues": [
+    "LIVE_CASH_VALUATION_DATE_UNKNOWN",
+    "STALE_COMPONENTS",
+    "VALUATION_DATE_UNKNOWN"
+  ],
+  "sources": {
+    "stored_positions": "read",
+    "manual_wealth_items": "read",
+    "tiger_cash": "queried"
+  },
+  "all_three_amounts_non_null": true,
+  "database_and_wal_bytes_unchanged": true,
+  "real_payload_location": "outside Git, mode 0600",
+  "business_backend_started": false
+}

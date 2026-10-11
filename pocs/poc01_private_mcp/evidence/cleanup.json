@@ -1,0 +1,14 @@
+{
+  "poc_listener_8787_closed": true,
+  "cloudflared_session_exit_code": 0,
+  "observed_server_session_exit_code": 143,
+  "termination": "explicit SIGTERM, test-only processes",
+  "isolation": {
+    "violations": [],
+    "business_modules_loaded": []
+  },
+  "no_startup_service_registered": true,
+  "account_plugin_removed": false,
+  "account_connection_disconnected": "NOT_VERIFIED",
+  "account_cleanup_observation": "Test plugin management page remained Loading settings; no delete performed."
+}

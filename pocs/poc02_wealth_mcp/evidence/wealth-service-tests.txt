@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/songbin/.codex/worktrees/poc02-wealth-query/WealthPilot
+configfile: pytest.ini
+plugins: anyio-4.12.1, langsmith-0.8.0
+collected 12 items
+
+tests/test_wealth_service.py ............                                [100%]
+
+============================== 12 passed in 1.27s ==============================

@@ -1,0 +1,4 @@
+# Independent MCP env only. Business worker uses unchanged WealthPilot env.
+mcp==2.3.0
+cryptography==46.0.3
+pytest==8.4.2

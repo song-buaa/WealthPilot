@@ -1,0 +1,54 @@
+{
+  "status": "PASS",
+  "invalid_currency": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Error executing tool get_synthetic_wealth_summary: 1 validation error for get_synthetic_wealth_summaryArguments\ncurrency\n  Input should be 'CNY' [type=literal_error, input_value='USD', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.14/v/literal_error"
+      }
+    ],
+    "isError": true,
+    "resultType": "complete"
+  },
+  "recovery": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"schema_version\": \"poc01.wealth-summary.v1\",\n  \"synthetic\": true,\n  \"source\": \"hardcoded_fixture\",\n  \"as_of\": \"2026-01-01T00:00:00Z\",\n  \"currency\": \"CNY\",\n  \"amount_unit\": \"minor\",\n  \"minor_unit_scale\": 2,\n  \"total_assets_minor\": 100000000,\n  \"total_liabilities_minor\": 10000000,\n  \"net_worth_minor\": 90000000,\n  \"assets\": [\n    {\n      \"category\": \"cash\",\n      \"amount_minor\": 20000000\n    },\n    {\n      \"category\": \"fixed_income\",\n      \"amount_minor\": 40000000\n    },\n    {\n      \"category\": \"equity\",\n      \"amount_minor\": 30000000\n    },\n    {\n      \"category\": \"other\",\n      \"amount_minor\": 10000000\n    }\n  ],\n  \"notice\": \"SYNTHETIC TEST DATA ONLY \u2014 not the user's financial information.\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "schema_version": "poc01.wealth-summary.v1",
+      "synthetic": true,
+      "source": "hardcoded_fixture",
+      "as_of": "2026-01-01T00:00:00Z",
+      "currency": "CNY",
+      "amount_unit": "minor",
+      "minor_unit_scale": 2,
+      "total_assets_minor": 100000000,
+      "total_liabilities_minor": 10000000,
+      "net_worth_minor": 90000000,
+      "assets": [
+        {
+          "category": "cash",
+          "amount_minor": 20000000
+        },
+        {
+          "category": "fixed_income",
+          "amount_minor": 40000000
+        },
+        {
+          "category": "equity",
+          "amount_minor": 30000000
+        },
+        {
+          "category": "other",
+          "amount_minor": 10000000
+        }
+      ],
+      "notice": "SYNTHETIC TEST DATA ONLY \u2014 not the user's financial information."
+    },
+    "isError": false,
+    "resultType": "complete"
+  }
+}

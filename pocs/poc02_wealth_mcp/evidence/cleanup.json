@@ -1,0 +1,15 @@
+{
+  "production_database_and_wal_bytes_unchanged": true,
+  "runtime_key_in_poc02_deliverables": 0,
+  "real_minor_amounts_in_evidence": 0,
+  "temporary_ports_closed": {
+    "8788": true,
+    "8789": true,
+    "8790": true
+  },
+  "temporary_private_payload_files_removed": 6,
+  "user_tunnel_and_runtime_key_retained": true,
+  "no_production_deployment": true,
+  "no_real_trades": true,
+  "git_commits_push_merge": false
+}
