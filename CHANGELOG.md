@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Unreleased] - main / 4.0 migration validation
+
+- 当前 main 在 v3.15.1 后持续增加财富、消费分析、账单导入/刷新一致性、技术形态证据等能力；产品版本以 Git/CI 和实际验收记录为准。
+- 固定 Phase 0 审计、PoC 01 合成跨端调用、PoC 02 私人 Tunnel 真实财富只读查询及 PoC 03 部署准备成果。
+- PoC 03 Stage 1.5：GitHub PR/CI/main 为主要发布路径，新增指定完整 Commit 安装、固定哈希 ARM 依赖及 MCP PoC CI；离线包应急保留。
+- 4.0 尚未生产上线，Mac Mini Stage 2 未执行；PoC 02 凭证展示事故仍 FAIL，未标记已补救。
+- 本轮不改变财富统计、投资分析或交易逻辑，不运行真实库迁移或设备部署。
+
 ## [3.15.1] - 2026-08-18
 
 Patch Release：修复 Portfolio 资产分类根因，明确区分券商证券类型、载体类型与经济资产类别。
@@ -16,7 +24,7 @@ Patch Release：修复 Portfolio 资产分类根因，明确区分券商证券�
 - Portfolio API、汇总和前端统一消费 canonical economic asset class
 
 ### Validation
-- 真实 Self-use API 与 Portfolio UI 人工验收一致：CSBGU3、IB01 均显示为固收；固收汇总 15.8%，权益汇总 84.1%
+- 真实 Self-use API 与 Portfolio UI 人工验收分类及汇总一致；当前公开说明不保留私人资产比例。
 - Targeted、全量 pytest、compileall、frontend lint/build 与 Offline M5 18/18 通过
 
 ### Safety

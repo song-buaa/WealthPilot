@@ -2,7 +2,25 @@
 
 基于 Multi-Agent 架构的个人投资辅助决策系统
 
-**当前稳定版本：v3.15.1**
+**开发基线：main；4.0 迁移验证中，尚未生产上线。** 最后一个 SemVer 稳定 Tag 为 `v3.15.1`（历史发布），不能代表当前 main。当前 Commit 和 CI 以 GitHub 实际记录为准；前端 package 的 `0.0.0` 和 FastAPI 的 `1.0.0` 也不是产品发布版本。
+
+## 当前状态与部署路线
+
+3.x 业务系统继续采用 React/Vite + FastAPI + SQLite、PEER 四 Agent 和 13 个内部 Skills。main 已在 v3.15.1 后增加财富总览、消费账单分析及技术形态证据等能力，未改为由 ChatGPT 承担全部决策。
+
+4.0 目标是复用这些业务服务：ChatGPT 提供对话/通用推理/偏好记忆，通过 MCP / Skills 调用专业能力，React Web 保留可视化。当前已验证的对外能力只有**财富总览只读工具**；交易授权/执行、投资分析 Skills 和复盘尚未迁移。
+
+| 阶段 | 当前证据 |
+|---|---|
+| Phase 0 | 3.x 现状审计和模块迁移影响报告完成。 |
+| PoC 01 | 合成 MCP 工具，ChatGPT Web / iOS 实际调用通过。 |
+| PoC 02 | 真实财富查询通过个人 Secure MCP Tunnel，复用原财富计算，与原 Web 口径一致；凭证展示事故仍为 **FAIL**，未补救。 |
+| PoC 03 Stage 1 / 1.5 | 常驻部署工具、GitHub 指定 Commit 安装、离线应急包和 CI 准备；Mac Mini 实测仍留 Stage 2。 |
+| PoC 03 Stage 2 | **未执行**：原生 ARM、数据迁移、独立生产凭证、远程查询、MacBook 关闭和重启恢复均不能标记 PASS。 |
+
+标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
+
+入口：[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布 Gate](docs/PROJECT_GOVERNANCE.md)、[Mac Mini Stage 2 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)、[Stage 1.5 发布整理记录](docs/WealthPilot_4x_PoC03_Stage15_Publication.md)。历史 PoC 报告保留当轮事实，不代表已完成设备生产验收。
 
 ## 项目简介
 
@@ -35,6 +53,9 @@ WealthPilot 维护两种明确隔离的本地运行模式：
 
 | 模块        | 解决的问题                                               | 状态     |
 | --------- | --------------------------------------------------- | ------ |
+| 财富总览 | 原投资汇总与手工资产/负债的核心净资产口径、结构展示和刷新一致性；养老金金额级去重边界保留 | 已实现，见 WealthOverview / wealth_service |
+| 消费分析 | 本地账单导入、经济事件/分类/重复来源处理及明细分析；数据源有各自覆盖边界 | 已实现，见 Consumption / consumption services |
+| 技术形态证据 | canonical TA-Lib 指标、形态事实及证据治理；不等于自动生成交易数值或交易授权 | 部分实现，见 technical_patterns / pattern_data |
 | 投资决策      | 针对具体持仓给出有依据的买卖建议，而不是泛泛的市场观点；支持多轮追问、宏观问题分析、多标横向对比    | ✅ v3.0 |
 | 投资行动      | 决策 → 分批执行计划 → 盘中触发评估 → 人工确认下单（老虎 / 盈透 IBKR）；规则引擎确定性产出价格与数量，AI 只写解释 | ✅ v3.11 |
 | 投资账户总览    | 持仓分散在多个券商看不清全貌；支持老虎 / 富途 / 盈透 / 国金持仓自动同步，统一展示资产分布与盈亏     | ✅ v3.0 |
@@ -62,19 +83,21 @@ WealthPilot 维护两种明确隔离的本地运行模式：
 - **SQLAlchemy 2.0**（ORM，SQLite）
 - **Pydantic v2**（数据契约与字段校验）
 - **OpenAI ≥ 1.20**（LLM 调用）
-- **LangGraph**（决策流编排，StateGraph 状态机）
+- **LangGraph**（保留图/工具层依赖；当前决策主路径为 PEER service）
 - **LangChain**（Text Splitter 文档切片）
 - **ChromaDB**（向量库，支持知识库 RAG 语义检索）
 - **AKShare**（港股 / A 股行情数据）
 - **Alpha Vantage API**（美股基本面 / 新闻 / 财报数据）
 - **Tiger OpenAPI SDK / Futu OpenD / 盈透 API / 国金 QMT API**（券商持仓同步）
-- **ib_async**（盈透 IBKR 下单，仅 LIMIT 单，市场白名单 {US, HK}）
+- **ib_async**（IBKR 受合约身份、路由和人工授权护栏约束；包含已验证的 LSE USD 上市身份 / SMART 执行路径）
 
 ## 架构说明
 
 ### 系统架构图
 
-![WealthPilot v3.14 架构图](./docs/wealthpilot_v36_arch.svg)
+![WealthPilot 历史 v3.6 架构图](./docs/wealthpilot_v36_arch.svg)
+
+该图是历史说明；当前调用边界和 4.0 目标以 [ARCHITECTURE_CURRENT.md](docs/ARCHITECTURE_CURRENT.md) 为准。
 
 ### 1. 概述
 
@@ -110,7 +133,7 @@ WealthPilot 的核心是基于 PEER Multi-Agent + Skills 协议的决策架构�
 
 ### 3. Skills 协议层
 
-项目内部定义的能力描述层，共 13 个原子能力单元。每个 Skill 有独立 SKILL.md，描述 intent / inputs / outputs / preconditions，Planning Agent 读取协议选择能力，Executing Agent 调用实现。
+项目内部定义的能力描述层，共 13 个 Skill（包含原子、组合与旁路能力）。每个 Skill 有独立 SKILL.md，描述 intent / inputs / outputs / preconditions，Planning Agent 读取协议选择能力，Executing Agent 调用实现。
 
 **数据加载类**
 
@@ -205,6 +228,8 @@ WealthPilot/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── Dashboard.tsx        # 投资账户总览
+│   │   │   ├── WealthOverview.tsx   # 财富核心净资产口径
+│   │   │   ├── Consumption.tsx      # 消费账单与经济事件分析
 │   │   │   ├── Discipline.tsx       # 投资纪律
 │   │   │   ├── Research.tsx         # 投研观点
 │   │   │   ├── Decision.tsx         # 投资决策（SSE + ExplainPanel）
@@ -235,13 +260,13 @@ WealthPilot/
 │   │   ├── contracts.py             # Agent 间数据契约（结构化任务与结果）
 │   │   └── adapters.py              # v2/v3 适配层
 │   ├── services/
-│   │   ├── decision_service.py      # 决策服务入口（含 feature flag）
+│   │   ├── decision_service.py      # 唯一 PEER 决策入口；无 v2/v3 切换 flag
 │   │   ├── decision_service_v3.py   # v3 Multi-Agent 编排
 │   │   └── broker_sync/             # 券商持仓同步子系统（v3.0 新增）
 │   │       ├── tiger_adapter.py     # 老虎证券适配器
 │   │       ├── futu_adapter.py      # 富途证券适配器
 │   │       └── sync_service.py      # cron 调度 + 时序写入
-│   └── knowledge/                   # 知识层（v3.6 新增）
+│   └── knowledge/                   # 知识索引/检索服务；源文件在根 knowledge_base/
 │
 ├── decision_engine/                 # 投资决策引擎（v2/v3 共用）
 │   ├── data_loader.py               # 持仓 + 投研数据加载（LLM 语义匹配）
@@ -263,7 +288,8 @@ WealthPilot/
 │
 ├── knowledge_base/                  # 私有知识库（Markdown 真相源）
 │
-├── docs/                            # 设计文档归档
+├── pocs/                            # 独立只读 MCP 与 Mac Mini 部署工具
+├── docs/                            # 当前治理/架构/执行说明和历史验收文档
 │   └── architecture-v3.svg          # v3.0 系统架构图
 ├── tests/                           # 单元测试（含 18 回归用例）
 ├── requirements.txt
@@ -309,13 +335,15 @@ v3.14 的 Execution Plan 在隔离 Demo 中使用提交的静态 OHLCV fixture �
 
 ```bash
 # 终端 1：启动后端
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000 --host 127.0.0.1
 
 # 终端 2：启动前端
 cd frontend && npm run dev
 ```
 
 浏览器访问 **http://localhost:5173**
+
+以上是 MacBook 的 3.x 完整 Dev 启动方式，后端 lifespan 可初始化调度/轮询；**不得作为当前 Mac Mini Prod 只读 MCP 启动命令**。Prod 按 Stage 2 说明仅启用两个固定 launchd job。
 
 ### 4. 运行测试
 

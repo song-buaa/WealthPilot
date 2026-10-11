@@ -1,12 +1,15 @@
-# PoC 03 第一阶段：Mac Mini 部署准备
+# PoC 03 Stage 1 / 1.5：Mac Mini 部署准备与 GitHub 发布
 
 本目录提供部署工具，不启动完整 WealthPilot 后端。PoC 02 的 server/worker/reader 原样复用；生产只有财富只读 MCP 和 Secure MCP Tunnel 两个 launchd job。
+
+Stage 1.5 主要路线已改为 GitHub PR/CI/main → Mini 拉取指定完整 SHA。deploy.py install-github 仅接受固定公开仓库的 main ancestor 和 exact-commit 四项 Actions success，安装不切换当前版本或启动服务；离线包为应急备用。
 
 完整步骤与第二阶段交接：[Mac Mini 执行说明](../../docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)。验收状态：[PoC 03 报告](../../docs/WealthPilot_4x_Phase1_PoC03_Report.md)。
 
 | 文件 | 用途 |
 |---|---|
 | `build_release.py` | 从干净、已提交的 Git HEAD 创建 bundle、源码归档、ARM wheels 和 SHA256SUMS；不带运行数据库/凭证。 |
+| `github_release.py` | GitHub 指定 Commit / CI / main ancestry 核对，固定哈希公共资产下载并复用安装器。 |
 | `deploy.py` | 本机审查、离线安装双环境、配置、launchd 计划/执行、版本/合成-真实模式切换。 |
 | `snapshot.py` | SQLite mode=ro 一致性备份、完整性与表数据摘要、原财富计算的私有金额参考和恢复。 |
 | `runner.py` | 固定两个入口，验证 Git/真实访问门槛；有限大小的生命周期元数据日志，丢弃原始子进程输出。 |

@@ -1,8 +1,8 @@
 # WealthPilot 项目治理基线
 
-> 更新日期：2026-08-18
+> 更新日期：2026-10-11
 > Current development baseline：当前 `main`
-> Latest stable release：`v3.15.1`
+> Historical latest SemVer stable release：`v3.15.1`（不代表当前 main）
 > Previous stable release：`v3.15.0`
 > Immutable historical release：`v3.14.0` → `4314e031ca653ea87a346c198d3a6dc466017ab6`
 
@@ -10,7 +10,9 @@
 
 WealthPilot 是本地优先的个人投资决策工作台。当前前端为 React 19 + Vite 8 + TypeScript，后端为 FastAPI + SQLAlchemy + SQLite，决策链路为 PEER 四 Agent + 13 个 Skills。核心入口为 `frontend/src`、`backend/main.py`、`backend/agents`、`backend/services`、`skills` 与 `app`。
 
-`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.1` 是 Latest stable release，`v3.15.0` 是 Previous stable release；`v3.14.0` 保留为 immutable historical release，原 Tag 不移动、不重建。
+`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.1` 是历史最后一个 SemVer 稳定发布，后续 functional milestone Tags 与 main 提交不自动构成新的 SemVer 产品版本。`v3.15.0` / `v3.14.0` 保持历史不可变，原 Tag 不移动、不重建。frontend 0.0.0 / FastAPI 1.0.0 不是当前产品版本。
+
+当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；PoC 03 Stage 2 尚未执行，不宣称正式生产上线。
 
 ## 2. 运行模式
 
@@ -31,7 +33,7 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 ## 3. 分支与提交策略
 
 - `main` 是唯一长期活跃分支，也是 GitHub 默认分支。
-- 新工作从最新 `main` 创建短期 `codex/<topic>` 分支，完成验收后使用 fast-forward 或经审查的普通合并回到 `main`，随后删除短期分支。
+- 新工作从最新 `main` 创建短期 `codex/<topic>` 分支，完成验收后通过 PR 和实际分支保护允许的合并方式回到 `main`；清理分支/工作树须有用户授权，不删除未确认历史或未提交工作。
 - 不长期维护 release、develop 或个人 handover 分支；未知历史分支在确认所有者与用途前不删除。
 - 每个提交职责单一，不 squash 已有历史；使用精确路径暂存，禁止 `git add .` 和 `git add -A`。
 - 未经明确授权，不 push、不合并、不创建或移动 Tag。
@@ -78,11 +80,13 @@ Live M5 仅用于人工、授权型 Provider 观察：必须同时使用 `--mode
 
 ### Automated CI
 
-GitHub Actions 的 `Quality Gates` workflow 自动执行三个并行检查：
+GitHub Actions 的 `Quality Gates` workflow 当前执行四个并行检查，前三项原有 Gate 保持：
 
 - `backend-tests`：Python 3.11、compileall、全量 pytest；
 - `frontend-checks`：Node 22、`npm ci`、lint、build；
 - `offline-m5`：确定性 Offline M5 18/18。
+
+PoC 集成后增加第四项 `mcp-poc-tests` / `MCP PoC tests`：临时库的只读/部署/GitHub guards 和独立 MCP 环境 HTTP 测试。PoC 01/02 的同名 test_http.py 需在两个 pytest 进程分别执行，避免收集冲突。全部四项须通过才发布当前只读部署候选；Linux CI 不代替 Mac Mini ARM 和账号实测。
 
 Workflow 在面向 `main` 的 Pull Request、`main` 与 `codex/**` 分支 push，以及手动 `workflow_dispatch` 时运行；同一分支或 PR 的新提交会取消旧 Run。权限限定为 `contents: read`，每个 Job 有独立 timeout。
 
@@ -93,6 +97,20 @@ CI 只做自动质量验证，不自动修复、提交、合并、发布或部�
 GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：要求 GitHub Actions 的 `Backend tests`、`Frontend checks`、`Offline M5` 三项检查通过，并采用 strict up-to-date 策略；同时要求 linear history，禁止 force push 和删除 `main`。短期开发分支不受该 Ruleset 约束。
 
 当前不强制 Pull Request、Review、Signed Commits、Deployment 或 Merge Queue。标准流程仍为短期分支 push、等待 CI 全绿、确认基于最新 `main` 后 fast-forward 更新 `main`。仓库 Owner 保留显式紧急 bypass；该能力只用于恢复，日常合并仍须遵循 Mandatory Merge Gates。
+
+### GitHub 发布与 Mac Mini 部署标准流程
+
+1. MacBook Dev fetch 最新 origin/main，检查全部工作树，保护未提交文件，从最新 main 建立干净短期分支；只整合已验证且属于任务的成果。不 force push、不 squash 已有历史。
+2. 检查拟新增提交的全部文件/blob 历史：不含真实数据库、Key/Token/私钥、私人账户或财务 payload；保留用户授权的仓库外备份。公开仓库中的真实验收证据只留时间/状态/金额比较布尔结论。
+3. 本机运行相称的全量 pytest、frontend lint/build、Offline M5、PoC 专项；精确暂存提交，push 开发分支，创建 PR。检查 exact HEAD 的四项 Actions 结果，任何失败/未解决代码发布阻塞都不能合并。
+4. 重新核对 origin/main 和 base；按现有 linear-history/strict Gates 发布。当前允许在 PR/CI 全绿后 fast-forward 推送相同 HEAD 到 main（无 bypass，GitHub 自动识别 PR 已合入）；不制造违反 linear-history 的 merge commit。base 变化时重新形成可审查候选并重跑 Gate，不强推历史。
+5. 验证 GitHub PR 状态、remote main、local main、origin/main 和预期 SHA 一致，记录 CI/PR/完整 revision。普通 main 发布不自动创建稳定 Tag 或 GitHub Release，不代表生产验收。
+6. Mac Mini 上的 Codex 在 Stage 2 以个人操作者确认的完整 SHA 使用 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。独立最小权限运行 Key、真实数据和配置在代码外，先合成、再证据门槛、后真实验收。
+7. 新 release 安装不启动/切换服务；复用既有 launchd、健康检查和版本回滚。先合成检查，再实际本地/Web/iOS、迁移金额、MacBook 关闭、退出/重启、无业务写入及恢复验收。Prod 禁止直接改业务代码；修复回 Dev 发布新的 SHA。
+
+MacBook 为 Dev，Mac Mini 为 Prod；本机仓库发布操作不得暗含 SSH/设备部署授权。离线包保留为网络/GitHub不可用时的应急材料，依赖与 revision 仍需核对；不能用未完成生产验收的 Stage 1 包冒充已通过 Stage 2。
+
+PoC 02 凭证事故维持 FAIL；代码发布与生产开通分开。新的生产 Key 不自动补救/撤销旧 Key，旧权限对生产范围的影响仍是 Stage 2 边界核对事项。当前没有生产部署、数据迁移或新增交易授权。
 
 ## 7. 精简技术债 Backlog
 

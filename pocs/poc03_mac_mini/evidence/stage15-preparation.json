@@ -1,0 +1,89 @@
+{
+  "result": "PASS_PREPARATION",
+  "worktrees": {
+    "original": {
+      "branch": "codex/phase1-poc01-private-mcp",
+      "head": "4da23b1868f3e6dae85a15383405aad3b15da5e3",
+      "nonignored_untracked_files": 29,
+      "tracked_changes": 0,
+      "ignored_entries_count": 125,
+      "ignored_data_and_configs_not_copied": true,
+      "baseline_file_hashes_equal": true
+    },
+    "poc02": {
+      "branch": "codex/phase1-poc02-wealth-query",
+      "head": "4da23b1868f3e6dae85a15383405aad3b15da5e3",
+      "nonignored_untracked_files": 56,
+      "tracked_changes": 0,
+      "ignored_entries_count": 41,
+      "ignored_data_and_configs_not_copied": true,
+      "baseline_file_hashes_equal": true
+    },
+    "poc03": {
+      "branch": "codex/phase1-poc03-mac-mini-prep",
+      "head": "56aa7ed90d636dfb5bf2d306a6af3e3fb9c2fd12",
+      "nonignored_untracked_files": 0,
+      "tracked_changes": 0,
+      "ignored_entries_count": 37,
+      "ignored_data_and_configs_not_copied": true
+    },
+    "other_audit": {
+      "branch": "codex/tovest-pattern-reuse-audit",
+      "head": "1f06798e7797dcd2b83a5a6b828bf48f6c207623",
+      "nonignored_untracked_files": 0,
+      "tracked_changes": 0,
+      "ignored_entries_count": 13,
+      "ignored_data_and_configs_not_copied": true,
+      "baseline_file_hashes_equal": true
+    },
+    "release": {
+      "branch": "codex/poc03-github-release",
+      "initial_tree_equal_to_56aa7ed": true,
+      "main_start": "4da23b1868f3e6dae85a15383405aad3b15da5e3",
+      "source_poc03_revision": "56aa7ed90d636dfb5bf2d306a6af3e3fb9c2fd12",
+      "original_poc01_files_including_cache": 32,
+      "original_poc01_cache_and_files_equal": true,
+      "branches_at_audit": [
+        "codex/hide-futu-sync-ui 63cbb5ca6fbcd23b19ae96f1261845900eb6de0c",
+        "codex/ibkr-pattern-data-contract-probe f65b6fcc0635d0f4fabd72cd22bcecc03509a584",
+        "codex/phase1-poc01-private-mcp 4da23b1868f3e6dae85a15383405aad3b15da5e3",
+        "codex/phase1-poc02-wealth-query 4da23b1868f3e6dae85a15383405aad3b15da5e3",
+        "codex/phase1-poc03-mac-mini-prep 56aa7ed90d636dfb5bf2d306a6af3e3fb9c2fd12",
+        "codex/poc03-github-release 6cf77a3819ace2478e3c27368ea185b4ef40fb2a",
+        "codex/talib-consolidation-prd-revision ac9ac1f9427d9d46ba9dfd5b42b9af59bfac1b02",
+        "codex/technical-pattern-evidence-readiness-audit 84e1ffa6f9f9a225a62e2c2ebd52497fe3ea0b83",
+        "codex/tovest-pattern-core-migration-audit 2cd1af3d619561db482cd01ec4c91515035d1aa7",
+        "codex/tovest-pattern-reuse-audit 1f06798e7797dcd2b83a5a6b828bf48f6c207623",
+        "feat/v3.14-kline-provider 11cd2e9881d2ac8afa61351c7037b1fec6001277",
+        "main 4da23b1868f3e6dae85a15383405aad3b15da5e3",
+        "master 35ca490aec5571edf5a90ba7c1d7aa13061ba992",
+        "origin 4da23b1868f3e6dae85a15383405aad3b15da5e3",
+        "origin/main 4da23b1868f3e6dae85a15383405aad3b15da5e3",
+        "origin/master bdcd244292a1e1537fdc0c1e0fa10ed341e90206"
+      ]
+    }
+  },
+  "public_assets": {
+    "result": "PASS",
+    "wheel_count": 65,
+    "all_wheels_exact_committed_hashes": true,
+    "official_tunnel_digest_checked": true,
+    "private_api_or_database_access": false,
+    "native_arm_installation": "BLOCKED_STAGE2"
+  },
+  "local_tests": {
+    "backend_passed": 896,
+    "backend_skipped": 7,
+    "frontend_lint_build": "PASS",
+    "m5_offline": "18/18; public_network_attempts=0",
+    "reader_deploy_github_guards": "51/51",
+    "poc01_http": "11/11",
+    "poc02_http": "9/9",
+    "compileall": "PASS"
+  },
+  "no_mac_mini_connection": true,
+  "no_real_database_migration": true,
+  "poc02_credential_incident": "FAIL_NOT_REMEDIATED",
+  "production_acceptance": "BLOCKED_STAGE2",
+  "github_ci_result": "USE_EXACT_PR_HEAD_AND_FINAL_DELIVERY_RECEIPT"
+}

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前稳定版本：v3.15.1 | 稳定标签：`v3.15.1` | 最后更新：2026-08-18
+> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-11
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
@@ -10,6 +10,16 @@
 每个新任务先读取本文件、`README.md` 和 `docs/PROJECT_GOVERNANCE.md`，再检查 `git status`、当前分支和任务相关代码。`docs/CODEX_WEALTHPILOT_HANDOVER_AUDIT.md` 已封存为历史接管证据，`docs/archive/` 也是历史资料；两者都不能覆盖当前代码、README 与治理文档中的事实。
 
 默认从最新 `main` 创建短期 `codex/<topic>` 分支；每个提交保持职责单一，精确暂存，禁止把 `.env`、数据库、券商凭证或本地备份写入 Git。未经用户明确授权，不 push、不合并、不创建或移动发布 Tag。
+
+## 4.0 当前边界与 Dev / Prod
+
+`v3.15.1` 是历史稳定 Tag，不代表当前 main。核实实际 Git SHA、后续提交和 CI；不要把 frontend 0.0.0 / FastAPI 1.0.0 当产品版本。当前 main 包含财富、消费和技术形态证据等后续能力；当前架构事实见 [ARCHITECTURE_CURRENT.md](docs/ARCHITECTURE_CURRENT.md)。
+
+Phase 0 已审计；PoC 01 合成 MCP 和 PoC 02 真实财富只读 MCP 的 Web/iOS 验证已完成。PEER、内部 SkillsLoader、投资分析和交易链路仍属于 3.x；不能宣称已经整体迁移给 ChatGPT。PoC 02 凭证展示事故保持 FAIL，未标记撤销或补救。
+
+MacBook 为 Dev，Mac Mini 为 Prod。标准流程为 GitHub 短期分支 → PR → 全部质量 Gate → main → Mini 拉取 CI 已通过的完整 SHA → 原生 ARM 依赖 → launchd → 实际验收。部署不自动跟随 main；数据、备份、配置、日志、凭证在代码外。离线包仅应急保留。
+
+PoC 03 Stage 2 尚未执行。仅部署既有只读财富工具及 Secure MCP Tunnel，不启动 backend.main、broker sync、OrderPoller、Gateway 或交易服务。本机文件/脚本测试不能代替 Mini 原生执行、真实查询、重启和 MacBook 关闭验收。步骤见 [Mac Mini 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)。生产修复回 Dev，重新发布 Commit；不直接修改 Prod 业务代码。
 
 ## 项目概述
 
@@ -22,11 +32,13 @@ WealthPilot 是 AI 驱动的个人投资决策工作台。本地运行，数据�
 - PerformanceAnalysis：收益表现归因分析
 - Education：投资知识科普 / 通用对话
 
-## 当前架构（v3.15）
+## 当前 3.x 业务架构（持续演进的 main）
 
-WealthPilot v3.15 是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。Execution Plan 通过 K 线 Provider fallback 获取因子；Typed Trade Intent 与 ExecutionBatch 将多标的意图转为可复核计划，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
+WealthPilot 业务系统是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。财富、消费、技术形态证据使用各自业务服务。Execution Plan 通过 K 线 Provider fallback 获取因子；Typed Trade Intent 与 ExecutionBatch 将多标的意图转为可复核计划，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
 
 ### PEER 4 Agent
+
+下文行动图中的 Mock 是 Demo/测试适配器；Self-use 可按显式授权选择 Tiger/IBKR。不能将 Mock 示意扩大为所有交易都模拟，也不能将完整后端启动方式用于 Mini 只读 MCP。
 
 | Agent | 职责 | 关键代码 |
 |-------|------|---------|
@@ -102,6 +114,7 @@ AllocationIntent（组合级调整意图）
 | RiskEngine | 下单前风控检查（3 条规则） | `backend/services/action/risk_engine.py` |
 | BrokerAdapter | 券商抽象接口（place_order / get_order_status） | `backend/services/action/brokers/base.py` |
 | TigerBrokerAdapter | Tiger 老虎证券（美股+港股 LIMIT 单,v3.4） | `backend/services/action/brokers/tiger.py` |
+| IBKRBrokerAdapter | dedicated loop、合约/券商权威校验；Typed Intent / ExecutionBatch 执行受独立授权护栏约束 | `backend/services/action/brokers/ibkr.py` |
 | MockBrokerAdapter | Mock 券商（异步 5s 成交，用于开发/演示） | `backend/services/action/brokers/mock.py` |
 | CredentialProvider | 凭证管理抽象层（Keyring / InMemory,v3.4） | `backend/services/action/brokers/credentials.py` |
 | OrderPoller | 订单状态后台轮询（3-5s 间隔,v3.4） | `backend/services/action/order_poller.py` |
@@ -216,7 +229,7 @@ cd frontend && npm run dev
 
 ### 数据隐私
 - 所有用户数据存于本地 SQLite（`data/wealthpilot.db`）
-- 不向云端上传任何持仓 / 交易数据
+- 不提交或公开上传任何私人财富/持仓/交易数据。用户明确授权的个人 ChatGPT MCP 查询仅返回 PoC 02 最小财富摘要；不将授权扩展到持仓明细、凭证、交易数据或其他工作区。
 - 投研观点通过本地投研卡 + 第三方公开数据源（盈米 MCP / 联网搜索）获取
 
 ### 外部依赖 optional 原则
@@ -255,7 +268,7 @@ WealthPilot 从 v3.6 起引入私有知识库，采用 **File-as-Source-of-Truth
 ### knowledge_base/ 目录结构
 
 ```
-backend/knowledge_base/
+knowledge_base/
 ├── investment_principles/    投资纪律手册（MD + RULES_CONFIG 双载体）
 ├── investment_style/         投资理念（价值主张、决策框架、纪律哲学）
 ├── allocation_principles/    资产配置原则（多元配置、再平衡、目标区间）
@@ -321,17 +334,17 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - WhatIf、最终确认哈希、人工实盘确认与 Broker authority reconciliation 完成闭环
 - Case 1 Live UAT：CBU3 与 IB01 经 SMART 路由真实成交，Batch 收敛为 COMPLETED
 
-### v3.15.1（当前稳定版本）✅
+### v3.15.1（历史 SemVer 稳定版本）✅
 - 建立唯一 canonical asset classification 入口，分离 Broker security type、vehicle type 与 economic asset class
 - ETF 不再因 `secType=STK` 默认归为 Equity；经济暴露证据不足时 fail closed 为 `UNKNOWN`
 - CSBGU3 / CBU3 与 IB01 正确归类为 Fixed Income，Portfolio API、汇总与 UI 使用同一 canonical 字段
 - 完成真实 Self-use API/UI 人工验收与全量自动质量 Gate
 
-### v4.0（中期）
-- 高级 Memory（Mem0 用户偏好 / 知识图谱标的关系）
-- 多 Agent 真实 A2A 通信（跨进程能力扩展）
-- 投资纪律完整 11 条（当前简化版仅检查纪律 3）
-- 接入 LangSmith 做结构化 trace + 可观测性
+### v4.0（迁移验证中，未生产上线）
+- 已验证：ChatGPT Web/iOS → 私人 MCP → 既有财富服务只读摘要；事故 FAIL 与功能 PASS 分开记录。
+- 当前：GitHub 版本 / CI / 指定 Commit 部署准备；Mini 常驻验收留 Stage 2。
+- 目标：ChatGPT 对话、通用推理和偏好记忆；Skills/MCP 暴露专业业务；React 保留可视化。
+- 后续：投资分析封装、对话发起并经用户授权的执行、决策历史/复盘；尚未实现本次迁移。Mem0/A2A/LangSmith 不作为当前 4.0 基线或本轮必做项。
 
 ### 不在路线图（明确决策）
 - Computer-Use / 自动下单：金融合规问题，AI 不应自动执行交易

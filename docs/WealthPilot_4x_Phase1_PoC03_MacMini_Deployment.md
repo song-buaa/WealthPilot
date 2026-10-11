@@ -1,12 +1,12 @@
 # WealthPilot PoC 03 · Mac Mini 第二阶段执行说明
 
-> 本包由 MacBook 完成准备；尚未部署到 Mac Mini。第二阶段由 Mac Mini 上的 Codex 执行。保留 PoC 02 凭证事故 FAIL，独立生产 Key 不表示旧 Key 已撤销。生产代码以包内 `release.json` 的完整 Git SHA 为准，不合并 main，不创建发布 Tag。
+> Stage 1.5 更新：MacBook Dev → GitHub PR/CI/main → Mac Mini Prod 拉取完整 Commit 为主要路线。尚未部署 Mini，第二阶段由设备端 Codex 执行。原离线包仅应急保留；PoC 02 凭证事故仍 FAIL，新 Key 不表示旧 Key 已撤销。代码发布不等于 4.0 生产上线。
 
 ## 1. 第二阶段入口与目录
 
 Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明和 PoC 03 报告。确认这台机器为目标 Mac Mini、使用哪一个非 root 本机用户及其真实 hostname，再执行；当前阶段不要把任何设备验收写成 PASS。
 
-目标：macOS 13+、**原生 arm64 CPython 3.11**。MacBook 现有 x86_64 Python 不适合作为生产解释器。选择可信官方 Python 安装或已有原生解释器，由设备端核实；不要复制 MacBook venv。生产依赖从包内 ARM wheels 离线安装，不在设备重新解析最新版本或编译源包。
+目标：macOS 13+、**原生 arm64 CPython 3.11**。MacBook 现有 x86_64 Python 不适合作为生产解释器。选择可信官方 Python 安装或已有原生解释器，由设备端核实；不要复制 MacBook venv。生产依赖从固定哈希 ARM wheels 安装，不在设备重新解析最新版本或编译源包。
 
 建议在运行用户的目录分离以下内容（脚本支持带空格的绝对路径）：
 
@@ -29,23 +29,21 @@ Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明�
 
 父目录 0700，配置及凭证不得置于 Git/代码目录。不会自动安装原 FastAPI 后端、Web、IBKR Gateway、同步任务、订单轮询或交易执行。Tiger 只使用既有 `get_prime_assets` 现金查询，是否需要该配置以迁移源参考为准；不默默丢弃现金。Web 展示比对已在 PoC 02 验证，本包不增加生产 Web 服务。
 
-## 2. 校验包与设备审查（Mac Mini）
+## 2. GitHub 指定 Commit 与设备审查（Mac Mini）
 
-把部署包通过可信文件传输交给 Mac Mini。包不包含真实数据库、运行配置或密钥。先从交付记录核对完整 revision 及包 SHA-256，再运行包内校验；仅核对包内自带摘要不能独立建立来源信任。
+查阅本轮 PR/main/CI 交付记录，使用已合入且四项 CI 成功的完整 SHA。不使用未经发布的 56aa7ed、浮动 main 或 Tag 名代替指定 Commit。仓库目前公开，可 HTTPS 无凭证 clone；若将来变私有，先核对用户已有只读 GitHub 访问方式，不把 Token 写到 URL/参数或配置。
 
 ```bash
-WP_PACKAGE="/absolute/path/to/unpacked-deployment-package"
 WP_PY="/absolute/path/to/native/python3.11"
 WP_ROOT="$HOME/Library/Application Support/WealthPilotProd"
 WP_BOOTSTRAP="$HOME/WealthPilot-PoC03-bootstrap"
-cd "$WP_PACKAGE"
-shasum -a 256 -c SHA256SUMS
-mkdir -m 700 "$WP_BOOTSTRAP"
-tar -xzf "$WP_PACKAGE/source.tar.gz" -C "$WP_BOOTSTRAP"
+WP_REV="REPLACE_WITH_VERIFIED_FULL_MAIN_COMMIT_SHA"
+# 新的空 bootstrap 目录，不覆盖已有 checkout 或手工改动
+ git clone --no-checkout --branch main https://github.com/song-buaa/WealthPilot.git "$WP_BOOTSTRAP"
+ git -C "$WP_BOOTSTRAP" merge-base --is-ancestor "$WP_REV" origin/main
+ git -C "$WP_BOOTSTRAP" checkout --detach "$WP_REV"
 WP_TOOLS="$WP_BOOTSTRAP/pocs/poc03_mac_mini"
-WP_REV=$("$WP_PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' "$WP_PACKAGE/release.json")
 "$WP_PY" -c 'import platform,socket; print(platform.machine(),platform.python_version()); print(socket.gethostname())'
-# 以下值必须来自目标 Mac Mini 的实际观察
 WP_HOST="REPLACE_WITH_ACTUAL_MAC_MINI_HOSTNAME"
 "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" audit
 "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" prepare --expected-hostname "$WP_HOST"
@@ -55,11 +53,11 @@ WP_HOST="REPLACE_WITH_ACTUAL_MAC_MINI_HOSTNAME"
 
 普通用户 LaunchAgent 依赖登录；本方案使用 `/Library/LaunchDaemons` 的 system-domain jobs，通过 `UserName` 以非 root 用户运行，支持解除磁盘锁定后的系统启动。**FileVault 冷启动可能需要现场用户解锁，launchd 无法代替解锁；不能据此承诺无人值守冷重启自动恢复。** 留给第二阶段分别验证进程恢复、解锁后的重启恢复和断电恢复。需要修改休眠/电源策略时由设备操作者审阅，第一阶段不修改这些设置。[Apple launchd 文档](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
 
-## 3. 离线安装与原生兼容（Mac Mini）
+## 3. GitHub 安装与原生兼容（Mac Mini）
 
 ```bash
-"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" install-release \
-  --package "$WP_PACKAGE" --revision "$WP_REV" --python "$WP_PY" --expected-hostname "$WP_HOST"
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" install-github \
+  --revision "$WP_REV" --python "$WP_PY" --expected-hostname "$WP_HOST"
 WP_CODE="$WP_ROOT/releases/$WP_REV/code"
 WP_BIZ="$WP_ROOT/releases/$WP_REV/envs/business/bin/python"
 WP_MCP="$WP_ROOT/releases/$WP_REV/envs/mcp/bin/python"
@@ -70,12 +68,16 @@ chmod 600 "$WP_ROOT/evidence/native-business-smoke.json"
 
 安装失败保留该 release 供诊断，不标记安装完成、不要修改锁文件绕过哈希/架构检查。重试使用新的空部署根或经审阅清理失败的未激活 release；不要删除已运行版本。实际 arm64 import、SQLite/SQLAlchemy、OpenAI SDK 被动导入及 Tiger `get_prime_assets` 方法导入均需通过；smoke 的临时库、禁网络与禁后端/交易模块边界不可取消。此时尚未启动任何生产进程。
 
+install-github 验证 exact-commit 四项 GitHub Actions（Backend tests、Frontend checks、Offline M5、MCP PoC tests）全部完成且 success，并检查 commit 为 origin/main ancestor。API 不可达、限流、检查缺失/未完成/失败均拒绝，不绕过。来源是固定公共仓库。
+
+依赖为两环境原生 ARM 哈希锁：64 个固定文件名/版本/摘要的 PyPI wheel 加 Git 中既有纯 Python Tiger wheel，以及固定摘要官方 Tunnel v0.0.16。首次联网只下载公开资产，不读数据库/运行凭证；私有暂存目录构造同 SHA 临时包复用 Stage 1 安装器，完成后清理。安装不修改 current、私人配置/数据，不启动 jobs。离线包不再是长期主要流程。
+
 ## 4. 生成迁移材料（MacBook 源端，第二阶段协调执行）
 
 本阶段没有执行真实库导出。设备部署阶段在 MacBook 用固定 Git 版本的工具生成一致性备份，**不要 cp 在线数据库或只复制主文件漏掉已提交 WAL**。本脚本用 read transaction + SQLite backup 捕获同一快照，验证完整性和全部表行摘要；不会调用 init_db/get_summary，也不会写入源库。[Python SQLite backup](https://docs.python.org/3.11/library/sqlite3.html#sqlite3.Connection.backup)
 
 ```bash
-WP_SRC_CODE="/Users/songbin/.codex/worktrees/poc03-mac-mini-prep/WealthPilot"
+WP_SRC_CODE="/absolute/path/to/clean-checkout-of-the-same-published-commit"
 WP_SRC_PY="/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python"
 WP_EXPORT="$HOME/WealthPilot-private-transfer/poc03-export"
 mkdir -p -m 700 "$WP_EXPORT"
@@ -200,3 +202,17 @@ sudo "$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" switch \
 日志仅记录启动/退出和 PID，原始子进程输出丢弃；每服务轮转总上限约 4MiB。工具完成记录需运营期定期归档（不含金额），控制磁盘增长。首次生产候选目标是有限只读基础环境，7×24 可用性、网络重连、休眠和备份保存周期须在第二阶段取得实际证据；本阶段不加入调度同步、监控平台或 CI/CD。
 
 保留最小权限独立生产凭证，凭证变更由用户完成；任何退回匿名公网、复用旧事故 Key、启用交易、修改业务代码或放宽权限均超出本包范围。不要把设备阶段的临时修复直接留在 Prod 代码中；必要变更回 Dev 短期分支，再以新的 Git SHA 重新打包。
+
+## 8. 后续更新与离线应急
+
+更新：Dev PR/CI/main 发布新完整 SHA → Mini 用新 SHA bootstrap 的 install-github 安装（旧 current 保持运行）→ 原生 smoke → 审阅 switch --mode synthetic 计划再 --apply → readyz / 本地合成 → 必要范围/数据门槛及真实验收。不重新 configure 覆盖配置。健康失败时停止入口并 switch 上一已安装 SHA，重新验证；无上一版本时保持停止或合成。
+
+原 Stage 1 离线包及交付摘要保留在 MacBook 仓库外。以后可从已通过 CI 的指定 main Commit 用 build_release.py 重建应急包，不加入真实数据/凭证。先核对可信交付记录的包 SHA、完整 revision 和包内 SHA256SUMS，再用包内工具：
+
+```bash
+"$WP_PY" "$WP_TOOLS/deploy.py" --root "$WP_ROOT" install-release \
+  --package /absolute/path/to/verified-emergency-package --revision "$WP_REV" \
+  --python "$WP_PY" --expected-hostname "$WP_HOST"
+```
+
+离线安装不能联网核对 CI，操作者必须保存可信 main/CI 记录并匹配 SHA。原 56aa7ed 包仅为 Stage 1 准备资产，不作为本轮已完成完整发布 Gate 的首次 Prod 候选。应急安装同样不自动开通真实，Stage 2 实测不得省略。
