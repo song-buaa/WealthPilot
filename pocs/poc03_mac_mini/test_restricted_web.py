@@ -446,3 +446,12 @@ def test_ibkr_sync_factory_has_readonly_client_without_action_router(monkeypatch
     assert 'backend.api.action' not in sys.modules
     assert factory.ibkr._loop is None and not factory.ibkr._connected
     factory.close()
+
+
+def test_concurrent_web_refreshes_do_not_fail_during_wal_cleanup(web,caplog):
+    from concurrent.futures import ThreadPoolExecutor
+    paths=['/api/broker-sync/status','/api/wealth/summary','/api/portfolio/summary']
+    with TestClient(create_app(*web,factory=fake_service),base_url='http://127.0.0.1:8790') as client:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results=list(pool.map(lambda i:client.get(paths[i%len(paths)]).status_code,range(90)))
+    assert all(status==200 for status in results),caplog.text

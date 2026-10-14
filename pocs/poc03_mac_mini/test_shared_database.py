@@ -414,3 +414,32 @@ def test_unknown_stale_and_source_failure_remain_explicit(shared, monkeypatch):
     data = overview(shared, cash_configured=True)
     assert data["status"] == "unavailable" and data["net_worth_minor"] is None
     assert "TIGER_CASH_SOURCE_FAILED" in data["issues"]
+
+
+def test_transient_sidecar_disappearing_during_validation_is_allowed(shared, monkeypatch):
+    _, db, contract_path = shared
+    sidecar = Path(str(db) + "-journal")
+    sidecar.touch(mode=0o600)
+    original = shared_sqlite.private_file
+    removed = False
+    def racing_file(path, mode=None):
+        nonlocal removed
+        if Path(path) == sidecar and not removed:
+            removed = True
+            sidecar.unlink()  # simulate SQLite's last-close cleanup, fixture only
+        return original(path, mode)
+    monkeypatch.setattr(shared_sqlite, "private_file", racing_file)
+    shared_sqlite.check_file(db, shared_sqlite.load_contract(contract_path))
+    assert removed
+
+
+@pytest.mark.parametrize("kind", ["public", "dangling_symlink"])
+def test_persistent_unsafe_sidecar_still_fails_closed(shared, kind):
+    _, db, contract_path = shared
+    sidecar = Path(str(db) + "-journal")
+    if kind == "public":
+        sidecar.touch(); sidecar.chmod(0o644)
+    else:
+        sidecar.symlink_to(sidecar.with_name("missing-synthetic-journal"))
+    with pytest.raises(ValueError):
+        shared_sqlite.check_file(db, shared_sqlite.load_contract(contract_path))

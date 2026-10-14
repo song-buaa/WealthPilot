@@ -62,7 +62,7 @@ SQLite 按短事务序列化写入；遇 busy/连接/未知错误显式失败，
    ```
 
    configure 默认列表为空、拒绝覆盖已有 Web 配置。后续更新用 select，不重置原 MCP/Tunnel 配置或凭证；构建/配置均不启动 Web。
-3. **共享模式分支**：若已是经验证的 Batch 1 shared_wal，核对同一库/Portfolio/receipt，无需再次迁移/改权限；MCP 可以继续使用兼容的旧 release。若仍是0400固定副本，先由设备操作者批准短暂停服窗口，严格按 Batch 1 第3节：先切到支持共享契约的新 MCP release并验证固定模式，再停两个 jobs，确认全部客户端已关闭，执行 shared_database 的计划→`--services-stopped --apply`，保留精确原库和历史参考，再启动 MCP/Tunnel并用 `validate --expect real --runtime-data` 核实。**不能只 chmod，也不能在旧 runner 仍使用迁移 SHA 时先写库。** 本轮 Dev 不执行此窗口。
+3. **共享模式分支**：若已是经验证的 Batch 1 shared_wal，核对同一库/Portfolio/receipt，无需再次迁移/改权限；MCP须已使用包含本批侧文件并发修复的兼容release；若仍是旧Batch 1检查，先经批准切到本发布SHA，再启Web。若仍是0400固定副本，先由设备操作者批准短暂停服窗口，严格按 Batch 1 第3节：先切到支持共享契约的新 MCP release并验证固定模式，再停两个 jobs，确认全部客户端已关闭，执行 shared_database 的计划→`--services-stopped --apply`，保留精确原库和历史参考，再启动 MCP/Tunnel并用 `validate --expect real --runtime-data` 核实。**不能只 chmod，也不能在旧 runner 仍使用迁移 SHA 时先写库。** 本轮 Dev 不执行此窗口。
 4. **只启 Web、broker仍为空**：原有 MCP 健康已确认后，`web_deploy ... services install` 先生成 plist 计划；检查独立 label/UserName/固定 release 路径，再由设备操作者以系统 launchd 所需权限加 `--apply`。这一步只处理 Web job，不停止现有两个 jobs。
 5. **健康与私网浏览**：确认只监听127.0.0.1:8790，GET `/api/web/status` 显示正确 SHA/shared_wal/empty allowlist/scheduler=false。从 MacBook 使用已信任的 SSH 别名：`ssh -N -L 127.0.0.1:8790:127.0.0.1:8790 <trusted-mini-alias>`，浏览 localhost:8790；不关闭主机密钥校验，不开公网端口。确认财富/组合可见、未开放功能明确提示、同步按钮未启用；同一时点/既有来源口径下与 MCP 比较三金额，报告只记录布尔值。来源/现金/FX变化产生差异不能自动PASS；partial/unknown/stale保留。
 6. **真实 broker 单独验收后才启用**：查实 Gateway、账户只读护栏、唯一clientId、QMT登录/私网/secret、实际Portfolio。必要参数由操作者保存在0600 web-brokers.json；不得迁移整份 .env。等任务结束，仅停止 Web job，执行 `web_deploy ... brokers --enabled-brokers <已验收列表> --gateways-verified --services-stopped` 的计划，确认后加 `--apply`，再只重启 Web。此确认参数仅记录操作者验收，不是脚本自动网关证明；未经真实验收不得勾选。初次 Dev Mock PASS 不能填入设备 PASS。
@@ -79,7 +79,9 @@ SQLite 按短事务序列化写入；遇 busy/连接/未知错误显式失败，
 
 自动化：`test_restricted_web.py` 的真实 handler / 原 Guojin sync_and_persist + 合成输入；独立 MCP HTTP 请求验证 Web提交后读取新值；原 Batch 1 读写/并发/异常退出/备份恢复回归；Playwright 在真正受限生产托管下覆盖成功同步、失败保留last-good、只开放页面和按钮。另建最小 Web Python环境，pip check及同一浏览器流程通过。所有来源 Mock、网络只用 loopback，日志在仓库外保存。
 
-本地最终结果：受限 Web **38 passed**（含独立 MCP HTTP）；原同步/归属/持久化 **56 passed / 2 integration deselected**；后端全量 **896 passed / 7 skipped**；Batch 1共享库 **31 passed**；既有 reader/deploy/GitHub guards **73 passed**；两套MCP HTTP **11 + 9 passed**；Offline M5 **18/18**、公网尝试0；前端 lint/build 与两个真实浏览器用例 PASS。ARM额外9个wheel为纯Python资产可用性证据，最小Web环境为Dev x86_64，不是Mini执行证明。现有未改package-lock的npm advisories与bundle大小提示保留，未自动升级依赖。
+本地最终结果：受限 Web **39 passed**（含独立 MCP HTTP）；原同步/归属/持久化 **56 passed / 2 integration deselected**；后端全量 **896 passed / 7 skipped**；Batch 1共享库 **34 passed**；既有 reader/deploy/GitHub guards **73 passed**；两套MCP HTTP **11 + 9 passed**；Offline M5 **18/18**、公网尝试0；前端 lint/build 与两个真实浏览器用例 PASS。ARM额外9个wheel为纯Python资产可用性证据，最小Web环境为Dev x86_64，不是Mini执行证明。现有未改package-lock的npm advisories与bundle大小提示保留，未自动升级依赖。
+
+首次Linux CI在并发刷新时发现503，本地90次并发请求复现 FileNotFoundError：SQLite正常关闭会清理临时WAL/SHM/journal，侧文件可在存在检查与stat之间消失。共享契约仅允许这一临时缺失窗口；主库/契约缺失、公开权限、dangling symlink仍拒绝。新增确定性清理竞态/不安全侧文件及并发Web回归，未放宽浏览器“零失败API”断言。失败CI日志保留在仓库外交付记录。
 
 实际 Mini ARM、真实 broker/现金/FX、SSH访问与设备恢复 **NOT RUN**。发布前的最终计数和 GitHub SHA/PR/CI 见本轮交付收据；不能把代码/Dev PASS 当设备生产验收。
 

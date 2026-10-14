@@ -1,6 +1,7 @@
 """Loopback-only private Web: explicit handlers, no full backend lifespan."""
 from contextlib import asynccontextmanager
 import fcntl
+import logging
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -59,7 +60,12 @@ def create_app(config, static_dir, *, factory=None):
             return JSONResponse({"detail": "PRIVATE_LOOPBACK_ACCESS_REQUIRED"}, status_code=403)
         try:
             response = await call_next(request)
-        except Exception:
+        except Exception as error:
+            category = type(error).__name__
+            if category not in {"FileNotFoundError", "PermissionError", "OperationalError", "ValueError"}:
+                category = "UnexpectedError"
+            logging.getLogger("restricted-web-lifecycle").error(
+                '{"event":"web_request_failed","category":"%s"}', category)
             return JSONResponse({"detail": "WEB_OPERATION_FAILED"}, status_code=503)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"

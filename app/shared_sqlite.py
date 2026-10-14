@@ -59,7 +59,13 @@ def check_file(database, contract):
     for suffix in ("-wal", "-shm", "-journal"):
         sidecar = Path(str(path) + suffix)
         if sidecar.exists() or sidecar.is_symlink():
-            private_file(sidecar)
+            try:
+                private_file(sidecar)
+            except FileNotFoundError:
+                # SQLite may unlink transient sidecars on the last close while
+                # another connection is being validated. Only tolerate absence;
+                # a dangling/replaced symlink must still fail closed.
+                require(not sidecar.is_symlink(), "SHARED_PATH_SYMLINK_REFUSED")
     return path
 
 

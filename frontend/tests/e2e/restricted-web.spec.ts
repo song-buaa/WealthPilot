@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 test.describe.configure({ mode: 'serial' })
 
-async function server(fails = false): Promise<{ base: string; process: ChildProcess }> {
+async function server(fails = false): Promise<{ base: string; process: ChildProcess; errors: string[] }> {
   const port = await new Promise<number>((resolve) => {
     const sock = createServer()
     sock.listen(0, '127.0.0.1', () => {
@@ -16,12 +16,14 @@ async function server(fails = false): Promise<{ base: string; process: ChildProc
   const python = process.env.WP_TEST_PYTHON ?? '/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python'
   const fixture = fileURLToPath(new URL('../fixtures/restricted_web_server.py', import.meta.url))
   const child = spawn(python, [fixture, String(port), ...(fails ? ['--source-fails'] : [])], {
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, PYTHON_DOTENV_DISABLED: '1' }, stdio: 'ignore',
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, PYTHON_DOTENV_DISABLED: '1' }, stdio: ['ignore', 'ignore', 'pipe'],
   })
+  const errors: string[] = []
+  child.stderr?.on('data', chunk => { if (errors.length < 20) errors.push(String(chunk).slice(0, 2000)) })
   const base = `http://127.0.0.1:${port}`
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (child.exitCode !== null) throw new Error('Synthetic Web fixture failed to start')
-    try { if ((await fetch(`${base}/api/web/status`)).ok) return { base, process: child } } catch { /* wait for loopback */ }
+    if (child.exitCode !== null) throw new Error(`Synthetic Web fixture failed to start: ${errors.join('')}`)
+    try { if ((await fetch(`${base}/api/web/status`)).ok) return { base, process: child, errors } } catch { /* wait for loopback */ }
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   child.kill()
@@ -31,7 +33,7 @@ async function server(fails = false): Promise<{ base: string; process: ChildProc
 test('restricted React pages, actual manual sync and explicit unavailable features', async ({ page, request }) => {
   const fixture = await server()
   const failures: string[] = []
-  page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400) failures.push(response.url()) })
+  page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`) })
   try {
     await page.goto(fixture.base)
     await expect(page.getByText('手动券商同步', { exact: true })).toBeVisible()
@@ -50,7 +52,7 @@ test('restricted React pages, actual manual sync and explicit unavailable featur
     await expect(page.getByText('自动同步尚未启用；仅支持已验收券商的手动同步。')).toHaveCount(0)
     await page.goto(`${fixture.base}/#/decision`)
     await expect(page.getByRole('heading', { name: '此功能尚未开放' })).toBeVisible()
-    expect(failures).toEqual([])
+    expect(failures, fixture.errors.join('')).toEqual([])
   } finally { fixture.process.kill() }
 })
 
