@@ -14,9 +14,10 @@
 |---|---|
 | Phase 0 | 3.x 现状审计和模块迁移影响报告完成。 |
 | PoC 01 | 合成 MCP 工具，ChatGPT Web / iOS 实际调用通过。 |
-| PoC 02 | 真实财富查询通过个人 Secure MCP Tunnel，复用原财富计算，与原 Web 口径一致；凭证展示事故仍为 **FAIL**，未补救。 |
+| PoC 02 | 真实财富查询通过个人 Secure MCP Tunnel，复用原财富计算，与原 Web 口径一致；凭证展示事故保持历史 **FAIL**，撤销后的权限检查单独记录。 |
 | PoC 03 Stage 1 / 1.5 | 常驻部署工具、GitHub 指定 Commit 安装、离线应急包和 CI 准备；Mac Mini 实测仍留 Stage 2。 |
-| PoC 03 Stage 2 | 设备交接报告 ARM、数据迁移、独立凭证和本地 synthetic 已通过；Tunnel 启动阻塞，real 未启用。Web/iOS、MacBook 关闭和恢复验收待完成。 |
+| PoC 03 Stage 2 | 用户已确认 Mini 真实只读 MCP 激活，ChatGPT Web/iOS 可查询；本轮 Dev 未连接设备复验，不能扩展为所有常驻/恢复项目已通过。 |
+| Web & Data Sync Batch 1 | 显式共享 WAL 契约、MCP 只读、运行期启动检查与备份恢复副本测试；Web、同步和生产权限切换尚未部署。见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。 |
 
 标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
 

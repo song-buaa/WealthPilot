@@ -9,8 +9,9 @@ import jsonschema
 from common import private_json, require, safe_cli, write_json
 
 
-async def validate(port, expectation, reference=None):
-    require(expectation != "real" or reference is not None, "MIGRATION_REFERENCE_REQUIRED")
+async def validate(port, expectation, reference=None, runtime_data=False):
+    require(not (runtime_data and reference is not None), "RUNTIME_AND_MIGRATION_COMPARISON_EXCLUSIVE")
+    require(expectation != "real" or reference is not None or runtime_data, "MIGRATION_REFERENCE_REQUIRED")
     async with Client(f"http://127.0.0.1:{port}/mcp", mode="legacy", read_timeout_seconds=60) as client:
         tools = await client.list_tools()
         require([t.name for t in tools.tools] == ["get_wealth_overview"], "UNEXPECTED_MCP_TOOL_CATALOG")
@@ -28,6 +29,7 @@ async def validate(port, expectation, reference=None):
         summary = {"schema": "poc03.mcp-validation.v1", "result": "PASS" if checks is None or all(checks.values()) else "FAIL",
                    "one_readonly_tool": True, "contract_valid": True, "synthetic": data["synthetic"],
                    "status": data["status"], "issues": data["issues"], "amounts_equal_to_migration_reference": checks,
+                   "comparison_basis": "runtime_contract_only" if runtime_data else "migration" if reference is not None else "synthetic",
                    "comparison_note": "Live cash/FX may change after migration; a difference needs review, not an automatic PASS."}
         return summary
 
@@ -37,10 +39,11 @@ def main():
     parser.add_argument("--port", type=int, default=8788)
     parser.add_argument("--expect", choices=("synthetic", "real"), required=True)
     parser.add_argument("--reference")
+    parser.add_argument("--runtime-data", action="store_true", help="Check live contract/quality; do not compare changing amounts to historical migration")
     parser.add_argument("--output", required=True, help="Private metadata-only validation record")
     args = parser.parse_args()
     reference = private_json(args.reference) if args.reference else None
-    summary = asyncio.run(validate(args.port, args.expect, reference))
+    summary = asyncio.run(validate(args.port, args.expect, reference, args.runtime_data))
     write_json(args.output, summary)
     print(json.dumps(summary))
     if summary["result"] != "PASS":

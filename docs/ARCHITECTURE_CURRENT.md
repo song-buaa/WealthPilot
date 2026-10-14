@@ -2,6 +2,8 @@
 
 > 2026-10-11。开发事实以 main 的代码/测试为准；v3.15.1 是历史 SemVer Tag。4.0 正在迁移验证，尚未生产上线。
 
+2026-10-14 更新：用户确认 Mini real MCP 及 ChatGPT Web/iOS 已可查询，本轮 Dev 未复验设备。Web & Data Sync Batch 1 增加 opt-in 共享 SQLite WAL 契约：Web/同步未来受控写、MCP 保持只读事务；默认固定迁移副本模式保留，生产切换尚未执行。见 [共享契约、恢复与 Batch 2/3 边界](WealthPilot_4x_Web_Data_Sync_Batch1.md)。下方旧 Stage 2 阻塞记录不覆盖该用户更新，也不代表完整 Web/同步已生产上线。
+
 ## 当前 3.x 业务系统
 
 | 边界 | 实际入口 / 职责 |

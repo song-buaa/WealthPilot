@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased] - main / 4.0 migration validation
 
+- Web & Data Sync Batch 1：增加显式共享 WAL 数据库契约、受控 writer 连接、只读 MCP 每请求校验和运行期启动检查；保留历史迁移 SHA/参考、切换前精确副本及一致性备份恢复。新增隔离库/跨运行环境 HTTP 测试和生产权限/回滚及 Batch 2/3 边界说明；未部署 Web/同步或修改 Mini。
 - 当前 main 在 v3.15.1 后持续增加财富、消费分析、账单导入/刷新一致性、技术形态证据等能力；产品版本以 Git/CI 和实际验收记录为准。
 - 固定 Phase 0 审计、PoC 01 合成跨端调用、PoC 02 私人 Tunnel 真实财富只读查询及 PoC 03 部署准备成果。
 - PoC 03 Stage 1.5：GitHub PR/CI/main 为主要发布路径，新增指定完整 Commit 安装、固定哈希 ARM 依赖及 MCP PoC CI；离线包应急保留。

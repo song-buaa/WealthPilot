@@ -19,7 +19,9 @@ Phase 0 已审计；PoC 01 合成 MCP 和 PoC 02 真实财富只读 MCP 的 Web/
 
 MacBook 为 Dev，Mac Mini 为 Prod。标准流程为 GitHub 短期分支 → PR → 全部质量 Gate → main → Mini 拉取 CI 已通过的完整 SHA → 原生 ARM 依赖 → launchd → 实际验收。部署不自动跟随 main；数据、备份、配置、日志、凭证在代码外。离线包仅应急保留。
 
-PoC 03 Stage 2 已有设备端 ARM 安装、数据迁移和本地 synthetic 证据；Tunnel 启动阻塞，real 尚未启用，远程与常驻验收未完成。仅部署既有只读财富工具及 Secure MCP Tunnel，不启动 backend.main、broker sync、OrderPoller、Gateway 或交易服务。本机文件/脚本测试不能代替 Mini 原生执行、真实查询、重启和 MacBook 关闭验收。步骤见 [Mac Mini 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)。生产修复回 Dev，重新发布 Commit；不直接修改 Prod 业务代码。
+PoC 03 Stage 2 已有设备端 ARM 安装、数据迁移和本地 synthetic 证据；用户于 2026-10-14 确认 Mini real MCP 与 ChatGPT Web/iOS 可用，本轮 Dev 未远程复验。仅部署既有只读财富工具及 Secure MCP Tunnel，不启动 backend.main、broker sync、OrderPoller、Gateway 或交易服务。本机文件/脚本测试不能代替 Mini 原生执行、真实查询、重启和 MacBook 关闭验收。步骤见 [Mac Mini 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)。生产修复回 Dev，重新发布 Commit；不直接修改 Prod 业务代码。
+
+Web & Data Sync Batch 1 仅在 Dev 实现显式共享 WAL 契约，默认固定副本模式不变。未经设备阶段确认，不 chmod 生产库、不改生产配置、不启动 Web/同步。新受限入口使用同一 DB 路径和 `WEALTHPILOT_SQLITE_CONTRACT`，不能启动完整 backend.main；权限切换/恢复和 Batch 2/3 白名单见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。原凭证展示事故保持历史 FAIL，撤销后的权限检查单独记录。
 
 ## 项目概述
 

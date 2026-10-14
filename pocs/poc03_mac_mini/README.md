@@ -12,6 +12,7 @@ Stage 1.5 主要路线已改为 GitHub PR/CI/main → Mini 拉取指定完整 SH
 | `github_release.py` | GitHub 指定 Commit / CI / main ancestry 核对，固定哈希公共资产下载并复用安装器。 |
 | `deploy.py` | 本机审查、离线安装双环境、配置、launchd 计划/执行、版本/合成-真实模式切换。 |
 | `snapshot.py` | SQLite mode=ro 一致性备份、完整性与表数据摘要、原财富计算的私有金额参考和恢复。 |
+| `shared_database.py` | opt-in 共享 WAL 切换和验证备份恢复后的文件重绑定；默认只读计划，不自动改生产权限或启动服务。 |
 | `runner.py` | 固定两个入口，验证 Git/真实访问门槛；有限大小的生命周期元数据日志，丢弃原始子进程输出。 |
 | `access_check.py` | 第二阶段认证 metadata、匿名/无效凭证拒绝和关联范围核对，不输出 IDs/Key/API body。 |
 | `compatibility.py` | 禁公网、禁完整后端/决策/交易模块导入的临时数据库 smoke。 |
@@ -47,3 +48,5 @@ PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest \
 ```
 
 不要在重打包时加入数据库、迁移参考、私人配置或任何 Key。bundle/源码与 package manifest 的 revision 必须一致；完整包摘要从可信交付记录核对。
+
+Web & Data Sync Batch 1 的共享模式不改变默认固定副本部署。生产 0400→0600、历史参考与运行数据分离、恢复/回滚、writer 环境及测试方式见 [Batch 1 说明](../../docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。只读 MCP 不因文件可写而获得写 SQL 能力；不直接运行完整 Web 后端。

@@ -29,6 +29,13 @@ def get_engine():
     """获取（或创建）SQLAlchemy engine，首次调用时才真正连接。"""
     global _engine
     if _engine is None:
+        contract = os.environ.get("WEALTHPILOT_SQLITE_CONTRACT")
+        if contract:
+            from app.shared_sqlite import verify, writer_connection
+            verify(DB_PATH, contract, integrity=True)
+            _engine = create_engine("sqlite://", echo=False, poolclass=NullPool,
+                                    creator=lambda: writer_connection(DB_PATH, contract))
+            return _engine
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         # NullPool：不缓存连接，每次 get_session() 都打开全新连接。
         # 这解决了 Streamlit 多次 rerun 时 SQLite 读到旧快照的问题。

@@ -12,7 +12,7 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 
 `main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.1` 是历史最后一个 SemVer 稳定发布，后续 functional milestone Tags 与 main 提交不自动构成新的 SemVer 产品版本。`v3.15.0` / `v3.14.0` 保持历史不可变，原 Tag 不移动、不重建。frontend 0.0.0 / FastAPI 1.0.0 不是当前产品版本。
 
-当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；PoC 03 Stage 2 已有部分设备证据，Tunnel/远程及恢复验收待完成，不宣称正式生产上线。
+当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；用户于 2026-10-14 确认 Mini real MCP 与 ChatGPT Web/iOS 可用，本轮 Dev 未复验，不宣称完整 Web/同步已生产上线。
 
 ## 2. 运行模式
 
@@ -46,6 +46,8 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 - 发布后验证 local main、origin/main 与预期提交一致；Tag 只在明确发布动作中创建，不因普通文档提交重打或移动。
 
 ## 5. 安全边界
+
+- Web & Data Sync 的共享 WAL 是显式设备切换，不随代码发布自动启用；原 0400 固定副本默认保留。权限调整、历史/运行参考分离、备份恢复及旧版本回滚见 [Batch 1 说明](WealthPilot_4x_Web_Data_Sync_Batch1.md)。生产修改需设备阶段授权；本轮 Dev 不连接 Mini。
 
 - `.env*`、本地 SQLite、券商凭证、私钥、完整账户号和仓库外备份不得提交。
 - Public Demo 必须与 self-use 数据库、凭证和网络能力物理/配置隔离。

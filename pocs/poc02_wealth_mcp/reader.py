@@ -20,7 +20,10 @@ class ReadError(Exception):
 
 
 @contextmanager
-def readonly_snapshot(path):
+def readonly_snapshot(path, database_contract=None):
+    if database_contract:
+        from app.shared_sqlite import check_file, load_contract
+        check_file(path, load_contract(database_contract))
     path = Path(path).resolve(strict=True)
     raw = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     raw.execute("PRAGMA query_only=ON")
@@ -41,6 +44,9 @@ def readonly_snapshot(path):
             raw.execute("BEGIN")  # Python sqlite legacy mode otherwise skips BEGIN for SELECT.
             transaction = connection.begin()
             try:
+                if database_contract:
+                    from app.shared_sqlite import verify
+                    verify(path, database_contract, connection=raw)
                 yield connection
             finally:
                 transaction.rollback()
@@ -102,7 +108,7 @@ def _minor(value):
     return int(Decimal(str(round(float(value), 2))) * 100)
 
 
-def read_overview(path, portfolio_id, *, cash_configured=False, now=None):
+def read_overview(path, portfolio_id, *, cash_configured=False, now=None, database_contract=None):
     from app.models import Portfolio, Position, WealthItem
     now = now or datetime.now(timezone.utc)
     queried_at = now.isoformat()
@@ -112,7 +118,11 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None):
     old_handlers = root.handlers[:]
     root.handlers = [probe]
     try:
-        with readonly_snapshot(path) as connection, service_sessions(connection) as wealth, observe_cash() as cash:
+        with readonly_snapshot(path, database_contract) as connection, service_sessions(connection) as wealth, observe_cash() as cash:
+            if database_contract:
+                from app.shared_sqlite import load_contract
+                if load_contract(database_contract)["portfolio_id"] != portfolio_id:
+                    raise ReadError("PORTFOLIO_NOT_FOUND")
             with Session(bind=connection, autoflush=False,
                          join_transaction_mode="rollback_only") as session:
                 if session.get(Portfolio, portfolio_id) is None:

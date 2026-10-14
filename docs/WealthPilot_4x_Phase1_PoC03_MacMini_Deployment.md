@@ -2,6 +2,9 @@
 
 > Tunnel 兼容修复更新：MacBook Dev → GitHub PR/CI/main → Mac Mini Prod 拉取完整 Commit 为主要路线。设备交接报告 ARM 安装、数据迁移及本地 synthetic MCP 已通过；Tunnel 启动阻塞，两个 system jobs 已停止，real 尚未启用。继续执行由设备端 Codex 完成，本轮 Dev 不操作 Mini。原离线包仅应急保留；PoC 02 凭证事故仍 FAIL，新 Key 不表示旧 Key 已撤销。代码发布不等于 4.0 生产上线。
 
+
+2026-10-14 后续状态：用户确认 Mini real MCP 及 ChatGPT Web/iOS 已可查询；本轮 Dev 不复验设备。上述停服/Tunnel 阻塞为历史当轮记录，不得据此停止当前服务或重做迁移。Web & Data Sync Batch 1 交付 opt-in 共享 WAL，默认固定副本不变；生产权限切换、历史参考、备份恢复/回滚必须先阅读 [Batch 1 执行边界](WealthPilot_4x_Web_Data_Sync_Batch1.md)，不要只 chmod 运行库。
+
 ## 1. 第二阶段入口与目录
 
 Mac Mini Codex 首先阅读 AGENTS.md、README、PROJECT_GOVERNANCE、本说明和 PoC 03 报告。确认这台机器为目标 Mac Mini、使用哪一个非 root 本机用户及其真实 hostname，再执行；分别记录已有设备证据与本轮重新验收；Dev 回归测试不能替代设备 PASS。

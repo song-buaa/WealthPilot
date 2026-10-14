@@ -33,7 +33,8 @@ def main():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = read_overview(config["database_path"], int(config["portfolio_id"]),
-                                   cash_configured=cash_configured)
+                                   cash_configured=cash_configured,
+                                   database_contract=config.get("database_contract_path"))
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
     except Exception as error:
         safe = {"PORTFOLIO_NOT_FOUND"}

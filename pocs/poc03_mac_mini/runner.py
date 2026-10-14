@@ -62,7 +62,20 @@ def child_command(root, role):
             wealth = private_json(root / "config/wealth.json")
             require(Path(wealth["database_path"]).resolve() == (root / "data/wealthpilot.db").resolve(), "PRODUCTION_DATABASE_PATH_MISMATCH")
             reference = private_json(root / "data/migration-reference.json")
-            require(digest(wealth["database_path"]) == reference["database_sha256"], "MIGRATION_DATABASE_DIGEST_MISMATCH")
+            database_mode = config.get("database_mode", "fixed_snapshot")
+            if database_mode == "shared_wal":
+                from shared_database import verify
+                contract_path = root / "config/database-contract.json"
+                require(wealth.get("database_contract_path") == str(contract_path), "SHARED_CONTRACT_PATH_MISMATCH")
+                contract = verify(wealth["database_path"], contract_path, integrity=True)
+                require(contract["portfolio_id"] == wealth["portfolio_id"] == reference["portfolio_id"],
+                        "SHARED_PORTFOLIO_MISMATCH")
+                require(contract["migration_database_sha256"] == reference["database_sha256"],
+                        "SHARED_MIGRATION_PROVENANCE_MISMATCH")
+            else:
+                require(database_mode == "fixed_snapshot", "INVALID_DATABASE_MODE")
+                require(not wealth.get("database_contract_path"), "SHARED_CONTRACT_REQUIRES_SHARED_MODE")
+                require(digest(wealth["database_path"]) == reference["database_sha256"], "MIGRATION_DATABASE_DIGEST_MISMATCH")
             require(bool(wealth.get("tiger_cash")) == reference["cash_reference"]["configured"],
                     "CASH_CONFIGURATION_DIFFERS_FROM_MIGRATION")
             args += ["--real-config", root / "config/wealth.json",
