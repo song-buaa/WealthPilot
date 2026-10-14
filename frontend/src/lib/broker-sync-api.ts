@@ -3,6 +3,9 @@
 const BASE = "/api/broker-sync";
 
 export interface SyncStatusItem {
+  enabled?: boolean;
+  running?: boolean;
+  last_attempt_id?: number | null;
   broker: string;
   platform: string;
   last_sync_time: string | null;
@@ -24,6 +27,8 @@ export interface SyncStatusResponse {
 export interface TriggerResponse {
   message: string;
   brokers_triggered: string[];
+  already_running?: string[];
+  jobs?: { broker: string; run_id: number }[];
 }
 
 export async function getSyncStatus(): Promise<SyncStatusResponse> {

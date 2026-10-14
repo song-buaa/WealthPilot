@@ -24,6 +24,15 @@ class PositionSnapshotRepository:
         triggered_by: str = "manual",
     ) -> PositionSnapshotRun:
         """创建一条 running 状态的 run 记录,提交后返回。"""
+        existing_id = self.session.info.get("sync_run_id")
+        if existing_id is not None:
+            run = self.session.get(PositionSnapshotRun, existing_id)
+            if run is None or run.broker != broker or run.status != "running":
+                raise ValueError("SYNC_RUN_BINDING_INVALID")
+            if account_id not in ("pending", "__unconfigured__") or run.account_id == "pending":
+                run.account_id = account_id
+            self.session.commit()
+            return run
         run = PositionSnapshotRun(
             broker=broker,
             account_id=account_id,

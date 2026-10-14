@@ -17,6 +17,13 @@ import DemoPasswordGate from '@/components/DemoPasswordGate'
 import WealthOverview from '@/pages/WealthOverview'
 import Retirement from '@/pages/Retirement'
 import Consumption from '@/pages/Consumption'
+import { RESTRICTED_WEB } from '@/lib/restricted-web'
+import RestrictedUnavailable from '@/components/RestrictedUnavailable'
+import type { ReactNode } from 'react'
+
+function FullWebOnly({ children }: { children: ReactNode }) {
+  return RESTRICTED_WEB ? <RestrictedUnavailable /> : children
+}
 
 export default function App() {
   return (
@@ -30,20 +37,20 @@ export default function App() {
 
           {/* 功能页 — 每个页面包裹 ErrorBoundary，单页崩溃不影响导航 */}
           <Route path="/dashboard"  element={<RouteErrorBoundary><Dashboard /></RouteErrorBoundary>} />
-          <Route path="/discipline" element={<RouteErrorBoundary><Discipline /></RouteErrorBoundary>} />
-          <Route path="/research"   element={<RouteErrorBoundary><Research /></RouteErrorBoundary>} />
-          <Route path="/decision"   element={<RouteErrorBoundary><Decision /></RouteErrorBoundary>} />
-          <Route path="/profile"    element={<RouteErrorBoundary><UserProfile /></RouteErrorBoundary>} />
-          <Route path="/action"        element={<RouteErrorBoundary><Action /></RouteErrorBoundary>} />
+          <Route path="/discipline" element={<FullWebOnly><RouteErrorBoundary><Discipline /></RouteErrorBoundary></FullWebOnly>} />
+          <Route path="/research"   element={<FullWebOnly><RouteErrorBoundary><Research /></RouteErrorBoundary></FullWebOnly>} />
+          <Route path="/decision"   element={<FullWebOnly><RouteErrorBoundary><Decision /></RouteErrorBoundary></FullWebOnly>} />
+          <Route path="/profile"    element={<FullWebOnly><RouteErrorBoundary><UserProfile /></RouteErrorBoundary></FullWebOnly>} />
+          <Route path="/action"        element={<FullWebOnly><RouteErrorBoundary><Action /></RouteErrorBoundary></FullWebOnly>} />
           <Route path="/wealth" element={<RouteErrorBoundary><WealthOverview /></RouteErrorBoundary>} />
-          <Route path="/retirement" element={<RouteErrorBoundary><Retirement /></RouteErrorBoundary>} />
-          <Route path="/consumption" element={<RouteErrorBoundary><Consumption /></RouteErrorBoundary>} />
+          <Route path="/retirement" element={<FullWebOnly><RouteErrorBoundary><Retirement /></RouteErrorBoundary></FullWebOnly>} />
+          <Route path="/consumption" element={<FullWebOnly><RouteErrorBoundary><Consumption /></RouteErrorBoundary></FullWebOnly>} />
 
           {/* 所有未实现功能统一走 Placeholder */}
-          <Route path="/placeholder/:name" element={<Placeholder />} />
+          <Route path="/placeholder/:name" element={<FullWebOnly><Placeholder /></FullWebOnly>} />
 
           {/* 404 兜底 */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={RESTRICTED_WEB ? <RestrictedUnavailable /> : <Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
     </HashRouter>

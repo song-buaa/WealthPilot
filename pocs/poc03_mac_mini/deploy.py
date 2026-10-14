@@ -96,7 +96,10 @@ def install_release(root, package, revision, python):
         for name in archive.namelist():
             require(Path(name).name == name and name.endswith(".whl"), "WHEEL_ARCHIVE_INVALID")
             (wheels / name).write_bytes(archive.read(name))
-    for role in ("mcp", "business"):
+    roles = ["mcp", "business"]
+    if (release / "code/pocs/poc03_mac_mini/locks/web.txt").is_file():
+        roles.append("web")
+    for role in roles:
         environment = release / "envs" / role
         run([python, "-m", "venv", environment])
         lock = release / "code/pocs/poc03_mac_mini/locks" / (role + ".txt")
@@ -104,7 +107,8 @@ def install_release(root, package, revision, python):
              "--require-hashes", "--only-binary=:all:", "-r", lock])
         run([environment / "bin/python", "-m", "pip", "check"])
     write_json(release / "installed.json", {"revision": revision, "package_verified": True,
-                                            "dependencies_hash_checked": True, "source_main": manifest["source_main"]})
+                                            "dependencies_hash_checked": True, "environments": roles,
+                                            "source_main": manifest["source_main"]})
     return release
 
 

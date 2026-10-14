@@ -70,6 +70,9 @@ def stage_assets(code, directory, fetch=get_json, transfer=download):
     wheels = directory / "wheels"; wheels.mkdir(mode=0o700)
     tools = Path(code) / "pocs/poc03_mac_mini"
     records = json.loads((tools / "evidence/arm-wheel-assets.json").read_text())["wheels"]
+    web_assets = tools / "evidence/arm-web-wheel-assets.json"
+    if web_assets.is_file():
+        records += json.loads(web_assets.read_text())["wheels"]
     for record in records:
         name, sha = record["filename"], record["sha256"]
         require(Path(name).name == name and name.endswith(".whl"), "ASSET_FILENAME_INVALID")

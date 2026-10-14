@@ -9,6 +9,7 @@ import DonutDistributionChart from '@/components/shared/DonutDistributionChart'
 import { getSyncStatus } from '@/lib/broker-sync-api'
 import { fmtCny, fmtCnySigned, fmtPct } from '@/lib/fmt'
 import { wealthApi, type WealthItem, type WealthItemWrite, type WealthSummary } from '@/lib/api'
+import { RESTRICTED_WEB } from '@/lib/restricted-web'
 
 const ASSET_TYPES = [['bank_cash', '银行现金 / 活期'], ['time_deposit', '定期存款 / 大额存单'], ['housing_fund', '住房公积金'], ['enterprise_annuity', '企业年金'], ['personal_pension', '个人养老金'], ['pension_insurance', '养老保险'], ['basic_pension', '基本养老保险权益'], ['other_asset', '其他资产']] as const
 const LIABILITY_TYPES = [['credit_card', '信用卡'], ['consumer_loan', '信用贷'], ['mortgage', '房贷'], ['other_liability', '其他负债']] as const
@@ -159,7 +160,7 @@ export default function WealthOverview() {
           <div style={detailTitle}>
             <span>📋 资产与负债明细</span>
             <div style={detailActions}>
-              <button type="button" onClick={() => setForm(emptyForm(detailFilter))} style={dataManagementExportButtonStyle}>新增{detailFilter === 'asset' ? '资产' : '负债'}</button>
+              <button type="button" disabled={RESTRICTED_WEB} title={RESTRICTED_WEB ? "生产 Web 暂未开放编辑" : undefined} onClick={() => setForm(emptyForm(detailFilter))} style={dataManagementExportButtonStyle}>新增{detailFilter === 'asset' ? '资产' : '负债'}</button>
               <button type="button" onClick={exportDetails} style={dataManagementExportButtonStyle}><Download size={11} /> 导出{detailFilter === 'asset' ? '资产' : '负债'}</button>
             </div>
           </div>
@@ -176,7 +177,7 @@ export default function WealthOverview() {
           <AttributionStrip summary={summary} />
         </section>
       </>}
-      {form && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
+      {form && !RESTRICTED_WEB && <ItemDialog form={form} setForm={setForm} saving={saving} onSubmit={save} onClose={() => setForm(null)} />}
     </div>
   )
 }
@@ -248,7 +249,7 @@ function DetailTable({ items, onEdit, onDelete }: { items: DetailRow[]; onEdit: 
           <td style={{ ...detailTd, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtCny(item.current_value)}</td>
           <td style={{ ...detailTd, textAlign: 'right', fontSize: 12 }}>{isPortfolioSummary || item.effective_included_in_net_worth ? <span style={{ color: '#16A34A', fontWeight: 500 }}>● 计入</span> : <span style={{ color: '#9CA3AF' }}>仅展示</span>}</td>
           <td style={{ ...detailTd, textAlign: 'right', color: isPortfolioSummary || item.freshness === 'latest' ? '#9CA3AF' : '#D97706', fontSize: 11, whiteSpace: 'nowrap' }}>{isPortfolioSummary ? portfolioSyncText(item.updated_at) : freshnessText(item)}</td>
-          <td style={{ ...detailTd, textAlign: 'right' }}>{isPortfolioSummary ? null : <details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details>}</td>
+          <td style={{ ...detailTd, textAlign: 'right' }}>{isPortfolioSummary || RESTRICTED_WEB ? null : <details style={{ position: 'relative', display: 'inline-block' }}><summary aria-label={`${item.name}更多操作`} style={moreButton}><Ellipsis size={17} /></summary><div style={moreMenu}><button type="button" onClick={() => onEdit(item)} style={menuButton}><Edit3 size={14} /> 编辑</button><button type="button" onClick={() => onDelete(item)} style={{ ...menuButton, color: '#DC2626' }}><Trash2 size={14} /> 删除</button></div></details>}</td>
         </tr>
       })}</tbody>
     </table>

@@ -4,6 +4,8 @@
 
 2026-10-14 更新：用户确认 Mini real MCP 及 ChatGPT Web/iOS 已可查询，本轮 Dev 未复验设备。Web & Data Sync Batch 1 增加 opt-in 共享 SQLite WAL 契约：Web/同步未来受控写、MCP 保持只读事务；默认固定迁移副本模式保留，生产切换尚未执行。见 [共享契约、恢复与 Batch 2/3 边界](WealthPilot_4x_Web_Data_Sync_Batch1.md)。下方旧 Stage 2 阻塞记录不覆盖该用户更新，也不代表完整 Web/同步已生产上线。
 
+Batch 2 开发事实：新增受限 Web 的显式 handler 白名单及原手动同步共用入口，复用 shared WAL；独立 Web label/固定release/环境，不启动22:00 job或订单链。当前为 Dev Mock/合成验证，生产未安装/启用本批能力。见 [Batch 2 实施和一体化部署](WealthPilot_4x_Web_Data_Sync_Batch2.md)。
+
 ## 当前 3.x 业务系统
 
 | 边界 | 实际入口 / 职责 |

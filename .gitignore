@@ -90,3 +90,6 @@ tiger_openapi_token.properties
 
 # v3.6 知识层索引（可重建，不提交）
 knowledge_base/_index/
+# Local browser test artifacts (CI/Dev evidence is kept outside source).
+frontend/test-results/
+frontend/playwright-report/

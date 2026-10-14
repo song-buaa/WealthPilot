@@ -200,6 +200,7 @@ class GuojinSyncService:
                     run_id=run.id,
                     positions=positions,
                     total_market_value_cnh=None,
+                    finalize=False,
                 )
 
                 # ── upsert 到 Position 业务表（不走 upsert_from_snapshots，
@@ -236,7 +237,7 @@ class GuojinSyncService:
                 # ── 收窄的 stale 清理 ──
                 self._remove_qmt_stale_positions(db_session, upsert_service, snapshots)
 
-                db_session.commit()
+                repo.mark_run_succeeded(run.id, position_count=len(positions))
                 return run.id
 
             except (ConnectionError, TimeoutError, OSError) as e:
@@ -302,7 +303,16 @@ class GuojinSyncService:
 
         all_guojin = db_session.query(BusinessPosition).filter(
             BusinessPosition.platform == platform,
-        ).all()
+        )
+        if "portfolio_id" in db_session.info:
+            # Restricted production: never claim/delete another account/source.
+            owner = snapshots[0].account_id if snapshots else None
+            if owner is None:
+                return 0
+            all_guojin = all_guojin.filter_by(
+                portfolio_id=db_session.info["portfolio_id"], broker="guojin",
+                broker_account_id=owner, sync_source="api")
+        all_guojin = all_guojin.all()
 
         removed = 0
         for pos in all_guojin:

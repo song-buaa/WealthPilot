@@ -1,0 +1,42 @@
+{
+  "result": "PASS_BINARY_ASSET_AVAILABILITY_ONLY",
+  "target": "macOS 13+ ARM64 CPython 3.11",
+  "wheels": [
+    {
+      "filename": "annotated_doc-0.0.4-py3-none-any.whl",
+      "sha256": "571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320"
+    },
+    {
+      "filename": "fastapi-0.135.3-py3-none-any.whl",
+      "sha256": "9b0f590c813acd13d0ab43dd8494138eb58e484bfac405db1f3187cfc5810d98"
+    },
+    {
+      "filename": "python_multipart-0.0.22-py3-none-any.whl",
+      "sha256": "2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155"
+    },
+    {
+      "filename": "starlette-1.0.0-py3-none-any.whl",
+      "sha256": "d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b"
+    },
+    {
+      "filename": "uvicorn-0.43.0-py3-none-any.whl",
+      "sha256": "46fac64f487fd968cd999e5e49efbbe64bd231b5bd8b4a0b482a23ebce499620"
+    },
+    {
+      "filename": "ib_async-2.1.0-py3-none-any.whl",
+      "sha256": "f6d8b991bdbd6dd38e700c61b3dced06ebe0f14be4e5263e2ef10ba10b88d434"
+    },
+    {
+      "filename": "aeventkit-2.1.0-py3-none-any.whl",
+      "sha256": "962d43f79e731ac43527f2d0defeed118e6dbaa85f1487f5667540ebb8f00729"
+    },
+    {
+      "filename": "nest_asyncio-1.6.0-py3-none-any.whl",
+      "sha256": "87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c"
+    },
+    {
+      "filename": "tzdata-2025.3-py2.py3-none-any.whl",
+      "sha256": "06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1"
+    }
+  ]
+}

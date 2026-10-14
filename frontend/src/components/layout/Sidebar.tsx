@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { ChevronDown, Compass } from 'lucide-react'
 import './Sidebar.css'
+import { RESTRICTED_WEB } from '@/lib/restricted-web'
 
 // ── 类型 ──────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ function NavItem({ item, nested = false }: { item: NavItemDef; nested?: boolean 
       end
       className={({ isActive }) => `wp-sidebar-item${nested ? ' wp-sidebar-secondary' : ''}${isActive ? ' is-active' : ''}`}
     >
-      {item.label}
+      {item.label}{RESTRICTED_WEB && !['/', '/dashboard', '/wealth'].includes(item.to) && <small> · 暂不可用</small>}
     </NavLink>
   )
 }

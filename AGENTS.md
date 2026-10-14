@@ -23,6 +23,8 @@ PoC 03 Stage 2 已有设备端 ARM 安装、数据迁移和本地 synthetic 证�
 
 Web & Data Sync Batch 1 仅在 Dev 实现显式共享 WAL 契约，默认固定副本模式不变。未经设备阶段确认，不 chmod 生产库、不改生产配置、不启动 Web/同步。新受限入口使用同一 DB 路径和 `WEALTHPILOT_SQLITE_CONTRACT`，不能启动完整 backend.main；权限切换/恢复和 Batch 2/3 白名单见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。原凭证展示事故保持历史 FAIL，撤销后的权限检查单独记录。
 
+Batch 2 已增加 `backend/restricted_web.py`、共用手动同步 dispatch，以及独立 Web 环境/构建/launchd 工具；默认只监听 loopback，broker列表为空，不创建scheduler。只注册 method/path 白名单，不运行完整后端/订单/PEER。Dev测试不等于设备或真实券商PASS；首次共享切换、Web安装及回滚必须按 [Batch 2 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。MCP/Tunnel与Web独立版本/label，发布不自动改生产。
+
 ## 项目概述
 
 WealthPilot 是 AI 驱动的个人投资决策工作台。本地运行，数据私有，帮助个人投资者从"凭直觉"过渡到"系统化决策"。

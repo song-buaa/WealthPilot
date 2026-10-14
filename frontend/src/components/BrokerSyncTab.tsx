@@ -2,9 +2,10 @@
  * BrokerSyncTab — 券商 API 同步面板
  * 嵌入 Dashboard 的 ImportSection 作为第 4 个 tab。
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { RefreshCw, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react'
 import { getSyncStatus, triggerSync, type SyncStatusItem } from '@/lib/broker-sync-api'
+import { RESTRICTED_WEB } from '@/lib/restricted-web'
 
 // 平台显示名映射（与 Dashboard.tsx 一致）
 const PLATFORM_DISPLAY: Record<string, string> = { '雪盈证券': '盈透证券' }
@@ -32,14 +33,27 @@ export function BrokerSyncTab({ onRefresh }: Props) {
   const [status, setStatus] = useState<SyncStatusItem[]>([])
   const [syncing, setSyncing] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const previouslyRunning = useRef(false)
 
   useEffect(() => {
     let active = true
-    getSyncStatus()
-      .then(res => { if (active) setStatus(visibleSyncStatus(res.brokers)) })
-      .catch(e => console.error('获取同步状态失败', e))
-    return () => { active = false }
-  }, [])
+    const refreshStatus = () => getSyncStatus()
+      .then(res => {
+        if (!active) return
+        const items = visibleSyncStatus(res.brokers)
+        setStatus(items)
+        const running = items.some(item => item.running)
+        if (previouslyRunning.current && !running) {
+          window.dispatchEvent(new Event('portfolio-updated'))
+          onRefresh()
+        }
+        previouslyRunning.current = running
+      })
+      .catch(() => { if (active) setMessage('获取同步状态失败，请稍后重试或刷新页面。') })
+    void refreshStatus()
+    const timer = RESTRICTED_WEB ? window.setInterval(refreshStatus, 5000) : undefined
+    return () => { active = false; window.clearInterval(timer) }
+  }, [onRefresh])
 
   const handleSync = async (broker: VisibleBroker | 'all') => {
     setSyncing(broker)
@@ -47,15 +61,19 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
     // 记录触发前的时间戳,用于检测是否有新 run
     const prevTimes = Object.fromEntries(
-      status.map(s => [s.broker, s.last_attempt_time ?? s.last_sync_time])
+      status.map(s => [s.broker, s.last_attempt_id ?? s.last_attempt_time ?? s.last_sync_time])
     )
 
     try {
       // UI “all” means only the visible brokers, not the backend's broader all.
-      const targets = broker === 'all' ? VISIBLE_BROKERS : [broker]
+      const targets = RESTRICTED_WEB ? [broker] : broker === 'all' ? VISIBLE_BROKERS : [broker]
       const results = await Promise.all(targets.map(target => triggerSync(target)))
       const brokersToCheck = [...new Set(results.flatMap(result => result.brokers_triggered))]
-      if (!brokersToCheck.length) throw new Error('没有可同步的投资账户')
+      if (!brokersToCheck.length) {
+        setMessage(results[0]?.message ?? '尚未启用券商同步')
+        return
+      }
+      const expectedIds = Object.fromEntries(results.flatMap(r => r.jobs ?? []).map(j => [j.broker, j.run_id]))
       setMessage('⏳ 同步中...')
 
       // 轮询最多 30 秒,每 2 秒检查一次
@@ -69,9 +87,9 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
         const allUpdated = brokersToCheck.every(b => {
           const item = newStatus.brokers.find(s => s.broker === b)
-          const attemptedAt = item?.last_attempt_time ?? item?.last_sync_time
+          const attemptedAt = item?.last_attempt_id ?? item?.last_attempt_time ?? item?.last_sync_time
           const attemptedStatus = item?.last_attempt_status ?? item?.last_sync_status
-          return item && attemptedAt !== prevTimes[b] && ['success', 'failed'].includes(attemptedStatus ?? '')
+          return item && (expectedIds[b] ? item.last_attempt_id === expectedIds[b] : attemptedAt !== prevTimes[b]) && ['success', 'failed'].includes(attemptedStatus ?? '')
         })
 
         if (allUpdated) {
@@ -118,7 +136,8 @@ export function BrokerSyncTab({ onRefresh }: Props) {
           const attemptCount = item.last_attempt_position_count ?? item.last_position_count
           const attemptError = item.last_attempt_error_message ?? item.error_message
           const cfg = STATUS_CONFIG[attemptStatus] ?? STATUS_CONFIG.never
-          const isSyncing = syncing === item.broker || syncing === 'all'
+          const isSyncing = syncing === item.broker || syncing === 'all' || Boolean(item.running)
+          const disabled = RESTRICTED_WEB && item.enabled !== true
           return (
             <div key={item.broker} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -130,7 +149,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{displayPlatform(item.platform)}</span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: cfg.color }}>
                     {isSyncing ? <Loader2 size={11} className="animate-spin" /> : cfg.icon}
-                    {isSyncing ? '同步中...' : cfg.text}
+                    {disabled ? '未启用' : isSyncing ? '同步中...' : cfg.text}
                   </span>
                 </div>
                 <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>
@@ -151,8 +170,8 @@ export function BrokerSyncTab({ onRefresh }: Props) {
               </div>
               <button
                 onClick={() => handleSync(item.broker as VisibleBroker)}
-                disabled={isSyncing || syncing === 'all'}
-                style={{ ...btnSync, ...(isSyncing || syncing === 'all' ? btnDisabled : {}) }}
+                disabled={disabled || isSyncing || syncing === 'all'}
+                style={{ ...btnSync, ...(disabled || isSyncing || syncing === 'all' ? btnDisabled : {}) }}
               >
                 {isSyncing ? '同步中' : '同步'}
               </button>
@@ -163,7 +182,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
       <button
         onClick={() => handleSync('all')}
-        disabled={syncing !== null}
+        disabled={syncing !== null || (RESTRICTED_WEB && !status.some(item => item.enabled))}
         style={{ ...btnSyncAll, ...(syncing !== null ? btnDisabled : {}) }}
       >
         <RefreshCw size={13} />
@@ -175,7 +194,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
       )}
 
       <p style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginTop: 10 }}>
-        下次自动同步: 今日 22:00 北京时间
+        {RESTRICTED_WEB ? '自动同步尚未启用；仅支持已验收券商的手动同步。' : '下次自动同步: 今日 22:00 北京时间'}
       </p>
     </div>
   )

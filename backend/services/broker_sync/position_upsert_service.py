@@ -104,6 +104,13 @@ class PositionUpsertService:
 
     def __init__(self, session: Session):
         self.session = session
+        self.portfolio_id = session.info.get("portfolio_id", 1)
+
+    def _business_query(self):
+        query = self.session.query(BusinessPosition)
+        if "portfolio_id" in self.session.info:
+            query = query.filter_by(portfolio_id=self.portfolio_id)
+        return query
 
     def upsert_from_snapshots(
         self,
@@ -243,7 +250,7 @@ class PositionUpsertService:
         )
         for (symbol,) in historical_symbols:
             ticker = self._denormalize_ticker(symbol)
-            legacy = self.session.query(BusinessPosition).filter_by(
+            legacy = self._business_query().filter_by(
                 ticker=ticker,
                 platform=platform,
                 broker=None,
@@ -265,7 +272,7 @@ class PositionUpsertService:
     ) -> int:
         """只删除同 broker + account + source 下已不在成功快照中的持仓。"""
         current_symbols = {snap.symbol for snap in snap_list}
-        query = self.session.query(BusinessPosition).filter_by(
+        query = self._business_query().filter_by(
             broker=broker,
             broker_account_id=account_id,
             sync_source=sync_source,
@@ -291,7 +298,7 @@ class PositionUpsertService:
         )
 
         # 2. 查现有行
-        existing = self.session.query(BusinessPosition).filter_by(
+        existing = self._business_query().filter_by(
             symbol=snap.symbol,
             broker=snap.broker,
             broker_account_id=snap.account_id,
@@ -307,7 +314,7 @@ class PositionUpsertService:
                 symbol=snap.symbol,
             ).filter(PositionSnapshot.run_id != snap.run_id).first()
             if has_snapshot_evidence:
-                existing = self.session.query(BusinessPosition).filter_by(
+                existing = self._business_query().filter_by(
                     ticker=ticker,
                     platform=platform,
                     broker=None,
@@ -330,7 +337,7 @@ class PositionUpsertService:
         if existing is None:
             # 新建(需要 portfolio_id,默认用 1)
             new_pos = BusinessPosition(
-                portfolio_id=1,
+                portfolio_id=self.portfolio_id,
                 ticker=ticker,
                 symbol=snap.symbol,  # v3.11: 存完整 TICKER:MARKET 真值
                 platform=platform,

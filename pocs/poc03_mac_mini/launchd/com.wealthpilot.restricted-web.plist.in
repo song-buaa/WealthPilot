@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.wealthpilot.restricted-web</string>
+  <key>UserName</key><string>__SERVICE_USER__</string>
+  <key>WorkingDirectory</key><string>__PROD_ROOT__</string>
+  <key>ProgramArguments</key><array>
+    <string>__PROD_ROOT__/releases/__WEB_REVISION__/envs/web/bin/python</string>
+    <string>__PROD_ROOT__/releases/__WEB_REVISION__/code/pocs/poc03_mac_mini/web_runner.py</string>
+    <string>--root</string><string>__PROD_ROOT__</string>
+  </array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>45</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict></plist>

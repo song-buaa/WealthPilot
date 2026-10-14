@@ -151,7 +151,8 @@ def get_sync_status():
         db.close()
 
 
-def _run_sync(broker: str, triggered_by: str = "manual"):
+def _run_sync(broker: str, triggered_by: str = "manual", *, db_session=None,
+              service_factory=None, raise_errors=False):
     """实际执行同步（在 BackgroundTask 或 scheduler 里调用）。"""
     # 确保 backend/ 在 sys.path 中（sync_service 内部用 from core.config / from services.broker_sync）
     import sys, os
@@ -159,9 +160,12 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
 
-    db = get_session()
+    db = db_session if db_session is not None else get_session()
     try:
-        if broker == "tiger":
+        if service_factory is not None:
+            service = service_factory(broker)
+            return service.sync_and_persist(db, triggered_by=triggered_by)
+        elif broker == "tiger":
             # 延迟 import 避免双重注册：_run_sync 在 backend/ 上下文执行
             from services.broker_sync.tiger.sync_service import TigerSyncService  # noqa: E402
             service = TigerSyncService()
@@ -185,11 +189,14 @@ def _run_sync(broker: str, triggered_by: str = "manual"):
         from services.broker_sync.position_upsert_service import backfill_bare_names
         backfill_bare_names(db)
     except Exception as e:
+        if raise_errors:
+            raise
         import traceback
         print(f"[broker-sync] {broker} 同步失败: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc()
     finally:
-        db.close()
+        if db_session is None:
+            db.close()
 
 
 @router.post("/trigger", response_model=TriggerResponse)

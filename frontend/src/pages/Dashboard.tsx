@@ -24,6 +24,7 @@ import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
 import DataTip from '@/components/shared/DataTip'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
+import { RESTRICTED_WEB } from '@/lib/restricted-web'
 
 // ── 杠杆分级 ──────────────────────────────────────────────────
 function leverageGrade(mult: number) {
@@ -133,7 +134,7 @@ export default function Dashboard() {
       <div>
         <PageHeader />
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
-          <EmptyState icon={Upload} title="暂无持仓数据" desc="请通过导入 CSV 添加持仓，导入后数据将自动刷新" />
+          <EmptyState icon={Upload} title="暂无持仓数据" desc={RESTRICTED_WEB ? '请先核实并启用券商，再手动同步。' : '请通过导入 CSV 添加持仓，导入后数据将自动刷新'} />
         </div>
         {/* 仍然显示导入面板 */}
         <ImportSection
@@ -534,6 +535,12 @@ function ImportSection({ open, onToggle, onRefresh }: { open: boolean; onToggle:
     border: `1px solid ${cur === val ? '#BFDBFE' : '#E5E7EB'}`,
   })
 
+  if (RESTRICTED_WEB) return <section aria-label="手动券商同步" style={{ margin: '20px 0' }}>
+    <h3>手动券商同步</h3>
+    <p>CSV、截图、基金导入及服务端导出尚未开放。</p>
+    <BrokerSyncTab onRefresh={onRefresh} />
+  </section>
+
   return (
     <div style={{ marginBottom: 16 }}>
       <button onClick={onToggle} style={dataManagementBarStyle(open)}>
@@ -681,6 +688,8 @@ function LiabImportSection({ open, onToggle, onRefresh }: { open: boolean; onTog
       if (fileRef.current) fileRef.current.value = ''
     }
   }
+
+  if (RESTRICTED_WEB) return <p>负债导入与编辑尚未开放。</p>
 
   return (
     <div style={{ marginBottom: 16 }}>

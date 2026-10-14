@@ -18,6 +18,7 @@
 | PoC 03 Stage 1 / 1.5 | 常驻部署工具、GitHub 指定 Commit 安装、离线应急包和 CI 准备；Mac Mini 实测仍留 Stage 2。 |
 | PoC 03 Stage 2 | 用户已确认 Mini 真实只读 MCP 激活，ChatGPT Web/iOS 可查询；本轮 Dev 未连接设备复验，不能扩展为所有常驻/恢复项目已通过。 |
 | Web & Data Sync Batch 1 | 显式共享 WAL 契约、MCP 只读、运行期启动检查与备份恢复副本测试；Web、同步和生产权限切换尚未部署。见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。 |
+| Web & Data Sync Batch 2 | 受限 React/FastAPI Web、原手动同步入口、默认空启用列表、独立 Web 环境/launchd；仅合成/Mock 验证，未操作 Mini 或启用22:00任务。见 [实现、验收及一体化部署/回滚](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。 |
 
 标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
 

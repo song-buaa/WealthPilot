@@ -36,7 +36,7 @@ class SnowballSyncService:
     MAX_RETRIES = 2
     RETRY_DELAY_SECONDS = 5
 
-    def __init__(self):
+    def __init__(self, ibkr_client=None):
         self._source_channel = (
             "ibkr" if "ibkr" in os.environ.get("BROKER_MODE", "").lower()
             else "snowball"
@@ -44,10 +44,12 @@ class SnowballSyncService:
         if self._source_channel == "ibkr":
             if not settings.ibkr_account:
                 raise RuntimeError("IBKR_ACCOUNT 未配置")
-            from backend.api.action import _get_adapter
             self.account_id = settings.ibkr_account
             self.adapter = IBKRPortfolioAdapter(account_id=self.account_id)
-            self._client = _get_adapter()
+            if ibkr_client is None:
+                from backend.api.action import _get_adapter
+                ibkr_client = _get_adapter()
+            self._client = ibkr_client
             if self._client.broker_name != "ibkr":
                 raise RuntimeError("BROKER_MODE=ibkr 但未取得 IBKRBrokerAdapter")
             return
