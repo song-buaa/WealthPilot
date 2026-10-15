@@ -24,6 +24,7 @@ mcp>=1.0.0               # 盈米基金诊断 MCP 客户端
 
 # ── 券商 OpenAPI ─────────────────────────────────────────────────────────────
 tigeropen
+keyring==25.7.0
 futu-api
 apscheduler
 pytz>=2024.1             # 时区处理（apscheduler 定时任务）
