@@ -39,6 +39,10 @@ export default function Action() {
     if (!params.has('trade')) return
     let active = true
     Promise.resolve().then(async () => {
+      if (!active) return
+      setDraftCardOpen(false)
+      setCurrentDraft(null)
+      setLinkError(null)
       if (params.get('trade') !== '1') throw new Error('不支持的交易链接版本')
       const values: Record<string, unknown> = {}
       for (const [key, value] of params) {

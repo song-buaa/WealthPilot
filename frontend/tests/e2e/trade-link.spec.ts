@@ -55,6 +55,8 @@ test('link → existing editable draft → existing final confirmation → Mock 
 })
 
 test('invalid and duplicate parameters are explicit, no implicit defaults', async ({page}) => {
+  await page.goto(link())
+  await expect(page.getByRole('dialog')).toBeVisible()
   await page.goto(link('&quantity=2'))
   await expect(page.getByRole('alert')).toContainText('参数重复')
   await expect(page.getByRole('dialog')).not.toBeVisible()
