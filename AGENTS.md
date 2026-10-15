@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-11
+> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-15
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
@@ -24,6 +24,8 @@ PoC 03 Stage 2 已有设备端 ARM 安装、数据迁移和本地 synthetic 证�
 Web & Data Sync Batch 1 仅在 Dev 实现显式共享 WAL 契约，默认固定副本模式不变。未经设备阶段确认，不 chmod 生产库、不改生产配置、不启动 Web/同步。新受限入口使用同一 DB 路径和 `WEALTHPILOT_SQLITE_CONTRACT`，不能启动完整 backend.main；权限切换/恢复和 Batch 2/3 白名单见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。原凭证展示事故保持历史 FAIL，撤销后的权限检查单独记录。
 
 Batch 2 已增加 `backend/restricted_web.py`、共用手动同步 dispatch，以及独立 Web 环境/构建/launchd 工具；默认只监听 loopback，broker列表为空，不创建scheduler。只注册 method/path 白名单，不运行完整后端/订单/PEER。Dev测试不等于设备或真实券商PASS；首次共享切换、Web安装及回滚必须按 [Batch 2 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。MCP/Tunnel与Web独立版本/label，发布不自动改生产。
+
+ChatGPT Skills 迭代 1 使用独立 `pocs/chatgpt_skills` 入口和临时 Mock 数据库；P1 复用只读服务，P2 仅验证原 OrderManager 的模拟链路，不启用真实券商。工具参数 `confirmed=true` 不证明人类确认，Business Web/iOS 必须独立验收。不得自动替换现役 MCP/Tunnel/Web 或借此启用订单轮询。见 [迭代说明](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。
 
 ## 项目概述
 

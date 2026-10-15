@@ -74,15 +74,7 @@ def get_wealth_overview(currency: Literal["CNY"] = "CNY") -> Overview:
     return validated
 
 
-def main():
-    global settings
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8788)
-    parser.add_argument("--real-config")
-    parser.add_argument("--access-evidence")
-    parser.add_argument("--business-python", default="/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python")
-    parser.add_argument("--events", help="Metadata-only completion ledger, outside Git.")
-    settings = parser.parse_args()
+def validate_real_access(settings, parser):
     if settings.real_config:
         if not settings.access_evidence:
             parser.error("real mode requires reviewed private-access evidence")
@@ -97,6 +89,18 @@ def main():
                 parser.error("private configuration and evidence must have mode 0600")
             if Path(file).resolve().is_relative_to(Path(__file__).resolve().parents[2]):
                 parser.error("private configuration must be outside the repository")
+
+
+def main():
+    global settings
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=8788)
+    parser.add_argument("--real-config")
+    parser.add_argument("--access-evidence")
+    parser.add_argument("--business-python", default="/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python")
+    parser.add_argument("--events", help="Metadata-only completion ledger, outside Git.")
+    settings = parser.parse_args()
+    validate_real_access(settings, parser)
     mcp.run(transport="streamable-http", host="127.0.0.1", port=settings.port,
         json_response=True, stateless_http=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,

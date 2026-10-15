@@ -605,22 +605,23 @@ def discard_intent(intent_id: str):
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _get_portfolio_total_value(session) -> Decimal:
+def _get_portfolio_total_value(session, portfolio_id: int = 1) -> Decimal:
     """获取投资组合总资产（CNY）。
     TODO: v3.x 升级多用户后，改为从 request.user.portfolio_id 获取
     """
     from app.utils.position_aggregator import aggregate_investment_positions
-    _, total_assets = aggregate_investment_positions(pid=1)
+    _, total_assets = aggregate_investment_positions(pid=portfolio_id)
     return Decimal(str(total_assets))
 
 
-def _get_position_value(session, symbol: str) -> Optional[Decimal]:
+def _get_position_value(session, symbol: str, portfolio_id: int | None = None) -> Optional[Decimal]:
     """获取指定标的的当前持仓市值（CNY）。"""
     from app.models import Position
     total = Decimal("0")
-    positions = session.query(Position).filter(
-        Position.market_value_cny > 0,
-    ).all()
+    query = session.query(Position).filter(Position.market_value_cny > 0)
+    if portfolio_id is not None:
+        query = query.filter(Position.portfolio_id == portfolio_id)
+    positions = query.all()
     for p in positions:
         if p.ticker == symbol or p.name == symbol:
             total += Decimal(str(p.market_value_cny))

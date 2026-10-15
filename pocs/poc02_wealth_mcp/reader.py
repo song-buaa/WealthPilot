@@ -58,8 +58,9 @@ def readonly_snapshot(path, database_contract=None):
 def service_sessions(connection):
     from app import analyzer, models
     from app import database
+    from app.utils import position_aggregator
     from backend.services import portfolio_service, wealth_service
-    modules = (database, models, analyzer, portfolio_service, wealth_service)
+    modules = (database, models, analyzer, portfolio_service, wealth_service, position_aggregator)
     original = [(module, module.get_session) for module in modules]
     def factory():
         return Session(bind=connection, autoflush=False,

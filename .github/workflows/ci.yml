@@ -146,6 +146,7 @@ jobs:
           "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pip install -r pocs/poc01_private_mcp/requirements-dev.txt
           "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pytest -q pocs/poc01_private_mcp/tests/test_http.py
           "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pytest -q pocs/poc02_wealth_mcp/test_http.py
+          WP_BUSINESS_PYTHON="$(which python)" "$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" -m pytest -q pocs/chatgpt_skills/test_protocol.py
           MCP_TEST_PYTHON="$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" python -m pytest -q pocs/poc03_mac_mini/test_shared_database.py -k shared_mcp_http
           MCP_TEST_PYTHON="$RUNNER_TEMP/wealthpilot-mcp-poc/bin/python" python -m pytest -q pocs/poc03_mac_mini/test_restricted_web.py -k real_mcp_http
       - uses: actions/setup-node@v7

@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased] - main / 4.0 migration validation
 
+- ChatGPT Skills 迭代 1：独立 Streamable HTTP 七工具；复用财富/持仓详情与原草稿、风险、确认、订单和状态服务。增加合成库/Mock 端到端、幂等及只读隔离回归；现役 MCP/Web/数据库保持不变，Business Web/iOS 和真实交易未验收。
+
 - Web & Data Sync Batch 2：复用原 React 与财富/组合 handler，提供仅 loopback 的受限 Web；原 sync_and_persist 增加预约防重入、失败状态与实际Portfolio绑定，国金快照/业务写入原子完成。新增独立 Web ARM 锁、构建和 launchd/回滚工具及合成库/真实浏览器/MCP回归；未连接 Mini、未实际启用券商或定时任务。
 - Web & Data Sync Batch 1：增加显式共享 WAL 数据库契约、受控 writer 连接、只读 MCP 每请求校验和运行期启动检查；保留历史迁移 SHA/参考、切换前精确副本及一致性备份恢复。新增隔离库/跨运行环境 HTTP 测试和生产权限/回滚及 Batch 2/3 边界说明；未部署 Web/同步或修改 Mini。
 - 当前 main 在 v3.15.1 后持续增加财富、消费分析、账单导入/刷新一致性、技术形态证据等能力；产品版本以 Git/CI 和实际验收记录为准。
