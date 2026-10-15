@@ -158,4 +158,4 @@ jobs:
           npm ci
           npm run build
           npx playwright install --with-deps chromium
-          WP_TEST_PYTHON="$(which python)" npx playwright test tests/e2e/restricted-web.spec.ts --workers=1
+          WP_TEST_PYTHON="$(which python)" npx playwright test tests/e2e/restricted-web.spec.ts tests/e2e/trade-link.spec.ts --workers=1

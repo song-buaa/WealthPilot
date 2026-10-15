@@ -8,7 +8,7 @@
  * - checkbox "我已确认订单参数无误" 必须勾选
  * - 两个条件同时满足才能点"确认提交"
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2 } from 'lucide-react'
 import { actionApi, type SymbolStrategyResponse } from '@/lib/api'
@@ -39,6 +39,8 @@ interface Props {
 const CONFIRMATION_TEXT = '我已知晓风险并坚持下单'
 
 export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPlaced }: Props) {
+  const busy = useRef(false)
+  const [executionLabel, setExecutionLabel] = useState('正在核实券商模式')
   const { showToast } = useToast()
 
   const [riskLoading, setRiskLoading] = useState(true)
@@ -60,6 +62,8 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
     if (!open) return
 
     let active = true
+    actionApi.executionContext().then(result => { if (active) setExecutionLabel(result.label) })
+      .catch(() => { if (active) setExecutionLabel('无法核实券商模式，请勿将结果视为实盘') })
     actionApi.checkRisk(strategy.id, {
       quantity,
       limit_price: limitPrice,
@@ -81,7 +85,8 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
     (!needsConfirmation || textMatch)
 
   async function handleSubmit() {
-    if (!canSubmit) return
+    if (!canSubmit || busy.current) return
+    busy.current = true
     setSubmitting(true)
     setSubmitError(null)
 
@@ -116,6 +121,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
       const msg = err instanceof Error ? err.message : '下单失败'
       setSubmitError(msg)
     } finally {
+      busy.current = false
       setSubmitting(false)
     }
   }
@@ -130,7 +136,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           background: '#fff', borderRadius: 12, padding: 0,
-          width: 480, maxHeight: '90vh', overflowY: 'auto',
+          width: 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           zIndex: 8001,
         }}>
@@ -144,6 +150,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
           </div>
 
           <div style={{ padding: '16px 20px' }}>
+            <div role="status" style={{ marginBottom: 12 }}>交易环境：{executionLabel}</div>
             {/* Order Summary */}
             <div style={{
               background: '#F9FAFB', borderRadius: 8, padding: '12px 16px',
@@ -154,9 +161,11 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
                 <div><b>标的：</b>{strategy.symbol}</div>
                 <div><b>方向：</b><span style={{ color: strategy.side === 'BUY' ? '#16A34A' : '#DC2626', fontWeight: 600 }}>{sideLabel}</span></div>
                 <div><b>数量：</b>{quantity} 股</div>
-                <div><b>限价：</b>${limitPrice}</div>
+                <div><b>限价：</b>{strategy.currency ? `${limitPrice} ${strategy.currency}` : `$${limitPrice}`}</div>
                 <div><b>订单类型：</b>{strategy.order_type === 'LIMIT' ? '限价单' : strategy.order_type}</div>
-                <div><b>预估金额：</b>约 ${estimatedAmount.toLocaleString()}</div>
+                {strategy.trigger_price != null && <div><b>策略触发价：</b>{strategy.trigger_price}（按原策略/适配器语义，不代表独立券商止损单）</div>}
+                <div><b>有效期：</b>GTC</div>
+                <div><b>预估金额：</b>约 {strategy.currency ? `${estimatedAmount.toLocaleString()} ${strategy.currency}` : `$${estimatedAmount.toLocaleString()}`}</div>
               </div>
             </div>
 

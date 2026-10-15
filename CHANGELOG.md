@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## main · 2026-10-15 · P2 Web trade handoff
+
+- P1 保留；新增无业务写入的交易确认链接工具，真实 MCP 只暴露四项读取。
+- 原 Action 草稿/最终确认预填，显示券商模式；同链接防重复，复用原订单执行和状态查询。
+- 个人 Pro + 私人 HTTPS 的部署/回滚说明及自动化回归；不要求 Business，不创建 Mock 生产环境，首次真实委托留用户验收。
+
+
 ## [Unreleased] - main / 4.0 migration validation
 
 - ChatGPT Skills 迭代 1：独立 Streamable HTTP 七工具；复用财富/持仓详情与原草稿、风险、确认、订单和状态服务。增加合成库/Mock 端到端、幂等及只读隔离回归；现役 MCP/Web/数据库保持不变，Business Web/iOS 和真实交易未验收。

@@ -8,7 +8,7 @@
 
 3.x 业务系统继续采用 React/Vite + FastAPI + SQLite、PEER 四 Agent 和 13 个内部 Skills。main 已在 v3.15.1 后增加财富总览、消费账单分析及技术形态证据等能力，未改为由 ChatGPT 承担全部决策。
 
-4.0 目标是复用这些业务服务：ChatGPT 提供对话/通用推理/偏好记忆，通过 MCP / Skills 调用专业能力，React Web 保留可视化。生产对外能力仍为**财富总览只读工具**。ChatGPT Skills 迭代 1 新增资产/负债/账户/持仓读取与原订单链路的 Mock MCP 封装，使用独立 Dev 入口；目标账号写工具和 Mini 新入口尚未验收，未开放真实委托。投资分析 Skills 和复盘尚未迁移。
+4.0 目标是复用这些业务服务：ChatGPT 提供对话/通用推理/偏好记忆，通过 MCP / Skills 调用专业业务，React Web 保留可视化。P1 三项生产只读查询已经完成 Mini、ChatGPT Web/iOS 验收。P2 新增纯只读交易链接工具，个人 Pro 可跳转原 Web 预填并最终确认，经原 OrderManager/BrokerAdapter 执行；不要求 Business，不部署独立 Mock 系统。首次真实委托由用户按实际需求确认，设备结果与代码 CI 分开记录。投资分析和复盘尚未迁移。
 
 | 阶段 | 当前证据 |
 |---|---|
@@ -20,7 +20,7 @@
 | Web & Data Sync Batch 1 | 显式共享 WAL 契约、MCP 只读、运行期启动检查与备份恢复副本测试；Web、同步和生产权限切换尚未部署。见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。 |
 | Web & Data Sync Batch 2 | 受限 React/FastAPI Web、原手动同步入口、默认空启用列表、独立 Web 环境/launchd；仅合成/Mock 验证，未操作 Mini 或启用22:00任务。见 [实现、验收及一体化部署/回滚](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。 |
 
-[ChatGPT Skills 迭代 1：工具、模拟交易、Business 待验项与增量部署边界](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。本轮保留现役完整 Web、数据库与 MCP/Tunnel，不切换生产。
+[P2：个人 Pro → 原 Web 最终确认、配置与发布](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。[原迭代 1](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md) 的 Mock 写工具保留为自动化基础，其 Business/独立 Mock 部署路线已由本次产品决策替代。
 
 标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
 

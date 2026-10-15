@@ -14,7 +14,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
+    const detail = (body as { detail?: unknown }).detail
+    const message = typeof detail === 'string' ? detail : Array.isArray(detail)
+      ? detail.map(e => `${e.loc?.slice(1).join('.') || '参数'}: ${e.msg || '无效'}`).join('；')
+      : detail ? JSON.stringify(detail) : `HTTP ${res.status}`
+    throw new Error(message)
   }
   // 204 No Content：返回 null
   if (res.status === 204) {
@@ -664,6 +668,8 @@ export interface SymbolStrategyDraft {
   limit_price: number | null
   parent_intent_index: number | null
   value_sources: Record<string, string> | null  // v0.6: 推算依据
+  currency?: string
+  time_in_force?: string
 }
 
 export interface MissingField {
@@ -679,6 +685,7 @@ export interface AllocationIntentDraft {
 }
 
 export interface ActionDraftResponse {
+  prefill_request_id?: string
   id: string
   conversation_id: string
   decision_summary: string
@@ -851,6 +858,18 @@ export const executionBatchApi = {
 }
 
 export const actionApi = {
+  previewTradeLink: (params: Record<string, unknown>) =>
+    request<{ request_id: string; draft: ActionDraftResponse; execution: { label: string } }>('/action/trade-link/preview', {
+      method: 'POST', body: JSON.stringify(params),
+    }),
+
+  createDraft: (params: Record<string, unknown>) =>
+    request<ActionDraftResponse>('/action/drafts', { method: 'POST', body: JSON.stringify(params) }),
+
+  executionContext: () => request<{ label: string; broker: string; live_enabled: boolean }>('/action/execution-context'),
+
+  getOrder: (id: string, refresh = false) =>
+    request<OrderResponse>(`/action/orders/${id}${refresh ? '?refresh=true' : ''}`),
   generateDraft: (params: {
     conversation_id: string
     conversation_context: Array<{ role: string; content: string }>
@@ -973,6 +992,7 @@ export interface AllocationIntentResponse {
 }
 
 export interface SymbolStrategyResponse {
+  currency?: string
   id: string
   source_draft_id: string | null
   parent_intent_id: string | null

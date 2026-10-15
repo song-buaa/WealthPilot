@@ -36,6 +36,7 @@ s=get_session();s.add(Position(portfolio_id=7,name='Synthetic asset',ticker='AAP
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     log=tempfile.TemporaryFile()
     process=subprocess.Popen([sys.executable,str(ROOT/'pocs/chatgpt_skills/server.py'),'--port',str(port),
+                              '--web-base-url','https://mini.example.ts.net',
                               '--business-python',BUSINESS,'--mock-database',str(db),'--portfolio-id','7'],
                              cwd=ROOT,env=env,stdout=log,stderr=log)
     endpoint=f'http://127.0.0.1:{port}/mcp'
@@ -56,12 +57,40 @@ s=get_session();s.add(Position(portfolio_id=7,name='Synthetic asset',ticker='AAP
         log.close()
 
 
+def test_link_tool_never_persists_a_draft(endpoint, tmp_path):
+    async def run():
+        before=hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()
+        async with Client(endpoint,mode='legacy') as client:
+            result=await client.call_tool('prepare_trade_confirmation_link', {'order': {
+                'symbol':'NVDA:US','side':'BUY','quantity':10,'order_type':'LIMIT',
+                'limit_price':'180','currency':'USD'}})
+            assert not result.is_error, result.content
+            value=result.structured_content
+            assert value['url'].startswith('https://mini.example.ts.net/#/action?')
+            assert value['draft_created'] is False and value['order_submitted'] is False
+        assert hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()==before
+    asyncio.run(run())
+
+
+def test_real_endpoint_exposes_only_four_read_only_tools():
+    from types import SimpleNamespace
+    from pocs.chatgpt_skills.server import create_server
+    async def run():
+        server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
+        async with Client(server,mode='legacy') as client:
+            tools=(await client.list_tools()).tools
+            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link'}
+            assert all(t.annotations.read_only_hint for t in tools)
+    asyncio.run(run())
+
+
 def test_discovery_annotations_and_existing_overview_contract(endpoint):
     async def run():
         async with Client(endpoint,mode='legacy',read_timeout_seconds=50) as client:
             tools=(await client.list_tools()).tools
             by_name={t.name:t for t in tools}
-            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status'}
+            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status'}
+            assert by_name['prepare_trade_confirmation_link'].annotations.read_only_hint
             assert all(tool.meta['securitySchemes'] == [{'type':'noauth'}] for tool in tools)
             assert by_name['get_investment_details'].annotations.read_only_hint
             assert not by_name['create_trade_draft'].annotations.read_only_hint

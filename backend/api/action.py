@@ -31,6 +31,7 @@ from backend.services.action.risk_engine import (
     check_order_risk, validate_confirmation, CONFIRMATION_TEXT,
 )
 from backend.utils.datetime_utils import utc_iso
+from pocs.chatgpt_skills.trade_link import LinkPreviewRequest, LinkOrder, draft_payload
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,39 @@ def _serialize_order(o) -> dict:
 # ActionDraft 端点
 # ═══════════════════════════════════════════════════════════════════
 
+@router.get("/execution-context")
+def execution_context():
+    """Configuration facts, not an assertion that the broker is connected."""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    mode = "mock" if PUBLIC_DEMO_MODE else _BROKER_MODE
+    broker = "tiger" if "tiger" in mode else "ibkr" if "ibkr" in mode else "mock"
+    if broker == "tiger":
+        from backend.services.action.brokers.tiger import ENABLE_TIGER_LIVE_TRADING
+        live = ENABLE_TIGER_LIVE_TRADING and mode.endswith(".live")
+        readonly = False
+    elif broker == "ibkr":
+        from backend.services.action.brokers.ibkr import ENABLE_IBKR_LIVE_TRADING, IBKR_READ_ONLY_MODE
+        live, readonly = ENABLE_IBKR_LIVE_TRADING, IBKR_READ_ONLY_MODE
+    else:
+        live, readonly = False, False
+    return {"broker": broker, "mode": mode, "live_enabled": live, "read_only": readonly,
+            "connection_verified": False,
+            "label": "Mock 模拟交易" if broker == "mock" else
+                     "只读：当前不可提交真实订单" if readonly else
+                     "真实券商实盘配置（连接状态待券商确认）" if live else
+                     "真实券商模拟盘配置（不是实盘）"}
+
+
+@router.post("/trade-link/preview")
+def preview_trade_link(body: LinkPreviewRequest):
+    """Open an editable in-memory preview. No draft or order is persisted."""
+    order = LinkOrder.model_validate(body.model_dump(exclude={"request_id"}))
+    return {"request_id": str(body.request_id), "execution": execution_context(),
+            "draft": {"id": "", "conversation_id": "", "status": "prefill",
+                      "decision_summary": f"ChatGPT 明确指令：{order.symbol} {order.side}",
+                      "payload": draft_payload(order), "created_at": None, "updated_at": None,
+                      "confirmed_at": None, "discarded_at": None}}
+
 @router.post("/drafts/generate")
 def generate_draft(body: dict):
     """AI 生成行动清单草稿（调 ActionPlanner Skill）。"""
@@ -182,6 +216,29 @@ def create_draft(body: dict):
     """手动创建行动清单草稿（未来扩展）。"""
     mgr, session = _get_manager()
     try:
+        if body.get("prefill_request_id") is not None:
+            # Repeated opening/clicking of one URL must reuse one original draft.
+            # Only this Web handoff uses the reservation; legacy behavior is unchanged.
+            from uuid import UUID
+            from sqlalchemy import text
+            from backend.services.action.models import ActionDraft
+            request_id = str(UUID(body["prefill_request_id"]))
+            payload = body.get("payload", {})
+            rows = payload.get("symbol_strategies", [])
+            if len(rows) != 1 or payload.get("allocation_intents") or payload.get("missing_fields"):
+                raise ValueError("交易链接必须包含一条完整的单标的指令")
+            fields = {k: v for k, v in rows[0].items() if k in LinkOrder.model_fields}
+            order = LinkOrder.model_validate(fields)
+            payload = draft_payload(order)
+            session.execute(text("BEGIN IMMEDIATE"))
+            existing = session.query(ActionDraft).filter_by(
+                user_id="chatgpt-web-link", conversation_id=request_id).first()
+            if existing is not None:
+                return _serialize_draft(existing)
+            draft = mgr.create_draft(request_id, payload, body.get("decision_summary", ""))
+            draft.user_id = "chatgpt-web-link"
+            session.commit()
+            return _serialize_draft(draft)
         draft = mgr.create_draft(
             conversation_id=body.get("conversation_id", ""),
             payload=body.get("payload", {}),
@@ -382,13 +439,16 @@ def cancel_order(order_id: str):
 
 
 @router.get("/orders/{order_id}")
-def get_order(order_id: str):
+def get_order(order_id: str, refresh: bool = False):
     """订单详情。"""
     mgr, session = _get_manager()
     try:
         o = mgr.get_order(order_id)
         if o is None:
             raise HTTPException(status_code=404, detail="订单不存在")
+        if refresh:
+            mgr.sync_order_status(order_id)
+            session.commit()
         return _serialize_order(o)
     finally:
         session.close()
@@ -733,6 +793,16 @@ def place_order(strategy_id: str, body: dict, request: Request):
         strategy = mgr.get_strategy(strategy_id)
         if strategy is None:
             raise HTTPException(status_code=404, detail="策略不存在")
+        from backend.services.action.models import ActionDraft, OrderRecord
+        source = session.get(ActionDraft, strategy.source_draft_id) if strategy.source_draft_id else None
+        if source is not None and source.user_id == "chatgpt-web-link":
+            # Reserve the existing single-order Web handoff. Replayed final clicks
+            # return the first attempt, including unknown/rejected; never resubmit.
+            from sqlalchemy import text
+            session.execute(text("BEGIN IMMEDIATE"))
+            existing = session.query(OrderRecord).filter_by(strategy_id=strategy_id).first()
+            if existing is not None:
+                return _serialize_order(existing)
         if strategy.batch_leg_id:
             raise HTTPException(
                 status_code=409,

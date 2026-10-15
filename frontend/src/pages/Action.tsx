@@ -4,7 +4,7 @@
  * 行动清单 = 待确认草稿 + 按意图分组的策略 + 散户策略 + 已挂单
  */
 import React, { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Trash2, FileText } from 'lucide-react'
 import { actionApi, executionBatchApi, type ActionDraftResponse, type AllocationIntentResponse, type SymbolStrategyResponse, type OrderResponse, type TimelineEvent, type ExecutionBatchResponse } from '@/lib/api'
 import { ALLOC_LABEL } from '@/lib/allocation-api'
@@ -17,6 +17,12 @@ import ExecutionBatchCard from '@/components/ExecutionBatchCard'
 type TabKey = 'action' | 'history'
 
 export default function Action() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [executionLabel, setExecutionLabel] = useState<string>()
+  const [directStrategy, setDirectStrategy] = useState<SymbolStrategyResponse | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const searchParams = new URLSearchParams(window.location.hash.split('?')[1] || '')
   const urlTab = searchParams.get('tab') as string | null
   // 兼容旧 URL: tab=strategies/allocation → action
@@ -27,6 +33,29 @@ export default function Action() {
   const [drafts, setDrafts] = useState<ActionDraftResponse[]>([])
   const [draftCardOpen, setDraftCardOpen] = useState(false)
   const [currentDraft, setCurrentDraft] = useState<ActionDraftResponse | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (!params.has('trade')) return
+    let active = true
+    Promise.resolve().then(async () => {
+      if (params.get('trade') !== '1') throw new Error('不支持的交易链接版本')
+      const values: Record<string, unknown> = {}
+      for (const [key, value] of params) {
+        if (params.getAll(key).length !== 1) throw new Error(`交易链接参数重复：${key}`)
+        if (key !== 'trade') values[key] = value
+      }
+      if (values.quantity !== undefined) values.quantity = Number(values.quantity)
+      const result = await actionApi.previewTradeLink(values)
+      if (active) {
+        setCurrentDraft({ ...result.draft, prefill_request_id: result.request_id })
+        setExecutionLabel(result.execution.label)
+        setLinkError(null)
+        setDraftCardOpen(true)
+      }
+    }).catch(error => { if (active) setLinkError(`交易链接无效，未创建草稿或下单：${error.message}`) })
+    return () => { active = false }
+  }, [location.search])
 
   const fetchDrafts = useCallback(async () => {
     try {
@@ -53,16 +82,33 @@ export default function Action() {
       setDrafts(prev => prev.filter(d => d.id !== id))
     } catch (e: unknown) { alert(`丢弃失败: ${(e as Error).message}`) }
   }
-  function handleDraftConfirmed() {
+  async function handleDraftConfirmed(id?: string) {
+    const fromLink = Boolean(currentDraft?.prefill_request_id)
     setDraftCardOpen(false)
     setCurrentDraft(null)
     fetchDrafts()
+    setRefreshKey(k => k + 1)
+    if (fromLink && id) {
+      navigate('/action', { replace: true })
+      try {
+        const result = await actionApi.listStrategies()
+        const strategy = result.items.find(s => s.source_draft_id === id)
+        if (!strategy) throw new Error('未找到已确认的策略，请在行动记录中查看')
+        const orders = await actionApi.listOrders({ strategy_id: strategy.id })
+        if (orders.items.length) setLinkError('此链接已有订单，请在原行动记录查看状态；未重复提交。')
+        else {
+          const confirmed = await actionApi.getDraft(id)
+          setDirectStrategy({ ...strategy, currency: confirmed.payload?.symbol_strategies[0]?.currency })
+        }
+      } catch (error) { setLinkError((error as Error).message) }
+    }
   }
 
   return (
     <div>
       {/* 页面头部 — 与 Discipline / Dashboard 完全一致的结构 */}
       <PageHeader icon="🎯" title="投资行动" subtitle="决策落地 · 全流程追溯" />
+      {linkError && <div role="alert" style={{ padding: 12, color: '#B45309' }}>{linkError}</div>}
 
       {/* Tab 切换器 */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #E5E7EB', marginBottom: 20 }}>
@@ -102,6 +148,7 @@ export default function Action() {
       <div>
         {activeTab === 'action' && (
           <ActionListTab
+            key={refreshKey}
             drafts={drafts}
             onEditDraft={handleEditDraft}
             onDiscardDraft={handleDiscardDraft}
@@ -113,10 +160,12 @@ export default function Action() {
       {/* ActionDraftCard 弹层 */}
       <ActionDraftCard
         open={draftCardOpen}
-        onClose={() => { setDraftCardOpen(false); setCurrentDraft(null) }}
+        onClose={() => { setDraftCardOpen(false); setCurrentDraft(null); if (currentDraft?.prefill_request_id) navigate('/action', { replace: true }) }}
         draft={currentDraft}
         onConfirmed={handleDraftConfirmed}
+        executionLabel={currentDraft?.prefill_request_id ? executionLabel : undefined}
       />
+      {directStrategy && <ConfirmOrderDialog key={directStrategy.id} open onClose={() => setDirectStrategy(null)} strategy={directStrategy} onOrderPlaced={() => { setDirectStrategy(null); setRefreshKey(k => k + 1) }} />}
     </div>
   )
 }
@@ -141,6 +190,23 @@ function ActionListTab({
   const [batches, setBatches] = useState<ExecutionBatchResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [placeOrderStrategy, setPlaceOrderStrategy] = useState<SymbolStrategyResponse | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const pending = orders.filter(o => !['filled', 'cancelled', 'expired', 'rejected', 'unknown'].includes(o.status))
+    if (!pending.length) return
+    let active = true
+    const timer = setTimeout(() => {
+      Promise.all(pending.map(o => actionApi.getOrder(o.id, true)))
+        .then(updated => { if (active) {
+          const byId = new Map(updated.map(o => [o.id, o]))
+          setOrders(old => old.map(o => byId.get(o.id) || o))
+          setStatusError(null)
+        } })
+        .catch(() => { if (active) setStatusError('券商状态刷新失败，保留最后状态；请核实券商端，勿重复下单。') })
+    }, 5000)
+    return () => { active = false; clearTimeout(timer) }
+  }, [orders])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -235,6 +301,7 @@ function ActionListTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {statusError && <div role="alert">{statusError}</div>}
 
       {batches.length > 0 && (
         <>

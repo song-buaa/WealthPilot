@@ -6,7 +6,7 @@
  * - 旧路径(单笔): 兼容，走原布局
  * - 恢复 trigger_price 可编辑
  */
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, AlertTriangle, CheckCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import type { ActionDraftResponse, SymbolStrategyDraft } from '@/lib/api'
@@ -32,7 +32,8 @@ interface Props {
   open: boolean
   onClose: () => void
   draft: ActionDraftResponse | null
-  onConfirmed: () => void
+  onConfirmed: (draftId?: string) => void
+  executionLabel?: string
   planMeta?: PlanMeta | null  // v3.11: 执行计划附加信息
 }
 
@@ -54,7 +55,8 @@ export default function ActionDraftCard(props: Props) {
   return <ActionDraftCardContent key={props.draft?.id ?? 'empty'} {...props} />
 }
 
-function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }: Props) {
+function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, executionLabel }: Props) {
+  const busy = useRef(false)
   const [strategies, setStrategies] = useState<SymbolStrategyDraft[]>(
     () => draft?.payload?.symbol_strategies || [],
   )
@@ -78,7 +80,8 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
   const totalQty = strategies.reduce((s, st) => s + (st.quantity || 0), 0)
 
   async function handleConfirm() {
-    if (!canConfirm) return
+    if (!canConfirm || busy.current) return
+    busy.current = true
     setConfirming(true)
     setError(null)
     try {
@@ -117,16 +120,29 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
           risk_notes: riskNotes,
           missing_fields: missingFields,
         }
-        await actionApi.updateDraft(draft.id, {
+        let saved = draft
+        if (draft.prefill_request_id) {
+          saved = await actionApi.createDraft({
+            prefill_request_id: draft.prefill_request_id,
+            decision_summary: summary, payload: updatedPayload,
+          })
+          if (!['draft', 'confirmed'].includes(saved.status)) throw new Error('此链接的草稿已丢弃，请发起新的交易指令')
+        }
+        if (saved.status === 'draft') {
+          await actionApi.updateDraft(saved.id, {
           decision_summary: summary,
-          payload: updatedPayload,
-        })
-        await actionApi.confirmDraft(draft.id)
+          payload: draft.prefill_request_id ? saved.payload : updatedPayload,
+          })
+          await actionApi.confirmDraft(saved.id)
+        }
+        onConfirmed(saved.id)
+        return
       }
       onConfirmed()
     } catch (e: unknown) {
       setError((e as Error).message || '确认失败')
     } finally {
+      busy.current = false
       setConfirming(false)
     }
   }
@@ -156,7 +172,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
         <Dialog.Content style={{
           position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           background: '#fff', borderRadius: 16, padding: 0,
-          width: 800, maxHeight: '85vh', overflow: 'auto',
+          width: 'min(800px, 96vw)', maxHeight: '85vh', overflow: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,0.2)', zIndex: 1001,
         }}>
           {/* 头部 */}
@@ -175,6 +191,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
           </div>
 
           <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {executionLabel && <div role="status">交易环境：{executionLabel}。此步骤仅加入投资行动，最终提交仍需确认。</div>}
 
             {/* ── 执行计划模式: 计划头 + N 批次行 ── */}
             {isExecutionPlan && (
@@ -320,7 +337,10 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
                     marginBottom: 10, background: '#FAFBFC',
                   }}>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{s.symbol}</span>
+                      {draft?.prefill_request_id ? <>
+                        <input aria-label="标的及市场" value={s.symbol} onChange={e => handleFieldChange(i, 'symbol', e.target.value)} style={inputStyle} />
+                        <select aria-label="买卖方向" value={s.side} onChange={e => handleFieldChange(i, 'side', e.target.value)}><option>BUY</option><option>SELL</option></select>
+                      </> : <span style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{s.symbol}</span>}
                       <span style={{
                         fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 4,
                         background: s.side === 'BUY' ? '#DCFCE7' : '#FEE2E2',
@@ -329,9 +349,15 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta }:
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <EditableField label="数量（股）" value={s.quantity ?? ''}
-                        onChange={v => handleFieldChange(i, 'quantity', v ? parseInt(v) : null)} />
+                        onChange={v => handleFieldChange(i, 'quantity', v ? (draft?.prefill_request_id ? Number(v) : parseInt(v)) : null)} />
                       <EditableField label="限价" value={s.limit_price ?? ''}
                         onChange={v => handleFieldChange(i, 'limit_price', v ? parseFloat(v) : null)} />
+                      {draft?.prefill_request_id && <>
+                        <label>订单类型<select aria-label="订单类型" value={s.order_type} onChange={e => handleFieldChange(i, 'order_type', e.target.value)}><option>LIMIT</option><option>CONDITIONAL_LIMIT</option></select></label>
+                        <label>交易币种<input aria-label="交易币种" value={s.currency || ''} onChange={e => handleFieldChange(i, 'currency', e.target.value)} style={inputStyle} /></label>
+                        <div>有效期：{s.time_in_force}</div>
+                        {s.order_type === 'CONDITIONAL_LIMIT' && <EditableField label="触发价" value={s.trigger_price ?? ''} onChange={v => handleFieldChange(i, 'trigger_price', v ? Number(v) : null)} />}
+                      </>}
                     </div>
                   </div>
                 ))}
@@ -424,7 +450,7 @@ function EditableField({ label, value, onChange }: {
   return (
     <div>
       <label style={{ fontSize: 11, color: '#6B7280', marginBottom: 2, display: 'block' }}>{label}</label>
-      <input type="text" value={value} onChange={e => onChange(e.target.value)} style={{
+      <input aria-label={label} type="text" value={value} onChange={e => onChange(e.target.value)} style={{
         width: '100%', padding: '6px 10px', fontSize: 13,
         border: '1px solid #E5E7EB', borderRadius: 6, outline: 'none', fontFamily: 'inherit',
       }} />
