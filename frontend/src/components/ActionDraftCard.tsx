@@ -194,7 +194,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
         <Dialog.Content style={{
           position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           background: '#fff', borderRadius: 16, padding: 0,
-          width: 'min(800px, 96vw)', maxHeight: '85vh', overflow: 'auto',
+          width: 'min(800px, 96vw)', maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
           boxShadow: '0 20px 60px rgba(0,0,0,0.2)', zIndex: 1001,
         }}>
           {/* 头部 */}
@@ -212,7 +212,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
             </Dialog.Close>
           </div>
 
-          <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ padding: '16px 24px', overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
             {executionLabel && <div role="status">交易环境：{executionLabel}。此步骤仅加入投资行动，最终提交仍需确认。</div>}
 
             {ibkr && <>
@@ -439,7 +439,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
 
           {/* 底部 */}
           <div style={{
-            padding: '16px 24px', borderTop: '1px solid #E5E7EB',
+            flexShrink: 0, padding: '16px 24px', borderTop: '1px solid #E5E7EB',
             display: 'flex', justifyContent: 'flex-end', gap: 10,
           }}>
             <button onClick={onClose} style={{

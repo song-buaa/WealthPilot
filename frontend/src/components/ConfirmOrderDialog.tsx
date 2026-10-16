@@ -189,20 +189,20 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           background: '#fff', borderRadius: 12, padding: 0,
-          width: ibkr ? 'min(640px, 96vw)' : 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto',
+          width: ibkr ? 'min(640px, 96vw)' : 'min(480px, 96vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           zIndex: 8001,
         }}>
           {/* Header */}
           <div style={{
-            padding: '16px 20px', borderBottom: '1px solid #E5E7EB',
+            flexShrink: 0, padding: '16px 20px', borderBottom: '1px solid #E5E7EB',
             fontSize: 16, fontWeight: 700, color: '#1B2A4A',
           }}>
             <span style={{ marginRight: 8 }}>&#9888;&#65039;</span>
             最终确认下单
           </div>
 
-          <div style={{ padding: '16px 20px' }}>
+          <div style={{ padding: '16px 20px', overflowY: 'auto', minHeight: 0 }}>
             <div role="status" style={{ marginBottom: 12 }}>交易环境：{ibkr ? 'IBKR · LSEETF / USD / SMART' : executionLabel}</div>
             {ibkr && <>
               <p>当前请求：{ibkr.requestId}</p>
@@ -354,7 +354,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
 
           {/* Footer */}
           <div style={{
-            padding: '12px 20px', borderTop: '1px solid #E5E7EB',
+            flexShrink: 0, padding: '12px 20px', borderTop: '1px solid #E5E7EB',
             display: 'flex', justifyContent: 'flex-end', gap: 12,
           }}>
             <button
