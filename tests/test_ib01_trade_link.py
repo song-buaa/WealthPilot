@@ -303,6 +303,7 @@ def test_all_in_submission_rechecks_fee_and_confirmed_payload_without_real_order
         assert not adapter.place_calls and s.query(OrderRecord).count()==0
         monkeypatch.setattr(adapter,'what_if_limit_order',original)
         loaded.legs[0].final_limit=125
+        s.commit()
         with pytest.raises(ExecutionSafetyError,match='payload changed'):
             service.submit_next_leg(batch['id'],confirmation_version=batch['confirmation_version'])
         assert not adapter.place_calls
@@ -346,3 +347,19 @@ def test_preview_fingerprint_is_bound_to_request_id(api):
     response=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(other,quote))
     assert response.status_code==422 and 'PREVIEW_CHANGED' in response.text
     assert not adapter.place_calls
+
+
+def test_cached_old_review_cannot_survive_another_session_price_edit(api):
+    client,engine,adapter=api
+    params,quote=quoted_request(client)
+    old=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    route='/api/execution-batches/'+old['id']
+    old=client.post(route+'/confirm',json={'confirmation_version':0}).json()
+    with Session(engine) as stale_session:
+        service=ExecutionBatchService(stale_session,adapter,clock=lambda:NOW,allow_mutation=True)
+        cached=service.get_batch(old['id']);assert cached.status=='CONFIRMED'
+        response=client.post(route+'/manual-limits',json={'limits':{'IB01':130},'confirmation_version':old['confirmation_version']})
+        assert response.status_code==200,response.text
+        with pytest.raises(ExecutionSafetyError):
+            service.submit_next_leg(old['id'],confirmation_version=old['confirmation_version'])
+        assert not adapter.place_calls

@@ -780,8 +780,19 @@ class ExecutionBatchService:
                          for item, leg in zip(facts["legs"], batch.legs)]
         return hashlib.sha256(_json(facts).encode()).hexdigest()
 
+    def _lock_all_in_review(self, batch: ExecutionBatch) -> None:
+        # Use the existing SQLite write-serialization contract for version changes
+        # and submission. A simultaneous price edit cannot submit an old review.
+        if self.is_all_in(batch) and self.session.get_bind().dialect.name == "sqlite":
+            from sqlalchemy import text
+            connection = self.session.connection().connection.driver_connection
+            if not connection.in_transaction:
+                self.session.execute(text("BEGIN IMMEDIATE"))
+            self.session.refresh(batch)
+
     def reprice_all_in(self, batch_id: str, limits: dict, version: int) -> ExecutionBatch:
         batch = self.get_batch(batch_id)
+        self._lock_all_in_review(batch)
         if not self.is_all_in(batch) or version != batch.confirmation_version:
             raise ExecutionSafetyError("confirmation version 无效")
         if batch.status in {"CANCELLED", "COMPLETED"} or any(leg.linked_order_id for leg in batch.legs):
@@ -800,6 +811,7 @@ class ExecutionBatchService:
 
     def confirm_batch(self, batch_id: str) -> ExecutionBatch:
         batch = self.get_batch(batch_id)
+        self._lock_all_in_review(batch)
         if batch.status != "READY":
             raise ExecutionSafetyError(f"Batch status={batch.status}，不可确认")
         if self.is_all_in(batch):
@@ -996,6 +1008,7 @@ class ExecutionBatchService:
         """Official mutation path. Must only be called by the authenticated UI flow."""
         self._assert_live_mutation_enabled()
         batch = self.get_batch(batch_id)
+        self._lock_all_in_review(batch)
         if batch.confirmation_version != confirmation_version or not batch.confirmation_hash:
             raise ExecutionSafetyError("confirmation version/hash 无效")
         if batch.status not in {"CONFIRMED", "SUBMITTING", "PARTIALLY_SUBMITTED"}:
