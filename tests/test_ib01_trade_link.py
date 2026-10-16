@@ -469,3 +469,48 @@ def test_failed_link_refresh_can_retry_without_reviving_explicit_cancellation(ap
     with Session(engine) as s:
         assert s.query(ExecutionBatch).count()==2 and s.query(OrderRecord).count()==0
     assert not adapter.place_calls
+
+def test_concurrent_fresh_link_retries_share_one_active_review(api, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from threading import Event, current_thread
+    client, engine, adapter = api
+    params, quote = quoted_request(client)
+    old = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    later = NOW+timedelta(seconds=40)
+    original_quote = adapter.get_executable_quote
+    monkeypatch.setattr(adapter, 'get_executable_quote',
+                        lambda r:original_quote(r)|{'quote_timestamp':later.isoformat()})
+    monkeypatch.setattr(link_handoff, 'ExecutionBatchService',
+                        lambda s,a:ExecutionBatchService(s,a,clock=lambda:later,allow_mutation=False))
+    monkeypatch.setattr(execution_batch, '_service',
+                        lambda s:ExecutionBatchService(s,adapter,clock=lambda:later,allow_mutation=False))
+    fresh = client.post('/api/execution-batches/trade-link/quote',json=params).json()
+    payload = confirmation(params,fresh)
+    entered, release, second_done = Event(), Event(), Event()
+    original_cash = adapter.get_cash_snapshot
+    first_thread = []
+    def cash(currency):
+        if not first_thread:
+            first_thread.append(current_thread().ident)
+            entered.set()
+            assert release.wait(4)
+        return original_cash(currency)
+    monkeypatch.setattr(adapter, 'get_cash_snapshot', cash)
+    def second():
+        try:return client.post('/api/execution-batches/trade-link/confirm-intent',json=payload)
+        finally:second_done.set()
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(client.post,'/api/execution-batches/trade-link/confirm-intent',json=payload)
+        assert entered.wait(4)
+        other = workers.submit(second)
+        second_done.wait(1)  # A serialized retry must wait behind the fresh build.
+        release.set()
+        one, two = first.result(), other.result()
+    assert one.status_code==two.status_code==200, (one.text,two.text)
+    assert one.json()['id']==two.json()['id']
+    with Session(engine) as s:
+        assert s.query(ExecutionBatch).count()==2
+        assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
+        assert s.query(OrderRecord).count()==0
+    assert not adapter.place_calls

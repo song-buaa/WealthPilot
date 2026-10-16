@@ -807,9 +807,13 @@ class ExecutionBatchService:
         self._audit("execution_batch_price_change_invalidated", {"batch_id": batch.id,
                     "confirmation_version": batch.confirmation_version, "broker_mutation": 0})
         self.session.commit()
+        # Invalidation must survive a failed refresh, but reacquire the existing
+        # writer lock before checking/creating its replacement. Concurrent link
+        # retries then observe and reuse one replacement rather than create two.
+        self._lock_all_in_review(batch)
         next_batch = self.create_batch(conversation_id=batch.source_conversation_id,
                                        message_id=batch.source_message_id, _manual_limits=limits)
-        next_batch.confirmation_version = batch.confirmation_version
+        next_batch.confirmation_version = max(next_batch.confirmation_version, batch.confirmation_version)
         return next_batch
 
     def confirm_batch(self, batch_id: str) -> ExecutionBatch:
