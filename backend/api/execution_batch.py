@@ -196,7 +196,8 @@ def confirm_ibkr_link(body: IBKRLinkConfirmation):
         quote_guard({"quote_quality": "LIVE", "ask": 1, "bid": 1,
                      "quote_timestamp": body.quote_as_of}, now=_service(session).clock())
         order = _link_order(body)
-        batch = create_link_batch(session, _adapter(), order, limit_price=body.limit_price)
+        batch = create_link_batch(session, _adapter(), order, limit_price=body.limit_price,
+                                  reviewed_at=body.quote_as_of, review_hash=body.preview_hash)
         service = _service(session)
         if batch.status in {"CANCELLED", "COMPLETED"} or any(leg.linked_order_id for leg in batch.legs):
             return _serialize_batch(batch)

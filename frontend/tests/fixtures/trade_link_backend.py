@@ -70,6 +70,18 @@ def ibkr_counts():
                 'business_counts':counts, 'business_fingerprints':fingerprints,
                 'real_order_calls':len(ibkr.place_calls)}
 
+
+@app.post('/__test/age-ibkr-reviews')
+def age_ibkr_reviews():
+    """Make only the persisted review stale; fresh quote generation stays real-time."""
+    from datetime import timedelta
+    from backend.services.action.models import ExecutionLeg
+    with get_session() as s:
+        for leg in s.query(ExecutionLeg).all():
+            leg.quote_as_of = datetime.now(timezone.utc) - timedelta(seconds=40)
+        s.commit()
+    return {'isolated_synthetic_fixture': True}
+
 @app.get('/api/demo/status')
 def demo(): return {'public_demo_mode': False}
 @app.get('/api/{path:path}')

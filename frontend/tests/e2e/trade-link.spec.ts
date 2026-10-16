@@ -273,3 +273,48 @@ test('legacy saved draft retains edit, cancel and close without saving local cha
   await dialog.getByRole('button',{name:'关闭行动清单'}).click()
   await expect(dialog).not.toBeVisible()
 })
+
+for (const mobile of [false, true]) {
+  test(`IB01 reopened stale request refreshes and enters final dialog once (${mobile ? 'mobile' : 'desktop'})`, async ({page, request}) => {
+    await resetIBKR(request)
+    if (mobile) await page.setViewportSize({width:390,height:844})
+    const before = await (await request.get(`${base}/__test/ibkr-counts`)).json()
+    const url = ibkrLink()
+    let confirmations = 0
+    let orderSubmissions = 0
+    page.on('request', r => {
+      if (r.url().endsWith('/confirm-intent')) confirmations++
+      if (r.url().endsWith('/submit') || r.url().endsWith('/place_order')) orderSubmissions++
+    })
+    async function review() {
+      await page.getByRole('button',{name:'加入投资行动',exact:true}).click()
+      await expect(page.getByTestId('ibkr-review-fields')).toContainText('WhatIf：PASS')
+      await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeEnabled()
+    }
+    await page.goto(url)
+    await review()
+    await page.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+    const final = page.getByTestId('confirm-order-dialog')
+    await expect(final).toContainText('最终确认下单')
+    await request.post(`${base}/__test/age-ibkr-reviews`)
+    await page.reload() // Same request_id and an old DB quote; a new preview is fresh.
+    await review()
+    await page.getByLabel('IBKR 限价').fill('130')
+    await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeDisabled()
+    await page.getByRole('button',{name:'重新计算股数、费用及 WhatIf',exact:true}).click()
+    await expect(page.getByTestId('ibkr-quantity')).toHaveText('30')
+    const confirm = page.getByRole('button',{name:'核对并进入最终确认',exact:true})
+    await expect(confirm).toBeEnabled()
+    await confirm.evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click() })
+    await expect(final).toContainText('最终确认下单')
+    await expect(final).toContainText('WhatIf：PASS')
+    await expect(final.getByTestId('confirm-ibkr-plan')).toBeEnabled()
+    await expect(final.getByTestId('submit-btn')).toBeDisabled()
+    expect(confirmations).toBe(2)
+    expect(orderSubmissions).toBe(0)
+    const after = await (await request.get(`${base}/__test/ibkr-counts`)).json()
+    expect(after.batches).toBe(before.batches + 2)
+    expect(after.orders).toBe(before.orders)
+    expect(after.real_order_calls).toBe(0)
+  })
+}

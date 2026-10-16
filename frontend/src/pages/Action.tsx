@@ -30,6 +30,7 @@ export default function Action() {
   const [ibkrBusy, setIbkrBusy] = useState(false)
   const [ibkrError, setIbkrError] = useState('')
   const quoteSequence = useRef(0)
+  const intentConfirmationInFlight = useRef(false)
   const invalidateQuotes = useCallback(() => { quoteSequence.current++ }, [])
   const focusedIBKR = new URLSearchParams(location.search).get('trade') === 'ibkr'
 
@@ -73,7 +74,8 @@ export default function Action() {
   }
 
   async function confirmIBKRIntent() {
-    if (!ibkrLink || !ibkrQuote || ibkrDirty) return
+    if (!ibkrLink || !ibkrQuote || ibkrDirty || intentConfirmationInFlight.current) return
+    intentConfirmationInFlight.current = true
     const sequence = ++quoteSequence.current
     setIbkrBusy(true)
     try {
@@ -82,7 +84,7 @@ export default function Action() {
       if (batch.source_conversation_id !== ibkrLink.request_id) throw new Error('交易批次与请求不匹配')
       setIbkrBatch(batch)
     } catch (err) { if (sequence === quoteSequence.current) { setIbkrDirty(true); throw err } }
-    finally { if (sequence === quoteSequence.current) setIbkrBusy(false) }
+    finally { intentConfirmationInFlight.current = false; if (sequence === quoteSequence.current) setIbkrBusy(false) }
   }
   const [linkError, setLinkError] = useState<string | null>(null)
   const [executionLabel, setExecutionLabel] = useState<string>()

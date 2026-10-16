@@ -108,16 +108,17 @@ def test_confirm_intent_reuses_batch_and_cannot_authorize_an_order(api):
     assert not adapter.place_calls
 
 
-def test_terminal_link_replay_does_not_create_another_batch(api):
+@pytest.mark.parametrize('terminal_status', ['COMPLETED', 'CANCELLED'])
+def test_terminal_link_replay_does_not_create_another_batch(api, terminal_status):
     client,engine,adapter=api
     payload=budget(request_id=str(uuid4()),confirmed=True)
     quote=client.post('/api/execution-batches/trade-link/quote',json={k:v for k,v in payload.items() if k!='confirmed'}).json()
     payload.update(preview_hash=quote['preview_hash'],quote_as_of=quote['batch']['legs'][0]['quote_as_of'])
     first=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).json()
     with Session(engine) as s:
-        s.get(ExecutionBatch,first['id']).status='COMPLETED';s.commit()
+        s.get(ExecutionBatch,first['id']).status=terminal_status;s.commit()
     second=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).json()
-    assert second['id']==first['id'] and second['status']=='COMPLETED'
+    assert second['id']==first['id'] and second['status']==terminal_status
     assert not adapter.place_calls
 
 
@@ -363,3 +364,108 @@ def test_cached_old_review_cannot_survive_another_session_price_edit(api):
         with pytest.raises(ExecutionSafetyError):
             service.submit_next_leg(old['id'],confirmation_version=old['confirmation_version'])
         assert not adapter.place_calls
+
+
+@pytest.mark.parametrize('manual_limit', [None, '100'])
+def test_fresh_link_review_replaces_stale_persisted_batch(api, monkeypatch, manual_limit):
+    """Reopening/recalculating the same request must not reuse its old quote."""
+    from datetime import timedelta
+    client, engine, adapter = api
+    params, first_quote = quoted_request(client)
+    old = client.post('/api/execution-batches/trade-link/confirm-intent',
+                      json=confirmation(params, first_quote)).json()
+    old = client.post('/api/execution-batches/'+old['id']+'/confirm',
+                      json={'confirmation_version': old['confirmation_version']}).json()
+    later = NOW + timedelta(seconds=40)
+    original = adapter.get_executable_quote
+    monkeypatch.setattr(adapter, 'get_executable_quote',
+                        lambda r: original(r) | {'quote_timestamp': later.isoformat()})
+    monkeypatch.setattr(link_handoff, 'ExecutionBatchService',
+                        lambda s, a: ExecutionBatchService(s, a, clock=lambda: later, allow_mutation=False))
+    monkeypatch.setattr(execution_batch, '_service',
+                        lambda s: ExecutionBatchService(s, adapter, clock=lambda: later, allow_mutation=False))
+    edited = params | ({'limit_price': manual_limit} if manual_limit else {})
+    fresh = client.post('/api/execution-batches/trade-link/quote', json=edited).json()
+    result = client.post('/api/execution-batches/trade-link/confirm-intent',
+                         json=confirmation(edited, fresh))
+    assert result.status_code == 200, result.text
+    batch = result.json()
+    assert batch['id'] != old['id'] and batch['status'] == 'READY'
+    assert batch['confirmation_version'] > old['confirmation_version']
+    assert not batch['confirmation_hash'] and not batch['confirmed_at']
+    assert batch['legs'][0]['quote_as_of'] == fresh['batch']['legs'][0]['quote_as_of']
+    if manual_limit:
+        assert batch['legs'][0]['final_limit'] == float(manual_limit)
+    duplicate = client.post('/api/execution-batches/trade-link/confirm-intent',
+                            json=confirmation(edited, fresh))
+    assert duplicate.status_code == 200 and duplicate.json()['id'] == batch['id']
+    with Session(engine) as s:
+        original_batch = s.get(ExecutionBatch, old['id'])
+        assert original_batch.status == 'CANCELLED' and not original_batch.confirmation_hash
+        assert s.query(ExecutionBatch).count() == 2
+        assert s.query(OrderRecord).count() == s.query(SymbolStrategy).count() == 0
+    assert not adapter.place_calls
+    expired = confirmation(edited, fresh) | {'quote_as_of': (later-timedelta(seconds=31)).isoformat()}
+    assert client.post('/api/execution-batches/trade-link/confirm-intent',json=expired).status_code == 422
+
+@pytest.mark.parametrize('offset', ['+08:00', None])
+def test_equivalent_review_timestamp_does_not_create_duplicate(api, offset):
+    from datetime import datetime, timedelta, timezone
+    client, engine, adapter = api
+    params, quote = quoted_request(client)
+    payload = confirmation(params, quote)
+    when = datetime.fromisoformat(payload['quote_as_of'].replace('Z', '+00:00'))
+    payload['quote_as_of'] = (when.astimezone(timezone(timedelta(hours=8))).isoformat()
+                             if offset else when.replace(tzinfo=None).isoformat())
+    first = client.post('/api/execution-batches/trade-link/confirm-intent', json=payload)
+    assert first.status_code == 200, first.text
+    second = client.post('/api/execution-batches/trade-link/confirm-intent', json=payload)
+    assert second.status_code == 200 and second.json()['id'] == first.json()['id']
+    with Session(engine) as s:
+        assert s.query(ExecutionBatch).count() == 1 and s.query(OrderRecord).count() == 0
+    assert not adapter.place_calls
+
+
+def test_quote_expiring_during_whatif_stays_blocked(api, monkeypatch):
+    from datetime import timedelta
+    client, _, adapter = api
+    params, quote = quoted_request(client)
+    original = adapter.what_if_limit_order
+    def slow_whatif(*args, **kwargs):
+        result = original(*args, **kwargs)
+        monkeypatch.setattr(execution_batch, '_service',
+                            lambda s: ExecutionBatchService(s, adapter, clock=lambda: NOW+timedelta(seconds=31)))
+        return result
+    monkeypatch.setattr(adapter, 'what_if_limit_order', slow_whatif)
+    result = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote))
+    assert result.status_code == 422 and 'quote stale' in result.text
+    assert not adapter.place_calls
+
+def test_failed_link_refresh_can_retry_without_reviving_explicit_cancellation(api, monkeypatch):
+    from datetime import timedelta
+    client, engine, adapter = api
+    params, quote = quoted_request(client)
+    old = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    later = NOW+timedelta(seconds=40)
+    original = adapter.get_executable_quote
+    monkeypatch.setattr(adapter, 'get_executable_quote',lambda r:original(r)|{'quote_timestamp':later.isoformat()})
+    monkeypatch.setattr(link_handoff, 'ExecutionBatchService',
+                        lambda s,a:ExecutionBatchService(s,a,clock=lambda:later,allow_mutation=False))
+    monkeypatch.setattr(execution_batch, '_service',
+                        lambda s:ExecutionBatchService(s,adapter,clock=lambda:later,allow_mutation=False))
+    fresh = client.post('/api/execution-batches/trade-link/quote',json=params).json()
+    # Facts change during confirm: fail closed, but don't trap the request forever.
+    monkeypatch.setattr(adapter, 'get_executable_quote',
+                        lambda r:original(r)|{'quote_timestamp':later.isoformat(),'ask':127,'bid':126.99})
+    failed = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,fresh))
+    assert failed.status_code==422 and 'PREVIEW_CHANGED' in failed.text
+    with Session(engine) as s:
+        assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
+        assert not s.get(ExecutionBatch,old['id']).confirmation_hash
+    fresh = client.post('/api/execution-batches/trade-link/quote',json=params).json()
+    retried = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,fresh))
+    assert retried.status_code==200, retried.text
+    assert retried.json()['status']=='READY' and retried.json()['id']!=old['id']
+    with Session(engine) as s:
+        assert s.query(ExecutionBatch).count()==2 and s.query(OrderRecord).count()==0
+    assert not adapter.place_calls

@@ -1,13 +1,20 @@
 """Thin Web-only handoff into existing typed-intent and ExecutionBatch services."""
 import json
 from contextlib import contextmanager
+from datetime import timezone
 
 from app.models import Conversation, ConversationMessage
 from backend.services.action.models import ExecutionBatch
 from backend.services.trade_intent.models import StructuredTradeIntent, TradeIntentField
 from backend.services.trade_intent.persistence import confirm_trade_intent
 from backend.services.execution_batch.service import ExecutionBatchService
+from backend.services.execution_batch.calculator import ExecutionSafetyError
 from pocs.chatgpt_skills.trade_link import IBKRLinkPreviewRequest
+
+
+def _utc(value):
+    # SQLite stores naive UTC; browser ISO values may carry an explicit offset.
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
 def link_intent(order: IBKRLinkPreviewRequest) -> StructuredTradeIntent:
@@ -30,7 +37,8 @@ def link_intent(order: IBKRLinkPreviewRequest) -> StructuredTradeIntent:
     )
 
 
-def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_price=None):
+def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_price=None,
+                      reviewed_at=None, review_hash=None):
     """Called only by the explicit Web intent-confirm button; never submits."""
     request_id = str(order.request_id)
     parameters = order.model_dump(mode="json")
@@ -61,7 +69,37 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_
     existing = session.query(ExecutionBatch).filter_by(source_message_id=message.id).order_by(
         ExecutionBatch.created_at.desc()).first()
     if existing is not None:
-        return existing  # Includes terminal attempts: opening the same link is never a new order.
+        if (reviewed_at is not None and existing.status == "CANCELLED"
+                and json.loads(existing.execution_policy or "{}").get("review_refresh_pending")
+                and not any(leg.linked_order_id for leg in existing.legs)):
+            # A failed refresh invalidated the old confirmation durably. A new
+            # explicit fresh review may retry; explicit user cancellations cannot.
+            next_batch = ExecutionBatchService(session, adapter).create_batch(
+                conversation_id=request_id, message_id=message.id,
+                _manual_limits={"IB01": limit_price} if limit_price is not None else None)
+            next_batch.confirmation_version = existing.confirmation_version
+            return next_batch
+        # A link replay must stay on the same request, but a newly reviewed quote
+        # must not get trapped behind its old persisted review. Submitted/terminal
+        # batches are never resurrected. Identical retries reuse the fresh batch.
+        if (reviewed_at is not None and existing.status not in {"CANCELLED", "COMPLETED"}
+                and not any(leg.linked_order_id for leg in existing.legs)):
+            service = ExecutionBatchService(session, adapter)
+            try:
+                service.assert_review_fresh(existing)
+                fresh = all(
+                    _utc(leg.quote_as_of) >= _utc(reviewed_at)
+                    for leg in existing.legs
+                )
+                same_review = service.review_fingerprint(existing) == review_hash
+            except ExecutionSafetyError:
+                fresh = same_review = False
+            if not fresh or not same_review:
+                return service.reprice_all_in(
+                    existing.id, {"IB01": limit_price} if limit_price is not None else None,
+                    existing.confirmation_version,
+                )
+        return existing
     return ExecutionBatchService(session, adapter).create_batch(
         conversation_id=request_id, message_id=message.id,
         _manual_limits={"IB01": limit_price} if limit_price is not None else None)

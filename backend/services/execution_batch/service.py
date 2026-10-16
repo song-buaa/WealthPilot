@@ -790,7 +790,7 @@ class ExecutionBatchService:
                 self.session.execute(text("BEGIN IMMEDIATE"))
             self.session.refresh(batch)
 
-    def reprice_all_in(self, batch_id: str, limits: dict, version: int) -> ExecutionBatch:
+    def reprice_all_in(self, batch_id: str, limits: dict | None, version: int) -> ExecutionBatch:
         batch = self.get_batch(batch_id)
         self._lock_all_in_review(batch)
         if not self.is_all_in(batch) or version != batch.confirmation_version:
@@ -801,6 +801,9 @@ class ExecutionBatchService:
         batch.status = "CANCELLED"
         batch.confirmation_hash = None
         batch.confirmation_version += 1
+        policy = json.loads(batch.execution_policy or "{}")
+        policy["review_refresh_pending"] = True
+        batch.execution_policy = _json(policy)
         self._audit("execution_batch_price_change_invalidated", {"batch_id": batch.id,
                     "confirmation_version": batch.confirmation_version, "broker_mutation": 0})
         self.session.commit()
