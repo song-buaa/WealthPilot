@@ -4,7 +4,7 @@
 
 最短调用：MCP → 独立业务 worker → `run_chat_stream_v3` → 原 Planning / Executing / Expressing / Reviewing。通过可选进程内 result callback 取得原 LoadedData、规则、信号、行情、研究和结构化表达；汇总原 SSE 最终文本。没有本机 HTTP 请求，没有复制决策计算，没有再次生成结论。普通 Web 沿用原默认入口和行为。
 
-分析 worker 复用原完整 Web Python 环境和运行配置中白名单分析 Provider/代理项；不继承交易权限。`--analysis-business-python`、`--analysis-env-file` 均为操作者配置，模型不能指定路径/Portfolio ID。所有原服务数据库连接使用 SQLite `mode=ro`、query_only 和 authorizer；同一 worker 到退出始终只读，包括超时后仍在结束的可选 Provider 线程。显式进程环境 `WEALTHPILOT_EPHEMERAL_ANALYSIS=true` 让原图不落 checkpoints、原会话不持久化；只作用于该独立进程。ChatGPT 传入相关历史，不写 Web 会话。原交易意图解析在该分析调用中跳过，避免无关重复模型调用。
+分析 worker 复用原完整 Web Python 环境和运行配置中白名单分析 Provider/代理项；不继承交易权限。`--analysis-business-python`、`--analysis-env-file`、`--analysis-working-directory` 均为操作者配置，模型不能指定路径/Portfolio ID。所有原服务数据库连接使用 SQLite `mode=ro`、query_only 和 authorizer；同一 worker 到退出始终只读，包括超时后仍在结束的可选 Provider 线程。显式进程环境 `WEALTHPILOT_EPHEMERAL_ANALYSIS=true` 让原图不落 checkpoints、原会话不持久化；只作用于该独立进程。ChatGPT 传入相关历史，不写 Web 会话。原交易意图解析在该分析调用中跳过，避免无关重复模型调用。相对知识/纪律文件复用原完整 Web 工作目录；不存在既有知识索引时按原 optional 行为降级，不创建另一份 Chroma 数据库或集合。
 
 结果 `wealthpilot.analysis.v1` 包含 conclusion、原 professional_result.analysis_result、结构化 evidence、scope、data_quality、issues 和 queried_at。查不到组合、模型/路径/执行失败显式返回错误或 unavailable；澄清为 partial，不把缺数据变成零。来源日期使用既有同步成功时间，查询时间不是估值日期；保留同步失败、过期、日期未知、模型降级和审查警告。新建仓直接保留原 Expressing 结构，不使用旧 SSE 兼容摘要中的默认 HOLD 冒充新建仓结论。
 

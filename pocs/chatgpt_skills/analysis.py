@@ -123,6 +123,7 @@ def captured_evidence(result, captured, portfolio_id):
     result.scope = dict(currency='CNY',amount_unit='major',
         analysis_denominator='aggregated stored investment holdings; excludes personal manual wealth and live cash',
         investment_holdings_total_cny=loaded.total_assets,
+        holdings_cost_price_semantics='aggregated total cost value in CNY, not per-share price',
         profile_basis='existing DataLoader default profile, not verified personal risk preferences')
     pattern = result.professional_result.get('pattern_evidence')
     result.professional_result = {
@@ -171,8 +172,12 @@ def captured_evidence(result, captured, portfolio_id):
                 result.issues.append('MARKET_DATA_INCOMPLETE')
             if any(s in str(getattr(part,'source','')).lower() for s in ('seed','demo','mock')):
                 result.issues.append('DEMONSTRATION_MARKET_SOURCE')
+    if not loaded.retrieved_principles:
+        result.issues.append('PRINCIPLES_RETRIEVAL_UNAVAILABLE')
     if loaded.research and not loaded.retrieved_research_views:
         result.issues.append('RESEARCH_PROVENANCE_UNVERIFIED')
+    if loaded.is_new_entry:
+        result.limitations.append('Original new-entry buy_init tag identifies the evaluation path, not an unconditional buy instruction; use the actual conclusion and risks.')
     result.limitations.append('Original research may fall back to examples without verified dates; do not present unverified research as live evidence.')
 
 

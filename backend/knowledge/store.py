@@ -66,6 +66,11 @@ class KnowledgeStore:
 
             index_dir = kb_config.get("index_dir", "knowledge_base/_index")
             chroma_path = Path(index_dir) / "chroma_db"
+            import os
+            ephemeral = os.environ.get("WEALTHPILOT_EPHEMERAL_ANALYSIS") == "true"
+            if ephemeral and not (chroma_path / "chroma.sqlite3").is_file():
+                self._init_error = "existing knowledge index unavailable"
+                return
             chroma_path.mkdir(parents=True, exist_ok=True)
 
             self._client = chromadb.PersistentClient(
@@ -82,10 +87,13 @@ class KnowledgeStore:
 
             self._embedding_fn = self._build_embedding_fn(model_name)
 
-            self._collection = self._client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
+            if ephemeral:
+                self._collection = self._client.get_collection(name=collection_name)
+            else:
+                self._collection = self._client.get_or_create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"},
+                )
 
             self._ready = True
             logger.info(

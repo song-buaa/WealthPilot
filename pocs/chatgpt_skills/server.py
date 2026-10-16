@@ -60,7 +60,8 @@ class BusinessClient:
                 if self.settings.mock_database:
                     command += ["--mock-database", self.settings.mock_database]
                 self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, env=env)
+                    stderr=subprocess.DEVNULL, text=True, env=env,
+                    cwd=getattr(self.settings, "worker_cwd", None))
             try:
                 self.process.stdin.write(json.dumps({"operation": operation, "arguments": arguments})+"\n")
                 self.process.stdin.flush()
@@ -81,6 +82,7 @@ def create_server(settings):
     client = BusinessClient(settings)
     analysis_settings = SimpleNamespace(**vars(settings))
     analysis_settings.business_python = getattr(settings, "analysis_business_python", None) or getattr(settings, "business_python", "")
+    analysis_settings.worker_cwd = getattr(settings, "analysis_working_directory", None)
     analysis_client = BusinessClient(analysis_settings)
     analysis_lock = threading.Lock()
     @asynccontextmanager
@@ -170,6 +172,7 @@ def main():
     parser.add_argument("--business-python", required=True)
     parser.add_argument("--real-config")
     parser.add_argument("--access-evidence")
+    parser.add_argument("--analysis-working-directory", help="Reuse the existing complete Web working directory for relative knowledge/rules assets")
     parser.add_argument("--analysis-business-python", help="Reuse the existing complete Web business Python for PEER dependencies")
     parser.add_argument("--analysis-env-file", help="Existing local runtime JSON; only original analysis provider settings are read")
     parser.add_argument("--mock-database")

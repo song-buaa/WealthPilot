@@ -229,3 +229,12 @@ def test_existing_new_entry_path_preserves_its_original_structured_result(analys
     assert result['evidence']['target_position']['is_virtual'] is True
     assert result['professional_result']['analysis_result']['is_new_entry'] is True
     assert result['conclusion']=='FIXTURE observe new entry'
+
+
+def test_ephemeral_analysis_does_not_create_knowledge_index(tmp_path,monkeypatch):
+    from backend.knowledge import store
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('WEALTHPILOT_EPHEMERAL_ANALYSIS','true')
+    knowledge=store.KnowledgeStore()
+    assert not knowledge.is_ready()
+    assert not (tmp_path/'knowledge_base/_index/chroma_db').exists()
