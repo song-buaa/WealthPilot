@@ -201,6 +201,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._open_order_evidence: dict[int, list[dict]] = {}
         self._submitted_order_ids: set[int] = set()
         self._open_order_sync_lock: asyncio.Lock | None = None
+        self._cash_snapshot_lock: asyncio.Lock | None = None
 
     def _run_on_loop(self, operation, *, timeout: float | None = None):
         """在 adapter 专属 event loop 执行一次 IB 调用并等待普通结果。
@@ -838,26 +839,77 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ensure_connected()
 
         async def cash_on_loop():
-            summary = await self._ib.accountSummaryAsync(self._account_id)
-            values = list(self._ib.accountValues(account=self._account_id))
+            values = await self._fresh_account_values()
+            balances = self._native_cash_balances(values)
+            native = next((item for item in balances if item["currency"] == currency), None)
+            if native is None:
+                raise ConnectionError("IBKR_NATIVE_CASH_UNAVAILABLE:" + currency)
             result = {
                 "currency": currency,
                 "account_masked": f"***{self._account_id[-4:]}",
                 "as_of": datetime.now(timezone.utc).isoformat(),
+                "CashBalance": native["amount"],
+                "cash_source": "IBKR_PER_CURRENCY_LEDGER",
             }
-            for item in [*summary, *values]:
+            for item in values:
                 if item.currency != currency:
                     continue
-                if item.tag in {
-                    "CashBalance", "SettledCash", "TotalCashValue",
-                    "AvailableFunds", "BuyingPower",
-                }:
+                if item.tag in {"AvailableFunds", "BuyingPower", "TotalCashValue"}:
                     value = self._finite_number(item.value)
                     if value is not None:
-                        result[item.tag] = value
+                        # These are account/base-currency aggregates, even when
+                        # their currency label equals USD. Never spend them.
+                        result["account_base_" + item.tag] = value
+                elif item.tag == "$LEDGER-SettledCash":
+                    value = self._finite_number(item.value)
+                    if value is None:
+                        raise ConnectionError("IBKR_NATIVE_SETTLED_CASH_INVALID")
+                    result["SettledCash"] = value
             return result
 
         return self._run_on_loop(cash_on_loop, timeout=self._timeout + 5)
+
+    async def _fresh_account_values(self):
+        # SDK shares the accountValues completion future. Serialize refreshes
+        # and await accountDownloadEnd instead of relabelling an old cache "now".
+        if self._cash_snapshot_lock is None:
+            self._cash_snapshot_lock = asyncio.Lock()
+        async with self._cash_snapshot_lock:
+            try:
+                # Re-subscribing an active legacy account stream does not emit
+                # a new accountDownloadEnd on Gateway. Restart only this client
+                # subscription to obtain a completed fresh account download.
+                self._ib.client.reqAccountUpdates(False, self._account_id)
+                for key in list(self._ib.wrapper.accountValues):
+                    if key[0] == self._account_id:
+                        del self._ib.wrapper.accountValues[key]
+                await asyncio.wait_for(
+                    self._ib.reqAccountUpdatesAsync(self._account_id), self._timeout)
+                return [item for item in self._ib.accountValues(account=self._account_id)
+                        if item.account == self._account_id
+                        and not getattr(item, "modelCode", "")]
+            except BaseException:
+                self._connected = False
+                self._ib.disconnect()  # Isolate incomplete/late account callbacks.
+                raise
+
+    def _native_cash_balances(self, values):
+        balances = {}
+        for item in values:
+            if item.tag not in {"CashBalance", "$LEDGER-CashBalance"}:
+                continue
+            currency = str(item.currency).upper()
+            if not currency or currency == "BASE":
+                continue
+            value = self._finite_number(item.value)
+            if value is None:
+                raise ConnectionError("IBKR_NATIVE_CASH_INVALID:" + currency)
+            if currency in balances and balances[currency] != value:
+                raise ConnectionError("IBKR_NATIVE_CASH_CONFLICT:" + currency)
+            balances[currency] = value
+        if not balances:
+            raise ConnectionError("IBKR_NATIVE_CASH_UNAVAILABLE")
+        return [{"currency": key, "amount": value} for key, value in sorted(balances.items())]
 
     def list_open_order_details(self) -> list[dict]:
         """Fresh account-wide facts, without binding or taking over orders.
@@ -1178,18 +1230,15 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ensure_connected()
         try:
             async def fetch_account_info():
-                summary = await self._ib.accountSummaryAsync(self._account_id)
+                values = await self._fresh_account_values()
                 info = {"broker": "ibkr", "account_id": self._account_id}
-                for item in summary:
+                for item in values:
                     if item.tag in ("TotalCashValue", "NetLiquidation", "BuyingPower"):
                         info[item.tag] = float(item.value)
                 # Dashboard 现金以逐币种 CashBalance 为真值；BASE 是折算汇总，
                 # 与各原币行同时使用会重复计算。
-                info["cash_balances"] = [
-                    {"currency": item.currency, "amount": float(item.value)}
-                    for item in self._ib.accountValues(account=self._account_id)
-                    if item.tag == "CashBalance" and item.currency != "BASE"
-                ]
+                info["cash_balances"] = self._native_cash_balances(values)
+                info["cash_as_of"] = datetime.now(timezone.utc).isoformat()
                 return info
 
             return self._run_on_loop(fetch_account_info)
@@ -1215,6 +1264,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._loop = None
         self._thread = None
         self._open_order_sync_lock = None
+        self._cash_snapshot_lock = None
         logger.info("[IBKR] shutdown 完成")
 
     # ── orderRef 幂等反查（PRD §3.6.1）──────────────────────

@@ -318,3 +318,31 @@ for (const mobile of [false, true]) {
     expect(after.real_order_calls).toBe(0)
   })
 }
+
+
+test('completed IB01 request reload shows its result even after cash spent; no fresh quote or duplicate',async({page,request})=>{
+  await resetIBKR(request)
+  const url=ibkrLink()
+  const requestId=new URLSearchParams(new URL(url).hash.split('?')[1]).get('request_id')!
+  await page.goto(url)
+  await page.getByRole('button',{name:'加入投资行动'}).click()
+  await expect(page.getByTestId('ibkr-quantity')).toHaveText('39')
+  await page.getByRole('button',{name:'核对并进入最终确认'}).click()
+  await expect(page.getByTestId('confirm-order-dialog')).toBeVisible()
+  await request.post(`${base}/__test/complete-ibkr-request`,{data:{request_id:requestId}})
+  await request.post(`${base}/__test/ibkr-state`,{data:{cash:100}})
+  await request.post(`${base}/__test/age-ibkr-reviews`)
+  const before=await(await request.get(`${base}/__test/ibkr-counts`)).json()
+  let quotes=0
+  page.on('request',r=>{if(r.url().endsWith('/trade-link/quote'))quotes++})
+  await page.reload()
+  const final=page.getByTestId('confirm-order-dialog')
+  await expect(final.getByTestId('ibkr-existing-order')).toContainText('COMPLETED / FILLED')
+  await expect(final.getByLabel('IBKR 限价')).toBeDisabled()
+  await expect(final.getByRole('button',{name:'重新计算股数、费用及 WhatIf'})).toBeDisabled()
+  await expect(final.getByTestId('confirm-checkbox')).toBeDisabled()
+  await expect(final.getByTestId('submit-btn')).toBeDisabled()
+  await expect(final).not.toContainText('报价已过期')
+  expect(quotes).toBe(0)
+  expect(await(await request.get(`${base}/__test/ibkr-counts`)).json()).toEqual(before)
+})

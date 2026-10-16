@@ -38,7 +38,9 @@ class SnowballSyncService:
 
     def __init__(self, ibkr_client=None):
         self._source_channel = (
-            "ibkr" if "ibkr" in os.environ.get("BROKER_MODE", "").lower()
+            "ibkr" if (ibkr_client is not None
+                       or "ibkr" in os.environ.get("BROKER_MODE", "").lower()
+                       or (settings.ibkr_account and not settings.snowball_secret_key))
             else "snowball"
         )
         if self._source_channel == "ibkr":
@@ -47,8 +49,8 @@ class SnowballSyncService:
             self.account_id = settings.ibkr_account
             self.adapter = IBKRPortfolioAdapter(account_id=self.account_id)
             if ibkr_client is None:
-                from backend.api.action import _get_adapter
-                ibkr_client = _get_adapter()
+                from backend.api.action import _get_ibkr_adapter
+                ibkr_client = _get_ibkr_adapter()
             self._client = ibkr_client
             if self._client.broker_name != "ibkr":
                 raise RuntimeError("BROKER_MODE=ibkr 但未取得 IBKRBrokerAdapter")
@@ -84,8 +86,10 @@ class SnowballSyncService:
         """拉取持仓 → 转换为统一 Position 列表。"""
         snapshot_time = datetime.now(timezone.utc)
         if self._source_channel == "ibkr":
-            raw_positions = self._client.get_positions()
             account_info = self._client.get_account_info()
+            if account_info.get("account_id") != self.account_id:
+                raise RuntimeError("IBKR_SYNC_ACCOUNT_MISMATCH")
+            raw_positions = self._client.get_positions()
             return self.adapter.to_positions(
                 raw_positions,
                 account_info.get("cash_balances", []),

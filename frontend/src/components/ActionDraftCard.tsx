@@ -539,11 +539,12 @@ const expandBtn: React.CSSProperties = {
 
 
 /** Shared fields inside the two existing P2 dialogs; no separate trading page. */
-export function IBKRReviewFields({ batch, preview, limit, onLimitChange }: {
+export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnly = false }: {
   batch: ExecutionBatchResponse | null
   preview?: IBKRLinkPreview
   limit: string
   onLimitChange: (value: string) => void
+  readOnly?: boolean
 }) {
   const leg = batch?.legs[0]
   const instrument = leg ?? preview?.instrument
@@ -558,7 +559,7 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange }: {
     <div><b>报价 Ask：</b>{amount(leg?.quote_ask)} · {leg?.quote_quality ?? '待获取'}</div>
     <div><b>报价时间：</b>{leg?.quote_as_of ?? '未知，不可提交'}</div>
     <div><b>建议限价：</b>{amount(leg?.suggested_limit)}</div>
-    <label style={{display: 'block', margin: '8px 0'}}>限价（USD） <input aria-label="IBKR 限价" inputMode="decimal" value={limit}
+    <label style={{display: 'block', margin: '8px 0'}}>限价（USD） <input aria-label="IBKR 限价" disabled={readOnly} inputMode="decimal" value={limit}
       onChange={event => onLimitChange(event.target.value)} style={{padding: 8, border: '1px solid #CBD5E1', borderRadius: 6, maxWidth: '100%'}} /></label>
     <div><b>整数股数：</b><span data-testid="ibkr-quantity">{leg?.final_quantity ?? '待计算'}</span></div>
     <div><b>订单名义金额：</b>{amount(batch?.estimated_total)}</div>

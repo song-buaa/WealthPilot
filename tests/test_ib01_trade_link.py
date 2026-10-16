@@ -514,3 +514,17 @@ def test_concurrent_fresh_link_retries_share_one_active_review(api, monkeypatch)
         assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
         assert s.query(OrderRecord).count()==0
     assert not adapter.place_calls
+
+
+def test_all_in_budget_uses_native_usd_not_base_cash_or_margin(api):
+    from backend.services.action.tests.test_ibkr_native_cash import adapter as cash_adapter, row
+    client, engine, broker = api
+    native = cash_adapter([row('$LEDGER-CashBalance',120),row('$LEDGER-CashBalance',50000,'CNH'),
+                           row('TotalCashValue',8000),row('AvailableFunds',20000),row('BuyingPower',80000)])
+    broker.get_cash_snapshot = native.get_cash_snapshot
+    response = client.post('/api/execution-batches/trade-link/quote',json=budget(request_id=str(uuid4())))
+    assert response.status_code == 422
+    assert 'INSUFFICIENT_USD_CASH_FOR_ALL_IN_BUDGET' in response.text
+    assert broker.place_calls == []
+    with Session(engine) as session:
+        assert session.query(OrderRecord).count() == session.query(ExecutionBatch).count() == 0

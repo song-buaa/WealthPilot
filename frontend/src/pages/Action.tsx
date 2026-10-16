@@ -121,7 +121,13 @@ export default function Action() {
       }
       if (params.get('trade') === 'ibkr') {
         const preview = await executionBatchApi.previewTradeLink(values)
-        if (active) { setIbkrLink(preview); setIbkrOrder(preview.order) }
+        const existing = (await executionBatchApi.list(preview.request_id)).items.find(batch =>
+          batch.source_conversation_id === preview.request_id &&
+          (batch.status === 'COMPLETED' || batch.legs.some(leg => Boolean(leg.linked_order_id))))
+        if (active) {
+          setIbkrLink(preview); setIbkrOrder(preview.order)
+          if (existing) setIbkrBatch(existing)
+        }
         return
       }
       if (values.quantity !== undefined) values.quantity = Number(values.quantity)

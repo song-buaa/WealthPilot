@@ -829,7 +829,8 @@ export const executionBatchApi = {
       method: 'POST',
       body: JSON.stringify({ conversation_id: conversationId, message_id: messageId }),
     }),
-  list: () => request<{ items: ExecutionBatchResponse[] }>('/execution-batches'),
+  list: (requestId?: string) => request<{ items: ExecutionBatchResponse[] }>(
+    '/execution-batches' + (requestId ? `?request_id=${encodeURIComponent(requestId)}` : '')),
   get: (batchId: string) => request<ExecutionBatchResponse>(`/execution-batches/${batchId}`),
   refresh: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/refresh`, { method: 'POST' },

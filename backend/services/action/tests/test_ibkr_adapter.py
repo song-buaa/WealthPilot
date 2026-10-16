@@ -84,6 +84,7 @@ def _make_adapter(**kwargs):
     adapter._client_id = 1
     adapter._account_id = kwargs.get("account_id", "DU1234567")
     adapter._timeout = 5.0
+    adapter._cash_snapshot_lock = None
     adapter._connected = True
     adapter._account_verified = True
     adapter._loop = MagicMock()
@@ -691,7 +692,10 @@ class TestDedicatedLoopReadPath:
         adapter._ib.openTrades.return_value = []
         adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[])
         adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
-        account_value = MagicMock(tag="NetLiquidation", value="1")
+        account_value = MagicMock(tag="NetLiquidation", value="1", account="DU1234567", currency="USD", modelCode="")
+        cash = MagicMock(tag="$LEDGER-CashBalance", value="1", account="DU1234567", currency="USD", modelCode="")
+        adapter._ib.reqAccountUpdatesAsync = AsyncMock()
+        adapter._ib.accountValues.return_value = [account_value, cash]
         adapter._ib.accountSummaryAsync = AsyncMock(return_value=[account_value])
         runner = MagicMock(side_effect=adapter._run_on_loop)
         adapter._run_on_loop = runner

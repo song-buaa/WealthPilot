@@ -46,6 +46,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
   const [safety, setSafety] = useState<{ibkr_read_only_mode: boolean; live_trading_enabled: boolean} | null>(null)
   const batch = ibkr?.batch
   const leg = batch?.legs[0]
+  const executed = Boolean(batch && (batch.status === 'COMPLETED' || batch.legs.some(item => item.linked_order_id)))
   const fresh = Boolean(leg?.quote_as_of && now - Date.parse(leg.quote_as_of) <= Number(batch?.execution_policy.quote_max_age_seconds ?? 30) * 1000)
   useEffect(() => {
     if (!ibkr) return
@@ -101,7 +102,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
   const needsConfirmation = riskResult?.requires_confirmation ?? false
   const textMatch = confirmText === CONFIRMATION_TEXT
 
-  const canSubmit = ibkr ? Boolean(checkboxChecked && !submitting && !dirty && fresh && batch?.status === 'CONFIRMED'
+  const canSubmit = ibkr ? Boolean(!executed && checkboxChecked && !submitting && !dirty && fresh && batch?.status === 'CONFIRMED'
     && safety?.live_trading_enabled && !safety.ibkr_read_only_mode) :
     checkboxChecked &&
     !submitting &&
@@ -199,17 +200,18 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
             fontSize: 16, fontWeight: 700, color: '#1B2A4A',
           }}>
             <span style={{ marginRight: 8 }}>&#9888;&#65039;</span>
-            最终确认下单
+            {executed ? '交易结果' : '最终确认下单'}
           </div>
 
           <div style={{ padding: '16px 20px', overflowY: 'auto', minHeight: 0 }}>
             <div role="status" style={{ marginBottom: 12 }}>交易环境：{ibkr ? 'IBKR · LSEETF / USD / SMART' : executionLabel}</div>
             {ibkr && <>
               <p>当前请求：{ibkr.requestId}</p>
-              <IBKRReviewFields batch={ibkr.batch} limit={limit} onLimitChange={value => {setLimit(value); setDirty(true); setCheckboxChecked(false)}} />
-              <button disabled={submitting || Boolean(leg?.linked_order_id)} onClick={recalculateIBKR}>重新计算股数、费用及 WhatIf</button>
+              {executed && <p role="status" data-testid="ibkr-existing-order">此请求已关联订单：{batch?.status} / {leg?.status}。不会重复准备或提交买单。</p>}
+              <IBKRReviewFields batch={ibkr.batch} readOnly={executed} limit={limit} onLimitChange={value => {setLimit(value); setDirty(true); setCheckboxChecked(false)}} />
+              <button disabled={submitting || executed} onClick={recalculateIBKR}>重新计算股数、费用及 WhatIf</button>
               {dirty && <p role="status">限价已修改或重新计算失败，旧确认不可提交。</p>}
-              {!fresh && <p role="status">报价已过期，请重新计算并重新确认。</p>}
+              {!executed && !fresh && <p role="status">报价已过期，请重新计算并重新确认。</p>}
               {(!safety?.live_trading_enabled || safety.ibkr_read_only_mode) && <p role="status">IBKR 当前保留只读保护，尚不可提交真实订单。</p>}
             </>}
             {!ibkr && <>
@@ -332,6 +334,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
             }}>
               <input
                 data-testid="confirm-checkbox"
+                disabled={executed}
                 type="checkbox"
                 checked={checkboxChecked}
                 onChange={e => setCheckboxChecked(e.target.checked)}

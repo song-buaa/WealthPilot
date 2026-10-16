@@ -187,8 +187,11 @@ def test_ibkr_cash_uses_currency_cash_balance_only():
 def test_ibkr_account_read_exposes_cash_balance_not_valuation_fields():
     adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
     adapter._account_id = "U-TEST"
-    adapter._ensure_connected = MagicMock()
+    adapter._cash_snapshot_lock = None
+    adapter._timeout = 5
     adapter._ib = MagicMock()
+    adapter._ib.reqAccountUpdatesAsync = AsyncMock()
+    adapter._ensure_connected = MagicMock()
     adapter._ib.accountSummaryAsync = AsyncMock(return_value=[
         MagicMock(tag="TotalCashValue", value="300", currency="USD"),
         MagicMock(tag="NetLiquidation", value="900", currency="USD"),
@@ -196,9 +199,15 @@ def test_ibkr_account_read_exposes_cash_balance_not_valuation_fields():
     ])
     adapter._ib.accountValues.return_value = [
         MagicMock(tag="CashBalance", value="300", currency="BASE"),
+        MagicMock(tag="TotalCashValue", value="300", currency="USD"),
+        MagicMock(tag="BuyingPower", value="1200", currency="USD"),
         MagicMock(tag="CashBalance", value="200", currency="USD"),
         MagicMock(tag="AvailableFunds", value="700", currency="USD"),
     ]
+
+    for item in adapter._ib.accountValues.return_value:
+        item.account = "U-TEST"
+        item.modelCode = ""
 
     def run_immediately(operation, **_kwargs):
         result = operation()

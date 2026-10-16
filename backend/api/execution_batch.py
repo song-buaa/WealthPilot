@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from typing import Literal
@@ -232,10 +233,11 @@ def create_batch(body: dict):
 
 
 @router.get("")
-def list_batches():
+def list_batches(request_id: UUID | None = None):
     session = get_session()
     try:
-        return {"items": [_serialize_batch(item) for item in _service(session).list_batches()]}
+        return {"items": [_serialize_batch(item) for item in _service(session).list_batches()
+                          if request_id is None or item.source_conversation_id == str(request_id)]}
     finally:
         session.close()
 

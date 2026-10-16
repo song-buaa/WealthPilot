@@ -82,6 +82,18 @@ def age_ibkr_reviews():
         s.commit()
     return {'isolated_synthetic_fixture': True}
 
+@app.post('/__test/complete-ibkr-request')
+def complete_ibkr_request(body: dict):
+    # Disposable synthetic fixture: no SDK or real order submission.
+    from backend.services.action.models import ExecutionBatch
+    with get_session() as s:
+        batch=s.query(ExecutionBatch).filter_by(source_conversation_id=body['request_id']).one()
+        batch.status='COMPLETED'
+        for leg in batch.legs:
+            leg.status='FILLED'
+        s.commit()
+    return {'isolated_synthetic_fixture':True,'real_order_submitted':False}
+
 @app.get('/api/demo/status')
 def demo(): return {'public_demo_mode': False}
 @app.get('/api/{path:path}')
