@@ -1,5 +1,11 @@
 # Changelog
 
+## main — P3/P4/P5 投资分析 MCP
+
+- 增加单标决策、组合/配置评估及当前持仓收益三个只读工具，直接适配原 PEER 结果、业务事实与数据质量。
+- 分析 worker 不持久化图/会话、不启用交易；原 Web/P1/P2 行为保留。设备验收独立记录。
+
+
 All notable changes to the WealthPilot project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 

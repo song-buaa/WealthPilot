@@ -98,6 +98,9 @@ async def run_chat_stream_v3(
     conversation_id: str,
     portfolio_id: int = 1,
     conversation_history: Optional[list[dict]] = None,
+    *,
+    result_callback=None,
+    analysis_only: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     v3.0 决策流：4 Agent 协作。
@@ -163,17 +166,19 @@ async def run_chat_stream_v3(
         yield _sse("stage", {"stage": "intent", "label": "意图识别中..."})
 
         planning = get_planning_agent()
+        async def analysis_trade_intent():
+            # Analysis does not need a second, parallel trade-parameter LLM call.
+            if analysis_only:
+                return None
+            return await asyncio.to_thread(parse_trade_intent, trade_intent_input, conversation_history)
+
         plan_out, trade_intent = await asyncio.gather(
             asyncio.to_thread(
                 planning.run,
                 user_input, conversation_id, portfolio_id, conversation_history,
                 all_positions,
             ),
-            asyncio.to_thread(
-                parse_trade_intent,
-                trade_intent_input,
-                conversation_history,
-            ),
+            analysis_trade_intent(),
         )
 
         if plan_out.status == AgentTaskStatus.FAILED:
@@ -375,6 +380,10 @@ async def run_chat_stream_v3(
                 "message": f"输出质量待优化（评分 {review_out.score:.2f}）",
                 "failed_rules": review_out.failed_rules,
             })
+
+        # Optional in-process result adapter; Web SSE behavior stays unchanged.
+        if result_callback is not None:
+            result_callback(plan_out, exec_out, expr_out, review_out)
 
         # ── Stage 5: 写入 store + 保存对话历史 + done 事件 ──
         assistant_message_id = await _write_stores_v3(

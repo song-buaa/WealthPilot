@@ -232,7 +232,9 @@ def test_confirmation_replay_after_holdings_change_never_resubmits(workflow):
         assert session.query(OrderRecord).count() == 1
 
 
-def test_partial_fill_status_uses_original_manager(workflow):
+def test_partial_fill_status_uses_original_manager(workflow, monkeypatch):
+    # Freeze the existing Mock final-fill choice; cancellation is covered separately.
+    monkeypatch.setattr("backend.services.action.brokers.mock.random.random", lambda: .5)
     workflow.adapter.partial_fill_probability = 1
     p = create(workflow, quantity=10)
     workflow.confirm(p['draft_id'], p['preview_hash'], True, CONFIRMATION_TEXT)
@@ -245,7 +247,7 @@ def test_partial_fill_status_uses_original_manager(workflow):
 def test_restart_lost_mock_broker_state_is_explicit_not_replayed(workflow):
     p = create(workflow)
     placed = workflow.confirm(p['draft_id'], p['preview_hash'], True, CONFIRMATION_TEXT)
-    restarted = TradeWorkflow(workflow.path, 7, MockBrokerAdapter(), synthetic=True,
+    restarted = TradeWorkflow(workflow.path, 7, MockBrokerAdapter(network_failure_probability=0), synthetic=True,
                               discipline_provider=lambda *a: {'violation':False})
     try:
         with pytest.raises(TradeError, match='BROKER_ORDER_STATE_UNAVAILABLE'):

@@ -10,6 +10,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.append(str(Path(__file__).resolve().parents[2] / "backend"))
 MOCK_APPLICATION_ID = 0x57504D4B
 SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DRAFT_NOT_FOUND",
                "REQUEST_ID_CONFLICT", "EXPLICIT_CONFIRMATION_REQUIRED", "PREVIEW_CHANGED_REVIEW_REQUIRED",
@@ -54,6 +55,7 @@ def main():
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--real-config")
+    parser.add_argument("--analysis-env-file")
     args = parser.parse_args()
     os.umask(0o077)
     logging.getLogger().handlers = [logging.NullHandler()]
@@ -83,7 +85,19 @@ def main():
                 request = json.loads(line)
                 operation, a = request["operation"], request["arguments"]
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    if operation == "get_wealth_overview" and workflow:
+                    if operation in ("analyze_position", "review_portfolio", "analyze_performance"):
+                        import asyncio
+                        from pocs.chatgpt_skills.analysis import analyze
+                        if args.analysis_env_file:
+                            values = json.loads(Path(args.analysis_env_file).read_text())
+                            allowed = {"WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2", "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
+                            os.environ.update({k:v for k,v in values.items() if k in allowed and isinstance(v,str)})
+                        if config:
+                            os.environ["WEALTHPILOT_DB_PATH"] = config["database_path"]
+                        result = asyncio.run(analyze(config["database_path"] if config else path,
+                            config["portfolio_id"] if config else args.portfolio_id, operation, a,
+                            contract=config.get("database_contract_path") if config else None, synthetic=config is None, worker_process=True))
+                    elif operation == "get_wealth_overview" and workflow:
                         from pocs.poc02_wealth_mcp.reader import read_overview
                         result = read_overview(path, args.portfolio_id)
                         result["synthetic"] = True

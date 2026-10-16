@@ -1,9 +1,11 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-15
+> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-16
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
+
+P3/P4/P5 通过原 PEER 服务和只读 worker 开放单标决策、组合评估与当前持仓盈亏分析；不新建分析/收益引擎。代码与设备实际验收分开记录，见 [分析工具说明](docs/WealthPilot_4x_P345_Analysis_Skills.md)。
 
 ## Codex 新任务入口
 
@@ -25,7 +27,7 @@ Web & Data Sync Batch 1 仅在 Dev 实现显式共享 WAL 契约，默认固定�
 
 Batch 2 已增加 `backend/restricted_web.py`、共用手动同步 dispatch，以及独立 Web 环境/构建/launchd 工具；默认只监听 loopback，broker列表为空，不创建scheduler。只注册 method/path 白名单，不运行完整后端/订单/PEER。Dev测试不等于设备或真实券商PASS；首次共享切换、Web安装及回滚必须按 [Batch 2 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。MCP/Tunnel与Web独立版本/label，发布不自动改生产。
 
-P1 已有三项生产读取及 ChatGPT Web/iOS 实测。P2 采用个人 Pro → 只读生成预填链接 → 原 Web 最终确认，不在 MCP 创建真实草稿或提交订单；复用原券商/风控规则，不新建 Mock App/Tunnel，不触及 P3/P4/P5。细节见 [P2 说明](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。
+P1 已有三项生产读取及 ChatGPT Web/iOS 实测。P2 采用个人 Pro → 只读生成预填链接 → 原 Web 最终确认，不在 MCP 创建真实草稿或提交订单；复用原券商/风控规则，不新建 Mock App/Tunnel；P3/P4/P5 后续独立接入。细节见 [P2 说明](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。
 
 原 ChatGPT Skills 迭代 1 使用独立 `pocs/chatgpt_skills` 入口和临时 Mock 数据库；P1 复用只读服务，P2 仅验证原 OrderManager 的模拟链路，不启用真实券商。工具参数 `confirmed=true` 不证明人类确认，Business Web/iOS 必须独立验收。不得自动替换现役 MCP/Tunnel/Web 或借此启用订单轮询。见 [迭代说明](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。
 

@@ -408,6 +408,10 @@ def build_decision_graph():
     import sqlite3
     from langgraph.checkpoint.sqlite import SqliteSaver
 
+    # MCP analysis supplies its history; keep the same graph without disk checkpoints.
+    if os.environ.get("WEALTHPILOT_EPHEMERAL_ANALYSIS") == "true":
+        return graph.compile()
+
     _ckpt_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "data", "checkpoints.db",

@@ -4,6 +4,8 @@
 
 **开发基线：main；4.0 迁移验证中，尚未生产上线。** 最后一个 SemVer 稳定 Tag 为 `v3.15.1`（历史发布），不能代表当前 main。当前 Commit 和 CI 以 GitHub 实际记录为准；前端 package 的 `0.0.0` 和 FastAPI 的 `1.0.0` 也不是产品发布版本。
 
+P3/P4/P5 通过原 PEER 服务和只读 worker 开放单标决策、组合评估与当前持仓盈亏分析；不新建分析/收益引擎。代码与设备实际验收分开记录，见 [分析工具说明](docs/WealthPilot_4x_P345_Analysis_Skills.md)。
+
 ## 当前状态与部署路线
 
 3.x 业务系统继续采用 React/Vite + FastAPI + SQLite、PEER 四 Agent 和 13 个内部 Skills。main 已在 v3.15.1 后增加财富总览、消费账单分析及技术形态证据等能力，未改为由 ChatGPT 承担全部决策。

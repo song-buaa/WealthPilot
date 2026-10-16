@@ -8,6 +8,7 @@ import select
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -20,6 +21,7 @@ from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult
 from pocs.chatgpt_skills.trade_link import LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS
+from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
 from pocs.poc02_wealth_mcp import server as overview
 
 
@@ -51,6 +53,8 @@ class BusinessClient:
                            FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
                 command = [self.settings.business_python, str(Path(__file__).with_name("worker.py")),
                            "--portfolio-id", str(self.settings.portfolio_id)]
+                if getattr(self.settings, "analysis_env_file", None):
+                    command += ["--analysis-env-file", self.settings.analysis_env_file]
                 if self.settings.real_config:
                     command += ["--real-config", self.settings.real_config]
                 if self.settings.mock_database:
@@ -60,7 +64,7 @@ class BusinessClient:
             try:
                 self.process.stdin.write(json.dumps({"operation": operation, "arguments": arguments})+"\n")
                 self.process.stdin.flush()
-                if not select.select([self.process.stdout], [], [], 45)[0]:
+                if not select.select([self.process.stdout], [], [], 270 if operation in ("analyze_position", "review_portfolio", "analyze_performance") else 45)[0]:
                     raise TimeoutError()
                 response = json.loads(self.process.stdout.readline())
             except (OSError, ValueError, KeyError, TimeoutError):
@@ -75,14 +79,19 @@ class BusinessClient:
 
 def create_server(settings):
     client = BusinessClient(settings)
+    analysis_settings = SimpleNamespace(**vars(settings))
+    analysis_settings.business_python = getattr(settings, "analysis_business_python", None) or getattr(settings, "business_python", "")
+    analysis_client = BusinessClient(analysis_settings)
+    analysis_lock = threading.Lock()
     @asynccontextmanager
     async def lifespan(server):
         try:
             yield {}
         finally:
             client.close()
+            analysis_client.close()
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
-        instructions=("For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
+        instructions=("For professional analysis use analyze_position/review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
                       "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. "))
     overview.settings = settings
@@ -113,7 +122,26 @@ def create_server(settings):
         except ValueError as error:
             raise ToolError(str(error)) from None
 
-    # A real endpoint advertises only the three P1 reads plus this pure URL tool.
+    def analysis_call(operation, request):
+        with analysis_lock:
+            try:
+                return AnalysisResult.model_validate(analysis_client.call(operation, request.model_dump(mode="json")))
+            finally:
+                analysis_client.close()
+
+    @server.tool(meta=security_meta, annotations=read, description="Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
+    def analyze_position(request: AnalysisRequest) -> AnalysisResult:
+        return analysis_call("analyze_position", request)
+
+    @server.tool(meta=security_meta, annotations=read, description="Review investment portfolio/allocation via original PortfolioReview/AssetAllocation PEER and AllocationService snapshot/default targets/deviation. Weights refer to investment holdings, NOT full personal wealth. No sector inference without evidence. Preserve partial/failed sources. No trades.")
+    def review_portfolio(request: AnalysisRequest) -> AnalysisResult:
+        return analysis_call("review_portfolio", request)
+
+    @server.tool(meta=security_meta, annotations=read, description="Analyze CURRENT holdings P&L and profit/loss contributors via original PerformanceAnalysis PEER and existing performance calculation. NOT period returns, TWR/MWR, realized P&L or historical trade attribution. Explicit source dates/quality/scope; never fabricate returns. No trades.")
+    def analyze_performance(request: AnalysisRequest) -> AnalysisResult:
+        return analysis_call("analyze_performance", request)
+
+    # Real production: P1 + pure P2 URL + three analysis reads.
     # The original Mock workflow stays available to isolated automated tests.
     if settings.real_config:
         return server
@@ -142,6 +170,8 @@ def main():
     parser.add_argument("--business-python", required=True)
     parser.add_argument("--real-config")
     parser.add_argument("--access-evidence")
+    parser.add_argument("--analysis-business-python", help="Reuse the existing complete Web business Python for PEER dependencies")
+    parser.add_argument("--analysis-env-file", help="Existing local runtime JSON; only original analysis provider settings are read")
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))

@@ -246,10 +246,13 @@ def save_conversation_turn(
     asset: str | None = None,
     *,
     assistant_metadata: dict | None = None,
-) -> int:
+) -> int | None:
     """写入本轮的 user 消息和 assistant 消息，共两条记录。
     同时确保 conversations 主表有对应记录（首条消息自动创建）。
     """
+    import os
+    if os.environ.get("WEALTHPILOT_EPHEMERAL_ANALYSIS") == "true":
+        return None
     from app.database import get_session as get_db_session
     from app.models import Conversation, ConversationMessage
 
