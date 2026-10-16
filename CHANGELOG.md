@@ -1,5 +1,11 @@
 # Changelog
 
+## IBKR 只读挂单同步修复（2026-10-16）
+
+- ExecutionBatch 的资金占用检查改用不绑定订单的 reqAllOpenOrders 完整快照，按账户过滤并覆盖其他 API 客户端；不以缓存或查询失败冒充空挂单。
+- 串行处理 SDK 共用 openOrders future 的查询；不完整同步关闭本适配器连接以隔离迟到回调，后续重新连接。原 OrderPoller 保持本客户端语义。
+- WhatIf 的匹配请求收到 321 校验拒绝时立即失败，避免 SDK warning 留下等待超时；不变更 Gateway 只读权限、费用门槛或实盘开关，不修改 P2 UI。
+
 ## P2 行动清单入口纠偏（2026-10-16）
 
 - IB01 预填第一屏恢复简洁的原 ActionDraftCard 参数编辑与“加入投资行动”，保留含费用预算和 DAY；不自动取报价或写业务表。

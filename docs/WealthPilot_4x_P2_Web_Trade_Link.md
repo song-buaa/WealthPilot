@@ -103,3 +103,25 @@ Gateway Read-Only 阻止 WhatIf 时如实显示阻断，不调整开关。
 
 新 IBKR 链接固定 DAY，与原 IBKR `_build_live_limit_order` / WhatIf 的实际有效期一致；
 上一版误标的 GTC 链接需重新生成。普通美股/港股单标路径继续原 GTC 契约，不修改适配器。
+
+### Gateway 只读同步与独立能力验收
+
+`reqOpenOrders` 在设备只读 Gateway 上可被 321 校验拒绝；ib_async 2.1 将该码作为 warning，
+不结束未编号的 openOrders future，表现为等待超时。增加超时或将失败返回空数组不能修复它。
+资金占用检查改用不绑定订单的 `reqAllOpenOrdersAsync`，等待 `openOrderEnd` 对应的完整返回，
+覆盖 API 可见的其他客户端挂单、按已核实账户过滤；不使用 `openTrades()` 缓存替代查询。
+两类查询共用 SDK 的 openOrders future，须在专属 loop 上串行；不完整同步断开本适配器的
+API socket 隔离迟到回调，后续正常重连。原 OrderPoller 仍只处理本客户端订单。
+
+挂单查询是原预算资金占用门槛，不能跳过；它失败不证明合约和行情本身不可用，应分别诊断。
+WhatIf 仍通过原构造器发送 `whatIf=true / transmit=true / DAY` 的非执行预估请求，未调用真实
+OrderManager 下单。当匹配该请求的 321 拒绝到达时明确结束其 future，不误伤其他请求或
+真实订单状态。Gateway 的只读权限仍可能拒绝 WhatIf；此时费用未知、预算整股只是候选值，
+不得将零费用、总资金占用或最终确认标为通过，仍保持 DRAFT。
+
+IB01 的 MCP 链接、编辑表单、WhatIf 与原真实提交构造器均为 DAY；普通 Tiger 美股/港股仍为
+原 GTC。检查真实提交构造器只构造内存对象，不调用提交接口。
+
+参考：[IBKR 订单绑定语义](https://www.interactivebrokers.com/docs/tws-api/doc/orders/modifying-orders)、
+[IBKR WhatIf 非执行预估](https://www.interactivebrokers.com/docs/tws-api/doc/orders/test-order-impact-what-if)。
+生产证据仅保存脱敏状态于仓库外；本修复不授权关闭只读保护或提交真实交易。

@@ -33,6 +33,8 @@ ChatGPT 负责自然语言交互、相关上下文、工具选择及最终回答
 
 IB01 预算链接先打开 ActionDraftCard 简洁编辑表单，不自动取报价或落库；明确点击“加入投资行动”后才核对报价/费用，核对通过后由用户主动进入 ConfirmOrderDialog。预算包含费用及原资金安全垫；底层复用原可信 LSEETF/USD/SMART 合约登记和 IBKR Typed Intent / ExecutionBatch / Web 最终授权；不把 USD 推断为 US，也不在 MCP 下单。测试用 Mock 写工具仍只供隔离自动化，不是生产工具集。
 
+IBKR 资金占用检查使用不绑定订单的 reqAllOpenOrders 新鲜账户快照，查询失败不可视为无挂单。Gateway 只读权限可独立阻止 WhatIf；321 校验拒绝应明确失败，不表示合约/行情连接全部不可用，也不得自动解除只读或跳过费用确认。
+
 ## Dev / Prod 与后续任务
 
 MacBook 为 Dev，Mac Mini 为 Prod，运行完整 Web、完整后端、MCP/Tunnel、共享 WAL 生产数据库及原有业务服务。流程：最新 main → 短期分支 → PR / 四项 CI → 经授权合入 main → Mini 安装确认的完整 SHA → 独立预检 / 切换 / 验收。生产各组件可独立固定版本，main、全局 current、SDK 环境和组件部署 SHA 不可互相推断；版本观察表见治理文档。`v3.15.1` 是历史 SemVer Tag，尚无 `v4.0.0` Tag；frontend/FastAPI 包版本不是产品版本。

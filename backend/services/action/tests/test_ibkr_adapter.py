@@ -690,6 +690,7 @@ class TestDedicatedLoopReadPath:
         adapter._ib.positions.return_value = []
         adapter._ib.openTrades.return_value = []
         adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[])
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
         account_value = MagicMock(tag="NetLiquidation", value="1")
         adapter._ib.accountSummaryAsync = AsyncMock(return_value=[account_value])
         runner = MagicMock(side_effect=adapter._run_on_loop)
@@ -715,6 +716,7 @@ class TestDedicatedLoopReadPath:
         adapter = _make_adapter()
         adapter._ensure_connected = MagicMock()
         adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[])
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
         adapter._ib.openTrades.return_value = []
         assert adapter.list_open_orders() == []
 
@@ -729,6 +731,137 @@ class TestDedicatedLoopReadPath:
         assert adapter._ib is None
         assert adapter._loop is None
         assert adapter._thread is None
+
+
+class TestReadOnlyOrderSnapshots:
+    def test_cash_authority_reads_fresh_all_client_snapshot_not_cache(self):
+        adapter = _make_adapter()
+        own = _make_mock_trade(order_id=1)
+        other_client = _make_mock_trade(order_id=2)
+        other_client.order.clientId = 9
+        other_client.orderStatus.remaining = 3
+        other_account = _make_mock_trade(order_id=3)
+        other_account.order.account = "DU7654321"
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[own, other_client, other_account])
+        adapter._ib.openTrades.return_value = [_make_mock_trade(order_id=99)]
+        rows = adapter.list_open_order_details()
+        assert [row["order_id"] for row in rows] == [1, 2]
+        assert rows[1]["remaining_quantity"] == 3
+        adapter._ib.reqOpenOrdersAsync.assert_not_called()
+        adapter._ib.openTrades.assert_not_called()
+        adapter._ib.reqAutoOpenOrders.assert_not_called()
+        adapter._ib.placeOrder.assert_not_called()
+
+    def test_readonly_legacy_poller_keeps_own_client_semantics(self, monkeypatch):
+        monkeypatch.setattr("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", True)
+        adapter = _make_adapter()
+        own = _make_mock_trade(order_id=1)
+        other = _make_mock_trade(order_id=2)
+        other.order.clientId = 9
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[own, other])
+        assert len(adapter.list_open_orders()) == 1
+        adapter._ib.reqOpenOrdersAsync.assert_not_called()
+
+    def test_writable_legacy_poller_retains_original_request(self, monkeypatch):
+        monkeypatch.setattr("backend.services.action.brokers.ibkr.IBKR_READ_ONLY_MODE", False)
+        adapter = _make_adapter()
+        own = _make_mock_trade()
+        own.order.account = ""  # Existing own-client snapshots may omit this.
+        adapter._ib.reqOpenOrdersAsync = AsyncMock(return_value=[own])
+        assert len(adapter.list_open_orders()) == 1
+        adapter._ib.reqOpenOrdersAsync.assert_awaited_once()
+        adapter._ib.reqAllOpenOrdersAsync.assert_not_called()
+
+    def test_snapshot_failure_is_not_empty_and_requires_clean_session(self):
+        adapter = _make_adapter()
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(side_effect=TimeoutError("fixture timeout"))
+        with pytest.raises(TimeoutError):
+            adapter.list_open_order_details()
+        assert adapter._connected is False
+        adapter._ib.disconnect.assert_called_once()
+
+    def test_cancelled_snapshot_cannot_leave_a_late_callback_session_reusable(self):
+        adapter = _make_adapter()
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(side_effect=lambda: None)
+        async def stalled():
+            await asyncio.sleep(1)
+            return []
+        adapter._ib.reqAllOpenOrdersAsync.side_effect = stalled
+        async def timed_read():
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(adapter._read_open_trades(all_clients=True), timeout=0.005)
+            with pytest.raises(ConnectionError, match="reconnect required"):
+                await adapter._read_open_trades(all_clients=True)
+        asyncio.run(timed_read())
+        adapter._ib.disconnect.assert_called_once()
+        assert adapter._connected is False
+        assert adapter._ib.reqAllOpenOrdersAsync.await_count == 1
+
+    def test_unknown_account_cannot_prove_no_competing_orders(self):
+        adapter = _make_adapter()
+        unknown = _make_mock_trade()
+        unknown.order.account = ""
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[unknown])
+        with pytest.raises(ConnectionError, match="account missing"):
+            adapter.list_open_order_details()
+
+    def test_shared_unnumbered_snapshot_requests_are_serialized(self):
+        adapter = _make_adapter()
+        active = peak = 0
+        async def snapshot():
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.005)
+            active -= 1
+            return []
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(side_effect=snapshot)
+        async def concurrent_reads():
+            return await asyncio.gather(adapter._read_open_trades(all_clients=True),
+                                        adapter._read_open_trades(all_clients=False))
+        assert asyncio.run(concurrent_reads()) == [[], []]
+        assert peak == 1
+
+
+class TestWhatIfValidationRejection:
+    @staticmethod
+    def setup_preview(adapter, *, matching_error):
+        from eventkit import Event
+        adapter._ib.errorEvent = Event("error")
+        adapter._ib.wrapper._futures = {}
+        def end_request(req_id, error, *, success):
+            assert not success
+            adapter._ib.wrapper._futures.pop(req_id).set_exception(error)
+        adapter._ib.wrapper._endReq = MagicMock(side_effect=end_request)
+        def request(_contract, order):
+            assert order.whatIf is True and order.tif == "DAY"
+            loop = asyncio.get_running_loop()
+            pending = loop.create_future()
+            adapter._ib.wrapper._futures[73] = pending
+            loop.call_soon(adapter._ib.errorEvent.emit, 73 if matching_error else 74, 321, "Read-Only API", _contract)
+            if not matching_error:
+                state = MagicMock(commission=1.2, commissionCurrency="USD", warningText="")
+                loop.call_soon(pending.set_result, state)
+            return pending
+        adapter._ib.whatIfOrderAsync = MagicMock(side_effect=request)
+
+    def test_matching_321_is_explicit_failure_not_timeout_or_fake_fee(self):
+        adapter = _make_adapter()
+        self.setup_preview(adapter, matching_error=True)
+        with pytest.raises(ConnectionError, match="IBKR_WHATIF_VALIDATION_REJECTED_321"):
+            adapter.what_if_limit_order({"con_id":354802220,"symbol":"IB01","sec_type":"STK","exchange":"SMART","currency":"USD"}, quantity=32, limit_price=Decimal("122.22"))
+        assert adapter._ib.wrapper._futures == {}
+        adapter._ib.wrapper._endReq.assert_called_once()
+        adapter._ib.placeOrder.assert_not_called()
+
+    def test_unrelated_321_does_not_complete_this_preview(self):
+        adapter = _make_adapter()
+        self.setup_preview(adapter, matching_error=False)
+        result = adapter.what_if_limit_order({"con_id":354802220,"symbol":"IB01","sec_type":"STK","exchange":"SMART","currency":"USD"}, quantity=32, limit_price=Decimal("122.22"))
+        assert result["status"] == "PASS"
+        assert result["commission"] == 1.2
+        adapter._ib.wrapper._endReq.assert_not_called()
+        adapter._ib.placeOrder.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════

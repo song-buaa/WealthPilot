@@ -200,6 +200,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._error_codes: dict[int, dict] = {}
         self._open_order_evidence: dict[int, list[dict]] = {}
         self._submitted_order_ids: set[int] = set()
+        self._open_order_sync_lock: asyncio.Lock | None = None
 
     def _run_on_loop(self, operation, *, timeout: float | None = None):
         """在 adapter 专属 event loop 执行一次 IB 调用并等待普通结果。
@@ -859,10 +860,16 @@ class IBKRBrokerAdapter(BrokerAdapter):
         return self._run_on_loop(cash_on_loop, timeout=self._timeout + 5)
 
     def list_open_order_details(self) -> list[dict]:
+        """Fresh account-wide facts, without binding or taking over orders.
+
+        reqOpenOrders can be rejected by a read-only Gateway (321), and only
+        covers one client. Cash reservation needs all clients' active orders.
+        Await the completed snapshot, never substitute the openTrades cache.
+        """
         self._ensure_connected()
 
         async def read_on_loop():
-            await self._ib.reqOpenOrdersAsync()
+            trades = await self._read_open_trades(all_clients=True)
             return [
                 {
                     **self._snapshot_trade(trade),
@@ -870,10 +877,47 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     "remaining_quantity": int(trade.orderStatus.remaining or 0),
                     "limit_price": self._finite_number(trade.order.lmtPrice),
                 }
-                for trade in self._ib.openTrades()
+                for trade in trades
             ]
 
         return self._run_on_loop(read_on_loop)
+
+    async def _read_open_trades(self, *, all_clients: bool):
+        # ib_async shares the unnumbered "openOrders" future for both request
+        # types. Serialize them on the adapter loop to prevent overwriting it.
+        if getattr(self, "_open_order_sync_lock", None) is None:
+            self._open_order_sync_lock = asyncio.Lock()
+        async with self._open_order_sync_lock:
+            if not self._connected:
+                raise ConnectionError("IBKR open-order session unavailable; reconnect required")
+            account_snapshot = all_clients or IBKR_READ_ONLY_MODE
+            try:
+                if account_snapshot:
+                    trades = await self._ib.reqAllOpenOrdersAsync()
+                else:
+                    trades = await self._ib.reqOpenOrdersAsync()
+            except BaseException:
+                # These callbacks have no request ID. After an incomplete
+                # snapshot, a late openOrderEnd must not complete a new query.
+                # Close only this API socket; a later call reconnects normally.
+                self._connected = False
+                self._ib.disconnect()
+                raise
+            if not account_snapshot:
+                return trades  # Preserve the writable client's original scope.
+            selected = []
+            for trade in trades:
+                account = str(trade.order.account or "")
+                if not account:
+                    raise ConnectionError("IBKR open-order account missing; cash authority unavailable")
+                if account != self._account_id:
+                    continue
+                # Legacy OrderPoller scans only its own client's orders. The
+                # ExecutionBatch cash check deliberately includes every client.
+                if not all_clients and int(trade.order.clientId) != self._client_id:
+                    continue
+                selected.append(trade)
+            return selected
 
     def list_execution_details(self) -> list[dict]:
         """Return detached execution evidence for read-only reconciliation."""
@@ -914,7 +958,24 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 limit_price=limit_price,
             )
             order.account = self._account_id
-            state = await self._ib.whatIfOrderAsync(contract, order)
+            pending = self._ib.whatIfOrderAsync(contract, order)
+
+            def reject_preview(req_id, code, _message, _contract):
+                # ib_async 2.1 treats 321 as a warning, leaving the WhatIf
+                # future pending. Fail only this exact request, without
+                # touching trades, other previews or successful OrderState.
+                if (code == 321 and asyncio.isfuture(pending)
+                        and self._ib.wrapper._futures.get(req_id) is pending):
+                    self._ib.wrapper._endReq(
+                        req_id, ConnectionError("IBKR_WHATIF_VALIDATION_REJECTED_321"),
+                        success=False,
+                    )
+
+            self._ib.errorEvent += reject_preview
+            try:
+                state = await pending
+            finally:
+                self._ib.errorEvent -= reject_preview
 
             def state_number(name: str) -> float | None:
                 value = self._finite_number(getattr(state, name, None))
@@ -1054,10 +1115,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ensure_connected()
         try:
             async def fetch_open_order_snapshots():
-                await self._ib.reqOpenOrdersAsync()
                 return [
                     self._snapshot_trade(trade)
-                    for trade in self._ib.openTrades()
+                    for trade in await self._read_open_trades(all_clients=False)
                 ]
 
             snapshots = self._run_on_loop(fetch_open_order_snapshots)
@@ -1154,6 +1214,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._ib = None
         self._loop = None
         self._thread = None
+        self._open_order_sync_lock = None
         logger.info("[IBKR] shutdown 完成")
 
     # ── orderRef 幂等反查（PRD §3.6.1）──────────────────────

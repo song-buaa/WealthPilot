@@ -16,6 +16,8 @@
 
 七工具均为生产只读工具。P2 只校验参数和生成 URL，不在 MCP 创建草稿或委托；原 ActionDraft、SymbolStrategy、OrderManager、BrokerAdapter、风控和人工确认全部保留。IB01 含费用总预算入口先显示 ActionDraftCard 简洁参数编辑，点击“加入投资行动”后核对报价/费用，通过后主动进入 ConfirmOrderDialog；打开链接不自动取报价或落库。底层保留原 IBKR Typed Intent / ExecutionBatch / SMART；改价需重新取行情、计算 WhatIf 并重新确认，不走普通美股/Tiger 路径。当前使用个人 Pro，不使用 Business/Edu，不部署独立 Mock ChatGPT 应用。
 
+IBKR 合约、行情和 WhatIf 权限分别验收。挂单资金检查使用新鲜的只读账户快照；Gateway 只读模式拒绝 WhatIf 时保留 DRAFT，费用和最终确认不能标为通过，也不会自动开启实盘。
+
 ## 当前架构与环境
 
 ```mermaid
