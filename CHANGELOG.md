@@ -1,5 +1,26 @@
 # Changelog
 
+## WealthPilot 4.0 — 正式功能范围收口 · 2026-10-16
+
+用户确认 4.0 第一阶段收口，后续优化进入新版本；本记录不是自动创建 v4.0.0 Tag / GitHub Release 或部署的指令。
+
+### Delivered
+
+- 完整 React Web、FastAPI Core、生产数据及原业务服务已从 MacBook 迁至 Mac Mini；MacBook Dev → GitHub PR/CI → Mini 固定 SHA / launchd，代码与数据/配置/凭证分离。
+- 同一 WealthPilot-Prod / Secure MCP Tunnel 提供七项生产只读工具：财富总览、手工资产负债、账户持仓、交易预填链接、单标决策、组合评估、当前持仓收益分析。
+- P1、P3/P4/P5 已完成 ChatGPT Web/iOS 实际调用；P2 为个人 Pro → 原 Web 参数预填/人工最终确认，MacBook/iPhone 预填已验收，不要求 Business/Edu 或独立 Mock 应用。
+- 完整复用原 PEER 四 Agent、13 内部 Skills、数据源、规则/信号、专业 LLM/Expressing 与报告模板；ChatGPT 负责交互和再次组织呈现。原 Web 可视化、ActionDraft / SymbolStrategy / OrderManager / BrokerAdapter 及人工交易确认继续保留。
+- 本次文档基于 main `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，包含 P3/P4/P5 后的 IB01 原 IBKR 交易链接兼容修复；2026-10-16 只读核对 Mini Core/Web/MCP 启动入口同样引用该业务 SHA。准确版本/环境引用与观察限定见 PROJECT_GOVERNANCE。
+
+### Known limits / acceptance
+
+- P2 新入口首次真实券商提交/成交未验收，不能写为已真实成交；历史其他入口的实盘记录保持原事实。
+- P5 只覆盖当前持仓账面盈亏与结构，不含完整历史收益或因果归因。
+- PARTIAL、未配置/不可用 Gateway 和数据源、未核实的运行/恢复事项仍保留。PoC02 凭证展示事故保持历史 FAIL，撤销后的权限检查独立记录。
+- 本次仅文档更新，不改业务代码、数据库、生产配置或服务，不自动创建 Release/Tag 或部署。
+
+以下为历史阶段记录，保留当时的“未部署”、工具数量与测试路线描述，不代表当前生产状态；当前基线以上述收口记录和当前架构为准。
+
 ## main · 2026-10-16 · IB01 交易入口兼容
 
 - IB01 预算链接通过原可信合约登记规范化 LSE 身份，避免 USD→US 及 Tiger 错路由。
@@ -24,7 +45,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - 个人 Pro + 私人 HTTPS 的部署/回滚说明及自动化回归；不要求 Business，不创建 Mock 生产环境，首次真实委托留用户验收。
 
 
-## [Unreleased] - main / 4.0 migration validation
+## 历史 main 迁移验证记录（原 Unreleased，收口前阶段事实）
 
 - ChatGPT Skills 迭代 1：独立 Streamable HTTP 七工具；复用财富/持仓详情与原草稿、风险、确认、订单和状态服务。增加合成库/Mock 端到端、幂等及只读隔离回归；现役 MCP/Web/数据库保持不变，Business Web/iOS 和真实交易未验收。
 

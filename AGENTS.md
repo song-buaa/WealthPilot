@@ -1,11 +1,11 @@
 # AGENTS.md
 
 > WealthPilot 项目级 AI Agent 协作说明
-> 当前开发基线：main（3.x 业务 + 4.0 迁移验证） | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-16
+> 当前产品：WealthPilot 4.0（五大核心场景已收口） · 开发基线：main | 历史 SemVer 稳定标签：`v3.15.1` | 最后更新：2026-10-16
 
 本文件遵循 [AGENTS.md 开放标准](https://agents.md/)，为 AI 编程助手（Claude Code / Cursor / Cline 等）提供项目上下文与协作约定。
 
-P3/P4/P5 通过原 PEER 服务和只读 worker 开放单标决策、组合评估与当前持仓盈亏分析；不新建分析/收益引擎。代码与设备实际验收分开记录，见 [分析工具说明](docs/WealthPilot_4x_P345_Analysis_Skills.md)。
+WealthPilot 4.0 已完成 Mac Mini 生产部署及 ChatGPT Web/iOS 五大核心场景接入验收。当前架构、版本观察与仍未验收事项以 [当前架构](docs/ARCHITECTURE_CURRENT.md) 和 [治理基线](docs/PROJECT_GOVERNANCE.md) 为准；后续优化进入新版本，不重新执行历史 PoC 迁移计划。
 
 ## Codex 新任务入口
 
@@ -13,44 +13,56 @@ P3/P4/P5 通过原 PEER 服务和只读 worker 开放单标决策、组合评估
 
 默认从最新 `main` 创建短期 `codex/<topic>` 分支；每个提交保持职责单一，精确暂存，禁止把 `.env`、数据库、券商凭证或本地备份写入 Git。未经用户明确授权，不 push、不合并、不创建或移动发布 Tag。
 
-## 4.0 当前边界与 Dev / Prod
+## 4.0 当前产品与职责
 
-`v3.15.1` 是历史稳定 Tag，不代表当前 main。核实实际 Git SHA、后续提交和 CI；不要把 frontend 0.0.0 / FastAPI 1.0.0 当产品版本。当前 main 包含财富、消费和技术形态证据等后续能力；当前架构事实见 [ARCHITECTURE_CURRENT.md](docs/ARCHITECTURE_CURRENT.md)。
+ChatGPT 负责自然语言交互、相关上下文、工具选择及最终回答组织。MCP 连接既有业务服务。WealthPilot Core 保留完整 FastAPI、Planning / Executing / Expressing / Reviewing 四 Agent、13 个内部 Skills、数据源、规则/信号引擎、专业 LLM 和原报告模板。ChatGPT 基于原专业结果再次组织表达；Expressing 与原决策引擎继续运行。完整 React Web 保留全部原页面、可视化和人工交易确认。
 
-Phase 0 已审计；PoC 01 合成 MCP 和 PoC 02 真实财富只读 MCP 的 Web/iOS 验证已完成。PEER、内部 SkillsLoader、投资分析和交易链路仍属于 3.x；不能宣称已经整体迁移给 ChatGPT。PoC 02 凭证展示事故保持 FAIL，未标记撤销或补救。
+五大场景 P1 资产负债查询、P2 明确交易链接、P3 单标决策、P4 组合评估、P5 当前持仓收益分析均 DONE。P2 为个人 Pro → 只读生成链接 → 原 Web 预填/最终确认 → 原券商链路；MacBook/iPhone 预填已验收，新入口首次真实提交/成交未验收。P5 不含完整历史收益归因。当前不使用 Business/Edu，也不部署独立 Mock ChatGPT 应用。
 
-MacBook 为 Dev，Mac Mini 为 Prod。标准流程为 GitHub 短期分支 → PR → 全部质量 Gate → main → Mini 拉取 CI 已通过的完整 SHA → 原生 ARM 依赖 → launchd → 实际验收。部署不自动跟随 main；数据、备份、配置、日志、凭证在代码外。离线包仅应急保留。
+生产入口 `pocs/chatgpt_skills/server.py` 在 real 配置下仅开放七项只读工具：
 
-PoC 03 Stage 2 已有设备端 ARM 安装、数据迁移和本地 synthetic 证据；用户于 2026-10-14 确认 Mini real MCP 与 ChatGPT Web/iOS 可用，本轮 Dev 未远程复验。仅部署既有只读财富工具及 Secure MCP Tunnel，不启动 backend.main、broker sync、OrderPoller、Gateway 或交易服务。本机文件/脚本测试不能代替 Mini 原生执行、真实查询、重启和 MacBook 关闭验收。步骤见 [Mac Mini 执行说明](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)。生产修复回 Dev，重新发布 Commit；不直接修改 Prod 业务代码。
+| 工具 | 复用边界 |
+|---|---|
+| `get_wealth_overview` | WealthService / PortfolioService，资产、负债、净资产 |
+| `get_manual_wealth_items` | 现有手工资产/负债明细，只读事务 |
+| `get_investment_details` | 原投资账户归属、聚合持仓及盈亏数据 |
+| `prepare_trade_confirmation_link` | 纯参数校验和 URL；不创建草稿/订单；Web 复用 ActionDraft → SymbolStrategy → OrderManager → BrokerAdapter |
+| `analyze_position` | 原 PositionDecision / position_single 与新建仓路径、PEER 专业结论 |
+| `review_portfolio` | 原 PortfolioReview / AssetAllocation、AllocationService 快照/目标/偏离度 |
+| `analyze_performance` | 原 PerformanceAnalysis 与当前持仓账面盈亏/贡献 |
 
-Web & Data Sync Batch 1 仅在 Dev 实现显式共享 WAL 契约，默认固定副本模式不变。未经设备阶段确认，不 chmod 生产库、不改生产配置、不启动 Web/同步。新受限入口使用同一 DB 路径和 `WEALTHPILOT_SQLITE_CONTRACT`，不能启动完整 backend.main；权限切换/恢复和 Batch 2/3 白名单见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。原凭证展示事故保持历史 FAIL，撤销后的权限检查单独记录。
+IB01 预算链接复用原可信 LSEETF/USD/SMART 合约登记和 IBKR Typed Intent / ExecutionBatch / Web 最终授权；不把 USD 推断为 US，也不在 MCP 下单。测试用 Mock 写工具仍只供隔离自动化，不是生产工具集。
 
-Batch 2 已增加 `backend/restricted_web.py`、共用手动同步 dispatch，以及独立 Web 环境/构建/launchd 工具；默认只监听 loopback，broker列表为空，不创建scheduler。只注册 method/path 白名单，不运行完整后端/订单/PEER。Dev测试不等于设备或真实券商PASS；首次共享切换、Web安装及回滚必须按 [Batch 2 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。MCP/Tunnel与Web独立版本/label，发布不自动改生产。
+## Dev / Prod 与后续任务
 
-P1 已有三项生产读取及 ChatGPT Web/iOS 实测。P2 采用个人 Pro → 只读生成预填链接 → 原 Web 最终确认，不在 MCP 创建真实草稿或提交订单；复用原券商/风控规则，不新建 Mock App/Tunnel；P3/P4/P5 后续独立接入。细节见 [P2 说明](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。
+MacBook 为 Dev，Mac Mini 为 Prod，运行完整 Web、完整后端、MCP/Tunnel、共享 WAL 生产数据库及原有业务服务。流程：最新 main → 短期分支 → PR / 四项 CI → 经授权合入 main → Mini 安装确认的完整 SHA → 独立预检 / 切换 / 验收。生产各组件可独立固定版本，main、全局 current、SDK 环境和组件部署 SHA 不可互相推断；版本观察表见治理文档。`v3.15.1` 是历史 SemVer Tag，尚无 `v4.0.0` Tag；frontend/FastAPI 包版本不是产品版本。
 
-原 ChatGPT Skills 迭代 1 使用独立 `pocs/chatgpt_skills` 入口和临时 Mock 数据库；P1 复用只读服务，P2 仅验证原 OrderManager 的模拟链路，不启用真实券商。工具参数 `confirmed=true` 不证明人类确认，Business Web/iOS 必须独立验收。不得自动替换现役 MCP/Tunnel/Web 或借此启用订单轮询。见 [迭代说明](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。
+优先复用现有能力，不复制财富统计、专业决策或交易引擎，不增加无必要的数据库、服务、Tunnel、认证或模拟生产系统。生产修复回 Dev，走 PR/CI；不在 Mini 直接改业务代码。完整后端 `backend.main` 已用于生产，不能再套用“Mini 禁止完整后端”的旧 PoC 限制；其 lifespan 包含原同步、订单轮询和触发评估，任何启动/重启都须核对任务与券商配置，文档收口不授权启停、同步或交易。
 
-IB01 的 P2 预算链接接回原 IBKR Typed Intent / ExecutionBatch；仅支持已验证的 IB01 LSEETF/USD/SMART 身份，保留原最终 Web 授权、资金与只读护栏，不在 MCP 创建或提交订单。
+共享库由 Web/原业务服务受控写入，MCP 使用 SQLite 只读事务与进程隔离；数据、备份、配置、凭证和日志位于代码外。不要将运行期业务更新误判成固定迁移 SHA 损坏，也不要用历史 migration-reference 覆盖实时数据。权限、身份契约与备份/回滚规则继续有效。
+
+部分数据仍为 PARTIAL（日期未知/过期、研究来源未验证、原则检索缺失或演示 fallback），不能当作实时交易信号。组合投资持仓与完整个人财富分母不得混用；配置默认目标和画像不能冒充已核实个人偏好。部分券商 Gateway/数据源不可用；未核实的常驻、恢复和跨网项目不标 PASS。PoC02 凭证事故保持历史 FAIL，后续撤销检查单独记录。
+
+历史过程仅供追溯：[PoC03](docs/WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md)、[Batch1](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)、[Batch2](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)、[P2](docs/WealthPilot_4x_P2_Web_Trade_Link.md)、[P3/P4/P5](docs/WealthPilot_4x_P345_Analysis_Skills.md)。其中“未部署”“受限 Web”“Business/独立 Mock”等当轮计划不是当前默认约束；真正适用的安全与质量 Gate 继续遵守治理文档。
 
 ## 项目概述
 
 WealthPilot 是 AI 驱动的个人投资决策工作台。本地运行，数据私有，帮助个人投资者从"凭直觉"过渡到"系统化决策"。
 
-核心能力覆盖 5 种意图：
+Core 内部保留以下 5 种意图（与产品 P1–P5 场景不是一一对应编号）：
 - PositionDecision：单标决策（买入/持有/减仓/止损/止盈）
 - PortfolioReview：组合健康度全面评估
 - AssetAllocation：资产配置方案生成
-- PerformanceAnalysis：收益表现归因分析
+- PerformanceAnalysis：现有持仓收益与盈亏结构分析
 - Education：投资知识科普 / 通用对话
 
-## 当前 3.x 业务架构（持续演进的 main）
+## WealthPilot Core（复用原 3.x 业务系统）
 
 WealthPilot 业务系统是 React/Vite + FastAPI + SQLite 的本地优先应用，决策主链路采用 PEER Multi-Agent + Skills 协议。财富、消费、技术形态证据使用各自业务服务。Execution Plan 通过 K 线 Provider fallback 获取因子；Typed Trade Intent 与 ExecutionBatch 将多标的意图转为可复核计划，投资行动仍坚持“规则引擎给数值、AI 写解释、用户人工确认”的边界。
 
 ### PEER 4 Agent
 
-下文行动图中的 Mock 是 Demo/测试适配器；Self-use 可按显式授权选择 Tiger/IBKR。不能将 Mock 示意扩大为所有交易都模拟，也不能将完整后端启动方式用于 Mini 只读 MCP。
+下文行动图中的 Mock 是 Demo/测试适配器；Self-use 可按显式授权选择 Tiger/IBKR。不能将 Mock 示意扩大为所有交易都模拟，完整 Web 后端与只读 MCP 是独立进程，不能用完整后端替换只读 MCP 入口。
 
 | Agent | 职责 | 关键代码 |
 |-------|------|---------|
@@ -152,8 +164,8 @@ graph LR
     H -->|用户点立即下单| I[ConfirmOrderDialog]
     I --> J[RiskEngine 风控检查]
     J -->|通过或确认风险| K[OrderManager.place_order]
-    K --> L[MockBrokerAdapter]
-    L -->|异步成交| M[OrderRecord status=filled]
+    K --> L[BrokerAdapter：按配置选择 Tiger / IBKR / Mock]
+    L -->|券商权威状态，Mock 仅测试| M[OrderRecord 状态更新]
     K --> N[AuditLog]
 ```
 
@@ -205,7 +217,7 @@ backend/
         mock.py            MockBrokerAdapter
   market_data/           市场数据适配层（Futu/AV/Tiger）
   mcp_client/            盈米 MCP 客户端
-skills/                  12 个 SKILL.md
+skills/                  13 个 SKILL.md
 decision_engine/         核心引擎（data_loader / rule_engine / signal_engine / llm_engine）
 app/                     ORM 模型 + 业务服务 + 汇率服务
 frontend/
@@ -240,8 +252,8 @@ cd frontend && npm run dev
 ```
 
 ### 数据隐私
-- 所有用户数据存于本地 SQLite（`data/wealthpilot.db`）
-- 不提交或公开上传任何私人财富/持仓/交易数据。用户明确授权的个人 ChatGPT MCP 查询仅返回 PoC 02 最小财富摘要；不将授权扩展到持仓明细、凭证、交易数据或其他工作区。
+- 业务数据存于本地 SQLite；Dev 路径由本地配置指定，Prod 数据在代码目录之外。
+- 不提交或公开上传私人财务数据。用户已授权个人 ChatGPT 通过七项只读工具读取必要财富/持仓/分析结果；凭证、原始账户敏感字段及无关数据不返回，不扩展到其他工作区，不把查询授权当作交易授权。
 - 投研观点通过本地投研卡 + 第三方公开数据源（盈米 MCP / 联网搜索）获取
 
 ### 外部依赖 optional 原则
@@ -352,11 +364,11 @@ general/Education 路由通过 `_execute_general()` 单独调用 `wp-retrieve-pr
 - CSBGU3 / CBU3 与 IB01 正确归类为 Fixed Income，Portfolio API、汇总与 UI 使用同一 canonical 字段
 - 完成真实 Self-use API/UI 人工验收与全量自动质量 Gate
 
-### v4.0（迁移验证中，未生产上线）
-- 已验证：ChatGPT Web/iOS → 私人 MCP → 既有财富服务只读摘要；事故 FAIL 与功能 PASS 分开记录。
-- 当前：GitHub 版本 / CI / 指定 Commit 部署准备；Mini 常驻验收留 Stage 2。
-- 目标：ChatGPT 对话、通用推理和偏好记忆；Skills/MCP 暴露专业业务；React 保留可视化。
-- 后续：投资分析封装、对话发起并经用户授权的执行、决策历史/复盘；尚未实现本次迁移。Mem0/A2A/LangSmith 不作为当前 4.0 基线或本轮必做项。
+### v4.0（2026-10-16 正式收口）✅
+- MacBook Dev / GitHub PR/CI / Mac Mini Prod；完整 React Web、FastAPI、生产数据库及 MCP/Tunnel 已运行。
+- 七项只读 MCP 工具覆盖 P1–P5，ChatGPT Web/iOS 已实际验收；PEER、Expressing、13 内部 Skills 与原专业模板完整保留。
+- P2 原 Web 预填与人工确认；新入口首次真实提交/成交未验收。P5 仅现有持仓账面盈亏与结构分析。
+- PARTIAL、Gateway/数据源与历史凭证事故等边界见治理文档，不阻塞功能范围收口。后续优化进入新版本；Mem0/A2A/LangSmith 不属于已落地基线。
 
 ### 不在路线图（明确决策）
 - Computer-Use / 自动下单：金融合规问题，AI 不应自动执行交易

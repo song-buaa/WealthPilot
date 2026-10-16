@@ -1,18 +1,18 @@
 # WealthPilot 项目治理基线
 
-> 更新日期：2026-10-11
-> Current development baseline：当前 `main`
+> 更新日期：2026-10-16
+> 当前产品：WealthPilot 4.0 五大核心场景已收口；Current development baseline：当前 `main`
 > Historical latest SemVer stable release：`v3.15.1`（不代表当前 main）
 > Previous stable release：`v3.15.0`
 > Immutable historical release：`v3.14.0` → `4314e031ca653ea87a346c198d3a6dc466017ab6`
 
 ## 1. 当前产品与架构
 
-WealthPilot 是本地优先的个人投资决策工作台。当前前端为 React 19 + Vite 8 + TypeScript，后端为 FastAPI + SQLAlchemy + SQLite，决策链路为 PEER 四 Agent + 13 个 Skills。核心入口为 `frontend/src`、`backend/main.py`、`backend/agents`、`backend/services`、`skills` 与 `app`。
+WealthPilot 4.0 是个人 ChatGPT Pro + 七项生产只读 MCP + 原完整 Core + React Web 的私人财富管理工作台。P1 资产负债、P2 交易预填链接、P3 单标决策、P4 组合评估、P5 当前持仓收益分析均已完成功能范围收口。Web/iOS 接入和 Mac Mini 部署已验收；P2 新入口首次真实提交/成交及 P5 完整历史归因不在 DONE 事实中。
 
-`main` 是唯一长期开发与集成分支，也是持续演进的 Current development baseline。`v3.15.1` 是历史最后一个 SemVer 稳定发布，后续 functional milestone Tags 与 main 提交不自动构成新的 SemVer 产品版本。`v3.15.0` / `v3.14.0` 保持历史不可变，原 Tag 不移动、不重建。frontend 0.0.0 / FastAPI 1.0.0 不是当前产品版本。
+ChatGPT 负责交互、上下文和最终回答组织；原 FastAPI、PEER 四 Agent、13 内部 Skills、规则/信号、专业 LLM/Expressing 和模板继续生成专业分析。Mini 运行完整 Web/后端与 MCP/Tunnel、生产数据库；受限 Web 及单工具 PoC 是历史路径。组件、工具和数据质量边界见 [当前架构](ARCHITECTURE_CURRENT.md)。
 
-当前 main 已有财富、消费、技术形态证据等后续业务；4.0 目标和已验证范围见 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md)。PoC 01/02 验证 ChatGPT 单工具调用；用户于 2026-10-14 确认 Mini real MCP 与 ChatGPT Web/iOS 可用，本轮 Dev 未复验，不宣称完整 Web/同步已生产上线。
+`main` 是唯一长期集成分支；功能完成、代码发布、组件部署、Tag 和具体运行验收分开记录。历史 PoC/Batch 文档只反映当时事实，不再作为默认产品/任务约束。文档不得将未来优化写成已实现，也不能因旧阶段限制否认已部署的完整系统。
 
 ## 2. 运行模式
 
@@ -40,20 +40,36 @@ WealthPilot 是本地优先的个人投资决策工作台。当前前端为 Reac
 
 ## 4. 版本、Tag 与发布
 
+### 2026-10-16 版本观察表
+
+| 对象 | 已核实事实 | 如何解释 |
+|---|---|---|
+| 本次文档整理起点的 remote main | `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，PR #10；在 P3/P4/P5 的 `62f2f8168727acfea159f3f57858e6e109b20610` 之后，包含 IB01 交易链接兼容修复；main 四项 CI SUCCESS | 这是起点快照；最新 main 用 fetch / rev-parse 重新读取 |
+| Mini MCP 业务入口 | 启动包装器固定 `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，job 运行 | 不等于其复用的 SDK Python 环境 SHA |
+| Mini 完整后端 / Web | 两个启动入口均引用 `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，jobs 运行，health HTTP 200 | 本次只读核对启动引用与健康，不新增交易或 IB01 成交验收 |
+| Mini 复用环境 / 资产 / current | MCP SDK 环境为 `4ebf2cb05cb26c77dfd04ab41ef81e69592ddfcb`；分析工作目录资产锚点 `36ef2cb40791e421ab76833cb1dead383b8c540d`；全局 current 为 `d5c4291ed0202a460be1f51056fd69748065fda6` | 都不能替代组件业务 SHA；Tunnel 保持独立原身份，不由 main/current 推定版本 |
+| 本次 docs-only 提交 | 基于上述 main，准确 SHA 见该文档 PR / `git log -1 -- README.md AGENTS.md docs/ARCHITECTURE_CURRENT.md docs/PROJECT_GOVERNANCE.md CHANGELOG.md` | PR 未合并前不是 main；即使合并也不自动部署。避免在文档中循环嵌入自己的提交 SHA |
+| 已存在 SemVer Tag | 历史最新 `v3.15.1` → `5492b1dbead99677e0e84d8a177a78e6e7157036`（peeled commit）；另有历史功能里程碑 Tag | 不代表当前 main 或生产版本；Tag 不移动/重建 |
+| `v4.0.0` | remote 尚无此 Tag，4.0 是用户确认的产品功能收口 | 不因文档收口自动创建 Tag / GitHub Release |
+
+观察时间为 2026-10-16 08:27–08:28 UTC（Mini 启动文件/launchd/health 只读检查；不读财务数据、不重启服务）。完整验收与数据质量见当前架构；后续设备变更必须新增时间与组件版本记录，不能把本表当永久实时状态。前端 package 0.0.0 / FastAPI 1.0.0 不是产品发布版本。
+
 - 版本遵循 SemVer：破坏兼容为 major，向后兼容功能为 minor，修复与文档治理为 patch 或后续 main 提交。
-- 稳定 Tag 使用带 `v` 的完整版本号，例如 `v3.14.1`，Tag 必须指向已验收的不可变提交。
-- 发布前同步 `README.md`、`AGENTS.md` 与 `CHANGELOG.md`，确认工作区干净、敏感文件未跟踪，并执行相称的后端测试、前端 lint/build 和人工 smoke。
-- 发布后验证 local main、origin/main 与预期提交一致；Tag 只在明确发布动作中创建，不因普通文档提交重打或移动。
+- 稳定 Tag 使用带 `v` 的完整版本号，必须绑定操作者批准的不可变提交及其验收范围；功能 DONE 不代表所有实盘、数据质量或恢复项目 PASS。
+- 发布前同步本次相关核心文档，检查工作区与敏感文件，执行适用质量 Gate。文档-only 改动检查链接/格式/一致性并走现有全部 CI，不通过文档发布触发真实运行或重新验收交易。
+- 发布后核对 local main、origin/main、remote main；组件部署 SHA 单列。未经授权不创建/移动 Tag 或 Release。
 
 ## 5. 安全边界
 
-- Web & Data Sync 的共享 WAL 是显式设备切换，不随代码发布自动启用；原 0400 固定副本默认保留。权限调整、历史/运行参考分离、备份恢复及旧版本回滚见 [Batch 1 说明](WealthPilot_4x_Web_Data_Sync_Batch1.md)。生产修改需设备阶段授权；本轮 Dev 不连接 Mini。
+- 当前生产使用共享 SQLite WAL，Web/原业务服务受控写、MCP 只读；身份/属主/schema/Portfolio 校验与 SQLite Backup API 备份恢复保留。历史 migration-reference 不作为运行期资产快照；合法更新不再比固定迁移 SHA。不得因旧 PoC 的 0400 固定副本说明盲目改权限/覆盖库；回滚前核对模式与兼容性，历史步骤见 [Batch 1](WealthPilot_4x_Web_Data_Sync_Batch1.md)。
 
 - `.env*`、本地 SQLite、券商凭证、私钥、完整账户号和仓库外备份不得提交。
 - Public Demo 必须与 self-use 数据库、凭证和网络能力物理/配置隔离。
 - IBKR 默认为只读：Gateway Read-Only API 开启，`IBKR_READ_ONLY_MODE=true`，`ENABLE_IBKR_LIVE_TRADING=false`。
 - 未经用户逐次明确授权，禁止 place/submit/cancel/modify/replace order 及任何等价 mutation。
 - 连接、超时和查询失败必须显式失败，不得伪装成空账户、空持仓或空订单。
+- 生产七工具只读；P2 仅 URL，最终确认/委托在原 Web。用户已授权个人范围内必要财富、持仓和分析读取，不授权其他工作区、凭证外传或自动交易。
+- 完整 backend.main 已用于 Mini，原 lifespan 的调度/同步、扫描/轮询/触发评估仍存在；后续重启须核对真实任务/券商配置。文档更新不启停任何服务，不扩大交易授权。
 
 ## 6. 质量门与当前基线
 
@@ -88,7 +104,7 @@ GitHub Actions 的 `Quality Gates` workflow 当前执行四个并行检查，前
 - `frontend-checks`：Node 22、`npm ci`、lint、build；
 - `offline-m5`：确定性 Offline M5 18/18。
 
-PoC 集成后增加第四项 `mcp-poc-tests` / `MCP PoC tests`：临时库的只读/部署/GitHub guards 和独立 MCP 环境 HTTP 测试。PoC 01/02 的同名 test_http.py 需在两个 pytest 进程分别执行，避免收集冲突。全部四项须通过才发布当前只读部署候选；Linux CI 不代替 Mac Mini ARM 和账号实测。
+PoC 集成后增加第四项 `mcp-poc-tests` / `MCP PoC tests`：临时库的只读/部署/GitHub guards 和独立 MCP 环境 HTTP 测试。PoC 01/02 的同名 test_http.py 需在两个 pytest 进程分别执行，避免收集冲突。全部四项须通过才发布当前业务或文档候选；Linux CI 不代替 Mac Mini ARM 和账号实测。
 
 Workflow 在面向 `main` 的 Pull Request、`main` 与 `codex/**` 分支 push，以及手动 `workflow_dispatch` 时运行；同一分支或 PR 的新提交会取消旧 Run。权限限定为 `contents: read`，每个 Job 有独立 timeout。
 
@@ -104,17 +120,27 @@ GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：�
 
 1. MacBook Dev fetch 最新 origin/main，检查全部工作树，保护未提交文件，从最新 main 建立干净短期分支；只整合已验证且属于任务的成果。不 force push、不 squash 已有历史。
 2. 检查拟新增提交的全部文件/blob 历史：不含真实数据库、Key/Token/私钥、私人账户或财务 payload；保留用户授权的仓库外备份。公开仓库中的真实验收证据只留时间/状态/金额比较布尔结论。
-3. 本机运行相称的全量 pytest、frontend lint/build、Offline M5、PoC 专项；精确暂存提交，push 开发分支，创建 PR。检查 exact HEAD 的四项 Actions 结果，任何失败/未解决代码发布阻塞都不能合并。
+3. 业务变更本机运行相称的全量 pytest、frontend lint/build、Offline M5 和专项；文档-only 检查格式、链接、代码/部署事实及一致性。精确暂存提交，push 开发分支，创建 PR。检查 exact HEAD 的四项 Actions 结果，任何失败/未解决代码发布阻塞都不能合并。
 4. 重新核对 origin/main 和 base；按现有 linear-history/strict Gates 发布。当前允许在 PR/CI 全绿后 fast-forward 推送相同 HEAD 到 main（无 bypass，GitHub 自动识别 PR 已合入）；不制造违反 linear-history 的 merge commit。base 变化时重新形成可审查候选并重跑 Gate，不强推历史。
 5. 验证 GitHub PR 状态、remote main、local main、origin/main 和预期 SHA 一致，记录 CI/PR/完整 revision。普通 main 发布不自动创建稳定 Tag 或 GitHub Release，不代表生产验收。
-6. Mac Mini 上的 Codex 在 Stage 2 以个人操作者确认的完整 SHA 使用 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。独立普通运行 Key（默认最小权限，个人例外见下文）、真实数据和配置在代码外，先合成、再证据门槛、后真实验收。
-7. 新 release 安装不启动/切换服务；复用既有 launchd、健康检查和版本回滚。先合成检查，再实际本地/Web/iOS、迁移金额、MacBook 关闭、退出/重启、无业务写入及恢复验收。Prod 禁止直接改业务代码；修复回 Dev 发布新的 SHA。
+6. 需要部署时，Mini 操作者以确认的完整 SHA 使用现有 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。安装不等于激活；复用原组件环境、共享数据及个人凭证，不重复迁移数据库或配置全部生产参数。文档-only PR 默认不部署。
+7. 安装后按实际受影响组件进行独立预检、备份旧入口、经授权切换原 launchd job、健康/契约/原功能回归及必要 Web/iOS 验收；失败恢复入口并验证健康，不盲目覆盖业务数据库。记录组件 SHA、依赖/资产版本、时间和结果。常驻、MacBook 关闭、退出/重启、备份恢复、每个数据源及真实订单均按单项证据验收，不能由 CI 或健康检查推定通过。Prod 禁止直接改业务代码；修复回 Dev 发布新的 SHA。
 
-MacBook 为 Dev，Mac Mini 为 Prod；本机仓库发布操作不得暗含 SSH/设备部署授权。离线包保留为网络/GitHub不可用时的应急材料，依赖与 revision 仍需核对；不能用未完成生产验收的 Stage 1 包冒充已通过 Stage 2。
+MacBook 为 Dev，Mac Mini 为 Prod；代码/文档发布不暗含设备变更授权。离线包为应急备份。历史 Stage 1/2 说明保留可复用的安装/回滚步骤，但其“尚未上线”或“只部署 MCP”等计划不再覆盖当前完整生产架构。
 
-PoC 02 凭证事故维持 FAIL；代码发布与生产开通分开。新的生产 Key 不自动补救/撤销旧 Key，旧权限对生产范围的影响仍是 Stage 2 边界核对事项。本轮 Dev 发布不执行生产部署、数据迁移或新增交易授权。
+PoC02 凭证展示事故保持历史 FAIL。后续旧 Key 撤销后的权限检查独立记录，不能抹除事故或把未检查事项写成补救通过。当前功能范围收口不增加凭证、数据迁移或交易授权。
 
-## 7. 精简技术债 Backlog
+## 7. 当前已知限制与技术债
+
+4.0 功能范围已收口，以下属于后续优化或单项待验收，不作为“4.0 尚未部署”的理由：
+
+- 资产/分析数据仍可能 PARTIAL：来源失败、过期、日期未知、研究无法验证、原则索引缺失或演示 fallback。synthetic=false 不保证实时证据质量；默认目标/画像不当作个人已确认设定。
+- P2 新链接入口首次真实订单提交/成交未验收；不得用历史其他入口的实盘 UAT 代替。
+- P5 当前持仓账面盈亏已用，完整历史归因、TWR/MWR、已实现交易/因果归因未建设。
+- 部分券商 Gateway / 数据源未配置或不可用；真实同步、常驻恢复、代理/跨网访问等逐项保留 PASS/BLOCKED/待验收，未验证不标 PASS。
+- PoC02 历史凭证事故仍 FAIL；后续撤销检查单列。
+
+技术债继续保留：
 
 1. 审核并归档未知历史分支 `master`、`origin/master` 与 `feat/v3.14-kline-provider`；确认所有者前不删除。
 2. 对前端大 bundle 做按路由/重组件拆分。
