@@ -1,5 +1,6 @@
 """Thin Web-only handoff into existing typed-intent and ExecutionBatch services."""
 import json
+from contextlib import contextmanager
 
 from app.models import Conversation, ConversationMessage
 from backend.services.action.models import ExecutionBatch
@@ -17,7 +18,7 @@ def link_intent(order: IBKRLinkPreviewRequest) -> StructuredTradeIntent:
         intent_id="ti_"+order.request_id.hex, broker=field("IBKR"),
         account=field("现有 IBKR 配置账户（请在批次预览核对）", "AI_INFERRED"),
         funding_source=field("CASH", "AI_INFERRED"), funding_currency=field("USD"),
-        budget_mode=field("FIXED_TOTAL"), stated_cash=field(str(order.target_amount)),
+        budget_mode=field("ALL_IN_TOTAL"), stated_cash=field(str(order.target_amount)),
         venue=field("LSE", "AI_INFERRED"), trading_currency=field("USD"), share_class=field("ACC", "AI_INFERRED"),
         side=field(order.side), order_type=field(order.order_type),
         legs=[{"sequence": 1, "alias": field("IB01"),
@@ -29,7 +30,7 @@ def link_intent(order: IBKRLinkPreviewRequest) -> StructuredTradeIntent:
     )
 
 
-def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest):
+def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_price=None):
     """Called only by the explicit Web intent-confirm button; never submits."""
     request_id = str(order.request_id)
     parameters = order.model_dump(mode="json")
@@ -62,4 +63,27 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest):
     if existing is not None:
         return existing  # Includes terminal attempts: opening the same link is never a new order.
     return ExecutionBatchService(session, adapter).create_batch(
-        conversation_id=request_id, message_id=message.id)
+        conversation_id=request_id, message_id=message.id,
+        _manual_limits={"IB01": limit_price} if limit_price is not None else None)
+
+
+@contextmanager
+def preview_link_batch(adapter, order, *, limit_price=None):
+    """Use the original engine on disposable in-memory tables, never production DB.
+
+    Only original read-only IBKR facts/WhatIf are requested; no strategy or order
+    is created. The result is consumed before the temporary session is disposed.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.database import Base
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            batch = create_link_batch(session, adapter, order, limit_price=limit_price)
+            yield batch
+            session.rollback()
+    finally:
+        engine.dispose()

@@ -22,7 +22,7 @@ P3/P4/P5 通过原 PEER 服务和只读 worker 开放单标决策、组合评估
 | Web & Data Sync Batch 1 | 显式共享 WAL 契约、MCP 只读、运行期启动检查与备份恢复副本测试；Web、同步和生产权限切换尚未部署。见 [Batch 1 说明](docs/WealthPilot_4x_Web_Data_Sync_Batch1.md)。 |
 | Web & Data Sync Batch 2 | 受限 React/FastAPI Web、原手动同步入口、默认空启用列表、独立 Web 环境/launchd；仅合成/Mock 验证，未操作 Mini 或启用22:00任务。见 [实现、验收及一体化部署/回滚](docs/WealthPilot_4x_Web_Data_Sync_Batch2.md)。 |
 
-[P2：个人 Pro → 原 Web 最终确认、配置与发布](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。 IB01 预算买入入口复用原 IBKR 合约解析与 ExecutionBatch Web 授权；不会把伦敦 USD 交易线映射为美股或 Tiger。[原迭代 1](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md) 的 Mock 写工具保留为自动化基础，其 Business/独立 Mock 部署路线已由本次产品决策替代。
+[P2：个人 Pro → 原 Web 最终确认、配置与发布](docs/WealthPilot_4x_P2_Web_Trade_Link.md)。 IB01 含费用总预算入口统一复用 ActionDraftCard / ConfirmOrderDialog，底层保留原 IBKR ExecutionBatch / SMART；报价或限价变更需重算 WhatIf 并重新确认。[原迭代 1](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md) 的 Mock 写工具保留为自动化基础，其 Business/独立 Mock 部署路线已由本次产品决策替代。
 
 标准路线：**MacBook Dev → GitHub 分支 / PR / CI / main → Mac Mini Prod 拉取已验证的完整 Commit → 原生依赖安装 → launchd → 健康与实际查询验收**。不在 Prod 修改业务代码，不自动跟随 main，不启动交易/同步任务。离线包仅应急备用。
 

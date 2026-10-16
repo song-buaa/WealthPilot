@@ -3,7 +3,7 @@
  * 2 Tab：行动清单 / 行动记录
  * 行动清单 = 待确认草稿 + 按意图分组的策略 + 散户策略 + 已挂单
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Trash2, FileText } from 'lucide-react'
 import { actionApi, executionBatchApi, type ActionDraftResponse, type AllocationIntentResponse, type SymbolStrategyResponse, type OrderResponse, type TimelineEvent, type ExecutionBatchResponse } from '@/lib/api'
@@ -13,8 +13,7 @@ import ConfirmOrderDialog from '@/components/ConfirmOrderDialog'
 import PageHeader from '@/components/shared/PageHeader'
 import { useDemoMode } from '@/hooks/useDemoMode'
 import ExecutionBatchCard from '@/components/ExecutionBatchCard'
-import IBKRTradeLinkPreview from '@/components/IBKRTradeLinkPreview'
-import type { IBKRLinkPreview } from '@/lib/api'
+import type { IBKRLinkPreview, IBKRQuote } from '@/lib/api'
 
 type TabKey = 'action' | 'history'
 
@@ -22,6 +21,44 @@ export default function Action() {
   const location = useLocation()
   const navigate = useNavigate()
   const [ibkrLink, setIbkrLink] = useState<IBKRLinkPreview | null>(null)
+  const [ibkrQuote, setIbkrQuote] = useState<IBKRQuote | null>(null)
+  const [ibkrBatch, setIbkrBatch] = useState<ExecutionBatchResponse | null>(null)
+  const [ibkrLimit, setIbkrLimit] = useState('')
+  const [ibkrDirty, setIbkrDirty] = useState(false)
+  const [ibkrBusy, setIbkrBusy] = useState(false)
+  const [ibkrError, setIbkrError] = useState('')
+  const quoteSequence = useRef(0)
+  const invalidateQuotes = useCallback(() => { quoteSequence.current++ }, [])
+  const focusedIBKR = new URLSearchParams(location.search).get('trade') === 'ibkr'
+
+  async function quoteIBKR(preview: IBKRLinkPreview, limit?: string) {
+    const sequence = ++quoteSequence.current
+    setIbkrBusy(true); setIbkrDirty(true); setIbkrError('')
+    try {
+      const quote = await executionBatchApi.quoteTradeLink({...preview.order, request_id: preview.request_id,
+        ...(limit ? {limit_price: limit} : {})})
+      if (sequence !== quoteSequence.current) return
+      if (quote.request_id !== preview.request_id) throw new Error('交易请求不匹配')
+      setIbkrQuote(quote); setIbkrLimit(quote.batch.legs[0].final_limit?.toString() ?? ''); setIbkrDirty(false)
+    } catch (err) { if (sequence === quoteSequence.current) setIbkrError((err as Error).message) }
+    finally { if (sequence === quoteSequence.current) setIbkrBusy(false) }
+  }
+
+  function closeIBKR() {
+    quoteSequence.current++; setIbkrLink(null); setIbkrBatch(null); setIbkrQuote(null)
+    navigate('/action', {replace: true})
+  }
+
+  async function confirmIBKRIntent() {
+    if (!ibkrLink || !ibkrQuote || ibkrDirty) return
+    setIbkrBusy(true)
+    try {
+      const batch = await executionBatchApi.confirmTradeLinkIntent(ibkrLink, ibkrQuote, ibkrLimit)
+      if (batch.source_conversation_id !== ibkrLink.request_id) throw new Error('交易批次与请求不匹配')
+      setIbkrBatch(batch)
+    } catch (err) { setIbkrDirty(true); throw err }
+    finally { setIbkrBusy(false) }
+  }
   const [linkError, setLinkError] = useState<string | null>(null)
   const [executionLabel, setExecutionLabel] = useState<string>()
   const [directStrategy, setDirectStrategy] = useState<SymbolStrategyResponse | null>(null)
@@ -55,7 +92,7 @@ export default function Action() {
       }
       if (params.get('trade') === 'ibkr') {
         const preview = await executionBatchApi.previewTradeLink(values)
-        if (active) setIbkrLink(preview)
+        if (active) { setIbkrLink(preview); setIbkrQuote(null); setIbkrBatch(null); setIbkrLimit(''); await quoteIBKR(preview) }
         return
       }
       if (values.quantity !== undefined) values.quantity = Number(values.quantity)
@@ -67,8 +104,8 @@ export default function Action() {
         setDraftCardOpen(true)
       }
     }).catch(error => { if (active) setLinkError(`交易链接无效，未创建草稿或下单：${error.message}`) })
-    return () => { active = false }
-  }, [location.search])
+    return () => { active = false; invalidateQuotes() }
+  }, [location.search, invalidateQuotes])
 
   const fetchDrafts = useCallback(async () => {
     try {
@@ -123,6 +160,7 @@ export default function Action() {
       <PageHeader icon="🎯" title="投资行动" subtitle="决策落地 · 全流程追溯" />
       {linkError && <div role="alert" style={{ padding: 12, color: '#B45309' }}>{linkError}</div>}
 
+      {focusedIBKR ? <p>正在核对当前 ChatGPT 交易请求。取消后可返回行动清单和历史记录。</p> : <>
       {/* Tab 切换器 */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #E5E7EB', marginBottom: 20 }}>
         {([
@@ -170,9 +208,16 @@ export default function Action() {
         {activeTab === 'history' && <TimelineTab />}
       </div>
 
-      {ibkrLink && <IBKRTradeLinkPreview preview={ibkrLink}
-        onClose={() => { setIbkrLink(null); navigate('/action', { replace: true }) }}
-        onCreated={() => { setIbkrLink(null); setRefreshKey(k => k + 1); navigate('/action', { replace: true }) }} />}
+      </>}
+      {ibkrLink && !ibkrBatch && <ActionDraftCard open draft={null} onClose={closeIBKR} onConfirmed={() => {}}
+        ibkr={{preview: ibkrLink, quote: ibkrQuote, limit: ibkrLimit, dirty: ibkrDirty, busy: ibkrBusy, error: ibkrError,
+          onLimitChange: value => { quoteSequence.current++; setIbkrLimit(value); setIbkrDirty(true); setIbkrBusy(false) },
+          onRecalculate: () => { void quoteIBKR(ibkrLink, ibkrLimit) }, onConfirm: confirmIBKRIntent}} />}
+      {ibkrBatch && ibkrLink && <ConfirmOrderDialog key={`${ibkrBatch.id}:${ibkrBatch.confirmation_version}`} open
+        onClose={closeIBKR} onOrderPlaced={() => {}}
+        ibkr={{batch: ibkrBatch, requestId: ibkrLink.request_id, onChanged: batch => {
+          if (batch.source_conversation_id === ibkrLink.request_id) setIbkrBatch(batch)
+        }}} />}
       {/* ActionDraftCard 弹层 */}
       <ActionDraftCard
         open={draftCardOpen}

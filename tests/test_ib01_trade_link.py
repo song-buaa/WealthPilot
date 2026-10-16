@@ -61,6 +61,7 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(execution_batch, '_adapter', lambda: adapter)
     monkeypatch.setattr(link_handoff, 'ExecutionBatchService',
         lambda s, a: ExecutionBatchService(s, a, clock=lambda: NOW, allow_mutation=False))
+    monkeypatch.setattr(execution_batch, '_service', lambda s: ExecutionBatchService(s,adapter,clock=lambda:NOW,allow_mutation=False))
     app=FastAPI();app.include_router(execution_batch.router,prefix='/api/execution-batches')
     with TestClient(app) as client:yield client,engine,adapter
     engine.dispose()
@@ -84,10 +85,12 @@ def test_web_preview_is_pure_and_request_requires_intent_confirmation(api):
 def test_confirm_intent_reuses_batch_and_cannot_authorize_an_order(api):
     client,engine,adapter=api
     payload=budget(request_id=str(uuid4()),confirmed=True)
+    quote=client.post('/api/execution-batches/trade-link/quote',json={k:v for k,v in payload.items() if k!='confirmed'}).json()
+    payload.update(preview_hash=quote['preview_hash'],quote_as_of=quote['batch']['legs'][0]['quote_as_of'])
     result=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload)
     assert result.status_code==200,result.text
     batch=result.json();leg=batch['legs'][0]
-    assert batch['broker']=='ibkr' and batch['budget_mode']=='FIXED_TOTAL'
+    assert batch['broker']=='ibkr' and batch['budget_mode']=='ALL_IN_TOTAL'
     assert batch['status']=='READY' and batch['confirmation_version']==0
     assert leg['resolved_con_id']==354802220 and leg['exchange']=='SMART'
     assert leg['listing_exchange']=='LSEETF' and leg['currency']=='USD'
@@ -108,6 +111,8 @@ def test_confirm_intent_reuses_batch_and_cannot_authorize_an_order(api):
 def test_terminal_link_replay_does_not_create_another_batch(api):
     client,engine,adapter=api
     payload=budget(request_id=str(uuid4()),confirmed=True)
+    quote=client.post('/api/execution-batches/trade-link/quote',json={k:v for k,v in payload.items() if k!='confirmed'}).json()
+    payload.update(preview_hash=quote['preview_hash'],quote_as_of=quote['batch']['legs'][0]['quote_as_of'])
     first=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).json()
     with Session(engine) as s:
         s.get(ExecutionBatch,first['id']).status='COMPLETED';s.commit()
@@ -121,7 +126,7 @@ def test_fixed_target_still_requires_original_intent_constraints(api):
     valid=link_handoff.link_intent(IBKRLinkPreviewRequest.model_validate(budget(request_id=str(uuid4()))))
     from backend.services.trade_intent.models import IntentConfirmationStatus
     valid.confirmation_status=IntentConfirmationStatus.CONFIRMED
-    assert ExecutionBatchService._validate_case1_intent(valid)=='IB01_FIXED_TARGET'
+    assert ExecutionBatchService._validate_case1_intent(valid)=='IB01_ALL_IN_TARGET'
     for field,value in [('side','SELL'),('broker','TIGER'),('venue','NYSE'),('funding_currency','GBP')]:
         changed=valid.model_copy(deep=True);getattr(changed,field).value=value
         with pytest.raises(ExecutionSafetyError):ExecutionBatchService._validate_case1_intent(changed)
@@ -177,3 +182,167 @@ def test_existing_poller_and_web_refresh_keep_ibkr_orders_on_ibkr(api, monkeypat
     with TestClient(app) as client:
         assert client.get('/api/action/orders/synthetic-ibkr?refresh=true').status_code==200
     assert calls[-1]==('ibkr','synthetic-ibkr')
+
+
+def quoted_request(client, **changes):
+    params = budget(request_id=str(uuid4()), **changes)
+    response = client.post('/api/execution-batches/trade-link/quote', json=params)
+    assert response.status_code == 200, response.text
+    quote = response.json()
+    return params, quote
+
+
+def confirmation(params, quote):
+    return params | dict(confirmed=True, preview_hash=quote['preview_hash'],
+                        quote_as_of=quote['batch']['legs'][0]['quote_as_of'])
+
+
+def test_all_in_quote_reuses_original_engine_and_leaves_production_tables_empty(api, monkeypatch):
+    client, engine, adapter = api
+    original = adapter.get_executable_quote
+    monkeypatch.setattr(adapter, 'get_executable_quote', lambda r: original(r)|{'ask':100,'bid':99.99})
+    params, quote = quoted_request(client)
+    batch = quote['batch']; leg = batch['legs'][0]
+    assert batch['budget_mode'] == 'ALL_IN_TOTAL'
+    assert leg['final_quantity'] == 39  # 40 shares would exceed the cap after fees/cushion.
+    assert leg['estimated_notional'] + batch['estimated_fees'] + batch['safety_cushion'] <= 4000
+    assert leg['what_if']['status'] == 'PASS'
+    assert leg['resolved_con_id'] == 354802220 and leg['execution_exchange'] == 'SMART'
+    with Session(engine) as s:
+        assert s.query(ExecutionBatch).count() == s.query(ConversationMessage).count() == s.query(OrderRecord).count() == 0
+    assert not quote['persisted'] and adapter.what_if_calls and not adapter.place_calls
+    result = client.post('/api/execution-batches/trade-link/confirm-intent', json=confirmation(params,quote))
+    assert result.status_code == 200, result.text
+    assert result.json()['source_conversation_id'] == params['request_id']
+
+
+def test_price_edit_rebuilds_quote_fees_and_invalidates_confirmed_version(api):
+    client, engine, adapter = api
+    params, quote = quoted_request(client)
+    batch = client.post('/api/execution-batches/trade-link/confirm-intent', json=confirmation(params,quote)).json()
+    route = '/api/execution-batches/'+batch['id']
+    confirmed = client.post(route+'/confirm',json={'confirmation_version':0})
+    assert confirmed.status_code == 200, confirmed.text
+    old = confirmed.json(); assert old['confirmation_hash']
+    before = len(adapter.what_if_calls)
+    result = client.post(route+'/manual-limits',json={'limits':{'IB01':100},'confirmation_version':old['confirmation_version']})
+    assert result.status_code == 200, result.text
+    new = result.json()
+    assert new['id'] != old['id']
+    assert new['source_conversation_id'] == params['request_id']
+    assert new['legs'][0]['final_quantity'] == 39 and new['estimated_total']+new['estimated_fees']+new['safety_cushion']<=4000
+    assert len(adapter.what_if_calls)>before and not new['confirmation_hash']
+    with Session(engine) as s:
+        assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
+        assert not s.get(ExecutionBatch,old['id']).confirmation_hash
+    assert client.post(route+'/confirm',json={'confirmation_version':old['confirmation_version']}).status_code==422
+    assert client.post('/api/execution-batches/'+new['id']+'/confirm',json={'confirmation_version':old['confirmation_version']}).status_code==422
+    assert not adapter.place_calls
+
+
+@pytest.mark.parametrize('problem',['MISSING','DELAYED','STALE','CASH','FEES','WRONG_CURRENCY'])
+def test_bad_quote_cash_or_fees_never_reaches_ready(api,monkeypatch,problem):
+    from datetime import timedelta
+    client,engine,adapter=api
+    original=adapter.get_executable_quote
+    if problem in {'MISSING','DELAYED','STALE'}:
+        changes={'MISSING':{'ask':None},'DELAYED':{'quote_quality':'DELAYED','market_data_type':3},
+                 'STALE':{'quote_timestamp':(NOW-timedelta(seconds=31)).isoformat()}}[problem]
+        monkeypatch.setattr(adapter,'get_executable_quote',lambda r: original(r)|changes)
+    elif problem=='CASH':
+        monkeypatch.setattr(adapter,'get_cash_snapshot',lambda c:{'CashBalance':3999})
+    elif problem=='FEES': adapter.what_if_error=True
+    else: adapter.commission_currency='GBP'
+    result=client.post('/api/execution-batches/trade-link/quote',json=budget(request_id=str(uuid4())))
+    assert result.status_code!=200 or result.json()['batch']['status']!='READY'
+    assert not adapter.place_calls
+    with Session(engine) as s: assert s.query(OrderRecord).count()==s.query(ExecutionBatch).count()==0
+
+
+def test_changed_or_expired_preview_cannot_be_confirmed(api,monkeypatch):
+    from datetime import timedelta
+    client,_,adapter=api
+    params,quote=quoted_request(client)
+    expired=confirmation(params,quote)|{'quote_as_of':(NOW-timedelta(seconds=31)).isoformat()}
+    assert client.post('/api/execution-batches/trade-link/confirm-intent',json=expired).status_code==422
+    original=adapter.get_executable_quote
+    monkeypatch.setattr(adapter,'get_executable_quote',lambda r:original(r)|{'ask':127,'bid':126.99})
+    changed=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote))
+    assert changed.status_code==422 and 'PREVIEW_CHANGED' in changed.text
+    assert not adapter.place_calls
+
+
+def test_failed_reprice_leaves_old_confirmation_invalid(api,monkeypatch):
+    client,engine,adapter=api
+    params,quote=quoted_request(client)
+    old=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    route='/api/execution-batches/'+old['id']
+    old=client.post(route+'/confirm',json={'confirmation_version':old['confirmation_version']}).json()
+    monkeypatch.setattr(adapter,'get_cash_snapshot',lambda c:{'CashBalance':0})
+    result=client.post(route+'/manual-limits',json={'limits':{'IB01':130},'confirmation_version':old['confirmation_version']})
+    assert result.status_code==422
+    with Session(engine) as s:
+        batch=s.get(ExecutionBatch,old['id'])
+        assert batch.status=='CANCELLED' and not batch.confirmation_hash
+    assert not adapter.place_calls
+
+
+def test_all_in_submission_rechecks_fee_and_confirmed_payload_without_real_orders(api,monkeypatch):
+    client,engine,adapter=api
+    params,quote=quoted_request(client)
+    batch=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'confirmation_version':0}).json()
+    with Session(engine) as s:
+        service=ExecutionBatchService(s,adapter,clock=lambda:NOW,allow_mutation=True) # Fake adapter only
+        loaded=service.get_batch(batch['id'])
+        assert service.review_fingerprint(loaded)==loaded.confirmation_hash
+        original=adapter.what_if_limit_order
+        monkeypatch.setattr(adapter,'what_if_limit_order',lambda r,**kw:original(r,**kw)|{'commission':100})
+        with pytest.raises(ExecutionSafetyError,match='ALL_IN_BUDGET_EXCEEDED'):
+            service.submit_next_leg(batch['id'],confirmation_version=batch['confirmation_version'])
+        assert not adapter.place_calls and s.query(OrderRecord).count()==0
+        monkeypatch.setattr(adapter,'what_if_limit_order',original)
+        loaded.legs[0].final_limit=125
+        with pytest.raises(ExecutionSafetyError,match='payload changed'):
+            service.submit_next_leg(batch['id'],confirmation_version=batch['confirmation_version'])
+        assert not adapter.place_calls
+
+
+def test_all_in_rejects_stale_confirmed_quote_even_with_fresh_broker_quote(api,monkeypatch):
+    from datetime import timedelta
+    client,engine,adapter=api
+    params,quote=quoted_request(client)
+    batch=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
+    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'confirmation_version':0}).json()
+    original=adapter.get_executable_quote
+    monkeypatch.setattr(adapter,'get_executable_quote',lambda r:original(r)|{'quote_timestamp':(NOW+timedelta(seconds=31)).isoformat()})
+    with Session(engine) as s:
+        service=ExecutionBatchService(s,adapter,clock=lambda:NOW+timedelta(seconds=31),allow_mutation=True)
+        with pytest.raises(ExecutionSafetyError,match='quote stale'):
+            service.submit_next_leg(batch['id'],confirmation_version=batch['confirmation_version'])
+        assert not adapter.place_calls
+
+
+def test_all_in_quantity_dependent_fees_converge_inside_budget(api,monkeypatch):
+    client,_,adapter=api
+    original=adapter.what_if_limit_order
+    monkeypatch.setattr(adapter,'what_if_limit_order',lambda r,**kw:original(r,**kw)|{'commission':kw['quantity']*.5})
+    _,quote=quoted_request(client)
+    batch=quote['batch'];leg=batch['legs'][0]
+    assert batch['estimated_fees']==leg['final_quantity']*.5
+    assert leg['estimated_notional']+batch['estimated_fees']+batch['safety_cushion']<=4000
+    assert not adapter.place_calls
+
+
+def test_ibkr_tif_matches_original_day_builder_and_rejects_old_mislabelled_gtc():
+    assert IBKRLinkOrder.model_validate(budget()).time_in_force=='DAY'
+    with pytest.raises(ValueError):IBKRLinkOrder.model_validate(budget(time_in_force='GTC'))
+
+
+def test_preview_fingerprint_is_bound_to_request_id(api):
+    client,_,adapter=api
+    params,quote=quoted_request(client)
+    other=params|{'request_id':str(uuid4())}
+    response=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(other,quote))
+    assert response.status_code==422 and 'PREVIEW_CHANGED' in response.text
+    assert not adapter.place_calls

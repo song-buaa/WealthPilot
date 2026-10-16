@@ -11,7 +11,8 @@
 import { useState, useEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2 } from 'lucide-react'
-import { actionApi, type SymbolStrategyResponse } from '@/lib/api'
+import { actionApi, executionBatchApi, type ExecutionBatchResponse, type SymbolStrategyResponse } from '@/lib/api'
+import { IBKRReviewFields } from './ActionDraftCard'
 import { useToast } from '@/hooks/useToast'
 
 interface RiskWarning {
@@ -29,17 +30,41 @@ interface RiskCheckResponse {
   confirmation_text_required: string | null
 }
 
-interface Props {
-  open: boolean
-  onClose: () => void
-  strategy: SymbolStrategyResponse
-  onOrderPlaced: () => void
-}
+type IBKRConfirmation = { batch: ExecutionBatchResponse; requestId: string; onChanged: (batch: ExecutionBatchResponse) => void }
+type Props = { open: boolean; onClose: () => void; onOrderPlaced: () => void } & (
+  {strategy: SymbolStrategyResponse; ibkr?: never} | {strategy?: never; ibkr: IBKRConfirmation}
+)
 
 const CONFIRMATION_TEXT = '我已知晓风险并坚持下单'
 
-export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPlaced }: Props) {
+export default function ConfirmOrderDialog({ open, onClose, strategy = {} as SymbolStrategyResponse, onOrderPlaced, ibkr }: Props) {
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const busy = useRef(false)
+  const [limit, setLimit] = useState(ibkr?.batch.legs[0].final_limit?.toString() ?? '')
+  const [dirty, setDirty] = useState(false)
+  const [now, setNow] = useState(Date.now)
+  const [safety, setSafety] = useState<{ibkr_read_only_mode: boolean; live_trading_enabled: boolean} | null>(null)
+  const batch = ibkr?.batch
+  const leg = batch?.legs[0]
+  const fresh = Boolean(leg?.quote_as_of && now - Date.parse(leg.quote_as_of) <= Number(batch?.execution_policy.quote_max_age_seconds ?? 30) * 1000)
+  useEffect(() => {
+    if (!ibkr) return
+    executionBatchApi.safety().then(setSafety).catch(() => setSafety(null))
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [ibkr])
+  useEffect(() => {
+    if (!ibkr) return
+    const pending = ibkr.batch.legs.filter(item => item.linked_order_id && !['FILLED','CANCELLED','REJECTED','UNKNOWN'].includes(item.status))
+    if (!pending.length) return
+    const timer = setTimeout(async () => {
+      try {
+        await Promise.all(pending.map(item => actionApi.getOrder(item.linked_order_id!, true)))
+        ibkr.onChanged(await executionBatchApi.get(ibkr.batch.id))
+      } catch (err) { setSubmitError((err as Error).message) }
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [ibkr])
   const [executionLabel, setExecutionLabel] = useState('正在核实券商模式')
   const { showToast } = useToast()
 
@@ -50,7 +75,6 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
   const [confirmText, setConfirmText] = useState('')
   const [checkboxChecked, setCheckboxChecked] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const quantity = strategy.target_quantity || 0
   const limitPrice = strategy.limit_price || 0
@@ -59,7 +83,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
 
   // Run risk check when dialog opens
   useEffect(() => {
-    if (!open) return
+    if (!open || ibkr) return
 
     let active = true
     actionApi.executionContext().then(result => { if (active) setExecutionLabel(result.label) })
@@ -72,17 +96,36 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
       .catch(err => { if (active) setRiskError(err.message || '风控检查失败') })
       .finally(() => { if (active) setRiskLoading(false) })
     return () => { active = false }
-  }, [open, strategy.id, quantity, limitPrice])
+  }, [open, strategy.id, quantity, limitPrice, ibkr])
 
   const needsConfirmation = riskResult?.requires_confirmation ?? false
   const textMatch = confirmText === CONFIRMATION_TEXT
 
-  const canSubmit =
+  const canSubmit = ibkr ? Boolean(checkboxChecked && !submitting && !dirty && fresh && batch?.status === 'CONFIRMED'
+    && safety?.live_trading_enabled && !safety.ibkr_read_only_mode) :
     checkboxChecked &&
     !submitting &&
     riskResult !== null &&
     !riskError &&
     (!needsConfirmation || textMatch)
+
+  async function recalculateIBKR() {
+    if (!ibkr || busy.current) return
+    busy.current = true; setSubmitting(true); setCheckboxChecked(false); setSubmitError(null); setDirty(true)
+    try {
+      const next = await executionBatchApi.applyManualLimits(ibkr.batch.id, {IB01: Number(limit)}, ibkr.batch.confirmation_version)
+      ibkr.onChanged(next)
+    } catch (err) { setSubmitError(`${(err as Error).message}。旧确认已撤销，请取消并重新生成交易链接。`) }
+    finally { busy.current = false; setSubmitting(false) }
+  }
+
+  async function confirmIBKRPlan() {
+    if (!ibkr || dirty || !fresh || busy.current) return
+    busy.current = true; setSubmitting(true); setSubmitError(null)
+    try { ibkr.onChanged(await executionBatchApi.confirm(ibkr.batch.id, ibkr.batch.confirmation_version)) }
+    catch (err) { setSubmitError((err as Error).message) }
+    finally { busy.current = false; setSubmitting(false) }
+  }
 
   async function handleSubmit() {
     if (!canSubmit || busy.current) return
@@ -99,6 +142,16 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
     }, 30000)
 
     try {
+      if (ibkr) {
+        const current = ibkr.batch
+        for (const item of current.legs) {
+          if (!item.linked_order_id) await executionBatchApi.submitLeg(current.id, item.id, current.confirmation_version,
+            `确认并提交 ${current.legs.length} 笔 IBKR 实盘限价单`)
+        }
+        ibkr.onChanged(await executionBatchApi.get(current.id))
+        clearTimeout(timeoutWarning); clearTimeout(timeoutCritical)
+        return
+      }
       const result = await actionApi.placeOrder(strategy.id, {
         quantity,
         limit_price: limitPrice,
@@ -136,7 +189,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           background: '#fff', borderRadius: 12, padding: 0,
-          width: 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto',
+          width: ibkr ? 'min(640px, 96vw)' : 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto',
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           zIndex: 8001,
         }}>
@@ -150,7 +203,16 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
           </div>
 
           <div style={{ padding: '16px 20px' }}>
-            <div role="status" style={{ marginBottom: 12 }}>交易环境：{executionLabel}</div>
+            <div role="status" style={{ marginBottom: 12 }}>交易环境：{ibkr ? 'IBKR · LSEETF / USD / SMART' : executionLabel}</div>
+            {ibkr && <>
+              <p>当前请求：{ibkr.requestId}</p>
+              <IBKRReviewFields batch={ibkr.batch} limit={limit} onLimitChange={value => {setLimit(value); setDirty(true); setCheckboxChecked(false)}} />
+              <button disabled={submitting || Boolean(leg?.linked_order_id)} onClick={recalculateIBKR}>重新计算股数、费用及 WhatIf</button>
+              {dirty && <p role="status">限价已修改或重新计算失败，旧确认不可提交。</p>}
+              {!fresh && <p role="status">报价已过期，请重新计算并重新确认。</p>}
+              {(!safety?.live_trading_enabled || safety.ibkr_read_only_mode) && <p role="status">IBKR 当前保留只读保护，尚不可提交真实订单。</p>}
+            </>}
+            {!ibkr && <>
             {/* Order Summary */}
             <div style={{
               background: '#F9FAFB', borderRadius: 8, padding: '12px 16px',
@@ -227,6 +289,8 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
               )}
             </div>
 
+            </>}
+
             {/* Confirmation text input (only when risk warnings exist) */}
             {needsConfirmation && (
               <div style={{
@@ -273,7 +337,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
                 onChange={e => setCheckboxChecked(e.target.checked)}
                 style={{ marginTop: 2 }}
               />
-              <span>我已确认订单参数无误，理解此操作不可撤回</span>
+              <span>{ibkr ? '我已确认订单参数及费用，并确认 Gateway 已获本人实盘授权；最终提交才会发送订单' : '我已确认订单参数无误，理解此操作不可撤回'}</span>
             </label>
 
             {/* Submit error */}
@@ -305,6 +369,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy, onOrderPla
             >
               取消
             </button>
+            {ibkr && batch?.status === 'READY' && <button data-testid="confirm-ibkr-plan" disabled={dirty || !fresh || submitting} onClick={confirmIBKRPlan}>确认交易计划</button>}
             <button
               data-testid="submit-btn"
               onClick={handleSubmit}

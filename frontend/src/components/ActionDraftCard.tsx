@@ -6,10 +6,10 @@
  * - 旧路径(单笔): 兼容，走原布局
  * - 恢复 trigger_price 可编辑
  */
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, AlertTriangle, CheckCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
-import type { ActionDraftResponse, SymbolStrategyDraft } from '@/lib/api'
+import type { ActionDraftResponse, SymbolStrategyDraft, IBKRLinkPreview, IBKRQuote, ExecutionBatchResponse } from '@/lib/api'
 import { actionApi } from '@/lib/api'
 import { formatDataSource, formatDegraded, formatFactors, formatConstraints } from '@/lib/plan-display'
 
@@ -28,11 +28,24 @@ interface PlanMeta {
   risk_notes_text?: string
 }
 
+interface IBKRPrefill {
+  preview: IBKRLinkPreview
+  quote: IBKRQuote | null
+  limit: string
+  dirty: boolean
+  busy: boolean
+  error: string
+  onLimitChange: (value: string) => void
+  onRecalculate: () => void
+  onConfirm: () => Promise<void>
+}
+
 interface Props {
   open: boolean
   onClose: () => void
   draft: ActionDraftResponse | null
   onConfirmed: (draftId?: string) => void
+  ibkr?: IBKRPrefill
   executionLabel?: string
   planMeta?: PlanMeta | null  // v3.11: 执行计划附加信息
 }
@@ -52,10 +65,10 @@ function normalizeMissingFields(draft: ActionDraftResponse | null): MissingField
 }
 
 export default function ActionDraftCard(props: Props) {
-  return <ActionDraftCardContent key={props.draft?.id ?? 'empty'} {...props} />
+  return <ActionDraftCardContent key={props.ibkr?.preview.request_id ?? props.draft?.id ?? 'empty'} {...props} />
 }
 
-function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, executionLabel }: Props) {
+function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, executionLabel, ibkr }: Props) {
   const busy = useRef(false)
   const [strategies, setStrategies] = useState<SymbolStrategyDraft[]>(
     () => draft?.payload?.symbol_strategies || [],
@@ -71,7 +84,15 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
   const [showFactors, setShowFactors] = useState(false)
   const [showConstraints, setShowConstraints] = useState(false)
 
-  const canConfirm = missingFields.length === 0
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!ibkr) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [ibkr])
+  const leg = ibkr?.quote?.batch.legs[0]
+  const fresh = Boolean(leg?.quote_as_of && now - Date.parse(leg.quote_as_of) <= Number(ibkr?.quote?.batch.execution_policy.quote_max_age_seconds ?? 30) * 1000)
+  const canConfirm = ibkr ? Boolean(ibkr.quote?.batch.status === 'READY' && fresh && !ibkr.dirty && !ibkr.busy) : missingFields.length === 0
 
   // 判断是否为执行计划模式(N 条同 symbol 同 side 的批次)
   const isExecutionPlan = strategies.length > 0 && planMeta?.plan_id
@@ -85,6 +106,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
     setConfirming(true)
     setError(null)
     try {
+      if (ibkr) { await ibkr.onConfirm(); return }
       if (planMeta?.plan_id) {
         // 执行计划路径: 先同步编辑后的数量到 DB，再 confirm
         const tranchesPayload = strategies.map((s, i) => ({
@@ -192,6 +214,16 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
 
           <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
             {executionLabel && <div role="status">交易环境：{executionLabel}。此步骤仅加入投资行动，最终提交仍需确认。</div>}
+
+            {ibkr && <>
+              <IBKRReviewFields batch={ibkr.quote?.batch ?? null} preview={ibkr.preview}
+                limit={ibkr.limit} onLimitChange={ibkr.onLimitChange} />
+              {ibkr.dirty && <p role="status">参数已修改，请重新计算股数、费用和 WhatIf；旧预览不可确认。</p>}
+              {!fresh && ibkr.quote && <p role="status">报价已过期，请重新获取报价。</p>}
+              <button disabled={ibkr.busy} onClick={ibkr.onRecalculate}>{ibkr.busy ? '正在读取 IBKR…' : '重新计算股数、费用及 WhatIf'}</button>
+              {ibkr.error && <p role="alert">{ibkr.error}</p>}
+              <p>确认后进入最终下单确认；此处不提交订单。</p>
+            </>}
 
             {/* ── 执行计划模式: 计划头 + N 批次行 ── */}
             {isExecutionPlan && (
@@ -426,7 +458,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
             >
               {confirming
                 ? <><Loader2 size={14} className="animate-spin" />确认中...</>
-                : <><CheckCircle size={14} />加入投资行动</>}
+                : <><CheckCircle size={14} />{ibkr ? '确认意图并进入最终确认' : '加入投资行动'}</>}
             </button>
           </div>
         </Dialog.Content>
@@ -465,4 +497,40 @@ const inputStyle: React.CSSProperties = {
 const expandBtn: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer',
   fontSize: 11, color: '#6B7280', display: 'flex', alignItems: 'center', gap: 2,
+}
+
+
+/** Shared fields inside the two existing P2 dialogs; no separate trading page. */
+export function IBKRReviewFields({ batch, preview, limit, onLimitChange }: {
+  batch: ExecutionBatchResponse | null
+  preview?: IBKRLinkPreview
+  limit: string
+  onLimitChange: (value: string) => void
+}) {
+  const leg = batch?.legs[0]
+  const instrument = leg ?? preview?.instrument
+  const amount = (value: number | null | undefined) => value == null ? '待获取' : `${value.toLocaleString('en-US', {maximumFractionDigits: 4})} USD`
+  const attention = batch?.attention_reason
+  return <section data-testid="ibkr-review-fields" style={{fontSize: 13, lineHeight: 1.8, overflowWrap: 'anywhere'}}>
+    <div><b>标的：</b>IB01:LSE · <b>方向：</b>买入 BUY · <b>券商：</b>IBKR · LIMIT / DAY</div>
+    <div><b>合约：</b>conId {instrument && ('resolved_con_id' in instrument ? instrument.resolved_con_id : instrument.con_id)} · {instrument?.isin}</div>
+    <div><b>上市 / 执行 / 币种：</b>LSEETF / SMART / USD · Acc</div>
+    <div><b>账户：</b>{batch?.account_masked ?? '现有 IBKR 账户，读取中'}</div>
+    <div><b>总支出上限（含费用和安全垫）：</b><span data-testid="ibkr-link-target">{amount(batch?.stated_cash ?? Number(preview?.order.target_amount))}</span></div>
+    <div><b>报价 Ask：</b>{amount(leg?.quote_ask)} · {leg?.quote_quality ?? '待获取'}</div>
+    <div><b>报价时间：</b>{leg?.quote_as_of ?? '未知，不可提交'}</div>
+    <div><b>建议限价：</b>{amount(leg?.suggested_limit)}</div>
+    <label style={{display: 'block', margin: '8px 0'}}>限价（USD） <input aria-label="IBKR 限价" inputMode="decimal" value={limit}
+      onChange={event => onLimitChange(event.target.value)} style={{padding: 8, border: '1px solid #CBD5E1', borderRadius: 6, maxWidth: '100%'}} /></label>
+    <div><b>整数股数：</b><span data-testid="ibkr-quantity">{leg?.final_quantity ?? '待计算'}</span></div>
+    <div><b>订单名义金额：</b>{amount(batch?.estimated_total)}</div>
+    <div><b>预计费用：</b>{leg?.what_if?.status === 'PASS' ? amount(batch?.estimated_fees) : '未取得，不可提交'}</div>
+    <div><b>WhatIf：</b>{String(leg?.what_if?.status ?? '待校验')}</div>
+    <div><b>资金安全垫：</b>{amount(batch?.safety_cushion)}</div>
+    <div><b>资金占用（含费用及安全垫）：</b><span data-testid="ibkr-total-outlay">{batch ? amount(batch.estimated_total + batch.estimated_fees + batch.safety_cushion) : '待计算'}</span></div>
+    <div><b>状态：</b>{batch?.status ?? '读取中'}</div>
+    {batch && <div><b>当前批次 / 确认版本：</b>{batch.id} / {batch.confirmation_version}</div>}
+    {attention && <p role="alert">风险及阻断：{Array.isArray(attention) ? attention.join('；') : attention}</p>}
+    <p style={{color: '#B45309'}}>金额、数量和费用均须经 IBKR 校验；报价过期、费用未知或资金不足时不可提交。</p>
+  </section>
 }

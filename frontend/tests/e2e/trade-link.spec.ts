@@ -80,21 +80,86 @@ test('mobile viewport: prefill and final confirmation fit the screen without sub
 })
 
 
-test('IB01 budget link opens qualified IBKR intent without creating a batch or order', async ({page,request}) => {
-  const beforeOrders=(await (await request.get(`${base}/api/action/orders`)).json()).items.length
-  const beforeBatches=(await (await request.get(`${base}/api/execution-batches`)).json()).items.length
-  const calls:string[]=[]
-  page.on('request',r => { if (r.method()==='POST') calls.push(new URL(r.url()).pathname) })
-  await page.goto(`${base}/#/action?trade=ibkr&request_id=${randomUUID()}&broker=IBKR&symbol=IB01%3AUK&side=BUY&order_type=LIMIT&target_amount=4000&currency=USD`)
+function ibkrLink() {
+  const supplied = process.env.WP_ACTUAL_CHATGPT_LINK
+  return supplied ? base + new URL(supplied).hash.replace(/^#/, '/#') : `${base}/#/action?trade=ibkr&request_id=${randomUUID()}&broker=IBKR&symbol=IB01%3ALSE&side=BUY&order_type=LIMIT&target_amount=4000&currency=USD`
+}
+
+async function resetIBKR(request: import('@playwright/test').APIRequestContext) {
+  await request.post(`${base}/__test/ibkr-state`, {data:{quality:'LIVE',cash:10000,fee:5}})
+}
+
+for (const mobile of [false,true]) {
+  test(`IB01 unified dialogs: all-in quote, edit, final plan and version invalidation (${mobile?'mobile':'desktop'})`, async ({page,request}) => {
+    await resetIBKR(request)
+    if (mobile) await page.setViewportSize({width:390,height:844})
+    const before = await (await request.get(`${base}/__test/ibkr-counts`)).json()
+    const submissions:string[]=[]
+    page.on('request',r => { if(r.url().endsWith('/submit') || r.url().endsWith('/place_order')) submissions.push(r.url()) })
+    await page.goto(ibkrLink())
+    const draft=page.getByRole('dialog')
+    await expect(draft.getByRole('heading',{name:/行动清单/})).toBeVisible()
+    await expect(draft).toContainText('LSEETF / SMART / USD')
+    await expect(draft).toContainText('354802220')
+    await expect(draft).toContainText('IE00BGSF1X88')
+    await expect(draft.getByTestId('ibkr-quantity')).toHaveText('39')
+    await expect(draft.getByTestId('ibkr-total-outlay')).toHaveText('3,930 USD')
+    await expect(draft).toContainText('WhatIf：PASS')
+    expect((await (await request.get(`${base}/__test/ibkr-counts`)).json()).batches).toBe(before.batches)
+    await expect(page.getByText('多标的交易执行',{exact:true})).not.toBeVisible()
+    await expect(page.getByText(/IBKR Case 1/)).not.toBeVisible()
+    await draft.getByLabel('IBKR 限价').fill('130')
+    await expect(draft.getByRole('button',{name:'确认意图并进入最终确认'})).toBeDisabled()
+    await draft.getByRole('button',{name:'重新计算股数、费用及 WhatIf'}).click()
+    await expect(draft.getByTestId('ibkr-quantity')).toHaveText('30')
+    await expect(draft.getByTestId('ibkr-total-outlay')).toHaveText('3,930 USD')
+    if (process.env.WP_UI_SCREENSHOT_DIR) await page.screenshot({path:`${process.env.WP_UI_SCREENSHOT_DIR}/isolated-${mobile?'mobile':'desktop'}-prefill.png`})
+    await draft.getByRole('button',{name:'确认意图并进入最终确认'}).click()
+    const final=page.getByTestId('confirm-order-dialog')
+    await expect(final).toContainText('最终确认下单')
+    await expect(final).toContainText('WhatIf：PASS')
+    await expect(final).toContainText('当前请求：')
+    await expect(final.getByTestId('submit-btn')).toBeDisabled()
+    await final.getByTestId('confirm-ibkr-plan').click()
+    await expect(final.getByTestId('confirm-ibkr-plan')).not.toBeVisible()
+    await expect(final).toContainText('CONFIRMED')
+    await final.getByRole('checkbox').check()
+    await expect(final.getByTestId('submit-btn')).toBeDisabled() // real safety flags stay OFF
+    if (process.env.WP_UI_SCREENSHOT_DIR) await page.screenshot({path:`${process.env.WP_UI_SCREENSHOT_DIR}/isolated-${mobile?'mobile':'desktop'}-final.png`})
+    const bounds=await final.boundingBox()
+    expect(bounds!.width).toBeLessThanOrEqual(mobile?390:1280)
+    await final.getByLabel('IBKR 限价').fill('100')
+    await expect(final.getByRole('checkbox')).not.toBeChecked()
+    await final.getByRole('button',{name:'重新计算股数、费用及 WhatIf'}).click()
+    await expect(final.getByTestId('ibkr-quantity')).toHaveText('39')
+    await expect(final.getByTestId('confirm-ibkr-plan')).toBeVisible()
+    await final.getByTestId('cancel-btn').click()
+    expect(submissions).toHaveLength(0)
+    const after=await (await request.get(`${base}/__test/ibkr-counts`)).json()
+    expect(after.orders).toBe(before.orders)
+    expect(after.real_order_calls).toBe(0)
+  })
+}
+
+test('IB01 delayed quote / insufficient cash blocks confirmation in original dialog',async ({page,request}) => {
+  for (const state of [{quality:'DELAYED',cash:10000,fee:5},{quality:'LIVE',cash:3999,fee:5}]) {
+    await request.post(`${base}/__test/ibkr-state`,{data:state})
+    await page.goto(ibkrLink())
+    const dialog=page.getByRole('dialog')
+    await expect(dialog.getByRole('button',{name:'确认意图并进入最终确认'})).toBeDisabled()
+    if(state.cash===3999) await expect(dialog.getByRole('alert')).toContainText('INSUFFICIENT')
+    else await expect(dialog.getByRole('alert')).toContainText('marketDataType')
+  }
+  await resetIBKR(request)
+})
+
+test('HK ordinary prefill retains original dialogs and currency',async({page})=>{
+  await page.goto(link().replace('NVDA%3AUS','00700%3AHK').replace('currency=USD','currency=HKD'))
   const dialog=page.getByRole('dialog')
-  await expect(dialog).toContainText('IB01:LSE')
-  await expect(dialog).toContainText('354802220')
-  await expect(dialog).toContainText('IE00BGSF1X88')
-  await expect(dialog).toContainText('LSEETF / SMART')
-  await expect(dialog.getByTestId('ibkr-link-target')).toHaveText('4000 USD')
-  await expect(dialog).toContainText('只读保护')
-  await dialog.getByRole('button',{name:'取消',exact:true}).click()
-  expect(calls).toEqual(['/api/execution-batches/trade-link/preview'])
-  expect((await (await request.get(`${base}/api/action/orders`)).json()).items.length).toBe(beforeOrders)
-  expect((await (await request.get(`${base}/api/execution-batches`)).json()).items.length).toBe(beforeBatches)
+  await expect(dialog.getByLabel('标的及市场')).toHaveValue('0700:HK')
+  await expect(dialog.getByLabel('交易币种')).toHaveValue('HKD')
+  await dialog.getByRole('button',{name:'加入投资行动'}).click()
+  const final=page.getByTestId('confirm-order-dialog')
+  await expect(final).toContainText('HKD')
+  await final.getByTestId('cancel-btn').click()
 })

@@ -31,7 +31,7 @@ P1 已有三项生产读取及 ChatGPT Web/iOS 实测。P2 采用个人 Pro → 
 
 原 ChatGPT Skills 迭代 1 使用独立 `pocs/chatgpt_skills` 入口和临时 Mock 数据库；P1 复用只读服务，P2 仅验证原 OrderManager 的模拟链路，不启用真实券商。工具参数 `confirmed=true` 不证明人类确认，Business Web/iOS 必须独立验收。不得自动替换现役 MCP/Tunnel/Web 或借此启用订单轮询。见 [迭代说明](docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。
 
-IB01 的 P2 预算链接接回原 IBKR Typed Intent / ExecutionBatch；仅支持已验证的 IB01 LSEETF/USD/SMART 身份，保留原最终 Web 授权、资金与只读护栏，不在 MCP 创建或提交订单。
+IB01 的 P2 预算链接统一复用 ActionDraftCard / ConfirmOrderDialog，预算包含费用及原资金安全垫；底层使用原 IBKR Typed Intent / ExecutionBatch；仅支持已验证的 IB01 LSEETF/USD/SMART 身份，保留原最终 Web 授权、资金与只读护栏，不在 MCP 创建或提交订单。
 
 ## 项目概述
 

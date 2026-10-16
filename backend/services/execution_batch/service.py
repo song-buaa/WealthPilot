@@ -219,14 +219,14 @@ class ExecutionBatchService:
                 raise ExecutionSafetyError(f"Case 1 {name}={actual}, expected={expected}")
         legs = ExecutionBatchService._canonical_leg_values(intent)
         budget_mode = str(intent.budget_mode.value or "").upper()
-        if budget_mode == "FIXED_TOTAL":
+        if budget_mode in {"FIXED_TOTAL", "ALL_IN_TOTAL"}:
             # Entry compatibility for a single IB01 top-up. The existing fixed
             # target calculator, broker resolver, WhatIf, cash ledger and final
             # per-leg submission checks remain the execution authority.
             if (len(legs) == 1 and legs[0][:2] == ("IB01", "APPROX_AMOUNT")
                     and legs[0][2] is not None and legs[0][2] > 0
                     and money(intent.stated_cash.value) == legs[0][2]):
-                return "IB01_FIXED_TARGET"
+                return "IB01_ALL_IN_TARGET" if budget_mode == "ALL_IN_TOTAL" else "IB01_FIXED_TARGET"
             raise ExecutionSafetyError("IB01 fixed target must match the confirmed USD target amount")
         if budget_mode != "ALL_AVAILABLE_CASH":
             raise ExecutionSafetyError("Case 1 budget_mode unsupported")
@@ -258,6 +258,7 @@ class ExecutionBatchService:
         message_id: int,
         _controlled_retry_of: ExecutionBatch | None = None,
         _retry_attempt: int | None = None,
+        _manual_limits: dict | None = None,
     ) -> ExecutionBatch:
         """Resolve and calculate a real or fake plan; never submits an order."""
         intent = self.load_confirmed_intent(
@@ -285,6 +286,12 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("检测到外部 BUY open order，Case 1 资金池被锁定")
 
         cushion = money(os.getenv("BATCH_CASH_SAFETY_CUSHION_USD", "25"))
+        if not cushion.is_finite() or cushion < 0:
+            raise ExecutionSafetyError("Invalid cash safety cushion")
+        if intent_variant == "IB01_ALL_IN_TARGET" and authoritative_cash < money(intent.stated_cash.value):
+            raise ExecutionSafetyError("INSUFFICIENT_USD_CASH_FOR_ALL_IN_BUDGET")
+        if _manual_limits is not None and (intent_variant != "IB01_ALL_IN_TARGET" or set(_manual_limits) != {"IB01"}):
+            raise ExecutionSafetyError("Unsupported manual limit input")
         if _controlled_retry_of is not None and _retry_attempt not in {2, 3}:
             raise ExecutionSafetyError("Controlled Retry attempt 必须明确为 2 或 3")
 
@@ -310,6 +317,9 @@ class ExecutionBatchService:
                 "currency": "USD",
                 "side": "BUY", "order_type": "LIMIT", "quantity": "WHOLE",
                 "intent_variant": intent_variant,
+                **({"quote_max_age_seconds": int(os.getenv("BATCH_QUOTE_MAX_AGE_SECONDS", "30")),
+                    "budget_includes_fees": True, "budget_includes_safety_cushion": True, "time_in_force": "DAY"}
+                   if intent_variant == "IB01_ALL_IN_TARGET" else {}),
                 "sequence": [item[0] for item in self._canonical_leg_values(intent)],
                 "external_open_order_count": len(open_order_details),
                 "external_open_buy_order_count": len(competing),
@@ -402,6 +412,13 @@ class ExecutionBatchService:
                 leg.suggested_limit = limit
                 leg.final_limit = limit
                 leg.limit_source = "SUGGESTED_BEST_ASK"
+                if _manual_limits is not None:
+                    limit = money(_manual_limits[alias])
+                    if not limit.is_finite() or limit <= 0 or normalize_buy_limit(limit, resolved["market_rule"]) != limit:
+                        raise ExecutionSafetyError("手工 Limit 不符合 MarketRule tick")
+                    leg.final_limit = limit
+                    leg.limit_source = "USER_MANUAL_CONFIRMED"
+                    leg.manual_limit_confirmed_at = self.clock()
                 if mode == "APPROX_AMOUNT":
                     quantity, notional = calculate_fixed_quantity(target, limit)
                     leg.estimated_quantity = leg.final_quantity = quantity
@@ -416,11 +433,20 @@ class ExecutionBatchService:
         for leg in fixed_legs:
             total_notional += money(leg.estimated_notional)
             try:
-                result = self.adapter.what_if_limit_order(
-                    json.loads(leg.resolution_snapshot),
-                    quantity=leg.estimated_quantity,
-                    limit_price=money(leg.suggested_limit),
-                )
+                if intent_variant == "IB01_ALL_IN_TARGET":
+                    quantity, notional, result, _ = self._calculate_remainder_with_what_if(
+                        leg, budget_before_own_fee=money(batch.stated_cash) - cushion,
+                        funding_currency=batch.funding_currency,
+                    )
+                    total_notional += notional - money(leg.estimated_notional)
+                    leg.final_quantity = leg.estimated_quantity = quantity
+                    leg.estimated_notional = notional
+                else:
+                    result = self.adapter.what_if_limit_order(
+                        json.loads(leg.resolution_snapshot),
+                        quantity=leg.estimated_quantity,
+                        limit_price=money(leg.final_limit),
+                    )
                 leg.what_if_snapshot = _json(result)
                 total_fees += _validate_what_if_result(
                     result, batch.funding_currency,
@@ -473,6 +499,8 @@ class ExecutionBatchService:
         batch.estimated_residual = max(
             Decimal("0"), authoritative_cash - total_notional - total_fees - cushion,
         )
+        if intent_variant == "IB01_ALL_IN_TARGET" and not attention:
+            self.assert_all_in_budget(batch)
         if attention:
             batch.status = "DRAFT"
             batch.attention_reason = _json(attention)
@@ -711,12 +739,73 @@ class ExecutionBatchService:
             ],
         }
 
+    @staticmethod
+    def is_all_in(batch: ExecutionBatch) -> bool:
+        return json.loads(batch.execution_policy or "{}").get("intent_variant") == "IB01_ALL_IN_TARGET"
+
+    def assert_all_in_budget(self, batch: ExecutionBatch, *, fee=None) -> None:
+        total = money(batch.estimated_total) + money(batch.estimated_fees if fee is None else fee) + money(batch.safety_cushion)
+        fee_value = money(batch.estimated_fees if fee is None else fee)
+        if not fee_value.is_finite() or fee_value < 0:
+            raise ExecutionSafetyError("Invalid WhatIf fee reserve")
+        if total > money(batch.stated_cash) or total > money(batch.usable_cash):
+            raise ExecutionSafetyError("ALL_IN_BUDGET_EXCEEDED: notional + fees + safety cushion")
+
+    def assert_review_fresh(self, batch: ExecutionBatch) -> None:
+        for leg in batch.legs:
+            if leg.quote_quality != "LIVE" or str(leg.market_data_type) != "1" or not leg.market_open:
+                raise ExecutionSafetyError("Fresh LIVE quote and open market required")
+            quote_guard({"quote_quality": leg.quote_quality, "ask": leg.quote_ask,
+                         "bid": leg.quote_bid, "quote_timestamp": leg.quote_as_of}, now=self.clock())
+            _validate_what_if_result(json.loads(leg.what_if_snapshot or "null") or {}, batch.funding_currency)
+        self.assert_all_in_budget(batch)
+
+    @staticmethod
+    def review_fingerprint(batch: ExecutionBatch) -> str:
+        # Bind economic facts, not transient IDs or the broker's new timestamp.
+        facts = ExecutionBatchService._confirmation_payload(batch)
+        facts.pop("batch_id")
+        facts["request_id"] = batch.source_conversation_id
+        for name in ("safety_cushion", "usable_cash", "estimated_fees", "estimated_total", "estimated_residual"):
+            facts[name] = format(money(facts[name]).normalize(), "f")
+        for leg in facts["legs"]:
+            leg.pop("id")
+            leg.pop("quote_as_of")
+            for name in ("target_amount", "final_limit"):
+                leg[name] = format(money(leg[name]).normalize(), "f")
+            what_if = leg["what_if"] or {}
+            leg["what_if"] = {"status": what_if.get("status"),
+                              "fee": format(_commission_in_funding_currency(what_if, batch.funding_currency).normalize(), "f") if what_if.get("status") == "PASS" else None}
+        facts["legs"] = [{**item, "quote_ask": format(money(leg.quote_ask).normalize(), "f"), "quote_bid": format(money(leg.quote_bid).normalize(), "f")}
+                         for item, leg in zip(facts["legs"], batch.legs)]
+        return hashlib.sha256(_json(facts).encode()).hexdigest()
+
+    def reprice_all_in(self, batch_id: str, limits: dict, version: int) -> ExecutionBatch:
+        batch = self.get_batch(batch_id)
+        if not self.is_all_in(batch) or version != batch.confirmation_version:
+            raise ExecutionSafetyError("confirmation version 无效")
+        if batch.status in {"CANCELLED", "COMPLETED"} or any(leg.linked_order_id for leg in batch.legs):
+            raise ExecutionSafetyError("Terminal/submitted batch cannot be repriced")
+        # Invalidate first, even if fresh quotes/WhatIf subsequently fail.
+        batch.status = "CANCELLED"
+        batch.confirmation_hash = None
+        batch.confirmation_version += 1
+        self._audit("execution_batch_price_change_invalidated", {"batch_id": batch.id,
+                    "confirmation_version": batch.confirmation_version, "broker_mutation": 0})
+        self.session.commit()
+        next_batch = self.create_batch(conversation_id=batch.source_conversation_id,
+                                       message_id=batch.source_message_id, _manual_limits=limits)
+        next_batch.confirmation_version = batch.confirmation_version
+        return next_batch
+
     def confirm_batch(self, batch_id: str) -> ExecutionBatch:
         batch = self.get_batch(batch_id)
         if batch.status != "READY":
             raise ExecutionSafetyError(f"Batch status={batch.status}，不可确认")
+        if self.is_all_in(batch):
+            self.assert_review_fresh(batch)
         batch.confirmation_version += 1
-        batch.confirmation_hash = hashlib.sha256(
+        batch.confirmation_hash = self.review_fingerprint(batch) if self.is_all_in(batch) else hashlib.sha256(
             _json(self._confirmation_payload(batch)).encode("utf-8")
         ).hexdigest()
         batch.status = "CONFIRMED"
@@ -964,12 +1053,21 @@ class ExecutionBatchService:
         limit = money(leg.final_limit)
         if quantity <= 0 or limit <= 0:
             raise ExecutionSafetyError("Leg 无有效 quantity/limit")
+        if self.is_all_in(batch):
+            self.assert_review_fresh(batch)
+            expected = self.review_fingerprint(batch)
+            if expected != batch.confirmation_hash:
+                raise ExecutionSafetyError("confirmation payload changed")
         if leg.target_amount and money(quantity) * limit > money(leg.target_amount):
             raise ExecutionSafetyError("Fixed Target ceiling violated")
         what_if = self.adapter.what_if_limit_order(
             resolved, quantity=quantity, limit_price=limit,
         )
-        _validate_what_if_result(what_if, batch.funding_currency)
+        fee = _validate_what_if_result(what_if, batch.funding_currency)
+        if self.is_all_in(batch):
+            self.assert_all_in_budget(batch, fee=fee)
+            if fee != money(batch.estimated_fees):
+                raise ExecutionSafetyError("WhatIf fee changed; refresh and reconfirm")
         leg.what_if_snapshot = _json(what_if)
 
         strategy = SymbolStrategy(
