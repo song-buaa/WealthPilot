@@ -24,6 +24,8 @@ export default function Action() {
   const [ibkrQuote, setIbkrQuote] = useState<IBKRQuote | null>(null)
   const [ibkrBatch, setIbkrBatch] = useState<ExecutionBatchResponse | null>(null)
   const [ibkrLimit, setIbkrLimit] = useState('')
+  const [ibkrOrder, setIbkrOrder] = useState<Record<string, string>>({})
+  const [ibkrStage, setIbkrStage] = useState<'edit' | 'review'>('edit')
   const [ibkrDirty, setIbkrDirty] = useState(false)
   const [ibkrBusy, setIbkrBusy] = useState(false)
   const [ibkrError, setIbkrError] = useState('')
@@ -49,15 +51,38 @@ export default function Action() {
     navigate('/action', {replace: true})
   }
 
+  function editIBKR() {
+    invalidateQuotes(); setIbkrStage('edit'); setIbkrQuote(null)
+    setIbkrDirty(true); setIbkrBusy(false); setIbkrError('')
+  }
+
+  async function joinIBKRAction() {
+    if (!ibkrLink) return
+    const sequence = ++quoteSequence.current
+    setIbkrBusy(true); setIbkrError('')
+    try {
+      // Same pure validation as opening a link; edited intent stays local until
+      // the existing fresh-quote/WhatIf confirmation endpoint accepts it.
+      const preview = await executionBatchApi.previewTradeLink({...ibkrOrder, request_id: ibkrLink.request_id})
+      if (sequence !== quoteSequence.current) return
+      setIbkrLink(preview); setIbkrOrder(preview.order); setIbkrStage('review')
+      await quoteIBKR(preview, ibkrLimit)
+    } catch (err) {
+      if (sequence === quoteSequence.current) { setIbkrError((err as Error).message); setIbkrBusy(false) }
+    }
+  }
+
   async function confirmIBKRIntent() {
     if (!ibkrLink || !ibkrQuote || ibkrDirty) return
+    const sequence = ++quoteSequence.current
     setIbkrBusy(true)
     try {
       const batch = await executionBatchApi.confirmTradeLinkIntent(ibkrLink, ibkrQuote, ibkrLimit)
+      if (sequence !== quoteSequence.current) return
       if (batch.source_conversation_id !== ibkrLink.request_id) throw new Error('交易批次与请求不匹配')
       setIbkrBatch(batch)
-    } catch (err) { setIbkrDirty(true); throw err }
-    finally { setIbkrBusy(false) }
+    } catch (err) { if (sequence === quoteSequence.current) { setIbkrDirty(true); throw err } }
+    finally { if (sequence === quoteSequence.current) setIbkrBusy(false) }
   }
   const [linkError, setLinkError] = useState<string | null>(null)
   const [executionLabel, setExecutionLabel] = useState<string>()
@@ -84,6 +109,8 @@ export default function Action() {
       setCurrentDraft(null)
       setLinkError(null)
       setIbkrLink(null)
+      setIbkrBatch(null); setIbkrQuote(null); setIbkrLimit(''); setIbkrStage('edit')
+      setIbkrDirty(true); setIbkrBusy(false); setIbkrError(''); setDirectStrategy(null)
       if (!['1', 'ibkr'].includes(params.get('trade') || '')) throw new Error('不支持的交易链接版本')
       const values: Record<string, unknown> = {}
       for (const [key, value] of params) {
@@ -92,7 +119,7 @@ export default function Action() {
       }
       if (params.get('trade') === 'ibkr') {
         const preview = await executionBatchApi.previewTradeLink(values)
-        if (active) { setIbkrLink(preview); setIbkrQuote(null); setIbkrBatch(null); setIbkrLimit(''); await quoteIBKR(preview) }
+        if (active) { setIbkrLink(preview); setIbkrOrder(preview.order) }
         return
       }
       if (values.quantity !== undefined) values.quantity = Number(values.quantity)
@@ -210,8 +237,10 @@ export default function Action() {
 
       </>}
       {ibkrLink && !ibkrBatch && <ActionDraftCard open draft={null} onClose={closeIBKR} onConfirmed={() => {}}
-        ibkr={{preview: ibkrLink, quote: ibkrQuote, limit: ibkrLimit, dirty: ibkrDirty, busy: ibkrBusy, error: ibkrError,
+        ibkr={{stage: ibkrStage, preview: ibkrLink, order: ibkrOrder, quote: ibkrQuote, limit: ibkrLimit, dirty: ibkrDirty, busy: ibkrBusy, error: ibkrError,
+          onOrderChange: (field, value) => { invalidateQuotes(); setIbkrOrder(order => ({...order, [field]: value})); setIbkrQuote(null); setIbkrDirty(true); setIbkrBusy(false); setIbkrError('') },
           onLimitChange: value => { quoteSequence.current++; setIbkrLimit(value); setIbkrDirty(true); setIbkrBusy(false) },
+          onJoin: joinIBKRAction, onBack: editIBKR,
           onRecalculate: () => { void quoteIBKR(ibkrLink, ibkrLimit) }, onConfirm: confirmIBKRIntent}} />}
       {ibkrBatch && ibkrLink && <ConfirmOrderDialog key={`${ibkrBatch.id}:${ibkrBatch.confirmation_version}`} open
         onClose={closeIBKR} onOrderPlaced={() => {}}

@@ -69,11 +69,20 @@ IB01 继续使用原 ActionDraftCard → ConfirmOrderDialog；独立 IBKRTradeLi
 现金足以覆盖该预算。复用原整股/WhatIf 收敛算法；费用不明、延迟/缺失/过期行情、休市、
 合约身份不符或资金不足均不可确认或提交，不使用估算行情冒充 LIVE。
 
-打开链接先取得登记身份，再调用 `/api/execution-batches/trade-link/quote`：在一次性内存
-SQLite 中运行原 Typed Intent / ExecutionBatchService，读取原 IBKR 事实及 WhatIf 后销毁。
-不打开或写生产数据库，不创建 SymbolStrategy/OrderRecord，不调用 place_order。
-展示合约、账户掩码、方向、预算、报价时间/质量、建议及实际限价、整股数、费用、安全垫、
-资金占用与阻断原因。纯登记预览不代表 Gateway/行情/WhatIf 可用。
+打开链接只调用纯登记 `/trade-link/preview`，显示原 ActionDraftCard 的“行动清单”编辑表单：
+标的、买入方向、总预算、可选限价、LIMIT、USD 和 DAY，附简短风险提示与“加入投资行动”。
+保留预算意图，不静默换成确定股数；当前 IB01 仅支持既有 BUY/LIMIT/USD/DAY 预算变体，
+不因 UI 编辑扩大券商或 Schema 支持范围。第一屏不读取实时行情，不自动落库。
+
+用户点击“加入投资行动”后，该组件进入“投资行动核对”步骤，才调用
+`/api/execution-batches/trade-link/quote`：在一次性内存 SQLite 中运行原 Typed Intent /
+ExecutionBatchService，读取原 IBKR 事实及 WhatIf 后销毁，不打开或写生产数据库，
+不创建 SymbolStrategy/OrderRecord，不调用 place_order。在此后续步骤展示合约、账户掩码、
+预算、报价时间/质量、限价、整股数、费用、安全垫、资金占用与阻断原因。
+IBKR 的“加入”此时只推进本页参数核对：现有接口要求新鲜报价与 WhatIf，通过后明确点击
+“核对并进入最终确认”才保存原意图/批次。报价不可用不妨碍首屏编辑，但阻断后续确认。
+返回编辑会丢弃旧预览，预算或参数变更必须重新核对；新链接清除旧最终确认状态。
+纯登记预览不代表 Gateway/行情/WhatIf 可用，不用 Fake 填充生产 UI。
 
 用户修改限价后必须重新取报价、合约和现金，重新计算数量/费用及 WhatIf。点击意图确认时
 绑定显示过的报价时间和经济参数 hash；报价过期或最新经济事实变化需重新预览。
@@ -88,7 +97,8 @@ request_id 关联。确认计划锁定版本，再由用户最终确认；最终
 美股/港股保留原草稿、确认组件和业务调用方式。
 
 自动化使用一次性库和 Fake/Mock Broker，桌面/移动尺寸测试不冒充 Safari/iPhone 实机。
-生产验收仅打开预填、内存报价和确认界面，不创建或提交真实订单，也不启用实盘。
+生产 UI smoke 仅打开预填，不点击加入、保存批次或任何交易提交按钮；后续报价失败场景
+用隔离故障注入验收。既有 Gateway 读取超时保留独立 BLOCKED，不作为 UI 专项失败。
 Gateway Read-Only 阻止 WhatIf 时如实显示阻断，不调整开关。
 
 新 IBKR 链接固定 DAY，与原 IBKR `_build_live_limit_order` / WhatIf 的实际有效期一致；

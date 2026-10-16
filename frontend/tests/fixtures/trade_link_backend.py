@@ -58,9 +58,16 @@ def set_ibkr_state(body: dict):
 
 @app.get('/__test/ibkr-counts')
 def ibkr_counts():
-    from backend.services.action.models import ExecutionBatch,OrderRecord
+    import hashlib
+    from sqlalchemy import text
     with get_session() as s:
-        return {'batches':s.query(ExecutionBatch).count(), 'orders':s.query(OrderRecord).count(),
+        names = ['action_drafts', 'allocation_intents', 'symbol_strategies',
+                 'order_records', 'execution_batches', 'execution_legs',
+                 'conversations', 'conversation_messages']
+        counts = {name: s.execute(text(f'SELECT count(*) FROM {name}')).scalar() for name in names}
+        fingerprints = {name: hashlib.sha256(repr(s.execute(text(f'SELECT * FROM {name} ORDER BY rowid')).fetchall()).encode()).hexdigest() for name in names}
+        return {'batches':counts['execution_batches'], 'orders':counts['order_records'],
+                'business_counts':counts, 'business_fingerprints':fingerprints,
                 'real_order_calls':len(ibkr.place_calls)}
 
 @app.get('/api/demo/status')

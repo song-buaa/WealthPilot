@@ -29,13 +29,18 @@ interface PlanMeta {
 }
 
 interface IBKRPrefill {
+  stage: 'edit' | 'review'
   preview: IBKRLinkPreview
+  order: Record<string, string>
   quote: IBKRQuote | null
   limit: string
   dirty: boolean
   busy: boolean
   error: string
   onLimitChange: (value: string) => void
+  onOrderChange: (field: string, value: string) => void
+  onJoin: () => Promise<void>
+  onBack: () => void
   onRecalculate: () => void
   onConfirm: () => Promise<void>
 }
@@ -92,7 +97,11 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
   }, [ibkr])
   const leg = ibkr?.quote?.batch.legs[0]
   const fresh = Boolean(leg?.quote_as_of && now - Date.parse(leg.quote_as_of) <= Number(ibkr?.quote?.batch.execution_policy.quote_max_age_seconds ?? 30) * 1000)
-  const canConfirm = ibkr ? Boolean(ibkr.quote?.batch.status === 'READY' && fresh && !ibkr.dirty && !ibkr.busy) : missingFields.length === 0
+  const validEntry = ibkr && Boolean(ibkr.order.symbol.trim() && Number(ibkr.order.target_amount) > 0
+    && Number.isFinite(Number(ibkr.order.target_amount))
+    && (!ibkr.limit || (Number.isFinite(Number(ibkr.limit)) && Number(ibkr.limit) > 0)))
+  const canConfirm = ibkr ? !ibkr.busy && (ibkr.stage === 'edit' ? validEntry
+    : Boolean(ibkr.quote?.batch.status === 'READY' && fresh && !ibkr.dirty)) : missingFields.length === 0
 
   // 判断是否为执行计划模式(N 条同 symbol 同 side 的批次)
   const isExecutionPlan = strategies.length > 0 && planMeta?.plan_id
@@ -106,7 +115,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
     setConfirming(true)
     setError(null)
     try {
-      if (ibkr) { await ibkr.onConfirm(); return }
+      if (ibkr) { await (ibkr.stage === 'edit' ? ibkr.onJoin() : ibkr.onConfirm()); return }
       if (planMeta?.plan_id) {
         // 执行计划路径: 先同步编辑后的数量到 DB，再 confirm
         const tranchesPayload = strategies.map((s, i) => ({
@@ -203,10 +212,10 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <Dialog.Title style={{ fontSize: 16, fontWeight: 700, color: '#1B2A4A', margin: 0 }}>
-              {isExecutionPlan ? '📋 执行计划确认' : '📋 行动清单'}
+              {isExecutionPlan ? '📋 执行计划确认' : ibkr?.stage === 'review' ? '📋 投资行动核对' : '📋 行动清单'}
             </Dialog.Title>
             <Dialog.Close asChild>
-              <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#9CA3AF' }}>
+              <button aria-label="关闭行动清单" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#9CA3AF' }}>
                 <X size={18} />
               </button>
             </Dialog.Close>
@@ -215,14 +224,43 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
           <div style={{ padding: '16px 24px', overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
             {executionLabel && <div role="status">交易环境：{executionLabel}。此步骤仅加入投资行动，最终提交仍需确认。</div>}
 
-            {ibkr && <>
+            {ibkr?.stage === 'edit' && <>
+              <div role="status" style={{fontSize: 13, color: '#374151'}}>交易环境：IBKR。此步骤仅加入投资行动，最终提交仍需确认。</div>
+              <Section title="标的策略">
+                <div style={{border: '1px solid #E5E7EB', borderRadius: 10, padding: '14px 16px', background: '#FAFBFC'}}>
+                  <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center'}}>
+                    <input aria-label="标的及市场" value={ibkr.order.symbol}
+                      onChange={event => ibkr.onOrderChange('symbol', event.target.value)} style={{...inputStyle, width: 148, maxWidth: '100%'}} />
+                    <select aria-label="买卖方向" value={ibkr.order.side} onChange={event => ibkr.onOrderChange('side', event.target.value)}><option value="BUY">BUY</option></select>
+                    <span style={{fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#DCFCE7', color: '#16A34A'}}>买入</span>
+                  </div>
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10}}>
+                    <EditableField label="总预算（USD，含费用）" value={ibkr.order.target_amount}
+                      onChange={value => ibkr.onOrderChange('target_amount', value)} />
+                    <EditableField label="限价（可选）" value={ibkr.limit} onChange={ibkr.onLimitChange} />
+                    <label style={{fontSize: 13}}>订单类型 <select aria-label="订单类型" value={ibkr.order.order_type} onChange={event => ibkr.onOrderChange('order_type', event.target.value)}><option value="LIMIT">LIMIT</option></select></label>
+                    <label style={{fontSize: 13}}>交易币种 <select aria-label="交易币种" value={ibkr.order.currency} onChange={event => ibkr.onOrderChange('currency', event.target.value)}><option value="USD">USD</option></select></label>
+                    <label style={{fontSize: 13}}>有效期 <select aria-label="有效期" value={ibkr.order.time_in_force} onChange={event => ibkr.onOrderChange('time_in_force', event.target.value)}><option value="DAY">DAY</option></select></label>
+                    <div style={{fontSize: 12, color: '#6B7280'}}>数量（股）：报价后计算整数股数</div>
+                  </div>
+                  <p style={{fontSize: 12, color: '#6B7280', marginTop: 12, marginBottom: 0}}>预算包含费用和资金安全垫；未填写限价时，下一步获取建议限价。</p>
+                </div>
+              </Section>
+              <Section title="风险提示">
+                <div style={{fontSize: 12, color: '#D97706', lineHeight: 1.6, paddingLeft: 8, borderLeft: '2px solid #F59E0B'}}>来自 ChatGPT 的预填参数，请核对后继续；最终订单仍需单独确认。</div>
+              </Section>
+              {ibkr.error && <p role="alert">{ibkr.error}</p>}
+            </>}
+
+            {ibkr?.stage === 'review' && <>
               <IBKRReviewFields batch={ibkr.quote?.batch ?? null} preview={ibkr.preview}
                 limit={ibkr.limit} onLimitChange={ibkr.onLimitChange} />
               {ibkr.dirty && <p role="status">参数已修改，请重新计算股数、费用和 WhatIf；旧预览不可确认。</p>}
               {!fresh && ibkr.quote && <p role="status">报价已过期，请重新获取报价。</p>}
               <button disabled={ibkr.busy} onClick={ibkr.onRecalculate}>{ibkr.busy ? '正在读取 IBKR…' : '重新计算股数、费用及 WhatIf'}</button>
               {ibkr.error && <p role="alert">{ibkr.error}</p>}
-              <p>确认后进入最终下单确认；此处不提交订单。</p>
+              <p>正在核对已编辑的投资意图，尚未保存。报价、费用及资金校验通过后，才可保存并进入最终确认；此处不提交订单。</p>
+              <button disabled={ibkr.busy} onClick={ibkr.onBack}>返回编辑参数</button>
             </>}
 
             {/* ── 执行计划模式: 计划头 + N 批次行 ── */}
@@ -458,7 +496,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
             >
               {confirming
                 ? <><Loader2 size={14} className="animate-spin" />确认中...</>
-                : <><CheckCircle size={14} />{ibkr ? '确认意图并进入最终确认' : '加入投资行动'}</>}
+                : <><CheckCircle size={14} />{ibkr?.stage === 'review' ? '核对并进入最终确认' : '加入投资行动'}</>}
             </button>
           </div>
         </Dialog.Content>
