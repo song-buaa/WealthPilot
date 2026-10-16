@@ -1,12 +1,14 @@
 """Pure URL/preview preparation. No database, broker, network or LLM access."""
 import re
 from typing import Literal
+from decimal import Decimal
 from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.utils.symbol import parse_symbol, normalize_symbol, _CURRENCY_TO_MARKET
 from pocs.chatgpt_skills.contracts import ExplicitOrder
+from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
 
 
 class LinkOrder(ExplicitOrder):
@@ -16,7 +18,11 @@ class LinkOrder(ExplicitOrder):
 
     @model_validator(mode="after")
     def normalize(self):
+        if self.symbol.strip().upper() == "IB01":
+            raise ValueError("IB01_REQUIRES_IBKR_BUDGET_LINK: broker=IBKR, target_amount, currency=USD")
         ticker, market = parse_symbol(self.symbol.upper())
+        if ticker.upper() == "IB01":
+            raise ValueError("IB01_REQUIRES_IBKR_BUDGET_LINK: broker=IBKR, target_amount, currency=USD")
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9.-]*", ticker):
             raise ValueError("INVALID_SYMBOL")
         self.symbol = normalize_symbol(ticker, market)
@@ -32,10 +38,49 @@ class LinkPreviewRequest(LinkOrder):
     request_id: UUID
 
 
+class IBKRLinkOrder(BaseModel):
+    """IB01 uses the existing qualified-contract batch path, not currency→US guessing.
+
+    The target is an approximate share notional; original broker fees/cash rules
+    are reviewed separately in Web. No quantity or price is invented in MCP.
+    """
+    model_config = ConfigDict(extra="forbid")
+    broker: Literal["IBKR"]
+    symbol: str = Field(min_length=1, max_length=30)
+    side: Literal["BUY"]
+    order_type: Literal["LIMIT"]
+    currency: Literal["USD"]
+    target_amount: Decimal = Field(gt=0, allow_inf_nan=False)
+    time_in_force: Literal["GTC"] = "GTC"
+
+    @model_validator(mode="after")
+    def normalize(self):
+        parts = self.symbol.strip().upper().split(":")
+        if (parts[0] != "IB01" or len(parts) > 2
+                or (len(parts) == 2 and parts[1] not in {"UK", "LSE", "LSEETF"})):
+            raise ValueError("IBKR_LINK_REQUIRES_VERIFIED_IB01_LSE_USD")
+        self.symbol = "IB01:LSE"
+        return self
+
+
+class IBKRLinkPreviewRequest(IBKRLinkOrder):
+    request_id: UUID
+
+
+def ibkr_instrument() -> dict:
+    trusted = TRUSTED_INSTRUMENTS["IB01"]
+    return {"con_id": trusted.con_id, "symbol": trusted.symbol,
+            "local_symbol": trusted.local_symbol, "isin": trusted.isin,
+            "listing_exchange": trusted.exchange, "execution_exchange": "SMART",
+            "primary_exchange": trusted.primary_exchange, "currency": trusted.currency}
+
+
 class TradeLinkResult(BaseModel):
     schema_version: Literal["wealthpilot.trade-link.v1"] = "wealthpilot.trade-link.v1"
     url: str
-    order: LinkOrder
+    order: LinkOrder | IBKRLinkOrder
+    execution_path: Literal["single_order", "ibkr_batch"] = "single_order"
+    instrument: dict | None = None
     request_id: UUID
     requires_web_confirmation: Literal[True] = True
     draft_created: Literal[False] = False
@@ -43,7 +88,7 @@ class TradeLinkResult(BaseModel):
     notice: str = "仅预填，未创建草稿或下单。请在 WealthPilot Web 核对券商模式、风险和完整订单后最终确认。"
 
 
-def prepare_link(base_url: str, order: LinkOrder) -> TradeLinkResult:
+def prepare_link(base_url: str, order: LinkOrder | IBKRLinkOrder) -> TradeLinkResult:
     base = urlsplit(base_url)
     if (base.scheme not in {"http", "https"} or not base.hostname or base.username
             or base.password or base.path not in {"", "/"} or base.query or base.fragment):
@@ -51,10 +96,12 @@ def prepare_link(base_url: str, order: LinkOrder) -> TradeLinkResult:
     if base.scheme == "http" and base.hostname not in {"127.0.0.1", "localhost"}:
         raise ValueError("WEB_BASE_URL_REQUIRES_PRIVATE_HTTPS")
     request_id = uuid4()
-    params = {"trade": "1", "request_id": str(request_id),
+    params = {"trade": "ibkr" if isinstance(order, IBKRLinkOrder) else "1", "request_id": str(request_id),
               **order.model_dump(mode="json", exclude_none=True)}
     return TradeLinkResult(url=base_url.rstrip("/")+"/#/action?"+urlencode(params),
-                           order=order, request_id=request_id)
+                           order=order, request_id=request_id,
+                           execution_path="ibkr_batch" if isinstance(order, IBKRLinkOrder) else "single_order",
+                           instrument=ibkr_instrument() if isinstance(order, IBKRLinkOrder) else None)
 
 
 def draft_payload(order: LinkOrder) -> dict:

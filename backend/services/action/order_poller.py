@@ -43,6 +43,7 @@ class OrderPoller:
         get_session,
         get_broker_adapter,
         poll_interval: float = 5.0,
+        get_broker_adapter_for_order=None,
     ):
         """
         Args:
@@ -52,6 +53,7 @@ class OrderPoller:
         """
         self._get_session = get_session
         self._get_broker_adapter = get_broker_adapter
+        self._get_broker_adapter_for_order = get_broker_adapter_for_order
         self._poll_interval = poll_interval
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -102,6 +104,8 @@ class OrderPoller:
 
             for order in orders:
                 try:
+                    if self._get_broker_adapter_for_order is not None:
+                        manager.broker_adapter = self._get_broker_adapter_for_order(order.broker_name)
                     manager.sync_order_status(order.id)
                 except Exception as e:
                     logger.warning(

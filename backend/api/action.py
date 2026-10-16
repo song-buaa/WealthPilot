@@ -70,6 +70,14 @@ def _get_adapter():
     return adapter
 
 
+def _get_ibkr_adapter():
+    """Reuse the original IBKR singleton even when ordinary orders use Tiger."""
+    global _cached_adapter
+    if _cached_adapter is None:
+        _cached_adapter = get_broker_adapter(broker_name="ibkr", mode="readonly")
+    return _cached_adapter
+
+
 def _get_manager():
     """获取 OrderManager 实例（每次请求新建 session + 注入 broker_adapter）。"""
     session = get_session()
@@ -428,6 +436,9 @@ def cancel_order(order_id: str):
     """本地取消订单。"""
     mgr, session = _get_manager()
     try:
+        existing = mgr.get_order(order_id)
+        if existing is not None and existing.broker_name == "ibkr" and mgr.broker_adapter.broker_name != "ibkr":
+            mgr.broker_adapter = _get_ibkr_adapter()
         o = mgr.cancel_order(order_id)
         session.commit()
         return _serialize_order(o)
@@ -447,6 +458,8 @@ def get_order(order_id: str, refresh: bool = False):
         if o is None:
             raise HTTPException(status_code=404, detail="订单不存在")
         if refresh:
+            if o.broker_name == "ibkr" and mgr.broker_adapter.broker_name != "ibkr":
+                mgr.broker_adapter = _get_ibkr_adapter()
             mgr.sync_order_status(order_id)
             session.commit()
         return _serialize_order(o)

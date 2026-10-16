@@ -90,6 +90,9 @@ async def lifespan(app: FastAPI):
     order_poller = OrderPoller(
         get_session=get_session,
         get_broker_adapter=_get_adapter,
+        get_broker_adapter_for_order=lambda broker: (
+            action_api._get_ibkr_adapter() if broker == "ibkr" else _get_adapter()
+        ),
     )
     await order_poller.start()
 
@@ -153,6 +156,9 @@ async def lifespan(app: FastAPI):
 
     scheduler.shutdown()
     print("[scheduler] 定时同步已停止")
+
+    if action_api._cached_adapter is not None:
+        action_api._cached_adapter.shutdown()
 
     if _broker_mode == "mock":
         from backend.services.action.brokers.mock import shutdown_mock_adapter

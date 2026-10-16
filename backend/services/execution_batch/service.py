@@ -209,7 +209,7 @@ class ExecutionBatchService:
             raise ExecutionSafetyError("Trade Intent 尚未人工确认")
         required = {
             "broker": "IBKR", "funding_source": "CASH",
-            "funding_currency": "USD", "budget_mode": "ALL_AVAILABLE_CASH",
+            "funding_currency": "USD",
             "venue": "LSE", "trading_currency": "USD",
             "share_class": "ACC", "side": "BUY", "order_type": "LIMIT",
         }
@@ -218,6 +218,18 @@ class ExecutionBatchService:
             if actual != expected:
                 raise ExecutionSafetyError(f"Case 1 {name}={actual}, expected={expected}")
         legs = ExecutionBatchService._canonical_leg_values(intent)
+        budget_mode = str(intent.budget_mode.value or "").upper()
+        if budget_mode == "FIXED_TOTAL":
+            # Entry compatibility for a single IB01 top-up. The existing fixed
+            # target calculator, broker resolver, WhatIf, cash ledger and final
+            # per-leg submission checks remain the execution authority.
+            if (len(legs) == 1 and legs[0][:2] == ("IB01", "APPROX_AMOUNT")
+                    and legs[0][2] is not None and legs[0][2] > 0
+                    and money(intent.stated_cash.value) == legs[0][2]):
+                return "IB01_FIXED_TARGET"
+            raise ExecutionSafetyError("IB01 fixed target must match the confirmed USD target amount")
+        if budget_mode != "ALL_AVAILABLE_CASH":
+            raise ExecutionSafetyError("Case 1 budget_mode unsupported")
         for variant, expected in CASE1_INTENT_VARIANTS.items():
             if legs == expected:
                 return variant
@@ -280,7 +292,7 @@ class ExecutionBatchService:
             broker="ibkr",
             account_ref=getattr(self.adapter, "_account_id", "fake-account"),
             funding_currency="USD",
-            budget_mode="ALL_AVAILABLE_CASH",
+            budget_mode=str(intent.budget_mode.value),
             source_conversation_id=conversation_id,
             source_message_id=message_id,
             source_trade_intent=_json(intent.model_dump(mode="json")),

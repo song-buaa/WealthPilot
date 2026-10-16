@@ -13,12 +13,15 @@ import ConfirmOrderDialog from '@/components/ConfirmOrderDialog'
 import PageHeader from '@/components/shared/PageHeader'
 import { useDemoMode } from '@/hooks/useDemoMode'
 import ExecutionBatchCard from '@/components/ExecutionBatchCard'
+import IBKRTradeLinkPreview from '@/components/IBKRTradeLinkPreview'
+import type { IBKRLinkPreview } from '@/lib/api'
 
 type TabKey = 'action' | 'history'
 
 export default function Action() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [ibkrLink, setIbkrLink] = useState<IBKRLinkPreview | null>(null)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [executionLabel, setExecutionLabel] = useState<string>()
   const [directStrategy, setDirectStrategy] = useState<SymbolStrategyResponse | null>(null)
@@ -43,11 +46,17 @@ export default function Action() {
       setDraftCardOpen(false)
       setCurrentDraft(null)
       setLinkError(null)
-      if (params.get('trade') !== '1') throw new Error('不支持的交易链接版本')
+      setIbkrLink(null)
+      if (!['1', 'ibkr'].includes(params.get('trade') || '')) throw new Error('不支持的交易链接版本')
       const values: Record<string, unknown> = {}
       for (const [key, value] of params) {
         if (params.getAll(key).length !== 1) throw new Error(`交易链接参数重复：${key}`)
         if (key !== 'trade') values[key] = value
+      }
+      if (params.get('trade') === 'ibkr') {
+        const preview = await executionBatchApi.previewTradeLink(values)
+        if (active) setIbkrLink(preview)
+        return
       }
       if (values.quantity !== undefined) values.quantity = Number(values.quantity)
       const result = await actionApi.previewTradeLink(values)
@@ -161,6 +170,9 @@ export default function Action() {
         {activeTab === 'history' && <TimelineTab />}
       </div>
 
+      {ibkrLink && <IBKRTradeLinkPreview preview={ibkrLink}
+        onClose={() => { setIbkrLink(null); navigate('/action', { replace: true }) }}
+        onCreated={() => { setIbkrLink(null); setRefreshKey(k => k + 1); navigate('/action', { replace: true }) }} />}
       {/* ActionDraftCard 弹层 */}
       <ActionDraftCard
         open={draftCardOpen}

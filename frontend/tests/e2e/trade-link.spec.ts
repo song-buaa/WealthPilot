@@ -78,3 +78,23 @@ test('mobile viewport: prefill and final confirmation fit the screen without sub
   expect((await final.boundingBox())!.width).toBeLessThanOrEqual(390)
   await final.getByTestId('cancel-btn').click()
 })
+
+
+test('IB01 budget link opens qualified IBKR intent without creating a batch or order', async ({page,request}) => {
+  const beforeOrders=(await (await request.get(`${base}/api/action/orders`)).json()).items.length
+  const beforeBatches=(await (await request.get(`${base}/api/execution-batches`)).json()).items.length
+  const calls:string[]=[]
+  page.on('request',r => { if (r.method()==='POST') calls.push(new URL(r.url()).pathname) })
+  await page.goto(`${base}/#/action?trade=ibkr&request_id=${randomUUID()}&broker=IBKR&symbol=IB01%3AUK&side=BUY&order_type=LIMIT&target_amount=4000&currency=USD`)
+  const dialog=page.getByRole('dialog')
+  await expect(dialog).toContainText('IB01:LSE')
+  await expect(dialog).toContainText('354802220')
+  await expect(dialog).toContainText('IE00BGSF1X88')
+  await expect(dialog).toContainText('LSEETF / SMART')
+  await expect(dialog.getByTestId('ibkr-link-target')).toHaveText('4000 USD')
+  await expect(dialog).toContainText('只读保护')
+  await dialog.getByRole('button',{name:'取消',exact:true}).click()
+  expect(calls).toEqual(['/api/execution-batches/trade-link/preview'])
+  expect((await (await request.get(`${base}/api/action/orders`)).json()).items.length).toBe(beforeOrders)
+  expect((await (await request.get(`${base}/api/execution-batches`)).json()).items.length).toBe(beforeBatches)
+})

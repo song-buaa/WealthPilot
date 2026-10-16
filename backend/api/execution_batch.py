@@ -9,6 +9,8 @@ import json
 import os
 
 from fastapi import APIRouter, HTTPException
+from typing import Literal
+from pocs.chatgpt_skills.trade_link import IBKRLinkPreviewRequest, ibkr_instrument
 
 from app.database import get_session
 from backend.services.execution_batch.calculator import ExecutionSafetyError
@@ -30,8 +32,8 @@ LIVE_CONFIRMATION_TEXT = live_confirmation_text(4)
 
 def _adapter():
     # Reuse the action singleton: one Gateway clientId, one dedicated loop.
-    from backend.api.action import _get_adapter
-    return _get_adapter()
+    from backend.api.action import _get_ibkr_adapter
+    return _get_ibkr_adapter()
 
 
 def _service(session):
@@ -143,6 +145,36 @@ def safety_status():
         "broker_gateway_read_only": "VERIFY_IN_GATEWAY_UI",
         "mutation_endpoint": "HUMAN_UI_ONLY",
     }
+
+
+class IBKRLinkConfirmation(IBKRLinkPreviewRequest):
+    confirmed: Literal[True]
+
+
+@router.post("/trade-link/preview")
+def preview_ibkr_link(body: IBKRLinkPreviewRequest):
+    # Registry identity is evidence for the intended instrument, not a claim
+    # of a fresh Gateway qualification/quote/connection. No DB or broker call.
+    return {"request_id": str(body.request_id),
+            "order": body.model_dump(mode="json", exclude={"request_id"}),
+            "instrument": ibkr_instrument(), "safety": safety_status(),
+            "draft_created": False, "order_submitted": False}
+
+
+@router.post("/trade-link/confirm-intent")
+def confirm_ibkr_link(body: IBKRLinkConfirmation):
+    from backend.services.execution_batch.link_handoff import create_link_batch
+    session = get_session()
+    try:
+        batch = create_link_batch(session, _adapter(),
+            IBKRLinkPreviewRequest.model_validate(body.model_dump(exclude={"confirmed"})))
+        session.commit()
+        return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
 
 
 @router.post("")

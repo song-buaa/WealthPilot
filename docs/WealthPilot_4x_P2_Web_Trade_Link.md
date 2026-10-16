@@ -41,3 +41,37 @@ CONDITIONAL_LIMIT 保留原策略及适配器语义：展示触发价，不宣�
 PoC 02 凭证展示事故保留历史 FAIL；P3/P4/P5 不在本轮范围。
 
 参考：[OpenAI 工具声明](https://developers.openai.com/plugins/reference)、[连接刷新](https://developers.openai.com/plugins/deploy/connect-chatgpt)、[Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)。
+
+
+## IB01 / IBKR 入口兼容修复
+
+历史 IB01 成交使用 Typed Trade Intent → ExecutionBatch → 原 Web 人工确认 → IBKR：
+`conId=354802220`、`ISIN=IE00BGSF1X88`、LSEETF 上市、USD、SMART 执行。
+普通单标入口仅识别 CN/HK/SH/SZ/US，并以币种反推市场；USD 并不能证明 US。
+因此不能只扩大 UK 白名单，或把 IB01 改写成 IB01:US 后走当前 Tiger 模式。
+
+`prepare_trade_confirmation_link` 为 IB01 提供既有 IBKR 批次路径的预算参数变体：
+
+```json
+{"order":{"broker":"IBKR","symbol":"IB01","side":"BUY","order_type":"LIMIT","currency":"USD","target_amount":"4000"}}
+```
+
+接受 IB01、IB01:UK、IB01:LSE、IB01:LSEETF，仅通过已有可信合约登记归一为
+IB01:LSE，不开放任意 UK 证券。工具结果包含登记的合约身份与 `execution_path=ibkr_batch`；
+URL 使用 `trade=ibkr`。金额是目标买入名义金额上限，佣金另计；MCP 不推算股数或限价。
+需要用户在 Web 核对当前 IBKR 账户、美元现金、LSEETF/USD/Acc、LIMIT/GTC。
+
+打开链接调用 `/api/execution-batches/trade-link/preview`，仅在内存显示上述意图，不访问
+数据库或 Gateway。点击“确认意图并生成 IBKR 交易预览”才保存原 Typed Trade Intent、确认
+其含义并调用原 ExecutionBatchService。单腿 IB01 固定目标复用原整股计算、合约/SMART
+二次验证、MarketRule、行情、WhatIf、资金/佣金账本与目标金额上限，不新建执行引擎。
+明确的 IBKR 批次及其订单状态刷新使用原 IBKR 单例，不随普通单标的 Tiger 模式改变；
+原轮询器按记录的券商选用已有适配器，避免把 IBKR 订单号交给 Tiger。
+
+原 ExecutionBatchCard 继续负责批次确认、实时校验与最终人工下单。确认意图不是订单授权；
+打开链接/生成预览不调用 place_order，不启用 IBKR 实盘开关。已有终态批次的同一链接仍
+返回原批次；参数变更必须新链接。Gateway、只读开关、交易时段或行情不满足时如实阻塞。
+美股/港股继续使用原参数、ActionDraftCard 和 ConfirmOrderDialog；不改其交易规则。
+
+自动化仅使用隔离数据库和 Fake/Mock Broker，不能当作真实成交证明。设备只读合约核对、
+生产部署 SHA 和 ChatGPT 实际工具调用结果留本机独立收据，不提交账户、订单号或私人金额。

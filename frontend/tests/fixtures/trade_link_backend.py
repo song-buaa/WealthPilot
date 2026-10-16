@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 from app.database import Base, get_engine, get_session
 from app.models import Portfolio
-from backend.api import action
+from backend.api import action, execution_batch
 from backend.services.action.brokers.mock import MockBrokerAdapter
 
 Base.metadata.create_all(get_engine())
@@ -30,6 +30,7 @@ action._get_position_value = lambda *a: 0
 action._get_discipline_result = lambda *a: None
 action._get_fx_rate_to_cny = lambda *a: 1
 app = FastAPI(); app.include_router(action.router, prefix='/api/action')
+app.include_router(execution_batch.router, prefix='/api/execution-batches')
 @app.get('/api/demo/status')
 def demo(): return {'public_demo_mode': False}
 @app.get('/api/{path:path}')

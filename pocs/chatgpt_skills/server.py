@@ -19,7 +19,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult
-from pocs.chatgpt_skills.trade_link import LinkOrder, TradeLinkResult, prepare_link
+from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
 from pocs.poc02_wealth_mcp import server as overview
@@ -117,8 +117,8 @@ def create_server(settings):
 
     @server.tool(meta=security_meta,
         annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),
-        description="Prepare a clickable private WealthPilot Web trade-confirmation URL from explicit BUY/SELL parameters. Pure validation/URL generation: never creates a draft, changes data, connects to a broker or submits an order. Ask for missing required fields instead of guessing. Show the link and order summary; user opens the existing Web, edits/reviews, and finally confirms there. LIMIT needs limit_price; CONDITIONAL_LIMIT also needs trigger_price. Existing single-order GTC only. Preserve all P1 data-quality warnings; do not call Mock trade tools for real requests.")
-    def prepare_trade_confirmation_link(order: LinkOrder) -> TradeLinkResult:
+        description="Prepare a clickable private WealthPilot Web trade-confirmation URL from explicit BUY/SELL parameters. Pure validation/URL generation: never creates a draft, changes data, connects to a broker or submits an order. Ask for missing required fields instead of guessing. Show the link and order summary; user opens the existing Web, edits/reviews, and finally confirms there. LIMIT needs limit_price; CONDITIONAL_LIMIT also needs trigger_price. US/HK single-order GTC only. For IB01 use the IBKR budget variant: broker=IBKR, symbol=IB01 (or IB01:LSE/IB01:UK/IB01:LSEETF), side=BUY, order_type=LIMIT, currency=USD, target_amount=the user budget. It opens the original qualified LSEETF/USD/SMART ExecutionBatch Web review; do not invent quantity or limit_price or relabel IB01 as US. Preserve all P1 data-quality warnings; do not call Mock trade tools for real requests.")
+    def prepare_trade_confirmation_link(order: LinkOrder | IBKRLinkOrder) -> TradeLinkResult:
         try:
             return prepare_link(getattr(settings, "web_base_url", ""), order)
         except ValueError as error:

@@ -794,7 +794,25 @@ export interface ExecutionBatchResponse {
   legs: ExecutionLegResponse[]
 }
 
+export interface IBKRLinkPreview {
+  request_id: string
+  order: Record<string, string>
+  instrument: { con_id: number; symbol: string; local_symbol: string; isin: string;
+    listing_exchange: string; execution_exchange: string; primary_exchange: string; currency: string }
+  safety: { ibkr_read_only_mode: boolean; live_trading_enabled: boolean }
+  draft_created: false
+  order_submitted: false
+}
+
 export const executionBatchApi = {
+  previewTradeLink: (params: Record<string, unknown>) => request<IBKRLinkPreview>(
+    '/execution-batches/trade-link/preview', { method: 'POST', body: JSON.stringify(params) },
+  ),
+  confirmTradeLinkIntent: (preview: IBKRLinkPreview) => request<ExecutionBatchResponse>(
+    '/execution-batches/trade-link/confirm-intent', {
+      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true }),
+    },
+  ),
   create: (conversationId: string, messageId: number) =>
     request<ExecutionBatchResponse>('/execution-batches', {
       method: 'POST',

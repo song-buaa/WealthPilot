@@ -72,6 +72,24 @@ def test_link_tool_never_persists_a_draft(endpoint, tmp_path):
     asyncio.run(run())
 
 
+def test_ib01_budget_link_is_pure_and_exposes_verified_identity(endpoint, tmp_path):
+    async def run():
+        before=hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()
+        async with Client(endpoint,mode='legacy') as client:
+            result=await client.call_tool('prepare_trade_confirmation_link', {'order': {
+                'broker':'IBKR','symbol':'IB01:UK','side':'BUY','order_type':'LIMIT',
+                'target_amount':'4000','currency':'USD'}})
+            assert not result.is_error,result.content
+            value=result.structured_content
+            assert value['instrument']['con_id']==354802220
+            assert value['execution_path']=='ibkr_batch'
+            assert value['order']['symbol']=='IB01:LSE'
+            assert value['order']['target_amount']=='4000'
+            assert value['draft_created'] is False and value['order_submitted'] is False
+        assert hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()==before
+    asyncio.run(run())
+
+
 def test_real_endpoint_exposes_only_seven_read_only_tools():
     from types import SimpleNamespace
     from pocs.chatgpt_skills.server import create_server
