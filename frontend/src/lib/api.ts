@@ -804,13 +804,24 @@ export interface IBKRLinkPreview {
   order_submitted: false
 }
 
+export interface IBKRQuote {
+  batch: ExecutionBatchResponse
+  preview_hash: string
+  request_id: string
+  persisted: false
+  order_submitted: false
+}
+
 export const executionBatchApi = {
+  quoteTradeLink: (params: Record<string, unknown>) => request<IBKRQuote>(
+    '/execution-batches/trade-link/quote', { method: 'POST', body: JSON.stringify(params) },
+  ),
   previewTradeLink: (params: Record<string, unknown>) => request<IBKRLinkPreview>(
     '/execution-batches/trade-link/preview', { method: 'POST', body: JSON.stringify(params) },
   ),
-  confirmTradeLinkIntent: (preview: IBKRLinkPreview) => request<ExecutionBatchResponse>(
+  confirmTradeLinkIntent: (preview: IBKRLinkPreview, quote: IBKRQuote, limit?: string) => request<ExecutionBatchResponse>(
     '/execution-batches/trade-link/confirm-intent', {
-      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true }),
+      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true, preview_hash: quote.preview_hash, quote_as_of: quote.batch.legs[0].quote_as_of, ...(limit ? {limit_price: limit} : {}) }),
     },
   ),
   create: (conversationId: string, messageId: number) =>
@@ -829,12 +840,12 @@ export const executionBatchApi = {
   smartRoutingRetry: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/smart-routing-retry`, { method: 'POST' },
   ),
-  confirm: (batchId: string) => request<ExecutionBatchResponse>(
-    `/execution-batches/${batchId}/confirm`, { method: 'POST' },
+  confirm: (batchId: string, version?: number) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/confirm`, { method: 'POST', body: JSON.stringify({confirmation_version: version}) },
   ),
-  applyManualLimits: (batchId: string, limits: Record<string, number>) =>
+  applyManualLimits: (batchId: string, limits: Record<string, number>, version?: number) =>
     request<ExecutionBatchResponse>(`/execution-batches/${batchId}/manual-limits`, {
-      method: 'POST', body: JSON.stringify({ limits }),
+      method: 'POST', body: JSON.stringify({ limits, confirmation_version: version }),
     }),
   safety: () => request<{
     ibkr_read_only_mode: boolean

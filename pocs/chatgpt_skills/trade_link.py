@@ -41,8 +41,8 @@ class LinkPreviewRequest(LinkOrder):
 class IBKRLinkOrder(BaseModel):
     """IB01 uses the existing qualified-contract batch path, not currency→US guessing.
 
-    The target is an approximate share notional; original broker fees/cash rules
-    are reviewed separately in Web. No quantity or price is invented in MCP.
+    The target is the total USD outlay ceiling, including broker fees and the
+    existing cash safety cushion. No quantity or price is invented in MCP.
     """
     model_config = ConfigDict(extra="forbid")
     broker: Literal["IBKR"]
@@ -50,8 +50,8 @@ class IBKRLinkOrder(BaseModel):
     side: Literal["BUY"]
     order_type: Literal["LIMIT"]
     currency: Literal["USD"]
-    target_amount: Decimal = Field(gt=0, allow_inf_nan=False)
-    time_in_force: Literal["GTC"] = "GTC"
+    target_amount: Decimal = Field(gt=0, allow_inf_nan=False, description="USD total outlay cap including fees and safety cushion")
+    time_in_force: Literal["DAY"] = "DAY"
 
     @model_validator(mode="after")
     def normalize(self):

@@ -31,7 +31,7 @@ ChatGPT 负责自然语言交互、相关上下文、工具选择及最终回答
 | `review_portfolio` | 原 PortfolioReview / AssetAllocation、AllocationService 快照/目标/偏离度 |
 | `analyze_performance` | 原 PerformanceAnalysis 与当前持仓账面盈亏/贡献 |
 
-IB01 预算链接复用原可信 LSEETF/USD/SMART 合约登记和 IBKR Typed Intent / ExecutionBatch / Web 最终授权；不把 USD 推断为 US，也不在 MCP 下单。测试用 Mock 写工具仍只供隔离自动化，不是生产工具集。
+IB01 预算链接统一复用 ActionDraftCard / ConfirmOrderDialog，预算包含费用及原资金安全垫；底层复用原可信 LSEETF/USD/SMART 合约登记和 IBKR Typed Intent / ExecutionBatch / Web 最终授权；不把 USD 推断为 US，也不在 MCP 下单。测试用 Mock 写工具仍只供隔离自动化，不是生产工具集。
 
 ## Dev / Prod 与后续任务
 

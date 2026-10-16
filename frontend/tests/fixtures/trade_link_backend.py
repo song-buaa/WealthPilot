@@ -18,6 +18,26 @@ from app.database import Base, get_engine, get_session
 from app.models import Portfolio
 from backend.api import action, execution_batch
 from backend.services.action.brokers.mock import MockBrokerAdapter
+from tests.test_execution_batch_service import FakeIBKRExecutionAdapter
+from backend.services.execution_batch import link_handoff
+from backend.services.execution_batch.service import ExecutionBatchService
+from datetime import datetime, timezone
+
+ibkr = FakeIBKRExecutionAdapter()
+ibkr_state = {'quality':'LIVE', 'cash':10000, 'fee':5}
+_original_quote = ibkr.get_executable_quote
+_original_cash = ibkr.get_cash_snapshot
+ibkr.get_executable_quote = lambda r: _original_quote(r) | {
+    'ask':100, 'bid':99.99, 'quote_timestamp':datetime.now(timezone.utc).isoformat(),
+    'quote_quality':ibkr_state['quality'], 'market_data_type':1 if ibkr_state['quality']=='LIVE' else 3}
+ibkr.get_cash_snapshot = lambda c: _original_cash(c) | {k:ibkr_state['cash'] for k in ['CashBalance','SettledCash','TotalCashValue']}
+_original_what_if = ibkr.what_if_limit_order
+def what_if(r, **kwargs):
+    return _original_what_if(r,**kwargs) | {'commission':ibkr_state['fee']}
+ibkr.what_if_limit_order = what_if
+execution_batch._adapter = lambda: ibkr
+link_handoff.ExecutionBatchService = lambda s,a: ExecutionBatchService(s,a,allow_mutation=False)
+execution_batch._service = lambda s: ExecutionBatchService(s,ibkr,allow_mutation=False)
 
 Base.metadata.create_all(get_engine())
 with get_session() as s:
@@ -31,6 +51,18 @@ action._get_discipline_result = lambda *a: None
 action._get_fx_rate_to_cny = lambda *a: 1
 app = FastAPI(); app.include_router(action.router, prefix='/api/action')
 app.include_router(execution_batch.router, prefix='/api/execution-batches')
+@app.post('/__test/ibkr-state')
+def set_ibkr_state(body: dict):
+    ibkr_state.update(body)
+    return {'isolated_synthetic_fixture':True, 'real_order_submitted':False}
+
+@app.get('/__test/ibkr-counts')
+def ibkr_counts():
+    from backend.services.action.models import ExecutionBatch,OrderRecord
+    with get_session() as s:
+        return {'batches':s.query(ExecutionBatch).count(), 'orders':s.query(OrderRecord).count(),
+                'real_order_calls':len(ibkr.place_calls)}
+
 @app.get('/api/demo/status')
 def demo(): return {'public_demo_mode': False}
 @app.get('/api/{path:path}')

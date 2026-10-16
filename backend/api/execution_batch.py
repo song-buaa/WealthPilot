@@ -10,6 +10,9 @@ import os
 
 from fastapi import APIRouter, HTTPException
 from typing import Literal
+from datetime import datetime, timezone
+from decimal import Decimal
+from pydantic import Field
 from pocs.chatgpt_skills.trade_link import IBKRLinkPreviewRequest, ibkr_instrument
 
 from app.database import get_session
@@ -71,7 +74,7 @@ def _serialize_leg(leg) -> dict:
         "quote_bid": float(leg.quote_bid) if leg.quote_bid is not None else None,
         "quote_ask": float(leg.quote_ask) if leg.quote_ask is not None else None,
         "quote_last": float(leg.quote_last) if leg.quote_last is not None else None,
-        "quote_as_of": utc_iso(leg.quote_as_of), "quote_quality": leg.quote_quality,
+        "quote_as_of": ((leg.quote_as_of.astimezone(timezone.utc) if leg.quote_as_of.tzinfo else leg.quote_as_of.replace(tzinfo=timezone.utc)).isoformat().replace("+00:00", "Z") if leg.quote_as_of else None), "quote_quality": leg.quote_quality,
         "market_data_type": leg.market_data_type,
         "market_rule_id": leg.market_rule_id,
         "min_tick": float(leg.min_tick) if leg.min_tick is not None else None,
@@ -147,8 +150,30 @@ def safety_status():
     }
 
 
-class IBKRLinkConfirmation(IBKRLinkPreviewRequest):
+class IBKRQuoteRequest(IBKRLinkPreviewRequest):
+    limit_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class IBKRLinkConfirmation(IBKRQuoteRequest):
     confirmed: Literal[True]
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    quote_as_of: datetime
+
+
+def _link_order(body):
+    return IBKRLinkPreviewRequest.model_validate(body.model_dump(include=set(IBKRLinkPreviewRequest.model_fields)))
+
+
+@router.post("/trade-link/quote")
+def quote_ibkr_link(body: IBKRQuoteRequest):
+    from backend.services.execution_batch.link_handoff import preview_link_batch
+    try:
+        with preview_link_batch(_adapter(), _link_order(body), limit_price=body.limit_price) as batch:
+            result = _serialize_batch(batch)
+            return {"batch": result, "preview_hash": ExecutionBatchService.review_fingerprint(batch) if batch.status == "READY" else "",
+                    "request_id": str(body.request_id), "persisted": False, "order_submitted": False}
+    except Exception as exc:
+        _raise(exc)
 
 
 @router.post("/trade-link/preview")
@@ -166,8 +191,19 @@ def confirm_ibkr_link(body: IBKRLinkConfirmation):
     from backend.services.execution_batch.link_handoff import create_link_batch
     session = get_session()
     try:
-        batch = create_link_batch(session, _adapter(),
-            IBKRLinkPreviewRequest.model_validate(body.model_dump(exclude={"confirmed"})))
+        from backend.services.execution_batch.calculator import quote_guard
+        # An old displayed quote is never accepted merely because a new fetch works.
+        quote_guard({"quote_quality": "LIVE", "ask": 1, "bid": 1,
+                     "quote_timestamp": body.quote_as_of}, now=_service(session).clock())
+        order = _link_order(body)
+        batch = create_link_batch(session, _adapter(), order, limit_price=body.limit_price)
+        service = _service(session)
+        if batch.status in {"CANCELLED", "COMPLETED"} or any(leg.linked_order_id for leg in batch.legs):
+            return _serialize_batch(batch)
+        if not any(leg.linked_order_id for leg in batch.legs):
+            service.assert_review_fresh(batch)
+            if ExecutionBatchService.review_fingerprint(batch) != body.preview_hash:
+                raise ExecutionSafetyError("PREVIEW_CHANGED_REFRESH_REQUIRED")
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:
@@ -257,10 +293,14 @@ def create_smart_routing_retry(batch_id: str):
 
 
 @router.post("/{batch_id}/confirm")
-def confirm_batch(batch_id: str):
+def confirm_batch(batch_id: str, body: dict | None = None):
     session = get_session()
     try:
-        batch = _service(session).confirm_batch(batch_id)
+        service = _service(session)
+        current = service.get_batch(batch_id)
+        if service.is_all_in(current) and (body or {}).get("confirmation_version") != current.confirmation_version:
+            raise ExecutionSafetyError("confirmation version 无效")
+        batch = service.confirm_batch(batch_id)
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:
@@ -277,7 +317,12 @@ def apply_manual_limits(batch_id: str, body: dict):
         limits = body.get("limits")
         if not isinstance(limits, dict):
             raise ExecutionSafetyError("limits 必须为 alias → price")
-        batch = _service(session).apply_manual_limits(batch_id, limits)
+        service = _service(session)
+        current = service.get_batch(batch_id)
+        if service.is_all_in(current):
+            batch = service.reprice_all_in(batch_id, limits, body.get("confirmation_version"))
+        else:
+            batch = service.apply_manual_limits(batch_id, limits)
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:

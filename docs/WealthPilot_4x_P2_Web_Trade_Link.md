@@ -58,20 +58,38 @@ PoC 02 凭证展示事故保留历史 FAIL；P3/P4/P5 不在本轮范围。
 
 接受 IB01、IB01:UK、IB01:LSE、IB01:LSEETF，仅通过已有可信合约登记归一为
 IB01:LSE，不开放任意 UK 证券。工具结果包含登记的合约身份与 `execution_path=ibkr_batch`；
-URL 使用 `trade=ibkr`。金额是目标买入名义金额上限，佣金另计；MCP 不推算股数或限价。
-需要用户在 Web 核对当前 IBKR 账户、美元现金、LSEETF/USD/Acc、LIMIT/GTC。
+URL 使用 `trade=ibkr`，聚焦当前 request_id；历史列表仍保留，但不会在此流程加载。
 
-打开链接调用 `/api/execution-batches/trade-link/preview`，仅在内存显示上述意图，不访问
-数据库或 Gateway。点击“确认意图并生成 IBKR 交易预览”才保存原 Typed Trade Intent、确认
-其含义并调用原 ExecutionBatchService。单腿 IB01 固定目标复用原整股计算、合约/SMART
-二次验证、MarketRule、行情、WhatIf、资金/佣金账本与目标金额上限，不新建执行引擎。
-明确的 IBKR 批次及其订单状态刷新使用原 IBKR 单例，不随普通单标的 Tiger 模式改变；
-原轮询器按记录的券商选用已有适配器，避免把 IBKR 订单号交给 Tiger。
+### 统一确认体验与含费用预算（2026-10-16 产品确认）
 
-原 ExecutionBatchCard 继续负责批次确认、实时校验与最终人工下单。确认意图不是订单授权；
-打开链接/生成预览不调用 place_order，不启用 IBKR 实盘开关。已有终态批次的同一链接仍
-返回原批次；参数变更必须新链接。Gateway、只读开关、交易时段或行情不满足时如实阻塞。
-美股/港股继续使用原参数、ActionDraftCard 和 ConfirmOrderDialog；不改其交易规则。
+IB01 继续使用原 ActionDraftCard → ConfirmOrderDialog；独立 IBKRTradeLinkPreview 已移除。
+预算 `target_amount` 是**包含费用与现有资金安全垫的 USD 总支出上限**，不再是名义金额。
+新 Typed Intent 使用 `ALL_IN_TOTAL`，既有 FIXED_TOTAL/历史 Case 1 金额语义保持不变。
+`整数股数 × 限价 + IBKR WhatIf 费用预留 + 原安全垫 <= 用户预算`，同时要求真实 USD
+现金足以覆盖该预算。复用原整股/WhatIf 收敛算法；费用不明、延迟/缺失/过期行情、休市、
+合约身份不符或资金不足均不可确认或提交，不使用估算行情冒充 LIVE。
 
-自动化仅使用隔离数据库和 Fake/Mock Broker，不能当作真实成交证明。设备只读合约核对、
-生产部署 SHA 和 ChatGPT 实际工具调用结果留本机独立收据，不提交账户、订单号或私人金额。
+打开链接先取得登记身份，再调用 `/api/execution-batches/trade-link/quote`：在一次性内存
+SQLite 中运行原 Typed Intent / ExecutionBatchService，读取原 IBKR 事实及 WhatIf 后销毁。
+不打开或写生产数据库，不创建 SymbolStrategy/OrderRecord，不调用 place_order。
+展示合约、账户掩码、方向、预算、报价时间/质量、建议及实际限价、整股数、费用、安全垫、
+资金占用与阻断原因。纯登记预览不代表 Gateway/行情/WhatIf 可用。
+
+用户修改限价后必须重新取报价、合约和现金，重新计算数量/费用及 WhatIf。点击意图确认时
+绑定显示过的报价时间和经济参数 hash；报价过期或最新经济事实变化需重新预览。
+确认意图后保存原消息/意图及批次，直接进入同一个 ConfirmOrderDialog，原批次 ID 与
+request_id 关联。确认计划锁定版本，再由用户最终确认；最终按钮仍受原 IBKR 开关控制。
+持久化批次改价会先取消旧批次、撤销 hash/递增版本，再重建事实；即使重算失败旧确认也失效。
+重复打开同一请求不创建第二笔交易；终态不自动重试。
+
+统一弹窗根据批次 ID 展示状态，通过原订单状态同步刷新后读取该批次；不会把历史批次
+当作本次结果。最终仍调用原 ExecutionBatch.submit_next_leg → OrderManager → IBKR SMART，
+保留合约、WhatIf、资金、报价、版本/hash 和人工确认检查。不会调用普通 Tiger 下单路径。
+美股/港股保留原草稿、确认组件和业务调用方式。
+
+自动化使用一次性库和 Fake/Mock Broker，桌面/移动尺寸测试不冒充 Safari/iPhone 实机。
+生产验收仅打开预填、内存报价和确认界面，不创建或提交真实订单，也不启用实盘。
+Gateway Read-Only 阻止 WhatIf 时如实显示阻断，不调整开关。
+
+新 IBKR 链接固定 DAY，与原 IBKR `_build_live_limit_order` / WhatIf 的实际有效期一致；
+上一版误标的 GTC 链接需重新生成。普通美股/港股单标路径继续原 GTC 契约，不修改适配器。

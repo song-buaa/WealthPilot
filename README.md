@@ -14,7 +14,7 @@
 | P4 组合评估 | `review_portfolio`：原 PortfolioReview / AssetAllocation、配置快照、目标偏离与集中度 | DONE，Web/iOS 实测 |
 | P5 收益分析 | `analyze_performance`：原 PerformanceAnalysis、持仓账面盈亏与贡献结构 | DONE，Web/iOS 实测；不含完整历史收益归因 |
 
-七工具均为生产只读工具。P2 只校验参数和生成 URL，不在 MCP 创建草稿或委托；原 ActionDraft、SymbolStrategy、OrderManager、BrokerAdapter、风控和人工确认全部保留。IB01 预算变体复用原 IBKR Typed Intent / ExecutionBatch，而非误走普通美股/Tiger 路径。当前使用个人 Pro，不使用 Business/Edu，不部署独立 Mock ChatGPT 应用。
+七工具均为生产只读工具。P2 只校验参数和生成 URL，不在 MCP 创建草稿或委托；原 ActionDraft、SymbolStrategy、OrderManager、BrokerAdapter、风控和人工确认全部保留。IB01 含费用总预算入口统一复用 ActionDraftCard / ConfirmOrderDialog，底层保留原 IBKR Typed Intent / ExecutionBatch / SMART；改价需重新取行情、计算 WhatIf 并重新确认，不走普通美股/Tiger 路径。当前使用个人 Pro，不使用 Business/Edu，不部署独立 Mock ChatGPT 应用。
 
 ## 当前架构与环境
 
