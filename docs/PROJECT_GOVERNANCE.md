@@ -17,7 +17,7 @@
 
 - `main` 是唯一长期集成分支。新任务 fetch 后从最新 `origin/main` 建短期 `codex/<topic>` 分支；继续已有 PR 时复用其分支并核对 base，不创建重复 PR。
 - 保护其他分支/worktree 和未提交工作；未知历史分支、用户文件和 worktree 未确认用途/授权前不删除。不长期维护 develop/release/个人 handover 分支。
-- 每提交职责单一，精确路径暂存；禁止 `git add .` / `git add -A`、force push、squash 既有历史、force add ignored 本地配置。
+- 按可独立验证、可回退的最小职责分步提交，提交信息采用 Conventional Commits 风格（如 `docs:` / `fix:` / `feat:`）；精确路径暂存。禁止 `git add .` / `git add -A`、force push、squash 既有历史、force add ignored 本地配置。
 - push/PR、合并、Tag/Release、部署分别授权。用户已明确授权的下一步不重复询问；仅 PR 的任务停止在 PR/CI，明确授权合并的任务按第 6 节完成集成，均不默认部署。
 
 ## 4. 版本、Tag 与发布
@@ -108,6 +108,8 @@ CI 对 main / codex 分支 push、面向 main 的 PR 及手动 dispatch 运行�
 - **无能力变化（如局部 Bug）**：PR 写“Registry 无需更新”及原因；不要求机械修改索引或无关架构文档。
 
 ### 提交与验收
+
+出现失败先停止依赖该结果的后续步骤，报告证据与影响、定位原因，再做定点修复和重新验证；不盲试、不跳过失败继续发布。
 
 1. 复核最小 diff/敏感性并精确暂存；执行第 6 节适用 Gate 与完整场景，CI-only 和本地证据分开。
 2. 按上面的 Registry 条件同步文档；其他架构/接口/数据口径变化更新对应现行文档/契约，无变化写 N/A + 原因。

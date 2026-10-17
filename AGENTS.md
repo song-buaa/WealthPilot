@@ -31,6 +31,7 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.0 �
 
 ## 提交与交付
 
+- 沟通直接、结构清楚，说明结论、证据、影响和可简化方案；以产品体验与长期可维护性判断取舍，避免为短期省事引入过度设计。
 - 精确路径暂存，每提交职责单一，禁用 `git add .` / `git add -A`；不 force push、不 squash 既有历史、不删除未知分支/用户工作。
 - 测试与验收只维护在[治理文档第 6 节](docs/PROJECT_GOVERNANCE.md#6-质量门与当前基线)：L0 文档检查/全部 CI，代码变更保持原全量 Gate，关键业务另做完整场景；不依据本文摘要降低要求。离线命令与隔离见[dev_setup](docs/dev_setup.md)。
 - PR 使用[模板](.github/pull_request_template.md)，列出风险、复用证据、owner、检查、端到端场景、文档和未验收项。CI 查看 exact HEAD 的全部四项结果；CI 不自动合并或部署。
