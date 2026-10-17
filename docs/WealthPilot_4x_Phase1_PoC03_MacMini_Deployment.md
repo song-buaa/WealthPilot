@@ -1,5 +1,7 @@
 # WealthPilot PoC 03 · Mac Mini 第二阶段执行说明
 
+> 历史适用范围（2026-10-17 标注）：本文保留当时的审计/设计/部署证据，不作为当前架构或新的操作授权。现行实现与 owner 见 [ARCHITECTURE_CURRENT](ARCHITECTURE_CURRENT.md)，任务边界见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md)。旧步骤使用前须按当前代码及运行模式重新核对；本轮未执行本文生产步骤。
+
 > Tunnel 兼容修复更新：MacBook Dev → GitHub PR/CI/main → Mac Mini Prod 拉取完整 Commit 为主要路线。设备交接报告 ARM 安装、数据迁移及本地 synthetic MCP 已通过；Tunnel 启动阻塞，两个 system jobs 已停止，real 尚未启用。继续执行由设备端 Codex 完成，本轮 Dev 不操作 Mini。原离线包仅应急保留；PoC 02 凭证事故仍 FAIL，新 Key 不表示旧 Key 已撤销。代码发布不等于 4.0 生产上线。
 
 

@@ -1,6 +1,8 @@
 # WealthPilot 4.0 当前生产架构
 
-> 2026-10-16：用户确认五大核心场景正式收口。本文描述已落地产品；版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-17：在现有 4.0 架构说明上整合工程 owner 与数据权威；代码核对基线 `bc19b66f724767b5fb36e1c74a2378942a537f81`。2026-10-16 的功能/部署记录保留为历史观察，本轮未访问生产。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+
+本文是唯一现行架构总览；任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
 ## 1. 产品与组件职责
 
@@ -79,15 +81,17 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 ## 5. Web 交易、数据库与任务
 
-P2：ChatGPT 明确参数 → 只读 URL → `/#/action?...` → 原 ActionDraftCard / ConfirmOrderDialog → ActionDraft / SymbolStrategy / RiskEngine / OrderManager / BrokerAdapter → 原订单状态/记录。打开链接与预览不是最终交易授权，用户必须在 Web 亲自确认；不得将 Mock 成交当实盘成交。
+普通单标 P2：ChatGPT 明确参数 → 只读 URL → `/#/action?...` → 原 ActionDraftCard / ConfirmOrderDialog → ActionDraft / SymbolStrategy / RiskEngine / OrderManager / BrokerAdapter → 原订单状态/记录。打开链接与预览不是最终交易授权，用户必须在 Web 亲自确认；不得将 Mock 成交当实盘成交。
 
-main 的 PR #10 已支持 IB01 预算链接变体：原可信 LSEETF/USD 合约、SMART 执行身份 → Typed Trade Intent → ExecutionBatch → 原 Web 最终确认，保留资金、行情、WhatIf、幂等和交易开关。该兼容修复的合入或部署本身不证明新入口已经真实成交。普通单标路径和原交易规则保留，见 [P2 记录](WealthPilot_4x_P2_Web_Trade_Link.md)。
+IB01 预算变体已在后续 main 迭代统一到 ActionDraftCard 参数编辑和 ConfirmOrderDialog 最终确认，底层仍复用 Batch。PR #10 起支持的链路为：原可信 LSEETF/USD 合约、SMART 执行身份 → Typed Trade Intent → ExecutionBatch → 原 Web 最终确认，保留资金、行情、WhatIf、幂等和交易开关。该兼容修复的合入或部署本身不证明新入口已经真实成交。普通单标路径和原交易规则保留，见 [P2 记录](WealthPilot_4x_P2_Web_Trade_Link.md)。
 
 完整 FastAPI 后端负责原 REST/SSE 和业务写入。原非 Demo lifespan 包括孤儿订单扫描、OrderPoller、北京时间 22:00 同步和 15 分钟触发评估（`backend/main.py`）；本轮文档没有新增或启停这些任务。代码具备任务不代表每个券商 Gateway、定时成功或全部设备恢复事项已验收；任何后续启动/重启须核对实际任务、券商配置与授权。
 
 Web / 原同步服务受控写同一生产 SQLite WAL；MCP 每请求只读事务读取已提交数据。Web 原财富 summary 的聚合快照写入继续保留；MCP 复用只读计算，不能照搬该写入入口。共享契约校验路径/属主/文件身份/schema/Portfolio/WAL，合法业务更新不再与历史迁移 SHA 比较。历史 migration-reference 与备份摘要只作迁移/恢复证据，不覆盖运行期财富状态。使用 SQLite Backup API 一致性备份和经验证恢复路径，不直接复制活动库；回滚代码前核对共享模式，不盲目换回 0400 固定副本。见 [共享库历史实施与回滚](WealthPilot_4x_Web_Data_Sync_Batch1.md)。
 
 ## 6. 生产运行与版本
+
+本节是 2026-10-16 观察快照，非本轮实时生产复核；最新状态待授权后的组件检查。
 
 Mini 当前完整 Web 监听 loopback 8790、后端 18790、MCP 8788；现有 Secure MCP Tunnel 连接 MCP，Tailscale Serve 私人 HTTPS / 原生 SSH 转发连接 Web。四个原 launchd label 分别为 `com.wealthpilot.full-web`、`com.wealthpilot.full-backend`、`com.wealthpilot.readonly-mcp`、`com.wealthpilot.secure-tunnel`。系统级 job 的业务进程使用原运行用户；不把管理员切换校验进程误当成数据库属主进程。
 
@@ -105,3 +109,45 @@ GitHub 为主要发布路径：固定完整 SHA、main ancestry 和 exact-commit
 - PoC02 凭证展示事故继续保留历史 FAIL；后续撤销权限检查单列，不抹除事故。私钥、Key、账户敏感字段、真实数据库和财务 payload 不进 Git 或公开报告。
 
 这些限制不阻塞用户确认的 4.0 功能范围收口。后续复盘、历史归因、数据源优化或其他能力进入新迭代，不为文档收口重构 PEER、复制业务引擎或新增基础设施。
+
+
+## 8. 分层依赖与数据权威
+
+依赖方向：ChatGPT / React 展示 → MCP / REST / SSE 适配 → 原业务编排与规则 → 券商/市场/知识适配与持久化。前端可以显示结果和收集人工确认，MCP 可以校验协议参数；两者不另算投资建议、执行资金或券商状态。业务模块跨层复用必须显式传递账户/来源/单位/时间，不从 UI 文案反推事实。
+
+| 业务事实 | 权威来源 / owner | 读取与派生边界 |
+|---|---|---|
+| 已有投资持仓与账户归属 | [Position / Portfolio](../app/models.py)，由导入或 [broker_sync](../backend/services/broker_sync/position_upsert_service.py) 更新 | [PortfolioService](../backend/services/portfolio_service.py) / [analyzer](../app/analyzer.py) 聚合；本地快照不冒充实时券商账户。同步对账按 broker/account/source 范围，不能仅凭 ticker 跨账户覆盖 |
+| 券商实际订单、成交、实时资金 | 原 [IBKR](../backend/services/action/brokers/ibkr.py) / [Tiger](../backend/services/action/brokers/tiger.py) 返回的证据 | OrderManager 对账并持久化；本地状态是观察投影，失败/unknown 不推定无订单。执行资金另走 Batch 的新鲜原币 snapshot / cash ledger，不从财富净资产反推可买金额 |
+| IBKR 展示现金 | adapter `get_account_info` 的逐币种 CashBalance，经 [IBKRPortfolioAdapter](../backend/services/broker_sync/snowball/adapter.py) 转 CASH 持仓 | 排除 BASE 折算重复，沿用历史 broker=snowball / source_channel=ibkr，不新建第二套 IBKR 持仓；展示现金与可执行预算含义不同 |
+| Tiger 展示现金 | PortfolioService 的现有 Tiger cash 查询及虚拟行 | 汇总/positions 可包含实时现金；缺源当前可能降级为 0，不能据此确认真实余额。MCP 的 [SourceLogProbe](../pocs/poc02_wealth_mcp/reader.py) 保留缺源质量问题；不把这项遗留行为写成全局 fail-closed 已实现 |
+| 个人财富及负债 | [WealthService](../backend/services/wealth_service.py) 的手工 WealthItem + 原 Portfolio 投资汇总 | 沿用 included_in_net_worth / already_investment_accounted 去重，养老金仅金额级。不能在财富模块复制持仓/收益权威；WealthSnapshot 是财富汇总快照，不是交易账本 |
+| 汇率、币种与分类 | [FXService](../app/fx_service.py)、[canonical classification](../backend/services/instruments/classification.py) | Web 金额字段与 MCP 最小单位契约分开（overview scale=2；details CNY 元/原币字段见契约）。secType=STK 不证明 Equity，未知分类保留 UNKNOWN，禁止前端/MCP 再映射一套分类 |
+| 配置/专业分析 | [AllocationService](../backend/services/allocation_service.py)、[原 PEER](../backend/services/decision_service_v3.py)、原 Skills 与模板 | 正值已分类投资持仓配置分母、单标投资权重和完整财富分别解释。ChatGPT 组织原专业结果，不替换其数值/证据 owner |
+| 当前收益 / 历史范围 | 原 [performance calculation](../decision_engine/llm_engine.py) 与 OrderRecord | 当前持仓账面盈亏不等于期间收益或历史成交归因；不得把消费流水或财富快照当收益账本 |
+| 知识 | 根 [knowledge_base](../knowledge_base) Markdown | Chroma 是可重建索引；不复制另一套个人知识库 |
+
+Web `wealth_service.get_summary` 会记录聚合快照；MCP overview 通过 [readonly reader](../pocs/poc02_wealth_mcp/reader.py) 复用只读计算，details 经 [reader](../pocs/chatgpt_skills/reader.py) 读取存储持仓及质量。所谓“最新状态”仅表示当次读取的已提交业务状态，必须同时看来源同步时间、失败记录与质量；调用时间不能冒充估值时间。
+
+## 9. 交易对象、状态与同步职责
+
+| 对象 / owner | 负责 | 不得承担的替代职责 |
+|---|---|---|
+| [ActionPlanner](../backend/services/action/action_planner.py) / [ActionDraft](../backend/services/action/models.py) | 分析后的可编辑建议草稿；确认后形成 AllocationIntent / SymbolStrategy | 草稿确认不是券商最终下单确认，不持有券商真实成交权威 |
+| [Typed Trade Intent](../backend/services/trade_intent) / [ExecutionBatchService](../backend/services/execution_batch/service.py) | 结构化理解确认、Batch/Leg、可信合约、报价/WhatIf、原币现金/费用/安全垫、版本哈希、顺序及幂等/恢复 | 不替代 OrderManager，不从财富总额推算购买力，不宣称多腿 broker 提交具备数据库原子回滚 |
+| [OrderManager](../backend/services/action/order_manager.py) / OrderRecord | 草稿/策略/订单生命周期、原适配器提交、状态对账、累计成交与审计；`_sync_execution_batch_linkage` 回写关联 Leg/Batch | 不等于持仓同步服务，订单成交数量不得直接合成账户现金和持仓真值 |
+| [OrderPoller](../backend/services/action/order_poller.py) | 查询可轮询订单，按订单选择适配器，调用 `sync_order_status` 并提交状态事务 | 不是完整账户同步；`scan_orphan_orders` 是启动恢复动作，启动完整 backend 不是无副作用只读检查 |
+| [SnowballSyncService](../backend/services/broker_sync/snowball/sync_service.py) / [PositionUpsertService](../backend/services/broker_sync/position_upsert_service.py) | IBKR 分支读取真实持仓及现金，存成功 snapshot，再按账户/来源对账写业务 Position | 读券商并不代表只读本地 DB；失败不得先清空业务表；不在 MCP 中直接触发生产同步 |
+
+当前存在两种执行入口，共用原底层订单权威：普通 ActionDraft → SymbolStrategy → OrderManager；Typed Intent / IB01 budget → ExecutionBatch / ExecutionLeg → SymbolStrategy → OrderManager。二者是现有职责分工；本轮不合并或新增交易体系。实际 UI 的简洁编辑及最终确认体验仍需完整验收，不能只证明 Batch 对象存在。
+
+**成交后同步缺口（本轮静态核实）**：OrderPoller → OrderManager 更新订单/累计成交和 Batch linkage；这条调用链未调用 SnowballSyncService / PositionUpsertService。`backend/main.py` 的定时同步与 `/api/broker-sync/trigger` 是独立入口。因此不把“订单 filled”直接写为“持仓及现金已同步”。未发现可直接复用的持久化成交后同步事件闭环；未来最小触发/重试方案仍需设计验证，详见[模拟验证](GOVERNANCE_VALIDATION_REPORT.md)。
+
+生产 real MCP 的七工具没有订单状态查询或主动推送；Mock `get_trade_order_status` 会持久化状态，不能直接复制为生产只读工具。要让 ChatGPT 读订单结果，需另行评审现有 OrderRecord 的只读最小投影及权限；复用已存在的投资详情工具可以查询已同步持仓，不能承诺成交后即时更新。
+
+## 10. 架构扩展和变更规则
+
+- 新入口先检索[能力索引](CAPABILITY_REGISTRY.md)与代码；复用现有 owner / adapter / 模型。业务规则只留一个权威实现；如必须平行建设，先在现有设计/PR 记录原因、权威归属、迁移/退出和人工批准，不先落代码再补论证。
+- 跨模块必须说明输入/输出、读写方向、账户/币种/单位/时间与失败语义；同步不能反向调用 MCP，MCP 不成为定时器或交易引擎。
+- 新增或改变持仓/现金/收益口径、交易状态、写入/权限、数据模型、接口时，随 PR 更新本文及能力索引，补对应合约/完整用户场景验收。简单局部修复沿用 L1，不强制新建 ADR；重要架构决策在原专项设计或 PR 留可追溯决策记录。
+- 代码可验证关系与生产运行事实分开。对未知事件可靠性、源数据完整性或部署状态写待核实，不能凭接口 PASS、历史测试数或 CI 填补生产验收。详细流程见[治理文档](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)。

@@ -1,6 +1,6 @@
 # WealthPilot 项目治理基线
 
-> 更新日期：2026-10-16
+> 更新日期：2026-10-17（Phase 0 工程规范整合；生产观察仍为原日期）
 > 当前产品：WealthPilot 4.0 五大核心场景已收口；Current development baseline：当前 `main`
 > Historical latest SemVer stable release：`v3.15.1`（不代表当前 main）
 > Previous stable release：`v3.15.0`
@@ -33,7 +33,7 @@ ChatGPT 负责交互、上下文和最终回答组织；原 FastAPI、PEER 四 A
 ## 3. 分支与提交策略
 
 - `main` 是唯一长期活跃分支，也是 GitHub 默认分支。
-- 新工作从最新 `main` 创建短期 `codex/<topic>` 分支，完成验收后通过 PR 和实际分支保护允许的合并方式回到 `main`；清理分支/工作树须有用户授权，不删除未确认历史或未提交工作。
+- 新工作 fetch 后从最新 `origin/main` 创建短期 `codex/<topic>` 分支，完成验收后通过 PR 和实际分支保护允许的合并方式回到 `main`；清理分支/工作树须有用户授权，不删除未确认历史或未提交工作。
 - 不长期维护 release、develop 或个人 handover 分支；未知历史分支在确认所有者与用途前不删除。
 - 每个提交职责单一，不 squash 已有历史；使用精确路径暂存，禁止 `git add .` 和 `git add -A`。
 - 未经明确授权，不 push、不合并、不创建或移动 Tag。
@@ -78,7 +78,7 @@ ChatGPT 负责交互、上下文和最终回答组织；原 FastAPI、PEER 四 A
 Mandatory Merge Gates：
 
 - 所有业务代码：`python -m pytest`、frontend `npm run lint`、frontend `npm run build`，以及任务相关定向测试。
-- 影响决策主链路：在上述 Gate 之外，必须运行默认 Offline M5：`python scripts/m5_e2e_18_cases.py`，并达到 18/18。
+- 任何代码修改（保留原 AGENTS 更严格要求）：在上述 Gate 之外，必须运行默认 Offline M5：`python scripts/m5_e2e_18_cases.py`，并达到 18/18。
 - Offline M5 使用显式环境白名单、临时 SQLite、固定 Demo Seed、冻结 LLM/Search/Knowledge/Clock fixture、Mock broker 与公网 socket guard；本地 `.env`、个人数据库和真实 Provider 不属于测试前提。
 - 默认 M5 报告写入系统临时 artifact；只有显式 `--update-report` 才能更新 tracked `docs/m5_e2e_report.md`。
 
@@ -98,6 +98,8 @@ Live M5 仅用于人工、授权型 Provider 观察：必须同时使用 `--mode
 
 ### Automated CI
 
+文档规则检查 `python scripts/check_engineering_docs.py` 集成在原 `backend-tests` Job；仍保留原四项 Job 和权限，不新增部署步骤。该检查只读仓库，不导入业务模块、不连接网络/数据库。
+
 GitHub Actions 的 `Quality Gates` workflow 当前执行四个并行检查，前三项原有 Gate 保持：
 
 - `backend-tests`：Python 3.11、compileall、全量 pytest；
@@ -114,14 +116,14 @@ CI 只做自动质量验证，不自动修复、提交、合并、发布或部�
 
 GitHub Repository Ruleset `Protect main with Quality Gates` 仅保护 `main`：要求 GitHub Actions 的 `Backend tests`、`Frontend checks`、`Offline M5` 三项检查通过，并采用 strict up-to-date 策略；同时要求 linear history，禁止 force push 和删除 `main`。短期开发分支不受该 Ruleset 约束。
 
-当前不强制 Pull Request、Review、Signed Commits、Deployment 或 Merge Queue。标准流程仍为短期分支 push、等待 CI 全绿、确认基于最新 `main` 后 fast-forward 更新 `main`。仓库 Owner 保留显式紧急 bypass；该能力只用于恢复，日常合并仍须遵循 Mandatory Merge Gates。
+2026-10-17 通过 GitHub rulesets API 核实：规则集未强制 Pull Request、Review、Signed Commits、Deployment 或 Merge Queue；这描述平台配置，不构成绕过审查授权。项目标准流程必须短期分支 / PR / 全部四项 CI / 人工评审及明确合并授权；本轮仅 PR，禁止合并。确认基于最新 `main` 后才按实际 linear-history 允许的方式集成。仓库 Owner 保留显式紧急 bypass；该能力只用于恢复，日常合并仍须遵循 Mandatory Merge Gates。
 
 ### GitHub 发布与 Mac Mini 部署标准流程
 
 1. MacBook Dev fetch 最新 origin/main，检查全部工作树，保护未提交文件，从最新 main 建立干净短期分支；只整合已验证且属于任务的成果。不 force push、不 squash 已有历史。
 2. 检查拟新增提交的全部文件/blob 历史：不含真实数据库、Key/Token/私钥、私人账户或财务 payload；保留用户授权的仓库外备份。公开仓库中的真实验收证据只留时间/状态/金额比较布尔结论。
 3. 业务变更本机运行相称的全量 pytest、frontend lint/build、Offline M5 和专项；文档-only 检查格式、链接、代码/部署事实及一致性。精确暂存提交，push 开发分支，创建 PR。检查 exact HEAD 的四项 Actions 结果，任何失败/未解决代码发布阻塞都不能合并。
-4. 重新核对 origin/main 和 base；按现有 linear-history/strict Gates 发布。当前允许在 PR/CI 全绿后 fast-forward 推送相同 HEAD 到 main（无 bypass，GitHub 自动识别 PR 已合入）；不制造违反 linear-history 的 merge commit。base 变化时重新形成可审查候选并重跑 Gate，不强推历史。
+4. 取得明确合并授权后重新核对 origin/main 和 base；按现有 linear-history/strict Gates 集成。PR/CI 全绿本身不提供合并授权；经授权可 fast-forward 推送相同 HEAD 到 main（无 bypass，GitHub 自动识别 PR 已合入）；不制造违反 linear-history 的 merge commit。base 变化时重新形成可审查候选并重跑 Gate，不强推历史。
 5. 验证 GitHub PR 状态、remote main、local main、origin/main 和预期 SHA 一致，记录 CI/PR/完整 revision。普通 main 发布不自动创建稳定 Tag 或 GitHub Release，不代表生产验收。
 6. 需要部署时，Mini 操作者以确认的完整 SHA 使用现有 `install-github`；仅接受 main ancestor 和 exact-commit 四项 CI 成功。安装不等于激活；复用原组件环境、共享数据及个人凭证，不重复迁移数据库或配置全部生产参数。文档-only PR 默认不部署。
 7. 安装后按实际受影响组件进行独立预检、备份旧入口、经授权切换原 launchd job、健康/契约/原功能回归及必要 Web/iOS 验收；失败恢复入口并验证健康，不盲目覆盖业务数据库。记录组件 SHA、依赖/资产版本、时间和结果。常驻、MacBook 关闭、退出/重启、备份恢复、每个数据源及真实订单均按单项证据验收，不能由 CI 或健康检查推定通过。Prod 禁止直接改业务代码；修复回 Dev 发布新的 SHA。
@@ -157,7 +159,7 @@ PoC02 凭证展示事故保持历史 FAIL。后续旧 Key 撤销后的权限检�
 
 ## 8. 文档权威与仓库卫生
 
-- 当前事实优先级：运行代码与测试证据 → 本文 → `README.md` / `AGENTS.md` / `CHANGELOG.md` → 当前 PRD。
+- 当前实现事实以代码和相应测试证据为准；治理规则由本文和根 AGENTS 规定，架构 owner/依赖见 [当前架构](ARCHITECTURE_CURRENT.md)，复用入口见[能力索引](CAPABILITY_REGISTRY.md)。README 是产品/入口，CHANGELOG 是变更历史，PRD 是目标设计，均不代替运行证据。代码事实不豁免生产/交易权限；冲突保留更严格安全边界并报告，未核实项标 UNKNOWN。
 - `docs/CODEX_WEALTHPILOT_HANDOVER_AUDIT.md` 已封存，只用于追溯接管过程；`docs/archive/` 不是当前运行说明。
 - 重复副本、导出物和临时报告不得留在仓库。删除前先确认无运行时引用，并在仓库外备份需要保留的材料。
 - 收尾目标是 `git status` 完全干净，tracked 文件中不含凭证、真实账户标识或数据库。
@@ -165,3 +167,44 @@ PoC02 凭证展示事故保持历史 FAIL。后续旧 Key 撤销后的权限检�
 ### PoC 03 个人宽权限运行凭证例外
 
 默认最小权限 Read + Use；用户可明确接受独立普通生产 Key 的宽权限风险，仅适用单成员个人组织及本人个人 workspace。使用既有 deploy.py 的 `accept-runtime-key-risk` 记录时间和当前 Key 绑定，`minimal_permissions_verified=false` 不得改写；其余七项生产 Gate 不可豁免。例外不解决 PoC 02 旧凭证事故（仍 FAIL），不豁免旧 Key 对新范围的隔离核对，不授权交易或共享访问。执行步骤见 [部署说明第 9 节](WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md#9-tunnel-v0016-修复后继续执行已有配置数据和-key-保留)。
+
+
+## 9. 标准开发流程与风险分级
+
+任务先完成 **需求/非目标 → 能力检索 → 架构影响 → 最小变更方案**，再实施。工作记录或 PR 至少说明：已有入口/测试路径、选定 owner、读写和数据口径、现有缺口、复用方式、验收场景及权限。未发现能力时继续查服务、adapter、模型、API 和测试，不根据文件名直接新建体系。
+
+| 等级 | 示例与默认工作流 | 本地验证和验收 | 人工确认边界 |
+|---|---|---|---|
+| L0 文档/规范 | 无业务行为变化；审计现状、更新原文档、检查链接/一致性 | docs checker、diff check；原四项 CI 全跑。无需启动业务/生产或重新做实盘 UAT | push/PR 按任务授权；仅 PR 则到 CI 报告停止 |
+| L1 局部 Bug/UI | 复现 → 定位原 owner → 最小修复；无需独立架构评审 | 代码 Gate + 相关定向测试；影响用户行为时对应 smoke/E2E，说明未触及场景 | 原范围内实施；不能把局部修复当生产变更授权 |
+| L2 跨模块/口径/接口 | 列影响服务、状态、账户/币种/单位/时间/去重和兼容方案；复用原 owner | 代码 Gate + 合约/回归 + 完整用户场景；涉及 Web/MCP 时分别验证；记录失败/缺源语义 | 新平行服务/模型/流程须先记录架构依据和人工批准；不必为常规扩展另建 ADR 体系 |
+| L3 交易/生产/权限/Schema迁移 | 在 L2 基础上，先离线准备可审查方案，列权限、备份、预检、回滚和停止条件 | 原安全 Gate + 幂等/部分成交/unknown/失败与恢复；按授权做生产或交易验收，未做则 runtime-pending | 真实调用、生产写/同步、服务启停、数据恢复、交易 mutation、合并、部署分别明确授权 |
+
+风险按最敏感影响路径取最高级；L0 中的文档检查脚本/CI 配置修改仍须通过完整 CI。此次 Phase 0 为 L0，不修改业务代码、Schema 或数据，不执行模拟需求的实现。
+
+### 开发中
+
+- 先扩展原服务/适配器/模型，维持数据和状态 owner；MCP/前端不复制投资、资金、收益计算。跨模块 owner 见当前架构第 8–9 节。
+- Reuse First 的证据是“检索路径 + 现有入口/测试 + 缺口”；Minimal Diff 的证据是限定文件和非目标；Single Source of Truth 的证据是字段来源、单位、账户/来源范围及更新时机。
+- 若必须新增平行体系，先在现有专项设计或 PR 留决策记录：问题、检索结果、为何不能扩展原 owner、权威/迁移/退出、兼容和测试；人工明确批准后实施。不能默默创建另一个 Portfolio、收益账本或交易流程。
+- 修改架构/能力/接口/口径同步更新当前架构、能力索引及原专项契约；仅局部实现无契约变化可标 N/A 并解释。不因“未来 4.1”将目标当现行事实。
+
+### 提交前
+
+1. 查看 diff/新增文件与数据敏感性；精确暂存，排除用户无关工作。
+2. 执行适用本地 Gate：任何代码改动保留定向测试、全量 pytest、frontend lint/build、Offline M5 18/18。仅文档不要求本地重复整套业务测试，但仍走现有全部 CI；CI-only 覆盖与本地证据分别写明。
+3. 完整用户场景按风险验证，不能只记接口 PASS：输入/身份与来源 → 业务计算/状态 → Web/MCP 呈现 → 最终确认边界 → 错误/过期/重试/一致性。用临时库和 Mock；真实账户及订单需要独立授权。
+4. 历史失败仅在相同 Python/环境/临时 DB 的 clean main 对照后归因；不能因旧基线数字较小就报回归。
+5. 运行 `python scripts/check_engineering_docs.py` 和 `git diff --check`，填 [PR 模板](../.github/pull_request_template.md)。提交 SHA 和 CI 结果留 PR/交付记录，避免将文档自己的 SHA 循环嵌入。
+
+### PR 与发布前
+
+- PR 描述问题、结果、复用/owner、风险、检查、端到端证据、文档、未验收项和生产影响；N/A 必须有理由，不虚勾选。四项 CI 查看 exact HEAD，失败/未完成必须如实标记。
+- 仅有 PR/CI 不自动获得合并/部署权。发布前另做生产影响、必要一致性备份、已确认代码 SHA、授权切换、组件/原功能/设备验收及回滚准备；沿用第 6 节，不复制 Dev .env，不在 Prod 修业务代码。
+- 代码回滚不能盲目覆盖共享 WAL 业务数据；资金/订单不能用数据库回滚撤销；回滚与任何券商 mutation 各自授权。
+
+### 文档维护与机器检查范围
+
+[check_engineering_docs.py](../scripts/check_engineering_docs.py) 检查本轮活入口文档/PR 模板的相对链接、文件/标题锚点和必读入口引用；不请求远端 URL、不验证整份历史档案，也不能证明语义正确、部署状态或真实用户体验。新增活入口应加入检查清单。结构检查通过后仍需审查代码证据和权限边界。
+
+不同 Codex 会话/设备从仓库根 AGENTS 自动发现规则；若客户端不支持 AGENTS 自动加载，操作者必须在任务启动显式加载根文件及必读引用。文档无法证明所有客户端都自动服从，模拟验证只验证本次会话的可发现性与执行结果，见[验证报告](GOVERNANCE_VALIDATION_REPORT.md)。

@@ -1,5 +1,7 @@
 # WealthPilot 多标的交易执行闭环 Current Code Reuse / Gap Audit
 
+> 历史适用范围（2026-10-17 标注）：本文保留当时的审计/设计/部署证据，不作为当前架构或新的操作授权。现行实现与 owner 见 [ARCHITECTURE_CURRENT](ARCHITECTURE_CURRENT.md)，任务边界见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md)。旧步骤使用前须按当前代码及运行模式重新核对；本轮未执行本文生产步骤。
+
 > 审计日期：2026-08-15
 >
 > 审计分支：`codex/portfolio-sync-corrections`
