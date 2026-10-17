@@ -44,7 +44,6 @@ from backend.services.action.state_machine import (
     OrderStatus,
     validate_draft_transition,
     validate_strategy_transition,
-    validate_order_transition,
     project_broker_status,
 )
 from backend.services.action.brokers.base import (
@@ -459,7 +458,9 @@ class OrderManager:
                         if callable(cancel_by_ref) else self.broker_adapter.cancel_order(order.broker_order_id))
         except (ConnectionError, TimeoutError) as e:
             # 分支 c: 网络异常，无法确认撤单结果
-            order.status = OrderStatus.UNKNOWN
+            order = self.apply_broker_observation(order.id, OrderStatusUpdate(
+                order.broker_order_id, order.id, OrderStatus.UNKNOWN,
+                raw_response={"status_only": True}))
             self._audit("cancel_network_error", {
                 "order_id": order_id,
                 "error": str(e),
@@ -584,6 +585,45 @@ class OrderManager:
         self.session.flush()
         return audit.id
 
+    def _submission_key(self, owner, strategy_id, params):
+        batch_id, leg_id = params.get("batch_id"), params.get("batch_leg_id")
+        if batch_id:
+            if not leg_id:
+                raise ValueError("BATCH_LEG_REQUIRED")
+            facts = ["b0.batch-leg.v1", owner.portfolio_id, owner.broker, owner.account_id, batch_id, leg_id]
+        else:
+            strategy = self.get_strategy(strategy_id)
+            if strategy is None:
+                raise ValueError("策略不存在")
+            source = self.session.get(ActionDraft, strategy.source_draft_id) if strategy.source_draft_id else None
+            if source is not None and source.user_id == "chatgpt-web-link":
+                facts = ["b0.web-link.v1", owner.portfolio_id, owner.broker, owner.account_id, source.id, strategy_id]
+            else:
+                facts = ["b0.strategy-review.v1", owner.portfolio_id, owner.broker, owner.account_id,
+                         strategy_id, params.get("review_id")]
+        return hashlib.sha256(self._canonical(facts).encode()).hexdigest()
+
+    def existing_submission(self, strategy_id, params, *, owner=None):
+        """Read an identical durable claim, never 'any prior strategy order'."""
+        from backend.services.action.ownership import execution_owner
+        owner = owner or execution_owner(self.session, self.broker_adapter)
+        key = self._submission_key(owner, strategy_id, params)
+        order = self.session.query(OrderRecord).filter_by(submission_key=key).first()
+        if order is None:
+            return None
+        old = json.loads(order.submission_payload_json)
+        if (order.portfolio_id != owner.portfolio_id or order.broker_name != owner.broker
+                or order.broker_account_id != owner.account_id
+                or old["portfolio_id"] != owner.portfolio_id or old["broker"] != owner.broker
+                or old["account_id"] != owner.account_id
+                or order.batch_id != params.get("batch_id") or order.batch_leg_id != params.get("batch_leg_id")
+                or (not order.batch_id and order.strategy_id != strategy_id)):
+            raise ValueError("IDEMPOTENCY_OWNER_CONFLICT")
+        strategy = self.get_strategy(order.strategy_id)
+        if json.loads(self._canonical(self._parameters(strategy, params))) != old["parameters"]:
+            raise ValueError("IDEMPOTENCY_PARAMETER_CONFLICT")
+        return order
+
     def place_order(self, strategy_id: str, order_params: dict) -> OrderRecord:
         """Claim -> commit -> one broker call -> independent observation commit.
 
@@ -610,28 +650,9 @@ class OrderManager:
             manager = OrderManager(tx, self.broker_adapter)
             if execution_owner(tx, self.broker_adapter) != owner:
                 raise ValueError("EXECUTION_OWNER_CHANGED")
-            if batch_id:
-                key_facts = ["b0.batch-leg.v1", owner.portfolio_id, owner.broker, owner.account_id, batch_id, leg_id]
-            else:
-                source_strategy = manager.get_strategy(strategy_id)
-                if source_strategy is None:
-                    raise ValueError("策略不存在")
-                source = tx.get(ActionDraft, source_strategy.source_draft_id) if source_strategy.source_draft_id else None
-                if source is not None and source.user_id == "chatgpt-web-link":
-                    key_facts = ["b0.web-link.v1", owner.portfolio_id, owner.broker, owner.account_id, source.id, strategy_id]
-                else:
-                    key_facts = ["b0.strategy-review.v1", owner.portfolio_id, owner.broker, owner.account_id,
-                                 strategy_id, order_params.get("review_id")]
-            key = hashlib.sha256(manager._canonical(key_facts).encode()).hexdigest()
-            existing = tx.query(OrderRecord).filter_by(submission_key=key).first()
+            key = manager._submission_key(owner, strategy_id, order_params)
+            existing = manager.existing_submission(strategy_id, order_params, owner=owner)
             if existing is not None:
-                # Old version is allowed only as a read of the identical claim.
-                old = json.loads(existing.submission_payload_json)
-                for field in ("quantity", "limit_price", "time_in_force"):
-                    if field in order_params and str(old["parameters"][field]) != str(order_params[field]):
-                        # Decimal representations may differ without changing value.
-                        if field == "time_in_force" or Decimal(str(old["parameters"][field])) != Decimal(str(order_params[field])):
-                            raise ValueError("IDEMPOTENCY_PARAMETER_CONFLICT")
                 order_id = existing.id
             else:
                 unknown = tx.query(OrderRecord).filter(
@@ -789,29 +810,24 @@ class OrderManager:
                 if update is None:
                     update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
                                                filled_quantity=order.filled_quantity or 0,
-                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE"})
+                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE", "status_only": True})
             elif recover is not None:
                 update = recover(order.id)
                 if update is None:
                     update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
                                                filled_quantity=order.filled_quantity or 0,
-                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE"})
+                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE", "status_only": True})
             elif order.broker_order_id:
                 update = self.broker_adapter.get_order_status(order.broker_order_id)
             else:
                 update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
-                                           filled_quantity=order.filled_quantity or 0)
+                                           raw_response={"status_only": True})
         except (ConnectionError, TimeoutError) as e:
-            # 网络异常 → 标记 unknown（如果当前不是终态）
-            if order.status not in OrderStatus.TERMINAL:
-                try:
-                    validate_order_transition(order.status, OrderStatus.UNKNOWN)
-                    order.status = OrderStatus.UNKNOWN
-                except ValueError:
-                    pass  # 当前状态不允许转 unknown，保持原状
+            order = self.apply_broker_observation(order.id, OrderStatusUpdate(
+                order.broker_order_id, order.id, OrderStatus.UNKNOWN,
+                raw_response={"status_only": True}))
             self._audit("sync_network_error", {"order_id": order_id, "error": str(e)})
             logger.warning(f"[OrderManager] sync 网络异常: {e}")
-            self._sync_execution_batch_linkage(order)
             self.session.flush()
             return order
 
@@ -824,6 +840,18 @@ class OrderManager:
         quantities cannot erase known executions. A correction is quarantined,
         never replayed as a new financial event in B0.
         """
+        # The caller commits immediately after this database-only operation.
+        # Never flush stale caller changes, or trust an identity-map object read
+        # before broker I/O. A no-row UPDATE also upgrades an existing deferred
+        # transaction (or fails closed on SQLITE_BUSY_SNAPSHOT).
+        if self.session.new or self.session.dirty or self.session.deleted:
+            raise ValueError("COMMIT_PREPARATION_BEFORE_OBSERVATION")
+        if not self.session.connection().connection.driver_connection.in_transaction:
+            self.session.rollback()
+            self.session.execute(text("BEGIN IMMEDIATE"))
+        else:
+            self.session.execute(text("UPDATE order_records SET id=id WHERE 0"))
+        self.session.expire_all()
         order = self.get_order(order_id)
         if order is None:
             raise ValueError("订单不存在")
@@ -841,7 +869,7 @@ class OrderManager:
         new_status = update.status if update.status in OrderStatus.ALL else OrderStatus.UNKNOWN
         old_qty = int(order.filled_quantity or 0)
         try:
-            quantity = Decimal(str(update.filled_quantity))
+            quantity = Decimal(str(old_qty if update.raw_response.get("status_only") else update.filled_quantity))
             valid_qty = quantity.is_finite() and quantity == quantity.to_integral_value() and 0 <= quantity <= order.quantity
         except Exception:
             valid_qty = False
@@ -864,6 +892,7 @@ class OrderManager:
             qty = int(quantity)
             if qty < old_qty:
                 self._audit("broker_stale_observation", {"order_id": order.id, "quantity": qty})
+                self.session.flush()
                 return order
             order.status = project_broker_status(order.status, new_status,
                 previous_filled=old_qty, cumulative_filled=qty, quantity=order.quantity)
@@ -881,7 +910,8 @@ class OrderManager:
         if order.broker_order_id and order.submitted_at is None:
             order.submitted_at = now
         order.last_synced_at = now
-        raw = {**update.raw_response}
+        raw = ({**prior_raw, **update.raw_response} if update.raw_response.get("status_only")
+               else {**update.raw_response})
         for name in ("perm_id", "order_ref", "con_id", "observed_account_id"):
             if not raw.get(name) and prior_raw.get(name):
                 raw[name] = prior_raw[name]

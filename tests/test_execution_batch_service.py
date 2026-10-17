@@ -256,6 +256,140 @@ def make_ready_two_leg_batch(session, adapter=None):
     return service, adapter, batch
 
 
+@pytest.fixture
+def wal_batch(tmp_path, request):
+    """Independent connections, not the legacy single in-memory connection."""
+    from sqlalchemy import event
+    from app.models import Portfolio
+    engine = create_engine(f"sqlite:///{tmp_path / 'batch.db'}", connect_args={"timeout": 5})
+    @event.listens_for(engine, "connect")
+    def wal(connection, _):
+        connection.execute("PRAGMA journal_mode=WAL")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, info={"portfolio_id": 1})
+    with factory() as db:
+        db.add(Portfolio(id=1, name="Synthetic WAL owner"))
+        db.add(Conversation(id="case1-conversation", title="Synthetic"))
+        db.add(ConversationMessage(id=2, conversation_id="case1-conversation", role="assistant", content="Synthetic",
+            metadata_json=json.dumps({"trade_intent": canonical_two_leg_intent()})))
+        db.commit()
+    adapter = FakeIBKRExecutionAdapter()
+    with factory() as db:
+        service, _, batch = make_ready_two_leg_batch(db, adapter)
+        service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+        db.commit()
+        batch_id, leg_ids = batch.id, [leg.id for leg in batch.legs]
+        for leg_id in leg_ids[:getattr(request, "param", 2)]:
+            service.submit_next_leg(batch_id, confirmation_version=1, leg_id=leg_id)
+            db.commit()
+    yield factory, adapter, batch_id, leg_ids
+    engine.dispose()
+
+
+def test_r01_old_connection_cannot_reopen_filled_batch(wal_batch):
+    factory, adapter, batch_id, leg_ids = wal_batch
+    with factory() as older, factory() as newer:
+        cached_batch = older.get(ExecutionBatch, batch_id)
+        cached_legs = list(cached_batch.legs)
+        cached_order = older.get(OrderRecord, cached_legs[0].linked_order_id)
+        cached_strategy = older.get(SymbolStrategy, cached_order.strategy_id)
+        for leg_id in leg_ids:
+            leg = newer.get(ExecutionLeg, leg_id)
+            order = newer.get(OrderRecord, leg.linked_order_id)
+            OrderManager(newer, adapter).apply_broker_observation(order.id, OrderStatusUpdate(
+                order.broker_order_id, order.id, "filled", filled_quantity=order.quantity, avg_filled_price=order.limit_price))
+        newer.commit()
+        OrderManager(older, adapter).apply_broker_observation(cached_order.id, OrderStatusUpdate(
+            cached_order.broker_order_id, cached_order.id, "partially_filled", filled_quantity=4))
+        older.commit()
+        assert cached_order.status == "filled" and cached_order.filled_quantity == cached_order.quantity
+        assert cached_strategy.status == "completed" and cached_strategy.cumulative_filled_quantity == cached_order.quantity
+        assert cached_batch.status == "COMPLETED" and all(leg.status == "FILLED" for leg in cached_batch.legs)
+
+
+def test_r03_batch_linked_replay_requires_owner_and_immutable_parameters(wal_batch):
+    factory, adapter, batch_id, leg_ids = wal_batch
+    with factory() as db:
+        service = ExecutionBatchService(db, adapter, clock=lambda: NOW, allow_mutation=True)
+        leg = db.get(ExecutionLeg, leg_ids[0])
+        old_id = leg.linked_order_id
+        assert service.submit_next_leg(batch_id, confirmation_version=0, leg_id=leg.id).id == old_id
+        adapter._account_id = "DIFFERENT-SYNTHETIC-OWNER"
+        with pytest.raises(ExecutionSafetyError, match="BATCH_OWNER_MISMATCH"):
+            service.submit_next_leg(batch_id, confirmation_version=0, leg_id=leg.id)
+        adapter._account_id = "U-FAKE"
+        leg.final_limit += 1
+        db.commit()
+        with pytest.raises(ValueError, match="IDEMPOTENCY_PARAMETER_CONFLICT"):
+            service.submit_next_leg(batch_id, confirmation_version=0, leg_id=leg.id)
+    assert len(adapter.place_calls) == 2
+
+
+@pytest.mark.parametrize("operation", ["cancel", "sync"])
+def test_i02_network_unknown_updates_order_leg_and_batch_without_writer_io(wal_batch, operation):
+    factory, adapter, batch_id, leg_ids = wal_batch
+    def unavailable(*_):
+        with factory() as probe:
+            probe.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            probe.rollback()
+        raise TimeoutError("synthetic lost reply")
+    if operation == "cancel":
+        adapter.cancel_order = unavailable
+    else:
+        adapter.find_order_by_ref = unavailable
+    with factory() as db:
+        leg = db.get(ExecutionLeg, leg_ids[0])
+        manager = OrderManager(db, adapter)
+        (manager.cancel_order if operation == "cancel" else manager.sync_order_status)(leg.linked_order_id)
+        db.commit()
+        order = db.get(OrderRecord, leg.linked_order_id)
+        assert order.status == "unknown" and leg.status == "UNKNOWN"
+        assert db.get(ExecutionBatch, batch_id).status == "ATTENTION_REQUIRED"
+
+
+@pytest.mark.parametrize("wal_batch", [1], indirect=True)
+@pytest.mark.parametrize("concurrent", ["submit", "stop"])
+def test_i01_remaining_review_cas_never_changes_concurrently_claimed_or_stopped_leg(wal_batch, concurrent):
+    factory, adapter, batch_id, leg_ids = wal_batch
+    review_adapter = FakeIBKRExecutionAdapter()
+    cash = review_adapter.get_cash_snapshot
+    def concurrent_change(currency):
+        with factory() as other:
+            service = ExecutionBatchService(other, adapter, clock=lambda: NOW, allow_mutation=True)
+            if concurrent == "submit":
+                service.submit_next_leg(batch_id, confirmation_version=1, leg_id=leg_ids[1])
+            else:
+                service.stop_remaining(batch_id)
+            other.commit()
+        return cash(currency)
+    quote = review_adapter.get_executable_quote
+    def changed_quote(resolved):
+        value = quote(resolved)
+        if resolved["symbol"] == "IB01":
+            value.update(ask=127, bid=126.99)
+        return value
+    review_adapter.get_cash_snapshot = concurrent_change
+    review_adapter.get_executable_quote = changed_quote
+    with factory() as db:
+        service = ExecutionBatchService(db, review_adapter, clock=lambda: NOW, allow_mutation=True)
+        with pytest.raises(ExecutionSafetyError, match="REVIEW_CONCURRENT_CHANGE"):
+            service.review_remaining(batch_id)
+        db.rollback()
+    with factory() as db:
+        batch = db.get(ExecutionBatch, batch_id)
+        leg = db.get(ExecutionLeg, leg_ids[1])
+        assert leg.final_limit == 126 and batch.confirmation_version == 1
+        if concurrent == "submit":
+            order = db.get(OrderRecord, leg.linked_order_id)
+            assert order.limit_price == leg.final_limit and order.quantity == leg.final_quantity
+            assert leg.status == "OPEN" and batch.status == "SUBMITTED"
+            assert len(adapter.place_calls) == 2
+        else:
+            assert leg.linked_order_id is None and leg.status == "CANCELLED"
+            assert "REMAINING_STOPPED" in batch.attention_reason
+            assert len(adapter.place_calls) == 1
+
+
 def make_cancelled_two_leg_attempt(session, adapter=None):
     service, adapter, batch = make_ready_two_leg_batch(session, adapter)
     service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")

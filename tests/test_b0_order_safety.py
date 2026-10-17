@@ -267,3 +267,89 @@ def test_cancel_owner_mismatch_is_blocked_before_broker_mutation(rig):
         broker._account_id = 'DIFFERENT-ACCOUNT'
         with pytest.raises(ValueError, match='OWNER_MISMATCH'):
             manager.cancel_order(order.id)
+
+
+@pytest.mark.parametrize("status,quantity", [("partially_filled", 4), ("unknown", 0), ("cancelled", 0)])
+def test_r01_old_connection_observation_cannot_erase_committed_fill(rig, status, quantity):
+    factory, broker, strategy_id, params = rig
+    with factory() as db:
+        order_id = OrderManager(db, broker).place_order(strategy_id, params).id
+    with factory() as older, factory() as newer:
+        old_manager = OrderManager(older, broker)
+        cached = old_manager.get_order(order_id)  # strong reference across broker I/O
+        assert cached.filled_quantity == 0
+        new_manager = OrderManager(newer, broker)
+        new_manager.apply_broker_observation(order_id, OrderStatusUpdate(
+            "broker-perm-10", order_id, "filled", filled_quantity=10, avg_filled_price=Decimal("10")))
+        newer.commit()
+        old_manager.apply_broker_observation(order_id, OrderStatusUpdate(
+            "broker-perm-10", order_id, status, filled_quantity=quantity))
+        older.commit()
+    with factory() as db:
+        manager = OrderManager(db, broker)
+        order = manager.get_order(order_id)
+        strategy = manager.get_strategy(strategy_id)
+        assert order.status == "filled" and order.filled_quantity == 10
+        assert strategy.status == "completed" and strategy.cumulative_filled_quantity == 10
+
+
+def test_r03_new_review_after_prior_fill_must_recheck_risk_and_acknowledge(rig, monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from app.models import Position
+    from app.fx_service import fx_service
+    from backend.api import action
+    from backend.services.action.risk_engine import portfolio_order_risk, CONFIRMATION_TEXT
+    factory, broker, _, _ = rig
+    monkeypatch.setattr(fx_service, "_cache", {("USD", "CNY", "latest"): (7, "2026-10-17")})
+    with factory() as db:
+        db.add(Position(portfolio_id=11, name="Synthetic CNY balance", platform="Synthetic",
+            ticker="CASH-CNY", symbol="CASH-CNY:SH", segment="投资", asset_class="货币",
+            currency="CNY", quantity=20000, cost_price=1, market_value_cny=20000))
+        manager = OrderManager(db, broker)
+        draft = manager.create_draft("synthetic-risk", {"symbol_strategies": [
+            {"symbol": "AAPL:US", "side": "BUY", "quantity": 20, "limit_price": 10}], "missing_fields": []})
+        sid = manager.confirm_draft(draft.id)[0].id
+        db.commit()
+        risk = portfolio_order_risk(db, portfolio_id=11, symbol="AAPL:US", side="BUY", quantity=10, limit_price=Decimal("10"))
+        assert not risk["requires_confirmation"]
+        params = {"quantity": 10, "limit_price": 10}
+        first_review = manager.create_order_review(sid, params, risk_snapshot=risk)
+        db.commit()
+        broker.mode = "filled"
+        first = manager.place_order(sid, {**params, "review_id": first_review})
+        first_id = first.id
+        second_review = manager.create_order_review(sid, params, risk_snapshot=risk)
+        db.commit()
+    def manager_for_api():
+        db = factory()
+        return OrderManager(db, broker), db
+    monkeypatch.setattr(action, "_get_manager", manager_for_api)
+    request = Request({"type": "http", "headers": [], "client": ("127.0.0.1", 12345)})
+    fx_service._cache[("USD", "CNY", "latest")] = (7, "fallback")
+    with pytest.raises(HTTPException) as failure:
+        action.place_order(sid, {**params, "review_id": second_review}, request)
+    assert failure.value.detail == "RISK_REVIEW_CHANGED" and len(broker.requests) == 1
+    # Exact old claim remains a read, even after risk changed or review expired.
+    replay = action.place_order(sid, {**params, "review_id": first_review}, request)
+    assert replay["id"] == first_id and len(broker.requests) == 1
+    reviewed = action.check_risk(sid, params, request)
+    assert reviewed["requires_confirmation"]
+    with pytest.raises(HTTPException) as missing_ack:
+        action.place_order(sid, {**params, "review_id": reviewed["review_id"]}, request)
+    assert missing_ack.value.detail == "RISK_CONFIRMATION_REQUIRED" and len(broker.requests) == 1
+    result = action.place_order(sid, {**params, "review_id": reviewed["review_id"],
+                                     "confirmation_text": CONFIRMATION_TEXT}, request)
+    assert result["status"] == "filled" and len(broker.requests) == 2
+
+
+@pytest.mark.parametrize("changed", [{"order_type": "MARKET"}, {"stop_price": 8},
+                                     {"time_in_force": "DAY"}, {"resolved_contract": {"con_id": 1}}])
+def test_r03_existing_claim_requires_all_immutable_parameters(rig, changed):
+    factory, broker, strategy, params = rig
+    with factory() as db:
+        manager = OrderManager(db, broker)
+        manager.place_order(strategy, params)
+        with pytest.raises(ValueError, match="IDEMPOTENCY_PARAMETER_CONFLICT"):
+            manager.place_order(strategy, {**params, **changed})
+    assert len(broker.requests) == 1

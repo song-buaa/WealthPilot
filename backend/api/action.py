@@ -787,8 +787,7 @@ def place_order(strategy_id: str, body: dict, request: Request):
         strategy = mgr.get_strategy(strategy_id)
         if strategy is None:
             raise HTTPException(status_code=404, detail="策略不存在")
-        from backend.services.action.models import ActionDraft, OrderRecord, AuditLog
-        source = session.get(ActionDraft, strategy.source_draft_id) if strategy.source_draft_id else None
+        from backend.services.action.models import AuditLog
         if strategy.batch_leg_id:
             raise HTTPException(
                 status_code=409,
@@ -817,16 +816,14 @@ def place_order(strategy_id: str, body: dict, request: Request):
             symbol=strategy.symbol, side=strategy.side, quantity=quantity, limit_price=limit_price)
         # New warnings require a new review; stale financial evidence is never a PASS.
         prior = json.loads(review.payload)
+        params = {"quantity": quantity, "limit_price": limit_price,
+                  "time_in_force": body.get("time_in_force", "GTC"),
+                  "review_id": body.get("review_id"), "confirmation_text": confirmation_text}
         if risk_result != prior["risk"]:
             # A completed identical claim can still be read without new authorization.
-            existing = session.query(OrderRecord).filter_by(strategy_id=strategy_id).first()
-            if not existing:
+            if mgr.existing_submission(strategy_id, params, owner=owner) is None:
                 raise ValueError("RISK_REVIEW_CHANGED")
-        order = mgr.place_order(strategy_id, {
-            "quantity": quantity, "limit_price": limit_price,
-            "time_in_force": body.get("time_in_force", "GTC"),
-            "review_id": body.get("review_id"), "confirmation_text": confirmation_text,
-        })
+        order = mgr.place_order(strategy_id, params)
         mgr._audit("order_placed_manual_confirm", {"order_id": order.id,
             "review_id": body.get("review_id"), "risk_acknowledged": bool(confirmation_text)},
             ip_address=ip_address, user_agent=user_agent)
