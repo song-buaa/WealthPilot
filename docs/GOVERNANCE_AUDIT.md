@@ -1,5 +1,6 @@
 # Phase 0｜Governance Audit 与整合映射
 
+> 第 1–4 节记录初轮审计/仅 PR 授权，第 5 节保留历史摘录；最终修订、独立验证和后续授权范围见第 6 节，不用历史阶段限制覆盖当前用户指令。
 > 2026-10-17；审计基线：fetch 后 `origin/main = bc19b66f724767b5fb36e1c74a2378942a537f81`。任务：规范审计、文档整合、模拟验证、PR/CI；不进入 4.1 业务审计或开发。
 
 ## 1. 审计范围与方法
@@ -67,3 +68,63 @@
 本任务是 L0；不修改业务代码、Schema、数据库/财务数据、生产配置或凭证。文档 checker/CI 是唯一代码与配置变更。未运行真实 Provider、生产同步、服务重启或交易，不创建 Tag/Release。精确修改文件、最终 commit、PR 和 exact-HEAD 四项 CI 结果记录在 PR 与交付消息中，避免把文档自己的 SHA 循环写入内容。CI 失败/未完成须如实报告，不能以旧 main PASS 代替候选验证。
 
 剩余规范边界：机器检查不保证任意客户端自动加载/服从；历史档案不做全量链接清理；生产四组件版本及运行状态未在本轮复核。以上不阻塞本轮文档整合，不自动启动 4.1 工作。
+
+
+## 5. 原治理文档历史记录
+
+以下从 PR #19 初稿 `bf6701c` 的治理文档原样保留，分别对应当时观察、测试基线和阶段验收；不是本轮实时核验或长期任务授权。当前流程回到 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md)，部署/数据事实见现行架构及其带日期证据。将原治理中的历史记录移至本报告，不删除历史文件或撤销有效安全约束。
+
+### 2026-10-16 版本观察表
+
+| 对象 | 已核实事实 | 如何解释 |
+|---|---|---|
+| 本次文档整理起点的 remote main | `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，PR #10；在 P3/P4/P5 的 `62f2f8168727acfea159f3f57858e6e109b20610` 之后，包含 IB01 交易链接兼容修复；main 四项 CI SUCCESS | 这是起点快照；最新 main 用 fetch / rev-parse 重新读取 |
+| Mini MCP 业务入口 | 启动包装器固定 `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，job 运行 | 不等于其复用的 SDK Python 环境 SHA |
+| Mini 完整后端 / Web | 两个启动入口均引用 `8b648db4cf7c714cd43eef0d4e437f22d061eae6`，jobs 运行，health HTTP 200 | 本次只读核对启动引用与健康，不新增交易或 IB01 成交验收 |
+| Mini 复用环境 / 资产 / current | MCP SDK 环境为 `4ebf2cb05cb26c77dfd04ab41ef81e69592ddfcb`；分析工作目录资产锚点 `36ef2cb40791e421ab76833cb1dead383b8c540d`；全局 current 为 `d5c4291ed0202a460be1f51056fd69748065fda6` | 都不能替代组件业务 SHA；Tunnel 保持独立原身份，不由 main/current 推定版本 |
+| 本次 docs-only 提交 | 基于上述 main，准确 SHA 见该文档 PR / `git log -1 -- README.md AGENTS.md docs/ARCHITECTURE_CURRENT.md docs/PROJECT_GOVERNANCE.md CHANGELOG.md` | PR 未合并前不是 main；即使合并也不自动部署。避免在文档中循环嵌入自己的提交 SHA |
+| 已存在 SemVer Tag | 历史最新 `v3.15.1` → `5492b1dbead99677e0e84d8a177a78e6e7157036`（peeled commit）；另有历史功能里程碑 Tag | 不代表当前 main 或生产版本；Tag 不移动/重建 |
+| `v4.0.0` | remote 尚无此 Tag，4.0 是用户确认的产品功能收口 | 不因文档收口自动创建 Tag / GitHub Release |
+
+观察时间为 2026-10-16 08:27–08:28 UTC（Mini 启动文件/launchd/health 只读检查；不读财务数据、不重启服务）。完整验收与数据质量见当前架构；后续设备变更必须新增时间与组件版本记录，不能把本表当永久实时状态。前端 package 0.0.0 / FastAPI 1.0.0 不是产品发布版本。
+
+2026-08-14 在 `/Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python`、临时 SQLite、空外部密钥、Public Demo/Mock broker 安全配置下建立的新基线：
+
+- 后端全量 pytest：收集 423 项，`416 passed, 7 skipped, 0 failed, 0 warnings`。
+- IBKR adapter 定向测试：`86 passed`；仅使用 mock runtime，未连接 Gateway 或执行订单 mutation。
+- Execution Plan 定向测试：`98 passed, 0 warnings`。
+- Offline M5：连续三次 `18/18`，报告哈希一致；使用冻结 fixture，公网连接尝试为 `0`。
+- Python compileall：通过。
+- 前端 lint：`0 errors, 0 warnings`。
+- 前端 build：通过；仍有单 chunk 超过 500 kB 的非阻断提示。
+
+从该基线起，上述 mandatory merge gates 持续适用。测试必须使用临时数据库和显式关闭或冻结的外部 Provider，不能以本地 `.env`、个人数据库或真实服务可用性作为通过条件。
+
+### 财富总览 v0.1 已知限制与验收范围（2026-09-07）
+
+- 状态：**刷新一致性问题已完成**。按用户本轮确认的范围收口；不是对养老金账户/持仓级精确去重的验收。
+- 个人养老金的 `already_investment_accounted` 当前属于金额级去重：从实时 Portfolio 汇总中扣除已登记金额，不代表已建立账户或持仓身份映射。
+- 底层养老金持仓净值变化时，登记金额与实际 Portfolio 养老金资产可能产生小额偏差。用户已明确接受此限制，不阻塞本版本收口。
+- 后续建设账户级 / holding-level mapping 时统一解决精确去重；本轮不新增账户映射、持仓映射或其他数据模型。
+- “刷新一致性问题”与精确去重分别验收：同步完成后自动获取最新 Portfolio 数据、两页各自 API/UI 一致、SPA 进入及 focus / visibility / 同步通知触发刷新，无须手工刷新浏览器，也不增加财富页投资同步入口。
+- 刷新验收证据由 `frontend/tests/e2e/wealth-portfolio-consistency.spec.ts`（临时 SQLite、真实 Portfolio/Wealth service）与 `wealth-refresh.spec.ts` 覆盖；真实金额对账证据保留在仓库外私有审计报告，不提交个人财务数据。
+- 本轮复验：两个浏览器测试通过，真实服务测试逐项验证 focus、visibilitychange、portfolio-updated 都产生新的 summary 请求并显示正确金额；frontend lint/build 通过。未修改后端业务代码，沿用上一轮后端全量 892 passed、7 skipped 及 Offline M5 18/18 结果。
+
+### PoC 03 个人宽权限运行凭证例外
+
+默认最小权限 Read + Use；用户可明确接受独立普通生产 Key 的宽权限风险，仅适用单成员个人组织及本人个人 workspace。使用既有 deploy.py 的 `accept-runtime-key-risk` 记录时间和当前 Key 绑定，`minimal_permissions_verified=false` 不得改写；其余七项生产 Gate 不可豁免。例外不解决 PoC 02 旧凭证事故（仍 FAIL），不豁免旧 Key 对新范围的隔离核对，不授权交易或共享访问。执行步骤见 [部署说明第 9 节](WealthPilot_4x_Phase1_PoC03_MacMini_Deployment.md#9-tunnel-v0016-修复后继续执行已有配置数据和-key-保留)。
+
+
+## 6. 最终修订与收口记录
+
+本轮在 PR #19 原分支上追加，不新建规范文件、重命名核心文件或引入检查框架。治理文档由 210 行缩至 121 行：旧组件版本表、测试数量、养老金阶段验收和 PoC 细节保留到第 5 节/原历史说明，长期规则只引用；移除初轮“本轮仅 PR”作为长期限制，按当前任务分别授权 PR、合并与部署。
+
+四份核心职责以治理第 8 节为唯一分工表；AGENTS 保留默认行为和必读引用，架构维护模块/数据权威，Registry 维护复用索引，治理维护详细流程/质量/发布。文档与代码/运行证据冲突须报告并修正；未知项保留 UNKNOWN，安全约束不因代码事实豁免。
+
+Registry 的新增能力检查、权威入口/职责变更、废弃/迁移/合并强制同步，以及无能力变化注明理由的豁免，统一定义于治理第 9 节，PR 模板显式检查。未要求小 Bug 机械修改索引。
+
+本轮仅修改八份已有 Markdown：四份核心、PR 模板、两份报告、CLAUDE 指针。CLAUDE 的 v3.2 介绍由独立新会话发现并改为现行入口引用，质量 Gate 回链治理；无业务代码、Schema、业务数据、CI/检查器变更，也未新增文件。
+
+[独立新会话验证结果](GOVERNANCE_VALIDATION_REPORT.md#7-最终修订后的独立新会话验证)包含读取顺序、稳定文档快照、能力检索、最小方案和权限边界。本次 Registry 业务条目无需更新：没有新增/迁移业务能力或改变权威入口。跨设备未完成、客户端自动注入普适性未证明，为非阻塞验证限制。模拟需求的触发可靠性、账户关联和源数据时序仍属未来设计/验收，不在本轮展开。
+
+本地文档 checker 和 diff 检查通过；最终 exact-HEAD 四项 CI、授权合并和 main CI 以 PR #19/交付记录为准，不在提交前虚写 PASS。用户本轮已授权在无新实质问题且 CI 全绿后合并；未授权生产部署、业务审计或功能开发，合并/核对完成后停止。

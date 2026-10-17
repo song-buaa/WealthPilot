@@ -1,13 +1,13 @@
 # AGENTS.md
 
-WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.0 功能收口不代表 4.1 已实现或每个生产场景已验收。详细架构、历史版本和运行快照不在本文重复。
+WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.0 功能收口不代表 4.1 已实现或每个生产场景已验收。详细架构、流程和能力索引各自维护，职责分工见[治理文档第 8 节](docs/PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。
 
 ## 每个任务的启动顺序
 
 1. 读取本文件、[README](README.md)、[治理与工作流](docs/PROJECT_GOVERNANCE.md)、[当前架构](docs/ARCHITECTURE_CURRENT.md)、[能力索引](docs/CAPABILITY_REGISTRY.md)。检查目标目录及祖先目录的 AGENTS.md；更深规则仅作用于相应目录，不能削弱生产/交易边界。
 2. 检查 `git status --short`、branch、HEAD、remote 与已有 worktree。保护用户未提交工作；代码任务先 `git fetch origin main`，从最新 `origin/main` 建立短期 `codex/<topic>` 分支，必要时用独立 worktree。
 3. 写出需求/非目标、风险等级、已有能力及证据路径、权威数据与状态 owner、最小变更方案、测试/端到端验收和权限范围。用 `rg` 检索服务、适配器、模型、API、MCP 和测试；不能只读文档就认定缺少能力。
-4. 发现文档/代码冲突，记录差异及代码证据。历史 PRD、PoC、验收报告仅作追溯；无法核实的部署/关系写 UNKNOWN 或待核实，不用旧报告推定当前生产。
+4. 发现文档/代码冲突，报告差异、代码证据及影响，并在同一任务修正文档；无法核实保留 UNKNOWN。历史 PRD、PoC、验收报告仅作追溯；无法核实的部署/关系写 UNKNOWN 或待核实，不用旧报告推定当前生产。
 
 ## 实施规则
 
@@ -17,7 +17,7 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.0 �
 - **No Parallel System**：新增平行交易、持仓、收益服务/模型/流程前，必须在 PR 或现有设计文档中记录无法复用的原因、权威归属、迁移/退出方案，并取得人工明确批准后才实施。不得以新入口需求绕开原确认、风控或券商适配器。
 - PEER 是唯一决策主链路；禁止恢复 `USE_V3_AGENTS` 等双轨开关。不得直接修改 `decision_engine/` 核心引擎；新增能力沿用 Skill + Tool / `invoke_skill()`，不在 ExecutingAgent 堆业务 if-else。不改内部 SKILL.md 的 `type` / `entry_point` / `tool_name` 契约。
 - 外部依赖 optional：分析缺源应显式降级；交易安全校验缺合约、报价、费用或资金证据时 fail closed。失败不得伪装空账户/空订单/零费用；不得把所有业务失败一律吞掉。
-- **Documentation as Code**：接口、数据口径、能力或架构变化，同 PR 更新对应架构段落、能力条目和测试入口；无变化写 N/A 及理由。先更新现有文档，避免第二份权威说明。
+- **Documentation as Code**：先更新原文档，避免第二份权威说明；Registry 的新增/入口或职责变更/废弃迁移合并检查及无变化豁免统一按[治理规则](docs/PROJECT_GOVERNANCE.md#registry-维护检查)执行。
 
 ## 风险、权限与隔离
 
@@ -32,7 +32,6 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.0 �
 ## 提交与交付
 
 - 精确路径暂存，每提交职责单一，禁用 `git add .` / `git add -A`；不 force push、不 squash 既有历史、不删除未知分支/用户工作。
-- L0 执行 `python scripts/check_engineering_docs.py`、`git diff --check` 并走现有全部 CI。任何代码改动保留原严格基线：定向测试、全量 pytest、frontend lint/build、默认 Offline M5 18/18；决策/交易/口径变更另补完整场景验收。
-- M5 使用 `python scripts/m5_e2e_18_cases.py --mode offline`；默认临时报告，不改 tracked 评测报告。Live M5 仅限另行明确授权、`--mode live` + `M5_ALLOW_LIVE_PROVIDER=1`，不替代离线 Gate。
+- 测试与验收只维护在[治理文档第 6 节](docs/PROJECT_GOVERNANCE.md#6-质量门与当前基线)：L0 文档检查/全部 CI，代码变更保持原全量 Gate，关键业务另做完整场景；不依据本文摘要降低要求。离线命令与隔离见[dev_setup](docs/dev_setup.md)。
 - PR 使用[模板](.github/pull_request_template.md)，列出风险、复用证据、owner、检查、端到端场景、文档和未验收项。CI 查看 exact HEAD 的全部四项结果；CI 不自动合并或部署。
 - 结果区分已确认、推断、UNKNOWN、运行待验收；记录完整 SHA、PR/CI 链接、失败原因与范围。不得用测试数量、单接口 PASS 或健康检查替代实际业务验收。历史测试债务需相同环境/隔离数据库与 clean main 对照。

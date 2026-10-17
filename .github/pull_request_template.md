@@ -22,7 +22,8 @@
 
 ## 文档与生产边界
 
-- [ ] 架构/能力/接口/口径变化已更新 ARCHITECTURE_CURRENT / CAPABILITY_REGISTRY / 对应契约，或 N/A + 理由
+- [ ] Registry 维护判断已填写：新增能力检查已有覆盖并按需更新；权威入口/职责变化、废弃/迁移/合并必须同步更新；无能力变化注明“Registry 无需更新”及原因（参见[规则](../docs/PROJECT_GOVERNANCE.md#registry-维护检查)）
+- [ ] 架构/接口/口径变化已同步 ARCHITECTURE_CURRENT / 对应契约，或 N/A + 理由
 - [ ] 无凭证、数据库、备份、真实账户标识/财务 payload、无关用户工作
 - [ ] Dev/临时库/Mock 与 Mini Prod 隔离；生产影响、备份/预检/部署验收/回滚说明，或 N/A + 理由
 - [ ] 权限范围明确：PR / 合并 / Tag / 部署 / 同步写入 / 真实交易分别授权；仅 PR 时不得自动合并/部署
