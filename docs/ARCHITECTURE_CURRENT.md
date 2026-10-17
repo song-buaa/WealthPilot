@@ -158,6 +158,8 @@ Web `wealth_service.get_summary` 会记录聚合快照；MCP overview 通过 [re
 
 OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领、不可变授权和 OrderRecord/ExecutionLeg 关联后，才调用原适配器。`apply_broker_observation` 复用原状态机统一首次回包、轮询、对账、取消和恢复；OrderPoller 按实际券商/owner 每单提交。缺 broker ID 或 NOT_FOUND 不自动撤销、补单。OrderRecord 和原状态机仍是唯一订单权威，没有新增平行交易服务。
 
+观察投影在 I/O 后取得短写事务并刷新全部关联缓存，以最新数据库事实归并；撤单/查询网络异常也走此入口。IBKR 已可能发送后的本地异常保持 UNKNOWN。相同请求重读必须匹配当前 owner、稳定 key 和完整参数；Batch 剩余腿的外部重审结果在版本/linked/账本 CAS 后才能落库，不改变并发已提交的腿。
+
 同步对账以 Portfolio/broker/account/source 为完整 scope；完整物理账户只映射一个 canonical Portfolio，IBKR 持仓继续复用 snowball 通道。旧 owner/key=NULL 不视为新的发送权限或归属证据。LSE 身份沿用 trusted conId/币种/上市行，历史订正必须有 owner 和整行 CAS 证据，不能靠 USD 推断 US。
 
 共享模式启动只验证已迁移结构和原严格契约；不自动 DDL 或创建默认 Portfolio。风险警告统一沿用原 RiskEngine，缺数据显式说明；硬交易门与原 Web 最终人工确认保留。B0 没有接通成交后同步消费者或新增 MCP 工具，第 9 节的后续能力缺口保持有效。代码能力不代表 Mini 已安装或完成真实券商验收。

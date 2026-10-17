@@ -25,3 +25,5 @@
 交易提交、状态与同步的权威入口沿用上表。B0 在 [OrderManager](../backend/services/action/order_manager.py) 增加 `create_order_review` / durable `place_order` / `apply_broker_observation`；在原 [Batch service](../backend/services/execution_batch/service.py) 增加 `review_remaining`，保留已提交腿。原 [IBKR adapter](../backend/services/action/brokers/ibkr.py) 的 `recover_order` / `find_order_by_ref` 使用新鲜账户过滤证据。原 sync Repository/Upsert 和现有两个 MCP reader 统一 Portfolio/run/账户作用域；LSE 身份沿用既有 trusted instruments。
 
 复用时必须显式提交准备事务、传当前 owner/授权和确认参数，不绕过 Review/hash/epoch/TTL/WhatIf/人工风险确认。UNKNOWN/NOT_FOUND 不补单，缺 owner 的历史记录先核实；未订正的 LSE 身份冲突阻断同步。新 Schema 的字段/索引理由与兼容规则见 [Runbook](B0_PRODUCTION_RUNBOOK.md)，故障注入及原 Web 场景入口见 [实现说明](B0_IMPLEMENTATION.md#5-可重放隔离验收入口)。本分支是开发候选，生产迁移/验收待单独授权；成交后同步消费者、历史收益及 real MCP 订单工具仍未新增。
+
+PR #21 定向修复仍使用上述 owner：`existing_submission` 复用发送 key/参数校验，观察归并锁后重读，`review_remaining` 在外部计算后进行版本/linked/事实 CAS；迁移对计划内及应用后的目标碰撞均拒绝。正式回归映射见[评审回归](B0_IMPLEMENTATION.md#pr-21-定向评审回归)，不新增业务服务或 Schema。
