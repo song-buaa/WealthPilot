@@ -184,3 +184,41 @@ def test_prewrite_restore_preserves_inode_and_refuses_after_write_gate(legacy):
     write_private(root / "receipt.json", receipt)
     with pytest.raises(ValueError, match="FORBIDDEN_AFTER_WRITER"):
         migration.restore_prewrite(db, contract, root / "receipt.json", root / "never.db", writers_stopped=True)
+
+
+@pytest.mark.parametrize("stage", ["plan", "clone"])
+def test_r04_multiple_sources_cannot_become_one_canonical_identity(legacy, stage):
+    root, db, contract = legacy
+    from sqlalchemy.orm import Session
+    from app.models import Position
+    engine = create_engine(f"sqlite:///{db}")
+    with Session(engine) as session:
+        for ticker, qty in [("CSBGU3", 10), ("CBU3", 20)]:
+            session.add(Position(portfolio_id=7, broker="snowball", broker_account_id="synthetic-account", sync_source="api",
+                asset_class="固收", name="User protected name", segment="投资", platform="雪盈证券", ticker=ticker,
+                symbol=f"{ticker}:US", currency="USD", quantity=qty, cost_price=125.4,
+                classification_evidence_json=json.dumps({"con_id": 79000224, "isin": "IE00B3VWN179"})))
+        session.commit()
+    engine.dispose()
+    with closing(sqlite3.connect(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        before = [dict(r) for r in conn.execute("SELECT * FROM positions ORDER BY id")]
+    corrections = [{"position_id": row["id"], "expected_fingerprint": migration.row_fingerprint(row)} for row in before]
+    if stage == "plan":
+        with pytest.raises(ValueError, match="POSITION_IDENTITY_COLLISION"):
+            make_plan(db, contract, corrections)
+    else:
+        # Exercise the independent post-correction guard, even if a future
+        # preflight accidentally admitted this list. Transaction must roll back.
+        with closing(sqlite3.connect(db)) as conn:
+            with pytest.raises(ValueError, match="POSITION_IDENTITY_COLLISION"):
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    migration.apply_corrections(conn, [{**c, "symbol": "CBU3:LSE", "ticker": "CBU3"} for c in corrections])
+    verify(db, contract, integrity=True)
+    with closing(sqlite3.connect(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        assert [dict(r) for r in conn.execute("SELECT * FROM positions ORDER BY id")] == before
+    assert not (root / "receipt.json").exists()
+    with pytest.raises(ValueError, match="DUPLICATE_POSITION_CORRECTION"):
+        make_plan(db, contract, [corrections[0], corrections[0]])

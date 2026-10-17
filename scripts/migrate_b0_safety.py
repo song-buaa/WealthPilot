@@ -58,7 +58,11 @@ def identity_plan(conn, requests, portfolio_id):
     previous_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
     result = []
+    sources, targets = set(), set()
     for item in requests:
+        if item["position_id"] in sources:
+            raise ValueError("DUPLICATE_POSITION_CORRECTION")
+        sources.add(item["position_id"])
         row = conn.execute("SELECT * FROM positions WHERE id=?", (item["position_id"],)).fetchone()
         if row is None or row_fingerprint(row) != item["expected_fingerprint"]:
             raise ValueError("POSITION_CAS_MISMATCH")
@@ -75,6 +79,10 @@ def identity_plan(conn, requests, portfolio_id):
         if row["ticker"] not in {trusted.symbol, trusted.local_symbol, trusted.user_alias}:
             raise ValueError("POSITION_SYMBOL_MISMATCH")
         target = f"{trusted.local_symbol}:LSE"
+        identity = (portfolio_id, row["broker"], row["broker_account_id"], row["sync_source"], target, row["currency"])
+        if identity in targets:
+            raise ValueError("POSITION_IDENTITY_COLLISION_REQUIRES_REVIEW")
+        targets.add(identity)
         collision = conn.execute("SELECT id FROM positions WHERE portfolio_id=? AND broker=? AND broker_account_id=? AND sync_source=? AND symbol=? AND id<>?",
                 (portfolio_id, row["broker"], row["broker_account_id"], row["sync_source"], target, row["id"])).fetchone()
         if collision:
@@ -93,6 +101,15 @@ def apply_corrections(conn, corrections):
             raise ValueError("POSITION_CAS_MISMATCH")
         conn.execute("UPDATE positions SET symbol=?, ticker=? WHERE id=?",
                      (item["symbol"], item["ticker"], item["position_id"]))
+    # Independently verify the affected identities in the post-correction clone
+    # and again in the live migration transaction. Digest/inventory is not a
+    # business uniqueness guarantee. Never merge/delete/overwrite a collision.
+    for item in corrections:
+        row = conn.execute("SELECT * FROM positions WHERE id=?", (item["position_id"],)).fetchone()
+        count = conn.execute("SELECT count(*) FROM positions WHERE portfolio_id=? AND broker=? AND broker_account_id=? AND sync_source=? AND symbol=? AND currency=?",
+            (row["portfolio_id"], row["broker"], row["broker_account_id"], row["sync_source"], row["symbol"], row["currency"])).fetchone()[0]
+        if count != 1:
+            raise ValueError("POSITION_IDENTITY_COLLISION_REQUIRES_REVIEW")
     conn.row_factory = previous_factory
 
 

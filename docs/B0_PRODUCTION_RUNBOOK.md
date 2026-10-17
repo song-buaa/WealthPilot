@@ -30,6 +30,8 @@ Schema 定义在 [app/b0_schema.py](../app/b0_schema.py)，工具在 [migrate_b0
 
 历史 PositionSnapshot、AuditLog、已发订单保持原样。仅对当前 Position 进行显式列举的 LSE 订正：实际 Portfolio/broker/account/source + stored conId/currency/ISIN 证据 + 整行指纹 CAS；只改 symbol/ticker，保留 ID、数量、成本及用户字段。CBU3 的 primaryExchange=EBS 仍按已验证 conId 对应 LSE/USD 上市身份。碰撞、不明 owner 或无证据行阻断，不能合并数量/删除一边。同步遇到这种待订正旧行也失败，不能先新建再 stale-delete 旧行。
 
+订正计划拒绝重复 source ID，并检查计划内多个源是否映射同一 owner/canonical identity；不仅查询原表已有目标。克隆应用后及真实迁移事务内独立检查所有受影响目标的唯一性，冲突则回滚/停止，不生成 VERIFIED。Schema digest/inventory 一致不能替代这个业务不变量；无需增加索引或表。
+
 ## 3. 获得生产发布授权后执行
 
 以下变量由操作员显式指定，所有路径位于生产代码外的私有目录；不要把其实际值或财务 payload 写入 PR。
