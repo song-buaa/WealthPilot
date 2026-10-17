@@ -97,3 +97,16 @@ def test_aggregation_keeps_same_ticker_different_listing_or_currency_separate():
                     current_price=10, quantity=10, profit_loss_rate=0, is_leverage_etf=False)
     positions, total = aggregate([item("ABC:US", "USD"), item("ABC:LSE", "USD"), item("ABC:LSE", "GBP")])
     assert len(positions) == 3 and total == 300
+
+
+def test_nonshared_multiple_portfolios_never_inherit_legacy_first_portfolio(db, monkeypatch):
+    from backend.services.action.ownership import portfolio_scope
+    from app import state
+    monkeypatch.delenv('WEALTHPILOT_SQLITE_CONTRACT', raising=False)
+    monkeypatch.delenv('WEALTHPILOT_PORTFOLIO_ID', raising=False)
+    monkeypatch.setattr(state, 'portfolio_id', 11)
+    db.info.pop('portfolio_id')
+    with pytest.raises(ValueError, match='EXPLICIT_PORTFOLIO_REQUIRED'):
+        portfolio_scope(db)
+    monkeypatch.setenv('WEALTHPILOT_PORTFOLIO_ID', '12')
+    assert portfolio_scope(db) == 12

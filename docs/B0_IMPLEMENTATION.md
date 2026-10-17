@@ -34,6 +34,8 @@ IBKR 恢复使用新鲜 Open、Executions、Completed；实际返回账户先核
 
 [ownership](../backend/services/action/ownership.py) 是纯 owner 解析工具，不建账户映射表。使用 server session/已验证 shared contract/启动确定的 Portfolio 和明确 adapter 账户；不得按 Portfolio 1、最近 run、U 前缀猜测。一个完整物理账户跨 Portfolio 多义时 fail closed。
 
+非共享模式存在多个 Portfolio 时，必须由 server session 或私有 `WEALTHPILOT_PORTFOLIO_ID` 明确选择，不能沿用旧 startup 的“第一个 Portfolio”。单 Portfolio 的已启动应用上下文只在库内唯一性得到验证时可用；shared 模式始终核对原契约。
+
 原 Repository 从 reservation 到 source read 后绑定、persist、success/failed、latest 查询均保留 Portfolio 作用域；run 不可改绑到另一账户/Portfolio。PositionUpsert 的所有查询、legacy claim 和 stale 删除按同一 owner；完整空快照还必须提供匹配的 run。旧 owner=NULL 不成为新归属证据。Guojin 保留 QMT 管辖范围与截图保护，也不再跨 Portfolio 清理。手动、cron、restricted、已有运维脚本均显式传递 scope。
 
 IBKR 下单 broker=ibkr，持仓沿用 broker=snowball / source_channel=ibkr，不新增 ibkr Position 通道。MCP 现有只读 reader 的 freshness 按 Portfolio/账户查询，未增加 real 写工具或订单工具。

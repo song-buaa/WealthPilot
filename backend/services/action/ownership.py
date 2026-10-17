@@ -15,6 +15,7 @@ class ExecutionOwner:
 
 
 def portfolio_scope(session):
+    from app.models import Portfolio
     pid = session.info.get("portfolio_id")
     if os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"):
         from app.database import DB_PATH
@@ -24,11 +25,20 @@ def portfolio_scope(session):
             raise ValueError("CONTRACT_PORTFOLIO_MISMATCH")
         pid = verified_pid
     if pid is None:
-        from app import state
-        pid = state.portfolio_id
+        configured = os.environ.get("WEALTHPILOT_PORTFOLIO_ID")
+        if configured:
+            pid = int(configured)
+        else:
+            from app import state
+            # The legacy startup picks a default Portfolio. That is only
+            # unambiguous in a single-Portfolio DB, never an owner selection
+            # policy for multi-Portfolio trading or synchronization.
+            candidates = session.query(Portfolio.id).limit(2).all()
+            if len(candidates) != 1 or candidates[0][0] != state.portfolio_id:
+                raise ValueError("EXPLICIT_PORTFOLIO_REQUIRED")
+            pid = state.portfolio_id
     if type(pid) is not int or pid <= 0:
         raise ValueError("EXPLICIT_PORTFOLIO_REQUIRED")
-    from app.models import Portfolio
     if session.get(Portfolio, pid) is None:
         raise ValueError("PORTFOLIO_NOT_FOUND")
     return pid
