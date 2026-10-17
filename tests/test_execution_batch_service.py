@@ -1105,3 +1105,18 @@ def test_b0_batch_warns_like_standard_risk_and_never_exempts_ib01(session, monke
         service.confirm_batch(batch.id)
     service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
     assert not adapter.place_calls
+
+
+@pytest.mark.parametrize('missing_id,missing_broker_cancel', [(True, False), (False, True)])
+def test_b0_old_local_cancel_projection_never_authorizes_replacement(session, missing_id, missing_broker_cancel):
+    service, adapter, batch = make_cancelled_two_leg_attempt(session)
+    order = session.get(OrderRecord, batch.legs[0].linked_order_id)
+    if missing_id:
+        order.broker_order_id = None
+    if missing_broker_cancel:
+        order.raw_broker_response = json.dumps({'cancel_type': 'local_only'})
+    session.commit()
+    with pytest.raises(ExecutionSafetyError, match='UNPROVEN_LEGACY_CANCELLATION'):
+        service.create_controlled_retry(batch.id)
+    assert not adapter.place_calls
+    assert session.query(ExecutionBatch).count() == 1

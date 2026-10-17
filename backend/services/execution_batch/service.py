@@ -551,6 +551,15 @@ class ExecutionBatchService:
         self.session.flush()
         return batch
 
+    @staticmethod
+    def _require_broker_cancel_evidence(order):
+        try:
+            raw = json.loads(order.raw_broker_response or "{}")
+        except (TypeError, ValueError):
+            raw = {}
+        if not order.broker_order_id or raw.get("ib_status") not in {"Cancelled", "ApiCancelled"}:
+            raise ExecutionSafetyError("UNPROVEN_LEGACY_CANCELLATION: reconcile with broker; no replacement order")
+
     def create_controlled_retry(self, batch_id: str) -> ExecutionBatch:
         """Create the one allowed Case 1 Retry #2 without reusing old orders.
 
@@ -596,6 +605,7 @@ class ExecutionBatchService:
                 raise ExecutionSafetyError(
                     f"{leg.user_alias}: 旧 OrderRecord 非 cancelled/filled=0，HARD STOP"
                 )
+            self._require_broker_cancel_evidence(order)
             old_orders.append(order)
 
         if not self._broker().authenticate({}):
@@ -689,6 +699,7 @@ class ExecutionBatchService:
             raise ExecutionSafetyError(
                 "Retry #2 root cause 非 10311→201，禁止 SMART Retry #3"
             )
+        self._require_broker_cancel_evidence(first_order)
         if (
             second.status not in {"READY", "NOT_SUBMITTED"}
             or second.linked_order_id

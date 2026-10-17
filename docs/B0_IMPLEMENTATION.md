@@ -27,6 +27,7 @@ IBKR 恢复使用新鲜 Open、Executions、Completed；实际返回账户先核
 - 全部 Leg 可信 FILLED 时 Batch 立即 COMPLETED。stop_remaining 仅停止未认领腿，不把仍活动的已提交订单显示为“券商已撤单”。
 - 无 broker ID 不代表未发送。只有未认领的本地 Mock created 记录可本地取消；真实不明记录只恢复。取消受理后读取实际状态，再写审计，避免查询时 autoflush 开启写事务。
 - 真实撤单在 mutation 前核对持久化 owner；IBKR 使用新鲜账户/ref/permId 和原 API client 匹配，不凭会话级数字 orderId 接管别的订单。旧 owner 缺失只恢复，不自动撤单；更换 client 后不自动绑定或修改 Gateway 权限。
+- 原受控 Retry 也要求历史 broker ID 和券商 Cancelled/ApiCancelled 证据；旧本地误标 CANCELLED 或缺 ID 不能成为替代订单授权，仍须券商核实。
 - REMAINDER 不再在发送时静默修改量价。变化时要求 `review-remaining`，只更新未认领腿，显示差异、撤销旧 hash、重新人工确认；已提交腿、OrderRecord、旧确认版本保持原关联。整批 refresh 仍拒绝已有订单。
 - 普通单标和 Batch 均调用原 RiskEngine 的 5% / 40% / 纪律检查；同 Portfolio 投资口径。纪律复用原 rule_engine 和已加载持仓，不调用完整 data_loader 的研究/行情/LLM 链路。缺估值、可信 FX 或纪律数据明确警告，不能伪装 PASS；IB01 没有警告豁免。
 - 保留资金、合约、LIVE quote/30 秒 TTL、WhatIf/费用和原最终人工实盘确认文字。风险文字确认不能豁免这些硬门。原普通 GTC 与 Batch DAY 按实际已确认参数传到 SDK，unsupported TIF 拒绝。
