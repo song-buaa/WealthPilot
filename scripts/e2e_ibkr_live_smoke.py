@@ -15,6 +15,11 @@ IBKR 实盘最小额冒烟 — v3.10 阶段 3。一次性验证用途。
 运行（应用已用实盘配置启动后）：
     /Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python scripts/e2e_ibkr_live_smoke.py
 """
+
+# B0: historical mutation CLI has no durable claim or current Web authorization.
+if __name__ == "__main__":
+    raise SystemExit("Legacy trading validation is disabled; use the original Web review/confirmation flow.")
+
 import json
 import os
 import sys

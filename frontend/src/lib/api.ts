@@ -705,6 +705,11 @@ export interface ActionDraftResponse {
 }
 
 export interface RiskCheckResponse {
+  portfolio_id: number
+  account_masked: string
+  broker: string
+  review_id: number
+  time_in_force: 'DAY' | 'GTC'
   passed: boolean
   requires_confirmation: boolean
   warnings: Array<{
@@ -835,14 +840,17 @@ export const executionBatchApi = {
   refresh: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/refresh`, { method: 'POST' },
   ),
+  reviewRemaining: (batchId: string) => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/review-remaining`, { method: 'POST' },
+  ),
   controlledRetry: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/controlled-retry`, { method: 'POST' },
   ),
   smartRoutingRetry: (batchId: string) => request<ExecutionBatchResponse>(
     `/execution-batches/${batchId}/smart-routing-retry`, { method: 'POST' },
   ),
-  confirm: (batchId: string, version?: number) => request<ExecutionBatchResponse>(
-    `/execution-batches/${batchId}/confirm`, { method: 'POST', body: JSON.stringify({confirmation_version: version}) },
+  confirm: (batchId: string, version?: number, riskConfirmationText = '') => request<ExecutionBatchResponse>(
+    `/execution-batches/${batchId}/confirm`, { method: 'POST', body: JSON.stringify({confirmation_version: version, risk_confirmation_text: riskConfirmationText}) },
   ),
   applyManualLimits: (batchId: string, limits: Record<string, number>, version?: number) =>
     request<ExecutionBatchResponse>(`/execution-batches/${batchId}/manual-limits`, {
@@ -982,13 +990,13 @@ export const actionApi = {
   getTimeline: (limit: number = 50) =>
     request<{ items: TimelineEvent[]; total: number }>(`/action/timeline?limit=${limit}`),
 
-  checkRisk: (strategyId: string, params: { quantity: number; limit_price: number }) =>
+  checkRisk: (strategyId: string, params: { quantity: number; limit_price: number; time_in_force?: 'DAY' | 'GTC' }) =>
     request<RiskCheckResponse>(`/action/strategies/${strategyId}/check_risk`, {
       method: 'POST',
       body: JSON.stringify(params),
     }),
 
-  placeOrder: (strategyId: string, params: { quantity: number; limit_price: number; confirmation_text: string }) =>
+  placeOrder: (strategyId: string, params: { quantity: number; limit_price: number; confirmation_text: string; review_id: number; time_in_force: 'DAY' | 'GTC' }) =>
     request<OrderResponse>(`/action/strategies/${strategyId}/place_order`, {
       method: 'POST',
       body: JSON.stringify(params),
@@ -1563,4 +1571,9 @@ export interface ExplainData {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
+}
+
+export function batchRiskWarnings(batch: ExecutionBatchResponse) {
+  const risks = batch.execution_policy.risk_warnings as Record<string, RiskCheckResponse> | undefined
+  return Object.values(risks ?? {}).flatMap(risk => risk.warnings)
 }

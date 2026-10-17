@@ -232,9 +232,11 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
     def _ensure_connected(self) -> None:
         """确保 IB 连接已建立。首次调用时启动后台线程。"""
+        # ib_async clientId=0 binds manual orders during connect, even readonly.
+        if type(self._client_id) is not int or self._client_id <= 0:
+            raise ConnectionError("RECOVERY_REQUIRES_VERIFIED_NONZERO_CLIENT_ID")
         if self._connected and self._ib:
             return
-
         from ib_async import IB
 
         if self._loop is None:
@@ -351,7 +353,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
             action=request.side.upper(),
             totalQuantity=int(request.quantity),
             lmtPrice=float(request.limit_price),
-            tif="DAY",
+            tif=request.time_in_force,
         )
         order.whatIf = False
         order.transmit = True
@@ -387,6 +389,10 @@ class IBKRBrokerAdapter(BrokerAdapter):
         - ConnectionError / TimeoutError 不 catch，由上层 OrderManager 处理。
         - 业务拒单在此方法内返回 rejected。
         """
+        if request.time_in_force not in {"DAY", "GTC"}:
+            raise ValueError("UNSUPPORTED_TIF")
+        if request.broker_account_id and request.broker_account_id != self._account_id:
+            raise ValueError("BROKER_ACCOUNT_MISMATCH")
         self._ensure_connected()
         if _is_live_read_only_account(self._account_id):
             return self._rejected(
@@ -477,6 +483,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 # on an empty account field is ambiguous for FA/multi-account
                 # sessions and prevents exact preview/live parity evidence.
                 order.account = self._account_id
+                if request.dispatch_deadline is not None and time.time() >= request.dispatch_deadline:
+                    raise TimeoutError("DISPATCH_DEADLINE_EXPIRED")
                 trade = self._ib.placeOrder(contract, order)
                 self._submitted_order_ids.add(int(trade.order.orderId or 0))
 
@@ -978,13 +986,25 @@ class IBKRBrokerAdapter(BrokerAdapter):
         async def read_on_loop():
             from ib_async import ExecutionFilter
 
-            fills = await self._ib.reqExecutionsAsync(ExecutionFilter())
+            fills = await asyncio.wait_for(self._ib.reqExecutionsAsync(
+                ExecutionFilter(acctCode=self._account_id)), self._timeout)
             return [
                 {
                     "order_id": int(fill.execution.orderId or 0),
                     "perm_id": int(fill.execution.permId or 0),
                     "order_ref": str(fill.execution.orderRef or ""),
                     "exec_id": str(fill.execution.execId or ""),
+                    "observed_account_id": str(fill.execution.acctNumber),
+                    "currency": str(fill.contract.currency or ""),
+                    "cum_quantity": self._finite_number(fill.execution.cumQty),
+                    "pending_price_revision": getattr(fill.execution, "pendingPriceRevision", False) is True,
+                    "avg_price": self._finite_number(fill.execution.avgPrice),
+                    "client_id": int(fill.execution.clientId or 0),
+                    "commission": (self._finite_number(fill.commissionReport.commission)
+                        if fill.commissionReport.execId == fill.execution.execId
+                        and fill.commissionReport.currency else None),
+                    "commission_currency": (fill.commissionReport.currency
+                        if fill.commissionReport.execId == fill.execution.execId else None),
                     "con_id": int(fill.contract.conId or 0),
                     "symbol": fill.contract.localSymbol or fill.contract.symbol or "",
                     "side": str(fill.execution.side or "").upper(),
@@ -993,6 +1013,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     "timestamp": str(fill.execution.time or ""),
                 }
                 for fill in fills
+                if str(fill.execution.acctNumber or "") == self._account_id
             ]
 
         return self._run_on_loop(read_on_loop, timeout=self._timeout + 5)
@@ -1269,26 +1290,92 @@ class IBKRBrokerAdapter(BrokerAdapter):
 
     # ── orderRef 幂等反查（PRD §3.6.1）──────────────────────
 
-    def find_order_by_ref(self, order_ref: str) -> Optional[OrderStatusUpdate]:
-        """按 orderRef 在当前 session 的 trades 中反查订单。
+    def recover_order(self, order_ref: str, *, perm_id=None):
+        return self.find_order_by_ref(order_ref, known_perm_id=perm_id)
 
-        用于超时后判断"订单是否其实已提交成功"，避免盲目重下。
-        M2 交付能力 + 单测，M3 端到端接入 OrderManager。
+    def find_order_by_ref(self, order_ref: str, *, known_perm_id=None) -> Optional[OrderStatusUpdate]:
+        """Fresh account-scoped Open/Executions/Completed recovery, never resend.
 
-        Returns:
-            OrderStatusUpdate（命中）/ None（未命中）
+        Each positive source is usable even if another query is unavailable.
+        Empty snapshots have bounded broker retention and do not prove absence.
         """
-        self._ensure_connected()
-
-        for snapshot in self._read_trade_snapshots():
-            if snapshot["order_ref"] == order_ref:
-                return self._status_update_from_snapshot(
-                    snapshot,
-                    action="find_order_by_ref",
-                    local_order_id=order_ref,
-                )
-
-        return None
+        snapshots, executions, sources = [], [], {}
+        try:
+            snapshots.extend(self.list_open_order_details())
+            sources["open"] = "COMPLETE"
+        except Exception:
+            sources["open"] = "UNAVAILABLE"
+        try:
+            executions = self.list_execution_details()
+            sources["executions"] = "COMPLETE_BROKER_WINDOW"
+        except Exception:
+            sources["executions"] = "UNAVAILABLE"
+        try:
+            self._ensure_connected()
+            async def completed():
+                if getattr(self, "_completed_sync_lock", None) is None:
+                    self._completed_sync_lock = asyncio.Lock()
+                async with self._completed_sync_lock:
+                    try:
+                        trades = await asyncio.wait_for(self._ib.reqCompletedOrdersAsync(apiOnly=False), self._timeout)
+                        result = []
+                        for trade in trades:
+                            if str(trade.order.account or "") != self._account_id:
+                                continue
+                            snapshot = self._snapshot_trade(trade)
+                            # ib_async Completed creates OrderStatus.filled=0. Use
+                            # actual filledQuantity, not the Filled status label.
+                            qty = self._finite_number(getattr(trade.order, "filledQuantity", None))
+                            if qty is not None and qty >= 0 and qty.is_integer() and qty <= snapshot["order_snapshot"]["total_quantity"]:
+                                snapshot["filled_quantity"] = int(qty)
+                            result.append(snapshot)
+                        return result
+                    except BaseException:
+                        self._connected = False
+                        self._ib.disconnect()  # isolate late unnumbered completedOrdersEnd
+                        raise
+            snapshots.extend(self._run_on_loop(completed, timeout=self._timeout + 1))
+            sources["completed"] = "COMPLETE_BROKER_WINDOW"
+        except Exception:
+            sources["completed"] = "UNAVAILABLE"
+        def matches(item):
+            return item.get("order_ref") == order_ref or (known_perm_id and int(item.get("perm_id") or 0) == int(known_perm_id))
+        selected = [item for item in snapshots if matches(item)
+                    and item.get("observed_account_id") == self._account_id]
+        fills = [item for item in executions if matches(item)
+                 and item.get("observed_account_id") == self._account_id]
+        identities = {(item.get("perm_id"), item.get("con_id")) for item in selected + fills if item.get("perm_id")}
+        if len(identities) > 1:
+            return OrderStatusUpdate(None, order_ref, "unknown", raw_response={
+                "recovery_sources": sources, "execution_correction": True, "reason": "AMBIGUOUS_IDENTITY"})
+        candidates = [self._status_update_from_snapshot(item, action="fresh_recovery", local_order_id=order_ref)
+                      for item in selected]
+        if fills:
+            fill = max(fills, key=lambda item: item.get("cum_quantity") or 0)
+            qty = fill.get("cum_quantity")
+            if qty is not None and qty >= 0 and qty.is_integer():
+                candidates.append(OrderStatusUpdate(
+                    str(fill["perm_id"] or fill["order_id"]), order_ref, "partially_filled",
+                    filled_quantity=int(qty), avg_filled_price=Decimal(str(fill["avg_price"])) if fill.get("avg_price") else None,
+                    raw_response={**fill, "source": "fresh_executions"}))
+        if not candidates:
+            return None
+        priority = {"filled": 6, "cancelled": 5, "rejected": 5, "expired": 5,
+                    "partially_filled": 4, "broker_pending": 3, "submitted_to_broker": 2, "unknown": 1}
+        result = max(candidates, key=lambda item: (item.filled_quantity if item.filled_quantity is not None else -1, priority.get(item.status, 0)))
+        matching_fills = [item for item in fills if item.get("cum_quantity") == result.filled_quantity]
+        if matching_fills:
+            fill = matching_fills[-1]
+            price = Decimal(str(fill["avg_price"])) if fill.get("avg_price") else None
+            if price and result.avg_filled_price is None:
+                result.avg_filled_price = price
+            elif price and result.avg_filled_price.quantize(Decimal("0.0001")) != price.quantize(Decimal("0.0001")):
+                result.raw_response["execution_correction"] = True
+            result.raw_response["execution_evidence"] = matching_fills
+        if any(item.get("pending_price_revision") for item in fills):
+            result.raw_response["execution_correction"] = True
+        result.raw_response.update(recovery_sources=sources, observed_at=datetime.now(timezone.utc).isoformat())
+        return result
 
     # ── 内部: error callback 处理（M2.5）─────────────────────
 
@@ -1526,8 +1613,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
             "order_id": order_id,
             "perm_id": int(order.permId or status.permId or 0),
             "order_ref": order.orderRef or "",
+            "observed_account_id": account,
             "ib_status": status.status or "",
-            "filled_quantity": int(status.filled or 0),
+            "filled_quantity": self._finite_number(status.filled),
             "avg_filled_price": float(status.avgFillPrice or 0),
             "why_held": status.whyHeld or "",
             "con_id": getattr(contract, "conId", None) if contract else None,
@@ -1628,6 +1716,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         raw = {
             "broker": "ibkr",
             "account_id": self._account_id,
+            "observed_account_id": snapshot.get("observed_account_id"),
             "client_id": self._client_id,
             "action": action,
             "outside_rth": False,
@@ -1707,6 +1796,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         mapped, extras = self._map_snapshot_status(snapshot)
         raw = self._build_raw_from_snapshot(action, snapshot)
         raw.update(extras)
+        raw["observed_account_id"] = snapshot.get("observed_account_id")
         return OrderStatusUpdate(
             broker_order_id=broker_order_id or self._snapshot_broker_order_id(snapshot),
             local_order_id=local_order_id,

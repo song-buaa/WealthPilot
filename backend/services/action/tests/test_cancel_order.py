@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
+from backend.services.action.tests.b0_helpers import test_owner as prepare_owner, reviewed_place, sync_committed, cancel_committed
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -40,6 +41,7 @@ class StubAdapter(BrokerAdapter):
         status_after_cancel: str = "cancelled",
         filled_quantity_after_cancel: int = 0,
     ):
+        self._account_id = "test-stub-account"
         self._cancel_returns = cancel_returns
         self._cancel_raises = cancel_raises
         self._status_after_cancel = status_after_cancel
@@ -114,6 +116,7 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    prepare_owner(session)
     yield session
     session.close()
 
@@ -132,7 +135,7 @@ def _create_submitted_order(session, adapter, **kwargs):
     session.flush()
 
     mgr = OrderManager(session, broker_adapter=adapter)
-    order = mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 415})
+    order = reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 415})
     assert order.status == OrderStatus.SUBMITTED_TO_BROKER
     assert order.broker_order_id is not None
     return order, strategy, mgr
@@ -148,7 +151,7 @@ class TestCancelPreconditions:
     def test_cancel_nonexistent_order(self, db_session):
         mgr = OrderManager(db_session)
         with pytest.raises(ValueError, match="订单不存在"):
-            mgr.cancel_order("nonexistent")
+            cancel_committed(mgr, "nonexistent")
 
     def test_cancel_terminal_order_rejected(self, db_session):
         """已终态订单不可取消。"""
@@ -160,7 +163,7 @@ class TestCancelPreconditions:
         db_session.flush()
 
         with pytest.raises(ValueError, match="已终态"):
-            mgr.cancel_order(order.id)
+            cancel_committed(mgr, order.id)
 
     def test_cancel_local_only_no_broker_order_id(self, db_session):
         """无 broker_order_id → 仅本地取消，不调 adapter。"""
@@ -172,11 +175,12 @@ class TestCancelPreconditions:
         db_session.add(strategy)
         db_session.flush()
 
-        order = mgr.place_order(strategy.id, {"quantity": 50})
+        order = OrderRecord(strategy_id=strategy.id, symbol=strategy.symbol, side="BUY", quantity=50, status="created")
+        db_session.add(order); db_session.flush()
         assert order.status == OrderStatus.CREATED
         assert order.broker_order_id is None
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.CANCELLED
         assert order.cancelled_at is not None
 
@@ -184,7 +188,7 @@ class TestCancelPreconditions:
         logs = db_session.query(AuditLog).filter_by(event_type="order_cancelled").all()
         assert len(logs) == 1
         payload = json.loads(logs[0].payload)
-        assert payload["cancel_type"] == "local_only"
+        assert payload["cancel_type"] == "local_unclaimed"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -202,7 +206,7 @@ class TestCancelBranchA:
         )
         order, _, mgr = _create_submitted_order(db_session, adapter)
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.CANCELLED
         assert order.cancelled_at is not None
 
@@ -223,7 +227,7 @@ class TestCancelBranchA:
         order.status = OrderStatus.BROKER_PENDING
         db_session.flush()
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         # 不应该置 CANCELLED — 券商还没确认
         assert order.status == OrderStatus.BROKER_PENDING
         assert order.status != OrderStatus.CANCELLED
@@ -240,7 +244,7 @@ class TestCancelBranchA:
         )
         order, _, mgr = _create_submitted_order(db_session, adapter)
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.FILLED
         assert order.filled_quantity == 50
         assert order.status != OrderStatus.CANCELLED
@@ -265,7 +269,7 @@ class TestCancelBranchB:
         adapter._orders[order.broker_order_id]["status"] = "filled"
         adapter._orders[order.broker_order_id]["filled_quantity"] = 50
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.FILLED
         assert order.filled_quantity == 50
 
@@ -276,7 +280,7 @@ class TestCancelBranchB:
 
         adapter._orders[order.broker_order_id]["status"] = "cancelled"
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.CANCELLED
 
 
@@ -294,7 +298,7 @@ class TestCancelBranchC:
         )
         order, _, mgr = _create_submitted_order(db_session, adapter)
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.UNKNOWN
         assert order.status != OrderStatus.CANCELLED
 
@@ -314,7 +318,7 @@ class TestCancelBranchC:
         )
         order, _, mgr = _create_submitted_order(db_session, adapter)
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.UNKNOWN
 
     def test_cancel_network_error_from_broker_pending(self, db_session):
@@ -329,7 +333,7 @@ class TestCancelBranchC:
         order.status = OrderStatus.BROKER_PENDING
         db_session.flush()
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.UNKNOWN
 
     def test_cancel_network_error_from_partially_filled(self, db_session):
@@ -346,7 +350,7 @@ class TestCancelBranchC:
         order.filled_quantity = 20
         db_session.flush()
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         assert order.status == OrderStatus.UNKNOWN
         # 已有的部分成交数量不应被清零
         # （UNKNOWN 不修改 filled_quantity，等 poller 同步真实值）
@@ -364,7 +368,7 @@ class TestCancelRequestedMark:
         adapter = StubAdapter(cancel_returns=True, status_after_cancel="cancelled")
         order, _, mgr = _create_submitted_order(db_session, adapter)
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
 
         raw = json.loads(order.raw_broker_response)
         assert raw["cancel_requested"] is True
@@ -379,7 +383,7 @@ class TestCancelRequestedMark:
         order.raw_broker_response = json.dumps({"previous": "data"})
         db_session.flush()
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
         raw = json.loads(order.raw_broker_response)
         # sync_order_status 会覆盖 raw_broker_response，但 cancel_requested
         # 是在 sync 之前标记的，sync 后被新的 raw_response 覆盖是预期行为

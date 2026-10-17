@@ -184,13 +184,22 @@ class IBKRPortfolioAdapter:
 
     @staticmethod
     def _market(raw: dict) -> str:
+        from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
+        currency = str(raw.get("currency") or "").upper()
+        for trusted in TRUSTED_INSTRUMENTS.values():
+            if (str(raw.get("con_id")) == str(trusted.con_id) and currency == trusted.currency
+                    and (not raw.get("isin") or raw["isin"] == trusted.isin)):
+                return "LSE"
         exchange = str(raw.get("primary_exchange") or raw.get("exchange") or "").upper()
-        currency = str(raw.get("currency") or "USD").upper()
-        if exchange in {"SEHK", "HKFE"} or currency == "HKD":
-            return "HK"
-        if currency in {"CNY", "CNH"}:
-            return "CN"
-        return "US"
+        markets = {**EXCHANGE_TO_MARKET, "LSEETF": "LSE", "LSE": "LSE",
+                   "ISLAND": "US", "AMEX": "US", "SSE": "SH", "SZSE": "SZ"}
+        if exchange not in markets:
+            raise ValueError("UNKNOWN_LISTING_MARKET: incomplete IBKR snapshot")
+        market = markets[exchange]
+        expected = {"US": "USD", "HK": "HKD", "SH": "CNY", "SZ": "CNY"}.get(market)
+        if expected and expected != currency:
+            raise ValueError("LISTING_CURRENCY_MISMATCH")
+        return market
 
     @staticmethod
     def classification_evidence(raw: dict) -> AssetClassificationEvidence:
@@ -232,7 +241,16 @@ class IBKRPortfolioAdapter:
 
         raw_symbol = str(raw.get("local_symbol") or raw.get("symbol") or "").strip()
         market = self._market(raw)
-        symbol = normalize_symbol(raw_symbol, market)
+        canonical_symbol = raw_symbol
+        if market == "LSE":
+            from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
+            matched = [item for item in TRUSTED_INSTRUMENTS.values() if str(item.con_id) == str(raw.get("con_id"))]
+            if matched:
+                item = matched[0]
+                if raw_symbol not in {item.symbol, item.local_symbol, item.user_alias}:
+                    raise ValueError("IBKR_SYMBOL_IDENTITY_CONFLICT")
+                canonical_symbol = item.local_symbol
+        symbol = normalize_symbol(canonical_symbol, market)
         quantity = Decimal(str(raw.get("quantity") or 0))
         avg_cost = Decimal(str(raw.get("average_cost") or 0))
         current_price = Decimal(str(raw.get("current_price") or 0))
@@ -277,7 +295,8 @@ class IBKRPortfolioAdapter:
 
         currency = str(raw["currency"]).upper()
         amount = Decimal(str(raw["amount"]))
-        market = self._market({"currency": currency})
+        # CASH is a currency balance, not a listed security identity.
+        market = {"USD": "US", "HKD": "HK", "CNY": "CN", "CNH": "CN"}.get(currency, "FX")
         raw_symbol = f"CASH-{currency}"
         evidence = AssetClassificationEvidence(
             broker=self.BROKER_NAME,

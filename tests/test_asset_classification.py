@@ -109,7 +109,7 @@ def test_ibkr_adapter_serializes_adr_into_the_broker_position_contract():
     from backend.services.broker_sync.snowball.adapter import IBKRPortfolioAdapter
 
     position = IBKRPortfolioAdapter("U-TEST").security_to_position({
-        "symbol": "LI",
+        "symbol": "LI", "primary_exchange": "NASDAQ",
         "sec_type": "STK",
         "stock_type": "ADR",
         "currency": "USD",

@@ -22,6 +22,7 @@ class PositionSnapshotRun(Base):
     __tablename__ = "position_snapshot_runs"
 
     id = Column(Integer, primary_key=True)
+    portfolio_id = Column(Integer, nullable=True)  # legacy NULL is not ownership evidence
     broker = Column(String(20), nullable=False)
     account_id = Column(String(50), nullable=False)
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)

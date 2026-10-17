@@ -83,7 +83,10 @@ async def lifespan(app: FastAPI):
         from backend.api.action import _get_adapter as _action_get_adapter
         return _action_get_adapter()
 
-    orphan_count = scan_orphan_orders(get_session, _get_adapter)
+    def _order_adapter(broker):
+        return action_api._get_ibkr_adapter() if broker == "ibkr" else _get_adapter()
+
+    orphan_count = scan_orphan_orders(get_session, _get_adapter, _order_adapter)
     if orphan_count:
         print(f"[lifespan] 发现并处理 {orphan_count} 笔孤儿订单")
 

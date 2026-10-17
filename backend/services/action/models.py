@@ -26,7 +26,7 @@ import uuid
 
 from sqlalchemy import (
     Column, Integer, String, DateTime, Numeric, Text,
-    ForeignKey, Index, UniqueConstraint, Boolean,
+    ForeignKey, Index, UniqueConstraint, Boolean, text,
 )
 from sqlalchemy.orm import relationship
 
@@ -199,6 +199,12 @@ class OrderRecord(Base):
     batch_leg_id = Column(String(36), nullable=True)
     confirmation_version = Column(Integer, nullable=True)
 
+    # B0: nullable only for legacy rows; every new dispatch requires all four.
+    portfolio_id = Column(Integer, nullable=True)
+    broker_account_id = Column(String(100), nullable=True)
+    submission_key = Column(String(64), nullable=True)
+    submission_payload_json = Column(Text, nullable=True)
+
     broker_name = Column(String(20), nullable=False, default="mock")
     # broker_name: mock / tiger / futu / gjzq
     broker_order_id = Column(String(100), nullable=True)  # 券商侧订单 ID
@@ -227,6 +233,10 @@ class OrderRecord(Base):
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
     __table_args__ = (
+        Index("uq_order_records_submission_key", "submission_key", unique=True,
+              sqlite_where=text("submission_key IS NOT NULL")),
+        Index("uq_order_records_batch_submission", "batch_id", "confirmation_version",
+              "batch_leg_id", unique=True, sqlite_where=text("batch_id IS NOT NULL")),
         Index("ix_order_records_strategy_id", "strategy_id"),
         Index("ix_order_records_status", "status"),
     )

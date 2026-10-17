@@ -55,7 +55,7 @@ TIGER_TO_V32_STATUS = {
     TigerOrderStatus.PARTIALLY_FILLED: "partially_filled",
     TigerOrderStatus.FILLED: "filled",
     TigerOrderStatus.CANCELLED: "cancelled",
-    TigerOrderStatus.PENDING_CANCEL: "cancelled",
+    TigerOrderStatus.PENDING_CANCEL: "broker_pending",
     TigerOrderStatus.REJECTED: "rejected",
 }
 
@@ -196,11 +196,18 @@ class TigerBrokerAdapter(BrokerAdapter):
             action=request.side.upper(),
             limit_price=float(request.limit_price),
             quantity=int(request.quantity),
+            time_in_force=request.time_in_force,
         )
         # ── 闸门 4: outside_rth=False ─────────────────────────
         order.outside_rth = False
 
         try:
+            if request.time_in_force not in {"DAY", "GTC"}:
+                raise ValueError("UNSUPPORTED_TIF")
+            if request.broker_account_id and request.broker_account_id != self._account_id:
+                raise ValueError("BROKER_ACCOUNT_MISMATCH")
+            if request.dispatch_deadline is not None and time.time() >= request.dispatch_deadline:
+                raise TimeoutError("DISPATCH_DEADLINE_EXPIRED")
             self._trade_client.place_order(order)
         except (ConnectionError, TimeoutError):
             raise  # 透传给上层

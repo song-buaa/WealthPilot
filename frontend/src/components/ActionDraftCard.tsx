@@ -554,7 +554,7 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnl
     <div><b>标的：</b>IB01:LSE · <b>方向：</b>买入 BUY · <b>券商：</b>IBKR · LIMIT / DAY</div>
     <div><b>合约：</b>conId {instrument && ('resolved_con_id' in instrument ? instrument.resolved_con_id : instrument.con_id)} · {instrument?.isin}</div>
     <div><b>上市 / 执行 / 币种：</b>LSEETF / SMART / USD · Acc</div>
-    <div><b>账户：</b>{batch?.account_masked ?? '现有 IBKR 账户，读取中'}</div>
+    <div><b>账户：</b>{batch?.account_masked ?? '现有 IBKR 账户，读取中'} · Portfolio {String(batch?.execution_policy.portfolio_id ?? '待核实')}</div>
     <div><b>总支出上限（含费用和安全垫）：</b><span data-testid="ibkr-link-target">{amount(batch?.stated_cash ?? Number(preview?.order.target_amount))}</span></div>
     <div><b>报价 Ask：</b>{amount(leg?.quote_ask)} · {leg?.quote_quality ?? '待获取'}</div>
     <div><b>报价时间：</b>{leg?.quote_as_of ?? '未知，不可提交'}</div>

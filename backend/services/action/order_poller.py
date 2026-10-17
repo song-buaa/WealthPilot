@@ -84,108 +84,27 @@ class OrderPoller:
             await asyncio.sleep(self._poll_interval)
 
     def _poll_once(self):
-        """单次轮询: 查非终态订单,逐单同步状态。"""
-        session = self._get_session()
+        return scan_orphan_orders(self._get_session, self._get_broker_adapter,
+                                  self._get_broker_adapter_for_order)
+
+
+def scan_orphan_orders(get_session, get_broker_adapter, get_broker_adapter_for_order=None) -> int:
+    """Read-only broker reconciliation. UNKNOWN/absence never authorizes resend."""
+    from backend.services.action.order_manager import OrderManager
+    with get_session() as session:
+        rows = [(o.id, o.broker_name) for o in session.query(OrderRecord).filter(
+            OrderRecord.status.in_(POLLABLE_STATUSES)).all()]
+    count = 0
+    for order_id, broker_name in rows:
         try:
-            orders = (
-                session.query(OrderRecord)
-                .filter(OrderRecord.status.in_(POLLABLE_STATUSES))
-                .filter(OrderRecord.broker_order_id.isnot(None))
-                .all()
-            )
-            if not orders:
-                return
-
-            logger.debug("[OrderPoller] 发现 %d 笔待同步订单", len(orders))
-
-            from backend.services.action.order_manager import OrderManager
-            adapter = self._get_broker_adapter()
-            manager = OrderManager(session, broker_adapter=adapter)
-
-            for order in orders:
-                try:
-                    if self._get_broker_adapter_for_order is not None:
-                        manager.broker_adapter = self._get_broker_adapter_for_order(order.broker_name)
-                    manager.sync_order_status(order.id)
-                except Exception as e:
-                    logger.warning(
-                        "[OrderPoller] 同步订单 %s 失败: %s", order.id, e,
-                    )
-
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error("[OrderPoller] 事务异常: %s", e)
-        finally:
-            session.close()
-
-
-def scan_orphan_orders(get_session, get_broker_adapter) -> int:
-    """启动时扫描孤儿订单。
-
-    两类孤儿:
-    1. submitted_to_broker + broker_order_id IS NULL → 转 unknown (原有)
-    2. unknown + broker_order_id IS NULL → 转 cancelled (新增)
-       broker 从未收到这些订单，poller 永远无法 sync，直接标 cancelled。
-       注意: 有 broker_order_id 的 unknown 不动——那些等 TWS 在线后 poller 收敛。
-
-    Returns:
-        发现并处理的孤儿订单数量
-    """
-    session = get_session()
-    try:
-        from backend.services.action.order_manager import OrderManager
-        adapter = get_broker_adapter()
-        manager = OrderManager(session, broker_adapter=adapter)
-        total = 0
-
-        # 类型 1: submitted_to_broker + 无 broker_order_id → unknown
-        submitted_orphans = (
-            session.query(OrderRecord)
-            .filter(
-                OrderRecord.status == OrderStatus.SUBMITTED_TO_BROKER,
-                OrderRecord.broker_order_id.is_(None),
-            )
-            .all()
-        )
-        for order in submitted_orphans:
-            order.status = OrderStatus.UNKNOWN
-            manager._audit("orphan_order_detected", {
-                "order_id": order.id,
-                "strategy_id": order.strategy_id,
-                "symbol": order.symbol,
-            })
-            logger.warning("[scan_orphan] %s submitted→unknown (无 broker_order_id)", order.id)
-            total += 1
-
-        # 类型 2: unknown + 无 broker_order_id → cancelled
-        # broker 从未收到，等同于未提交，直接标 cancelled
-        unknown_orphans = (
-            session.query(OrderRecord)
-            .filter(
-                OrderRecord.status == OrderStatus.UNKNOWN,
-                OrderRecord.broker_order_id.is_(None),
-            )
-            .all()
-        )
-        for order in unknown_orphans:
-            order.status = OrderStatus.CANCELLED
-            manager._audit("orphan_unknown_no_broker_id", {
-                "order_id": order.id,
-                "strategy_id": order.strategy_id,
-                "symbol": order.symbol,
-                "reason": "broker 从未收到此订单(无 broker_order_id)，标记为已取消",
-            })
-            logger.warning("[scan_orphan] %s unknown→cancelled (无 broker_order_id)", order.id)
-            total += 1
-
-        if total:
-            session.commit()
-            logger.warning("[scan_orphan] 共处理 %d 笔孤儿订单", total)
-        return total
-    except Exception as e:
-        session.rollback()
-        logger.error("[scan_orphan] 扫描异常: %s", e)
-        return 0
-    finally:
-        session.close()
+            adapter = (get_broker_adapter_for_order(broker_name)
+                       if get_broker_adapter_for_order else get_broker_adapter())
+            if adapter is not None and adapter.broker_name != broker_name:
+                continue
+            with get_session() as session:
+                OrderManager(session, adapter).sync_order_status(order_id)
+                session.commit()
+                count += 1
+        except Exception as exc:
+            logger.warning("[OrderPoller] reconciliation %s: %s", order_id, exc)
+    return count

@@ -19,12 +19,15 @@ v3.4 M3 改造：
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.services.action.models import (
     ActionDraft,
@@ -42,6 +45,7 @@ from backend.services.action.state_machine import (
     validate_draft_transition,
     validate_strategy_transition,
     validate_order_transition,
+    project_broker_status,
 )
 from backend.services.action.brokers.base import (
     BrokerAdapter,
@@ -112,14 +116,18 @@ class OrderManager:
         leg.status = leg_status
 
         statuses = {item.status for item in batch.legs}
-        attention = statuses & {"UNKNOWN", "REJECTED", "CANCELLED"}
-        if attention:
+        stopped = bool(batch.attention_reason and "REMAINING_STOPPED" in batch.attention_reason)
+        attention = {item.status for item in batch.legs if item.linked_order_id} & {"UNKNOWN", "REJECTED", "CANCELLED"}
+        if stopped and not attention:
+            batch.status = ("SUBMITTED" if any(item.status in {"OPEN", "SUBMITTING", "PARTIAL_FILLED"}
+                            for item in batch.legs if item.linked_order_id) else "CANCELLED")
+        elif attention:
             batch.status = "ATTENTION_REQUIRED"
             batch.attention_reason = json.dumps([
                 f"BROKER_{status}: {item.user_alias}"
                 for item in batch.legs
                 if (status := item.status) in attention
-            ], ensure_ascii=False)
+            ] + (["REMAINING_STOPPED"] if stopped else []), ensure_ascii=False)
         elif statuses and statuses == {"FILLED"}:
             batch.status = "COMPLETED"
         elif "SUBMITTING" in statuses:
@@ -260,6 +268,10 @@ class OrderManager:
             "draft_id": draft_id,
             "entities_count": len(created_entities),
         })
+        self.session.flush()
+        for entity in created_entities:
+            if isinstance(entity, SymbolStrategy):
+                self._audit("b0_strategy_created", {"strategy_id": entity.id})
         self.session.flush()
         return created_entities
 
@@ -416,18 +428,20 @@ class OrderManager:
         if order.status in OrderStatus.TERMINAL:
             raise ValueError(f"订单已终态（{order.status}），不可取消")
 
-        # 无 broker_order_id（从未提交到券商）→ 仅本地取消
         if not order.broker_order_id or not self.broker_adapter:
-            validate_order_transition(order.status, OrderStatus.CANCELLED)
-            order.status = OrderStatus.CANCELLED
-            order.cancelled_at = datetime.now(timezone.utc)
-            self._audit("order_cancelled", {
-                "order_id": order_id,
-                "cancel_type": "local_only",
-            })
-            self.session.flush()
-            return order
+            if order.status == OrderStatus.CREATED and not order.submission_key and order.broker_name == "mock":
+                order.status = OrderStatus.CANCELLED
+                order.cancelled_at = datetime.now(timezone.utc)
+                self._audit("order_cancelled", {"order_id": order.id, "cancel_type": "local_unclaimed"})
+                self._sync_execution_batch_linkage(order)
+                self.session.flush()
+                return order
+            # A committed claim may have reached the broker. Recovery is read-only.
+            result = self.sync_order_status(order.id)
+            self._audit("cancel_requires_reconciliation", {"order_id": order.id})
+            return result
 
+        self._assert_broker_io_unlocked()
         # 有 broker_order_id → 先通知券商
         try:
             accepted = self.broker_adapter.cancel_order(order.broker_order_id)
@@ -448,14 +462,10 @@ class OrderManager:
             self.session.flush()
             return order
 
-        # 分支 a/b: 券商有响应 → 立即 sync 确认真实状态
-        self._audit("cancel_broker_responded", {
-            "order_id": order_id,
-            "broker_accepted": accepted,
-        })
-
-        # 调 sync_order_status 拉取券商端真实状态
+        # Read the broker status before queuing any audit writes; a cancel
+        # acknowledgement is not a terminal observation.
         order = self.sync_order_status(order_id)
+        self._audit("cancel_broker_responded", {"order_id": order_id, "broker_accepted": accepted})
 
         # sync 后标记 cancel_requested（sync 会覆盖 raw_broker_response，所以在之后标记）
         self._mark_cancel_requested(order)
@@ -488,182 +498,255 @@ class OrderManager:
             existing, ensure_ascii=False, default=str,
         )
 
-    def place_order(self, strategy_id: str, order_params: dict) -> OrderRecord:
-        """
-        创建订单并提交到券商。
+    @staticmethod
+    def _canonical(value):
+        def normalize(item):
+            if isinstance(item, Decimal):
+                return format(item.normalize(), "f")
+            if isinstance(item, dict):
+                return {k: normalize(v) for k, v in item.items()}
+            if isinstance(item, list):
+                return [normalize(v) for v in item]
+            return item
+        return json.dumps(normalize(value), sort_keys=True, separators=(",", ":"), default=str)
 
-        流程：
-        1. 校验策略 status=active
-        2. 超额校验：cumulative_filled + quantity ≤ target_quantity
-        3. 创建 OrderRecord（status=created）
-        4. 调用 BrokerAdapter.place_order
-           - 成功 → 更新 status/broker_order_id/raw_broker_response
-           - 拒单 → status=rejected
-           - 网络异常 → status=unknown
-        5. 写 audit_log
-        """
-        # 显式校验：AllocationIntent 不能直接下单
-        intent = self.session.query(AllocationIntent).filter_by(id=strategy_id).first()
-        if intent is not None:
-            raise ValueError(
-                "AllocationIntent cannot place orders directly. "
-                "It must be decomposed into SymbolStrategy first."
-            )
+    def _portfolio_epoch(self, portfolio_id):
+        from app.models import Position
+        rows = self.session.query(Position).filter_by(portfolio_id=portfolio_id).order_by(Position.id).all()
+        facts = [[p.id, p.symbol, p.currency, p.quantity, p.market_value_cny] for p in rows]
+        return hashlib.sha256(self._canonical(facts).encode()).hexdigest()
 
+    def _assert_broker_io_unlocked(self):
+        if self.session.connection().connection.driver_connection.in_transaction:
+            raise ValueError("BROKER_IO_WITH_SQLITE_WRITE_TRANSACTION_FORBIDDEN")
+
+    def _order_epoch(self, owner, *, excluding_batch=None):
+        q = self.session.query(OrderRecord).filter_by(broker_name=owner.broker)
+        records = q.filter((OrderRecord.broker_account_id == owner.account_id) |
+                           OrderRecord.broker_account_id.is_(None)).all()
+        return hashlib.sha256(self._canonical(sorted(o.id for o in records
+            if not excluding_batch or o.batch_id != excluding_batch)).encode()).hexdigest()
+
+    def _parameters(self, strategy, params):
+        if strategy.symbol and "\u4e00" <= strategy.symbol[0] <= "\u9fff":
+            raise InvalidSymbolError("symbol 包含中文")
+        quantity = Decimal(str(params.get("quantity", strategy.target_quantity or 0)))
+        if not quantity.is_finite() or quantity <= 0 or quantity != quantity.to_integral_value():
+            raise ValueError("positive whole quantity required")
+        tif = params.get("time_in_force", "GTC")
+        if tif not in {"GTC", "DAY"}:
+            raise ValueError("UNSUPPORTED_TIF")
+        return {"symbol": strategy.symbol, "side": strategy.side,
+                "quantity": int(quantity), "order_type": params.get("order_type", strategy.order_type),
+                "limit_price": Decimal(str(params.get("limit_price", strategy.limit_price or 0))),
+                "stop_price": (Decimal(str(params.get("stop_price", strategy.trigger_price)))
+                               if params.get("stop_price", strategy.trigger_price) is not None else None),
+                "time_in_force": tif, "resolved_contract": params.get("resolved_contract")}
+
+    def create_order_review(self, strategy_id, params, *, risk_snapshot, ttl=30):
+        """Persist original Web risk-review nonce, not a permission token.
+
+        Caller explicitly commits this review before returning it to the Web.
+        Preview/MCP link generation never calls this method.
+        """
+        from backend.services.action.ownership import execution_owner
         strategy = self.get_strategy(strategy_id)
         if strategy is None:
-            raise ValueError(f"策略不存在: {strategy_id}")
-        if strategy.status != StrategyStatus.ACTIVE:
-            raise ValueError(f"策略状态为 {strategy.status}，不可下单")
+            if self.session.get(AllocationIntent, strategy_id):
+                raise ValueError("AllocationIntent cannot place orders directly")
+            raise ValueError("策略不存在")
+        if strategy.batch_leg_id:
+            raise ValueError("ExecutionBatch 关联策略只能由批次状态机提交")
+        owner = execution_owner(self.session, self.broker_adapter)
+        if owner.broker not in {"mock", "stub"}:
+            eligible = any(json.loads(log.payload or "{}").get("strategy_id") == strategy_id
+                           for log in self.session.query(AuditLog).filter_by(event_type="b0_strategy_created"))
+            if not eligible:
+                raise ValueError("LEGACY_STRATEGY_RECONCILIATION_REQUIRED")
+        facts = {"strategy_id": strategy_id, "portfolio_id": owner.portfolio_id,
+                 "broker": owner.broker, "account_id": owner.account_id,
+                 "parameters": self._parameters(strategy, params),
+                 "epoch": self._order_epoch(owner), "portfolio_epoch": self._portfolio_epoch(owner.portfolio_id), "risk": risk_snapshot,
+                 "expires_at": time.time() + ttl}
+        audit = AuditLog(event_type="order_reviewed", payload=self._canonical(facts))
+        self.session.add(audit)
+        self.session.flush()
+        return audit.id
 
-        # ExecutionBatch strategies must retain the batch confirmation and
-        # per-leg idempotency authority.  The legacy single-strategy endpoint
-        # cannot create a replacement attempt for them.
-        strategy_batch_leg_id = getattr(strategy, "batch_leg_id", None)
-        if (
-            isinstance(strategy_batch_leg_id, str)
-            and strategy_batch_leg_id
-            and not (
-                order_params.get("batch_id")
-                and order_params.get("batch_leg_id") == strategy_batch_leg_id
-                and order_params.get("confirmation_version") is not None
-            )
-        ):
-            raise ValueError(
-                "ExecutionBatch 关联策略只能由批次状态机提交"
-            )
+    def place_order(self, strategy_id: str, order_params: dict) -> OrderRecord:
+        """Claim -> commit -> one broker call -> independent observation commit.
 
-        # v3.4 M3: symbol 中文名保护
-        if strategy.symbol and strategy.symbol[0] >= "\u4e00" and strategy.symbol[0] <= "\u9fff":
-            raise InvalidSymbolError(
-                f"symbol 包含中文,不是标的代码: {strategy.symbol}"
-            )
-
-        quantity = order_params.get("quantity", 0)
-
-        # v3.15 服务端幂等：同一 Batch confirmation version 的同一 Leg
-        # 只能拥有一条 OrderRecord。重放返回既有记录，不再触发 Broker。
+        A claim is UNKNOWN, not accepted. A crashed winner is never dispatched
+        by another invocation. SQLite writer locks exist only in short Tx A/B.
+        The caller must commit its own preparation explicitly before entering.
+        """
+        from backend.services.action.ownership import execution_owner
+        from backend.services.action.risk_engine import CONFIRMATION_TEXT
+        owner = execution_owner(self.session, self.broker_adapter)
+        if self.session.new or self.session.dirty or self.session.deleted:
+            raise ValueError("COMMIT_PREPARATION_BEFORE_DISPATCH")
+        connection = self.session.connection().connection.driver_connection
+        if connection.in_transaction:
+            raise ValueError("WRITE_TRANSACTION_BEFORE_DISPATCH")
+        factory = sessionmaker(bind=self.session.get_bind(), expire_on_commit=False)
+        self.session.rollback()  # release caller read snapshot; never commit arbitrary caller work
         batch_id = order_params.get("batch_id")
-        batch_leg_id = order_params.get("batch_leg_id")
-        confirmation_version = order_params.get("confirmation_version")
-        if batch_id and batch_leg_id and confirmation_version is not None:
-            existing = self.session.query(OrderRecord).filter_by(
-                batch_id=batch_id,
-                batch_leg_id=batch_leg_id,
-                confirmation_version=confirmation_version,
-            ).first()
+        leg_id = order_params.get("batch_leg_id")
+        claimed = False
+        with factory() as tx:
+            tx.execute(text("BEGIN IMMEDIATE"))
+            tx.info.update(self.session.info)
+            manager = OrderManager(tx, self.broker_adapter)
+            if execution_owner(tx, self.broker_adapter) != owner:
+                raise ValueError("EXECUTION_OWNER_CHANGED")
+            if batch_id:
+                key_facts = ["b0.batch-leg.v1", owner.portfolio_id, owner.broker, owner.account_id, batch_id, leg_id]
+            else:
+                source_strategy = manager.get_strategy(strategy_id)
+                if source_strategy is None:
+                    raise ValueError("策略不存在")
+                source = tx.get(ActionDraft, source_strategy.source_draft_id) if source_strategy.source_draft_id else None
+                if source is not None and source.user_id == "chatgpt-web-link":
+                    key_facts = ["b0.web-link.v1", owner.portfolio_id, owner.broker, owner.account_id, source.id, strategy_id]
+                else:
+                    key_facts = ["b0.strategy-review.v1", owner.portfolio_id, owner.broker, owner.account_id,
+                                 strategy_id, order_params.get("review_id")]
+            key = hashlib.sha256(manager._canonical(key_facts).encode()).hexdigest()
+            existing = tx.query(OrderRecord).filter_by(submission_key=key).first()
             if existing is not None:
-                return existing
-        if strategy.target_quantity is not None and quantity > 0:
-            remaining = strategy.target_quantity - strategy.cumulative_filled_quantity
-            if quantity > remaining:
-                raise ValueError(
-                    f"超额下单禁止: 目标数量={strategy.target_quantity}, "
-                    f"已成交={strategy.cumulative_filled_quantity}, "
-                    f"本次={quantity}, 超出={quantity - remaining}"
-                )
-
-        broker_name = "mock"
-        if self.broker_adapter:
-            broker_name = self.broker_adapter.broker_name
-
-        order = OrderRecord(
-            strategy_id=strategy_id,
-            broker_name=broker_name,
-            symbol=strategy.symbol,
-            side=strategy.side,
-            quantity=quantity,
-            order_type=order_params.get("order_type", strategy.order_type),
-            limit_price=order_params.get("limit_price", strategy.limit_price),
-            stop_price=order_params.get("stop_price", strategy.trigger_price),
-            status=OrderStatus.CREATED,
-            batch_id=batch_id,
-            batch_leg_id=batch_leg_id,
-            confirmation_version=confirmation_version,
-        )
-        self.session.add(order)
-        self.session.flush()
-
-        self._audit("order_created", {
-            "order_id": order.id,
-            "strategy_id": strategy_id,
-            "quantity": quantity,
-        })
-
-        # 调用 BrokerAdapter 提交到券商
-        if self.broker_adapter:
-            request = OrderRequest(
-                symbol=strategy.symbol,
-                side=strategy.side,
-                quantity=quantity,
-                order_type=order_params.get("order_type", strategy.order_type),
-                limit_price=(
-                    Decimal(str(order_params["limit_price"]))
-                    if order_params.get("limit_price") is not None
-                    else (Decimal(str(strategy.limit_price)) if strategy.limit_price else None)
-                ),
-                trigger_price=(
-                    Decimal(str(order_params["stop_price"]))
-                    if order_params.get("stop_price") is not None
-                    else (Decimal(str(strategy.trigger_price)) if strategy.trigger_price else None)
-                ),
-                local_order_id=order.id,
-                resolved_contract=order_params.get("resolved_contract"),
-            )
-
+                # Old version is allowed only as a read of the identical claim.
+                old = json.loads(existing.submission_payload_json)
+                for field in ("quantity", "limit_price", "time_in_force"):
+                    if field in order_params and str(old["parameters"][field]) != str(order_params[field]):
+                        # Decimal representations may differ without changing value.
+                        if field == "time_in_force" or Decimal(str(old["parameters"][field])) != Decimal(str(order_params[field])):
+                            raise ValueError("IDEMPOTENCY_PARAMETER_CONFLICT")
+                order_id = existing.id
+            else:
+                unknown = tx.query(OrderRecord).filter(
+                    OrderRecord.broker_name == owner.broker,
+                    ((OrderRecord.broker_account_id == owner.account_id) | OrderRecord.broker_account_id.is_(None)),
+                    OrderRecord.status.in_([OrderStatus.UNKNOWN, OrderStatus.SUBMITTED_TO_BROKER]),
+                ).first()
+                if unknown is not None:
+                    raise ValueError("ACCOUNT_RECONCILIATION_REQUIRED")
+                batch = tx.get(ExecutionBatch, batch_id) if batch_id else None
+                leg = tx.get(ExecutionLeg, leg_id) if batch else None
+                if batch:
+                    policy = json.loads(batch.execution_policy)
+                    from backend.services.execution_batch.service import ExecutionBatchService
+                    if ExecutionBatchService.review_fingerprint(batch, authorization=True) != batch.confirmation_hash:
+                        raise ValueError("BATCH_AUTHORIZATION_CHANGED")
+                    if (policy.get("portfolio_id") != owner.portfolio_id or batch.account_ref != owner.account_id
+                            or batch.confirmation_version != order_params.get("confirmation_version")
+                            or batch.confirmation_hash != order_params.get("confirmation_hash")
+                            or batch.status not in {"CONFIRMED", "SUBMITTING", "PARTIALLY_SUBMITTED"}
+                            or leg is None or leg.batch_id != batch.id or leg.linked_order_id):
+                        raise ValueError("BATCH_AUTHORIZATION_CHANGED")
+                    if policy.get("portfolio_epoch") != manager._portfolio_epoch(owner.portfolio_id):
+                        raise ValueError("PORTFOLIO_RISK_EVIDENCE_CHANGED")
+                    if policy.get("order_epoch") != manager._order_epoch(owner, excluding_batch=batch.id):
+                        raise ValueError("EXECUTION_EPOCH_CHANGED")
+                    if any(item.status not in {"OPEN", "PARTIAL_FILLED", "FILLED"}
+                           for item in batch.legs if item.sequence < leg.sequence):
+                        raise ValueError("PREVIOUS_LEG_NOT_ADVANCEABLE")
+                    strategy = SymbolStrategy(id=strategy_id, symbol=f"{leg.user_alias}:LSE", side="BUY",
+                        target_quantity=leg.final_quantity, limit_price=leg.final_limit, order_type="LIMIT",
+                        status=StrategyStatus.ACTIVE, batch_leg_id=leg.id,
+                        related_conversation_id=batch.source_conversation_id)
+                    tx.add(strategy)
+                    tx.flush()
+                    params = manager._parameters(strategy, order_params)
+                    if (params["quantity"] != leg.final_quantity or params["limit_price"] != leg.final_limit
+                            or params["time_in_force"] != policy.get("time_in_force", "DAY")):
+                        raise ValueError("BATCH_PARAMETERS_CHANGED")
+                    auth = {"confirmation_hash": batch.confirmation_hash, "version": batch.confirmation_version,
+                            "risk": policy.get("risk_warnings"), "epoch": policy.get("order_epoch")}
+                else:
+                    strategy = manager.get_strategy(strategy_id)
+                    if strategy.batch_leg_id:
+                        raise ValueError("ExecutionBatch 关联策略只能由批次状态机提交")
+                    params = manager._parameters(strategy, order_params)
+                    review = tx.get(AuditLog, order_params.get("review_id"))
+                    if review is None or review.event_type != "order_reviewed":
+                        raise ValueError("ORDER_REVIEW_REQUIRED")
+                    auth = json.loads(review.payload)
+                    if (auth["strategy_id"] != strategy_id or auth["portfolio_id"] != owner.portfolio_id
+                            or auth["account_id"] != owner.account_id or auth["broker"] != owner.broker
+                            or auth["epoch"] != manager._order_epoch(owner)
+                            or auth.get("portfolio_epoch") != manager._portfolio_epoch(owner.portfolio_id)
+                            or auth["parameters"] != json.loads(manager._canonical(params))):
+                        raise ValueError("ORDER_REVIEW_CHANGED")
+                    if auth["expires_at"] < time.time():
+                        raise ValueError("ORDER_REVIEW_EXPIRED")
+                    if auth["risk"].get("requires_confirmation") and order_params.get("confirmation_text") != CONFIRMATION_TEXT:
+                        raise ValueError("RISK_CONFIRMATION_REQUIRED")
+                if strategy.status != StrategyStatus.ACTIVE:
+                    raise ValueError(f"策略状态为 {strategy.status}，不可下单")
+                if strategy.symbol and "\u4e00" <= strategy.symbol[0] <= "\u9fff":
+                    raise InvalidSymbolError("symbol 包含中文")
+                outstanding = sum(max(0, o.quantity - int(o.filled_quantity or 0)) for o in manager.list_orders(strategy_id=strategy.id)
+                                  if o.status not in OrderStatus.TERMINAL)
+                if strategy.target_quantity is not None and params["quantity"] + outstanding + int(strategy.cumulative_filled_quantity or 0) > strategy.target_quantity:
+                    raise ValueError("超额下单禁止")
+                deadline = min(float(order_params.get("dispatch_deadline", time.time() + 30)),
+                               float(auth.get("expires_at", time.time() + 30)))
+                if deadline <= time.time():
+                    raise ValueError("ORDER_REVIEW_EXPIRED")
+                payload = manager._canonical({"portfolio_id": owner.portfolio_id, "account_id": owner.account_id,
+                    "broker": owner.broker, "parameters": params, "authorization": auth, "dispatch_deadline": deadline})
+                order = OrderRecord(strategy_id=strategy.id, broker_name=owner.broker,
+                    portfolio_id=owner.portfolio_id, broker_account_id=owner.account_id,
+                    submission_key=key, submission_payload_json=payload,
+                    symbol=params["symbol"], side=params["side"], quantity=params["quantity"],
+                    limit_price=params["limit_price"], stop_price=params["stop_price"], order_type=params["order_type"],
+                    status=OrderStatus.UNKNOWN, batch_id=batch_id, batch_leg_id=leg_id,
+                    confirmation_version=order_params.get("confirmation_version"))
+                tx.add(order)
+                tx.flush()
+                if leg:
+                    leg.linked_order_id, leg.linked_strategy_id = order.id, strategy.id
+                    leg.submission_attempted_at = datetime.now(timezone.utc)
+                manager._sync_execution_batch_linkage(order)
+                manager._audit("order_created", {"order_id": order.id})
+                manager._audit("dispatch_claimed", {"order_id": order.id, "portfolio_id": owner.portfolio_id})
+                order_id = order.id
+                try:
+                    tx.commit()  # A commit failure never grants dispatch permission.
+                except BaseException:
+                    # Some DBAPI commit errors leave transaction state ambiguous.
+                    # Discard the physical connection; never let its writer lock
+                    # leak through the pool or authorize a send.
+                    tx.invalidate()
+                    raise
+                claimed = True
+        if claimed:
+            facts = json.loads(payload)
+            params = facts["parameters"]
+            request = OrderRequest(**{k: v for k, v in params.items() if k not in {"stop_price", "limit_price"}},
+                limit_price=Decimal(params["limit_price"]),
+                trigger_price=Decimal(params["stop_price"]) if params["stop_price"] is not None else None,
+                local_order_id=order_id, broker_account_id=owner.account_id, dispatch_deadline=deadline)
             try:
-                update = self.broker_adapter.place_order(request)
-                order.broker_order_id = update.broker_order_id
-                order.raw_broker_response = json.dumps(
-                    update.raw_response, ensure_ascii=False, default=str,
-                )
-
-                if update.status in OrderStatus.ALL:
-                    order.status = update.status
-                else:
-                    order.status = OrderStatus.UNKNOWN
-
-                if order.status == OrderStatus.REJECTED:
-                    self._audit("order_rejected", self._enrich_audit_payload({
-                        "order_id": order.id,
-                        "reason": update.raw_response.get("reason", ""),
-                    }, update.raw_response, order))
-                elif order.status == OrderStatus.UNKNOWN:
-                    self._audit("order_submit_unknown", self._enrich_audit_payload({
-                        "order_id": order.id,
-                        "reason": update.raw_response.get("broker_ack_note", ""),
-                    }, update.raw_response, order))
-                elif order.status == OrderStatus.CANCELLED:
-                    order.cancelled_at = datetime.now(timezone.utc)
-                    self._audit("order_cancelled", self._enrich_audit_payload({
-                        "order_id": order.id,
-                        "broker_order_id": update.broker_order_id,
-                    }, update.raw_response, order))
-                elif order.status == OrderStatus.FILLED:
-                    order.filled_quantity = update.filled_quantity
-                    order.avg_filled_price = update.avg_filled_price
-                    order.filled_at = datetime.now(timezone.utc)
-                    self._audit("order_filled", self._enrich_audit_payload({
-                        "order_id": order.id,
-                        "broker_order_id": update.broker_order_id,
-                    }, update.raw_response, order))
-                else:
-                    order.submitted_at = datetime.now(timezone.utc)
-                    self._audit("order_submitted", self._enrich_audit_payload({
-                        "order_id": order.id,
-                        "broker_order_id": update.broker_order_id,
-                    }, update.raw_response, order))
-
-            except (ConnectionError, TimeoutError) as e:
-                order.status = OrderStatus.UNKNOWN
-                self._audit("order_network_error", {
-                    "order_id": order.id,
-                    "error": str(e),
-                })
-                logger.warning(f"[OrderManager] place_order 网络异常: {e}")
-
-        self.session.flush()
-        return order
+                if time.time() >= deadline:
+                    raise TimeoutError("DISPATCH_DEADLINE_EXPIRED")
+                update = self.broker_adapter.place_order(request)  # exactly one invocation; no retry
+            except Exception as exc:
+                # Broker may have accepted even when SDK reports an unexpected error.
+                update = OrderStatusUpdate(None, order_id, OrderStatus.UNKNOWN,
+                                           raw_response={"dispatch_error_type": type(exc).__name__})
+            with factory() as tx:
+                tx.execute(text("BEGIN IMMEDIATE"))
+                manager = OrderManager(tx, self.broker_adapter)
+                result = manager.apply_broker_observation(order_id, update)
+                manager._audit("order_submitted" if result.broker_order_id else "order_submit_unknown", {"order_id": order_id})
+                try:
+                    tx.commit()
+                except BaseException:
+                    tx.invalidate()
+                    raise
+        self.session.expire_all()
+        return self.get_order(order_id)
 
     def sync_order_status(self, order_id: str) -> OrderRecord:
         """
@@ -680,12 +763,33 @@ class OrderManager:
         if order is None:
             raise ValueError(f"订单不存在: {order_id}")
 
-        if not self.broker_adapter or not order.broker_order_id:
-            logger.info(f"[OrderManager] sync_order_status: 无 adapter 或无 broker_order_id")
+        if not self.broker_adapter:
             return order
-
+        self._assert_broker_io_unlocked()
+        configured = getattr(self.broker_adapter, "_account_id", None)
+        if order.broker_account_id and configured and configured != order.broker_account_id:
+            raise ValueError("BROKER_ACCOUNT_MISMATCH")
         try:
-            update = self.broker_adapter.get_order_status(order.broker_order_id)
+            recover = getattr(self.broker_adapter, "find_order_by_ref", None)
+            fresh_recover = getattr(self.broker_adapter, "recover_order", None)
+            if fresh_recover is not None:
+                raw = json.loads(order.raw_broker_response or "{}")
+                update = fresh_recover(order.id, perm_id=raw.get("perm_id"))
+                if update is None:
+                    update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
+                                               filled_quantity=order.filled_quantity or 0,
+                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE"})
+            elif recover is not None:
+                update = recover(order.id)
+                if update is None:
+                    update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
+                                               filled_quantity=order.filled_quantity or 0,
+                                               raw_response={"recovery": "NOT_FOUND_OR_UNAVAILABLE"})
+            elif order.broker_order_id:
+                update = self.broker_adapter.get_order_status(order.broker_order_id)
+            else:
+                update = OrderStatusUpdate(None, order.id, OrderStatus.UNKNOWN,
+                                           filled_quantity=order.filled_quantity or 0)
         except (ConnectionError, TimeoutError) as e:
             # 网络异常 → 标记 unknown（如果当前不是终态）
             if order.status not in OrderStatus.TERMINAL:
@@ -700,65 +804,90 @@ class OrderManager:
             self.session.flush()
             return order
 
-        new_status = update.status
+        return self.apply_broker_observation(order.id, update)
+
+    def apply_broker_observation(self, order_id: str, update: OrderStatusUpdate) -> OrderRecord:
+        """The sole projection writer for initial ack, poll, recovery and cancellation.
+
+        Cumulative facts never increment twice. Absence, pending and stale lower
+        quantities cannot erase known executions. A correction is quarantined,
+        never replayed as a new financial event in B0.
+        """
+        order = self.get_order(order_id)
+        if order is None:
+            raise ValueError("订单不存在")
+        if update.local_order_id and update.local_order_id != order.id:
+            raise ValueError("BROKER_ORDER_REF_MISMATCH")
+        actual_account = update.raw_response.get("observed_account_id")
+        if order.broker_account_id and actual_account and actual_account != order.broker_account_id:
+            raise ValueError("BROKER_ACCOUNT_MISMATCH")
+        if order.submission_payload_json:
+            claimed = json.loads(order.submission_payload_json)
+            contract = claimed["parameters"].get("resolved_contract") or {}
+            observed_con_id = update.raw_response.get("con_id")
+            if contract.get("con_id") and observed_con_id and int(contract["con_id"]) != int(observed_con_id):
+                raise ValueError("BROKER_CONTRACT_MISMATCH")
+        new_status = update.status if update.status in OrderStatus.ALL else OrderStatus.UNKNOWN
+        old_qty = int(order.filled_quantity or 0)
+        try:
+            quantity = Decimal(str(update.filled_quantity))
+            valid_qty = quantity.is_finite() and quantity == quantity.to_integral_value() and 0 <= quantity <= order.quantity
+        except Exception:
+            valid_qty = False
+        price_conflict = (old_qty > 0 and valid_qty and quantity == old_qty
+            and order.avg_filled_price is not None and update.avg_filled_price is not None
+            and Decimal(str(update.avg_filled_price)) > 0
+            and Decimal(str(update.avg_filled_price)).quantize(Decimal("0.0001"))
+                != Decimal(str(order.avg_filled_price)).quantize(Decimal("0.0001")))
+        prior_raw = json.loads(order.raw_broker_response or "{}")
+        disputed = (bool(update.raw_response.get("execution_correction")) or not valid_qty or price_conflict
+                    or bool(prior_raw.get("reconciliation_disputed")))
         now = datetime.now(timezone.utc)
-
-        # 校验状态流转（允许券商跳过中间状态，如 submitted → filled）
-        if new_status != order.status:
-            try:
-                validate_order_transition(order.status, new_status)
-            except ValueError:
-                # 券商可能跳过中间状态（如 submitted_to_broker → filled），
-                # 这在真实场景下是合法的。记录日志但接受更新。
-                logger.info(
-                    f"[OrderManager] 状态跳跃: {order.status} → {new_status} "
-                    f"(非标准流转，已接受)"
-                )
-
-            order.status = new_status
-
-        order.filled_quantity = update.filled_quantity
-        order.avg_filled_price = update.avg_filled_price
-        order.last_synced_at = now
-        order.raw_broker_response = json.dumps(
-            update.raw_response, ensure_ascii=False, default=str,
-        )
-
-        if new_status == "filled":
-            order.filled_at = now
-        elif new_status == "cancelled":
-            order.cancelled_at = now
-
-        self._sync_execution_batch_linkage(order)
-
-        # 回写 strategy.cumulative_filled_quantity
-        if update.filled_quantity > 0:
+        if disputed:
+            order.status = OrderStatus.UNKNOWN
             strategy = self.get_strategy(order.strategy_id)
-            if strategy:
-                # 重新计算 cumulative：查该 strategy 所有 order 的 filled_quantity 之和
-                all_orders = self.list_orders(strategy_id=strategy.id)
-                total_filled = sum(o.filled_quantity for o in all_orders)
-                strategy.cumulative_filled_quantity = total_filled
-                strategy.updated_at = now
-
-                # 如果已达 target → completed
-                if (strategy.target_quantity is not None
-                        and total_filled >= strategy.target_quantity
-                        and strategy.status == StrategyStatus.ACTIVE):
-                    strategy.status = StrategyStatus.COMPLETED
-                    strategy.completed_at = now
-                    self._audit("strategy_auto_completed", {
-                        "strategy_id": strategy.id,
-                        "total_filled": total_filled,
-                        "target": strategy.target_quantity,
-                    })
-
-        self._audit("order_synced", {
-            "order_id": order_id,
-            "status": new_status,
-            "filled_quantity": update.filled_quantity,
-        })
-
+            if strategy and strategy.status != StrategyStatus.DISCARDED:
+                strategy.status = StrategyStatus.PAUSED
+            self._audit("broker_observation_disputed", {"order_id": order.id, "reason": "quantity/correction"})
+        else:
+            qty = int(quantity)
+            if qty < old_qty:
+                self._audit("broker_stale_observation", {"order_id": order.id, "quantity": qty})
+                return order
+            order.status = project_broker_status(order.status, new_status,
+                previous_filled=old_qty, cumulative_filled=qty, quantity=order.quantity)
+            order.filled_quantity = qty
+            if update.avg_filled_price is not None and qty > 0:
+                price = Decimal(str(update.avg_filled_price))
+                if price.is_finite() and price > 0:
+                    order.avg_filled_price = price
+            if order.status == OrderStatus.FILLED and order.filled_at is None:
+                order.filled_at = now
+            if order.status == OrderStatus.CANCELLED and order.cancelled_at is None:
+                order.cancelled_at = now
+        if update.broker_order_id:
+            order.broker_order_id = update.broker_order_id
+        if order.broker_order_id and order.submitted_at is None:
+            order.submitted_at = now
+        order.last_synced_at = now
+        raw = {**update.raw_response}
+        for name in ("perm_id", "order_ref", "con_id", "observed_account_id"):
+            if not raw.get(name) and prior_raw.get(name):
+                raw[name] = prior_raw[name]
+        if disputed:
+            raw["reconciliation_disputed"] = True
+        order.raw_broker_response = json.dumps(raw, ensure_ascii=False, default=str)
+        self.session.flush()
+        strategy = self.get_strategy(order.strategy_id)
+        if strategy:
+            strategy.cumulative_filled_quantity = sum(int(o.filled_quantity or 0) for o in self.list_orders(strategy_id=strategy.id))
+            if (strategy.status == StrategyStatus.ACTIVE and strategy.target_quantity is not None
+                    and strategy.cumulative_filled_quantity >= strategy.target_quantity):
+                strategy.status = StrategyStatus.COMPLETED
+                strategy.completed_at = now
+        self._sync_execution_batch_linkage(order)
+        self._audit("order_synced", {"order_id": order.id, "status": order.status,
+                                    "filled_quantity": order.filled_quantity})
         self.session.flush()
         return order
 

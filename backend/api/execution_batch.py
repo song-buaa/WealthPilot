@@ -169,7 +169,10 @@ def _link_order(body):
 def quote_ibkr_link(body: IBKRQuoteRequest):
     from backend.services.execution_batch.link_handoff import preview_link_batch
     try:
-        with preview_link_batch(_adapter(), _link_order(body), limit_price=body.limit_price) as batch:
+        from backend.services.action.ownership import portfolio_scope
+        with get_session() as owner_session:
+            pid = portfolio_scope(owner_session)
+        with preview_link_batch(_adapter(), _link_order(body), portfolio_id=pid, limit_price=body.limit_price) as batch:
             result = _serialize_batch(batch)
             return {"batch": result, "preview_hash": ExecutionBatchService.review_fingerprint(batch) if batch.status == "READY" else "",
                     "request_id": str(body.request_id), "persisted": False, "order_submitted": False}
@@ -303,9 +306,23 @@ def confirm_batch(batch_id: str, body: dict | None = None):
         current = service.get_batch(batch_id)
         if service.is_all_in(current) and (body or {}).get("confirmation_version") != current.confirmation_version:
             raise ExecutionSafetyError("confirmation version 无效")
-        batch = service.confirm_batch(batch_id)
+        batch = service.confirm_batch(batch_id, risk_confirmation_text=(body or {}).get("risk_confirmation_text", ""))
         session.commit()
         return _serialize_batch(batch)
+    except Exception as exc:
+        session.rollback()
+        _raise(exc)
+    finally:
+        session.close()
+
+
+@router.post("/{batch_id}/review-remaining")
+def review_remaining(batch_id: str):
+    session = get_session()
+    try:
+        result = _service(session).review_remaining(batch_id)
+        session.commit()
+        return _serialize_batch(result)
     except Exception as exc:
         session.rollback()
         _raise(exc)

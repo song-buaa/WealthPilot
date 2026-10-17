@@ -144,9 +144,9 @@ def test_multiple_service_sessions_share_one_snapshot(fixture_db):
 
 def test_latest_failed_sync_and_old_success_remain_visible(fixture_db):
     with sqlite3.connect(fixture_db) as writer:
-        writer.execute('UPDATE positions SET broker="fixture", broker_account_id="PRIVATE_OWNER"')
-        writer.execute('CREATE TABLE position_snapshot_runs(broker TEXT, account_id TEXT, status TEXT, finished_at TEXT, started_at TEXT)')
-        writer.executemany('INSERT INTO position_snapshot_runs VALUES(?,?,?,?,?)', [
+        writer.execute('UPDATE positions SET broker="fixture", broker_account_id="PRIVATE_OWNER", sync_source="api"')
+        writer.execute('CREATE TABLE IF NOT EXISTS position_snapshot_runs(portfolio_id INTEGER, broker TEXT, account_id TEXT, status TEXT, finished_at TEXT, started_at TEXT)')
+        writer.executemany("INSERT INTO position_snapshot_runs(portfolio_id,broker,account_id,status,finished_at,started_at,triggered_by,retry_count,sync_source) VALUES(1,?,?,?,?,?,'manual',0,'api')", [
             ('fixture','PRIVATE_OWNER','success','2026-10-08 12:00:00','2026-10-08 11:00:00'),
             ('fixture','PRIVATE_OWNER','failed',None,'2026-10-11 11:00:00'),
         ])

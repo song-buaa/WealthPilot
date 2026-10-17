@@ -177,9 +177,10 @@ def test_confirmation_durable_before_uncertain_submission(workflow,monkeypatch):
     p=create(workflow)
     def crash(*a,**kw):raise RuntimeError('synthetic crash before persisted broker response')
     monkeypatch.setattr(workflow.adapter,'place_order',crash)
-    with pytest.raises(RuntimeError):workflow.confirm(p['draft_id'],p['preview_hash'],True,CONFIRMATION_TEXT)
-    with pytest.raises(TradeError,match='DRAFT_NOT_PENDING'):
-        workflow.confirm(p['draft_id'],p['preview_hash'],True,CONFIRMATION_TEXT)
+    result = workflow.confirm(p['draft_id'],p['preview_hash'],True,CONFIRMATION_TEXT)
+    assert result['orders'][0]['status'] == 'unknown'
+    again = workflow.confirm(p['draft_id'],p['preview_hash'],True,CONFIRMATION_TEXT)
+    assert again['orders'][0]['order_id'] == result['orders'][0]['order_id']
 
 
 def test_simultaneous_confirmation_creates_only_one_order(workflow):
@@ -301,9 +302,9 @@ def test_failed_latest_sync_preserves_success_date_and_holding(database, monkeyp
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add_all([
-            PositionSnapshotRun(broker='tiger', account_id='DO_NOT_RETURN_ACCOUNT', status='success',
+            PositionSnapshotRun(portfolio_id=7, broker='tiger', account_id='DO_NOT_RETURN_ACCOUNT', status='success',
                 started_at=datetime(2020,1,1), finished_at=datetime(2020,1,1)),
-            PositionSnapshotRun(broker='tiger', account_id='DO_NOT_RETURN_ACCOUNT', status='failed',
+            PositionSnapshotRun(portfolio_id=7, broker='tiger', account_id='DO_NOT_RETURN_ACCOUNT', status='failed',
                 started_at=datetime(2020,1,2), finished_at=datetime(2020,1,2), error_message='PRIVATE_ERROR')])
         session.commit()
     engine.dispose()

@@ -64,8 +64,8 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_
                          intent_id="ti_"+order.request_id.hex)
     # confirm_trade_intent commits the original meaning-only confirmation.
     # Serialize retries before consulting/creating the original batch.
-    from sqlalchemy import text
-    session.execute(text("BEGIN IMMEDIATE"))
+    # Meaning-only confirmation is committed; release reads before broker I/O.
+    session.rollback()
     existing = session.query(ExecutionBatch).filter_by(source_message_id=message.id).order_by(
         ExecutionBatch.created_at.desc()).first()
     if existing is not None:
@@ -106,7 +106,7 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_
 
 
 @contextmanager
-def preview_link_batch(adapter, order, *, limit_price=None):
+def preview_link_batch(adapter, order, *, portfolio_id, limit_price=None):
     """Use the original engine on disposable in-memory tables, never production DB.
 
     Only original read-only IBKR facts/WhatIf are requested; no strategy or order
@@ -120,6 +120,11 @@ def preview_link_batch(adapter, order, *, limit_price=None):
     try:
         Base.metadata.create_all(engine)
         with Session(engine) as session:
+            from app.models import Portfolio
+            pid = portfolio_id
+            session.info["portfolio_id"] = pid
+            session.add(Portfolio(id=pid, name="Disposable preview owner"))
+            session.commit()
             batch = create_link_batch(session, adapter, order, limit_price=limit_price)
             yield batch
             session.rollback()

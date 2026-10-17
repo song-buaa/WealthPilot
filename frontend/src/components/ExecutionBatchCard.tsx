@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle, Loader2, RefreshCw, ShieldAlert, X } from 'lucide-react'
 
-import { executionBatchApi, type ExecutionBatchResponse } from '@/lib/api'
+import { executionBatchApi, batchRiskWarnings, type ExecutionBatchResponse } from '@/lib/api'
 
 
 function usd(value: number | null | undefined) {
@@ -23,6 +23,9 @@ export default function ExecutionBatchCard({
   const [error, setError] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [ack, setAck] = useState(false)
+  const [riskText, setRiskText] = useState('')
+  const riskWarnings = batchRiskWarnings(batch)
+  const riskAccepted = !riskWarnings.length || riskText === '我已知晓风险并坚持下单'
   const [manualLimits, setManualLimits] = useState<Record<string, string>>(() =>
     Object.fromEntries(batch.legs.map(leg => [leg.user_alias, leg.final_limit?.toString() || ''])),
   )
@@ -58,7 +61,7 @@ export default function ExecutionBatchCard({
 
   async function confirm() {
     setBusy(true); setError(null)
-    try { update(await executionBatchApi.confirm(batch.id)) }
+    try { update(await executionBatchApi.confirm(batch.id, batch.confirmation_version, riskText)) }
     catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
@@ -123,6 +126,16 @@ export default function ExecutionBatchCard({
       </div>
 
       <div style={{ padding: 16 }}>
+        {riskWarnings.map((warning, index) => <p key={index} role="alert">{warning.message}</p>)}
+        {riskWarnings.length > 0 && <label>风险确认：<input value={riskText} onChange={event => setRiskText(event.target.value)} placeholder="我已知晓风险并坚持下单" /></label>}
+        {batch.legs.some(leg => leg.linked_order_id) && batch.legs.some(leg => !leg.linked_order_id && leg.status !== 'CANCELLED') &&
+          <button disabled={busy} onClick={async () => {
+            setBusy(true); setError(null)
+            try { update(await executionBatchApi.reviewRemaining(batch.id)); setRiskText('') }
+            catch (err) { setError((err as Error).message) }
+            finally { setBusy(false) }
+          }}>重新审阅未提交订单（保留已提交订单）</button>}
+
         {brokerAttention && (
           <div style={{ marginBottom: 12, padding: '10px 11px', background: '#FFF7ED', border: '1px solid #FDBA74', borderRadius: 8, color: '#9A3412', fontSize: 11, fontWeight: 700 }}>
             等待经纪商状态核验 / 提交结果异常。再次提交已禁用，请勿重试或创建替代订单。
@@ -217,7 +230,7 @@ export default function ExecutionBatchCard({
             <button onClick={applyManualLimits} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, cursor: 'pointer' }}>校验手工 Limit</button>
           )}
           {batch.status === 'READY' && (
-            <button onClick={confirm} disabled={busy} style={{ padding: '7px 12px', borderRadius: 7, border: 'none', background: '#2563EB', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>确认交易计划</button>
+            <button onClick={confirm} disabled={busy || !riskAccepted} style={{ padding: '7px 12px', borderRadius: 7, border: 'none', background: '#2563EB', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>确认交易计划</button>
           )}
           {batch.status === 'CONFIRMED' && (
             <button onClick={() => setModalOpen(true)} disabled={busy || !liveReady} style={{ padding: '7px 12px', borderRadius: 7, border: 'none', background: liveReady ? '#B91C1C' : '#D1D5DB', color: '#fff', fontWeight: 700, cursor: liveReady ? 'pointer' : 'not-allowed' }}>进入 IBKR 实盘提交确认</button>

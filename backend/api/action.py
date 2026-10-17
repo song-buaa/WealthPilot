@@ -755,37 +755,18 @@ def check_risk(strategy_id: str, body: dict, request: Request):
         quantity = body.get("quantity", strategy.target_quantity or 0)
         limit_price = Decimal(str(body.get("limit_price", strategy.limit_price or 0)))
 
-        total_value = _get_portfolio_total_value(session)
-        position_value = _get_position_value(session, strategy.symbol)
-        discipline = _get_discipline_result(strategy.symbol, strategy.side)
-        fx_rate = _get_fx_rate_to_cny(strategy.symbol, session)
-
-        risk_result = check_order_risk(
-            symbol=strategy.symbol,
-            side=strategy.side,
-            quantity=quantity,
-            limit_price=limit_price,
-            portfolio_total_value=total_value,
-            current_position_value=position_value,
-            discipline_result=discipline,
-            fx_rate_to_cny=fx_rate,
-        )
-
-        return {
-            "passed": risk_result.passed,
-            "requires_confirmation": risk_result.requires_confirmation,
-            "warnings": [
-                {
-                    "rule": w.rule,
-                    "severity": w.severity,
-                    "message": w.message,
-                    "detail": w.detail,
-                }
-                for w in risk_result.warnings
-            ],
-            "portfolio_total_value": float(total_value),
-            "confirmation_text_required": CONFIRMATION_TEXT if risk_result.requires_confirmation else None,
-        }
+        from backend.services.action.ownership import execution_owner
+        from backend.services.action.risk_engine import portfolio_order_risk
+        owner = execution_owner(session, mgr.broker_adapter)
+        risk = portfolio_order_risk(session, portfolio_id=owner.portfolio_id,
+            symbol=strategy.symbol, side=strategy.side, quantity=quantity, limit_price=limit_price)
+        params = {"quantity": quantity, "limit_price": limit_price,
+                  "time_in_force": body.get("time_in_force", "GTC")}
+        review_id = mgr.create_order_review(strategy.id, params, risk_snapshot=risk)
+        session.commit()
+        return {**risk, "review_id": review_id, "time_in_force": params["time_in_force"],
+                "portfolio_id": owner.portfolio_id, "broker": owner.broker,
+                "account_masked": "***" + owner.account_id[-4:]}
     finally:
         session.close()
 
@@ -806,16 +787,8 @@ def place_order(strategy_id: str, body: dict, request: Request):
         strategy = mgr.get_strategy(strategy_id)
         if strategy is None:
             raise HTTPException(status_code=404, detail="策略不存在")
-        from backend.services.action.models import ActionDraft, OrderRecord
+        from backend.services.action.models import ActionDraft, OrderRecord, AuditLog
         source = session.get(ActionDraft, strategy.source_draft_id) if strategy.source_draft_id else None
-        if source is not None and source.user_id == "chatgpt-web-link":
-            # Reserve the existing single-order Web handoff. Replayed final clicks
-            # return the first attempt, including unknown/rejected; never resubmit.
-            from sqlalchemy import text
-            session.execute(text("BEGIN IMMEDIATE"))
-            existing = session.query(OrderRecord).filter_by(strategy_id=strategy_id).first()
-            if existing is not None:
-                return _serialize_order(existing)
         if strategy.batch_leg_id:
             raise HTTPException(
                 status_code=409,
@@ -834,63 +807,29 @@ def place_order(strategy_id: str, body: dict, request: Request):
         ip_address = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent", "")
 
-        # 1. 二次跑完整风控（后端为最终裁判）
-        total_value = _get_portfolio_total_value(session)
-        position_value = _get_position_value(session, strategy.symbol)
-        discipline = _get_discipline_result(strategy.symbol, strategy.side)
-        fx_rate = _get_fx_rate_to_cny(strategy.symbol, session)
-
-        risk_result = check_order_risk(
-            symbol=strategy.symbol,
-            side=strategy.side,
-            quantity=quantity,
-            limit_price=limit_price,
-            portfolio_total_value=total_value,
-            current_position_value=position_value,
-            discipline_result=discipline,
-            fx_rate_to_cny=fx_rate,
-        )
-
-        # 2. 触发风控但确认文字不匹配 → 422
-        if risk_result.requires_confirmation:
-            if not validate_confirmation(risk_result, confirmation_text):
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error": "risk_confirmation_required",
-                        "message": "触发风控警告，需输入正确的风险确认文字",
-                        "warnings": [w.message for w in risk_result.warnings],
-                        "expected_text": CONFIRMATION_TEXT,
-                    },
-                )
-
-        # 3. 调 OrderManager.place_order
+        from backend.services.action.ownership import execution_owner
+        from backend.services.action.risk_engine import portfolio_order_risk
+        owner = execution_owner(session, mgr.broker_adapter)
+        review = session.get(AuditLog, body.get("review_id"))
+        if review is None or review.event_type != "order_reviewed":
+            raise ValueError("ORDER_REVIEW_REQUIRED")
+        risk_result = portfolio_order_risk(session, portfolio_id=owner.portfolio_id,
+            symbol=strategy.symbol, side=strategy.side, quantity=quantity, limit_price=limit_price)
+        # New warnings require a new review; stale financial evidence is never a PASS.
+        prior = json.loads(review.payload)
+        if risk_result != prior["risk"]:
+            # A completed identical claim can still be read without new authorization.
+            existing = session.query(OrderRecord).filter_by(strategy_id=strategy_id).first()
+            if not existing:
+                raise ValueError("RISK_REVIEW_CHANGED")
         order = mgr.place_order(strategy_id, {
-            "quantity": quantity,
-            "limit_price": limit_price_raw,
+            "quantity": quantity, "limit_price": limit_price,
+            "time_in_force": body.get("time_in_force", "GTC"),
+            "review_id": body.get("review_id"), "confirmation_text": confirmation_text,
         })
-
-        # 4. 写增强审计日志（order_placed_manual_confirm）
-        risk_warnings_data = [
-            {"rule": w.rule, "message": w.message, "detail": w.detail}
-            for w in risk_result.warnings
-        ]
-        mgr._audit(
-            "order_placed_manual_confirm",
-            payload={
-                "order_id": order.id,
-                "strategy_id": strategy_id,
-                "symbol": strategy.symbol,
-                "side": strategy.side,
-                "quantity": quantity,
-                "limit_price": float(limit_price),
-                "risk_warnings": risk_warnings_data,
-                "risk_acknowledged": bool(confirmation_text),
-            },
-            ip_address=ip_address,
-            user_agent=user_agent,
-        )
-
+        mgr._audit("order_placed_manual_confirm", {"order_id": order.id,
+            "review_id": body.get("review_id"), "risk_acknowledged": bool(confirmation_text)},
+            ip_address=ip_address, user_agent=user_agent)
         session.commit()
         return _serialize_order(order)
 

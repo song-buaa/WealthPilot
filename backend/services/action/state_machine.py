@@ -167,3 +167,29 @@ def validate_order_transition(from_status: str, to_status: str) -> None:
             f"Order 状态流转非法: {from_status} → {to_status}，"
             f"允许的目标状态: {allowed or '（终态，不可流转）'}"
         )
+
+
+def project_broker_status(current, observed, *, previous_filled, cumulative_filled, quantity):
+    """Evidence-aware observation jumps within the existing order state machine.
+
+    Unlike user commands, broker observations may skip intermediate states. A
+    pending/absent response cannot undo terminal evidence. Executions received
+    after cancellation update cumulative facts; partial evidence alone does not
+    prove that a cancelled remainder reopened.
+    """
+    if observed not in OrderStatus.ALL:
+        observed = OrderStatus.UNKNOWN
+    if cumulative_filled < previous_filled:
+        return current
+    if observed == OrderStatus.PARTIALLY_FILLED and cumulative_filled == 0:
+        observed = OrderStatus.UNKNOWN
+    if observed == OrderStatus.PARTIALLY_FILLED and cumulative_filled == quantity:
+        observed = OrderStatus.FILLED
+    if observed == OrderStatus.FILLED and cumulative_filled != quantity:
+        observed = OrderStatus.UNKNOWN
+    if current in OrderStatus.TERMINAL:
+        return (OrderStatus.FILLED if cumulative_filled > previous_filled and observed == OrderStatus.FILLED
+                else current)
+    if cumulative_filled and observed in {OrderStatus.CREATED, OrderStatus.SUBMITTED_TO_BROKER, OrderStatus.BROKER_PENDING}:
+        return OrderStatus.PARTIALLY_FILLED
+    return observed

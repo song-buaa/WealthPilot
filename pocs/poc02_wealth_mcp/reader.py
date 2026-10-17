@@ -147,15 +147,15 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
                         else:
                             unknown += 1
                 tables = inspect(connection).get_table_names()
-                owners = {(p.broker, p.broker_account_id) for p in positions}
-                for broker, account in owners:
-                    if not broker or not account or "position_snapshot_runs" not in tables:
+                owners = {(p.broker, p.broker_account_id, p.sync_source) for p in positions}
+                for broker, account, sync_source in owners:
+                    if not broker or not account or not sync_source or "position_snapshot_runs" not in tables:
                         unknown += 1
                         continue
                     rows = connection.execute(text(
                         "SELECT status, finished_at, started_at FROM position_snapshot_runs "
-                        "WHERE broker=:broker AND account_id=:account ORDER BY started_at DESC"
-                    ), {"broker": broker, "account": account}).mappings().all()
+                        "WHERE portfolio_id=:portfolio AND broker=:broker AND account_id=:account AND sync_source=:source ORDER BY started_at DESC"
+                    ), {"portfolio": portfolio_id, "broker": broker, "account": account, "source": sync_source}).mappings().all()
                     if rows and rows[0]["status"] == "failed":
                         issues.append("LATEST_POSITION_SYNC_FAILED")
                     success = next((r for r in rows if r["status"] == "success" and r["finished_at"]), None)

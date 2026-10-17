@@ -196,7 +196,7 @@ def test_duplicate_manual_and_future_cron_hold_one_lock(web):
 def test_restart_marks_only_our_interrupted_runs_failed(web):
     with database.get_session() as session:
         for source in ("restricted:manual", "manual"):
-            session.add(PositionSnapshotRun(broker="guojin",account_id="fixture",status="running",triggered_by=source))
+            session.add(PositionSnapshotRun(portfolio_id=7,broker="guojin",account_id="fixture",status="running",triggered_by=source))
         session.commit()
     with TestClient(create_app(*web, factory=fake_service), base_url="http://127.0.0.1:8790"):
         with database.get_session() as session:
@@ -240,7 +240,7 @@ def test_dist_hash_tampering_refused(shared):
 def test_upsert_and_stale_removal_stay_in_portfolio_account_and_source(shared, web):
     with database.get_engine().begin() as conn:
         conn.execute(text("INSERT INTO portfolios(id,name) VALUES(8,'other synthetic')"))
-        for pid, account, symbol, source in ((8,"fixture-account","000001:CN","api"),
+        for pid, account, symbol, source in ((8,"other-portfolio-account","000001:CN","api"),
             (7,"other-account","000002:CN","api"), (7,None,"000003:CN",None),
             (7,"fixture-account","000004:CN","api")):
             conn.execute(text("INSERT INTO positions(portfolio_id,name,platform,ticker,symbol,broker,broker_account_id,sync_source,segment,market_value_cny,asset_class) "
@@ -252,7 +252,7 @@ def test_upsert_and_stale_removal_stay_in_portfolio_account_and_source(shared, w
     with database.get_engine().connect() as conn:
         rows=conn.execute(text("SELECT portfolio_id,broker_account_id,symbol,market_value_cny FROM positions WHERE platform='国金证券' ORDER BY portfolio_id,symbol")).all()
     assert rows == [(7,"fixture-account","000001:CN",2500),(7,"other-account","000002:CN",50),
-                    (7,None,"000003:CN",50),(8,"fixture-account","000001:CN",50)]
+                    (7,None,"000003:CN",50),(8,"other-portfolio-account","000001:CN",50)]
 
 
 @pytest.mark.parametrize("unknown_account", [False, True])

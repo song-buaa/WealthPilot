@@ -46,7 +46,7 @@ def test_explicit_snowball_configuration_is_preserved(monkeypatch):
 
 def test_cash_upsert_is_idempotent_and_scoped(db_session,monkeypatch):
     configure(monkeypatch); c=client(); service=SnowballSyncService(c)
-    db_session.add(Portfolio(id=1,name='Synthetic'))
+    assert db_session.get(Portfolio, 1) is not None
     other=Position(portfolio_id=1,name='Other cash',ticker='USD',platform='老虎证券',asset_class='现金',
                    quantity=50,market_value_cny=350,original_value=50,original_currency='USD',
                    broker='tiger',broker_account_id='other',sync_source='api')

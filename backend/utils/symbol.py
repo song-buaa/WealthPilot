@@ -12,7 +12,7 @@ WealthPilot 全局 Symbol 标准化工具。
 
 import re
 
-VALID_MARKETS = {"US", "HK", "SH", "SZ", "CN"}
+VALID_MARKETS = {"US", "HK", "SH", "SZ", "CN", "LSE"}
 
 # CN 是 broker_sync 层历史遗留的 A 股市场代码, 统一映射到 SH/SZ
 # 但单独出现 CN 时无法区分 SH/SZ, 需要根据代码规则推断

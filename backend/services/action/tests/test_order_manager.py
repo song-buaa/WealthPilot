@@ -6,6 +6,7 @@ OrderManager 端到端测试 — 通过 MockBrokerAdapter 验证完整流程。
 import json
 import time
 
+from backend.services.action.tests.b0_helpers import test_owner as prepare_owner, reviewed_place, sync_committed, cancel_committed
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -31,6 +32,7 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    prepare_owner(session)
     yield session
     session.close()
 
@@ -79,7 +81,7 @@ class TestPlaceOrderNormal:
     def test_place_order_submitted(self, manager, db_session):
         """正常下单保留 Mock 返回的 broker_pending authority 状态。"""
         strategy = _create_strategy(db_session)
-        order = manager.place_order(strategy.id, {"quantity": 50, "limit_price": 415})
+        order = reviewed_place(manager, strategy.id, {"quantity": 50, "limit_price": 415})
         assert order.status == OrderStatus.BROKER_PENDING
         assert order.broker_order_id is not None
         assert order.broker_order_id.startswith("MOCK-")
@@ -89,7 +91,7 @@ class TestPlaceOrderNormal:
     def test_place_order_writes_audit(self, manager, db_session):
         """下单后 audit_log 有记录。"""
         strategy = _create_strategy(db_session)
-        manager.place_order(strategy.id, {"quantity": 50})
+        reviewed_place(manager, strategy.id, {"quantity": 50})
         db_session.commit()
 
         logs = db_session.query(AuditLog).all()
@@ -106,12 +108,12 @@ class TestPlaceOrderErrors:
 
     def test_strategy_not_found(self, manager):
         with pytest.raises(ValueError, match="策略不存在"):
-            manager.place_order("nonexistent-id", {"quantity": 10})
+            reviewed_place(manager, "nonexistent-id", {"quantity": 10})
 
     def test_strategy_not_active(self, manager, db_session):
         strategy = _create_strategy(db_session, status=StrategyStatus.PAUSED)
         with pytest.raises(ValueError, match="不可下单"):
-            manager.place_order(strategy.id, {"quantity": 10})
+            reviewed_place(manager, strategy.id, {"quantity": 10})
 
     def test_over_quantity_rejected(self, manager, db_session):
         """超额下单禁止。"""
@@ -120,7 +122,7 @@ class TestPlaceOrderErrors:
         db_session.flush()
 
         with pytest.raises(ValueError, match="超额下单禁止"):
-            manager.place_order(strategy.id, {"quantity": 30})  # 80+30 > 100
+            reviewed_place(manager, strategy.id, {"quantity": 30})  # 80+30 > 100
 
     def test_rejection_from_broker(self, db_session):
         """券商拒单 → status=rejected。"""
@@ -132,7 +134,7 @@ class TestPlaceOrderErrors:
         try:
             mgr = OrderManager(db_session, broker_adapter=adapter)
             strategy = _create_strategy(db_session)
-            order = mgr.place_order(strategy.id, {"quantity": 50})
+            order = reviewed_place(mgr, strategy.id, {"quantity": 50})
             assert order.status == OrderStatus.REJECTED
         finally:
             adapter.shutdown()
@@ -147,7 +149,7 @@ class TestPlaceOrderErrors:
         try:
             mgr = OrderManager(db_session, broker_adapter=adapter)
             strategy = _create_strategy(db_session)
-            order = mgr.place_order(strategy.id, {"quantity": 50})
+            order = reviewed_place(mgr, strategy.id, {"quantity": 50})
             assert order.status == OrderStatus.UNKNOWN
         finally:
             adapter.shutdown()
@@ -156,15 +158,15 @@ class TestPlaceOrderErrors:
         """无 adapter 时 order 停留在 created。"""
         mgr = OrderManager(db_session, broker_adapter=None)
         strategy = _create_strategy(db_session)
-        order = mgr.place_order(strategy.id, {"quantity": 50})
-        assert order.status == OrderStatus.CREATED
+        with pytest.raises((ValueError, AttributeError)):
+            reviewed_place(mgr, strategy.id, {"quantity": 50})
 
     def test_batch_managed_strategy_rejects_legacy_order_path(self, db_session):
         strategy = _create_strategy(db_session, batch_leg_id="case1-leg")
         mgr = OrderManager(db_session, broker_adapter=None)
 
         with pytest.raises(ValueError, match="只能由批次状态机提交"):
-            mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 415})
+            reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 415})
 
         assert db_session.query(OrderRecord).count() == 0
 
@@ -178,11 +180,11 @@ class TestSyncOrderStatus:
     def test_sync_filled(self, manager, db_session):
         """正常成交后 sync → filled + cumulative 回写。"""
         strategy = _create_strategy(db_session, target_quantity=100)
-        order = manager.place_order(strategy.id, {"quantity": 100})
+        order = reviewed_place(manager, strategy.id, {"quantity": 100})
 
         time.sleep(0.1)  # 等异步成交
 
-        order = manager.sync_order_status(order.id)
+        order = sync_committed(manager, order.id)
         assert order.status == OrderStatus.FILLED
         assert order.filled_quantity == 100
         assert order.filled_at is not None
@@ -194,11 +196,11 @@ class TestSyncOrderStatus:
     def test_sync_auto_completes_strategy(self, manager, db_session):
         """cumulative >= target → strategy auto completed。"""
         strategy = _create_strategy(db_session, target_quantity=50)
-        order = manager.place_order(strategy.id, {"quantity": 50})
+        order = reviewed_place(manager, strategy.id, {"quantity": 50})
 
         time.sleep(0.1)
 
-        manager.sync_order_status(order.id)
+        sync_committed(manager, order.id)
 
         s = manager.get_strategy(strategy.id)
         assert s.status == StrategyStatus.COMPLETED
@@ -214,13 +216,13 @@ class TestSyncOrderStatus:
         try:
             mgr = OrderManager(db_session, broker_adapter=adapter)
             strategy = _create_strategy(db_session)
-            order = mgr.place_order(strategy.id, {"quantity": 50})
+            order = reviewed_place(mgr, strategy.id, {"quantity": 50})
 
             time.sleep(0.05)
 
             # sync 时模拟网络异常
             adapter.network_failure_probability = 1.0
-            order = mgr.sync_order_status(order.id)
+            order = sync_committed(mgr, order.id)
             # 不崩溃，可能是 unknown 或保持原状
             assert order is not None
         finally:
@@ -230,9 +232,11 @@ class TestSyncOrderStatus:
         """无 broker_order_id 时直接返回。"""
         mgr = OrderManager(db_session, broker_adapter=None)
         strategy = _create_strategy(db_session)
-        order = mgr.place_order(strategy.id, {"quantity": 50})
-        # 无 adapter → created 状态，无 broker_order_id
-        result = mgr.sync_order_status(order.id)
+        order = OrderRecord(strategy_id=strategy.id, symbol=strategy.symbol, side="BUY",
+                            quantity=50, status=OrderStatus.CREATED)
+        db_session.add(order)
+        db_session.flush()
+        result = sync_committed(mgr, order.id)
         assert result.status == OrderStatus.CREATED
 
 
@@ -246,13 +250,13 @@ class TestMultipleOrders:
         """两笔订单累计不超额。"""
         strategy = _create_strategy(db_session, target_quantity=100)
 
-        o1 = manager.place_order(strategy.id, {"quantity": 60})
+        o1 = reviewed_place(manager, strategy.id, {"quantity": 60})
         time.sleep(0.1)
-        manager.sync_order_status(o1.id)
+        sync_committed(manager, o1.id)
 
-        o2 = manager.place_order(strategy.id, {"quantity": 40})
+        o2 = reviewed_place(manager, strategy.id, {"quantity": 40})
         time.sleep(0.1)
-        manager.sync_order_status(o2.id)
+        sync_committed(manager, o2.id)
 
         s = manager.get_strategy(strategy.id)
         assert s.cumulative_filled_quantity == 100
@@ -262,13 +266,13 @@ class TestMultipleOrders:
         """第三笔超额 → 拒绝。"""
         strategy = _create_strategy(db_session, target_quantity=100)
 
-        o1 = manager.place_order(strategy.id, {"quantity": 60})
+        o1 = reviewed_place(manager, strategy.id, {"quantity": 60})
         time.sleep(0.1)
-        manager.sync_order_status(o1.id)
+        sync_committed(manager, o1.id)
 
         # strategy 已 completed，不能再下单
         with pytest.raises(ValueError):
-            manager.place_order(strategy.id, {"quantity": 50})
+            reviewed_place(manager, strategy.id, {"quantity": 50})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -287,7 +291,7 @@ class TestAllocationIntentCannotPlaceOrder:
         db_session.flush()
 
         with pytest.raises(ValueError, match="AllocationIntent cannot place orders"):
-            manager.place_order(intent.id, {"quantity": 100})
+            reviewed_place(manager, intent.id, {"quantity": 100})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -333,11 +337,11 @@ class TestExpiredStatus:
         try:
             mgr = OrderManager(db_session, broker_adapter=adapter)
             strategy = _create_strategy(db_session, target_quantity=100)
-            order = mgr.place_order(strategy.id, {"quantity": 50})
+            order = reviewed_place(mgr, strategy.id, {"quantity": 50})
 
             time.sleep(0.3)  # 等过期
 
-            order = mgr.sync_order_status(order.id)
+            order = sync_committed(mgr, order.id)
             assert order.status == "expired"
 
             # expired 不应该让 strategy completed

@@ -11,7 +11,7 @@
 import { useState, useEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2 } from 'lucide-react'
-import { actionApi, executionBatchApi, type ExecutionBatchResponse, type SymbolStrategyResponse } from '@/lib/api'
+import { actionApi, executionBatchApi, batchRiskWarnings, type ExecutionBatchResponse, type SymbolStrategyResponse } from '@/lib/api'
 import { IBKRReviewFields } from './ActionDraftCard'
 import { useToast } from '@/hooks/useToast'
 
@@ -23,6 +23,11 @@ interface RiskWarning {
 }
 
 interface RiskCheckResponse {
+  review_id: number
+  portfolio_id: number
+  account_masked: string
+  broker: string
+  time_in_force: 'DAY' | 'GTC'
   passed: boolean
   requires_confirmation: boolean
   warnings: RiskWarning[]
@@ -56,7 +61,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
   }, [ibkr])
   useEffect(() => {
     if (!ibkr) return
-    const pending = ibkr.batch.legs.filter(item => item.linked_order_id && !['FILLED','CANCELLED','REJECTED','UNKNOWN'].includes(item.status))
+    const pending = ibkr.batch.legs.filter(item => item.linked_order_id && !['FILLED','CANCELLED','REJECTED'].includes(item.status))
     if (!pending.length) return
     const timer = setTimeout(async () => {
       try {
@@ -99,11 +104,12 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
     return () => { active = false }
   }, [open, strategy.id, quantity, limitPrice, ibkr])
 
-  const needsConfirmation = riskResult?.requires_confirmation ?? false
+  const ibkrWarnings = batch ? batchRiskWarnings(batch) : []
+  const needsConfirmation = ibkr ? ibkrWarnings.length > 0 && !batch?.execution_policy.risk_acknowledged : riskResult?.requires_confirmation ?? false
   const textMatch = confirmText === CONFIRMATION_TEXT
 
   const canSubmit = ibkr ? Boolean(!executed && checkboxChecked && !submitting && !dirty && fresh && batch?.status === 'CONFIRMED'
-    && safety?.live_trading_enabled && !safety.ibkr_read_only_mode) :
+    && safety?.live_trading_enabled && !safety.ibkr_read_only_mode && (!needsConfirmation || textMatch)) :
     checkboxChecked &&
     !submitting &&
     riskResult !== null &&
@@ -123,7 +129,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
   async function confirmIBKRPlan() {
     if (!ibkr || dirty || !fresh || busy.current) return
     busy.current = true; setSubmitting(true); setSubmitError(null)
-    try { ibkr.onChanged(await executionBatchApi.confirm(ibkr.batch.id, ibkr.batch.confirmation_version)) }
+    try { ibkr.onChanged(await executionBatchApi.confirm(ibkr.batch.id, ibkr.batch.confirmation_version, confirmText)) }
     catch (err) { setSubmitError((err as Error).message) }
     finally { busy.current = false; setSubmitting(false) }
   }
@@ -157,6 +163,8 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
         quantity,
         limit_price: limitPrice,
         confirmation_text: needsConfirmation ? confirmText : '',
+        review_id: riskResult!.review_id,
+        time_in_force: riskResult!.time_in_force,
       })
       clearTimeout(timeoutWarning)
       clearTimeout(timeoutCritical)
@@ -164,8 +172,10 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
       // v3.4 M5: 根据返回状态显示不同提示
       if (result?.status === 'rejected') {
         showToast('error', '订单被券商拒绝，请检查标的代码和下单参数')
+      } else if (result?.status === 'unknown') {
+        showToast('error', '提交结果未知，正在核验券商状态；请勿补单')
       } else {
-        showToast('success', '订单已提交至券商，等待成交')
+        showToast('success', result?.status === 'filled' ? '订单已成交' : '订单已提交至券商，等待成交')
       }
       onOrderPlaced()
       onClose()
@@ -228,7 +238,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
                 <div><b>限价：</b>{strategy.currency ? `${limitPrice} ${strategy.currency}` : `$${limitPrice}`}</div>
                 <div><b>订单类型：</b>{strategy.order_type === 'LIMIT' ? '限价单' : strategy.order_type}</div>
                 {strategy.trigger_price != null && <div><b>策略触发价：</b>{strategy.trigger_price}（按原策略/适配器语义，不代表独立券商止损单）</div>}
-                <div><b>有效期：</b>GTC</div>
+                <div><b>有效期：</b>{riskResult?.time_in_force ?? 'GTC'}</div>
                 <div><b>预估金额：</b>约 {strategy.currency ? `${estimatedAmount.toLocaleString()} ${strategy.currency}` : `$${estimatedAmount.toLocaleString()}`}</div>
               </div>
             </div>
@@ -293,6 +303,8 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
 
             </>}
 
+            {ibkrWarnings.map((warning, index) => <p key={index} role="alert">{warning.message}</p>)}
+            {!ibkr && riskResult && <p>Portfolio {riskResult.portfolio_id} · {riskResult.broker} · {riskResult.account_masked}</p>}
             {/* Confirmation text input (only when risk warnings exist) */}
             {needsConfirmation && (
               <div style={{
@@ -372,7 +384,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
             >
               取消
             </button>
-            {ibkr && batch?.status === 'READY' && <button data-testid="confirm-ibkr-plan" disabled={dirty || !fresh || submitting} onClick={confirmIBKRPlan}>确认交易计划</button>}
+            {ibkr && batch?.status === 'READY' && <button data-testid="confirm-ibkr-plan" disabled={dirty || !fresh || submitting || (needsConfirmation && !textMatch)} onClick={confirmIBKRPlan}>确认交易计划</button>}
             <button
               data-testid="submit-btn"
               onClick={handleSubmit}

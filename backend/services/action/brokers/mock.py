@@ -50,6 +50,7 @@ class MockBrokerAdapter(BrokerAdapter):
         network_failure_probability: float = 0.01,
         expire_after_seconds: float = 0,
     ):
+        self._account_id = "isolated-mock-account"
         self.fill_delay_seconds = fill_delay_seconds
         self.partial_fill_probability = partial_fill_probability
         self.rejection_probability = rejection_probability

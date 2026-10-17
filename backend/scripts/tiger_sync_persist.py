@@ -18,6 +18,10 @@ from services.broker_sync.tiger.sync_service import TigerSyncService
 
 
 def main():
+    import os
+    pid = int(os.environ.get("WEALTHPILOT_PORTFOLIO_ID", "0"))
+    if pid <= 0:
+        raise ValueError("Set explicit WEALTHPILOT_PORTFOLIO_ID; sync writes require separate authorization")
     print("=" * 80)
     print("老虎持仓同步落库验证（真实写入数据库）")
     print("=" * 80)
@@ -27,6 +31,7 @@ def main():
 
     service = TigerSyncService()
     db = get_session()
+    db.info["portfolio_id"] = pid
 
     try:
         run_id = service.sync_and_persist(db, triggered_by="manual")

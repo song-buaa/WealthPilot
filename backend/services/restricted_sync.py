@@ -88,6 +88,7 @@ class SyncExecutor:
         # Only our own jobs, after obtaining the process-wide exclusive lock.
         with get_session() as db:
             runs = db.query(PositionSnapshotRun).filter(
+                PositionSnapshotRun.portfolio_id == self.portfolio_id,
                 PositionSnapshotRun.status == "running",
                 PositionSnapshotRun.triggered_by.like("restricted:%")).all()
             for run in runs:
@@ -110,10 +111,11 @@ class SyncExecutor:
                     continue
                 try:
                     with get_session() as db:
-                        previous = api._get_last_successful_run(db, target)
-                        account = os.environ.get({"tiger": "TIGER_ACCOUNT", "snowball": "IBKR_ACCOUNT",
-                                                  "guojin": "GUOJIN_ACCOUNT"}[target])
-                        account = account or (previous.account_id if previous else "pending")
+                        db.info["portfolio_id"] = self.portfolio_id
+                        from core.config import settings
+                        account = ({"tiger": settings.tiger_account, "snowball": settings.ibkr_account,
+                                    "guojin": os.environ.get("GUOJIN_ACCOUNT")})[target]
+                        account = account or "pending"
                         run = PositionSnapshotRepository(db).create_run(target, account,
                             triggered_by="restricted:" + triggered_by)
                         jobs.append({"broker": target, "run_id": run.id})
@@ -143,6 +145,8 @@ class SyncExecutor:
                 db.info.update(portfolio_id=self.portfolio_id, sync_run_id=run_id)
                 try:
                     run = db.get(PositionSnapshotRun, run_id)
+                    if run is None or run.portfolio_id != self.portfolio_id or run.broker != broker:
+                        raise ValueError("SYNC_RUN_BINDING_INVALID")
                     returned = api._run_sync(broker, run.triggered_by, db_session=db,
                         service_factory=self.factory, raise_errors=True)
                     run = db.get(PositionSnapshotRun, run_id)
@@ -161,6 +165,7 @@ class SyncExecutor:
         # Existing API supplies last-attempt/last-success fields; extend safely.
         response = api.get_sync_status().model_dump()
         with get_session() as db:
+            db.info["portfolio_id"] = self.portfolio_id
             for item in response["brokers"]:
                 broker = item["broker"]
                 item["enabled"] = broker in self.enabled

@@ -10,6 +10,11 @@ WARNING: 仅使用模拟盘账号 21995161433588262
 """
 from __future__ import annotations
 
+# B0: historical mutation CLI has no durable claim or current Web authorization.
+if __name__ == "__main__":
+    raise SystemExit("Legacy trading validation is disabled; use the original Web review/confirmation flow.")
+
+
 import json
 import os
 import sys

@@ -27,6 +27,8 @@ class OrderRequest:
     trigger_price: Optional[Decimal] = None  # CONDITIONAL_LIMIT 必填
     time_in_force: str = "GTC"          # DAY / GTC
     local_order_id: str = ""            # WealthPilot 侧 order_record.id
+    dispatch_deadline: Optional[float] = None  # UTC epoch; checked immediately before broker send
+    broker_account_id: str = ""
     resolved_contract: Optional[dict[str, Any]] = None  # v3.15 broker-qualified identity
 
 

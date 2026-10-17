@@ -14,6 +14,11 @@ IBKR Paper 端到端验证 — M3 后半。
 运行：
     BROKER_MODE=ibkr /Users/songbin/opt/anaconda3/envs/wealthpilot/bin/python scripts/e2e_ibkr_paper.py
 """
+
+# B0: historical mutation CLI has no durable claim or current Web authorization.
+if __name__ == "__main__":
+    raise SystemExit("Legacy trading validation is disabled; use the original Web review/confirmation flow.")
+
 import os
 import sys
 import time

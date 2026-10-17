@@ -46,6 +46,7 @@ class TradeWorkflow:
                 yield session
             return
         with Session(self.engine) as session:
+            session.info["portfolio_id"] = self.portfolio_id
             # SQLite serializes confirmation/replay reservation across processes.
             session.execute(text("BEGIN IMMEDIATE"))
             try:
@@ -187,7 +188,6 @@ class TradeWorkflow:
             manager._audit("mcp_trade_confirmation", {"draft_id": draft.id, "preview_hash": preview_hash,
                             "confirmed": True, "risk_acknowledged": bool(risk_confirmation)})
             session.commit()
-            session.execute(text("BEGIN IMMEDIATE"))
             draft = self.owned(session, draft_id)
             strategy = session.query(SymbolStrategy).populate_existing().filter_by(id=strategy.id).one()
             if (strategy.symbol != order["symbol"] or strategy.side != order["side"]
@@ -197,9 +197,14 @@ class TradeWorkflow:
                        != (Decimal(order["trigger_price"]) if order.get("trigger_price") is not None else None)):
                 raise TradeError("DRAFT_CHANGED_REVIEW_REQUIRED")
             if session.query(OrderRecord).filter_by(strategy_id=strategy.id).first() is None:
-                manager.place_order(strategy.id, {"quantity": order["quantity"],
-                    "order_type": order["order_type"], "limit_price": order["limit_price"],
-                    "stop_price": order.get("trigger_price")})
+                if not self.synthetic or self.adapter.broker_name != "mock":
+                    raise TradeError("REAL_MCP_WRITES_FORBIDDEN")
+                params = {"quantity": order["quantity"], "order_type": order["order_type"],
+                    "limit_price": order["limit_price"], "stop_price": order.get("trigger_price"), "time_in_force": "GTC"}
+                review_id = manager.create_order_review(strategy.id, params, risk_snapshot=current["risk"])
+                session.commit()
+                manager.place_order(strategy.id, {**params, "review_id": review_id,
+                                                  "confirmation_text": risk_confirmation})
             return self.result(session, draft, risk_override=current["risk"])
 
     def status(self, draft_id):
@@ -207,10 +212,12 @@ class TradeWorkflow:
             draft = self.owned(session, draft_id)
             manager = OrderManager(session, self.adapter)
             ids = [s.id for s in session.query(SymbolStrategy).filter_by(source_draft_id=draft.id)]
+            session.commit()
             for order in session.query(OrderRecord).filter(OrderRecord.strategy_id.in_(ids)).all():
                 # Original method persists broker-authoritative state and cumulative fills.
                 try:
                     manager.sync_order_status(order.id)
+                    session.commit()
                 except ValueError:
                     raise TradeError("BROKER_ORDER_STATE_UNAVAILABLE") from None
             return self.result(session, draft)

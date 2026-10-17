@@ -36,7 +36,7 @@ from services.broker_sync.snowball.adapter import IBKRPortfolioAdapter  # noqa: 
 def db_session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    session = sessionmaker(bind=engine)(info={"portfolio_id": 1})
     session.add(Portfolio(id=1, name="测试组合"))
     session.commit()
     yield session
@@ -231,10 +231,12 @@ def test_successful_snapshot_removes_only_stale_owned_positions(db_session):
     db_session.commit()
 
     with patch("services.broker_sync.position_upsert_service.fx_service.convert", side_effect=_fake_fx):
+        db_session.add(PositionSnapshotRun(id=1, portfolio_id=1, broker="futu", account_id="FUTU-1", sync_source="api", status="running"))
+        db_session.commit()
         report = PositionUpsertService(db_session).upsert_from_snapshots(
             [_snapshot(symbol="A:US")],
             broker="futu", account_id="FUTU-1", sync_source="api",
-        )
+         complete_snapshot=True)
 
     assert report["removed"] == 1
     assert {row.ticker for row in db_session.query(BusinessPosition).all()} == {"A", "B2", "CSV", "C"}
@@ -248,13 +250,15 @@ def test_ibkr_bond_metadata_corrects_previously_legal_equity_class(db_session):
     db_session.commit()
 
     with patch("services.broker_sync.position_upsert_service.fx_service.convert", side_effect=_fake_fx):
+        db_session.add(PositionSnapshotRun(id=1, portfolio_id=1, broker="snowball", account_id="IB-1", sync_source="api", status="running"))
+        db_session.commit()
         PositionUpsertService(db_session).upsert_from_snapshots(
             [_snapshot(
                 symbol="IB01:US", broker="snowball", account_id="IB-1",
                 asset_class="bond", name="ISHARES US TREAS 0-1YR USD A",
             )],
             broker="snowball", account_id="IB-1", sync_source="api",
-        )
+         complete_snapshot=True)
 
     assert db_session.query(BusinessPosition).one().asset_class == "固收"
 
@@ -268,16 +272,18 @@ def test_successful_empty_snapshot_clears_only_exact_scope(db_session):
     ])
     db_session.commit()
 
+    run = PositionSnapshotRun(portfolio_id=1, broker="futu", account_id="FUTU-1", sync_source="api", status="running")
+    db_session.add(run); db_session.commit()
     report = PositionUpsertService(db_session).upsert_from_snapshots(
         [], broker="futu", account_id="FUTU-1", sync_source="api",
-    )
+        complete_snapshot=True, run_id=run.id)
 
     assert report["removed"] == 2
     assert {row.ticker for row in db_session.query(BusinessPosition).all()} == {"C", "FUND"}
 
 
 def test_successful_empty_claims_and_removes_legacy_row_with_snapshot_evidence(db_session):
-    run = PositionSnapshotRun(
+    run = PositionSnapshotRun(portfolio_id=1,
         broker="futu", account_id="FUTU-1", sync_source="api",
         status="success", position_count=1,
     )
@@ -294,9 +300,11 @@ def test_successful_empty_claims_and_removes_legacy_row_with_snapshot_evidence(d
     ])
     db_session.commit()
 
+    run = PositionSnapshotRun(portfolio_id=1, broker="futu", account_id="FUTU-1", sync_source="api", status="running")
+    db_session.add(run); db_session.commit()
     report = PositionUpsertService(db_session).upsert_from_snapshots(
         [], broker="futu", account_id="FUTU-1", sync_source="api",
-    )
+        complete_snapshot=True, run_id=run.id)
 
     assert report["removed"] == 1
     assert db_session.query(BusinessPosition).count() == 0

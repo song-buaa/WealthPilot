@@ -20,7 +20,13 @@ def startup() -> int:
     """
     global portfolio_id
     init_db()
-    portfolio_id = ensure_default_portfolio()
+    import os
+    if os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"):
+        from app.database import DB_PATH
+        from app.shared_sqlite import verify
+        portfolio_id = verify(DB_PATH, os.environ["WEALTHPILOT_SQLITE_CONTRACT"])["portfolio_id"]
+    else:
+        portfolio_id = ensure_default_portfolio()
     return portfolio_id
 
 

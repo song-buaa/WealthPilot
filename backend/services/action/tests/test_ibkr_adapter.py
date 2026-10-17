@@ -90,6 +90,9 @@ def _make_adapter(**kwargs):
     adapter._loop = MagicMock()
     adapter._thread = MagicMock()
     adapter._ib = MagicMock()
+    adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
+    adapter._ib.reqCompletedOrdersAsync = AsyncMock(return_value=[])
+    adapter._ib.reqExecutionsAsync = AsyncMock(return_value=[])
     adapter._error_codes = kwargs.get("error_codes", {})  # M2.5
     adapter._open_order_evidence = kwargs.get("open_order_evidence", {})
     adapter._submitted_order_ids = kwargs.get("submitted_order_ids", set())
@@ -971,7 +974,7 @@ class TestPlaceOrderPermId:
         assert order_arg.account == adapter._account_id
 
     def test_what_if_and_live_builders_keep_key_fields_in_parity(self):
-        request = _make_request(quantity=12, limit_price=Decimal("121.52"))
+        request = _make_request(quantity=12, limit_price=Decimal("121.52"), time_in_force="DAY")
         live = IBKRBrokerAdapter._build_live_limit_order(request)
         preview = IBKRBrokerAdapter._build_what_if_limit_order(
             quantity=12, limit_price=Decimal("121.52"),
@@ -1172,7 +1175,7 @@ class TestOrderRefLookup:
         """按 orderRef 反查 → 命中。"""
         adapter = _make_adapter()
         trade = _make_mock_trade(perm_id=888, order_ref="wp-order-abc", status="Submitted")
-        adapter._ib.trades.return_value = [trade]
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[trade])
 
         result = adapter.find_order_by_ref("wp-order-abc")
         assert result is not None
@@ -1184,14 +1187,14 @@ class TestOrderRefLookup:
         """按 orderRef 反查 → 未命中 → None。"""
         adapter = _make_adapter()
         trade = _make_mock_trade(perm_id=888, order_ref="other-ref")
-        adapter._ib.trades.return_value = [trade]
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[trade])
 
         result = adapter.find_order_by_ref("wp-order-xyz")
         assert result is None
 
     def test_find_by_ref_empty_trades(self):
         adapter = _make_adapter()
-        adapter._ib.trades.return_value = []
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
         assert adapter.find_order_by_ref("anything") is None
 
     def test_find_by_ref_returns_correct_status(self):
@@ -1201,7 +1204,7 @@ class TestOrderRefLookup:
             perm_id=999, order_ref="wp-filled-order",
             status="Filled", filled=100, avg_price=155.0,
         )
-        adapter._ib.trades.return_value = [trade]
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[trade])
 
         result = adapter.find_order_by_ref("wp-filled-order")
         assert result.status == "filled"
@@ -1252,6 +1255,13 @@ class TestMisc:
         fill.execution.permId = 1347224986
         fill.execution.orderRef = "local-order-ref"
         fill.execution.execId = "exec-1"
+        fill.execution.acctNumber = adapter._account_id
+        fill.execution.clientId = 1
+        fill.execution.cumQty = 3
+        fill.execution.avgPrice = 126.25
+        fill.contract.currency = "USD"
+        fill.commissionReport.execId = ""
+        fill.commissionReport.currency = ""
         fill.execution.side = "BOT"
         fill.execution.shares = 3
         fill.execution.price = 126.25
@@ -1268,6 +1278,9 @@ class TestMisc:
             "perm_id": 1347224986,
             "order_ref": "local-order-ref",
             "exec_id": "exec-1",
+            "observed_account_id": adapter._account_id, "client_id": 1,
+            "currency": "USD", "cum_quantity": 3.0, "avg_price": 126.25, "pending_price_revision": False,
+            "commission": None, "commission_currency": None,
             "con_id": 79000224,
             "symbol": "CBU3",
             "side": "BOT",
@@ -1297,7 +1310,7 @@ class TestMisc:
         # 拿到 placeOrder 被调时的 order 参数
         call_args = adapter._ib.placeOrder.call_args
         order = call_args[1].get("order") or call_args[0][1]
-        assert order.tif == "DAY", f"tif 不能为空，实际: {order.tif!r}"
+        assert order.tif == "GTC", f"tif 不能为空，实际: {order.tif!r}"
         assert order.outsideRth is False
         assert order.orderType == "LMT"
 

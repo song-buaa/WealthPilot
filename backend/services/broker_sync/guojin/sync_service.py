@@ -193,8 +193,7 @@ class GuojinSyncService:
 
                 # 回填 account_id
                 if self.adapter:
-                    run.account_id = self.adapter.account_id
-                    db_session.commit()
+                    run = repo.bind_run_account(run.id, self.adapter.account_id)
 
                 repo.persist_positions(
                     run_id=run.id,
@@ -304,14 +303,12 @@ class GuojinSyncService:
         all_guojin = db_session.query(BusinessPosition).filter(
             BusinessPosition.platform == platform,
         )
-        if "portfolio_id" in db_session.info:
-            # Restricted production: never claim/delete another account/source.
-            owner = snapshots[0].account_id if snapshots else None
-            if owner is None:
-                return 0
-            all_guojin = all_guojin.filter_by(
-                portfolio_id=db_session.info["portfolio_id"], broker="guojin",
-                broker_account_id=owner, sync_source="api")
+        owner = snapshots[0].account_id if snapshots else None
+        if owner is None:
+            return 0
+        all_guojin = all_guojin.filter_by(
+            portfolio_id=upsert_service.portfolio_id, broker="guojin",
+            broker_account_id=owner, sync_source="api")
         all_guojin = all_guojin.all()
 
         removed = 0

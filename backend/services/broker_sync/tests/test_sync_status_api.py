@@ -13,19 +13,23 @@ from services.broker_sync.models import PositionSnapshotRun
 
 def test_status_keeps_failed_attempt_separate_from_previous_success(monkeypatch):
     from backend.api import broker_sync as api
+    from core.config import settings
+    monkeypatch.setattr(settings, "tiger_account", "account")
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    from backend.services.action.tests.b0_helpers import test_owner
+    test_owner(session)
     now = datetime.now(timezone.utc)
     session.add_all([
-        PositionSnapshotRun(
+        PositionSnapshotRun(portfolio_id=1,
             broker="tiger", account_id="account", started_at=now - timedelta(hours=1),
             finished_at=now - timedelta(hours=1), status="success", position_count=11,
             triggered_by="manual",
         ),
-        PositionSnapshotRun(
+        PositionSnapshotRun(portfolio_id=1,
             broker="tiger", account_id="account", started_at=now,
             finished_at=now, status="failed",
             error_message="数据格式错误(不重试): RuntimeError: TIGER_ID 未配置",

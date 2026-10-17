@@ -20,6 +20,7 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    session.info["portfolio_id"] = 1
 
     # Position.portfolio_id 是 FK,需要先建 Portfolio
     portfolio = Portfolio(id=1, name="测试组合")
@@ -77,7 +78,7 @@ def make_snapshot(symbol="AAPL.US", broker="tiger", currency="USD",
 
 def test_insert_new_position(db_session, mock_fx):
     """新建 Position 行,所有字段正确填充。"""
-    run = PositionSnapshotRun(broker="tiger", account_id="4472659", status="success")
+    run = PositionSnapshotRun(portfolio_id=1, broker="tiger", account_id="4472659", status="success")
     db_session.add(run)
     db_session.commit()
 
@@ -86,7 +87,7 @@ def test_insert_new_position(db_session, mock_fx):
     db_session.commit()
 
     service = PositionUpsertService(db_session)
-    report = service.upsert_from_snapshots([snap])
+    report = service.upsert_from_snapshots([snap], complete_snapshot=True)
 
     assert report["inserted"] == 1
     assert report["updated"] == 0
@@ -103,7 +104,7 @@ def test_insert_new_position(db_session, mock_fx):
 
 def test_update_protects_user_modified_fields(db_session, mock_fx):
     """更新已有 Position 行时,name/asset_class/segment 受保护。"""
-    run = PositionSnapshotRun(broker="tiger", account_id="4472659", status="success")
+    run = PositionSnapshotRun(portfolio_id=1, broker="tiger", account_id="4472659", status="success")
     db_session.add(run)
     db_session.commit()
 
@@ -111,7 +112,7 @@ def test_update_protects_user_modified_fields(db_session, mock_fx):
     snap1 = make_snapshot(run_id=run.id, name="苹果", market_value=Decimal("16000"))
     db_session.add(snap1)
     db_session.commit()
-    PositionUpsertService(db_session).upsert_from_snapshots([snap1])
+    PositionUpsertService(db_session).upsert_from_snapshots([snap1], complete_snapshot=True)
 
     # 2. 用户手动修改 name 和 segment
     pos = db_session.query(BusinessPosition).first()
@@ -121,7 +122,7 @@ def test_update_protects_user_modified_fields(db_session, mock_fx):
 
     # 3. 再 update
     snap2 = make_snapshot(run_id=run.id, name="Apple Inc.", market_value=Decimal("17000"))
-    PositionUpsertService(db_session).upsert_from_snapshots([snap2])
+    PositionUpsertService(db_session).upsert_from_snapshots([snap2], complete_snapshot=True)
 
     pos = db_session.query(BusinessPosition).first()
     assert pos.name == "我的苹果"
@@ -131,7 +132,7 @@ def test_update_protects_user_modified_fields(db_session, mock_fx):
 
 def test_hk_ticker_denormalization(db_session, mock_fx):
     """港股 00068.HK → ticker=00068 (保留前导零)。"""
-    run = PositionSnapshotRun(broker="tiger", account_id="4472659", status="success")
+    run = PositionSnapshotRun(portfolio_id=1, broker="tiger", account_id="4472659", status="success")
     db_session.add(run)
     db_session.commit()
 
@@ -143,7 +144,7 @@ def test_hk_ticker_denormalization(db_session, mock_fx):
     db_session.add(snap)
     db_session.commit()
 
-    PositionUpsertService(db_session).upsert_from_snapshots([snap])
+    PositionUpsertService(db_session).upsert_from_snapshots([snap], complete_snapshot=True)
 
     pos = db_session.query(BusinessPosition).first()
     assert pos.ticker == "00068"
@@ -153,8 +154,8 @@ def test_hk_ticker_denormalization(db_session, mock_fx):
 
 def test_multiple_brokers_same_ticker_creates_two_rows(db_session, mock_fx):
     """老虎 MSFT + 富途 MSFT 应该是两行(platform 区分)。"""
-    run1 = PositionSnapshotRun(broker="tiger", account_id="4472659", status="success")
-    run2 = PositionSnapshotRun(broker="futu", account_id="6169", status="success")
+    run1 = PositionSnapshotRun(portfolio_id=1, broker="tiger", account_id="4472659", status="success")
+    run2 = PositionSnapshotRun(portfolio_id=1, broker="futu", account_id="6169", status="success")
     db_session.add_all([run1, run2])
     db_session.commit()
 
@@ -166,10 +167,11 @@ def test_multiple_brokers_same_ticker_creates_two_rows(db_session, mock_fx):
         run_id=run2.id, symbol="MSFT.US", broker="futu",
         quantity=Decimal("5"), market_value=Decimal("2072"),
     )
+    snap_futu.account_id = "6169"
     db_session.add_all([snap_tiger, snap_futu])
     db_session.commit()
 
-    PositionUpsertService(db_session).upsert_from_snapshots([snap_tiger, snap_futu])
+    PositionUpsertService(db_session).upsert_from_snapshots([snap_tiger, snap_futu], complete_snapshot=True)
 
     rows = db_session.query(BusinessPosition).filter_by(ticker="MSFT").all()
     assert len(rows) == 2

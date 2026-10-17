@@ -20,6 +20,8 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    from backend.services.action.tests.b0_helpers import test_owner
+    test_owner(session)
     yield session
     session.close()
 

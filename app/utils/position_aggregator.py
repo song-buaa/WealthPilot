@@ -111,6 +111,7 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
             {
                 "name": p.name,
                 "ticker": p.ticker or "",
+                "currency": getattr(p, "currency", None) or "",
                 "symbol": getattr(p, "symbol", None) or "",  # v3.11: TICKER:MARKET 真值
                 "platform": p.platform or "",
                 "asset_class": economic_asset_class_cn(p),
@@ -165,6 +166,8 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
                 if r["platform"] == "建设银行"
                 else r["name"]
             )
+        elif r.get("symbol") and ":" in r["symbol"]:
+            key = f"{r['symbol']}|{r.get('currency', '')}"
         elif r["ticker"]:
             key = r["ticker"]
         else:

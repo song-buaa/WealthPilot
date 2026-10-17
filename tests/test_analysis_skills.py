@@ -163,10 +163,10 @@ def test_sync_failure_and_staleness_are_preserved(analysis_db,peer,monkeypatch):
     engine=create_engine('sqlite:///'+str(analysis_db));Base.metadata.create_all(engine)
     with Session(engine) as s:
         row=s.query(Position).filter_by(portfolio_id=7,ticker='AAPL').one()
-        row.broker='tiger';row.broker_account_id='FIXTURE_SECRET_ACCOUNT'
+        row.broker='tiger';row.broker_account_id='FIXTURE_SECRET_ACCOUNT';row.sync_source='api'
         old=datetime.now()-timedelta(days=5)
-        s.add_all([PositionSnapshotRun(broker='tiger',account_id='FIXTURE_SECRET_ACCOUNT',started_at=old,finished_at=old,status='success'),
-                   PositionSnapshotRun(broker='tiger',account_id='FIXTURE_SECRET_ACCOUNT',started_at=datetime.now(),status='failed')]);s.commit()
+        s.add_all([PositionSnapshotRun(portfolio_id=7, broker='tiger',account_id='FIXTURE_SECRET_ACCOUNT',started_at=old,finished_at=old,status='success'),
+                   PositionSnapshotRun(portfolio_id=7, broker='tiger',account_id='FIXTURE_SECRET_ACCOUNT',started_at=datetime.now(),status='failed')]);s.commit()
     engine.dispose()
     result=asyncio.run(analyze(analysis_db,7,'analyze_performance',{'question':'fixture'}))
     assert {'LATEST_POSITION_SYNC_FAILED','STALE_COMPONENTS','VALUATION_DATE_UNKNOWN'}<=set(result['issues'])

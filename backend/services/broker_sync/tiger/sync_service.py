@@ -135,6 +135,8 @@ class TigerSyncService:
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 positions = self.fetch_positions()
+                # Bind a reserved pending account only after successful source read.
+                run = repo.bind_run_account(run.id, self.account_id)
                 repo.persist_positions(
                     run_id=run.id,
                     positions=positions,
@@ -153,7 +155,7 @@ class TigerSyncService:
                     broker="tiger",
                     account_id=self.account_id,
                     sync_source="api",
-                    commit=False,
+                    commit=False, complete_snapshot=True, run_id=run.id,
                 )
 
                 if upsert_report["errors"]:

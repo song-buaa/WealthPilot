@@ -217,6 +217,8 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
+    from backend.services.action.tests.b0_helpers import test_owner
+    test_owner(db)
     conversation = Conversation(id="case1-conversation", title="Case 1")
     db.add(conversation)
     db.add(ConversationMessage(
@@ -256,7 +258,8 @@ def make_ready_two_leg_batch(session, adapter=None):
 
 def make_cancelled_two_leg_attempt(session, adapter=None):
     service, adapter, batch = make_ready_two_leg_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     for index, leg in enumerate(batch.legs, start=1):
         strategy = SymbolStrategy(
             symbol=f"{leg.user_alias}:LSE", side="BUY",
@@ -288,14 +291,16 @@ def make_cancelled_two_leg_attempt(session, adapter=None):
         "BROKER_CANCELLED: CBU3", "BROKER_CANCELLED: IB01",
         "RETRY_DISABLED_PENDING_PRODUCT_OWNER",
     ])
-    session.flush()
+    session.commit()
     return service, adapter, batch
 
 
 def make_cancelled_retry_two_with_unsubmitted_second_leg(session):
     service, adapter, original = make_cancelled_two_leg_attempt(session)
+    session.commit()
     retry = service.create_controlled_retry(original.id)
-    service.confirm_batch(retry.id)
+    service.confirm_batch(retry.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first, second = retry.legs
     strategy = SymbolStrategy(
         symbol="CBU3:LSE", side="BUY", target_quantity=first.final_quantity,
@@ -326,7 +331,7 @@ def make_cancelled_retry_two_with_unsubmitted_second_leg(session):
     second.status = "READY"
     retry.status = "ATTENTION_REQUIRED"
     retry.attention_reason = "CBU3=CANCELLED"
-    session.flush()
+    session.commit()
     return service, adapter, original, retry
 
 
@@ -365,7 +370,8 @@ def test_two_leg_case1_intent_variant_is_exact_and_does_not_reuse_old_shape():
 
 def test_two_leg_batch_uses_trusted_cbu3_and_new_confirmation_without_orders(session):
     old_service, old_adapter, old_batch = make_ready_batch(session)
-    old_service.confirm_batch(old_batch.id)
+    old_service.confirm_batch(old_batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     service, adapter, batch = make_ready_two_leg_batch(session)
 
     assert batch.id != old_batch.id
@@ -381,7 +387,9 @@ def test_two_leg_batch_uses_trusted_cbu3_and_new_confirmation_without_orders(ses
     assert old_adapter.place_calls == []
     assert adapter.place_calls == []
 
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+
+    session.commit()
     assert batch.confirmation_version == 1
     assert batch.confirmation_hash != old_batch.confirmation_hash
 
@@ -505,7 +513,8 @@ def test_smart_retry_three_cancelled_first_leg_never_submits_ib01(session):
     )
     retry_three = service.create_smart_routing_retry(retry_two.id)
     adapter.order_statuses = ["cancelled", "broker_pending"]
-    service.confirm_batch(retry_three.id)
+    service.confirm_batch(retry_three.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first, second = retry_three.legs
 
     order = service.submit_next_leg(
@@ -522,7 +531,8 @@ def test_smart_retry_three_cancelled_first_leg_never_submits_ib01(session):
 def test_smart_whatif_and_live_submission_use_same_routed_identity(session):
     service, adapter, batch = make_ready_two_leg_batch(session)
     preview = adapter.what_if_calls[0]["resolved"]
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     service.submit_next_leg(
         batch.id, confirmation_version=1, leg_id=batch.legs[0].id,
     )
@@ -555,6 +565,7 @@ def test_remainder_quantity_converges_with_its_own_quantity_dependent_fee(sessio
         }
 
     adapter.what_if_limit_order = quantity_dependent_what_if
+    session.commit()
     quantity, notional, result, fee = service._calculate_remainder_with_what_if(
         remainder, budget_before_own_fee=Decimal("1000"), funding_currency="USD",
     )
@@ -717,6 +728,7 @@ def test_missing_quote_can_use_user_manual_tick_validated_limits(session):
     service = ExecutionBatchService(session, adapter, clock=lambda: NOW)
     batch = service.create_batch(conversation_id="case1-conversation", message_id=1)
     assert batch.status == "DRAFT"
+    session.commit()
     service.apply_manual_limits(batch.id, {
         "IBTA": 5, "VDCA": 61, "CBU0": 5, "IB01": 126,
     })
@@ -735,7 +747,8 @@ def test_manual_limit_must_be_exact_market_rule_tick(session):
 
 def test_confirmation_hash_and_sequential_submission_are_server_authoritative(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first = batch.legs[0]
     order = service.submit_next_leg(
         batch.id, confirmation_version=1, leg_id=first.id,
@@ -751,7 +764,8 @@ def test_confirmation_hash_and_sequential_submission_are_server_authoritative(se
 
 def test_duplicate_leg_submit_returns_same_order_without_second_broker_call(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     leg_id = batch.legs[0].id
     first = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg_id)
     repeated = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg_id)
@@ -762,7 +776,8 @@ def test_duplicate_leg_submit_returns_same_order_without_second_broker_call(sess
 def test_broker_no_ack_stays_submitting_and_blocks_next_leg(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["submitted_to_broker"])
     service, adapter, batch = make_ready_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first, second = batch.legs[:2]
 
     order = service.submit_next_leg(
@@ -786,7 +801,8 @@ def test_broker_no_ack_stays_submitting_and_blocks_next_leg(session):
 def test_immediate_broker_cancel_is_attention_not_submitted(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["cancelled"])
     service, adapter, batch = make_ready_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first = batch.legs[0]
 
     order = service.submit_next_leg(
@@ -801,13 +817,14 @@ def test_immediate_broker_cancel_is_attention_not_submitted(session):
 
 def test_order_poller_state_propagates_to_execution_batch(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first = batch.legs[0]
     order = service.submit_next_leg(
         batch.id, confirmation_version=1, leg_id=first.id,
     )
     assert first.status == "OPEN"
-    adapter.sync_result = OrderStatusUpdate(
+    adapter.reconcile_result = OrderStatusUpdate(
         broker_order_id=order.broker_order_id,
         local_order_id=order.id,
         status="cancelled",
@@ -827,7 +844,8 @@ def test_order_poller_state_propagates_to_execution_batch(session):
 def test_timeout_hard_stops_and_reconcile_found_recovers_without_new_order(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["timeout"])
     service, adapter, batch = make_ready_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     leg = batch.legs[0]
     order = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg.id)
     assert order.status == "unknown"
@@ -844,7 +862,8 @@ def test_timeout_hard_stops_and_reconcile_found_recovers_without_new_order(sessi
 def test_rejected_skip_cannot_flow_fixed_target_to_remainder(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["rejected"])
     service, _adapter, batch = make_ready_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     leg = batch.legs[0]
     service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg.id)
     assert leg.status == "REJECTED"
@@ -856,7 +875,8 @@ def test_rejected_skip_cannot_flow_fixed_target_to_remainder(session):
 
 def test_all_four_legs_submit_in_original_order_and_remainder_last(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     order_ids = []
     for leg in list(batch.legs):
         order = service.submit_next_leg(
@@ -872,7 +892,8 @@ def test_all_four_legs_submit_in_original_order_and_remainder_last(session):
 
 def test_open_and_partial_fill_are_advanceable_but_keep_reservation(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first = batch.legs[0]
     order = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=first.id)
     adapter.reconcile_result = OrderStatusUpdate(
@@ -886,6 +907,7 @@ def test_open_and_partial_fill_are_advanceable_but_keep_reservation(session):
     ledger = service._build_ledger(batch)
     assert ledger.filled_cost == Decimal("499")
     assert ledger.active_reservations > 0
+    session.commit()
     second = batch.legs[1]
     service.submit_next_leg(batch.id, confirmation_version=1, leg_id=second.id)
     assert len(adapter.place_calls) == 2
@@ -893,7 +915,8 @@ def test_open_and_partial_fill_are_advanceable_but_keep_reservation(session):
 
 def test_dynamic_remainder_respects_committed_fixed_legs_and_cushion(session):
     service, _adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     for leg in batch.legs[:3]:
         service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg.id)
     remainder = batch.legs[3]
@@ -911,18 +934,20 @@ def test_dynamic_remainder_respects_committed_fixed_legs_and_cushion(session):
 def test_reconcile_not_found_remains_hard_stop(session):
     adapter = FakeIBKRExecutionAdapter(order_statuses=["timeout"])
     service, adapter, batch = make_ready_batch(session, adapter)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     leg = batch.legs[0]
     service.submit_next_leg(batch.id, confirmation_version=1, leg_id=leg.id)
-    with pytest.raises(ExecutionSafetyError, match="NOT_FOUND"):
-        service.reconcile_leg(batch.id, leg.id)
+    service.reconcile_leg(batch.id, leg.id)
+    assert leg.status == "UNKNOWN"
     assert batch.status == "ATTENTION_REQUIRED"
     assert len(adapter.place_calls) == 1
 
 
 def test_stop_remaining_never_cancels_submitted_broker_order(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     first = batch.legs[0]
     service.submit_next_leg(batch.id, confirmation_version=1, leg_id=first.id)
     service.stop_remaining(batch.id)
@@ -935,7 +960,8 @@ def test_stop_remaining_never_cancels_submitted_broker_order(session):
 
 def test_replaced_confirmed_unsubmitted_batch_is_terminal_and_preserves_evidence(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     original_hash = batch.confirmation_hash
     original_version = batch.confirmation_version
     original_what_if = [leg.what_if_snapshot for leg in batch.legs]
@@ -963,7 +989,8 @@ def test_replaced_confirmed_unsubmitted_batch_is_terminal_and_preserves_evidence
 
 def test_replaced_intent_retirement_refuses_any_batch_with_broker_order(session):
     service, adapter, batch = make_ready_batch(session)
-    service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     service.submit_next_leg(
         batch.id, confirmation_version=1, leg_id=batch.legs[0].id,
     )
@@ -979,7 +1006,102 @@ def test_live_guard_rejects_mutation_before_adapter_call(session):
     service.allow_mutation = False
     batch.status = "READY"
     guarded = ExecutionBatchService(session, adapter, clock=lambda: NOW, allow_mutation=False)
-    guarded.confirm_batch(batch.id)
+    guarded.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
     with pytest.raises(PermissionError, match="真实提交未启用"):
         guarded.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[0].id)
     assert adapter.place_calls == []
+
+
+def test_b0_initial_filled_closes_order_strategy_leg_and_batch_together(session):
+    service, adapter, batch = make_ready_two_leg_batch(session)
+    def fill_immediately(request):
+        from sqlalchemy.orm import Session
+        with Session(session.get_bind()) as probe:
+            persisted = probe.get(OrderRecord, request.local_order_id)
+            assert persisted.status == "unknown" and persisted.submission_payload_json
+            assert probe.get(ExecutionLeg, persisted.batch_leg_id).linked_order_id == persisted.id
+        adapter.place_calls.append(request)
+        return OrderStatusUpdate(f"perm-{len(adapter.place_calls)}", request.local_order_id, "filled",
+            filled_quantity=request.quantity, avg_filled_price=request.limit_price,
+            raw_response={"observed_account_id": adapter._account_id})
+    adapter.place_order = fill_immediately
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    session.commit()
+    first = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[0].id)
+    assert session.get(SymbolStrategy, first.strategy_id).cumulative_filled_quantity == first.quantity
+    # Remaining budget is re-reviewed if actual fills change the human plan.
+    try:
+        service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[1].id)
+    except ExecutionSafetyError as exc:
+        assert "REVIEW_REQUIRED" in str(exc)
+        batch = service.review_remaining(batch.id); session.commit()
+        service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单"); session.commit()
+        service.submit_next_leg(batch.id, confirmation_version=batch.confirmation_version, leg_id=batch.legs[1].id)
+    assert batch.status == "COMPLETED" and all(leg.status == "FILLED" for leg in batch.legs)
+    assert len(adapter.place_calls) == 2
+
+
+def test_b0_remainder_parameter_change_requires_review_and_preserves_claimed_leg(session):
+    service, adapter, batch = make_ready_two_leg_batch(session)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单"); session.commit()
+    first = service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[0].id)
+    original_ref, original_payload = first.id, first.submission_payload_json
+    original_quote = adapter.get_executable_quote
+    def changed_quote(resolved):
+        quote = original_quote(resolved)
+        if resolved["symbol"] == "IB01":
+            quote.update(ask=127, bid=126.99)
+        return quote
+    adapter.get_executable_quote = changed_quote
+    with pytest.raises(ExecutionSafetyError, match="REVIEW_REQUIRED"):
+        service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[1].id)
+    assert len(adapter.place_calls) == 1
+    reviewed = service.review_remaining(batch.id); session.commit()
+    assert reviewed.status == "READY" and reviewed.confirmation_hash is None
+    assert batch.legs[0].linked_order_id == original_ref
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单"); session.commit()
+    service.submit_next_leg(batch.id, confirmation_version=batch.confirmation_version, leg_id=batch.legs[1].id)
+    assert len(adapter.place_calls) == 2
+    assert session.get(OrderRecord, original_ref).submission_payload_json == original_payload
+    # Replaying an old linked leg version reads the old result, never another send.
+    assert service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[0].id).id == original_ref
+    assert len(adapter.place_calls) == 2
+
+
+def test_b0_broker_fact_reads_and_dispatch_do_not_hold_sqlite_writer(session):
+    adapter = FakeIBKRExecutionAdapter()
+    from sqlalchemy.orm import Session
+    for name in ("authenticate", "get_cash_snapshot", "list_open_order_details", "resolve_lse_usd_etf",
+                 "qualify_execution_route", "get_executable_quote", "what_if_limit_order", "place_order"):
+        original = getattr(adapter, name)
+        def checked(*args, _original=original, **kwargs):
+            assert not session.connection().connection.driver_connection.in_transaction
+            return _original(*args, **kwargs)
+        setattr(adapter, name, checked)
+    service, adapter, batch = make_ready_two_leg_batch(session, adapter)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单"); session.commit()
+    service.submit_next_leg(batch.id, confirmation_version=1, leg_id=batch.legs[0].id)
+    assert len(adapter.place_calls) == 1
+
+
+def test_b0_batch_warns_like_standard_risk_and_never_exempts_ib01(session, monkeypatch):
+    from app.models import Position
+    from app.fx_service import fx_service
+    from backend.services.action.risk_engine import portfolio_order_risk
+    session.add(Position(portfolio_id=1, segment="投资", name="Synthetic holding", ticker="OTHER",
+        symbol="OTHER:US", platform="fixture", asset_class="权益", market_value_cny=10000,
+        quantity=10, currency="USD", cost_price=100, current_price=100))
+    session.commit()
+    monkeypatch.setitem(fx_service._cache, ("USD", "CNY", "latest"), (7, "2026-10-17"))
+    service, adapter, batch = make_ready_two_leg_batch(session)
+    policy = json.loads(batch.execution_policy)
+    for leg in batch.legs:
+        standard = portfolio_order_risk(session, portfolio_id=1, symbol=f"{leg.user_alias}:LSE",
+            side="BUY", quantity=leg.final_quantity, limit_price=money(leg.final_limit), currency="USD")
+        assert policy["risk_warnings"][leg.user_alias] == standard
+    assert "single_order_pct" in {w["rule"] for w in policy["risk_warnings"]["IB01"]["warnings"]}
+    with pytest.raises(ExecutionSafetyError, match="RISK_CONFIRMATION_REQUIRED"):
+        service.confirm_batch(batch.id)
+    service.confirm_batch(batch.id, risk_confirmation_text="我已知晓风险并坚持下单")
+    assert not adapter.place_calls

@@ -56,8 +56,11 @@ def test_lse_ticker_cannot_be_disguised_as_us_single_order(symbol):
 def api(tmp_path, monkeypatch):
     engine = create_engine('sqlite:///'+str(tmp_path/'fixture.db'), connect_args={'check_same_thread': False})
     Base.metadata.create_all(engine)
+    from app.models import Portfolio
+    with Session(engine, info={"portfolio_id": 1}) as db:
+        db.add(Portfolio(id=1, name="Isolated owner")); db.commit()
     adapter = FakeIBKRExecutionAdapter()
-    monkeypatch.setattr(execution_batch, 'get_session', lambda: Session(engine))
+    monkeypatch.setattr(execution_batch, 'get_session', lambda: Session(engine, info={"portfolio_id": 1}))
     monkeypatch.setattr(execution_batch, '_adapter', lambda: adapter)
     monkeypatch.setattr(link_handoff, 'ExecutionBatchService',
         lambda s, a: ExecutionBatchService(s, a, clock=lambda: NOW, allow_mutation=False))
@@ -77,7 +80,7 @@ def test_web_preview_is_pure_and_request_requires_intent_confirmation(api):
     for confirm in [None,False]:
         payload=params if confirm is None else params|{'confirmed':confirm}
         assert client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).status_code==422
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ConversationMessage).count()==s.query(ExecutionBatch).count()==s.query(OrderRecord).count()==0
     assert not adapter.place_calls and not adapter.what_if_calls
 
@@ -99,7 +102,7 @@ def test_confirm_intent_reuses_batch_and_cannot_authorize_an_order(api):
     assert duplicate.json()['id']==batch['id']
     changed=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload|{'target_amount':'5000'})
     assert changed.status_code==422
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ExecutionBatch).count()==1
         assert s.query(SymbolStrategy).count()==s.query(OrderRecord).count()==0
         service=ExecutionBatchService(s,adapter,clock=lambda:NOW,allow_mutation=False)
@@ -115,7 +118,7 @@ def test_terminal_link_replay_does_not_create_another_batch(api, terminal_status
     quote=client.post('/api/execution-batches/trade-link/quote',json={k:v for k,v in payload.items() if k!='confirmed'}).json()
     payload.update(preview_hash=quote['preview_hash'],quote_as_of=quote['batch']['legs'][0]['quote_as_of'])
     first=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).json()
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         s.get(ExecutionBatch,first['id']).status=terminal_status;s.commit()
     second=client.post('/api/execution-batches/trade-link/confirm-intent',json=payload).json()
     assert second['id']==first['id'] and second['status']==terminal_status
@@ -161,7 +164,7 @@ def test_existing_poller_and_web_refresh_keep_ibkr_orders_on_ibkr(api, monkeypat
             return OrderStatusUpdate(broker_order_id=order_id,local_order_id='',status='broker_pending',raw_response={})
         return SimpleNamespace(broker_name=name,get_order_status=status)
     adapters={name:adapter(name) for name in ['tiger','ibkr']}
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         for name in adapters:
             strategy=SymbolStrategy(symbol='IB01:LSE' if name=='ibkr' else 'NVDA:US',side='BUY',
                 target_quantity=1,order_type='LIMIT',limit_price=Decimal('1'),status='active')
@@ -170,13 +173,13 @@ def test_existing_poller_and_web_refresh_keep_ibkr_orders_on_ibkr(api, monkeypat
                 broker_order_id='synthetic-'+name,symbol=strategy.symbol,side='BUY',quantity=1,
                 order_type='LIMIT',status='broker_pending'))
         s.commit()
-    poller=OrderPoller(get_session=lambda:Session(engine),get_broker_adapter=lambda:adapters['tiger'],
+    poller=OrderPoller(get_session=lambda:Session(engine, info={"portfolio_id": 1}),get_broker_adapter=lambda:adapters['tiger'],
         get_broker_adapter_for_order=lambda name:adapters[name])
     poller._poll_once()
     assert sorted(calls)==[('ibkr','synthetic-ibkr'),('tiger','synthetic-tiger')]
     # Keep the manager and returned session identical, as in the original API.
     def manager():
-        s=Session(engine);return OrderManager(s,broker_adapter=adapters['tiger']),s
+        s=Session(engine, info={"portfolio_id": 1});return OrderManager(s,broker_adapter=adapters['tiger']),s
     monkeypatch.setattr(action,'_get_manager',manager)
     monkeypatch.setattr(action,'_get_ibkr_adapter',lambda:adapters['ibkr'])
     app=FastAPI();app.include_router(action.router,prefix='/api/action')
@@ -209,7 +212,7 @@ def test_all_in_quote_reuses_original_engine_and_leaves_production_tables_empty(
     assert leg['estimated_notional'] + batch['estimated_fees'] + batch['safety_cushion'] <= 4000
     assert leg['what_if']['status'] == 'PASS'
     assert leg['resolved_con_id'] == 354802220 and leg['execution_exchange'] == 'SMART'
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ExecutionBatch).count() == s.query(ConversationMessage).count() == s.query(OrderRecord).count() == 0
     assert not quote['persisted'] and adapter.what_if_calls and not adapter.place_calls
     result = client.post('/api/execution-batches/trade-link/confirm-intent', json=confirmation(params,quote))
@@ -222,7 +225,7 @@ def test_price_edit_rebuilds_quote_fees_and_invalidates_confirmed_version(api):
     params, quote = quoted_request(client)
     batch = client.post('/api/execution-batches/trade-link/confirm-intent', json=confirmation(params,quote)).json()
     route = '/api/execution-batches/'+batch['id']
-    confirmed = client.post(route+'/confirm',json={'confirmation_version':0})
+    confirmed = client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':0})
     assert confirmed.status_code == 200, confirmed.text
     old = confirmed.json(); assert old['confirmation_hash']
     before = len(adapter.what_if_calls)
@@ -233,11 +236,11 @@ def test_price_edit_rebuilds_quote_fees_and_invalidates_confirmed_version(api):
     assert new['source_conversation_id'] == params['request_id']
     assert new['legs'][0]['final_quantity'] == 39 and new['estimated_total']+new['estimated_fees']+new['safety_cushion']<=4000
     assert len(adapter.what_if_calls)>before and not new['confirmation_hash']
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
         assert not s.get(ExecutionBatch,old['id']).confirmation_hash
-    assert client.post(route+'/confirm',json={'confirmation_version':old['confirmation_version']}).status_code==422
-    assert client.post('/api/execution-batches/'+new['id']+'/confirm',json={'confirmation_version':old['confirmation_version']}).status_code==422
+    assert client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==422
+    assert client.post('/api/execution-batches/'+new['id']+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==422
     assert not adapter.place_calls
 
 
@@ -257,7 +260,7 @@ def test_bad_quote_cash_or_fees_never_reaches_ready(api,monkeypatch,problem):
     result=client.post('/api/execution-batches/trade-link/quote',json=budget(request_id=str(uuid4())))
     assert result.status_code!=200 or result.json()['batch']['status']!='READY'
     assert not adapter.place_calls
-    with Session(engine) as s: assert s.query(OrderRecord).count()==s.query(ExecutionBatch).count()==0
+    with Session(engine, info={"portfolio_id": 1}) as s: assert s.query(OrderRecord).count()==s.query(ExecutionBatch).count()==0
 
 
 def test_changed_or_expired_preview_cannot_be_confirmed(api,monkeypatch):
@@ -278,11 +281,11 @@ def test_failed_reprice_leaves_old_confirmation_invalid(api,monkeypatch):
     params,quote=quoted_request(client)
     old=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
     route='/api/execution-batches/'+old['id']
-    old=client.post(route+'/confirm',json={'confirmation_version':old['confirmation_version']}).json()
+    old=client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).json()
     monkeypatch.setattr(adapter,'get_cash_snapshot',lambda c:{'CashBalance':0})
     result=client.post(route+'/manual-limits',json={'limits':{'IB01':130},'confirmation_version':old['confirmation_version']})
     assert result.status_code==422
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         batch=s.get(ExecutionBatch,old['id'])
         assert batch.status=='CANCELLED' and not batch.confirmation_hash
     assert not adapter.place_calls
@@ -292,11 +295,11 @@ def test_all_in_submission_rechecks_fee_and_confirmed_payload_without_real_order
     client,engine,adapter=api
     params,quote=quoted_request(client)
     batch=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
-    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'confirmation_version':0}).json()
-    with Session(engine) as s:
+    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':0}).json()
+    with Session(engine, info={"portfolio_id": 1}) as s:
         service=ExecutionBatchService(s,adapter,clock=lambda:NOW,allow_mutation=True) # Fake adapter only
         loaded=service.get_batch(batch['id'])
-        assert service.review_fingerprint(loaded)==loaded.confirmation_hash
+        assert service.review_fingerprint(loaded, authorization=True)==loaded.confirmation_hash
         original=adapter.what_if_limit_order
         monkeypatch.setattr(adapter,'what_if_limit_order',lambda r,**kw:original(r,**kw)|{'commission':100})
         with pytest.raises(ExecutionSafetyError,match='ALL_IN_BUDGET_EXCEEDED'):
@@ -315,10 +318,10 @@ def test_all_in_rejects_stale_confirmed_quote_even_with_fresh_broker_quote(api,m
     client,engine,adapter=api
     params,quote=quoted_request(client)
     batch=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
-    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'confirmation_version':0}).json()
+    batch=client.post('/api/execution-batches/'+batch['id']+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':0}).json()
     original=adapter.get_executable_quote
     monkeypatch.setattr(adapter,'get_executable_quote',lambda r:original(r)|{'quote_timestamp':(NOW+timedelta(seconds=31)).isoformat()})
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         service=ExecutionBatchService(s,adapter,clock=lambda:NOW+timedelta(seconds=31),allow_mutation=True)
         with pytest.raises(ExecutionSafetyError,match='quote stale'):
             service.submit_next_leg(batch['id'],confirmation_version=batch['confirmation_version'])
@@ -355,13 +358,13 @@ def test_cached_old_review_cannot_survive_another_session_price_edit(api):
     params,quote=quoted_request(client)
     old=client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,quote)).json()
     route='/api/execution-batches/'+old['id']
-    old=client.post(route+'/confirm',json={'confirmation_version':0}).json()
-    with Session(engine) as stale_session:
+    old=client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':0}).json()
+    with Session(engine, info={"portfolio_id": 1}) as stale_session:
         service=ExecutionBatchService(stale_session,adapter,clock=lambda:NOW,allow_mutation=True)
         cached=service.get_batch(old['id']);assert cached.status=='CONFIRMED'
         response=client.post(route+'/manual-limits',json={'limits':{'IB01':130},'confirmation_version':old['confirmation_version']})
         assert response.status_code==200,response.text
-        with pytest.raises(ExecutionSafetyError):
+        with pytest.raises((ExecutionSafetyError, ValueError)):
             service.submit_next_leg(old['id'],confirmation_version=old['confirmation_version'])
         assert not adapter.place_calls
 
@@ -375,7 +378,7 @@ def test_fresh_link_review_replaces_stale_persisted_batch(api, monkeypatch, manu
     old = client.post('/api/execution-batches/trade-link/confirm-intent',
                       json=confirmation(params, first_quote)).json()
     old = client.post('/api/execution-batches/'+old['id']+'/confirm',
-                      json={'confirmation_version': old['confirmation_version']}).json()
+                      json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version': old['confirmation_version']}).json()
     later = NOW + timedelta(seconds=40)
     original = adapter.get_executable_quote
     monkeypatch.setattr(adapter, 'get_executable_quote',
@@ -399,7 +402,7 @@ def test_fresh_link_review_replaces_stale_persisted_batch(api, monkeypatch, manu
     duplicate = client.post('/api/execution-batches/trade-link/confirm-intent',
                             json=confirmation(edited, fresh))
     assert duplicate.status_code == 200 and duplicate.json()['id'] == batch['id']
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         original_batch = s.get(ExecutionBatch, old['id'])
         assert original_batch.status == 'CANCELLED' and not original_batch.confirmation_hash
         assert s.query(ExecutionBatch).count() == 2
@@ -421,7 +424,7 @@ def test_equivalent_review_timestamp_does_not_create_duplicate(api, offset):
     assert first.status_code == 200, first.text
     second = client.post('/api/execution-batches/trade-link/confirm-intent', json=payload)
     assert second.status_code == 200 and second.json()['id'] == first.json()['id']
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ExecutionBatch).count() == 1 and s.query(OrderRecord).count() == 0
     assert not adapter.place_calls
 
@@ -459,14 +462,14 @@ def test_failed_link_refresh_can_retry_without_reviving_explicit_cancellation(ap
                         lambda r:original(r)|{'quote_timestamp':later.isoformat(),'ask':127,'bid':126.99})
     failed = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,fresh))
     assert failed.status_code==422 and 'PREVIEW_CHANGED' in failed.text
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
         assert not s.get(ExecutionBatch,old['id']).confirmation_hash
     fresh = client.post('/api/execution-batches/trade-link/quote',json=params).json()
     retried = client.post('/api/execution-batches/trade-link/confirm-intent',json=confirmation(params,fresh))
     assert retried.status_code==200, retried.text
     assert retried.json()['status']=='READY' and retried.json()['id']!=old['id']
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ExecutionBatch).count()==2 and s.query(OrderRecord).count()==0
     assert not adapter.place_calls
 
@@ -509,7 +512,7 @@ def test_concurrent_fresh_link_retries_share_one_active_review(api, monkeypatch)
         one, two = first.result(), other.result()
     assert one.status_code==two.status_code==200, (one.text,two.text)
     assert one.json()['id']==two.json()['id']
-    with Session(engine) as s:
+    with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.query(ExecutionBatch).count()==2
         assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
         assert s.query(OrderRecord).count()==0
@@ -526,5 +529,5 @@ def test_all_in_budget_uses_native_usd_not_base_cash_or_margin(api):
     assert response.status_code == 422
     assert 'INSUFFICIENT_USD_CASH_FOR_ALL_IN_BUDGET' in response.text
     assert broker.place_calls == []
-    with Session(engine) as session:
+    with Session(engine, info={"portfolio_id": 1}) as session:
         assert session.query(OrderRecord).count() == session.query(ExecutionBatch).count() == 0

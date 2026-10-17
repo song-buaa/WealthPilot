@@ -68,6 +68,31 @@ BROKER_PLATFORM_MAP = {
 }
 
 
+def _portfolio_scope(db):
+    from backend.services.action.ownership import portfolio_scope
+    return portfolio_scope(db)
+
+
+def _sync_account(db, broker):
+    from core.config import settings
+    configured = {"tiger": settings.tiger_account, "futu": settings.futu_account,
+                  "snowball": settings.ibkr_account or settings.snowball_account}.get(broker)
+    if configured:
+        return configured
+    if broker != "guojin":
+        return None
+    import os
+    if os.environ.get("GUOJIN_ACCOUNT"):
+        return os.environ["GUOJIN_ACCOUNT"]
+    from services.broker_sync.models import PositionSnapshotRun
+    # Only a unique, explicitly owned observed account is usable, never the
+    # most recent run or a run whose Portfolio is NULL.
+    accounts = {r[0] for r in db.query(PositionSnapshotRun.account_id).filter_by(
+        portfolio_id=_portfolio_scope(db), broker=broker, sync_source="api").all()
+        if r[0] not in {"pending", "unknown", "__unconfigured__", ""}}
+    return next(iter(accounts)) if len(accounts) == 1 else None
+
+
 def _get_last_run(db, broker: str):
     """查询某 broker 最近一次 run。"""
     import sys, os
@@ -77,7 +102,8 @@ def _get_last_run(db, broker: str):
     from services.broker_sync.models import PositionSnapshotRun
     return (
         db.query(PositionSnapshotRun)
-        .filter_by(broker=broker)
+        .filter_by(portfolio_id=_portfolio_scope(db), broker=broker, sync_source="api")
+        .filter(PositionSnapshotRun.account_id.in_([_sync_account(db, broker), "pending"]))
         .order_by(desc(PositionSnapshotRun.started_at))
         .first()
     )
@@ -91,7 +117,8 @@ def _get_last_successful_run(db, broker: str):
     from services.broker_sync.models import PositionSnapshotRun
     return (
         db.query(PositionSnapshotRun)
-        .filter_by(broker=broker, status="success")
+        .filter_by(portfolio_id=_portfolio_scope(db), broker=broker, account_id=_sync_account(db, broker),
+                   sync_source="api", status="success")
         .order_by(desc(PositionSnapshotRun.started_at))
         .first()
     )
@@ -162,6 +189,7 @@ def _run_sync(broker: str, triggered_by: str = "manual", *, db_session=None,
 
     db = db_session if db_session is not None else get_session()
     try:
+        db.info["portfolio_id"] = _portfolio_scope(db)
         if service_factory is not None:
             service = service_factory(broker)
             return service.sync_and_persist(db, triggered_by=triggered_by)
@@ -177,7 +205,13 @@ def _run_sync(broker: str, triggered_by: str = "manual", *, db_session=None,
             service.close()
         elif broker == "snowball":
             from services.broker_sync.snowball.sync_service import SnowballSyncService  # noqa: E402
-            service = SnowballSyncService()
+            from backend.services.restricted_sync import ReadonlyIBKRClient
+            from backend.api.action import _get_ibkr_adapter
+            from core.config import settings
+            if settings.snowball_account and settings.ibkr_account:
+                raise ValueError("AMBIGUOUS_SNOWBALL_IBKR_SOURCE")
+            service = (SnowballSyncService(ibkr_client=ReadonlyIBKRClient(_get_ibkr_adapter()))
+                       if settings.ibkr_account else SnowballSyncService())
             service.sync_and_persist(db, triggered_by=triggered_by)
         elif broker == "guojin":
             from services.broker_sync.guojin.sync_service import GuojinSyncService  # noqa: E402

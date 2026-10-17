@@ -12,6 +12,7 @@ import json
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+from backend.services.action.tests.b0_helpers import test_owner as prepare_owner, reviewed_place, sync_committed, cancel_committed
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -42,6 +43,7 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    prepare_owner(session)
     yield session
     session.close()
 
@@ -70,6 +72,7 @@ class IBKRTestDouble(BrokerAdapter):
     """
 
     def __init__(self):
+        self._account_id = "test-ibkr-account"
         self.place_order_called = False
         self.cancel_order_called = False
         self.get_order_status_called = False
@@ -192,7 +195,7 @@ class TestOrderManagerIBKRRouting:
         mgr = OrderManager(db_session, broker_adapter=adapter)
         strategy = _create_strategy(db_session)
 
-        order = mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 150})
+        order = reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 150})
 
         assert adapter.place_order_called
         assert order.status == OrderStatus.SUBMITTED_TO_BROKER
@@ -205,10 +208,10 @@ class TestOrderManagerIBKRRouting:
         mgr = OrderManager(db_session, broker_adapter=adapter)
         strategy = _create_strategy(db_session)
 
-        order = mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 150})
+        order = reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 150})
         assert order.broker_order_id is not None
 
-        order = mgr.cancel_order(order.id)
+        order = cancel_committed(mgr, order.id)
 
         # M0 分流: 有 broker_order_id → 调 adapter.cancel_order + sync
         assert adapter.cancel_order_called
@@ -222,10 +225,10 @@ class TestOrderManagerIBKRRouting:
         mgr = OrderManager(db_session, broker_adapter=adapter)
         strategy = _create_strategy(db_session)
 
-        order = mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 150})
+        order = reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 150})
         adapter.get_order_status_called = False  # reset
 
-        order = mgr.sync_order_status(order.id)
+        order = sync_committed(mgr, order.id)
 
         assert adapter.get_order_status_called
 
@@ -235,7 +238,7 @@ class TestOrderManagerIBKRRouting:
         mgr = OrderManager(db_session, broker_adapter=adapter)
         strategy = _create_strategy(db_session)
 
-        order = mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 150})
+        order = reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 150})
         assert order.broker_name == "ibkr"
 
     def test_audit_log_written(self, db_session):
@@ -244,7 +247,7 @@ class TestOrderManagerIBKRRouting:
         mgr = OrderManager(db_session, broker_adapter=adapter)
         strategy = _create_strategy(db_session)
 
-        mgr.place_order(strategy.id, {"quantity": 50, "limit_price": 150})
+        reviewed_place(mgr, strategy.id, {"quantity": 50, "limit_price": 150})
         db_session.commit()
 
         logs = db_session.query(AuditLog).all()

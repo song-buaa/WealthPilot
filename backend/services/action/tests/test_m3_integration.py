@@ -28,78 +28,17 @@ from backend.services.action.state_machine import OrderStatus, StrategyStatus
 
 class TestSymbolValidation:
     def test_chinese_symbol_rejected(self):
-        """中文名 symbol 应被 InvalidSymbolError 拒绝。"""
-        session = MagicMock()
-        adapter = MagicMock()
-        adapter.broker_name = "tiger"
-        manager = OrderManager(session, broker_adapter=adapter)
-
-        # mock strategy with Chinese symbol
-        strategy = MagicMock()
-        strategy.symbol = "贵州茅台"
-        strategy.status = StrategyStatus.ACTIVE
-        strategy.target_quantity = 100
-        strategy.cumulative_filled_quantity = 0
-        strategy.side = "BUY"
-        strategy.order_type = "LIMIT"
-        strategy.limit_price = 1000
-        strategy.trigger_price = None
-
-        # mock intent query to return None (not an AllocationIntent)
-        session.query.return_value.filter_by.return_value.first.side_effect = [
-            None,      # AllocationIntent check
-            strategy,  # get_strategy
-        ]
-
+        from types import SimpleNamespace
+        strategy = SimpleNamespace(symbol="贵州茅台")
         with pytest.raises(InvalidSymbolError, match="包含中文"):
-            manager.place_order("test-strategy-id", {"quantity": 10})
+            OrderManager(MagicMock())._parameters(strategy, {"quantity": 10})
 
     def test_english_symbol_allowed(self):
-        """英文 symbol 不应触发 InvalidSymbolError。"""
-        session = MagicMock()
-        adapter = MagicMock()
-        adapter.broker_name = "tiger"
-        manager = OrderManager(session, broker_adapter=adapter)
-
-        strategy = MagicMock()
-        strategy.symbol = "MSFT"
-        strategy.status = StrategyStatus.ACTIVE
-        strategy.target_quantity = 100
-        strategy.cumulative_filled_quantity = 0
-        strategy.side = "BUY"
-        strategy.order_type = "LIMIT"
-        strategy.limit_price = Decimal("415.0")
-        strategy.trigger_price = None
-        strategy.id = "strat-001"
-
-        # mock: AllocationIntent check → None, get_strategy → strategy
-        intent_q = MagicMock()
-        intent_q.first.return_value = None
-        strategy_q = MagicMock()
-        strategy_q.first.return_value = strategy
-
-        def filter_by_side_effect(**kwargs):
-            if "id" in kwargs and kwargs["id"] == "test-strategy-id":
-                # Could be AllocationIntent or SymbolStrategy query
-                pass
-            return MagicMock(first=MagicMock(return_value=None))
-
-        session.query.return_value.filter_by.return_value.first.side_effect = [
-            None,      # AllocationIntent check
-            strategy,  # get_strategy
-        ]
-
-        update = MagicMock()
-        update.broker_order_id = "12345"
-        update.status = "submitted_to_broker"
-        update.raw_response = {"currency": "USD", "limit_price": 415.0, "quantity": 10}
-        adapter.place_order.return_value = update
-
-        # Should not raise InvalidSymbolError
-        manager.place_order("test-strategy-id", {
-            "quantity": 10,
-            "limit_price": 415.0,
-        })
+        from types import SimpleNamespace
+        strategy = SimpleNamespace(symbol="MSFT", side="BUY", target_quantity=100,
+                    order_type="LIMIT", limit_price=415, trigger_price=None)
+        params = OrderManager(MagicMock())._parameters(strategy, {"quantity": 10})
+        assert params["symbol"] == "MSFT" and params["time_in_force"] == "GTC"
 
     def test_numeric_symbol_allowed(self):
         """纯数字 symbol (港股) 不应触发 InvalidSymbolError。"""

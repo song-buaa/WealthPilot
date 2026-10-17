@@ -291,7 +291,7 @@ function ActionListTab({
   const [statusError, setStatusError] = useState<string | null>(null)
 
   useEffect(() => {
-    const pending = orders.filter(o => !['filled', 'cancelled', 'expired', 'rejected', 'unknown'].includes(o.status))
+    const pending = orders.filter(o => !['filled', 'cancelled', 'expired', 'rejected'].includes(o.status))
     if (!pending.length) return
     let active = true
     const timer = setTimeout(() => {

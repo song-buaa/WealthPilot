@@ -104,13 +104,11 @@ class PositionUpsertService:
 
     def __init__(self, session: Session):
         self.session = session
-        self.portfolio_id = session.info.get("portfolio_id", 1)
+        from backend.services.action.ownership import portfolio_scope
+        self.portfolio_id = portfolio_scope(session)
 
     def _business_query(self):
-        query = self.session.query(BusinessPosition)
-        if "portfolio_id" in self.session.info:
-            query = query.filter_by(portfolio_id=self.portfolio_id)
-        return query
+        return self.session.query(BusinessPosition).filter_by(portfolio_id=self.portfolio_id)
 
     def upsert_from_snapshots(
         self,
@@ -120,6 +118,8 @@ class PositionUpsertService:
         account_id: str | None = None,
         sync_source: str | None = None,
         commit: bool = True,
+        complete_snapshot: bool = False,
+        run_id: int | None = None,
     ) -> dict:
         """
         把 snapshots 同步到 Position 业务表。
@@ -141,6 +141,8 @@ class PositionUpsertService:
         errors = []
 
         snap_list = list(snapshots)
+        if not complete_snapshot:
+            raise ValueError("COMPLETE_ACCOUNT_SNAPSHOT_REQUIRED")
         scopes = self._resolve_scopes(
             snap_list,
             broker=broker,
@@ -148,6 +150,19 @@ class PositionUpsertService:
             sync_source=sync_source,
         )
 
+        from services.broker_sync.models import PositionSnapshotRun
+        for scope_broker, scope_account, scope_source in scopes:
+            conflict = self.session.query(BusinessPosition.id).filter(
+                BusinessPosition.broker == scope_broker, BusinessPosition.broker_account_id == scope_account,
+                BusinessPosition.portfolio_id != self.portfolio_id).first()
+            if conflict:
+                raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
+            if not snap_list:
+                run = self.session.get(PositionSnapshotRun, run_id) if run_id else None
+                if (run is None or run.portfolio_id != self.portfolio_id or run.broker != scope_broker
+                        or run.account_id != scope_account or run.sync_source != scope_source
+                        or run.status not in {"running", "success"}):
+                    raise ValueError("EMPTY_SNAPSHOT_RUN_OWNER_REQUIRED")
         for snap in snap_list:
             try:
                 if self._upsert_single(snap):
@@ -240,6 +255,7 @@ class PositionUpsertService:
             self.session.query(PositionSnapshot.symbol)
             .join(PositionSnapshotRun, PositionSnapshot.run_id == PositionSnapshotRun.id)
             .filter(
+                PositionSnapshotRun.portfolio_id == self.portfolio_id,
                 PositionSnapshotRun.broker == broker,
                 PositionSnapshotRun.account_id == account_id,
                 PositionSnapshotRun.sync_source == sync_source,
@@ -287,6 +303,17 @@ class PositionUpsertService:
 
     def _upsert_single(self, snap: PositionSnapshot) -> bool:
         """单条 upsert。返回 True 表示新增,False 表示更新。"""
+        from services.broker_sync.models import PositionSnapshotRun
+        run = self.session.get(PositionSnapshotRun, snap.run_id)
+        if (run is None or run.portfolio_id != self.portfolio_id or run.broker != snap.broker
+                or run.account_id != snap.account_id or run.sync_source != "api"
+                or run.status not in {"running", "success"}):
+            raise ValueError("SNAPSHOT_OWNER_MISMATCH")
+        conflict = self.session.query(BusinessPosition.id).filter(
+            BusinessPosition.broker == snap.broker, BusinessPosition.broker_account_id == snap.account_id,
+            BusinessPosition.portfolio_id != self.portfolio_id).first()
+        if conflict:
+            raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
         ticker = self._denormalize_ticker(snap.symbol)
         platform = BROKER_TO_PLATFORM.get(snap.broker)
         if not platform:
@@ -305,14 +332,29 @@ class PositionUpsertService:
             sync_source="api",
         ).first()
 
+        if existing is None and snap.market == "LSE":
+            from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
+            aliases = {value for item in TRUSTED_INSTRUMENTS.values()
+                       for value in (item.user_alias, item.symbol, item.local_symbol)
+                       if ticker in {item.user_alias, item.symbol, item.local_symbol}}
+            collision = self._business_query().filter(
+                BusinessPosition.broker == snap.broker, BusinessPosition.broker_account_id == snap.account_id,
+                BusinessPosition.sync_source == "api", BusinessPosition.currency == snap.currency,
+                BusinessPosition.ticker.in_(aliases), BusinessPosition.symbol != snap.symbol).first()
+            if collision:
+                raise ValueError("EVIDENCED_IDENTITY_CORRECTION_REQUIRED_BEFORE_SYNC")
+
         # 旧库升级后的首轮同步：只有存在相同 scope 的历史 snapshot 证据时，
         # 才接管旧的 platform+ticker 行，避免把手工/CSV 行误认作 API 持仓。
         if existing is None:
-            has_snapshot_evidence = self.session.query(PositionSnapshot.id).filter_by(
-                broker=snap.broker,
-                account_id=snap.account_id,
-                symbol=snap.symbol,
-            ).filter(PositionSnapshot.run_id != snap.run_id).first()
+            has_snapshot_evidence = self.session.query(PositionSnapshot.id).join(
+                PositionSnapshotRun, PositionSnapshot.run_id == PositionSnapshotRun.id).filter(
+                PositionSnapshotRun.portfolio_id == self.portfolio_id,
+                PositionSnapshotRun.status == "success",
+                PositionSnapshot.broker == snap.broker,
+                PositionSnapshot.account_id == snap.account_id,
+                PositionSnapshot.symbol == snap.symbol,
+                PositionSnapshot.run_id != snap.run_id).first()
             if has_snapshot_evidence:
                 existing = self._business_query().filter_by(
                     ticker=ticker,
@@ -385,7 +427,7 @@ class PositionUpsertService:
                 setattr(existing, field, value)
             return False
 
-    _KNOWN_MARKETS = {"US", "HK", "SH", "SZ"}
+    _KNOWN_MARKETS = {"US", "HK", "SH", "SZ", "LSE"}
 
     @staticmethod
     def _denormalize_ticker(symbol: str) -> str:

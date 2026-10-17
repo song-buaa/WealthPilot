@@ -42,6 +42,8 @@ execution_batch._service = lambda s: ExecutionBatchService(s,ibkr,allow_mutation
 Base.metadata.create_all(get_engine())
 with get_session() as s:
     s.add(Portfolio(id=1,name='Synthetic')); s.commit()
+from app import state
+state.portfolio_id = 1
 broker = MockBrokerAdapter(fill_delay_seconds=.05, rejection_probability=0,
                           partial_fill_probability=0, network_failure_probability=0)
 action._get_adapter = lambda: broker

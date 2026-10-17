@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+import uuid
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -126,12 +128,18 @@ class ExecutionBatchService:
         self.clock = clock
         self._allow_mutation_override = allow_mutation
 
+    def _broker(self):
+        """All broker reads/WhatIf use this guard; dispatch has its own Tx A/B."""
+        if self.session.connection().connection.driver_connection.in_transaction:
+            raise ExecutionSafetyError("BROKER_IO_WITH_SQLITE_WRITE_TRANSACTION_FORBIDDEN")
+        return self.adapter
+
     def _audit(self, event_type: str, payload: dict) -> None:
         self.session.add(AuditLog(event_type=event_type, payload=_json(payload)))
 
     def _resolve_for_smart_execution(self, alias: str) -> tuple[dict, object]:
         """Keep LSE listing identity separate from SMART execution routing."""
-        listing = self.adapter.resolve_lse_usd_etf(alias)
+        listing = self._broker().resolve_lse_usd_etf(alias)
         trusted = verify_resolved_instrument(alias, listing)
         qualifier = getattr(self.adapter, "qualify_execution_route", None)
         if not callable(qualifier):
@@ -180,7 +188,7 @@ class ExecutionBatchService:
         for _ in range(max_iterations):
             spendable = max(Decimal("0"), budget_before_own_fee - fee)
             quantity, notional = calculate_fixed_quantity(spendable, limit)
-            result = self.adapter.what_if_limit_order(
+            result = self._broker().what_if_limit_order(
                 resolved, quantity=quantity, limit_price=limit,
             )
             next_fee = _validate_what_if_result(result, funding_currency)
@@ -272,11 +280,11 @@ class ExecutionBatchService:
             if existing and existing.status not in {"CANCELLED", "COMPLETED"}:
                 return existing
 
-        if not self.adapter.authenticate({}):
+        if not self._broker().authenticate({}):
             raise ConnectionError("IBKR authenticate 失败")
-        cash_snapshot = self.adapter.get_cash_snapshot("USD")
+        cash_snapshot = self._broker().get_cash_snapshot("USD")
         authoritative_cash, cash_source = select_authoritative_cash(cash_snapshot)
-        open_order_details = self.adapter.list_open_order_details()
+        open_order_details = self._broker().list_open_order_details()
         competing = [
             item for item in open_order_details
             if str(item.get("side", "")).upper() == "BUY"
@@ -335,8 +343,8 @@ class ExecutionBatchService:
             }),
             status="DRAFT",
         )
-        self.session.add(batch)
-        self.session.flush()
+        # Prepare broker facts on transient objects, never under a SQLite write lock.
+        batch.id = str(uuid.uuid4())
 
         total_notional = Decimal("0")
         total_fees = Decimal("0")
@@ -354,7 +362,7 @@ class ExecutionBatchService:
                     f"{alias}: marketRuleId={resolved.get('market_rule_id')}, "
                     f"expected={expected_rule}"
                 )
-            quote = self.adapter.get_executable_quote(resolved)
+            quote = self._broker().get_executable_quote(resolved)
             leg = ExecutionLeg(
                 batch_id=batch.id, sequence=sequence, user_alias=alias,
                 allocation_mode=mode,
@@ -391,10 +399,10 @@ class ExecutionBatchService:
                     "time_zone_id": resolved.get("time_zone_id"),
                 }),
                 status="DRAFT",
-                market_open=self.adapter.is_market_open(resolved, now=self.clock()),
+                market_open=self._broker().is_market_open(resolved, now=self.clock()),
             )
-            self.session.add(leg)
-            self.session.flush()
+            leg.id = str(uuid.uuid4())
+            batch.legs.append(leg)
             try:
                 if str(quote.get("market_data_type")) != "1":
                     raise ExecutionSafetyError(
@@ -442,7 +450,7 @@ class ExecutionBatchService:
                     leg.final_quantity = leg.estimated_quantity = quantity
                     leg.estimated_notional = notional
                 else:
-                    result = self.adapter.what_if_limit_order(
+                    result = self._broker().what_if_limit_order(
                         json.loads(leg.resolution_snapshot),
                         quantity=leg.estimated_quantity,
                         limit_price=money(leg.final_limit),
@@ -508,6 +516,26 @@ class ExecutionBatchService:
             for leg in batch.legs:
                 leg.status = "READY"
             batch.status = "READY"
+        from backend.services.action.ownership import execution_owner
+        owner = execution_owner(self.session, self.adapter)
+        policy = json.loads(batch.execution_policy)
+        policy.update(portfolio_id=owner.portfolio_id, time_in_force="DAY")
+        batch.execution_policy = _json(policy)
+        self._update_risks(batch)
+        if self.session.new or self.session.dirty or self.session.deleted:
+            raise ExecutionSafetyError("COMMIT_PREPARATION_BEFORE_BROKER_REVIEW")
+        self.session.rollback()
+        from sqlalchemy import text
+        self.session.execute(text("BEGIN IMMEDIATE"))
+        candidates = self.session.query(ExecutionBatch).filter_by(source_message_id=message_id).filter(
+            ExecutionBatch.status.notin_(["CANCELLED", "COMPLETED"])).order_by(ExecutionBatch.created_at.desc()).all()
+        for active in candidates:
+            active_policy = json.loads(active.execution_policy or "{}")
+            if (_controlled_retry_of is None or
+                (active_policy.get("retry_of_batch_id") == _controlled_retry_of.id
+                 and active_policy.get("retry_attempt") == _retry_attempt)):
+                return active
+        self.session.add(batch)
         self._audit(
             "execution_batch_controlled_retry_created"
             if _controlled_retry_of is not None
@@ -570,12 +598,12 @@ class ExecutionBatchService:
                 )
             old_orders.append(order)
 
-        if not self.adapter.authenticate({}):
+        if not self._broker().authenticate({}):
             raise ConnectionError("IBKR authenticate 失败")
         if getattr(self.adapter, "_account_id", None) != source.account_ref:
             raise ExecutionSafetyError("当前 Gateway account 与原 Case 1 不匹配")
 
-        open_orders = self.adapter.list_open_order_details()
+        open_orders = self._broker().list_open_order_details()
         if open_orders:
             raise ExecutionSafetyError("Broker 当前存在 open order，HARD STOP")
 
@@ -668,11 +696,11 @@ class ExecutionBatchService:
         ):
             raise ExecutionSafetyError("IB01 Retry #2 已发生提交尝试，HARD STOP")
 
-        if not self.adapter.authenticate({}):
+        if not self._broker().authenticate({}):
             raise ConnectionError("IBKR authenticate 失败")
         if getattr(self.adapter, "_account_id", None) != source.account_ref:
             raise ExecutionSafetyError("当前 Gateway account 与 Retry #2 不匹配")
-        if self.adapter.list_open_order_details():
+        if self._broker().list_open_order_details():
             raise ExecutionSafetyError("Broker 当前存在 open order，HARD STOP")
         execution_reader = getattr(self.adapter, "list_execution_details", None)
         if not callable(execution_reader):
@@ -753,6 +781,8 @@ class ExecutionBatchService:
 
     def assert_review_fresh(self, batch: ExecutionBatch) -> None:
         for leg in batch.legs:
+            if leg.linked_order_id:
+                continue
             if leg.quote_quality != "LIVE" or str(leg.market_data_type) != "1" or not leg.market_open:
                 raise ExecutionSafetyError("Fresh LIVE quote and open market required")
             quote_guard({"quote_quality": leg.quote_quality, "ask": leg.quote_ask,
@@ -761,10 +791,14 @@ class ExecutionBatchService:
         self.assert_all_in_budget(batch)
 
     @staticmethod
-    def review_fingerprint(batch: ExecutionBatch) -> str:
+    def review_fingerprint(batch: ExecutionBatch, *, authorization=False) -> str:
         # Bind economic facts, not transient IDs or the broker's new timestamp.
         facts = ExecutionBatchService._confirmation_payload(batch)
         facts.pop("batch_id")
+        if not authorization:
+            facts["execution_policy"].pop("order_epoch", None)
+            facts["execution_policy"].pop("portfolio_epoch", None)
+            facts["execution_policy"].pop("risk_acknowledged", None)
         facts["request_id"] = batch.source_conversation_id
         for name in ("safety_cushion", "usable_cash", "estimated_fees", "estimated_total", "estimated_residual"):
             facts[name] = format(money(facts[name]).normalize(), "f")
@@ -810,30 +844,47 @@ class ExecutionBatchService:
         # Invalidation must survive a failed refresh, but reacquire the existing
         # writer lock before checking/creating its replacement. Concurrent link
         # retries then observe and reuse one replacement rather than create two.
-        self._lock_all_in_review(batch)
         next_batch = self.create_batch(conversation_id=batch.source_conversation_id,
                                        message_id=batch.source_message_id, _manual_limits=limits)
         next_batch.confirmation_version = max(next_batch.confirmation_version, batch.confirmation_version)
         return next_batch
 
-    def confirm_batch(self, batch_id: str) -> ExecutionBatch:
+    def _update_risks(self, batch):
+        from backend.services.action.risk_engine import portfolio_order_risk
+        policy = json.loads(batch.execution_policy)
+        risks = {leg.user_alias: portfolio_order_risk(self.session,
+                    portfolio_id=policy["portfolio_id"], symbol=f"{leg.user_alias}:LSE",
+                    side="BUY", quantity=leg.final_quantity or 0,
+                    limit_price=money(leg.final_limit), currency=leg.currency)
+                 for leg in batch.legs if not leg.linked_order_id}
+        policy["risk_warnings"] = risks
+        batch.execution_policy = _json(policy)
+
+    def confirm_batch(self, batch_id: str, *, risk_confirmation_text="") -> ExecutionBatch:
+        from backend.services.action.ownership import execution_owner
+        from backend.services.action.risk_engine import CONFIRMATION_TEXT
         batch = self.get_batch(batch_id)
-        self._lock_all_in_review(batch)
         if batch.status != "READY":
             raise ExecutionSafetyError(f"Batch status={batch.status}，不可确认")
-        if self.is_all_in(batch):
-            self.assert_review_fresh(batch)
+        self.assert_review_fresh(batch)
+        owner = execution_owner(self.session, self.adapter)
+        policy = json.loads(batch.execution_policy)
+        if policy.get("portfolio_id") != owner.portfolio_id or batch.account_ref != owner.account_id:
+            raise ExecutionSafetyError("BATCH_OWNER_MISMATCH")
+        if any(item.get("requires_confirmation") for item in policy.get("risk_warnings", {}).values()):
+            if risk_confirmation_text != CONFIRMATION_TEXT:
+                raise ExecutionSafetyError("RISK_CONFIRMATION_REQUIRED")
+        policy["risk_acknowledged"] = risk_confirmation_text == CONFIRMATION_TEXT
+        manager = OrderManager(self.session, self.adapter)
+        policy["order_epoch"] = manager._order_epoch(owner, excluding_batch=batch.id)
+        policy["portfolio_epoch"] = manager._portfolio_epoch(owner.portfolio_id)
+        batch.execution_policy = _json(policy)
         batch.confirmation_version += 1
-        batch.confirmation_hash = self.review_fingerprint(batch) if self.is_all_in(batch) else hashlib.sha256(
-            _json(self._confirmation_payload(batch)).encode("utf-8")
-        ).hexdigest()
+        batch.confirmation_hash = self.review_fingerprint(batch, authorization=True)
         batch.status = "CONFIRMED"
         batch.confirmed_at = self.clock()
-        self._audit("execution_batch_confirmed", {
-            "batch_id": batch.id,
-            "confirmation_version": batch.confirmation_version,
-            "confirmation_hash": batch.confirmation_hash,
-        })
+        self._audit("execution_batch_confirmed", {"batch_id": batch.id,
+            "confirmation_version": batch.confirmation_version, "confirmation_hash": batch.confirmation_hash})
         self.session.flush()
         return batch
 
@@ -865,13 +916,65 @@ class ExecutionBatchService:
             "retry_of_batch_id": retry_source.id if retry_source else None,
             "broker_mutation": 0,
         })
-        self.session.flush()
+        self.session.commit()  # retire old review before any fresh broker I/O
         return self.create_batch(
             conversation_id=batch.source_conversation_id,
             message_id=batch.source_message_id,
             _controlled_retry_of=retry_source,
             _retry_attempt=retry_attempt,
         )
+
+    def review_remaining(self, batch_id):
+        """Refresh unclaimed legs in place. Linked broker facts stay immutable."""
+        batch = self.get_batch(batch_id)
+        if not any(leg.linked_order_id for leg in batch.legs):
+            return self.refresh_batch(batch_id)
+        if any(leg.status in {"UNKNOWN", "REJECTED", "SUBMITTING"} for leg in batch.legs if leg.linked_order_id):
+            raise ExecutionSafetyError("RECONCILIATION_REQUIRED")
+        if batch.attention_reason and "REMAINING_STOPPED" in batch.attention_reason:
+            raise ExecutionSafetyError("REMAINING_STOPPED")
+        changes = []
+        with self.session.no_autoflush:
+            ledger = self._build_ledger(batch)
+            cash, _ = select_authoritative_cash(self._broker().get_cash_snapshot("USD"))
+            ledger.consistency_guard(cash)
+            for leg in batch.legs:
+                if leg.linked_order_id:
+                    continue
+                resolved, _ = self._resolve_for_smart_execution(leg.user_alias)
+                if resolved["con_id"] != leg.resolved_con_id:
+                    raise ExecutionSafetyError("CONTRACT_CHANGED")
+                quote = self._broker().get_executable_quote(resolved)
+                ask, _ = quote_guard(quote, now=self.clock())
+                if quote.get("quote_quality") != "LIVE" or str(quote.get("market_data_type")) != "1":
+                    raise ExecutionSafetyError("LIVE_QUOTE_REQUIRED")
+                old = {"quantity": leg.final_quantity, "limit": str(leg.final_limit)}
+                leg.final_limit = (money(leg.final_limit) if leg.limit_source == "USER_MANUAL_CONFIRMED"
+                                   else normalize_buy_limit(ask, resolved["market_rule"]))
+                budget = (ledger.remaining + _validate_what_if_result(json.loads(leg.what_if_snapshot), batch.funding_currency)
+                          if leg.allocation_mode == "REMAINDER" else money(leg.target_amount))
+                if leg.allocation_mode == "REMAINDER":
+                    quantity, notional, result, fee = self._calculate_remainder_with_what_if(
+                        leg, budget_before_own_fee=budget, funding_currency=batch.funding_currency)
+                else:
+                    quantity, notional = calculate_fixed_quantity(budget, leg.final_limit)
+                    result = self._broker().what_if_limit_order(resolved, quantity=quantity, limit_price=leg.final_limit)
+                    fee = _validate_what_if_result(result, batch.funding_currency)
+                leg.final_quantity = leg.estimated_quantity = quantity
+                leg.estimated_notional, leg.what_if_snapshot = notional, _json(result)
+                leg.quote_bid, leg.quote_ask, leg.quote_last = quote.get("bid"), quote.get("ask"), quote.get("last")
+                leg.quote_as_of = datetime.fromisoformat(quote["quote_timestamp"].replace("Z", "+00:00"))
+                leg.status = "READY"
+                changes.append({"leg_id": leg.id, "before": old,
+                                "after": {"quantity": quantity, "limit": str(leg.final_limit)}})
+            self._update_risks(batch)
+        batch.confirmation_hash = None
+        batch.confirmation_version += 1
+        batch.status = "READY"
+        batch.attention_reason = _json(["REVIEW_REQUIRED", changes])
+        self._audit("execution_remaining_reviewed", {"batch_id": batch.id, "changes": changes})
+        self.session.flush()
+        return batch
 
     def apply_manual_limits(
         self, batch_id: str, limits: dict[str, object],
@@ -905,7 +1008,7 @@ class ExecutionBatchService:
             leg.limit_source = "USER_MANUAL_CONFIRMED"
             leg.manual_limit_confirmed_at = self.clock()
             resolved = json.loads(leg.resolution_snapshot)
-            leg.market_open = self.adapter.is_market_open(resolved, now=self.clock())
+            leg.market_open = self._broker().is_market_open(resolved, now=self.clock())
             if leg.allocation_mode == "APPROX_AMOUNT":
                 quantity, notional = calculate_fixed_quantity(
                     money(leg.target_amount), limit,
@@ -919,7 +1022,7 @@ class ExecutionBatchService:
         for leg in fixed:
             total_notional += money(leg.estimated_notional)
             try:
-                result = self.adapter.what_if_limit_order(
+                result = self._broker().what_if_limit_order(
                     json.loads(leg.resolution_snapshot),
                     quantity=leg.final_quantity,
                     limit_price=money(leg.final_limit),
@@ -978,6 +1081,7 @@ class ExecutionBatchService:
         batch.attention_reason = _json(attention) if attention else None
         for leg in batch.legs:
             leg.status = "DRAFT" if attention else "READY"
+        self._update_risks(batch)
         self._audit("execution_batch_manual_limits_applied", {
             "batch_id": batch.id, "status": batch.status,
             "broker_mutation": 0,
@@ -1015,7 +1119,9 @@ class ExecutionBatchService:
         """Official mutation path. Must only be called by the authenticated UI flow."""
         self._assert_live_mutation_enabled()
         batch = self.get_batch(batch_id)
-        self._lock_all_in_review(batch)
+        requested = next((item for item in batch.legs if item.id == leg_id), None) if leg_id else None
+        if requested and requested.linked_order_id:
+            return self.session.get(OrderRecord, requested.linked_order_id)
         if batch.confirmation_version != confirmation_version or not batch.confirmation_hash:
             raise ExecutionSafetyError("confirmation version/hash 无效")
         if batch.status not in {"CONFIRMED", "SUBMITTING", "PARTIALLY_SUBMITTED"}:
@@ -1040,23 +1146,23 @@ class ExecutionBatchService:
         resolved, _ = self._resolve_for_smart_execution(leg.user_alias)
         if resolved["con_id"] != leg.resolved_con_id:
             raise ExecutionSafetyError("conId changed; confirmation invalid")
-        if not self.adapter.is_market_open(resolved, now=self.clock()):
+        if not self._broker().is_market_open(resolved, now=self.clock()):
             raise ExecutionSafetyError("MARKET_CLOSED：仅允许当前可交易时段即时提交")
         local_order_refs = {
             item.linked_order_id for item in batch.legs if item.linked_order_id
         }
         external = [
-            item for item in self.adapter.list_open_order_details()
+            item for item in self._broker().list_open_order_details()
             if str(item.get("side", "")).upper() == "BUY"
             and str(item.get("order_ref", "")) not in local_order_refs
         ]
         if external:
             raise ExecutionSafetyError("存在竞争性外部 BUY open order")
 
-        fresh_cash, _ = select_authoritative_cash(self.adapter.get_cash_snapshot("USD"))
+        fresh_cash, _ = select_authoritative_cash(self._broker().get_cash_snapshot("USD"))
         ledger = self._build_ledger(batch)
         ledger.consistency_guard(fresh_cash)
-        quote = self.adapter.get_executable_quote(resolved)
+        quote = self._broker().get_executable_quote(resolved)
         if str(quote.get("market_data_type")) != "1":
             raise ExecutionSafetyError("提交前 marketDataType 非 LIVE(1)")
         if str(quote.get("quote_quality") or "").upper() != "LIVE":
@@ -1065,22 +1171,23 @@ class ExecutionBatchService:
         if leg.allocation_mode == "REMAINDER":
             if money(leg.released_intent_amount) > 0:
                 raise ExecutionSafetyError("intent-level released budget requires reconfirmation")
-            limit = normalize_buy_limit(ask, resolved["market_rule"])
-            quantity, notional = calculate_fixed_quantity(ledger.remaining, limit)
-            leg.reference_price, leg.final_limit = ask, limit
-            leg.final_quantity, leg.estimated_notional = quantity, notional
+            # Never silently change a human-confirmed limit/quantity at dispatch.
+            limit = (money(leg.final_limit) if leg.limit_source == "USER_MANUAL_CONFIRMED"
+                     else normalize_buy_limit(ask, resolved["market_rule"]))
+            quantity, _ = calculate_fixed_quantity(ledger.remaining, limit)
+            if quantity != leg.final_quantity or limit != money(leg.final_limit):
+                raise ExecutionSafetyError("REVIEW_REQUIRED: refresh unclaimed remaining legs and reconfirm")
         quantity = int(leg.final_quantity or 0)
         limit = money(leg.final_limit)
         if quantity <= 0 or limit <= 0:
             raise ExecutionSafetyError("Leg 无有效 quantity/limit")
-        if self.is_all_in(batch):
-            self.assert_review_fresh(batch)
-            expected = self.review_fingerprint(batch)
-            if expected != batch.confirmation_hash:
-                raise ExecutionSafetyError("confirmation payload changed")
+        self.assert_review_fresh(batch)
+        expected = self.review_fingerprint(batch, authorization=True)
+        if expected != batch.confirmation_hash:
+            raise ExecutionSafetyError("confirmation payload changed")
         if leg.target_amount and money(quantity) * limit > money(leg.target_amount):
             raise ExecutionSafetyError("Fixed Target ceiling violated")
-        what_if = self.adapter.what_if_limit_order(
+        what_if = self._broker().what_if_limit_order(
             resolved, quantity=quantity, limit_price=limit,
         )
         fee = _validate_what_if_result(what_if, batch.funding_currency)
@@ -1088,57 +1195,26 @@ class ExecutionBatchService:
             self.assert_all_in_budget(batch, fee=fee)
             if fee != money(batch.estimated_fees):
                 raise ExecutionSafetyError("WhatIf fee changed; refresh and reconfirm")
-        leg.what_if_snapshot = _json(what_if)
-
-        strategy = SymbolStrategy(
-            symbol=f"{leg.user_alias}:LSE", side="BUY", target_quantity=quantity,
-            order_type="LIMIT", limit_price=limit, status="active",
-            related_conversation_id=batch.source_conversation_id,
-            decision_basis="v3.15 Case 1 confirmed ExecutionBatch",
-            batch_leg_id=leg.id,
-        )
-        self.session.add(strategy)
-        self.session.flush()
-        leg.linked_strategy_id = strategy.id
-        leg.status = "SUBMITTING"
-        batch.status = "SUBMITTING"
-        self.session.flush()
-
-        manager = OrderManager(self.session, broker_adapter=self.adapter)
-        order = manager.place_order(strategy.id, {
-            "quantity": quantity,
-            "limit_price": limit,
-            "order_type": "LIMIT",
-            "resolved_contract": resolved,
-            "batch_id": batch.id,
-            "batch_leg_id": leg.id,
-            "confirmation_version": confirmation_version,
+        old_fee = _validate_what_if_result(json.loads(leg.what_if_snapshot), batch.funding_currency)
+        if fee != old_fee:
+            raise ExecutionSafetyError("REVIEW_REQUIRED: WhatIf fee changed")
+        policy = json.loads(batch.execution_policy)
+        from backend.services.action.risk_engine import portfolio_order_risk
+        current_risk = portfolio_order_risk(self.session, portfolio_id=policy["portfolio_id"],
+            symbol=f"{leg.user_alias}:LSE", side="BUY", quantity=quantity, limit_price=limit, currency=leg.currency)
+        if current_risk != policy.get("risk_warnings", {}).get(leg.user_alias):
+            raise ExecutionSafetyError("REVIEW_REQUIRED: risk evidence changed")
+        # Preparation is read-only; Tx A creates strategy+claim+leg link together.
+        quote_age = (self.clock() - (leg.quote_as_of.replace(tzinfo=timezone.utc)
+                    if leg.quote_as_of.tzinfo is None else leg.quote_as_of)).total_seconds()
+        deadline = time.time() + max(0, int(policy.get("quote_max_age_seconds", 30)) - quote_age)
+        order = OrderManager(self.session, self.adapter).place_order(str(uuid.uuid4()), {
+            "quantity": quantity, "limit_price": limit, "order_type": "LIMIT",
+            "time_in_force": policy.get("time_in_force", "DAY"), "resolved_contract": resolved,
+            "batch_id": batch.id, "batch_leg_id": leg.id, "confirmation_version": confirmation_version,
+            "confirmation_hash": batch.confirmation_hash, "dispatch_deadline": deadline,
         })
-        leg.linked_order_id = order.id
-        leg.submission_attempted_at = self.clock()
-        leg.status = {
-            "submitted_to_broker": "SUBMITTING",
-            "broker_pending": "OPEN",
-            "partially_filled": "PARTIAL_FILLED",
-            "filled": "FILLED",
-            "rejected": "REJECTED",
-            "unknown": "UNKNOWN",
-            "cancelled": "CANCELLED",
-        }.get(order.status, "UNKNOWN")
-        if leg.status in {"UNKNOWN", "REJECTED", "CANCELLED"}:
-            batch.status = "ATTENTION_REQUIRED"
-            batch.attention_reason = f"{leg.user_alias}={leg.status}"
-        elif leg.status == "SUBMITTING":
-            batch.status = "SUBMITTING"
-        elif all(item.status in ADVANCEABLE_LEG_STATUSES for item in batch.legs):
-            batch.status = "SUBMITTED"
-        else:
-            batch.status = "PARTIALLY_SUBMITTED"
-        self._audit("execution_leg_submitted", {
-            "batch_id": batch.id, "leg_id": leg.id, "order_id": order.id,
-            "status": leg.status,
-        })
-        self.session.flush()
+        self.session.expire_all()
         return order
 
     def _build_ledger(self, batch: ExecutionBatch) -> CashLedger:
@@ -1176,29 +1252,7 @@ class ExecutionBatchService:
         if not leg or not leg.linked_order_id:
             raise LookupError("Leg/Order 不存在")
         order = self.session.query(OrderRecord).filter_by(id=leg.linked_order_id).one()
-        update = self.adapter.find_order_by_ref(order.id)
-        if update is None:
-            raise ExecutionSafetyError("orderRef NOT_FOUND；仅允许用户显式 Retry")
-        order.broker_order_id = update.broker_order_id
-        order.status = update.status
-        order.filled_quantity = update.filled_quantity
-        order.avg_filled_price = update.avg_filled_price
-        order.raw_broker_response = _json(update.raw_response)
-        leg.status = {
-            "submitted_to_broker": "SUBMITTING", "broker_pending": "OPEN",
-            "partially_filled": "PARTIAL_FILLED", "filled": "FILLED",
-            "rejected": "REJECTED", "unknown": "UNKNOWN",
-            "cancelled": "CANCELLED",
-        }.get(update.status, "UNKNOWN")
-        batch.status = (
-            "ATTENTION_REQUIRED"
-            if leg.status in {"UNKNOWN", "REJECTED", "CANCELLED"}
-            else "PARTIALLY_SUBMITTED"
-        )
-        self._audit("execution_leg_reconciled", {
-            "batch_id": batch.id, "leg_id": leg.id, "status": leg.status,
-        })
-        self.session.flush()
+        OrderManager(self.session, self.adapter).sync_order_status(order.id)
         return leg
 
     def skip_rejected_leg(self, batch_id: str, leg_id: str) -> ExecutionBatch:
@@ -1223,7 +1277,11 @@ class ExecutionBatchService:
         for leg in batch.legs:
             if not leg.linked_order_id and leg.status not in {"FILLED", "CANCELLED"}:
                 leg.status = "CANCELLED"
-        batch.status = "CANCELLED"
+        batch.attention_reason = _json(["REMAINING_STOPPED"])
+        linked = [leg for leg in batch.legs if leg.linked_order_id]
+        batch.status = ("ATTENTION_REQUIRED" if any(leg.status in {"UNKNOWN", "REJECTED"} for leg in linked)
+                        else "SUBMITTED" if any(leg.status in {"OPEN", "SUBMITTING", "PARTIAL_FILLED"} for leg in linked)
+                        else "CANCELLED")
         self._audit("execution_batch_remaining_stopped", {
             "batch_id": batch.id, "broker_cancel_mutations": 0,
         })

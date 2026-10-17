@@ -19,3 +19,9 @@
 | MCP 工具及只读协议 | real 配置七项工具已有 | [server](../pocs/chatgpt_skills/server.py)、[worker](../pocs/chatgpt_skills/worker.py)、[reader](../pocs/chatgpt_skills/reader.py)、[PoC02 readonly reader](../pocs/poc02_wealth_mcp/reader.py) | 七工具名称与边界见[当前架构](ARCHITECTURE_CURRENT.md#3-七个生产工具) | 优先扩展薄适配，原业务 owner 计算；每请求读取已提交数据并报告来源/质量 | [protocol tests](../pocs/chatgpt_skills/test_protocol.py)、[reader tests](../pocs/poc02_wealth_mcp/test_reader.py)、[analysis tests](../tests/test_analysis_skills.py) | Mock 写工具仅隔离测试。没有 real 订单状态查询/主动通知工具；读到最新已提交数据不保证券商已同步；Web/iOS 各自验收 |
 
 新增能力前须填写“候选 owner → 已检索入口/测试 → 缺口 → 最小扩展 → 权限/验收”。本索引未列出某项能力不等于仓库没有实现，应继续检索。消费、技术形态等专属设计保持原 owner，不能因本索引不是完整目录而另建体系。
+
+### B0 开发候选的复用更新
+
+交易提交、状态与同步的权威入口沿用上表。B0 在 [OrderManager](../backend/services/action/order_manager.py) 增加 `create_order_review` / durable `place_order` / `apply_broker_observation`；在原 [Batch service](../backend/services/execution_batch/service.py) 增加 `review_remaining`，保留已提交腿。原 [IBKR adapter](../backend/services/action/brokers/ibkr.py) 的 `recover_order` / `find_order_by_ref` 使用新鲜账户过滤证据。原 sync Repository/Upsert 和现有两个 MCP reader 统一 Portfolio/run/账户作用域；LSE 身份沿用既有 trusted instruments。
+
+复用时必须显式提交准备事务、传当前 owner/授权和确认参数，不绕过 Review/hash/epoch/TTL/WhatIf/人工风险确认。UNKNOWN/NOT_FOUND 不补单，缺 owner 的历史记录先核实；未订正的 LSE 身份冲突阻断同步。新 Schema 的字段/索引理由与兼容规则见 [Runbook](B0_PRODUCTION_RUNBOOK.md)，故障注入及原 Web 场景入口见 [实现说明](B0_IMPLEMENTATION.md#5-可重放隔离验收入口)。本分支是开发候选，生产迁移/验收待单独授权；成交后同步消费者、历史收益及 real MCP 订单工具仍未新增。

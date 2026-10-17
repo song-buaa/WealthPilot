@@ -22,6 +22,10 @@ from services.broker_sync.models import PositionSnapshotRun, PositionSnapshot
 
 
 def main():
+    import os
+    pid = int(os.environ.get("WEALTHPILOT_PORTFOLIO_ID", "0"))
+    if pid <= 0:
+        raise ValueError("Set explicit WEALTHPILOT_PORTFOLIO_ID; sync writes require separate authorization")
     print("=" * 80)
     print("富途 API → snapshot → Position 业务表 端到端验证")
     print("=" * 80)
@@ -29,6 +33,7 @@ def main():
     init_db()
     service = FutuSyncService()
     db = get_session()
+    db.info["portfolio_id"] = pid
 
     try:
         before_futu = db.query(BusinessPosition).filter_by(platform="富途证券").count()

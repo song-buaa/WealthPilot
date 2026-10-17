@@ -33,7 +33,7 @@ def api(tmp_path, monkeypatch):
     broker = MockBrokerAdapter(fill_delay_seconds=.01, rejection_probability=0,
                               partial_fill_probability=0, network_failure_probability=0)
     def manager():
-        session = Session(engine)
+        session = Session(engine, info={"portfolio_id": 1})
         return OrderManager(session, broker_adapter=broker), session
     monkeypatch.setattr(action, '_get_manager', manager)
     monkeypatch.setattr(action, '_BROKER_MODE', 'mock')
@@ -103,6 +103,9 @@ def test_existing_web_draft_confirm_order_status_and_repeat(api):
     with Session(engine) as s:assert s.query(OrderRecord).count()==0
     path=f"/api/action/strategies/{strategy['id']}/place_order"
     payload={'quantity':10,'limit_price':180,'confirmation_text':'我已知晓风险并坚持下单'}
+    reviewed = client.post(f"/api/action/strategies/{strategy['id']}/check_risk", json=payload)
+    assert reviewed.status_code == 200, reviewed.text
+    payload.update(review_id=reviewed.json()['review_id'], time_in_force='GTC')
     result=client.post(path,json=payload)
     assert result.status_code==200, result.text
     placed=result.json(); assert placed['broker_name']=='mock'

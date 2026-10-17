@@ -25,9 +25,9 @@ def account_ref(portfolio_id, row):
 def source_quality(connection, row):
     issues = []
     updated = None
-    if row.broker and row.broker_account_id and "position_snapshot_runs" in inspect(connection).get_table_names():
-        runs = connection.execute(text("SELECT status, finished_at FROM position_snapshot_runs WHERE broker=:b AND account_id=:a ORDER BY started_at DESC"),
-                                  {"b": row.broker, "a": row.broker_account_id}).mappings().all()
+    if row.broker and row.broker_account_id and row.sync_source and "position_snapshot_runs" in inspect(connection).get_table_names():
+        runs = connection.execute(text("SELECT status, finished_at FROM position_snapshot_runs WHERE portfolio_id=:p AND broker=:b AND account_id=:a AND sync_source=:s ORDER BY started_at DESC"),
+                                  {"p": row.portfolio_id, "b": row.broker, "a": row.broker_account_id, "s": row.sync_source}).mappings().all()
         if runs and runs[0]["status"] == "failed":
             issues.append("LATEST_POSITION_SYNC_FAILED")
         success = next((r for r in runs if r["status"] == "success" and r["finished_at"]), None)

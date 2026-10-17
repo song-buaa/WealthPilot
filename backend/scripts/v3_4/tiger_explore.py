@@ -22,6 +22,11 @@ WARNING: 严禁用系统 Python 3.7.1(/usr/local/bin/python3)运行,
    tigeropen 没有装在那里,会 ImportError。
 ================================================
 """
+
+# B0: historical mutation CLI has no durable claim or current Web authorization.
+if __name__ == "__main__":
+    raise SystemExit("Legacy trading validation is disabled; use the original Web review/confirmation flow.")
+
 import os
 import sys
 import time

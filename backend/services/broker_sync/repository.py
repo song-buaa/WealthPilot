@@ -16,6 +16,20 @@ class PositionSnapshotRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def _portfolio_id(self):
+        from backend.services.action.ownership import portfolio_scope
+        return portfolio_scope(self.session)
+
+    def bind_run_account(self, run_id, account_id):
+        run = self.session.get(PositionSnapshotRun, run_id)
+        if (run is None or run.portfolio_id != self._portfolio_id() or run.status != "running"
+                or not account_id or account_id in {"pending", "unknown", "__unconfigured__"}
+                or run.account_id not in {"pending", account_id}):
+            raise ValueError("SYNC_RUN_BINDING_INVALID")
+        run.account_id = account_id
+        self.session.commit()
+        return run
+
     def create_run(
         self,
         broker: str,
@@ -24,17 +38,17 @@ class PositionSnapshotRepository:
         triggered_by: str = "manual",
     ) -> PositionSnapshotRun:
         """创建一条 running 状态的 run 记录,提交后返回。"""
+        portfolio_id = self._portfolio_id()
         existing_id = self.session.info.get("sync_run_id")
         if existing_id is not None:
             run = self.session.get(PositionSnapshotRun, existing_id)
-            if run is None or run.broker != broker or run.status != "running":
+            if (run is None or run.broker != broker or run.status != "running"
+                    or run.portfolio_id != portfolio_id or run.sync_source != sync_source
+                    or (account_id not in {"pending", "__unconfigured__"} and run.account_id not in {"pending", account_id})):
                 raise ValueError("SYNC_RUN_BINDING_INVALID")
-            if account_id not in ("pending", "__unconfigured__") or run.account_id == "pending":
-                run.account_id = account_id
-            self.session.commit()
             return run
         run = PositionSnapshotRun(
-            broker=broker,
+            portfolio_id=portfolio_id, broker=broker,
             account_id=account_id,
             started_at=datetime.now(timezone.utc),
             status="running",
@@ -63,6 +77,19 @@ class PositionSnapshotRepository:
         if run is None:
             raise ValueError(f"Run id={run_id} 不存在")
 
+        if run.portfolio_id != self._portfolio_id() or run.account_id in {"pending", "unknown", "__unconfigured__"}:
+            raise ValueError("SYNC_RUN_OWNER_REQUIRED")
+        if any(pos.broker != run.broker or pos.account_id != run.account_id or pos.sync_source != run.sync_source for pos in positions):
+            raise ValueError("MIXED_SNAPSHOT_SCOPE")
+        from app.models import Position as BusinessPosition
+        conflict = self.session.query(BusinessPosition.id).filter(
+            BusinessPosition.broker == run.broker, BusinessPosition.broker_account_id == run.account_id,
+            BusinessPosition.portfolio_id != run.portfolio_id).first()
+        other_run = self.session.query(PositionSnapshotRun.id).filter(
+            PositionSnapshotRun.broker == run.broker, PositionSnapshotRun.account_id == run.account_id,
+            PositionSnapshotRun.portfolio_id != run.portfolio_id).first()
+        if conflict or other_run:
+            raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
         for pos in positions:
             snapshot = self._position_to_snapshot(run, pos)
             self.session.add(snapshot)
@@ -115,7 +142,7 @@ class PositionSnapshotRepository:
         """查询最近一次成功的 run。"""
         return (
             self.session.query(PositionSnapshotRun)
-            .filter_by(broker=broker, account_id=account_id, status="success")
+            .filter_by(portfolio_id=self._portfolio_id(), broker=broker, account_id=account_id, status="success")
             .order_by(PositionSnapshotRun.started_at.desc())
             .first()
         )
