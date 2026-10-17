@@ -9,6 +9,7 @@ import pytest
 from ib_async import Contract, Order, OrderStatus, Trade, ExecutionFilter
 from backend.services.action.brokers.ibkr import IBKRBrokerAdapter
 from backend.services.action.brokers.base import OrderRequest
+from tests.test_b0_order_safety import rig  # noqa: F401; same disposable WAL fixture
 
 
 def adapter():
@@ -150,3 +151,48 @@ def test_cancel_matches_fresh_account_ref_and_never_bare_id_or_other_client():
     with pytest.raises(ConnectionError, match='ORIGINAL_API_CLIENT'):
         ib.cancel_order_by_ref('stable-order-ref', broker_order_id='99')
     ib._ib.cancelOrder.assert_not_called()
+
+
+@pytest.mark.parametrize("error", [ValueError, RuntimeError, TimeoutError])
+@pytest.mark.parametrize("failure_point", ["snapshot", "sdk"])
+def test_r02_accepted_sdk_then_local_error_stays_unknown_and_cannot_resend(rig, monkeypatch, error, failure_point):
+    from backend.services.action.models import OrderRecord
+    from backend.services.action.order_manager import OrderManager
+    factory, broker, strategy, params = rig
+    ib = adapter()
+    ib._account_id = broker._account_id
+    snapshot = ib._snapshot_trade
+    def accept(contract, order):
+        with factory() as probe:
+            probe.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            persisted = probe.get(OrderRecord, order.orderRef)
+            assert persisted.status == "unknown" and persisted.submission_key
+            probe.rollback()
+        order.orderId, order.permId = 1, 101
+        if failure_point == "sdk":
+            raise error("accepted; SDK reply lost")
+        return Trade(contract, order, OrderStatus(status="Submitted"))
+    ib._ib.placeOrder.side_effect = accept
+    monkeypatch.setattr(ib, "_snapshot_trade", MagicMock(side_effect=error("accepted; local ack lost")))
+    with factory() as db:
+        manager = OrderManager(db, ib)
+        order = manager.place_order(strategy, params)
+        assert order.status == "unknown" and order.broker_order_id == ("101" if failure_point == "snapshot" else None)
+        assert manager.place_order(strategy, params).id == order.id
+        review = manager.create_order_review(strategy, params, risk_snapshot={"requires_confirmation": False})
+        db.commit()
+        with pytest.raises(ValueError, match="ACCOUNT_RECONCILIATION_REQUIRED"):
+            manager.place_order(strategy, {**params, "review_id": review})
+        order_id = order.id
+    ib._ib.placeOrder.assert_called_once()
+    sent = ib._ib.placeOrder.call_args.args[1]
+    assert sent.orderRef == order_id
+    # A restarted reader recovers the same broker identity, never a second send.
+    monkeypatch.setattr(ib, "_snapshot_trade", snapshot)
+    ib._ib.reqCompletedOrdersAsync.return_value = [completed_trade(
+        account=ib._account_id, ref=order_id, perm_id=101)]
+    with factory() as db:
+        recovered = OrderManager(db, ib).sync_order_status(order_id)
+        db.commit()
+        assert recovered.status == "filled" and recovered.filled_quantity == 10
+    ib._ib.placeOrder.assert_called_once()

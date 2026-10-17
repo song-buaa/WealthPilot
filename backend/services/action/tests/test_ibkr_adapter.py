@@ -999,23 +999,26 @@ class TestPlaceOrderPermId:
         assert raw["client_id"] == 1
         assert raw["order_ref"] == "ref-1"
 
-    def test_connection_error_transparent(self):
+    def test_connection_error_after_sdk_entry_is_unknown(self):
         adapter = _make_adapter()
         adapter._ib.placeOrder.side_effect = ConnectionError("disconnected")
-        with pytest.raises(ConnectionError):
-            adapter.place_order(_make_request())
+        result = adapter.place_order(_make_request(local_order_id="stable-ref"))
+        assert result.status == "unknown" and result.raw_response["order_ref"] == "stable-ref"
+        adapter._ib.placeOrder.assert_called_once()
 
-    def test_timeout_error_transparent(self):
+    def test_timeout_after_sdk_entry_is_unknown(self):
         adapter = _make_adapter()
         adapter._ib.placeOrder.side_effect = TimeoutError("timed out")
-        with pytest.raises(TimeoutError):
-            adapter.place_order(_make_request())
+        result = adapter.place_order(_make_request(local_order_id="stable-ref"))
+        assert result.status == "unknown" and result.raw_response["order_ref"] == "stable-ref"
+        adapter._ib.placeOrder.assert_called_once()
 
-    def test_generic_exception_rejected(self):
+    def test_generic_exception_after_sdk_entry_is_not_a_reject(self):
         adapter = _make_adapter()
         adapter._ib.placeOrder.side_effect = RuntimeError("IB error")
-        result = adapter.place_order(_make_request())
-        assert result.status == "rejected"
+        result = adapter.place_order(_make_request(local_order_id="stable-ref"))
+        assert result.status == "unknown" and result.raw_response["order_ref"] == "stable-ref"
+        adapter._ib.placeOrder.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════

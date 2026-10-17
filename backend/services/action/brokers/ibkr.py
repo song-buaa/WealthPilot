@@ -456,8 +456,11 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 action="place_order_blocked_unsupported_market",
             )
 
+        send_started = False
+        submitted_trade = None
         try:
             async def submit_on_loop() -> dict:
+                nonlocal send_started, submitted_trade
                 from ib_async import Contract, Stock
 
                 if resolved:
@@ -485,7 +488,11 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 order.account = self._account_id
                 if request.dispatch_deadline is not None and time.time() >= request.dispatch_deadline:
                     raise TimeoutError("DISPATCH_DEADLINE_EXPIRED")
+                # Once the SDK mutation is entered, any exception may follow an
+                # accepted order. Local serialization/ack failures are not rejects.
+                send_started = True
                 trade = self._ib.placeOrder(contract, order)
+                submitted_trade = trade
                 self._submitted_order_ids.add(int(trade.order.orderId or 0))
 
                 perm_deadline = time.monotonic() + PERM_ID_WAIT_SECONDS
@@ -517,9 +524,23 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     + BROKER_ACK_WAIT_SECONDS
                 ),
             )
-        except (ConnectionError, TimeoutError):
-            raise  # 透传给上层
         except Exception as e:
+            if send_started:
+                raw = {"broker": "ibkr", "action": "place_order_result_unknown",
+                       "order_ref": request.local_order_id,
+                       "dispatch_error_type": type(e).__name__}
+                broker_id = None
+                if submitted_trade is not None:
+                    # Capture identity only; do not call the failed snapshot or
+                    # fabricate a reject/fill from incomplete local evidence.
+                    order = submitted_trade.order
+                    raw.update(order_id=order.orderId, perm_id=order.permId,
+                               observed_account_id=order.account,
+                               con_id=getattr(submitted_trade.contract, "conId", None))
+                    broker_id = str(order.permId or order.orderId) if (order.permId or order.orderId) else None
+                return OrderStatusUpdate(broker_id, request.local_order_id, "unknown", raw_response=raw)
+            if isinstance(e, (ConnectionError, TimeoutError)):
+                raise
             logger.warning("[IBKR] placeOrder 异常: %s", e)
             return self._rejected(
                 request,
