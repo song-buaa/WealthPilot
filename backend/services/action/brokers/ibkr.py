@@ -1138,37 +1138,36 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 return True
         return False
 
-    def cancel_order(self, broker_order_id: str) -> bool:
-        """取消订单。
+    def cancel_order_by_ref(self, order_ref, *, broker_order_id):
+        return self.cancel_order(broker_order_id, local_order_id=order_ref)
 
-        按 permId 在 trades() 反查 Trade 对象再 cancelOrder。
-        查不到/已终态返回 False，受理成功 True。
+    def cancel_order(self, broker_order_id: str, *, local_order_id="") -> bool:
+        """Only cancel a fresh account/ref match belonging to this API client.
+
+        Numeric orderIds are session/client scoped. They alone never authorize
+        cancellation after reconnect; do not bind another client's manual order.
         """
         if _is_live_read_only_account(self._account_id):
-            logger.warning("[IBKR] 真实账户只读模式禁止撤单")
             return False
-
+        if not local_order_id:
+            raise ValueError("CANCEL_REQUIRES_DURABLE_ORDER_REF")
         self._ensure_connected()
-        try:
-            broker_id = int(broker_order_id)
-        except (TypeError, ValueError):
-            return False
-
-        def cancel_on_loop() -> bool:
-            for trade in self._ib.trades():
-                if trade.order.permId == broker_id or trade.order.orderId == broker_id:
-                    if trade.orderStatus.status in ("Filled", "Cancelled", "ApiCancelled"):
-                        return False
-                    # Inactive 可能是临时状态，仍尝试撤单
-                    self._ib.cancelOrder(trade.order)
-                    return True
-            return False
-
-        try:
-            return self._run_on_loop(cancel_on_loop)
-        except Exception as e:
-            logger.warning("[IBKR] cancelOrder 异常: %s", e)
-            return False
+        async def cancel_on_loop():
+            trades = await self._read_open_trades(all_clients=True)
+            selected = [trade for trade in trades if trade.order.orderRef == local_order_id]
+            if len(selected) != 1:
+                return False
+            trade = selected[0]
+            observed_id = trade.order.permId or trade.order.orderId
+            if str(broker_order_id) != str(observed_id):
+                return False
+            if int(trade.order.clientId) != self._client_id:
+                raise ConnectionError("CANCEL_REQUIRES_ORIGINAL_API_CLIENT")
+            if trade.orderStatus.status in {"Filled", "Cancelled", "ApiCancelled"}:
+                return False
+            self._ib.cancelOrder(trade.order)
+            return True
+        return self._run_on_loop(cancel_on_loop)
 
     def get_order_status(self, broker_order_id: str) -> OrderStatusUpdate:
         """查询订单最新状态。

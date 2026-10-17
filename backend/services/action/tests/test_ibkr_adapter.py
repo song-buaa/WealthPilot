@@ -1221,21 +1221,21 @@ class TestCancelOrder:
 
     def test_cancel_found_by_perm_id(self):
         adapter = _make_adapter()
-        trade = _make_mock_trade(perm_id=555, status="Submitted")
-        adapter._ib.trades.return_value = [trade]
-        assert adapter.cancel_order("555") is True
+        trade = _make_mock_trade(perm_id=555, order_ref="wp-cancel", status="Submitted")
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[trade])
+        assert adapter.cancel_order("555", local_order_id="wp-cancel") is True
         adapter._ib.cancelOrder.assert_called_once()
 
     def test_cancel_not_found(self):
         adapter = _make_adapter()
-        adapter._ib.trades.return_value = []
-        assert adapter.cancel_order("999") is False
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
+        assert adapter.cancel_order("999", local_order_id="wp-cancel") is False
 
     def test_cancel_already_filled(self):
         adapter = _make_adapter()
-        trade = _make_mock_trade(perm_id=555, status="Filled")
-        adapter._ib.trades.return_value = [trade]
-        assert adapter.cancel_order("555") is False
+        trade = _make_mock_trade(perm_id=555, order_ref="wp-cancel", status="Filled")
+        adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[trade])
+        assert adapter.cancel_order("555", local_order_id="wp-cancel") is False
 
 
 # ═══════════════════════════════════════════════════════════════════

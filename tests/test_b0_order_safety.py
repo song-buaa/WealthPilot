@@ -257,3 +257,13 @@ def test_broker_price_precision_matches_existing_numeric_scale_without_false_cor
         order = manager.get_order(order_id)
         assert order.status == "partially_filled"
         assert not json.loads(order.raw_broker_response).get("reconciliation_disputed")
+
+
+def test_cancel_owner_mismatch_is_blocked_before_broker_mutation(rig):
+    factory, broker, strategy, params = rig
+    with factory() as db:
+        manager = OrderManager(db, broker)
+        order = manager.place_order(strategy, params)
+        broker._account_id = 'DIFFERENT-ACCOUNT'
+        with pytest.raises(ValueError, match='OWNER_MISMATCH'):
+            manager.cancel_order(order.id)

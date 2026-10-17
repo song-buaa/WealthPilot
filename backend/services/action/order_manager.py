@@ -413,7 +413,7 @@ class OrderManager:
         """撤销订单 — 先通知券商，再按真实结果更新本地状态。
 
         分流逻辑（撤单受理 ≠ 已撤销）：
-        - 无 broker_order_id（从未提交）→ 仅本地置 CANCELLED
+        - 无 ID/历史 owner 不明 → 只读恢复，不推定未发送
         - 已终态 → 拒绝，抛 ValueError
         - 有 broker_order_id 且非终态 → 调 adapter.cancel_order()：
           a) True（受理）→ 立即 sync 确认真实状态
@@ -442,12 +442,23 @@ class OrderManager:
             return result
 
         self._assert_broker_io_unlocked()
-        # 有 broker_order_id → 先通知券商
+        if self.broker_adapter.broker_name != order.broker_name:
+            raise ValueError("BROKER_OWNER_MISMATCH")
+        if order.broker_name not in {"mock", "stub"}:
+            if not order.portfolio_id or not order.broker_account_id:
+                result = self.sync_order_status(order.id)
+                self._audit("legacy_cancel_requires_owner_review", {"order_id": order.id})
+                return result
+            from backend.services.action.ownership import execution_owner
+            owner = execution_owner(self.session, self.broker_adapter)
+            if owner.portfolio_id != order.portfolio_id or owner.account_id != order.broker_account_id:
+                raise ValueError("BROKER_OWNER_MISMATCH")
         try:
-            accepted = self.broker_adapter.cancel_order(order.broker_order_id)
+            cancel_by_ref = getattr(self.broker_adapter, "cancel_order_by_ref", None)
+            accepted = (cancel_by_ref(order.id, broker_order_id=order.broker_order_id)
+                        if callable(cancel_by_ref) else self.broker_adapter.cancel_order(order.broker_order_id))
         except (ConnectionError, TimeoutError) as e:
             # 分支 c: 网络异常，无法确认撤单结果
-            validate_order_transition(order.status, OrderStatus.UNKNOWN)
             order.status = OrderStatus.UNKNOWN
             self._audit("cancel_network_error", {
                 "order_id": order_id,

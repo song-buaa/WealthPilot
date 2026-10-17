@@ -132,3 +132,21 @@ def test_fractional_broker_cumulative_quantity_is_not_silently_floored():
     trade.orderStatus.filled = 1.5
     snapshot = ib._snapshot_trade(trade)
     assert snapshot["filled_quantity"] == 1.5
+
+
+def test_cancel_matches_fresh_account_ref_and_never_bare_id_or_other_client():
+    ib = adapter()
+    with pytest.raises(ValueError, match='DURABLE_ORDER_REF'):
+        ib.cancel_order('99')
+    trade = completed_trade()
+    trade.orderStatus.status = 'Submitted'
+    trade.order.clientId = 1
+    other = completed_trade(account='OTHER-ACCOUNT', ref='wrong-ref')
+    ib._ib.reqAllOpenOrdersAsync.return_value = [other, trade]
+    assert ib.cancel_order_by_ref('stable-order-ref', broker_order_id='99')
+    ib._ib.cancelOrder.assert_called_once_with(trade.order)
+    ib._ib.cancelOrder.reset_mock()
+    trade.order.clientId = 2
+    with pytest.raises(ConnectionError, match='ORIGINAL_API_CLIENT'):
+        ib.cancel_order_by_ref('stable-order-ref', broker_order_id='99')
+    ib._ib.cancelOrder.assert_not_called()
