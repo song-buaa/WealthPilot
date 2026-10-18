@@ -93,7 +93,7 @@ class Position(BaseModel):
 
 
 def is_cash_balance(position):
-    """Identify cash facts/ambiguous legacy cash, never classify funds as cash balances."""
+    """Screen cash collisions; never assign classification or infer an owner."""
     from collections.abc import Mapping
     get = position.get if isinstance(position, Mapping) else lambda key: getattr(position, key, None)
     vehicle = str(get("vehicle_type") or "").upper()
@@ -105,7 +105,7 @@ def is_cash_balance(position):
     currency = str(get("currency") or "").upper()
     currency_only = all(not code or currency and code in {currency, currency+":FX"} for code in codes)
     return (currency_only and vehicle in {"", "UNKNOWN"}
-            and (get("economic_asset_class") == "CASH" or get("asset_class") == "货币"))
+            and (get("economic_asset_class") == "CASH" or get("asset_class") in {"货币", "现金", "cash"}))
 
 
 def cash_position(broker, account_id, currency, amount, snapshot_time):

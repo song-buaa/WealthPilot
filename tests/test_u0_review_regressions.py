@@ -151,9 +151,10 @@ def test_r01_independent_known_owner_and_money_fund_are_not_claimed(db):
 
 
 @pytest.mark.parametrize('ticker',[None,'USD'])
-def test_r01_untyped_legacy_cash_requires_owner_evidence(db,ticker):
+@pytest.mark.parametrize('asset_class',['货币','现金','cash'])
+def test_r01_untyped_legacy_cash_requires_owner_evidence(db,ticker,asset_class):
     row=legacy_cash(ticker=ticker,symbol=None,vehicle_type=None,broker_security_type=None,
-        economic_asset_class=None,currency='USD')
+        economic_asset_class=None,currency='USD',asset_class=asset_class)
     db.add(row);db.commit();before=facts(db)
     with pytest.raises(ValueError,match='CASH_IDENTITY_COLLISION_REQUIRES_REVIEW'):
         PositionSnapshotRepository(db).synchronize('tiger','fixture',lambda:[
