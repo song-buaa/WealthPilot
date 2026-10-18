@@ -92,9 +92,25 @@ class Position(BaseModel):
     )
 
 
+def is_cash_balance(position):
+    """Identify cash facts/ambiguous legacy cash, never classify funds as cash balances."""
+    from collections.abc import Mapping
+    get = position.get if isinstance(position, Mapping) else lambda key: getattr(position, key, None)
+    vehicle = str(get("vehicle_type") or "").upper()
+    if vehicle == "CASH" or str(get("broker_security_type") or "").upper() == "CASH":
+        return True
+    codes = [str(get(key) or "").upper() for key in ("symbol", "ticker", "raw_symbol")]
+    if any(code.startswith("CASH-") for code in codes):
+        return True
+    currency = str(get("currency") or "").upper()
+    currency_only = all(not code or currency and code in {currency, currency+":FX"} for code in codes)
+    return (currency_only and vehicle in {"", "UNKNOWN"}
+            and (get("economic_asset_class") == "CASH" or get("asset_class") == "货币"))
+
+
 def cash_position(broker, account_id, currency, amount, snapshot_time):
     """One native currency fact, including confirmed zero/negative balances."""
-    from utils.symbol import normalize_symbol
+    from backend.utils.symbol import normalize_symbol
     from backend.services.instruments.classification import (
         AssetClassificationEvidence, classify_instrument, broker_position_classification_fields)
     currency = str(currency).upper()

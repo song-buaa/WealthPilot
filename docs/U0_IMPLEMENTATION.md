@@ -11,7 +11,7 @@
 | `restricted_sync.SyncExecutor` / `broker_sync` API | 统一完整 backend、手动、原 22:00、restricted 入口；显式 Portfolio 和已解析账户；数据库认领先于源构造/I/O。内存锁只是优化，跨进程正确性不靠锁。未配置源写 failed，manual all 继续已配置源；未新增 scheduler |
 | 原 Repository / SnapshotRun | BEGIN IMMEDIATE 短事务提交 token/300 秒租约；发布重新读取并验证 owner/token/租约，快照、业务行、success 同事务提交。失败只更新自己的 running。并发返回 busy，过期后下一请求才创建新 run；不把旧 run 改写为新成功 |
 | 原 Upsert | 发布前校验 scope、重复 canonical symbol（含同 symbol 不同币种）；FX 在写事务前冻结。异常空/部分读取/重复/冲突拒绝发布；保留 last-good。现有 name backfill 收窄到当前 Portfolio 的当前接收账户，同事务提交 |
-| Tiger | STK、FUND、prime assets 任一缺失都失败；一次取原币 cash_balance，与持仓同 run 持久化，排除 BASE，零/负余额保留。空证券还须 summary 的 market_value=0 独立证明；仅覆盖 STK/FUND/CASH，不清理未覆盖旧证券 |
+| Tiger | STK、FUND、prime assets 任一缺失都失败；一次取原币 cash_balance，与持仓同 run 持久化，排除 BASE，零/负余额保留。逐条校验 STK/FUND 原始 account 及 prime assets.account；缺失/混合/不匹配均拒绝。空证券还须 SDK 3.5.8 Segment.gross_position_value 有限且为 0 的独立证明；仅覆盖 STK/FUND/CASH，不清理未覆盖旧证券 |
 | IBKR / 历史 snowball | 保持 broker=snowball、source_channel=ibkr 和同实际账户；原 adapter 在已等待 accountDownloadEnd 后标明完成。空证券须此证据，缺现金拒绝发布。完整 backend 仅注入原 SDK loop 的只读 facade，不改交易开关 |
 | Futu / Guojin | 仍用原适配器；Futu 指定真实 acc_id、保留 HK 覆盖外旧行；Guojin owner 预先由显式配置或已唯一归属的历史证据解析，并核对返回行，不再 I/O 后换 owner。原 QMT 特殊 stale 规则保留，未接入新源 |
 | FXService | 结构化 FXQuote；latest TTL 300 秒、失败/降级 15 秒，来源日超过 4 个日历日 stale。失败保留 last-good 原日期；硬编码仅明示 fallback；未知无 1:1。非零估值缺 rate 则全账户保留 last-good；零事实可保留但 rate=NULL，禁止 ORM 默认填 1 |
@@ -83,3 +83,33 @@ PYTHON_DOTENV_DISABLED=1 "$PYTHON" scripts/migrate_b0_safety.py verify --stage u
 - U2 复用同 owner 的 claim/publication；仍需订单事务内 reserve、水位/覆盖证明、持久重试与崩溃补扫。不能在原订单观察事务直接调用本批会 commit 的 synchronize，也不能把任意 run success 当成交已覆盖。
 
 本轮不合并、不迁移、不部署、不接 QMT、不启动 U1/U2。
+
+
+## 7. PR #22 定向修复及现金存量核对
+
+- **R02 来源账户**：Tiger 在适配前逐条验证原 SDK Position.account，Adapter 再验证并保留实际源身份；不得从配置补造缺失账号。prime assets 的实际 account 也必须可证明且相同。错误/缺失身份整次失败，原 Last-good 和历史快照不变。
+- **R01 现金碰撞**：原 Upsert 在同 Portfolio 内检查现金余额记录。只有同 owner/api/canonical symbol/currency 的唯一行可更新；未知归属、同 owner 导入现金、重复 API 或币种/身份矛盾均 `CASH_IDENTITY_COLLISION_REQUIRES_REVIEW`。已明确属于其他账户的独立现金不认领；货币基金不是原币现金余额。无 symbol/仅币种代码的旧货币记录保守作为待核实现金，不按平台/名称证明归属。自动历史接管明确排除现金，首次成功 run 也不能成为接管手工现金的依据。
+- **I01 合法空仓**：真实 tigeropen 3.5.8 Segment 使用 gross_position_value。合法零证券加非零现金可正常发布；缺字段、NaN/Inf、非零 gross 或 owner 不明仍失败。不能用虚构的 market_value 测试属性替代实际 SDK 合同。
+
+### 显式同笔现金映射
+
+仅在人工核实同一笔现金后，复用原迁移工具 `--stage u0 --corrections "$CASH_CORRECTIONS"`。**本轮只在合成库演练，没有生产订正授权。** 每项请求必须含：
+
+```json
+{
+  "kind": "cash_owner",
+  "position_id": 123,
+  "expected_fingerprint": "<通过 row_fingerprint 私下生成的整行 SHA256>",
+  "broker": "tiger",
+  "account_id": "<人工核实的实际账户，仅私有文件>",
+  "currency": "CNY",
+  "confirmed_same_cash": true,
+  "evidence_ref": "<私有账户核对记录引用>"
+}
+```
+
+这不是同步客户端参数或自动匹配规则。plan 要求原行确属本 Portfolio 的现金事实、币种一致、旧 owner 为空或已经同一 owner、完整指纹匹配、没有其他 canonical 目标/同账户现金碰撞；同一计划多个源映射同一目标也拒绝。克隆及真实事务再次验证；旧 owner 指向另一账户、缺证明或目标已存在时停止，不自动合并/删除。需要处置已有重复数据时另作人工核对与明确订正授权，不能利用此映射覆盖现有 API 行。
+
+apply 仅更新指定原行的 broker/account/source 与 canonical symbol/ticker，保留 ID、金额、数量、成本、名称及其他事实；原行在后续同步中更新，不再插入第二条。证明及整行 CAS 留在不可变 plan/receipt；不增加 Schema 或现金账本。第一次真实同步的金额变动应按旧手工记录、来源现金、FX 分别核对，不将新增 CASH 行解释为财富增加。独立现金维持原真实归属；归属仍未知则保持阻断，不猜测配置账户。
+
+验证入口：[三项评审回归](../tests/test_u0_review_regressions.py)、[显式映射/CAS/碰撞演练](../tests/test_u0_schema_migration.py)。使用实际 SDK Position/PortfolioAccount/Segment 类型，覆盖账户错误/混合/缺失、首次/二次/重试现金碰撞、独立现金、合法空仓及异常 Last-good。浏览器/受限端原合成 000001 持仓修正为 COMMON_STOCK；不再把普通证券伪造为 CASH 来绕过现金合同。

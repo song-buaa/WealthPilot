@@ -1,5 +1,6 @@
 """老虎证券持仓同步服务。"""
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
 
@@ -82,9 +83,17 @@ class TigerSyncService:
         if stk_positions is None or fund_positions is None:
             raise ValueError("INCOMPLETE_SOURCE")
         sdk_positions = list(stk_positions) + list(fund_positions)
+        for position in sdk_positions:
+            source_account = getattr(position, "account", None)
+            if source_account is None or not str(source_account).strip():
+                raise ValueError("SOURCE_ACCOUNT_UNPROVEN")
+            if str(source_account) != self.account_id:
+                raise ValueError("MIXED_SNAPSHOT_SCOPE")
         assets = trade_client.get_prime_assets(account=self.account_id)
         observed = getattr(assets, "account", None) or getattr(assets, "account_id", None)
-        if observed and str(observed) != self.account_id:
+        if observed is None or not str(observed).strip():
+            raise ValueError("SOURCE_ACCOUNT_UNPROVEN")
+        if str(observed) != self.account_id:
             raise ValueError("MIXED_SNAPSHOT_SCOPE")
         segment = assets.segments.get("S") if assets and getattr(assets, "segments", None) else None
         balances = getattr(segment, "currency_assets", None)
@@ -92,8 +101,14 @@ class TigerSyncService:
             raise ValueError("INCOMPLETE_SOURCE")
         # Empty securities need independent account-summary confirmation. A cash
         # row must not accidentally hide an anomalous empty holdings response.
-        if not sdk_positions and getattr(segment, "market_value", None) != 0:
-            raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
+        if not sdk_positions:
+            # tigeropen 3.5.8 Segment exposes gross_position_value, not market_value.
+            try:
+                gross = Decimal(str(getattr(segment, "gross_position_value", None)))
+            except (InvalidOperation, ValueError):
+                raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW") from None
+            if not gross.is_finite() or gross != 0:
+                raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
         from services.broker_sync.schema import cash_position
         positions = self.adapter.to_positions(sdk_positions, snapshot_time)
         for currency, item in balances.items():

@@ -90,6 +90,11 @@ class TigerAdapter:
         if snapshot_time is None:
             snapshot_time = datetime.now(timezone.utc)
 
+        source_account = getattr(sdk_position, "account", None)
+        if source_account is None or not str(source_account).strip():
+            raise ValueError("SOURCE_ACCOUNT_UNPROVEN")
+        if str(source_account) != self.account_id:
+            raise ValueError("MIXED_SNAPSHOT_SCOPE")
         contract = sdk_position.contract
         currency = contract.currency
         raw_symbol = contract.symbol.lstrip("'") if hasattr(contract, "symbol") else ""
@@ -122,7 +127,7 @@ class TigerAdapter:
 
         return Position(
             broker=self.BROKER_NAME,
-            account_id=self.account_id,
+            account_id=str(source_account),
             symbol=self.normalize_symbol(raw_symbol, currency),
             raw_symbol=raw_symbol,
             name=getattr(contract, "name", None) or raw_symbol,

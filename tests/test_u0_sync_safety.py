@@ -188,8 +188,8 @@ def test_tiger_sdk_none_or_missing_cash_fails_without_publication(monkeypatch):
     client=SimpleNamespace(get_positions=lambda **kw:None)
     service._ensure_trade_client=lambda:client
     with pytest.raises(ValueError,match='INCOMPLETE'):service.fetch_positions()
-    client.get_positions=lambda **kw:[1] if kw['sec_type']=='STK' else []
-    client.get_prime_assets=lambda **kw:SimpleNamespace(segments={'S':SimpleNamespace(currency_assets={})})
+    client.get_positions=lambda **kw:[SimpleNamespace(account='fixture')] if kw['sec_type']=='STK' else []
+    client.get_prime_assets=lambda **kw:SimpleNamespace(account='fixture',segments={'S':SimpleNamespace(currency_assets={})})
     with pytest.raises(ValueError,match='INCOMPLETE'):service.fetch_positions()
     client.get_prime_assets=lambda **kw:SimpleNamespace(account='wrong',segments={})
     with pytest.raises(ValueError,match='MIXED'):service.fetch_positions()
@@ -200,7 +200,7 @@ def test_tiger_sdk_cash_rows_are_native_and_readonly_guard_is_intrinsic(monkeypa
     service=TigerSyncService.__new__(TigerSyncService);service.account_id='fixture'
     service.adapter=SimpleNamespace(to_positions=lambda rows,stamp:[source()])
     calls=[]
-    client=SimpleNamespace(get_positions=lambda **kw:([1] if kw['sec_type']=='STK' else []),
+    client=SimpleNamespace(get_positions=lambda **kw:([SimpleNamespace(account='fixture')] if kw['sec_type']=='STK' else []),
         get_prime_assets=lambda **kw:(calls.append(kw) or SimpleNamespace(account='fixture',segments={
             'S':SimpleNamespace(currency_assets={'USD':SimpleNamespace(cash_balance=Decimal('12.5')),
                 'CNY':SimpleNamespace(cash_balance=0),'BASE':SimpleNamespace(cash_balance=9999)})})))

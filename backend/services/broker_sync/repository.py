@@ -227,7 +227,8 @@ class PositionSnapshotRepository:
                 # Stable codes only: provider messages can contain credentials/account IDs.
                 code = str(exc) if str(exc) in {"EMPTY_SOURCE_REQUIRES_REVIEW", "INCOMPLETE_SOURCE",
                     "FX_RATE_UNAVAILABLE", "DUPLICATE_SNAPSHOT_IDENTITY", "MIXED_SNAPSHOT_SCOPE",
-                    "SYNC_CLAIM_EXPIRED_OR_REPLACED", "ACCOUNT_PORTFOLIO_AMBIGUOUS"} else "SYNC_SOURCE_FAILED"
+                    "SYNC_CLAIM_EXPIRED_OR_REPLACED", "ACCOUNT_PORTFOLIO_AMBIGUOUS",
+                    "SOURCE_ACCOUNT_UNPROVEN", "CASH_IDENTITY_COLLISION_REQUIRES_REVIEW"} else "SYNC_SOURCE_FAILED"
                 self.mark_run_failed(run_id, code, attempt)
                 raise ValueError(code) from None
 

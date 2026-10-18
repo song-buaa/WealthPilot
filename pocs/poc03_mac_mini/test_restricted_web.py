@@ -32,7 +32,7 @@ from services.broker_sync.models import PositionSnapshotRun
 
 def position(value=2500, account="fixture-account"):
     return Position(broker="guojin", account_id=account, symbol="000001:CN", raw_symbol="000001",
-        name="合成持仓", asset_class="cash", vehicle_type="CASH", economic_asset_class="CASH",
+        name="合成持仓", asset_class="equity", vehicle_type="COMMON_STOCK", economic_asset_class="EQUITY",
         classification_source="USER_EXPLICIT", classification_verification_status="EXPLICIT",
         market="CN", quantity=Decimal(1), avg_cost=Decimal(value), cost_method="weighted_average",
         cost_basis=Decimal(value), current_price=Decimal(value), market_value=Decimal(value), currency="CNY",

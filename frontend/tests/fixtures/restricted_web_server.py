@@ -45,7 +45,7 @@ def factory(broker):
     service = GuojinSyncService.__new__(GuojinSyncService)
     service.adapter = SimpleNamespace(account_id="synthetic")
     position = SnapshotPosition(broker="guojin", account_id="synthetic", symbol="000001:CN", raw_symbol="000001",
-        name="合成同步资产", asset_class="cash", vehicle_type="CASH", economic_asset_class="CASH",
+        name="合成同步资产", asset_class="equity", vehicle_type="COMMON_STOCK", economic_asset_class="EQUITY",
         classification_source="USER_EXPLICIT", classification_verification_status="EXPLICIT",
         market="CN", quantity=Decimal(1), avg_cost=Decimal(2500), cost_method="weighted_average",
         cost_basis=Decimal(2500), current_price=Decimal(2500), market_value=Decimal(2500), currency="CNY",

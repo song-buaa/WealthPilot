@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.fx_service import fx_service
 from app.models import Position as BusinessPosition
 from services.broker_sync.models import PositionSnapshot
+from services.broker_sync.schema import is_cash_balance
 from backend.services.instruments.classification import (
     AssetClassification,
     AssetClassificationEvidence,
@@ -150,6 +151,9 @@ class PositionUpsertService:
             account_id=account_id,
             sync_source=sync_source,
         )
+        for snap in snap_list:
+            if is_cash_balance(snap):
+                self._validate_cash_identity(snap)
 
         from services.broker_sync.models import PositionSnapshotRun
         for scope_broker, scope_account, scope_source in scopes:
@@ -272,6 +276,8 @@ class PositionUpsertService:
             .all()
         )
         for (symbol,) in historical_symbols:
+            if symbol.upper().startswith("CASH-"):
+                continue  # new sync history is not evidence of a manual cash row's owner
             ticker = self._denormalize_ticker(symbol)
             legacy = self._business_query().filter_by(
                 ticker=ticker,
@@ -280,7 +286,7 @@ class PositionUpsertService:
                 broker_account_id=None,
                 sync_source=None,
             ).first()
-            if legacy is not None:
+            if legacy is not None and not is_cash_balance(legacy):
                 legacy.broker = broker
                 legacy.broker_account_id = account_id
                 legacy.sync_source = sync_source
@@ -320,6 +326,27 @@ class PositionUpsertService:
             self.session.delete(pos)
         return len(stale)
 
+    def _validate_cash_identity(self, snap):
+        """Ambiguous legacy/imported cash requires an explicit offline mapping."""
+        matches = []
+        for row in self._business_query().all():
+            if not is_cash_balance(row):
+                continue
+            owner_known = bool(row.broker and row.broker_account_id)
+            same_owner = (row.broker, row.broker_account_id) == (snap.broker, snap.account_id)
+            if owner_known and not same_owner:
+                continue
+            currency = str(row.currency or "").upper()
+            if currency and currency != snap.currency and row.symbol != snap.symbol:
+                continue
+            exact = (same_owner and row.sync_source == "api" and row.symbol == snap.symbol
+                     and row.currency == snap.currency)
+            if not exact:
+                raise ValueError("CASH_IDENTITY_COLLISION_REQUIRES_REVIEW")
+            matches.append(row.id)
+        if len(matches) > 1:
+            raise ValueError("CASH_IDENTITY_COLLISION_REQUIRES_REVIEW")
+
     def _upsert_single(self, snap: PositionSnapshot) -> bool:
         """单条 upsert。返回 True 表示新增,False 表示更新。"""
         from services.broker_sync.models import PositionSnapshotRun
@@ -330,6 +357,8 @@ class PositionUpsertService:
             raise ValueError("SNAPSHOT_OWNER_MISMATCH")
         if run.context_json and (run.status != "running" or self.session.info.get("sync_publish_run_id") != run.id):
             raise ValueError("SYNC_PUBLICATION_REQUIRED")
+        if is_cash_balance(snap):
+            self._validate_cash_identity(snap)
         conflict = self.session.query(BusinessPosition.id).filter(
             BusinessPosition.broker == snap.broker, BusinessPosition.broker_account_id == snap.account_id,
             BusinessPosition.portfolio_id != self.portfolio_id).first()
@@ -377,7 +406,7 @@ class PositionUpsertService:
 
         # 旧库升级后的首轮同步：只有存在相同 scope 的历史 snapshot 证据时，
         # 才接管旧的 platform+ticker 行，避免把手工/CSV 行误认作 API 持仓。
-        if existing is None:
+        if existing is None and not is_cash_balance(snap):
             has_snapshot_evidence = self.session.query(PositionSnapshot.id).join(
                 PositionSnapshotRun, PositionSnapshot.run_id == PositionSnapshotRun.id).filter(
                 PositionSnapshotRun.portfolio_id == self.portfolio_id,

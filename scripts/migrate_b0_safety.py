@@ -106,6 +106,53 @@ def identity_plan(conn, requests, portfolio_id):
     return result
 
 
+def cash_owner_plan(conn, requests, portfolio_id):
+    """Operator-attested same-cash mapping, exact-row CAS; never merge duplicates."""
+    from backend.services.broker_sync.schema import cash_position, is_cash_balance
+    previous_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    result, sources, targets = [], set(), set()
+    try:
+        for item in requests:
+            if (item.get("kind") != "cash_owner" or item.get("confirmed_same_cash") is not True
+                    or not isinstance(item.get("evidence_ref"), str) or not item["evidence_ref"].strip()):
+                raise ValueError("EXPLICIT_CASH_MAPPING_EVIDENCE_REQUIRED")
+            if item["position_id"] in sources:
+                raise ValueError("DUPLICATE_POSITION_CORRECTION")
+            sources.add(item["position_id"])
+            row = conn.execute("SELECT * FROM positions WHERE id=?", (item["position_id"],)).fetchone()
+            if row is None or row_fingerprint(row) != item["expected_fingerprint"]:
+                raise ValueError("POSITION_CAS_MISMATCH")
+            account = item.get("account_id")
+            broker = item.get("broker")
+            if (broker not in {"tiger", "snowball", "futu", "guojin"}
+                    or not isinstance(account, str) or not account.strip() or len(account) > 50
+                    or account in {"pending", "unknown", "__unconfigured__"}):
+                raise ValueError("POSITION_OWNER_UNPROVEN")
+            if (row["portfolio_id"] != portfolio_id or row["currency"] != item.get("currency")
+                    or not is_cash_balance(dict(row))):
+                raise ValueError("CASH_IDENTITY_UNPROVEN")
+            if (row["broker"], row["broker_account_id"]) not in {(None, None), (broker, account)}:
+                raise ValueError("POSITION_OWNER_UNPROVEN")
+            target = cash_position(broker, account, item["currency"], 0, datetime.now(timezone.utc))
+            identity = (portfolio_id, broker, account, target.symbol, item["currency"])
+            if identity in targets or any(
+                    is_cash_balance(dict(other)) and (other["currency"] == item["currency"] or other["symbol"] == target.symbol)
+                    for other in conn.execute("SELECT * FROM positions WHERE portfolio_id=? AND broker=? AND broker_account_id=? AND id<>?",
+                        (portfolio_id, broker, account, row["id"]))):
+                raise ValueError("CASH_IDENTITY_COLLISION_REQUIRES_REVIEW")
+            if conn.execute("SELECT 1 FROM positions WHERE broker=? AND broker_account_id=? AND portfolio_id<>?",
+                    (broker, account, portfolio_id)).fetchone() or conn.execute(
+                    "SELECT 1 FROM position_snapshot_runs WHERE broker=? AND account_id=? AND portfolio_id<>?",
+                    (broker, account, portfolio_id)).fetchone():
+                raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
+            targets.add(identity)
+            result.append({**item, "symbol": target.symbol, "ticker": target.raw_symbol})
+        return result
+    finally:
+        conn.row_factory = previous_factory
+
+
 def apply_corrections(conn, corrections):
     previous_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
@@ -113,8 +160,12 @@ def apply_corrections(conn, corrections):
         row = conn.execute("SELECT * FROM positions WHERE id=?", (item["position_id"],)).fetchone()
         if row is None or row_fingerprint(row) != item["expected_fingerprint"]:
             raise ValueError("POSITION_CAS_MISMATCH")
-        conn.execute("UPDATE positions SET symbol=?, ticker=? WHERE id=?",
-                     (item["symbol"], item["ticker"], item["position_id"]))
+        if item.get("kind") == "cash_owner":
+            conn.execute("UPDATE positions SET symbol=?,ticker=?,broker=?,broker_account_id=?,sync_source='api' WHERE id=?",
+                (item["symbol"], item["ticker"], item["broker"], item["account_id"], item["position_id"]))
+        else:
+            conn.execute("UPDATE positions SET symbol=?, ticker=? WHERE id=?",
+                         (item["symbol"], item["ticker"], item["position_id"]))
     # Independently verify the affected identities in the post-correction clone
     # and again in the live migration transaction. Digest/inventory is not a
     # business uniqueness guarantee. Never merge/delete/overwrite a collision.
@@ -138,9 +189,8 @@ def make_plan(database, contract_path, corrections=()):
         expected = sum(len(cols) for cols in SCHEMA_COLUMNS.values())
         if existing not in {0, expected} or (existing == expected and statements):
             raise ValueError("PARTIAL_B0_SCHEMA_REQUIRES_RECEIPT_RECOVERY")
-        if MIGRATION_STAGE == "u0" and corrections:
-            raise ValueError("U0_HAS_NO_POSITION_CORRECTIONS")
-        corrections = identity_plan(source, corrections, contract["portfolio_id"])
+        corrections = (cash_owner_plan if MIGRATION_STAGE == "u0" else identity_plan)(
+            source, corrections, contract["portfolio_id"])
         with closing(sqlite3.connect(":memory:")) as clone:
             source.backup(clone)
             for statement in statements:

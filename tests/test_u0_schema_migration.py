@@ -69,3 +69,71 @@ def test_u0_interrupted_contract_recovery_and_new_fact_restore_refusal(deployed_
     with closing(sqlite3.connect(db)) as c:c.execute("UPDATE portfolios SET name='new-fact' WHERE id=7");c.commit()
     with pytest.raises(ValueError,match='BUSINESS_WRITES'):cli.restore_prewrite(db,contract,root/'receipt.json',root/'never.db',writers_stopped=True)
     assert verify(db,contract)
+
+
+def cash_request(cli,db):
+    with closing(sqlite3.connect(db)) as c:
+        cursor=c.execute("INSERT INTO positions(portfolio_id,name,ticker,symbol,platform,asset_class,vehicle_type,broker_security_type,currency,quantity,cost_price,current_price,market_value_cny,original_value,segment) VALUES(7,'legacy cash','CASH-CNY','CASH-CNY:CN','manual','货币','CASH','CASH','CNY',100,1,1,100,100,'投资')")
+        row_id=cursor.lastrowid
+        c.commit();c.row_factory=sqlite3.Row;row=c.execute('SELECT * FROM positions WHERE id=?',(row_id,)).fetchone()
+        return dict(kind='cash_owner',position_id=row['id'],expected_fingerprint=cli.row_fingerprint(row),
+            broker='tiger',account_id='fixture',currency='CNY',confirmed_same_cash=True,evidence_ref='synthetic-account-reconciliation')
+
+
+def test_explicit_cash_mapping_preserves_facts_and_reuses_row_on_sync(deployed_b0):
+    from sqlalchemy.orm import Session
+    from services.broker_sync.repository import PositionSnapshotRepository
+    from services.broker_sync.schema import cash_position
+    from app.models import Position
+    from datetime import datetime,timezone
+    cli,root,db,contract=deployed_b0
+    request=cash_request(cli,db)
+    with closing(sqlite3.connect(db)) as c:
+        c.row_factory=sqlite3.Row;before=dict(c.execute('SELECT * FROM positions').fetchone())
+    p=cli.make_plan(db,contract,[request])
+    assert len(p['ddl'])==2 and p['corrections'][0]['kind']=='cash_owner'
+    cli.apply_plan(db,contract,p,root/'before.db',root/'receipt.json',writers_stopped=True)
+    with closing(sqlite3.connect(db)) as c:
+        c.row_factory=sqlite3.Row;after=dict(c.execute('SELECT * FROM positions').fetchone())
+    changed={'broker','broker_account_id','sync_source','ticker','symbol'}
+    assert {k:v for k,v in before.items() if k not in changed}=={k:v for k,v in after.items() if k not in changed}
+    assert after['broker']=='tiger' and after['broker_account_id']=='fixture' and after['sync_source']=='api'
+    engine=create_engine('sqlite:///'+str(db))
+    with Session(engine,info={'portfolio_id':7}) as s:
+        for amount in [100,80,80]:
+            PositionSnapshotRepository(s).synchronize('tiger','fixture',lambda:[cash_position('tiger','fixture','CNY',amount,datetime.now(timezone.utc))],retries=0)
+        assert s.query(Position).count()==1 and s.query(Position).one().id==request['position_id']
+        assert s.query(Position).one().market_value_cny==80
+    engine.dispose()
+
+
+@pytest.mark.parametrize('failure',['attestation','fingerprint','duplicate_target','existing_api','cross_portfolio'])
+def test_cash_mapping_requires_proof_and_never_merges(deployed_b0,failure):
+    cli,root,db,contract=deployed_b0;request=cash_request(cli,db);requests=[request]
+    with closing(sqlite3.connect(db)) as c:
+        if failure=='existing_api':
+            c.execute("INSERT INTO positions(portfolio_id,name,platform,asset_class,vehicle_type,broker,broker_account_id,sync_source,symbol,currency) VALUES(7,'existing','test','货币','CASH','tiger','fixture','api','CASH-CNY:CN','CNY')")
+        elif failure=='cross_portfolio':
+            c.execute("INSERT INTO portfolios(id,name) VALUES(8,'other')")
+            c.execute("INSERT INTO positions(portfolio_id,name,platform,asset_class,broker,broker_account_id) VALUES(8,'other','test','货币','tiger','fixture')")
+        c.commit()
+    if failure=='attestation':request['confirmed_same_cash']=False
+    if failure=='fingerprint':request['expected_fingerprint']='0'*64
+    if failure=='duplicate_target':
+        second=cash_request(cli,db);requests.append(second)
+    with closing(sqlite3.connect(db)) as c:before=cli.inventory(c)
+    with pytest.raises(ValueError):cli.make_plan(db,contract,requests)
+    with closing(sqlite3.connect(db)) as c:assert cli.inventory(c)==before
+    assert not (root/'receipt.json').exists()
+
+
+def test_cash_mapping_plan_rejects_changed_row_before_any_apply(deployed_b0):
+    cli,root,db,contract=deployed_b0;request=cash_request(cli,db)
+    p=cli.make_plan(db,contract,[request])
+    with closing(sqlite3.connect(db)) as c:
+        c.execute('UPDATE positions SET market_value_cny=101 WHERE id=?',(request['position_id'],));c.commit()
+    with pytest.raises(ValueError,match='POSITION_CAS_MISMATCH'):
+        cli.apply_plan(db,contract,p,root/'not-created.db',root/'not-created.json',writers_stopped=True)
+    assert not (root/'not-created.db').exists() and not (root/'not-created.json').exists()
+    with closing(sqlite3.connect(db)) as c:
+        assert c.execute('SELECT broker,market_value_cny FROM positions').fetchone()==(None,101)

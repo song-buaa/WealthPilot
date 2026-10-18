@@ -35,4 +35,6 @@ PR #21 定向修复仍使用上述 owner：`existing_submission` 复用发送 ke
 
 U1 可复用 run id/last-good、来源/时间/币种/FX/质量，不得把单源 run id 当跨源一致 snapshot_id。U2 可复用同 owner 执行和发布，但成交事务内的 reserve、水位覆盖、崩溃补扫与持久重试仍需后续开发，当前不得从订单事务直接调用会 commit 的 synchronize。
 
+PR #22 修复：Tiger 原 SDK 账户逐条核验、真实 SDK 纯现金合同；Upsert 对旧现金/导入/API 碰撞阻断，不自动认领。已核实同笔现金走原离线迁移工具的显式 cash_owner 映射与整行 CAS，生产核对另行授权；没有新 Schema 或现金服务。回归见[定向安全测试](../tests/test_u0_review_regressions.py)。
+
 正式回归：[U0 安全测试](../tests/test_u0_sync_safety.py)、[U0 迁移演练](../tests/test_u0_schema_migration.py)，以及原 cash/upsert/restricted/readonly/browser 测试。迁移、证据及运行待验边界见 [U0 实现说明](U0_IMPLEMENTATION.md)。没有新增 MCP 工具、快照 payload、收益计算、公司映射或 QMT 接入。

@@ -17,6 +17,7 @@ def make_mock_position(symbol, currency, sec_type, quantity, avg_cost, market_pr
         name=name,
     )
     pos = SimpleNamespace(
+        account="4472659",
         contract=contract,
         quantity=quantity,
         average_cost=avg_cost,
