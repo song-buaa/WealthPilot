@@ -1,6 +1,6 @@
-# WealthPilot 4.0 当前生产架构
+# WealthPilot 当前系统架构
 
-> 2026-10-17：在现有 4.0 架构说明上整合工程 owner 与数据权威；代码核对基线 `bc19b66f724767b5fb36e1c74a2378942a537f81`。2026-10-16 的功能/部署记录保留为历史观察，本轮未访问生产。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-18：本次核对基线为已合入 B0 的 `12d9357f1543156db379a94ace8eb359c107c30e`；U0 为本 PR 开发候选，未部署。用户已确认 B0 正式生产部署，本轮仅核对已有发布记录，未访问生产。2026-10-16 的功能/部署记录保留为历史观察，本轮未访问生产。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -120,7 +120,7 @@ GitHub 为主要发布路径：固定完整 SHA、main ancestry 和 exact-commit
 | 已有投资持仓与账户归属 | [Position / Portfolio](../app/models.py)，由导入或 [broker_sync](../backend/services/broker_sync/position_upsert_service.py) 更新 | [PortfolioService](../backend/services/portfolio_service.py) / [analyzer](../app/analyzer.py) 聚合；本地快照不冒充实时券商账户。同步对账按 broker/account/source 范围，不能仅凭 ticker 跨账户覆盖 |
 | 券商实际订单、成交、实时资金 | 原 [IBKR](../backend/services/action/brokers/ibkr.py) / [Tiger](../backend/services/action/brokers/tiger.py) 返回的证据 | OrderManager 对账并持久化；本地状态是观察投影，失败/unknown 不推定无订单。执行资金另走 Batch 的新鲜原币 snapshot / cash ledger，不从财富净资产反推可买金额 |
 | IBKR 展示现金 | adapter `get_account_info` 的逐币种 CashBalance，经 [IBKRPortfolioAdapter](../backend/services/broker_sync/snowball/adapter.py) 转 CASH 持仓 | 排除 BASE 折算重复，沿用历史 broker=snowball / source_channel=ibkr，不新建第二套 IBKR 持仓；展示现金与可执行预算含义不同 |
-| Tiger 展示现金 | PortfolioService 的现有 Tiger cash 查询及虚拟行 | 汇总/positions 可包含实时现金；缺源当前可能降级为 0，不能据此确认真实余额。MCP 的 [SourceLogProbe](../pocs/poc02_wealth_mcp/reader.py) 保留缺源质量问题；不把这项遗留行为写成全局 fail-closed 已实现 |
+| Tiger 展示现金 | [TigerSyncService](../backend/services/broker_sync/tiger/sync_service.py) 读取逐币种 cash_balance，和持仓同 run 原子持久化为 CASH | U0 候选已移除 Portfolio/Web/MCP 的读时券商现金旁路与虚拟现金追加；不累计 BASE。缺源保留 last-good，不当成余额 0。零/负原币现金保留；执行预算仍走原交易资金权威 |
 | 个人财富及负债 | [WealthService](../backend/services/wealth_service.py) 的手工 WealthItem + 原 Portfolio 投资汇总 | 沿用 included_in_net_worth / already_investment_accounted 去重，养老金仅金额级。不能在财富模块复制持仓/收益权威；WealthSnapshot 是财富汇总快照，不是交易账本 |
 | 汇率、币种与分类 | [FXService](../app/fx_service.py)、[canonical classification](../backend/services/instruments/classification.py) | Web 金额字段与 MCP 最小单位契约分开（overview scale=2；details CNY 元/原币字段见契约）。secType=STK 不证明 Equity，未知分类保留 UNKNOWN，禁止前端/MCP 再映射一套分类 |
 | 配置/专业分析 | [AllocationService](../backend/services/allocation_service.py)、[原 PEER](../backend/services/decision_service_v3.py)、原 Skills 与模板 | 正值已分类投资持仓配置分母、单标投资权重和完整财富分别解释。ChatGPT 组织原专业结果，不替换其数值/证据 owner |
@@ -152,9 +152,9 @@ Web `wealth_service.get_summary` 会记录聚合快照；MCP overview 通过 [re
 - 架构/口径/状态权威变化同 PR 更新本文与对应契约；Registry 的具体维护触发条件及无能力变化豁免见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)，不在本文重复定义。重要架构决策在原专项设计或 PR 留可追溯记录。
 - 代码可验证关系与生产运行事实分开。对未知事件可靠性、源数据完整性或部署状态写待核实，不能凭接口 PASS、历史测试数或 CI 填补生产验收。详细流程见[治理文档](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)。
 
-## 11. B0 开发候选边界
+## 11. B0 已合入的代码边界
 
-本分支实现交易安全与作用域扩展，尚未部署生产。最终机制与隔离证据入口见 [B0 实现说明](B0_IMPLEMENTATION.md)，显式 Schema 迁移、停止条件和回滚见 [生产 Runbook](B0_PRODUCTION_RUNBOOK.md)。第 8、9 节的职责划分保持不变，以下 B0 规则覆盖其中旧实现细节。
+B0 已合入上述 main 基线，用户已确认正式生产部署；本轮不重复运行生产探测。最终机制与隔离证据入口见 [B0 实现说明](B0_IMPLEMENTATION.md)，显式 Schema 迁移、停止条件和回滚见 [生产 Runbook](B0_PRODUCTION_RUNBOOK.md)。第 8、9 节的职责划分保持不变，以下 B0 规则覆盖其中旧实现细节。
 
 OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领、不可变授权和 OrderRecord/ExecutionLeg 关联后，才调用原适配器。`apply_broker_observation` 复用原状态机统一首次回包、轮询、对账、取消和恢复；OrderPoller 按实际券商/owner 每单提交。缺 broker ID 或 NOT_FOUND 不自动撤销、补单。OrderRecord 和原状态机仍是唯一订单权威，没有新增平行交易服务。
 
@@ -162,4 +162,17 @@ OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领�
 
 同步对账以 Portfolio/broker/account/source 为完整 scope；完整物理账户只映射一个 canonical Portfolio，IBKR 持仓继续复用 snowball 通道。旧 owner/key=NULL 不视为新的发送权限或归属证据。LSE 身份沿用 trusted conId/币种/上市行，历史订正必须有 owner 和整行 CAS 证据，不能靠 USD 推断 US。
 
-共享模式启动只验证已迁移结构和原严格契约；不自动 DDL 或创建默认 Portfolio。风险警告统一沿用原 RiskEngine，缺数据显式说明；硬交易门与原 Web 最终人工确认保留。B0 没有接通成交后同步消费者或新增 MCP 工具，第 9 节的后续能力缺口保持有效。代码能力不代表 Mini 已安装或完成真实券商验收。
+共享模式启动只验证已迁移结构和原严格契约；不自动 DDL 或创建默认 Portfolio。风险警告统一沿用原 RiskEngine，缺数据显式说明；硬交易门与原 Web 最终人工确认保留。B0 没有接通成交后同步消费者或新增 MCP 工具，第 9 节的后续能力缺口保持有效。原开发文档中的生产待验状态属于当时证据；后续部署以独立发布记录为准，不据此扩大真实交易授权。
+
+
+## 12. U0 统一同步底座（本 PR 候选）
+
+原完整 backend、手动 API、北京时间 22:00 调度和 restricted 入口复用 [SyncExecutor](../backend/services/restricted_sync.py) → 原四券商 `sync_and_persist` → [PositionSnapshotRepository](../backend/services/broker_sync/repository.py) → 原 Upsert。未创建新调度器、任务队列或资产库。完整 backend 通过原 IBKR adapter 的只读 facade 取数，不更改其已授权交易开关；restricted 保留原严格只读进程前提。
+
+原 PositionSnapshotRun 在短事务内认领 Portfolio/broker/account/source，提交 token/300 秒租约后才外部 I/O。跨连接唯一索引限制同 owner 一个 running；发布重新锁库、重读 owner/token/租约，原子写快照、Position 与 success。过期旧 worker 不得覆盖新结果；崩溃 run 仅可在租约过期后由后续请求替换，旧 NULL context 必须人工核实。没有新增 queued/retry_wait 状态或后台持久重试扫描器。
+
+异常空、部分读取失败、重复 canonical symbol/币种、owner 冲突或非零估值未知 FX 都拒绝发布并保留 last-good。确证空仓须来源独立完成/覆盖证据；Tiger STK/FUND/CASH 与 Futu HK 仅声明支持分区，未覆盖旧持仓保留并标 partial。现金/持仓时间、价格时间与抓取时间分开，无法证明的时间为 NULL；run success 仅表示原子发布成功，不等于实时、全账户质量合格或成交覆盖。
+
+[FXService](../app/fx_service.py) 是唯一汇率权威：latest TTL 300 秒，降级 TTL 15 秒；实际来源日期超过 4 个日历日为 stale，失败可复用带原日期的 last-good 或显式 hardcoded fallback。未知币种不再默认 1:1；非零未知 FX 保留账户 last-good，已确认零余额可存 0 但 FX rate 为 NULL/质量未知。MCP 仍为原七项只读工具，不执行刷新。
+
+U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite 严格 digest 仍验证，显式迁移流程见 [U0 实现及发布输入](U0_IMPLEMENTATION.md)。同分析 snapshot_id/WealthSnapshot payload、分析前准备、成交触发/水位覆盖和公司经济归属映射均未实施；U1/U2 必须扩展本 owner/执行器，不能复制同步体系。

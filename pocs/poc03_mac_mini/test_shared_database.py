@@ -413,7 +413,7 @@ def test_unknown_stale_and_source_failure_remain_explicit(shared, monkeypatch):
     monkeypatch.setattr(portfolio_service, "_get_tiger_account_cash", failed)
     data = overview(shared, cash_configured=True)
     assert data["status"] == "unavailable" and data["net_worth_minor"] is None
-    assert "TIGER_CASH_SOURCE_FAILED" in data["issues"]
+    assert "TIGER_CASH_NOT_SYNCED" in data["issues"]
 
 
 def test_transient_sidecar_disappearing_during_validation_is_allowed(shared, monkeypatch):

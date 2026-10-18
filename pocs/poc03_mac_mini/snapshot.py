@@ -124,20 +124,14 @@ def valuation_reference(database, config):
     read, portfolio, probe = business_modules()
     tiger = config.get("tiger_cash", {})
     require(not tiger or set(tiger) == {"TIGER_ID", "TIGER_ACCOUNT", "TIGER_PRIVATE_KEY_PATH"}, "CASH_CONFIGURATION_INVALID")
-    os.environ.update(tiger)
-    original = portfolio._get_tiger_account_cash
-    value, details = original()
-    require(not probe.cash_failed, "CASH_REFERENCE_UNAVAILABLE")
-    portfolio._get_tiger_account_cash = lambda: (value, [{}] if details else [])
-    try:
-        result = read(database, int(config["portfolio_id"]), cash_configured=bool(tiger))
-    finally:
-        portfolio._get_tiger_account_cash = original
+    # U0 valuation references read native CASH from the same database snapshot.
+    # Credentials are never installed or used by this read-only operation.
+    result = read(database, int(config["portfolio_id"]), cash_configured=bool(tiger))
     require(result["status"] != "unavailable" and all(result[k] is not None for k in
             ("total_assets_minor", "total_liabilities_minor", "net_worth_minor")), "SOURCE_VALUATION_UNAVAILABLE")
-    return {"schema": "poc03.valuation-reference.v1", "database_sha256": digest(database),
+    return {"schema": "poc03.valuation-reference.v2", "database_sha256": digest(database),
             "portfolio_id": int(config["portfolio_id"]), "result": result,
-            "cash_reference": {"configured": bool(tiger), "value_cny": value, "has_details": bool(details)},
+            "cash_reference": {"configured": bool(tiger), "source": "stored_native_cash"},
             "fx_degraded_at_capture": probe.fx_degraded}
 
 
@@ -145,15 +139,11 @@ def check_reference(database, reference):
     require(digest(database) == reference["database_sha256"], "REFERENCE_DATABASE_MISMATCH")
     read, portfolio, _ = business_modules()
     cash = reference["cash_reference"]
-    original = portfolio._get_tiger_account_cash
-    portfolio._get_tiger_account_cash = lambda: (cash["value_cny"], [{}] if cash["has_details"] else [])
-    try:
-        result = read(database, int(reference["portfolio_id"]), cash_configured=cash["configured"])
-    finally:
-        portfolio._get_tiger_account_cash = original
+    require(not cash.get("has_details"), "LEGACY_EXTERNAL_CASH_REFERENCE_REQUIRES_RECAPTURE")
+    result = read(database, int(reference["portfolio_id"]), cash_configured=cash["configured"])
     checks = {k: result[k] == reference["result"][k] for k in ("total_assets_minor", "total_liabilities_minor", "net_worth_minor")}
     require(all(checks.values()), "MIGRATED_AMOUNTS_MISMATCH")
-    return {"amounts_equal": checks, "cash_reference_replayed_for_migration_only": True,
+    return {"amounts_equal": checks, "cash_source": "stored_native_cash",
             "live_cash_and_fx_equivalence": "NOT_TESTED"}
 
 

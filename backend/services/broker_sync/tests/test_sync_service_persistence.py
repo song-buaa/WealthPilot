@@ -92,13 +92,13 @@ def test_missing_credentials_are_recorded_as_a_failed_run(db_session, monkeypatc
     monkeypatch.setattr(settings, "tiger_private_key_path", None)
     service = TigerSyncService()
 
-    with pytest.raises(RuntimeError, match="TIGER_ID 未配置"):
+    with pytest.raises(ValueError, match="SYNC_ACCOUNT_UNCONFIGURED"):
         service.sync_and_persist(db_session)
 
     run = db_session.query(PositionSnapshotRun).one()
     assert run.status == "failed"
     assert run.account_id == "__unconfigured__"
-    assert run.error_message == "数据格式错误(不重试): RuntimeError: TIGER_ID 未配置"
+    assert run.error_message == "SYNC_ACCOUNT_UNCONFIGURED"
 
 
 def test_sync_and_persist_network_error_retries(db_session, mock_service):
@@ -107,12 +107,12 @@ def test_sync_and_persist_network_error_retries(db_session, mock_service):
         mock_service, "fetch_positions",
         side_effect=ConnectionError("connection failed")
     ):
-        with patch("services.broker_sync.tiger.sync_service.time.sleep"):
-            with pytest.raises(ConnectionError):
+        with patch("services.broker_sync.repository.time.sleep"):
+            with pytest.raises(ValueError, match="SYNC_SOURCE_FAILED"):
                 mock_service.sync_and_persist(db_session)
 
     from services.broker_sync.models import PositionSnapshotRun
     run = db_session.query(PositionSnapshotRun).first()
     assert run.status == "failed"
     assert run.retry_count == 2
-    assert "网络错误" in run.error_message
+    assert run.error_message == "SYNC_SOURCE_FAILED"

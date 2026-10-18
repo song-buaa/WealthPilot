@@ -10,7 +10,7 @@ from backend.services.broker_sync.tests.test_sync_service_persistence import db_
 
 def client():
     c=MagicMock(broker_name='ibkr')
-    c.get_account_info.return_value={'account_id':'U1234567','cash_balances':[
+    c.get_account_info.return_value={'account_id':'U1234567','account_snapshot_complete':True,'cash_balances':[
         {'currency':'USD','amount':120},{'currency':'CNH','amount':30},{'currency':'BASE','amount':125}]}
     c.get_positions.return_value=[]
     return c
@@ -51,8 +51,8 @@ def test_cash_upsert_is_idempotent_and_scoped(db_session,monkeypatch):
                    quantity=50,market_value_cny=350,original_value=50,original_currency='USD',
                    broker='tiger',broker_account_id='other',sync_source='api')
     db_session.add(other);db_session.commit()
-    with patch('services.broker_sync.position_upsert_service.fx_service.convert',
-               side_effect=lambda amount,*args:(amount*7,7,'2026-10-16')):
+    with patch('app.fx_service.fx_service.get_quote',
+               side_effect=lambda *args:__import__('app.fx_service',fromlist=['FXQuote']).FXQuote(7,'2026-10-16','fixture','fixture','current')):
         service.sync_and_persist(db_session)
         service.sync_and_persist(db_session)
         rows=db_session.query(Position).filter_by(broker='snowball',broker_account_id='U1234567').all()
@@ -62,5 +62,15 @@ def test_cash_upsert_is_idempotent_and_scoped(db_session,monkeypatch):
         assert db_session.get(Position,other.id).original_value==50
         c.get_account_info.return_value['cash_balances']=[{'currency':'USD','amount':0}]
         service.sync_and_persist(db_session)
-    assert db_session.query(Position).filter_by(broker='snowball',broker_account_id='U1234567').count()==0
+    assert db_session.query(Position).filter_by(broker='snowball',broker_account_id='U1234567').count()==1
     assert db_session.get(Position,other.id).original_value==50
+
+    assert db_session.query(Position).filter_by(broker='snowball').one().original_value == 0
+
+
+def test_missing_cash_cannot_turn_holdings_refresh_into_cash_deletion(monkeypatch):
+    configure(monkeypatch); c=client()
+    c.get_account_info.return_value['cash_balances']=[]
+    c.get_positions.return_value=[{'synthetic':'not converted'}]
+    with pytest.raises(ValueError,match='INCOMPLETE_SOURCE'):
+        SnowballSyncService(c).fetch_positions()

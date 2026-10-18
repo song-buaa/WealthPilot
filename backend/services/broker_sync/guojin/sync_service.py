@@ -4,13 +4,11 @@
 照抄 tiger sync_service 结构，区别在于数据来源是 HTTP 网关而非 SDK。
 """
 import os
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
 import httpx
-from pydantic import ValidationError
 
 from services.broker_sync.schema import Position
 from services.broker_sync.guojin.adapter import GuojinAdapter
@@ -31,7 +29,7 @@ class GuojinSyncService:
         if not self.gateway_secret:
             raise RuntimeError("GUOJIN_GATEWAY_SECRET 未配置")
 
-        # account_id 从网关返回的 JSON 里取，初始化时不需要
+        # Response owner is verified against the reservation before publishing.
         self.adapter: Optional[GuojinAdapter] = None
 
     def fetch_positions(self) -> tuple[list[Position], dict]:
@@ -161,113 +159,18 @@ class GuojinSyncService:
 
     # ── 持久化同步（写库）─────────────────────────────────────────
 
-    def sync_and_persist(
-        self,
-        db_session,
-        triggered_by: str = "manual",
-    ) -> int:
-        """同步持仓并写入数据库。
-
-        照抄 tiger sync_service 的 snapshot 三步流程：
-        1. create_run
-        2. fetch_positions（失败 → mark_run_failed + 抛异常）
-        3. persist_positions → upsert 到业务表
-        4. 收窄的 stale 清理（只清 QMT 管辖的 ticker）
-
-        返回 run_id。失败时抛出最后一次的异常。
-        """
+    def sync_and_persist(self, db_session, triggered_by="manual"):
         from services.broker_sync.repository import PositionSnapshotRepository
-
-        repo = PositionSnapshotRepository(db_session)
-        run = repo.create_run(
-            broker="guojin",
-            account_id="pending",  # fetch 后才知道，先占位
-            sync_source="api",
-            triggered_by=triggered_by,
-        )
-
-        last_exception: Optional[Exception] = None
-        for attempt in range(self.MAX_RETRIES + 1):
-            try:
-                positions, _account_data = self.fetch_positions()
-
-                # 回填 account_id
-                if self.adapter:
-                    run = repo.bind_run_account(run.id, self.adapter.account_id)
-
-                repo.persist_positions(
-                    run_id=run.id,
-                    positions=positions,
-                    total_market_value_cnh=None,
-                    finalize=False,
-                )
-
-                # ── upsert 到 Position 业务表（不走 upsert_from_snapshots，
-                #     因为其内含的 _remove_stale_positions 会按 platform
-                #     全量清理，误删截图导入的港股通逐条持仓）──
-                from services.broker_sync.position_upsert_service import PositionUpsertService
-                from services.broker_sync.models import PositionSnapshot
-
-                snapshots = db_session.query(PositionSnapshot).filter_by(run_id=run.id).all()
-                upsert_service = PositionUpsertService(db_session)
-
-                errors = []
-                inserted = 0
-                updated = 0
-                for snap in snapshots:
-                    try:
-                        # NOTE: _upsert_single 是 PositionUpsertService 的私有方法。
-                        # 此处有意直接调用以绕过 _remove_stale_positions 全量清理。
-                        # 如果 _upsert_single 签名变更，此处需同步更新。
-                        if upsert_service._upsert_single(snap):
-                            inserted += 1
-                        else:
-                            updated += 1
-                    except Exception as e:
-                        errors.append({
-                            "symbol": snap.symbol,
-                            "error": f"{type(e).__name__}: {e}",
-                        })
-
-                if errors:
-                    db_session.rollback()
-                    raise RuntimeError(f"业务表同步失败: {errors}")
-
-                # ── 收窄的 stale 清理 ──
-                self._remove_qmt_stale_positions(db_session, upsert_service, snapshots)
-
-                repo.mark_run_succeeded(run.id, position_count=len(positions))
-                return run.id
-
-            except (ConnectionError, TimeoutError, OSError) as e:
-                last_exception = e
-                if attempt < self.MAX_RETRIES:
-                    time.sleep(self.RETRY_DELAY_SECONDS)
-                    continue
-                db_session.rollback()
-                repo.mark_run_failed(
-                    run_id=run.id,
-                    error_message=(
-                        f"网络错误，重试 {self.MAX_RETRIES} 次后仍失败: "
-                        f"{type(e).__name__}: {e}"
-                    ),
-                    retry_count=attempt,
-                )
-                raise
-
-            except (ValidationError, KeyError, AttributeError, ValueError,
-                    RuntimeError) as e:
-                db_session.rollback()
-                repo.mark_run_failed(
-                    run_id=run.id,
-                    error_message=f"数据/逻辑错误（不重试）: {type(e).__name__}: {e}",
-                    retry_count=attempt,
-                )
-                raise
-
-        if last_exception:
-            raise last_exception
-        raise RuntimeError("sync_and_persist 内部逻辑错误")
+        def reconcile(db, upsert, snapshots):
+            for snap in snapshots:
+                upsert._upsert_single(snap)
+            self._remove_qmt_stale_positions(db, upsert, snapshots)
+        return PositionSnapshotRepository(db_session).synchronize(
+            "guojin", os.environ.get("GUOJIN_ACCOUNT") or db_session.info.get("sync_account_id")
+                or getattr(getattr(self,"adapter",None),"account_id",None),
+            self.fetch_positions, triggered_by=triggered_by,
+            metadata=lambda:{"complete":True,"source":"guojin_qmt","positions_as_of":None},
+            reconcile=reconcile, retries=self.MAX_RETRIES, retry_delay=self.RETRY_DELAY_SECONDS)
 
     @staticmethod
     def _remove_qmt_stale_positions(db_session, upsert_service, snapshots) -> int:

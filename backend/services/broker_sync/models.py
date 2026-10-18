@@ -10,7 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, Integer, String, DateTime, Numeric, Text,
-    ForeignKey, Index
+    ForeignKey, Index, text
 )
 from sqlalchemy.orm import relationship
 
@@ -35,6 +35,7 @@ class PositionSnapshotRun(Base):
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, nullable=False, default=0)
     triggered_by = Column(String(50), nullable=False, default="manual")
+    context_json = Column(Text, nullable=True)  # U0 claim token/lease + source/FX quality; legacy NULL is unproven
 
     snapshots = relationship(
         "PositionSnapshot",
@@ -44,6 +45,8 @@ class PositionSnapshotRun(Base):
 
     __table_args__ = (
         Index("ix_runs_broker_account_time", "broker", "account_id", "started_at"),
+        Index("uq_sync_active_owner", "portfolio_id", "broker", "account_id", "sync_source",
+              unique=True, sqlite_where=text("status = 'running' AND portfolio_id IS NOT NULL")),
     )
 
     def __repr__(self):

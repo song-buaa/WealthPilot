@@ -10,6 +10,7 @@
 import json
 from typing import Iterable
 
+from sqlalchemy import null
 from sqlalchemy.orm import Session
 
 from app.fx_service import fx_service
@@ -163,6 +164,12 @@ class PositionUpsertService:
                         or run.account_id != scope_account or run.sync_source != scope_source
                         or run.status not in {"running", "success"}):
                     raise ValueError("EMPTY_SNAPSHOT_RUN_OWNER_REQUIRED")
+                if run.context_json:
+                    import json as _json
+                    meta = _json.loads(run.context_json)
+                    if (self.session.info.get("sync_publish_run_id") != run.id or run.status != "running"
+                            or not meta.get("complete") or not meta.get("empty_confirmed")):
+                        raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
         for snap in snap_list:
             try:
                 if self._upsert_single(snap):
@@ -297,6 +304,18 @@ class PositionUpsertService:
             query = query.filter(~BusinessPosition.symbol.in_(current_symbols))
 
         stale = query.all()
+        run_id = self.session.info.get("sync_publish_run_id")
+        if run_id:
+            from services.broker_sync.models import PositionSnapshotRun
+            run = self.session.get(PositionSnapshotRun, run_id)
+            meta = json.loads(run.context_json or "{}")
+            coverage, markets = meta.get("coverage"), meta.get("markets")
+            removable = [p for p in stale if (not coverage or p.broker_security_type in coverage)
+                and (not markets or (p.symbol and p.symbol.rsplit(":",1)[-1] in markets))]
+            if len(removable) != len(stale):
+                meta.update(quality="partial", issues=sorted(set(meta.get("issues",[])+["UNCOVERED_POSITIONS_RETAINED"])))
+                run.context_json = json.dumps(meta)
+            stale = removable
         for pos in stale:
             self.session.delete(pos)
         return len(stale)
@@ -309,6 +328,8 @@ class PositionUpsertService:
                 or run.account_id != snap.account_id or run.sync_source != "api"
                 or run.status not in {"running", "success"}):
             raise ValueError("SNAPSHOT_OWNER_MISMATCH")
+        if run.context_json and (run.status != "running" or self.session.info.get("sync_publish_run_id") != run.id):
+            raise ValueError("SYNC_PUBLICATION_REQUIRED")
         conflict = self.session.query(BusinessPosition.id).filter(
             BusinessPosition.broker == snap.broker, BusinessPosition.broker_account_id == snap.account_id,
             BusinessPosition.portfolio_id != self.portfolio_id).first()
@@ -320,9 +341,19 @@ class PositionUpsertService:
             raise ValueError(f"未知 broker: {snap.broker}")
 
         # 1. 汇率换算
-        market_value_cny, fx_rate, fx_date = fx_service.convert(
-            float(snap.market_value), snap.currency, "CNY"
-        )
+        import json as _json
+        meta = _json.loads(run.context_json or "{}")
+        quote = meta.get("fx", {}).get(snap.currency)
+        if quote:
+            if quote.get("rate") is None and (snap.market_value != 0 or snap.unrealized_pnl != 0):
+                raise ValueError("FX_RATE_UNAVAILABLE")
+            fx_rate = quote["rate"]
+            fx_date = quote.get("rate_date") if quote.get("quality") in {"current","historical"} else quote.get("quality")
+            market_value_cny = float(snap.market_value) * fx_rate if fx_rate is not None else 0.0
+        elif run.context_json:
+            raise ValueError("SYNC_FX_PREFLIGHT_REQUIRED")
+        else:
+            market_value_cny, fx_rate, fx_date = fx_service.convert(float(snap.market_value), snap.currency, "CNY")
 
         # 2. 查现有行
         existing = self._business_query().filter_by(
@@ -366,7 +397,7 @@ class PositionUpsertService:
 
         # 3. 计算盈亏
         pnl_original = float(snap.unrealized_pnl)
-        pnl_cny = pnl_original * fx_rate
+        pnl_cny = pnl_original * fx_rate if fx_rate is not None else 0.0
         # Position 表 profit_loss_rate 存百分数(如 30.5 表示 +30.5%)
         pnl_pct = float(snap.unrealized_pnl_pct) * 100
 
@@ -396,7 +427,7 @@ class PositionUpsertService:
                 market_value_cny=market_value_cny,
                 original_currency=snap.currency,
                 original_value=float(snap.market_value),
-                fx_rate_to_cny=fx_rate,
+                fx_rate_to_cny=fx_rate if fx_rate is not None else null(),
                 fx_rate_date=fx_date,
                 profit_loss_value=pnl_cny,
                 profit_loss_rate=pnl_pct,
@@ -456,7 +487,7 @@ class PositionUpsertService:
         return symbol
 
 
-def backfill_bare_names(session: Session) -> int:
+def backfill_bare_names(session: Session, *, portfolio_id=None, broker=None, account_id=None, commit=True) -> int:
     """补全 name == ticker（裸代码）的持仓行的中文名。
 
     按 symbol（如 LI:US）分组，组内若存在 name≠ticker 的行（有中文名）
@@ -464,11 +495,14 @@ def backfill_bare_names(session: Session) -> int:
 
     自限制：一旦补上中文名，name≠ticker，后续不再触发。
     """
-    all_positions = session.query(BusinessPosition).filter(
+    query = session.query(BusinessPosition).filter(
         BusinessPosition.market_value_cny > 0,
         BusinessPosition.symbol.isnot(None),
         BusinessPosition.symbol != "",
-    ).all()
+    )
+    if portfolio_id is not None:
+        query = query.filter_by(portfolio_id=portfolio_id)
+    all_positions = query.all()
 
     from collections import defaultdict
     groups: dict[str, list] = defaultdict(list)
@@ -487,11 +521,13 @@ def backfill_bare_names(session: Session) -> int:
             continue
 
         for p in members:
+            if broker is not None and (p.broker != broker or p.broker_account_id != account_id):
+                continue
             if p.ticker and p.name == p.ticker:
                 p.name = donor_name
                 count += 1
 
-    if count:
+    if count and commit:
         session.commit()
         print(f"[backfill] 补全 {count} 条裸代码名称", flush=True)
     return count

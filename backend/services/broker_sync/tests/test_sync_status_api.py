@@ -48,7 +48,7 @@ def test_status_keeps_failed_attempt_separate_from_previous_success(monkeypatch)
     tiger = next(item for item in result.brokers if item.broker == "tiger")
 
     assert tiger.last_attempt_status == "failed"
-    assert tiger.last_attempt_error_message.endswith("TIGER_ID 未配置")
+    assert tiger.last_attempt_error_message == "SYNC_SOURCE_FAILED"
     assert tiger.last_successful_sync_time is not None
     assert tiger.last_successful_position_count == 11
     assert tiger.last_sync_status == "failed"  # 旧字段也不能继续伪装为 success

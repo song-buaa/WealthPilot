@@ -1,17 +1,29 @@
-"""券商同步 Repository:封装持仓快照的读写操作。"""
+"""Original snapshot repository: durable scoped claims and fenced publication."""
 import json
-from datetime import datetime, timezone
+import time
+import uuid
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
-
+from sqlalchemy import text
 from sqlalchemy.orm import Session
-
 from services.broker_sync.models import PositionSnapshot, PositionSnapshotRun
 from services.broker_sync.schema import Position
 
 
+class SyncBusy(ValueError):
+    def __init__(self, run_id):
+        self.run_id = run_id
+        super().__init__("SYNC_ALREADY_RUNNING")
+
+
+def context(run):
+    return json.loads(run.context_json or "{}")
+
+
 class PositionSnapshotRepository:
-    """持仓快照仓储层。"""
+    """One owner claim per run; broker/FX I/O never occurs inside publication."""
+    LEASE_SECONDS = 300
 
     def __init__(self, session: Session):
         self.session = session
@@ -20,132 +32,208 @@ class PositionSnapshotRepository:
         from backend.services.action.ownership import portfolio_scope
         return portfolio_scope(self.session)
 
-    def bind_run_account(self, run_id, account_id):
-        run = self.session.get(PositionSnapshotRun, run_id)
-        if (run is None or run.portfolio_id != self._portfolio_id() or run.status != "running"
-                or not account_id or account_id in {"pending", "unknown", "__unconfigured__"}
-                or run.account_id not in {"pending", account_id}):
-            raise ValueError("SYNC_RUN_BINDING_INVALID")
-        run.account_id = account_id
-        self.session.commit()
-        return run
+    def _begin(self):
+        if self.session.new or self.session.dirty or self.session.deleted:
+            raise ValueError("COMMIT_PREPARATION_BEFORE_SYNC")
+        self.session.rollback()
+        self.session.execute(text("BEGIN IMMEDIATE"))
+        self.session.expire_all()
 
-    def create_run(
-        self,
-        broker: str,
-        account_id: str,
-        sync_source: str = "api",
-        triggered_by: str = "manual",
-    ) -> PositionSnapshotRun:
-        """创建一条 running 状态的 run 记录,提交后返回。"""
+    def _token(self, run_id):
+        return self.session.info.get("sync_claims", {}).get(run_id)
+
+    def _check_claim(self, run):
+        meta = context(run)
+        if (run.portfolio_id != self._portfolio_id() or run.status != "running"
+                or not self._token(run.id) or meta.get("token") != self._token(run.id)
+                or meta.get("lease_until", "") <= datetime.now(timezone.utc).isoformat()):
+            raise ValueError("SYNC_CLAIM_EXPIRED_OR_REPLACED")
+        return meta
+
+    def _owner_check(self, portfolio_id, broker, account):
+        from app.models import Position as BusinessPosition
+        if (self.session.query(BusinessPosition.id).filter(
+                BusinessPosition.broker == broker, BusinessPosition.broker_account_id == account,
+                BusinessPosition.portfolio_id != portfolio_id).first()
+            or self.session.query(PositionSnapshotRun.id).filter(
+                PositionSnapshotRun.broker == broker, PositionSnapshotRun.account_id == account,
+                PositionSnapshotRun.portfolio_id != portfolio_id).first()):
+            raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
+
+    def create_run(self, broker, account_id, sync_source="api", triggered_by="manual"):
         portfolio_id = self._portfolio_id()
         existing_id = self.session.info.get("sync_run_id")
         if existing_id is not None:
             run = self.session.get(PositionSnapshotRun, existing_id)
-            if (run is None or run.broker != broker or run.status != "running"
-                    or run.portfolio_id != portfolio_id or run.sync_source != sync_source
-                    or (account_id not in {"pending", "__unconfigured__"} and run.account_id not in {"pending", account_id})):
+            if (run is None or (run.portfolio_id, run.broker, run.account_id, run.sync_source)
+                    != (portfolio_id, broker, account_id, sync_source)):
                 raise ValueError("SYNC_RUN_BINDING_INVALID")
+            self._check_claim(run)
             return run
-        run = PositionSnapshotRun(
-            portfolio_id=portfolio_id, broker=broker,
-            account_id=account_id,
-            started_at=datetime.now(timezone.utc),
-            status="running",
-            sync_source=sync_source,
-            triggered_by=triggered_by,
-            retry_count=0,
-        )
-        self.session.add(run)
-        self.session.commit()
-        self.session.refresh(run)
+        self._begin()
+        now = datetime.now(timezone.utc)
+        if not account_id or account_id in {"pending", "unknown", "__unconfigured__"}:
+            run = PositionSnapshotRun(portfolio_id=portfolio_id, broker=broker,
+                account_id="__unconfigured__", sync_source=sync_source, triggered_by=triggered_by,
+                status="failed", started_at=now, finished_at=now, error_message="SYNC_ACCOUNT_UNCONFIGURED")
+            self.session.add(run); self.session.commit()
+            raise ValueError("SYNC_ACCOUNT_UNCONFIGURED")
+        try:
+            self._owner_check(portfolio_id, broker, account_id)
+        except Exception:
+            self.session.rollback()
+            raise
+        active = self.session.query(PositionSnapshotRun).filter_by(portfolio_id=portfolio_id,
+            broker=broker, account_id=account_id, sync_source=sync_source, status="running").first()
+        if active:
+            meta = context(active)
+            if not meta.get("lease_until") or meta["lease_until"] > now.isoformat():
+                active_id = active.id
+                self.session.rollback()
+                raise SyncBusy(active_id)
+            active.status, active.finished_at = "failed", now
+            active.error_message = "SYNC_LEASE_EXPIRED"
+            self.session.flush()
+        token = uuid.uuid4().hex
+        run = PositionSnapshotRun(portfolio_id=portfolio_id, broker=broker, account_id=account_id,
+            sync_source=sync_source, triggered_by=triggered_by, status="running", started_at=now,
+            context_json=json.dumps({"version":1, "token":token,
+                "lease_until":(now+timedelta(seconds=self.LEASE_SECONDS)).isoformat(),
+                "quality":"pending", "issues":[]}))
+        self.session.add(run); self.session.commit()
+        run_id = run.id
+        self.session.info.setdefault("sync_claims", {})[run_id] = token
         return run
 
-    def persist_positions(
-        self,
-        run_id: int,
-        positions: list[Position],
-        total_market_value_cnh: Optional[Decimal] = None,
-        finalize: bool = True,
-    ) -> None:
-        """
-        批量写入持仓快照,并把 run 标记为 success。
-        整个操作是一个事务:任何一条失败,run 状态不会变成 success。
-        调用方负责处理事务回滚(出现异常时 session.rollback)。
-        """
+    def bind_run_account(self, run_id, account_id):
+        run = self.session.get(PositionSnapshotRun, run_id)
+        if run is None or run.account_id != account_id:
+            raise ValueError("SYNC_RUN_BINDING_INVALID")
+        self._check_claim(run)
+        return run  # account is fixed BEFORE source I/O; never rebind discovered owners
+
+    def persist_positions(self, run_id, positions, total_market_value_cnh=None, finalize=True):
+        self._begin()
         run = self.session.get(PositionSnapshotRun, run_id)
         if run is None:
-            raise ValueError(f"Run id={run_id} 不存在")
-
-        if run.portfolio_id != self._portfolio_id() or run.account_id in {"pending", "unknown", "__unconfigured__"}:
-            raise ValueError("SYNC_RUN_OWNER_REQUIRED")
-        if any(pos.broker != run.broker or pos.account_id != run.account_id or pos.sync_source != run.sync_source for pos in positions):
-            raise ValueError("MIXED_SNAPSHOT_SCOPE")
-        from app.models import Position as BusinessPosition
-        conflict = self.session.query(BusinessPosition.id).filter(
-            BusinessPosition.broker == run.broker, BusinessPosition.broker_account_id == run.account_id,
-            BusinessPosition.portfolio_id != run.portfolio_id).first()
-        other_run = self.session.query(PositionSnapshotRun.id).filter(
-            PositionSnapshotRun.broker == run.broker, PositionSnapshotRun.account_id == run.account_id,
-            PositionSnapshotRun.portfolio_id != run.portfolio_id).first()
-        if conflict or other_run:
-            raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
+            raise ValueError("SYNC_RUN_NOT_FOUND")
+        meta = self._check_claim(run)
+        prepared = self.session.info.get("sync_prepared", {}).get(run_id)
+        if prepared:
+            meta.update(prepared)
+            run.context_json = json.dumps(meta, default=str)
+        self._owner_check(run.portfolio_id, run.broker, run.account_id)
+        seen = set()
         for pos in positions:
-            snapshot = self._position_to_snapshot(run, pos)
-            self.session.add(snapshot)
-
+            if (pos.broker, pos.account_id, pos.sync_source) != (run.broker, run.account_id, run.sync_source):
+                raise ValueError("MIXED_SNAPSHOT_SCOPE")
+            # Upsert's current key is canonical symbol. Mixed-currency aliases
+            # must fail, not overwrite each other under one symbol.
+            if pos.symbol in seen:
+                raise ValueError("DUPLICATE_SNAPSHOT_IDENTITY")
+            seen.add(pos.symbol)
+        if not positions and not (prepared and prepared.get("empty_confirmed") and prepared.get("complete")):
+            raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
+        for pos in positions:
+            self.session.add(self._position_to_snapshot(run, pos))
+        self.session.info["sync_publish_run_id"] = run_id
         if finalize:
-            self.mark_run_succeeded(
-                run_id=run_id,
-                position_count=len(positions),
-                total_market_value_cnh=total_market_value_cnh,
-            )
+            self.mark_run_succeeded(run_id, len(positions), total_market_value_cnh)
         else:
             self.session.flush()
 
-    def mark_run_succeeded(
-        self,
-        run_id: int,
-        position_count: int,
-        total_market_value_cnh: Optional[Decimal] = None,
-    ) -> None:
-        """在 snapshot 与业务 Position 都已成功处理后，原子提交成功状态。"""
+    def mark_run_succeeded(self, run_id, position_count, total_market_value_cnh=None):
         run = self.session.get(PositionSnapshotRun, run_id)
-        if run is None:
-            raise ValueError(f"Run id={run_id} 不存在")
-        run.finished_at = datetime.now(timezone.utc)
-        run.status = "success"
-        run.position_count = position_count
-        run.total_market_value_cnh = total_market_value_cnh
+        self._check_claim(run)
+        if self.session.info.get("sync_publish_run_id") != run_id:
+            raise ValueError("SYNC_PUBLICATION_REQUIRED")
+        meta = context(run)
+        meta.setdefault("quality", "partial")
+        if meta["quality"] == "pending":
+            meta.update(quality="partial", issues=["SOURCE_EVIDENCE_UNKNOWN"])
+        run.context_json = json.dumps(meta, default=str)
+        run.finished_at, run.status = datetime.now(timezone.utc), "success"
+        run.position_count, run.total_market_value_cnh = position_count, total_market_value_cnh
+        self.session.commit()
+        self.session.info.pop("sync_publish_run_id", None)
+
+    def mark_run_failed(self, run_id, error_message, retry_count=0):
+        self.session.rollback()
+        self._begin()
+        run = self.session.get(PositionSnapshotRun, run_id)
+        if (run is None or run.portfolio_id != self._portfolio_id() or run.status != "running"
+                or not self._token(run_id) or context(run).get("token") != self._token(run_id)):
+            self.session.rollback()
+            return  # a late old worker cannot fail a completed/replaced task
+        meta = context(run)
+        meta.update(quality="unavailable", issues=[error_message.split(":",1)[0]])
+        run.context_json = json.dumps(meta)
+        run.finished_at, run.status = datetime.now(timezone.utc), "failed"
+        run.error_message, run.retry_count = error_message[:5000], retry_count
         self.session.commit()
 
-    def mark_run_failed(
-        self,
-        run_id: int,
-        error_message: str,
-        retry_count: int = 0,
-    ) -> None:
-        """把 run 标记为 failed,记录错误信息和重试次数。"""
-        run = self.session.get(PositionSnapshotRun, run_id)
-        if run is None:
-            return
+    def synchronize(self, broker, account_id, fetch, *, triggered_by="manual", metadata=None,
+                    reconcile=None, retries=2, retry_delay=5):
+        """Reuse original Snapshot+Upsert commit for every sync entrypoint."""
+        from app.fx_service import fx_service, FXRateUnavailable
+        from services.broker_sync.position_upsert_service import PositionUpsertService
+        run_id = self.create_run(broker, account_id, triggered_by=triggered_by).id
+        for attempt in range(retries+1):
+            self.session.rollback()  # release reservation/read transaction before ALL external I/O
+            try:
+                result = fetch()
+                positions = result[0] if isinstance(result, tuple) else result
+                if positions is None:
+                    raise ValueError("INCOMPLETE_SOURCE")
+                info = dict(metadata() if metadata else {})
+                if not positions and not (info.get("complete") and info.get("empty_confirmed")):
+                    raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
+                if info.get("complete") is False:
+                    raise ValueError("INCOMPLETE_SOURCE")
+                quotes = {ccy:fx_service.get_quote(ccy,"CNY").to_dict() for ccy in {p.currency for p in positions}}
+                if any(quotes[p.currency]["rate"] is None and
+                       (p.market_value != 0 or p.unrealized_pnl != 0) for p in positions):
+                    raise FXRateUnavailable("FX_RATE_UNAVAILABLE")
+                issues = set(info.get("issues", []))
+                if not info.get("source"):
+                    issues.add("SOURCE_EVIDENCE_UNKNOWN")
+                for q in quotes.values(): issues.update(q["issues"])
+                if any(p.broker_security_type != "CASH" for p in positions) and not info.get("price_as_of"): issues.add("PRICE_TIME_UNKNOWN")
+                prepared = {**info, "complete":True, "fx":quotes,
+                    "fetched_at":datetime.now(timezone.utc).isoformat(),
+                    "currencies":sorted(quotes), "row_count":len(positions),
+                    "quality":"partial" if issues else "current", "issues":sorted(issues)}
+                self.session.info.setdefault("sync_prepared", {})[run_id] = prepared
+                self.persist_positions(run_id, positions, finalize=False)
+                snapshots = self.session.query(PositionSnapshot).filter_by(run_id=run_id).all()
+                upsert = PositionUpsertService(self.session)
+                if reconcile:
+                    reconcile(self.session, upsert, snapshots)
+                else:
+                    report = upsert.upsert_from_snapshots(snapshots, broker=broker, account_id=account_id,
+                        sync_source="api", commit=False, complete_snapshot=True, run_id=run_id)
+                    if report["errors"]: raise ValueError("SYNC_BUSINESS_UPSERT_FAILED")
+                from services.broker_sync.position_upsert_service import backfill_bare_names
+                backfill_bare_names(self.session, portfolio_id=self._portfolio_id(),
+                    broker=broker, account_id=account_id, commit=False)
+                self.mark_run_succeeded(run_id, len(positions))
+                return run_id
+            except Exception as exc:
+                self.session.rollback()
+                transient = isinstance(exc, (ConnectionError, TimeoutError, OSError)) or type(exc).__name__ == "ApiException"
+                if transient and attempt < retries:
+                    time.sleep(retry_delay)
+                    continue
+                # Stable codes only: provider messages can contain credentials/account IDs.
+                code = str(exc) if str(exc) in {"EMPTY_SOURCE_REQUIRES_REVIEW", "INCOMPLETE_SOURCE",
+                    "FX_RATE_UNAVAILABLE", "DUPLICATE_SNAPSHOT_IDENTITY", "MIXED_SNAPSHOT_SCOPE",
+                    "SYNC_CLAIM_EXPIRED_OR_REPLACED", "ACCOUNT_PORTFOLIO_AMBIGUOUS"} else "SYNC_SOURCE_FAILED"
+                self.mark_run_failed(run_id, code, attempt)
+                raise ValueError(code) from None
 
-        run.finished_at = datetime.now(timezone.utc)
-        run.status = "failed"
-        run.error_message = error_message[:5000]
-        run.retry_count = retry_count
-        self.session.commit()
-
-    def get_latest_successful_run(
-        self, broker: str, account_id: str
-    ) -> Optional[PositionSnapshotRun]:
-        """查询最近一次成功的 run。"""
-        return (
-            self.session.query(PositionSnapshotRun)
-            .filter_by(portfolio_id=self._portfolio_id(), broker=broker, account_id=account_id, status="success")
-            .order_by(PositionSnapshotRun.started_at.desc())
-            .first()
-        )
+    def get_latest_successful_run(self, broker, account_id):
+        return (self.session.query(PositionSnapshotRun).filter_by(portfolio_id=self._portfolio_id(),
+            broker=broker, account_id=account_id, status="success").order_by(PositionSnapshotRun.started_at.desc()).first())
 
     @staticmethod
     def _position_to_snapshot(

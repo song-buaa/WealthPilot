@@ -7,6 +7,11 @@ Provider: Frankfurter API (https://api.frankfurter.app)
 
 import logging
 import warnings
+import math
+import time
+from dataclasses import dataclass, asdict, replace
+from datetime import date as calendar_date, datetime, timezone
+from threading import RLock
 from typing import Tuple
 
 try:
@@ -63,93 +68,125 @@ class FrankfurterProvider(FXProvider):
         return float(rate), actual_date
 
 
+def fx_date_is_current(value, today=None):
+    """Freshness policy shared by sync and stored-valuation projections."""
+    try:
+        age = ((today or calendar_date.today()) - calendar_date.fromisoformat(value)).days
+        return 0 <= age <= 4
+    except (TypeError, ValueError):
+        return False
+
+
+class FXRateUnavailable(ValueError):
+    """No defensible conversion exists; callers must retain/label last-good."""
+
+
+@dataclass(frozen=True)
+class FXQuote:
+    rate: float | None
+    rate_date: str | None
+    fetched_at: str
+    source: str
+    quality: str
+    issues: tuple[str, ...] = ()
+
+    def to_dict(self):
+        return asdict(self)
+
+
 class FXService:
-    """
-    FX 汇率服务。
-    - 同一 session 内相同 (from_currency, to_currency, date) 只请求一次（内存缓存）。
-    - 网络失败时 fallback 到 hardcoded 默认值，并记录警告。
-    """
+    """One FX authority, bounded latest/failure cache and explicit evidence."""
 
-    def __init__(self, provider: FXProvider = None):
+    def __init__(self, provider=None, *, ttl=300, failure_ttl=15, clock=None):
         self._provider = provider or FrankfurterProvider()
-        self._cache: dict = {}  # key: (from_currency, to_currency, date) -> (rate, actual_date)
+        self._cache = {}
+        self._expires = {}
+        self._last_good = {}
+        self._clock = clock or time.monotonic
+        self.ttl, self.failure_ttl = ttl, failure_ttl
+        self._lock = RLock()
 
-    def get_rate(self, from_currency: str, to_currency: str = "CNY", date: str = "latest") -> float:
-        """
-        返回汇率。
-        date 格式: 'YYYY-MM-DD' 或 'latest'
-        """
-        rate, _ = self._get_rate_with_date(from_currency, to_currency, date)
+    def get_rate(self, from_currency, to_currency="CNY", date="latest"):
+        return self._get_rate_with_date(from_currency, to_currency, date)[0]
+
+    def convert(self, amount, from_currency, to_currency="CNY", date="latest"):
+        rate, actual_date = self._get_rate_with_date(from_currency, to_currency, date)
+        return amount * rate, rate, actual_date
+
+    def _get_rate_with_date(self, from_currency, to_currency, date):
+        quote = self.get_quote(from_currency, to_currency, date)
+        if quote.rate is None:
+            raise FXRateUnavailable("FX_RATE_UNAVAILABLE")
+        # The legacy tuple API must not disguise stale/fallback values as fresh.
+        actual = quote.rate_date if quote.quality in {"current", "historical", "legacy"} else quote.quality
+        return quote.rate, actual
+
+    @staticmethod
+    def _valid(rate):
+        rate = float(rate)
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("INVALID_FX_RATE")
         return rate
 
-    def convert(self, amount: float, from_currency: str, to_currency: str = "CNY", date: str = "latest") -> Tuple[float, float, str]:
-        """
-        返回 (converted_amount, rate_used, rate_date)
-        汇率换算用确定性代码，不经过 LLM。
-        """
-        rate, actual_date = self._get_rate_with_date(from_currency, to_currency, date)
-        converted = amount * rate
-        return converted, rate, actual_date
-
-    def _get_rate_with_date(self, from_currency: str, to_currency: str, date: str) -> Tuple[float, str]:
-        """内部方法：带缓存和 fallback 的汇率获取"""
+    def get_quote(self, from_currency, to_currency="CNY", date="latest"):
         key = (from_currency.upper(), to_currency.upper(), date)
+        with self._lock:
+            now = self._clock()
+            cached = self._cache.get(key)
+            # Preserve the old private test/cache injection contract, never call
+            # an unversioned tuple a newly verified provider observation.
+            if isinstance(cached, tuple):
+                value, actual = cached
+                quote = FXQuote(self._valid(value), actual, "", "legacy_cache",
+                                "fallback" if actual == "fallback" else "legacy", ("FX_LEGACY_CACHE",))
+                self._cache[key], self._expires[key] = quote, now+self.failure_ttl
+                return quote
+            if cached and now < self._expires.get(key, 0):
+                return cached
+            stamp = datetime.now(timezone.utc).isoformat()
+            if key[0] == key[1]:
+                quote = FXQuote(1.0, calendar_date.today().isoformat() if date == "latest" else date,
+                                stamp, "same_currency", "current" if date == "latest" else "historical")
+            else:
+                try:
+                    rate, actual = self._provider.fetch_rate(*key)
+                    quote = self._provider_quote(rate, actual, date, stamp, "provider")
+                except Exception:
+                    quote = None
+                    if key[0] != "USD" and key[1] != "USD":
+                        try:
+                            first, d1 = self._provider.fetch_rate(key[0], "USD", date)
+                            second, d2 = self._provider.fetch_rate("USD", key[1], date)
+                            quote = self._provider_quote(self._valid(first)*self._valid(second),
+                                min(d1, d2), date, stamp, "provider_cross")
+                        except Exception:
+                            pass
+                    if quote is None:
+                        old = self._last_good.get(key)
+                        if old:
+                            quote = replace(old, quality="stale", issues=("FX_REFRESH_FAILED", "FX_STALE"))
+                        else:
+                            rates = {"CNY": 1.0, **FALLBACK_RATES}
+                            rate = rates[key[0]]/rates[key[1]] if key[0] in rates and key[1] in rates else None
+                            quote = FXQuote(rate, None, stamp, "hardcoded" if rate else "unavailable",
+                                            "fallback" if rate else "unavailable", ("FX_FALLBACK" if rate else "FX_UNKNOWN",))
+                            if rate:
+                                warnings.warn(f"FX fallback: {key[0]}->{key[1]}", RuntimeWarning, stacklevel=2)
+                        logger.warning("[FX degraded] %s->%s: %s", key[0], key[1], quote.quality)
+            if quote.quality in {"current", "historical", "stale"} and quote.source.startswith("provider"):
+                self._last_good[key] = quote
+            self._cache[key] = quote
+            self._expires[key] = now + (self.ttl if quote.quality in {"current", "historical"} else self.failure_ttl)
+            return quote
 
-        if key in self._cache:
-            return self._cache[key]
-
-        # 同货币
-        if from_currency.upper() == to_currency.upper():
-            result = (1.0, date if date != "latest" else "latest")
-            self._cache[key] = result
-            return result
-
-        # 尝试直接获取
-        try:
-            rate, actual_date = self._provider.fetch_rate(from_currency, to_currency, date)
-            result = (rate, actual_date)
-            self._cache[key] = result
-            return result
-        except Exception as e:
-            logger.warning(f"FX API 请求失败 ({from_currency}->{to_currency}, {date}): {e}，尝试交叉汇率")
-
-        # 尝试交叉汇率：先查 from->USD，再查 USD->to
-        try:
-            if from_currency.upper() != "USD" and to_currency.upper() != "USD":
-                rate_from_usd, date1 = self._provider.fetch_rate(from_currency, "USD", date)
-                rate_usd_to, date2 = self._provider.fetch_rate("USD", to_currency, date)
-                rate = rate_from_usd * rate_usd_to
-                actual_date = date1
-                result = (rate, actual_date)
-                self._cache[key] = result
-                return result
-        except Exception as e2:
-            logger.warning(f"交叉汇率也失败 ({from_currency}->{to_currency}): {e2}，使用 fallback")
-
-        # Fallback：先查 from->CNY fallback，再折算
-        fallback_from = FALLBACK_RATES.get(from_currency.upper(), 1.0)
-        fallback_to = FALLBACK_RATES.get(to_currency.upper(), 1.0)
-
-        if to_currency.upper() == "CNY":
-            rate = fallback_from
-        elif from_currency.upper() == "CNY":
-            rate = 1.0 / fallback_to if fallback_to != 0 else 1.0
-        else:
-            rate = fallback_from / fallback_to if fallback_to != 0 else fallback_from
-
-        logger.warning(
-            f"[FX fallback] {from_currency}->{to_currency} 使用兜底汇率 {rate:.4f}"
-            f"（Frankfurter 不可用，hardcoded: {from_currency}={fallback_from}, {to_currency}={fallback_to}）"
-        )
-        warnings.warn(
-            f"FX fallback: {from_currency}->{to_currency} 使用硬编码汇率 {rate:.4f}",
-            RuntimeWarning,
-            stacklevel=3,
-        )
-        result = (rate, "fallback")
-        self._cache[key] = result
-        return result
+    def _provider_quote(self, rate, actual, requested, stamp, source):
+        actual_date = calendar_date.fromisoformat(actual)
+        today = calendar_date.today()
+        if actual_date > today:
+            raise ValueError("FX_FUTURE_DATE")
+        quality = "historical" if requested != "latest" else "current" if fx_date_is_current(actual, today) else "stale"
+        return FXQuote(self._valid(rate), actual, stamp, source, quality,
+                       ("FX_STALE",) if quality == "stale" else ())
 
 
-# 模块级单例
 fx_service = FXService()

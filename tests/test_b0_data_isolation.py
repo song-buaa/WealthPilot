@@ -48,21 +48,19 @@ def test_complete_empty_snapshot_is_bound_to_run_and_exact_owner(db):
         service.upsert_from_snapshots([], broker="tiger", account_id="account-a", sync_source="api")
     with pytest.raises(ValueError, match="EMPTY_SNAPSHOT_RUN_OWNER"):
         service.upsert_from_snapshots([], broker="tiger", account_id="account-a", sync_source="api", complete_snapshot=True)
-    run = PositionSnapshotRepository(db).create_run("tiger", "account-a")
-    report = service.upsert_from_snapshots([], broker="tiger", account_id="account-a", sync_source="api",
-                                         complete_snapshot=True, run_id=run.id)
-    assert report["removed"] == 1
+    PositionSnapshotRepository(db).synchronize("tiger", "account-a", lambda: [], retries=0,
+        metadata=lambda: {"complete": True, "empty_confirmed": True, "source": "synthetic"})
     assert {(p.portfolio_id, p.broker_account_id) for p in db.query(Position)} == {(12, "account-b"), (11, "account-c")}
 
 
 def test_duplicate_physical_account_and_run_rebinding_fail_without_deletion(db):
     db.add_all([row(11, "same-account"), row(12, "same-account")]); db.commit()
     repo = PositionSnapshotRepository(db)
-    run = repo.create_run("tiger", "same-account")
     with pytest.raises(ValueError, match="AMBIGUOUS"):
-        PositionUpsertService(db).upsert_from_snapshots([], broker="tiger", account_id="same-account",
-            sync_source="api", complete_snapshot=True, run_id=run.id)
+        repo.create_run("tiger", "same-account")
+    db.rollback()
     assert db.query(Position).count() == 2
+    run = repo.create_run("tiger", "unique-account")
     db.info["sync_run_id"] = run.id
     with pytest.raises(ValueError, match="BINDING_INVALID"):
         repo.create_run("tiger", "different-account")

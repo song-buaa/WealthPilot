@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "pocs/poc03_mac_mini"))
 safe_env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
 os.environ.clear(); os.environ.update(safe_env)
+os.environ["GUOJIN_ACCOUNT"] = "synthetic"
 os.environ.update(PYTHON_DOTENV_DISABLED="1", PUBLIC_DEMO_MODE="false", BROKER_MODE="mock",
                   IBKR_READ_ONLY_MODE="true", ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false")
 original_connect = socket.socket.connect

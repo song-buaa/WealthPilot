@@ -34,6 +34,8 @@ def legacy(tmp_path, monkeypatch):
     engine.dispose()
     with closing(sqlite3.connect(db)) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("DROP INDEX uq_sync_active_owner")
+        conn.execute("ALTER TABLE position_snapshot_runs DROP COLUMN context_json")
         conn.execute("DROP INDEX uq_order_records_submission_key")
         for table, columns in COLUMNS.items():
             for col in columns:

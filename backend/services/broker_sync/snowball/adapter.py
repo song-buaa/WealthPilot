@@ -291,49 +291,8 @@ class IBKRPortfolioAdapter:
         )
 
     def cash_to_position(self, raw: dict, snapshot_time: datetime) -> Position:
-        from utils.symbol import normalize_symbol
-
-        currency = str(raw["currency"]).upper()
-        amount = Decimal(str(raw["amount"]))
-        # CASH is a currency balance, not a listed security identity.
-        market = {"USD": "US", "HKD": "HK", "CNY": "CN", "CNH": "CN"}.get(currency, "FX")
-        raw_symbol = f"CASH-{currency}"
-        evidence = AssetClassificationEvidence(
-            broker=self.BROKER_NAME,
-            broker_security_type="CASH",
-            vehicle_type_hint="CASH",
-            explicit_economic_asset_class="CASH",
-            explicit_source="BROKER_DETERMINISTIC_METADATA",
-            currency=currency,
-        )
-        classification = classify_instrument(evidence)
-        return Position(
-            broker=self.BROKER_NAME,
-            account_id=self.account_id,
-            symbol=normalize_symbol(raw_symbol, market),
-            raw_symbol=raw_symbol,
-            name=f"盈透账户现金（{currency}）",
-            **broker_position_classification_fields(
-                classification,
-                evidence=evidence,
-            ),
-            market=market,
-            quantity=amount,
-            available_quantity=None,
-            avg_cost=Decimal("1"),
-            cost_method=self.COST_METHOD,
-            cost_basis=amount,
-            current_price=Decimal("1"),
-            market_value=amount,
-            currency=currency,
-            unrealized_pnl=Decimal("0"),
-            unrealized_pnl_pct=Decimal("0"),
-            realized_pnl=Decimal("0"),
-            day_pnl=None,
-            snapshot_time=snapshot_time,
-            sync_source="api",
-            raw_data={"tag": "CashBalance", "currency": currency, "source_channel": "ibkr"},
-        )
+        from services.broker_sync.schema import cash_position
+        return cash_position(self.BROKER_NAME, self.account_id, raw["currency"], raw["amount"], snapshot_time)
 
     def to_positions(
         self,
@@ -347,6 +306,5 @@ class IBKRPortfolioAdapter:
             self.cash_to_position(item, snapshot_time)
             for item in cash_balances
             if str(item.get("currency") or "").upper() != "BASE"
-            and Decimal(str(item.get("amount") or 0)) != 0
         )
         return positions

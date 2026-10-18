@@ -21,6 +21,7 @@ DOCUMENTS = (
     "docs/CAPABILITY_REGISTRY.md",
     "docs/B0_IMPLEMENTATION.md",
     "docs/B0_PRODUCTION_RUNBOOK.md",
+    "docs/U0_IMPLEMENTATION.md",
     "docs/dev_setup.md",
     "docs/GOVERNANCE_AUDIT.md",
     "docs/GOVERNANCE_VALIDATION_REPORT.md",

@@ -74,21 +74,6 @@ def service_sessions(connection):
             module.get_session = function
 
 
-@contextmanager
-def observe_cash():
-    from backend.services import portfolio_service
-    original = portfolio_service._get_tiger_account_cash
-    observation = {"has_details": False}
-    def read_cash():
-        value, details = original()
-        observation["has_details"] = bool(details)
-        return value, details
-    portfolio_service._get_tiger_account_cash = read_cash
-    try:
-        yield observation
-    finally:
-        portfolio_service._get_tiger_account_cash = original
-
 
 class SourceLogProbe(logging.Handler):
     """Observe warning categories without formatting/persisting sensitive messages."""
@@ -111,6 +96,7 @@ def _minor(value):
 
 def read_overview(path, portfolio_id, *, cash_configured=False, now=None, database_contract=None):
     from app.models import Portfolio, Position, WealthItem
+    from app.fx_service import fx_date_is_current
     now = now or datetime.now(timezone.utc)
     queried_at = now.isoformat()
     issues = []
@@ -119,7 +105,7 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
     old_handlers = root.handlers[:]
     root.handlers = [probe]
     try:
-        with readonly_snapshot(path, database_contract) as connection, service_sessions(connection) as wealth, observe_cash() as cash:
+        with readonly_snapshot(path, database_contract) as connection, service_sessions(connection) as wealth:
             if database_contract:
                 from app.shared_sqlite import load_contract
                 if load_contract(database_contract)["portfolio_id"] != portfolio_id:
@@ -153,13 +139,18 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
                         unknown += 1
                         continue
                     rows = connection.execute(text(
-                        "SELECT status, finished_at, started_at FROM position_snapshot_runs "
+                        "SELECT status, finished_at, started_at, context_json FROM position_snapshot_runs "
                         "WHERE portfolio_id=:portfolio AND broker=:broker AND account_id=:account AND sync_source=:source ORDER BY started_at DESC"
                     ), {"portfolio": portfolio_id, "broker": broker, "account": account, "source": sync_source}).mappings().all()
                     if rows and rows[0]["status"] == "failed":
                         issues.append("LATEST_POSITION_SYNC_FAILED")
                     success = next((r for r in rows if r["status"] == "success" and r["finished_at"]), None)
                     if success:
+                        import json
+                        meta = json.loads(success["context_json"] or "{}")
+                        issues.extend(meta.get("issues", []))
+                        if not meta:
+                            issues.append("SOURCE_EVIDENCE_UNKNOWN")
                         updated = datetime.fromisoformat(str(success["finished_at"]))
                         dates.append(updated.date())
                         if (now.date() - updated.date()).days > 1:
@@ -171,32 +162,24 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
                 if stale:
                     issues.append("STALE_COMPONENTS")
                 totals = wealth._current_totals(portfolio_id)
-                if probe.cash_failed:
-                    cash_status = "failed"
-                    issues.append("TIGER_CASH_SOURCE_FAILED")
-                elif cash_configured:
-                    cash_status = "queried" if cash["has_details"] else "queried_zero_or_missing"
-                    if cash_status == "queried_zero_or_missing":
-                        issues.append("TIGER_CASH_ZERO_OR_SOURCE_EMPTY")
-                else:
-                    cash_status = "not_configured"
-                if probe.fx_degraded:
-                    issues.append("LIVE_CASH_FX_DEGRADED")
-                # Live cash has query time, but not a broker valuation timestamp.
-                if cash_configured:
-                    unknown += 1
-                    issues.append("LIVE_CASH_VALUATION_DATE_UNKNOWN")
+                has_cash = any(p.broker == "tiger" and p.vehicle_type == "CASH" for p in positions)
+                cash_status = "stored_native_cash" if has_cash else "not_synced" if cash_configured else "not_configured"
+                if cash_configured and not has_cash:
+                    issues.append("TIGER_CASH_NOT_SYNCED")
+                if any(p.currency != "CNY" and not fx_date_is_current(p.fx_rate_date, now.date()) for p in positions):
+                    issues.append("FX_STORED_VALUATION_UNVERIFIED")
                 amounts = {f"{name}_minor": _minor(totals[name])
                            for name in ("total_assets", "total_liabilities", "net_worth")}
-                if probe.cash_failed:
-                    amounts = {key: None for key in amounts}  # no plausible zero fallback presented as complete.
+                missing_cash = "TIGER_CASH_NOT_SYNCED" in issues
+                if missing_cash:
+                    amounts = {key:None for key in amounts}
                 return {
                     "schema_version": "poc02.wealth-overview.v1", "synthetic": False,
                     "currency": "CNY", "amount_unit": "minor", "minor_unit_scale": 2,
                     **amounts, "queried_at": queried_at,
                     "data_updated_date": max(dates).isoformat() if dates and not unknown else None,
                     "oldest_component_date": min(dates).isoformat() if dates else None,
-                    "status": "unavailable" if probe.cash_failed else ("partial" if issues else "ok"),
+                    "status": "unavailable" if missing_cash else "partial" if issues else "ok",
                     "issues": sorted(set(issues)),
                     "sources": {"stored_positions": "read", "manual_wealth_items": "read",
                                 "tiger_cash": cash_status},

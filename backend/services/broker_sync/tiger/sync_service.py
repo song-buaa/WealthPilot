@@ -1,10 +1,8 @@
 """老虎证券持仓同步服务。"""
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pydantic import ValidationError
 from tigeropen.tiger_open_config import TigerOpenClientConfig
 from tigeropen.common.util.signature_utils import read_private_key
 from tigeropen.common.consts import Language
@@ -29,12 +27,11 @@ class ReadOnlyTradeClient:
         self._inner = inner
 
     def __getattr__(self, name):
-        if settings.tiger_read_only_mode:
-            for kw in WRITE_METHOD_KEYWORDS:
-                if kw in name.lower():
-                    raise RuntimeError(
-                        f"READ_ONLY_MODE 已开启,拒绝调用写操作方法: {name}"
-                    )
+        for kw in WRITE_METHOD_KEYWORDS:
+            if kw in name.lower():
+                raise RuntimeError(
+                    f"READ_ONLY_MODE 已开启,拒绝调用写操作方法: {name}"
+                )
         return getattr(self._inner, name)
 
 
@@ -80,18 +77,38 @@ class TigerSyncService:
         snapshot_time = datetime.now(timezone.utc)
         trade_client = self._ensure_trade_client()
         # 老虎 SDK 默认 sec_type=STK,基金需要单独查询(API 不支持 sec_type=ALL)
-        stk_positions = trade_client.get_positions(
-            account=self.account_id, sec_type="STK"
-        ) or []
-        fund_positions = trade_client.get_positions(
-            account=self.account_id, sec_type="FUND"
-        ) or []
+        stk_positions = trade_client.get_positions(account=self.account_id, sec_type="STK")
+        fund_positions = trade_client.get_positions(account=self.account_id, sec_type="FUND")
+        if stk_positions is None or fund_positions is None:
+            raise ValueError("INCOMPLETE_SOURCE")
         sdk_positions = list(stk_positions) + list(fund_positions)
-
-        if not sdk_positions:
-            return []
-
-        return self.adapter.to_positions(sdk_positions, snapshot_time)
+        assets = trade_client.get_prime_assets(account=self.account_id)
+        observed = getattr(assets, "account", None) or getattr(assets, "account_id", None)
+        if observed and str(observed) != self.account_id:
+            raise ValueError("MIXED_SNAPSHOT_SCOPE")
+        segment = assets.segments.get("S") if assets and getattr(assets, "segments", None) else None
+        balances = getattr(segment, "currency_assets", None)
+        if not isinstance(balances, dict) or not balances:
+            raise ValueError("INCOMPLETE_SOURCE")
+        # Empty securities need independent account-summary confirmation. A cash
+        # row must not accidentally hide an anomalous empty holdings response.
+        if not sdk_positions and getattr(segment, "market_value", None) != 0:
+            raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
+        from services.broker_sync.schema import cash_position
+        positions = self.adapter.to_positions(sdk_positions, snapshot_time)
+        for currency, item in balances.items():
+            if currency == "BASE":
+                continue
+            amount = getattr(item, "cash_balance", None)
+            if amount is None:
+                raise ValueError("INCOMPLETE_SOURCE")
+            positions.append(cash_position("tiger", self.account_id, currency, amount, snapshot_time))
+        if not any(p.broker_security_type == "CASH" for p in positions):
+            raise ValueError("INCOMPLETE_SOURCE")
+        self._source_metadata = {"complete":True, "source":"tiger_api",
+            "coverage":["STK","FUND","CASH"], "positions_as_of":None,
+            "cash_as_of":None, "price_as_of":None, "issues":["BROKER_VALUATION_TIME_UNKNOWN"]}
+        return positions
 
     def fetch_account_summary(self) -> dict:
         """拉取账户资产摘要（净值、购买力等）。"""
@@ -106,88 +123,9 @@ class TigerSyncService:
     MAX_RETRIES = 2
     RETRY_DELAY_SECONDS = 5
 
-    def sync_and_persist(
-        self,
-        db_session,
-        triggered_by: str = "manual",
-    ) -> int:
-        """
-        同步持仓并写入数据库。
-
-        重试策略:
-        - 网络/API 错误:重试最多 MAX_RETRIES 次
-        - 数据格式错误:立即失败,不重试
-
-        返回 run_id。失败时抛出最后一次的异常。
-        """
-        from tigeropen.common.exceptions import ApiException
+    def sync_and_persist(self, db_session, triggered_by="manual"):
         from services.broker_sync.repository import PositionSnapshotRepository
-
-        repo = PositionSnapshotRepository(db_session)
-        run = repo.create_run(
-            broker="tiger",
-            account_id=self.account_id,
-            sync_source="api",
-            triggered_by=triggered_by,
-        )
-
-        last_exception: Optional[Exception] = None
-        for attempt in range(self.MAX_RETRIES + 1):
-            try:
-                positions = self.fetch_positions()
-                # Bind a reserved pending account only after successful source read.
-                run = repo.bind_run_account(run.id, self.account_id)
-                repo.persist_positions(
-                    run_id=run.id,
-                    positions=positions,
-                    total_market_value_cnh=None,
-                    finalize=False,
-                )
-
-                # 同步到 Position 业务表
-                from services.broker_sync.position_upsert_service import PositionUpsertService
-                from services.broker_sync.models import PositionSnapshot
-
-                snapshots = db_session.query(PositionSnapshot).filter_by(run_id=run.id).all()
-                upsert_service = PositionUpsertService(db_session)
-                upsert_report = upsert_service.upsert_from_snapshots(
-                    snapshots,
-                    broker="tiger",
-                    account_id=self.account_id,
-                    sync_source="api",
-                    commit=False, complete_snapshot=True, run_id=run.id,
-                )
-
-                if upsert_report["errors"]:
-                    raise RuntimeError(
-                        f"业务表同步失败: {upsert_report['errors']}"
-                    )
-
-                repo.mark_run_succeeded(run.id, position_count=len(positions))
-                return run.id
-
-            except (ApiException, ConnectionError, TimeoutError, OSError) as e:
-                last_exception = e
-                if attempt < self.MAX_RETRIES:
-                    time.sleep(self.RETRY_DELAY_SECONDS)
-                    continue
-                db_session.rollback()
-                repo.mark_run_failed(
-                    run_id=run.id,
-                    error_message=f"网络错误,重试 {self.MAX_RETRIES} 次后仍失败: {type(e).__name__}: {e}",
-                    retry_count=attempt,
-                )
-                raise
-
-            except (ValidationError, KeyError, AttributeError, ValueError, RuntimeError) as e:
-                db_session.rollback()
-                repo.mark_run_failed(
-                    run_id=run.id,
-                    error_message=f"数据格式错误(不重试): {type(e).__name__}: {e}",
-                    retry_count=attempt,
-                )
-                raise
-
-        if last_exception:
-            raise last_exception
-        raise RuntimeError("sync_and_persist 内部逻辑错误")
+        return PositionSnapshotRepository(db_session).synchronize(
+            "tiger", self.account_id, self.fetch_positions, triggered_by=triggered_by,
+            metadata=lambda:getattr(self, "_source_metadata", {}),
+            retries=self.MAX_RETRIES, retry_delay=self.RETRY_DELAY_SECONDS)

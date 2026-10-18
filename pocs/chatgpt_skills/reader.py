@@ -5,7 +5,7 @@ import logging
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
-from pocs.poc02_wealth_mcp.reader import readonly_snapshot, service_sessions, ReadError, SourceLogProbe, observe_cash
+from pocs.poc02_wealth_mcp.reader import readonly_snapshot, service_sessions, ReadError, SourceLogProbe
 
 MANUAL_FIELDS = ("id", "kind", "name", "item_type", "category", "source_type", "sync_mode",
                  "current_value", "currency", "original_value", "fx_rate_to_cny", "fx_rate_date",
@@ -26,17 +26,25 @@ def source_quality(connection, row):
     issues = []
     updated = None
     if row.broker and row.broker_account_id and row.sync_source and "position_snapshot_runs" in inspect(connection).get_table_names():
-        runs = connection.execute(text("SELECT status, finished_at FROM position_snapshot_runs WHERE portfolio_id=:p AND broker=:b AND account_id=:a AND sync_source=:s ORDER BY started_at DESC"),
+        runs = connection.execute(text("SELECT status, finished_at, context_json FROM position_snapshot_runs WHERE portfolio_id=:p AND broker=:b AND account_id=:a AND sync_source=:s ORDER BY started_at DESC"),
                                   {"p": row.portfolio_id, "b": row.broker, "a": row.broker_account_id, "s": row.sync_source}).mappings().all()
         if runs and runs[0]["status"] == "failed":
             issues.append("LATEST_POSITION_SYNC_FAILED")
         success = next((r for r in runs if r["status"] == "success" and r["finished_at"]), None)
         if success:
+            import json
+            meta = json.loads(success["context_json"] or "{}")
+            issues.extend(meta.get("issues", []))
+            if not meta:
+                issues.append("SOURCE_EVIDENCE_UNKNOWN")
             updated = datetime.fromisoformat(str(success["finished_at"])).date().isoformat()
     if updated is None:
         issues.append("VALUATION_DATE_UNKNOWN")
     elif (date.today() - date.fromisoformat(updated)).days > 1:
         issues.append("STALE_COMPONENTS")
+    from app.fx_service import fx_date_is_current
+    if row.currency != "CNY" and not fx_date_is_current(row.fx_rate_date):
+        issues.append("FX_STORED_VALUATION_UNVERIFIED")
     return updated, issues
 
 
@@ -92,7 +100,7 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                     accounts = [a for a in accounts if a["account_ref"] == arguments["account_ref"]]
                     if not accounts:
                         raise ReadError("ACCOUNT_NOT_FOUND")
-                # Existing Portfolio summary includes its existing Tiger cash behavior.
+                # Portfolio summary reads the same stored native CASH as holdings.
                 summary = portfolio_service.get_summary(portfolio_id)
                 if any(i.get("id") == -1 for i in serialized):
                     issues.append("LIVE_CASH_VALUATION_DATE_UNKNOWN")
@@ -102,7 +110,10 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
             return dict(schema_version="wealthpilot.details.v1", synthetic=synthetic,
                         queried_at=datetime.now(timezone.utc).isoformat(), status="partial" if issues else "ok",
                         issues=sorted(set(issues)), amount_unit="major", scope=scope,
-                        items=items, accounts=accounts, portfolio_summary=summary)
+                        items=items, accounts=accounts, portfolio_summary=summary,
+                        sources={"tiger_cash": "stored_native_cash" if any(
+                            p.broker == "tiger" and p.vehicle_type == "CASH" for p in rows) else "not_synced"}
+                        if operation == "get_investment_details" else {})
 
 
 def read_details(path, portfolio_id, operation, arguments, *, database_contract=None, synthetic=False, cash_configured=False):
@@ -110,22 +121,13 @@ def read_details(path, portfolio_id, operation, arguments, *, database_contract=
     probe, handlers = SourceLogProbe(), root.handlers[:]
     root.handlers = [probe]
     try:
-        with observe_cash() as cash:
-            result = _read_details(path, portfolio_id, operation, arguments, database_contract=database_contract, synthetic=synthetic)
-        result["sources"] = {}
+        result = _read_details(path, portfolio_id, operation, arguments, database_contract=database_contract, synthetic=synthetic)
         if operation == "get_investment_details":
-            result["sources"]["tiger_cash"] = "not_configured"
-            if cash_configured:
-                result["issues"].append("LIVE_CASH_VALUATION_DATE_UNKNOWN")
-                result["sources"]["tiger_cash"] = "queried" if cash["has_details"] else "queried_zero_or_missing"
-                if not cash["has_details"]:
-                    result["issues"].append("TIGER_CASH_ZERO_OR_SOURCE_EMPTY")
-            if probe.cash_failed:
-                result["sources"]["tiger_cash"] = "failed"
-                result["issues"].append("TIGER_CASH_SOURCE_FAILED")
+            has_cash = result["sources"].get("tiger_cash") == "stored_native_cash"
+            result["sources"]["tiger_cash"] = "stored_native_cash" if has_cash else "not_synced" if cash_configured else "not_configured"
+            if cash_configured and not has_cash:
+                result["issues"].append("TIGER_CASH_NOT_SYNCED")
                 result["portfolio_summary"] = None
-            if probe.fx_degraded:
-                result["issues"].append("LIVE_CASH_FX_DEGRADED")
         result["issues"] = sorted(set(result["issues"]))
         result["status"] = "partial" if result["issues"] else "ok"
         return result

@@ -1,7 +1,6 @@
-"""Single-process manual/cron dispatch around the existing sync_and_persist.
+"""Manual/cron dispatch; SnapshotRun claims fence writers across processes.
 
-No scheduler is created here. The Web process lock guarantees one dispatcher;
-per-broker locks cover both reservation and execution, including long requests.
+No scheduler is created here. Local locks only avoid redundant reservations.
 """
 from datetime import datetime, timezone
 import os
@@ -15,7 +14,7 @@ from backend.api import broker_sync as api
 from services.broker_sync.models import PositionSnapshotRun
 from services.broker_sync.repository import PositionSnapshotRepository
 
-SUPPORTED = ("tiger", "snowball", "guojin")
+SUPPORTED = ("tiger", "futu", "snowball", "guojin")
 
 
 class ReadonlyIBKRClient:
@@ -32,13 +31,17 @@ class ReadonlyIBKRClient:
 
 
 class ServiceFactory:
-    def __init__(self):
+    def __init__(self, *, restricted=True):
         self.ibkr = None
+        self.restricted = restricted
 
     def __call__(self, broker):
         if broker == "tiger":
             from services.broker_sync.tiger.sync_service import TigerSyncService
             service = TigerSyncService()
+        elif broker == "futu":
+            from services.broker_sync.futu.sync_service import FutuSyncService
+            service = FutuSyncService()
         elif broker == "guojin":
             from services.broker_sync.guojin.sync_service import GuojinSyncService
             service = GuojinSyncService()
@@ -46,28 +49,22 @@ class ServiceFactory:
             from core.config import settings
             from backend.services.action.brokers.ibkr import IBKRBrokerAdapter
             from services.broker_sync.snowball.sync_service import SnowballSyncService
-            if os.environ.get("IBKR_READ_ONLY_MODE") != "true" or os.environ.get("ENABLE_IBKR_LIVE_TRADING") != "false":
+            if self.restricted and (os.environ.get("IBKR_READ_ONLY_MODE") != "true" or os.environ.get("ENABLE_IBKR_LIVE_TRADING") != "false"):
                 raise ValueError("READONLY_IBKR_REQUIRED")
+            if not self.restricted and settings.snowball_account and settings.ibkr_account:
+                raise ValueError("AMBIGUOUS_SNOWBALL_IBKR_SOURCE")
+            if not self.restricted and not settings.ibkr_account:
+                return SnowballSyncService()
+            if not self.restricted:
+                from backend.api.action import _get_ibkr_adapter
+                service = SnowballSyncService(ibkr_client=ReadonlyIBKRClient(_get_ibkr_adapter()))
+                return service
             if self.ibkr is None:
                 self.ibkr = IBKRBrokerAdapter(host=settings.ibkr_host, port=settings.ibkr_port,
                     client_id=settings.ibkr_client_id, account_id=settings.ibkr_account or "")
             service = SnowballSyncService(ibkr_client=ReadonlyIBKRClient(self.ibkr))
         else:
             raise ValueError("BROKER_NOT_SUPPORTED")
-        original = service.fetch_positions
-        def fetch_nonempty():
-            result = original()
-            positions = result[0] if isinstance(result, tuple) else result
-            if not positions:
-                raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
-            if any(p.broker != broker or p.account_id in ("", "unknown", "pending", "__unconfigured__") for p in positions) or len({p.account_id for p in positions}) != 1:
-                raise ValueError("MIXED_SOURCE_REQUIRES_REVIEW")
-            # Use the existing FX service/cache before snapshot/upsert writes.
-            from app.fx_service import fx_service
-            for currency in {p.currency for p in positions}:
-                fx_service.get_rate(currency, "CNY")
-            return result
-        service.fetch_positions = fetch_nonempty
         return service
 
     def close(self):
@@ -76,25 +73,31 @@ class ServiceFactory:
 
 
 class SyncExecutor:
-    def __init__(self, enabled, portfolio_id, factory=None):
+    """All entrypoints reserve through the original durable SnapshotRun."""
+    def __init__(self, enabled, portfolio_id, factory=None, *, session_factory=None, account_resolver=None):
         if len(set(enabled)) != len(enabled) or any(b not in SUPPORTED for b in enabled):
             raise ValueError("INVALID_ENABLED_BROKERS")
-        self.enabled = tuple(enabled)
-        self.portfolio_id = portfolio_id
+        self.enabled, self.portfolio_id = tuple(enabled), portfolio_id
         self.factory = factory or ServiceFactory()
-        self.locks = {b: Lock() for b in self.enabled}
+        self.session_factory = session_factory or get_session
+        self.account_resolver = account_resolver or api._sync_account
+        self.locks = {b:Lock() for b in self.enabled}
+        self.claims = {}
 
     def recover_interrupted(self):
-        # Only our own jobs, after obtaining the process-wide exclusive lock.
-        with get_session() as db:
-            runs = db.query(PositionSnapshotRun).filter(
-                PositionSnapshotRun.portfolio_id == self.portfolio_id,
-                PositionSnapshotRun.status == "running",
-                PositionSnapshotRun.triggered_by.like("restricted:%")).all()
+        # Another process may legitimately be reading. Only expired leases are
+        # recoverable; legacy NULL-context runs require explicit operator review.
+        with self.session_factory() as db:
+            db.info["portfolio_id"] = self.portfolio_id
+            db.execute(__import__('sqlalchemy').text("BEGIN IMMEDIATE"))
+            from services.broker_sync.repository import context
+            now = datetime.now(timezone.utc)
+            runs = db.query(PositionSnapshotRun).filter_by(portfolio_id=self.portfolio_id,status="running").all()
             for run in runs:
-                run.status = "failed"
-                run.finished_at = datetime.now(timezone.utc)
-                run.error_message = "SYNC_INTERRUPTED_BY_RESTART"
+                lease = context(run).get("lease_until")
+                if lease and lease <= now.isoformat():
+                    run.status, run.finished_at = "failed", now
+                    run.error_message = "SYNC_LEASE_EXPIRED"
             db.commit()
 
     def reserve(self, broker, triggered_by="manual"):
@@ -102,77 +105,82 @@ class SyncExecutor:
             raise ValueError("INVALID_SYNC_TRIGGER")
         if broker != "all" and broker not in self.enabled:
             raise ValueError("BROKER_NOT_ENABLED")
+        from services.broker_sync.repository import SyncBusy
         jobs, busy = [], []
         try:
             for target in self.enabled if broker == "all" else (broker,):
                 lock = self.locks[target]
                 if not lock.acquire(blocking=False):
-                    busy.append(target)
-                    continue
+                    busy.append(target); continue
                 try:
-                    with get_session() as db:
+                    with self.session_factory() as db:
                         db.info["portfolio_id"] = self.portfolio_id
-                        from core.config import settings
-                        account = ({"tiger": settings.tiger_account, "snowball": settings.ibkr_account,
-                                    "guojin": os.environ.get("GUOJIN_ACCOUNT")})[target]
-                        account = account or "pending"
+                        account = self.account_resolver(db, target)
                         run = PositionSnapshotRepository(db).create_run(target, account,
-                            triggered_by="restricted:" + triggered_by)
-                        jobs.append({"broker": target, "run_id": run.id})
-                except Exception:
+                            triggered_by=("restricted:" if getattr(self.factory,"restricted",False) else "")+triggered_by)
+                        run_id = run.id
+                        self.claims[run_id] = db.info["sync_claims"][run_id]
+                        jobs.append({"broker":target,"run_id":run_id})
+                except SyncBusy:
+                    lock.release(); busy.append(target)
+                except ValueError as error:
                     lock.release()
+                    if broker == "all" and str(error) == "SYNC_ACCOUNT_UNCONFIGURED":
+                        continue  # failed attempt is recorded; configured sources still run
                     raise
-        except Exception:
-            # If reserving an all request fails, release earlier reservations too.
-            for job in jobs:
-                try:
-                    self._fail(job["run_id"], "SYNC_RESERVATION_FAILED")
                 except Exception:
-                    pass  # Original request still fails (e.g. DB unavailable).
-                finally:
-                    self.locks[job["broker"]].release()
+                    lock.release(); raise
+        except Exception:
+            for job in jobs:
+                self._fail(job["run_id"], "SYNC_RESERVATION_FAILED")
+                self.locks[job["broker"]].release()
             raise
         return jobs, busy
 
-    @staticmethod
-    def _fail(run_id, code):
-        with get_session() as db:
+    def _fail(self, run_id, code):
+        with self.session_factory() as db:
+            db.info.update(portfolio_id=self.portfolio_id, sync_claims={run_id:self.claims.get(run_id)})
             PositionSnapshotRepository(db).mark_run_failed(run_id, code)
 
     def execute(self, broker, run_id):
         try:
-            with get_session() as db:
-                db.info.update(portfolio_id=self.portfolio_id, sync_run_id=run_id)
+            with self.session_factory() as db:
+                db.info.update(portfolio_id=self.portfolio_id, sync_run_id=run_id,
+                               sync_claims={run_id:self.claims.get(run_id)})
+                run = db.get(PositionSnapshotRun, run_id)
+                if run is None or run.portfolio_id != self.portfolio_id or run.broker != broker:
+                    raise ValueError("SYNC_RUN_BINDING_INVALID")
+                PositionSnapshotRepository(db)._check_claim(run)
+                triggered_by = run.triggered_by
+                db.info["sync_account_id"] = run.account_id
+                db.rollback()
+                service = self.factory(broker)
                 try:
-                    run = db.get(PositionSnapshotRun, run_id)
-                    if run is None or run.portfolio_id != self.portfolio_id or run.broker != broker:
-                        raise ValueError("SYNC_RUN_BINDING_INVALID")
-                    returned = api._run_sync(broker, run.triggered_by, db_session=db,
-                        service_factory=self.factory, raise_errors=True)
-                    run = db.get(PositionSnapshotRun, run_id)
-                    if returned != run_id or run.status != "success":
+                    returned = service.sync_and_persist(db, triggered_by=triggered_by)
+                    if returned != run_id:
                         raise ValueError("SYNC_RESULT_NOT_COMMITTED")
-                except Exception:
-                    db.rollback()
-                    raise
+                    return run_id
+                finally:
+                    close = getattr(service,"close",None)
+                    if close: close()
         except Exception:
-            # Never expose raw provider errors, account IDs or credentials.
-            self._fail(run_id, "SYNC_SOURCE_FAILED")
+            self._fail(run_id,"SYNC_SOURCE_FAILED")
+            return run_id
         finally:
-            self.locks[broker].release()
+            self.claims.pop(run_id,None)
+            if self.locks[broker].locked(): self.locks[broker].release()
 
     def status(self):
-        # Existing API supplies last-attempt/last-success fields; extend safely.
-        response = api.get_sync_status().model_dump()
-        with get_session() as db:
+        with self.session_factory() as db:
             db.info["portfolio_id"] = self.portfolio_id
+            response = api.get_sync_status(db_session=db).model_dump()
             for item in response["brokers"]:
                 broker = item["broker"]
                 item["enabled"] = broker in self.enabled
-                item["running"] = broker in self.locks and self.locks[broker].locked()
                 run = api._get_last_run(db, broker)
+                item["running"] = bool(run and run.status == "running")
                 item["last_attempt_id"] = run.id if run else None
-                for key in ("error_message", "last_attempt_error_message"):
-                    if item[key]:
-                        item[key] = "SYNC_INTERRUPTED_BY_RESTART" if item[key] == "SYNC_INTERRUPTED_BY_RESTART" else "SYNC_SOURCE_FAILED"
-        return response
+                for key in ("error_message","last_attempt_error_message"):
+                    if item[key] and item[key] not in api.SAFE_SYNC_CODES:
+                        item[key] = "SYNC_SOURCE_FAILED"
+            return response

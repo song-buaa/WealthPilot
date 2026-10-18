@@ -320,8 +320,8 @@ def test_failed_futu_fetch_preserves_previous_positions_and_marks_failed(db_sess
     service = FutuSyncService.__new__(FutuSyncService)
     service.account_id = "FUTU-1"
     service.fetch_positions = MagicMock(side_effect=TimeoutError("OpenD timeout"))
-    with patch("services.broker_sync.futu.sync_service.time.sleep"):
-        with pytest.raises(TimeoutError):
+    with patch("services.broker_sync.repository.time.sleep"):
+        with pytest.raises(ValueError, match="SYNC_SOURCE_FAILED"):
             service.sync_and_persist(db_session)
 
     assert db_session.query(BusinessPosition).filter_by(ticker="A").count() == 1

@@ -56,6 +56,7 @@ def web(shared, monkeypatch):
     (directory / "assets").mkdir()
     (directory / "assets/fixture.js").write_text("// synthetic")
     (directory / "index.html").write_text("<html><head></head><body>synthetic</body></html>")
+    monkeypatch.setenv("GUOJIN_ACCOUNT", "fixture-account")
     config = {"database_path": str(db), "database_contract_path": str(contract), "portfolio_id": 7,
               "enabled_brokers": ["guojin"], "lock_path": str(root / "run/web.lock"), "revision": "a" * 40}
     return config, directory
@@ -196,13 +197,14 @@ def test_duplicate_manual_and_future_cron_hold_one_lock(web):
 def test_restart_marks_only_our_interrupted_runs_failed(web):
     with database.get_session() as session:
         for source in ("restricted:manual", "manual"):
-            session.add(PositionSnapshotRun(portfolio_id=7,broker="guojin",account_id="fixture",status="running",triggered_by=source))
+            session.add(PositionSnapshotRun(portfolio_id=7,broker="guojin",account_id=source,status="running",triggered_by=source,
+                context_json=json.dumps({"token":"synthetic","lease_until":"2000-01-01T00:00:00+00:00"}) if source.startswith("restricted:") else None))
         session.commit()
     with TestClient(create_app(*web, factory=fake_service), base_url="http://127.0.0.1:8790"):
         with database.get_session() as session:
             runs = session.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id).all()
             assert [r.status for r in runs] == ["failed", "running"]
-            assert runs[0].error_message == "SYNC_INTERRUPTED_BY_RESTART"
+            assert runs[0].error_message == "SYNC_LEASE_EXPIRED"
 
 
 def test_process_lock_rejects_second_web_instance(web):

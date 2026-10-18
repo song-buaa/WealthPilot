@@ -90,3 +90,27 @@ class Position(BaseModel):
         default_factory=dict,
         description="券商 SDK 返回的完整原始数据,JSON 序列化后存库"
     )
+
+
+def cash_position(broker, account_id, currency, amount, snapshot_time):
+    """One native currency fact, including confirmed zero/negative balances."""
+    from utils.symbol import normalize_symbol
+    from backend.services.instruments.classification import (
+        AssetClassificationEvidence, classify_instrument, broker_position_classification_fields)
+    currency = str(currency).upper()
+    amount = Decimal(str(amount))
+    if not amount.is_finite() or currency == "BASE":
+        raise ValueError("INVALID_NATIVE_CASH")
+    market = {"USD":"US","HKD":"HK","CNY":"CN","CNH":"CN"}.get(currency,"FX")
+    raw_symbol = "CASH-" + currency
+    evidence = AssetClassificationEvidence(broker=broker, broker_security_type="CASH",
+        vehicle_type_hint="CASH", explicit_economic_asset_class="CASH",
+        explicit_source="BROKER_DETERMINISTIC_METADATA", currency=currency)
+    return Position(broker=broker, account_id=account_id, symbol=normalize_symbol(raw_symbol, market),
+        raw_symbol=raw_symbol, name=f"账户现金（{currency}）",
+        **broker_position_classification_fields(classify_instrument(evidence), evidence=evidence),
+        market=market, quantity=amount, avg_cost=Decimal(1), cost_method="weighted_average",
+        cost_basis=amount, current_price=Decimal(1), market_value=amount, currency=currency,
+        unrealized_pnl=Decimal(0), unrealized_pnl_pct=Decimal(0), snapshot_time=snapshot_time,
+        sync_source="api", raw_data={"tag":"CashBalance","currency":currency,
+            "source_channel":"ibkr" if broker == "snowball" else broker})

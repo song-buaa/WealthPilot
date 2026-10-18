@@ -21,6 +21,20 @@ from app.b0_schema import plan as ddl_plan, verify as verify_shape
 from app.shared_sqlite import verify, schema_digest, load_contract, check_file
 from snapshot import backup, inventory
 
+MIGRATION_STAGE = "b0"
+RECEIPT_KEY = "b0_migration_receipt"
+SCHEMA_COLUMNS = __import__("app.b0_schema", fromlist=["COLUMNS"]).COLUMNS
+
+def select_stage(stage):
+    """Explicit opt-in only; the original B0 CLI/receipts stay B0 by default."""
+    global MIGRATION_STAGE, RECEIPT_KEY, SCHEMA_COLUMNS, ddl_plan, verify_shape
+    if stage not in {"b0", "u0"}:
+        raise ValueError("UNKNOWN_MIGRATION_STAGE")
+    module = __import__("app."+stage+"_schema", fromlist=["plan","verify","COLUMNS"])
+    MIGRATION_STAGE, RECEIPT_KEY = stage, stage+"_migration_receipt"
+    SCHEMA_COLUMNS, ddl_plan, verify_shape = module.COLUMNS, module.plan, module.verify
+
+
 
 def write_private(path, value):
     path = Path(path)
@@ -120,9 +134,12 @@ def make_plan(database, contract_path, corrections=()):
         before = inventory(source)
         statements = ddl_plan(source)
         existing = sum(int(any(row[1] == col for row in source.execute(f"PRAGMA table_info({table})")))
-                       for table, cols in __import__('app.b0_schema', fromlist=['COLUMNS']).COLUMNS.items() for col in cols)
-        if existing not in {0, 5} or (existing == 5 and statements):
+                       for table, cols in SCHEMA_COLUMNS.items() for col in cols)
+        expected = sum(len(cols) for cols in SCHEMA_COLUMNS.values())
+        if existing not in {0, expected} or (existing == expected and statements):
             raise ValueError("PARTIAL_B0_SCHEMA_REQUIRES_RECEIPT_RECOVERY")
+        if MIGRATION_STAGE == "u0" and corrections:
+            raise ValueError("U0_HAS_NO_POSITION_CORRECTIONS")
         corrections = identity_plan(source, corrections, contract["portfolio_id"])
         with closing(sqlite3.connect(":memory:")) as clone:
             source.backup(clone)
@@ -132,7 +149,7 @@ def make_plan(database, contract_path, corrections=()):
             verify_shape(clone)
             target_digest = schema_digest(clone)
             target_inventory = inventory(clone)
-        return {"schema": "wealthpilot.b0-migration.v1", "database_path": str(Path(database).resolve()),
+        return {"schema": f"wealthpilot.{MIGRATION_STAGE}-migration.v1", "database_path": str(Path(database).resolve()),
                 "file_identity": contract["file_identity"], "portfolio_id": contract["portfolio_id"],
                 "old_schema_sha256": contract["schema_sha256"], "target_schema_sha256": target_digest,
                 "old_contract_sha256": hashlib.sha256(Path(contract_path).read_bytes()).hexdigest(),
@@ -179,7 +196,7 @@ def apply_plan(database, contract_path, plan, backup_path, receipt_path, *, writ
     receipt["status"] = "DDL_COMMITTED"
     write_private(receipt_path, receipt)
     contract["schema_sha256"] = plan["target_schema_sha256"]
-    contract["b0_migration_receipt"] = str(Path(receipt_path).resolve())
+    contract[RECEIPT_KEY] = str(Path(receipt_path).resolve())
     write_private(contract_path, contract)
     verify(database, contract_path, integrity=True)
     receipt["status"] = "VERIFIED"
@@ -187,14 +204,20 @@ def apply_plan(database, contract_path, plan, backup_path, receipt_path, *, writ
     return receipt
 
 
+def _receipt_stage(receipt):
+    if receipt.get("schema") != f"wealthpilot.{MIGRATION_STAGE}-migration.v1":
+        raise ValueError("MIGRATION_STAGE_RECEIPT_MISMATCH")
+
+
 def resume_contract(database, contract_path, receipt_path, *, writers_stopped=False):
     receipt = private_read(receipt_path)
+    _receipt_stage(receipt)
     if not writers_stopped or receipt["business_writes_reenabled"] or receipt["status"] not in {"PREPARED", "DDL_COMMITTED"}:
         raise ValueError("RECOVERY_REQUIRES_STOPPED_UNREOPENED_WRITERS")
     contract = load_contract(contract_path)
     if contract not in (receipt["old_contract"], {**receipt["old_contract"],
             "schema_sha256": receipt["target_schema_sha256"],
-            "b0_migration_receipt": str(Path(receipt_path).resolve())}):
+            RECEIPT_KEY: str(Path(receipt_path).resolve())}):
         raise ValueError("RECOVERY_CONTRACT_CHANGED")
     check_file(database, receipt["old_contract"])
     with closing(sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
@@ -202,7 +225,7 @@ def resume_contract(database, contract_path, receipt_path, *, writers_stopped=Fa
             raise ValueError("RECOVERY_TARGET_UNPROVEN")
         verify_shape(conn)
     contract = {**receipt["old_contract"], "schema_sha256": receipt["target_schema_sha256"],
-                "b0_migration_receipt": str(Path(receipt_path).resolve())}
+                RECEIPT_KEY: str(Path(receipt_path).resolve())}
     write_private(contract_path, contract)
     verify(database, contract_path, integrity=True)
     receipt["status"] = "VERIFIED"
@@ -213,6 +236,7 @@ def restore_prewrite(database, contract_path, receipt_path, preserved_backup, *,
     """Explicit pre-write rollback only; never permitted after writer reenabling."""
     from snapshot import verify as verify_backup
     receipt = private_read(receipt_path)
+    _receipt_stage(receipt)
     if not writers_stopped or receipt["business_writes_reenabled"] or receipt["status"] != "VERIFIED":
         raise ValueError("PREWRITE_RESTORE_FORBIDDEN_AFTER_WRITER_ENABLE")
     verify(database, contract_path, integrity=True)
@@ -241,6 +265,8 @@ def restore_prewrite(database, contract_path, receipt_path, preserved_backup, *,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["plan", "apply", "verify", "resume-contract", "mark-writers-enabled", "restore-prewrite"])
+    parser.add_argument("--stage", choices=["b0","u0"], default="b0",
+                        help="U0 must be explicitly selected; never implicit in B0")
     parser.add_argument("--database", required=True)
     parser.add_argument("--contract", required=True)
     parser.add_argument("--plan")
@@ -249,6 +275,7 @@ def main():
     parser.add_argument("--corrections")
     parser.add_argument("--writers-stopped", action="store_true")
     args = parser.parse_args()
+    select_stage(args.stage)
     if args.mode == "plan":
         if not args.plan or Path(args.plan).exists():
             raise ValueError("NEW_PLAN_PATH_REQUIRED")
@@ -271,11 +298,12 @@ def main():
             verify_shape(conn)
         if args.mode == "mark-writers-enabled":
             receipt = private_read(args.receipt)
+            _receipt_stage(receipt)
             if receipt["status"] != "VERIFIED" or receipt["target_schema_sha256"] != load_contract(args.contract)["schema_sha256"]:
                 raise ValueError("VERIFIED_RECEIPT_REQUIRED")
             receipt["business_writes_reenabled"] = True  # MUST precede any writer restart
             write_private(args.receipt, receipt)
-    print("B0 migration command completed; no service or broker operation performed")
+    print(f"{MIGRATION_STAGE.upper()} migration command completed; no service or broker operation performed")
 
 
 if __name__ == "__main__":

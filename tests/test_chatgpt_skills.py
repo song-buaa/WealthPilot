@@ -100,7 +100,7 @@ def test_cash_failure_keeps_stored_holdings_but_never_claims_complete_zero(datab
     monkeypatch.setattr(portfolio_service,'_get_tiger_account_cash',failed)
     value=read_details(database,7,'get_investment_details',{},cash_configured=True)
     assert value['items'] and value['portfolio_summary'] is None
-    assert value['status']=='partial' and 'TIGER_CASH_SOURCE_FAILED' in value['issues']
+    assert value['status']=='partial' and 'TIGER_CASH_NOT_SYNCED' in value['issues']
     assert 'SENSITIVE_FAILURE' not in json.dumps(value)
 
 
@@ -341,5 +341,5 @@ def test_conditional_limit_preview_matches_original_broker_request(workflow):
 def test_zero_cash_is_not_claimed_as_proven_complete_source(database):
     value = read_details(database,7,'get_investment_details',{},cash_configured=True)
     assert value['status'] == 'partial'
-    assert value['sources']['tiger_cash'] == 'queried_zero_or_missing'
-    assert 'TIGER_CASH_ZERO_OR_SOURCE_EMPTY' in value['issues']
+    assert value['sources']['tiger_cash'] == 'not_synced'
+    assert 'TIGER_CASH_NOT_SYNCED' in value['issues']

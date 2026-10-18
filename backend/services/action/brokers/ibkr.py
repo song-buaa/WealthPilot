@@ -1280,6 +1280,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 # 与各原币行同时使用会重复计算。
                 info["cash_balances"] = self._native_cash_balances(values)
                 info["cash_as_of"] = datetime.now(timezone.utc).isoformat()
+                info["account_snapshot_complete"] = True  # awaited accountDownloadEnd above
                 return info
 
             return self._run_on_loop(fetch_account_info)

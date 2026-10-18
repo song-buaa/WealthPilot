@@ -44,6 +44,8 @@ class SyncStatusItem(BaseModel):
     last_attempt_error_message: Optional[str] = None
     last_successful_sync_time: Optional[str] = None
     last_successful_position_count: Optional[int] = None
+    last_successful_run_id: Optional[int] = None
+    data_quality: Optional[dict] = None
 
 
 class SyncStatusResponse(BaseModel):
@@ -58,6 +60,21 @@ class TriggerRequest(BaseModel):
 class TriggerResponse(BaseModel):
     message: str
     brokers_triggered: list[str]
+
+
+SAFE_SYNC_CODES = {"SYNC_LEASE_EXPIRED","SYNC_ACCOUNT_UNCONFIGURED","SYNC_SOURCE_FAILED",
+    "EMPTY_SOURCE_REQUIRES_REVIEW","INCOMPLETE_SOURCE","FX_RATE_UNAVAILABLE",
+    "DUPLICATE_SNAPSHOT_IDENTITY","MIXED_SNAPSHOT_SCOPE","SYNC_CLAIM_EXPIRED_OR_REPLACED",
+    "ACCOUNT_PORTFOLIO_AMBIGUOUS","SYNC_RESERVATION_FAILED"}
+
+
+def _public_quality(run):
+    if run is None:
+        return {"quality":"unavailable","issues":["NO_SUCCESSFUL_SYNC"]}
+    import json
+    meta = json.loads(run.context_json or "{}") or {"quality":"partial","issues":["SOURCE_EVIDENCE_UNKNOWN"]}
+    return {key:meta.get(key) for key in ("quality","issues","source","complete","coverage","markets","empty_confirmed","fetched_at",
+        "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx")}
 
 
 BROKER_PLATFORM_MAP = {
@@ -103,7 +120,7 @@ def _get_last_run(db, broker: str):
     return (
         db.query(PositionSnapshotRun)
         .filter_by(portfolio_id=_portfolio_scope(db), broker=broker, sync_source="api")
-        .filter(PositionSnapshotRun.account_id.in_([_sync_account(db, broker), "pending"]))
+        .filter(PositionSnapshotRun.account_id.in_([_sync_account(db, broker), "pending", "__unconfigured__"]))
         .order_by(desc(PositionSnapshotRun.started_at))
         .first()
     )
@@ -124,8 +141,7 @@ def _get_last_successful_run(db, broker: str):
     )
 
 
-@router.get("/status", response_model=SyncStatusResponse)
-def get_sync_status():
+def get_sync_status(db_session=None):
     """查询各 broker 最近同步状态。"""
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     if PUBLIC_DEMO_MODE:
@@ -141,7 +157,7 @@ def get_sync_status():
         sys.path.insert(0, backend_dir)
     from services.broker_sync.models import PositionSnapshotRun
 
-    db = get_session()
+    db = db_session if db_session is not None else get_session()
     try:
         brokers = []
         for broker, platform in BROKER_PLATFORM_MAP.items():
@@ -154,18 +170,18 @@ def get_sync_status():
                     last_sync_time=_format_beijing_time(attempt.started_at),
                     last_sync_status=attempt.status,
                     last_position_count=attempt.position_count,
-                    error_message=attempt.error_message,
+                    error_message=attempt.error_message if attempt.error_message in SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED" if attempt.error_message else None,
                     last_attempt_time=_format_beijing_time(attempt.started_at),
                     last_attempt_status=attempt.status,
                     last_attempt_position_count=attempt.position_count,
-                    last_attempt_error_message=attempt.error_message,
+                    last_attempt_error_message=attempt.error_message if attempt.error_message in SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED" if attempt.error_message else None,
                     last_successful_sync_time=(
                         _format_beijing_time(successful_run.started_at)
                         if successful_run else None
                     ),
-                    last_successful_position_count=(
-                        successful_run.position_count if successful_run else None
-                    ),
+                    last_successful_position_count=(successful_run.position_count if successful_run else None),
+                    last_successful_run_id=successful_run.id if successful_run else None,
+                    data_quality=_public_quality(successful_run),
                 ))
             else:
                 brokers.append(SyncStatusItem(
@@ -175,62 +191,38 @@ def get_sync_status():
                 ))
         return SyncStatusResponse(brokers=brokers)
     finally:
-        db.close()
+        if db_session is None:
+            db.close()
+
+
+def _executor():
+    from backend.services.restricted_sync import SyncExecutor, ServiceFactory
+    with get_session() as db:
+        pid = _portfolio_scope(db)
+    import os
+    configured = os.environ.get("WEALTHPILOT_ENABLED_SYNC_BROKERS")
+    enabled = tuple(b.strip() for b in configured.split(",") if b.strip()) if configured is not None else tuple(BROKER_PLATFORM_MAP)
+    return SyncExecutor(enabled, pid, factory=ServiceFactory(restricted=False))
 
 
 def _run_sync(broker: str, triggered_by: str = "manual", *, db_session=None,
               service_factory=None, raise_errors=False):
-    """实际执行同步（在 BackgroundTask 或 scheduler 里调用）。"""
-    # 确保 backend/ 在 sys.path 中（sync_service 内部用 from core.config / from services.broker_sync）
-    import sys, os
-    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
-
-    db = db_session if db_session is not None else get_session()
+    """Compatibility entrypoint for existing 22:00 cron/CLI and injected tests."""
     try:
-        db.info["portfolio_id"] = _portfolio_scope(db)
-        if service_factory is not None:
-            service = service_factory(broker)
-            return service.sync_and_persist(db, triggered_by=triggered_by)
-        elif broker == "tiger":
-            # 延迟 import 避免双重注册：_run_sync 在 backend/ 上下文执行
-            from services.broker_sync.tiger.sync_service import TigerSyncService  # noqa: E402
-            service = TigerSyncService()
-            service.sync_and_persist(db, triggered_by=triggered_by)
-        elif broker == "futu":
-            from services.broker_sync.futu.sync_service import FutuSyncService  # noqa: E402
-            service = FutuSyncService()
-            service.sync_and_persist(db, triggered_by=triggered_by)
-            service.close()
-        elif broker == "snowball":
-            from services.broker_sync.snowball.sync_service import SnowballSyncService  # noqa: E402
-            from backend.services.restricted_sync import ReadonlyIBKRClient
-            from backend.api.action import _get_ibkr_adapter
-            from core.config import settings
-            if settings.snowball_account and settings.ibkr_account:
-                raise ValueError("AMBIGUOUS_SNOWBALL_IBKR_SOURCE")
-            service = (SnowballSyncService(ibkr_client=ReadonlyIBKRClient(_get_ibkr_adapter()))
-                       if settings.ibkr_account else SnowballSyncService())
-            service.sync_and_persist(db, triggered_by=triggered_by)
-        elif broker == "guojin":
-            from services.broker_sync.guojin.sync_service import GuojinSyncService  # noqa: E402
-            service = GuojinSyncService()
-            service.sync_and_persist(db, triggered_by=triggered_by)
-        print(f"[broker-sync] {broker} 同步完成 @ {datetime.now()}", flush=True)
-
-        # ── 统一后处理：补全裸代码名称（如雪盈 LI → 理想汽车）──
-        from services.broker_sync.position_upsert_service import backfill_bare_names
-        backfill_bare_names(db)
-    except Exception as e:
+        if db_session is not None or service_factory is not None:
+            # Explicit injection keeps the same Repository claim/publication.
+            if db_session is None:
+                raise ValueError("EXPLICIT_SYNC_SESSION_REQUIRED")
+            return service_factory(broker).sync_and_persist(db_session, triggered_by=triggered_by)
+        executor = _executor()
+        jobs, _ = executor.reserve(broker, triggered_by)
+        for job in jobs:
+            executor.execute(job["broker"],job["run_id"])
+        return jobs[0]["run_id"] if jobs else None
+    except Exception:
         if raise_errors:
             raise
-        import traceback
-        print(f"[broker-sync] {broker} 同步失败: {type(e).__name__}: {e}", flush=True)
-        traceback.print_exc()
-    finally:
-        if db_session is None:
-            db.close()
+        return None
 
 
 @router.post("/trigger", response_model=TriggerResponse)
@@ -239,12 +231,18 @@ def trigger_sync(req: TriggerRequest, background_tasks: BackgroundTasks):
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     if PUBLIC_DEMO_MODE:
         return TriggerResponse(message="PUBLIC_DEMO_MODE: 同步已禁用", brokers_triggered=[])
-    brokers_to_run = ["tiger", "futu", "snowball", "guojin"] if req.broker == "all" else [req.broker]
+    from fastapi import HTTPException
+    executor = _executor()
+    try:
+        jobs, busy = executor.reserve(req.broker,"manual")
+    except ValueError:
+        raise HTTPException(400,"SYNC_SCOPE_OR_CONFIGURATION_INVALID") from None
+    for job in jobs:
+        background_tasks.add_task(executor.execute,job["broker"],job["run_id"])
+    return TriggerResponse(message="已有同步任务运行中" if busy and not jobs else "同步任务已提交,后台执行中",
+        brokers_triggered=[job["broker"] for job in jobs])
 
-    for broker in brokers_to_run:
-        background_tasks.add_task(_run_sync, broker, req.triggered_by)
 
-    return TriggerResponse(
-        message="同步任务已提交,后台执行中",
-        brokers_triggered=brokers_to_run,
-    )
+@router.get("/status", response_model=SyncStatusResponse)
+def sync_status_endpoint():
+    return get_sync_status()

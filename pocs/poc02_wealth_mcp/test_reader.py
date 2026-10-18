@@ -113,13 +113,13 @@ def test_source_failure_does_not_claim_zero_cash_is_complete(fixture_db, monkeyp
     result = read_overview(fixture_db, 1, cash_configured=True)
     assert result['status'] == 'unavailable'
     assert result['total_assets_minor'] is None
-    assert 'TIGER_CASH_SOURCE_FAILED' in result['issues']
+    assert 'TIGER_CASH_NOT_SYNCED' in result['issues']
     assert 'PRIVATE_ACCOUNT_FIXTURE' not in str(result)
 
 
 def test_zero_cash_and_missing_cash_are_not_conflated(fixture_db):
     result = read_overview(fixture_db, 1, cash_configured=True)
-    assert 'TIGER_CASH_ZERO_OR_SOURCE_EMPTY' in result['issues']
+    assert 'TIGER_CASH_NOT_SYNCED' in result['issues']
 
 
 def test_service_bindings_restored(fixture_db):
@@ -145,7 +145,7 @@ def test_multiple_service_sessions_share_one_snapshot(fixture_db):
 def test_latest_failed_sync_and_old_success_remain_visible(fixture_db):
     with sqlite3.connect(fixture_db) as writer:
         writer.execute('UPDATE positions SET broker="fixture", broker_account_id="PRIVATE_OWNER", sync_source="api"')
-        writer.execute('CREATE TABLE IF NOT EXISTS position_snapshot_runs(portfolio_id INTEGER, broker TEXT, account_id TEXT, status TEXT, finished_at TEXT, started_at TEXT, triggered_by TEXT, retry_count INTEGER, sync_source TEXT)')
+        writer.execute('CREATE TABLE IF NOT EXISTS position_snapshot_runs(portfolio_id INTEGER, broker TEXT, account_id TEXT, status TEXT, finished_at TEXT, started_at TEXT, triggered_by TEXT, retry_count INTEGER, sync_source TEXT, context_json TEXT)')
         writer.executemany("INSERT INTO position_snapshot_runs(portfolio_id,broker,account_id,status,finished_at,started_at,triggered_by,retry_count,sync_source) VALUES(1,?,?,?,?,?,'manual',0,'api')", [
             ('fixture','PRIVATE_OWNER','success','2026-10-08 12:00:00','2026-10-08 11:00:00'),
             ('fixture','PRIVATE_OWNER','failed',None,'2026-10-11 11:00:00'),

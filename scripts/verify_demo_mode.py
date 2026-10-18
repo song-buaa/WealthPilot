@@ -79,10 +79,13 @@ def main():
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     check("PUBLIC_DEMO_MODE is True", PUBLIC_DEMO_MODE is True)
 
-    # 1d. Tiger cash → 0
+    # 1d. Read-time Tiger cash bypass is retired, including Demo
     from backend.services.portfolio_service import _get_tiger_account_cash
-    cash, details = _get_tiger_account_cash()
-    check("Tiger cash short-circuited", cash == 0.0, f"got {cash}")
+    try:
+        _get_tiger_account_cash()
+        check("Tiger cash bypass retired", False)
+    except ValueError as exc:
+        check("Tiger cash bypass retired", str(exc) == "LIVE_CASH_READ_REMOVED_USE_SCOPED_POSITIONS")
 
     # 1e. MCP — DEMO_ALLOW_MARKET_DATA 控制
     from backend.core.demo_mode import DEMO_ALLOW_MARKET_DATA

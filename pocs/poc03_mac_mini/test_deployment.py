@@ -282,8 +282,12 @@ def test_private_reference_replays_existing_calculation(tmp_path, monkeypatch):
         session.commit()
     engine.dispose()
     reference = snapshot.valuation_reference(db, {"portfolio_id": 1})
+    assert reference["cash_reference"]["source"] == "stored_native_cash"
     result = snapshot.check_reference(db, reference)
     assert all(result["amounts_equal"].values())
+    legacy = {**reference, "cash_reference": {"configured": True, "value_cny": 100, "has_details": True}}
+    with pytest.raises(ValueError, match="LEGACY_EXTERNAL_CASH_REFERENCE_REQUIRES_RECAPTURE"):
+        snapshot.check_reference(db, legacy)
     reference["result"]["net_worth_minor"] += 1
     with pytest.raises(ValueError, match="AMOUNTS_MISMATCH"):
         snapshot.check_reference(db, reference)
