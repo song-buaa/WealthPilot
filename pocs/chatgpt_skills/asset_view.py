@@ -28,7 +28,8 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
     from app.database import get_session
     from app.models import Position
     from services.broker_sync.models import PositionSnapshotRun
-    from backend.api.broker_sync import _public_quality
+    from backend.api.broker_sync import _public_quality, public_sync_attempt
+    from services.broker_sync.repository import publication_status
     with readonly_business_database(path):
         overview = read_overview(path, portfolio_id)
         overview["synthetic"] = synthetic
@@ -59,10 +60,15 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                     import hashlib
                     ref = "account_" + hashlib.sha256(repr((portfolio_id,broker,account)).encode()).hexdigest()[:20]
                 entry = dict(account_ref=ref, broker=broker,
-                    last_attempt_id=latest.id if latest else None, last_attempt_status=latest.status if latest else "never",
+                    **public_sync_attempt(latest),
                     last_good_run_id=good.id if good else None,
+                    last_good_quality=quality["quality"],
                     account_synced_at=good.finished_at.isoformat() if good and good.finished_at else None,
                     **quality)
+                # Recheck the actual frozen input, not a pre-Backup observation.
+                entry["publication_status"] = publication_status(session, good)
+                if entry["publication_status"] != "matched":
+                    issues.add("SYNC_PUBLICATION_"+entry["publication_status"].upper())
                 accounts.append(entry)
                 issues.update(quality.get("issues") or [])
                 if not good:

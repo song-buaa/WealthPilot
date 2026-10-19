@@ -32,16 +32,18 @@ def context(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add_all([Portfolio(id=7,name='Synthetic'),Portfolio(id=8,name='OTHER_PRIVATE')]);session.commit()
-    state=SimpleNamespace(calls=0, offline=False, cash=1000)
+    state=SimpleNamespace(calls=0, offline=False, cash=1000, empty=False, error_code=None)
     def sessions():return Session(engine,info={'portfolio_id':7})
     def factory(broker):
         def sync(session,triggered_by='manual'):
             def fetch():
                 state.calls+=1
                 if state.offline:raise ConnectionError('isolated source unavailable')
+                if state.error_code:raise ValueError(state.error_code)
+                if state.empty:return []
                 return [cash_position(broker,'fixture','CNY',state.cash,datetime.now(timezone.utc))]
             return PositionSnapshotRepository(session).synchronize(broker,'fixture',fetch,retries=0,
-                triggered_by=triggered_by,metadata=lambda:dict(source='fixture',complete=True,
+                triggered_by=triggered_by,metadata=lambda:dict(source='fixture',complete=True,empty_confirmed=state.empty,
                     cash_as_of=datetime.now(timezone.utc).isoformat(),positions_as_of=datetime.now(timezone.utc).isoformat()))
         return SimpleNamespace(sync_and_persist=sync)
     def service():
@@ -74,8 +76,8 @@ def test_prepare_idempotency_and_immutable_views(context):
     assert service.request('same-task')[1] is None and c.state.calls==1
     next_view=ready(c,'different-task')
     assert next_view['snapshot_id']!=view['snapshot_id']
-    assert c.state.calls==1  # account observation still fresh, checked under claim
-    assert next_view['views']['wealth_summary']['total_assets']==2000
+    assert c.state.calls==2  # local facts diverged: original sync must restore/verify
+    assert next_view['views']['wealth_summary']['total_assets']==1000
     assert all('account_id' not in a and 'account' not in a for a in public_view(view)['data_quality']['accounts'])
     assert 'internal' not in public_view(view)
 
@@ -135,6 +137,8 @@ def test_failed_refresh_keeps_last_good_and_cooldown(context,monkeypatch,failure
     assert view['data_quality']['status']=='partial'
     assert view['data_quality']['can_propose_rebalance'] is False
     assert 'LATEST_POSITION_SYNC_FAILED' in view['data_quality']['issues']
+    assert view['data_quality']['accounts'][0]['last_attempt_reason_code']==(
+        'FX_RATE_UNAVAILABLE' if failure=='fx' else 'SYNC_SOURCE_FAILED')
     assert c.state.calls==2
     ready(c,'cooldown-task')
     assert c.state.calls==2

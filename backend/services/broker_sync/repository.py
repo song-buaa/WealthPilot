@@ -1,5 +1,6 @@
 """Original snapshot repository: durable scoped claims and fenced publication."""
 import json
+import hashlib
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -26,6 +27,29 @@ class SyncReusable(ValueError):
 
 def context(run):
     return json.loads(run.context_json or "{}")
+
+
+def published_positions(session, run):
+    """Fingerprint the actual scoped business projection, never a second calculation.
+
+    Sealed only inside synchronize's Snapshot+Upsert publication transaction.
+    Names and creation/row IDs are presentation/storage metadata; all remaining
+    Position columns affect identity, quantities, values, classification or scope.
+    """
+    from app.models import Position as BusinessPosition
+    fields = [c.name for c in BusinessPosition.__table__.columns if c.name not in {"id", "name", "created_at"}]
+    rows = session.query(BusinessPosition).filter_by(portfolio_id=run.portfolio_id,
+        broker=run.broker, broker_account_id=run.account_id, sync_source=run.sync_source).all()
+    facts = sorted(json.dumps({key:getattr(row,key) for key in fields}, sort_keys=True,
+                              ensure_ascii=False, allow_nan=False) for row in rows)
+    return {"version":1, "count":len(facts), "sha256":hashlib.sha256(json.dumps(facts).encode()).hexdigest()}
+
+
+def publication_status(session, run):
+    sealed = context(run).get("published_positions") if run else None
+    if not isinstance(sealed, dict) or sealed.get("version") != 1:
+        return "unverified"
+    return "matched" if sealed == published_positions(session, run) else "diverged"
 
 
 class PositionSnapshotRepository:
@@ -111,6 +135,7 @@ class PositionSnapshotRepository:
                 finished = recent.finished_at.replace(tzinfo=timezone.utc) if recent.finished_at.tzinfo is None else recent.finished_at
                 age = (now - finished).total_seconds()
                 if (recent.status == "success" and context(recent).get("complete") is True and 0 <= age <= freshness_seconds
+                        and publication_status(self.session, recent) == "matched"
                         or recent.status == "failed" and 0 <= age <= 15):
                     recent_id = recent.id
                     self.session.rollback()
@@ -237,6 +262,11 @@ class PositionSnapshotRepository:
                 from services.broker_sync.position_upsert_service import backfill_bare_names
                 backfill_bare_names(self.session, portfolio_id=self._portfolio_id(),
                     broker=broker, account_id=account_id, commit=False)
+                self.session.flush()
+                run = self.session.get(PositionSnapshotRun, run_id)
+                meta = context(run)
+                meta["published_positions"] = published_positions(self.session, run)
+                run.context_json = json.dumps(meta)
                 self.mark_run_succeeded(run_id, len(positions))
                 return run_id
             except Exception as exc:

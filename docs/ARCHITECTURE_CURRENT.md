@@ -185,3 +185,5 @@ U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite �
 同一 SQLite Backup 版本上的原 Portfolio/Wealth/reader 结果持久化；原 PEER/Skills 在限时、私有、hash 验证且只读的任务输入上运行，不改 decision_engine 或主 Backend 的全局 engine。Web/MCP 按 snapshot_id 读原 payload，不能查询当前表冒充旧 ID。账户同步、证券/行情、FX 和手工日期分列；缺失/过期则降级并取消精确调仓资格。Issuer 映射只合并已证实直接权益的 CNY 敞口，保留证券/数量/成本，不按币种/同名猜测。
 
 权限、字段必要性、输入期限、状态/恢复和生产迁移边界见 [U1 实现说明](U1_IMPLEMENTATION.md)。没有新持仓库、财富算法、订单状态机或成交消费者；新配置/Schema 的生产启用需要另行发布授权。
+
+PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影指纹；freshness 复用和冻结副本内均验证，不把最近 success 当当前行完整证明。无旧证据须刷新或降级，不事后认领历史事实。原 PEER 输出前重核同 ID 时效，Web 采用最终质量；最近失败尝试使用原安全错误白名单，与 last-good 质量分列。未新增 Schema。

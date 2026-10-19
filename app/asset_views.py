@@ -73,11 +73,15 @@ def public_view(payload):
     result = {k: v for k, v in payload.items() if k != "internal"}
     result["context_current"] = 0 <= (now() - datetime.fromisoformat(payload["captured_at"])).total_seconds() < VIEW_TTL
     expired = set()
+    if not result["context_current"]:
+        expired.add("ANALYSIS_CONTEXT_EXPIRED")
     if not 0 <= (now() - datetime.fromisoformat(payload["captured_at"])).total_seconds() <= 300:
         expired.add("STALE_ANALYSIS_VIEW")
     # Capture does not reset the source clock. A source already 290s old at
     # capture must not qualify for another 300s merely because this view is new.
     for account in result["data_quality"].get("accounts", []):
+        if account.get("publication_status", "unverified") != "matched":
+            expired.add("SYNC_PUBLICATION_"+account.get("publication_status", "unverified").upper())
         stamp = account.get("account_synced_at")
         if stamp:
             stamp = datetime.fromisoformat(stamp)

@@ -84,3 +84,12 @@
 - 原全量 pytest、原同步/共享库/只读协议、浏览器、frontend lint/build、Offline M5 18/18 与四项 CI 保持；精确数量、SHA/Run 链接以 PR/交付证据为准。未做生产、真实券商、真实付费模型或订单验收。
 
 本轮仅 PR，不合并、不部署、不启动 U2/B2/B3/QMT。
+
+## PR #24 定向修复合同
+
+- **R01 发布事实一致性**：原 Repository `synchronize` 在原 Snapshot/Upsert 发布事务中 flush 后，将实际 scoped Position 投影的 `version/count/sha256` 写入同一 Run 的 `context_json.published_positions`，与 success 一起 commit。没有新列/索引/表，没有第二份金额计算。指纹覆盖账户/来源、证券身份、数量、成本、原币/CNY 金额、FX、分类和 segment；不覆盖展示名称、行 ID 或创建时间。
+- 分析 freshness 在原账户 claim 短事务内还要求该发布指纹匹配当前行。缺失证据或行变化（包括同数量内容不同）须走原同步；不伪造历史指纹。旧 U0 run 没有该证据时，首次分析可能多做一次已授权只读同步。冻结后在同一副本上再核对，覆盖 claim 检查与 Backup 之间的其他连接写入；不一致/不能刷新则 `SYNC_PUBLICATION_DIVERGED/UNVERIFIED`、partial、不可精确调仓。合法且有发布证明的空仓指纹可复用；清空/CSV/平台导入功能保持，未知导入现金的原碰撞保护不得放宽。
+- 旧固定 payload 金额/ID 不改写；没有新发布校验证据的历史视图仍可核对，但读取时撤销精确资格。原手动及 22:00 发布自然产生新证据，未引入重试队列或额外同步进程。
+- **I01 输出时效**：原 PEER 输出前，对同一不可变视图再执行 `public_view`；不查活动持仓、不刷新、不换 ID。来源/视图过期则更新 issues/资格并提示一般分析；运行中超过 30 分钟上下文则返回 unavailable、`ANALYSIS_CONTEXT_EXPIRED`，不提供原专业结构化方案。响应 `data_quality.asset_view` 和 `context_current` 是最终状态，Web 使用它更新提示和按钮。
+- **I02 最近尝试与 Last-good**：原 broker_sync API 共用 `safe_sync_reason/public_sync_attempt`，投影 `last_attempt_time/status/reason_code`；last-good run、成功时间、`last_good_quality`、FX/证券时间保持独立。只有原 `SAFE_SYNC_CODES` 可直接返回，原始 SDK/账户/连接异常统一为 `SYNC_SOURCE_FAILED`；外部投影不含发布 hash 或原始异常。
+- 正式安全回归：[评审回归](../tests/test_u1_review_regressions.py) 覆盖 Web clear、CSV/平台替换、同条数的身份/数量/金额变化、跨连接冻结竞态、旧 run/旧 view、合法空仓、模型运行跨期、失败原因及敏感文本；[浏览器](../frontend/tests/e2e/asset-view.spec.ts) 验证最终质量替换初始资格，金额与 ID 保持固定。真实 ChatGPT 自然语言工具规划仍须发布后单独验收，测试客户端显式传 ID 不替代它。

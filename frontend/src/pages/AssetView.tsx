@@ -6,7 +6,9 @@ interface View {
   captured_at: string
   context_current: boolean
   data_quality: { status: string; issues: string[]; can_propose_rebalance: boolean;
-    accounts: { account_ref: string; broker: string; account_synced_at: string | null; price_as_of?: string | null }[] }
+    accounts: { account_ref: string; broker: string; account_synced_at: string | null; price_as_of?: string | null;
+      last_attempt_time?: string | null; last_attempt_status?: string; last_attempt_reason_code?: string | null;
+      last_good_quality?: string | null }[] }
   views: {
     wealth_summary: { total_assets: number; total_liabilities: number; net_worth: number }
     get_investment_details: { items: { id: number; name: string; symbol: string; account_ref: string; quantity: number;
@@ -40,11 +42,17 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
   async function review() {
     setBusy(true); setError('')
     try {
-      const result = await call<{ conclusion: string; snapshot_id: string }>(encodeURIComponent(snapshotId) + '/review', {
+      const result = await call<{ conclusion: string; snapshot_id: string;
+        data_quality: { asset_view: View['data_quality']; context_current: boolean } }>(encodeURIComponent(snapshotId) + '/review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: '评估本次固定资产视图的投资组合风险与配置情况', snapshot_id: snapshotId }),
       })
       if (result.snapshot_id !== snapshotId) throw new Error('分析输入版本不一致，请重新准备。')
+      if (!result.data_quality?.asset_view || typeof result.data_quality.context_current !== 'boolean') {
+        throw new Error('分析结果缺少最终数据质量，请重新准备。')
+      }
+      setView(current => current && ({ ...current, data_quality: result.data_quality.asset_view,
+        context_current: result.data_quality.context_current }))
       setConclusion(result.conclusion)
     } catch (e) { setError(e instanceof Error ? e.message : '分析暂不可用') }
     finally { setBusy(false) }
@@ -66,7 +74,11 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
         <p>净资产 ¥{money(view.views.wealth_summary.net_worth)}</p>
       </div>
       <h2 className="font-semibold">账户来源与时间</h2>
-      {view.data_quality.accounts.map(a => <p key={a.account_ref}>{a.broker}：账户同步 {a.account_synced_at ?? '未知'}；证券估值 {a.price_as_of ?? '未知'}</p>)}
+      {view.data_quality.accounts.map(a => <p key={a.account_ref}>
+        {a.broker}：最近尝试 {a.last_attempt_time ?? '未知'}（{a.last_attempt_status ?? '未知'}）
+        {a.last_attempt_reason_code && <>；失败原因 {a.last_attempt_reason_code}</>}；
+        最近成功同步 {a.account_synced_at ?? '未知'}；成功数据质量 {a.last_good_quality ?? '未知'}；证券估值 {a.price_as_of ?? '未知'}
+      </p>)}
       <h2 className="font-semibold">证券明细</h2>
       <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>
         <th>证券</th><th>账户</th><th>数量</th><th>原币成本单价</th><th>CNY 市值</th>

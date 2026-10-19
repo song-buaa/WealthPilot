@@ -69,6 +69,26 @@ SAFE_SYNC_CODES = {"SYNC_LEASE_EXPIRED","SYNC_ACCOUNT_UNCONFIGURED","SYNC_SOURCE
     "SOURCE_ACCOUNT_UNPROVEN","CASH_IDENTITY_COLLISION_REQUIRES_REVIEW"}
 
 
+def safe_sync_reason(run):
+    """Shared safe failure projection; never forward raw SDK/connection text."""
+    if run is None:
+        return None
+    if not run.error_message:
+        return "SYNC_SOURCE_FAILED" if run.status == "failed" else None
+    return run.error_message if run.error_message in SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED"
+
+
+def public_sync_attempt(run):
+    from datetime import timezone
+    stamp = run.started_at if run else None
+    if stamp is not None and stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return {"last_attempt_id":run.id if run else None,
+            "last_attempt_time":stamp.isoformat() if stamp else None,
+            "last_attempt_status":run.status if run else "never",
+            "last_attempt_reason_code":safe_sync_reason(run)}
+
+
 def _public_quality(run):
     if run is None:
         return {"quality":"unavailable","issues":["NO_SUCCESSFUL_SYNC"]}
@@ -171,11 +191,11 @@ def get_sync_status(db_session=None):
                     last_sync_time=_format_beijing_time(attempt.started_at),
                     last_sync_status=attempt.status,
                     last_position_count=attempt.position_count,
-                    error_message=attempt.error_message if attempt.error_message in SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED" if attempt.error_message else None,
+                    error_message=safe_sync_reason(attempt),
                     last_attempt_time=_format_beijing_time(attempt.started_at),
                     last_attempt_status=attempt.status,
                     last_attempt_position_count=attempt.position_count,
-                    last_attempt_error_message=attempt.error_message if attempt.error_message in SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED" if attempt.error_message else None,
+                    last_attempt_error_message=safe_sync_reason(attempt),
                     last_successful_sync_time=(
                         _format_beijing_time(successful_run.started_at)
                         if successful_run else None

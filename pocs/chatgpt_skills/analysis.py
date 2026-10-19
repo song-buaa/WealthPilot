@@ -250,8 +250,13 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             decision_service.clear_session(conversation)
         result.issues=sorted(set(result.issues+result.data_quality['issues']))
         if asset_view:
+            from app.asset_views import public_view
+            # A model may take minutes. Requalify the SAME immutable input at
+            # output time; never fetch new data or swap the snapshot identity.
+            asset_view = public_view(asset_view)
             result.snapshot_id = request.snapshot_id
             result.data_quality['asset_view'] = asset_view['data_quality']
+            result.data_quality['context_current'] = asset_view['context_current']
             result.scope['snapshot_id'] = request.snapshot_id
             result.evidence['asset_view'] = dict(wealth_summary=asset_view['views']['wealth_summary'],
                 portfolio_summary=asset_view['views']['portfolio_summary'], issuer_exposure=asset_view['issuer_exposure'])
@@ -259,5 +264,10 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             if not asset_view['data_quality']['can_propose_rebalance']:
                 result.conclusion = '数据存在过期或未知项；以下仅作一般分析，不构成可直接执行的精确调仓方案。\n'+result.conclusion
                 result.limitations.append('Precise rebalancing requires a new qualified asset view; source, security price and FX times are separate.')
+            if not asset_view['context_current']:
+                result.status = 'unavailable'
+                result.professional_result = {}
+                result.issues = sorted(set(result.issues + ['ANALYSIS_CONTEXT_EXPIRED']))
+                result.conclusion = '分析上下文已到期，请重新准备资产数据；本次结果不可用于精确调仓。'
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')

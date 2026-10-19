@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='wealthpilot-u1-http-') as temporary:
     from backend.services.restricted_sync import SyncExecutor
     from backend.services.asset_analysis import AssetAnalysisPreparation
     from backend.api import asset_analysis as api,wealth,portfolio
-    from app.asset_views import load_view
+    from app.asset_views import load_view,public_view
     engine=create_engine('sqlite:///'+str(db),connect_args={'timeout':10})
     Base.metadata.create_all(engine)
     with Session(engine) as session:
@@ -98,8 +98,9 @@ with tempfile.TemporaryDirectory(prefix='wealthpilot-u1-http-') as temporary:
     def no_orders():return {'order_count':0}
     original_worker=api.worker_call
     def browser_peer(database,pid,operation,arguments,**kwargs):
-        fixed=load_view(database,pid,arguments['snapshot_id'])
-        return {'snapshot_id':fixed['snapshot_id'],'conclusion':'Fixture PEER: fixed CNY '+str(fixed['views']['wealth_summary']['total_assets'])}
+        fixed=public_view(load_view(database,pid,arguments['snapshot_id']))
+        return {'snapshot_id':fixed['snapshot_id'],'conclusion':'Fixture PEER: fixed CNY '+str(fixed['views']['wealth_summary']['total_assets']),
+            'data_quality':{'asset_view':fixed['data_quality'],'context_current':fixed['context_current']}}
     api.worker_call=browser_peer
     dist=ROOT/'frontend/dist'
     if (dist/'assets').exists():app.mount('/assets',StaticFiles(directory=str(dist/'assets')),name='assets')

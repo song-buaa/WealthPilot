@@ -53,3 +53,46 @@ test('missing view is explicit and mobile view preserves original security rows'
   await expect(page.locator('tbody tr')).toHaveCount(0)
   await expect(page.getByText('总资产 ¥1,450.00')).toHaveCount(0)
 })
+
+for (const expired of [false,true]) {
+  test(`final review quality replaces initial qualification (context expired=${expired})`, async ({ page }) => {
+    let fixed: Record<string, unknown>
+    await page.route('**/api/asset-analysis/views/*',async route => {
+      if (route.request().method()!=='GET') return route.continue()
+      const response=await route.fetch()
+      fixed=await response.json()
+      await route.fulfill({response,json:{...fixed,context_current:true,
+        data_quality:{...(fixed.data_quality as object),status:'ok',issues:[],can_propose_rebalance:true}}})
+    })
+    await page.route('**/api/asset-analysis/views/*/review',async route => {
+      const body=route.request().postDataJSON()
+      expect(body.snapshot_id).toBe(snapshot)
+      await route.fulfill({json:{snapshot_id:snapshot,conclusion:'最终质量已降级',
+        data_quality:{context_current:!expired,asset_view:{...(fixed.data_quality as object),
+          status:'partial',can_propose_rebalance:false,issues:[expired?'ANALYSIS_CONTEXT_EXPIRED':'STALE_ACCOUNT_SYNC']}}}})
+    })
+    await page.goto(`${base}/#/asset-view/${snapshot}`)
+    await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
+    await expect(page.getByRole('status')).toHaveCount(0)
+    await page.getByRole('button',{name:'使用此版本进行组合评估'}).click()
+    await expect(page.getByRole('status')).toContainText(expired?'ANALYSIS_CONTEXT_EXPIRED':'STALE_ACCOUNT_SYNC')
+    await expect(page.getByTestId('asset-view-conclusion')).toContainText('最终质量已降级')
+    await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
+    if (expired) await expect(page.getByRole('button',{name:'使用此版本进行组合评估'})).toBeDisabled()
+  })
+}
+
+test('failed attempt reason is shown separately from last-good quality', async ({ page }) => {
+  await page.route('**/api/asset-analysis/views/*',async route => {
+    const response=await route.fetch()
+    const fixed=await response.json()
+    fixed.data_quality.accounts[0]={...fixed.data_quality.accounts[0],last_attempt_status:'failed',
+      last_attempt_time:'2026-10-19T00:00:00+00:00',last_attempt_reason_code:'FX_RATE_UNAVAILABLE',last_good_quality:'current'}
+    await route.fulfill({response,json:fixed})
+  })
+  await page.goto(`${base}/#/asset-view/${snapshot}`)
+  await expect(page.getByText('失败原因 FX_RATE_UNAVAILABLE',{exact:false})).toBeVisible()
+  await expect(page.getByText('最近尝试 2026-10-19T00:00:00+00:00',{exact:false})).toBeVisible()
+  await expect(page.getByText('成功数据质量 current',{exact:false})).toBeVisible()
+  await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
+})

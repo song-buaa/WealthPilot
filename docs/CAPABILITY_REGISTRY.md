@@ -47,3 +47,5 @@ PR #22 修复：Tiger 原 SDK 账户逐条核验、真实 SDK 纯现金合同；
 接口：受保护 `/api/asset-analysis/prepare`、requests 状态、views 固定读取与评估；原 Wealth/Portfolio/MCP 读取和专业分析可传 snapshot_id。显式启用 `--prepare-config` 后才多注册一个非纯只读 `prepare_asset_analysis`，原七工具权限不变；未提供 ID 的原读取不自动同步。Issuer 证据在原 [instruments 域](../backend/services/instruments/issuers.py)，初始只确认理想双市场身份，未知不猜测，保留成员明细。
 
 测试入口：[任务/隔离/PEER](../tests/test_u1_asset_views.py)、[API 权限](../tests/test_u1_api.py)、[Schema](../tests/test_u1_schema.py)、[MCP loopback](../pocs/chatgpt_skills/test_u1_protocol.py)、[Web](../frontend/tests/e2e/asset-view.spec.ts)。限制：源时间缺失仍 partial；30 分钟副本到期不能重跑旧专业分析，历史 payload 可读；原财富与投资/Allocation 分母不同；不含 U2 成交、B2 历史收益或 QMT。详细合同与发布影响见 [实现说明](U1_IMPLEMENTATION.md)。
+
+PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用及冻结后核对，旧证据不足不反向补造；原 PEER 最终输出重核时效，Web 使用最终质量；失败尝试时间/脱敏原因与 last-good 分开。安全回归见 [review regressions](../tests/test_u1_review_regressions.py)，不新增服务、表或迁移。
