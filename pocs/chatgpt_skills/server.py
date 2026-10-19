@@ -18,7 +18,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from typing import Annotated
-from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult
+from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
@@ -47,7 +47,7 @@ class BusinessClient:
         with self.lock:
             if self.process is None or self.process.poll() is not None:
                 self.close()
-                env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
+                env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR") if k in os.environ}
                 env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                            ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                            FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
@@ -92,28 +92,54 @@ def create_server(settings):
         finally:
             client.close()
             analysis_client.close()
+    prepare_config = getattr(settings, "prepare_config", None)
+    prepare_instructions = (" For a new portfolio evaluation, FIRST call prepare_asset_analysis once with a new stable analysis_request_id. "
+        "Reuse the SAME ID after timeout/pending; do not create another task to retry. When ready pass its snapshot_id to all wealth, holdings and professional analysis reads for this task. "
+        "If pending, wait/retry the same prepare; if expired or unavailable, explain the limitation. Never silently substitute live data for a snapshot_id. "
+        "When can_propose_rebalance=false, offer general analysis with explicit warnings, not a precise executable rebalancing plan.") if prepare_config else ""
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
         instructions=("For professional analysis use analyze_position/review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
-                      "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. "))
+                      "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions)
     overview.settings = settings
     security_meta = {"securitySchemes": [{"type": "noauth"}]}  # Private Tunnel supplies access control.
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+    if prepare_config:
+        from pocs.chatgpt_skills.prepare import PrepareClient
+        prepare_client = PrepareClient(prepare_config)
+        @server.tool(meta=security_meta,
+            annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+            description="Explicit non-trading prepare BEFORE portfolio evaluation. May read configured broker accounts and persist local snapshots through a separately authorized backend; NOT a pure read. No order capabilities. Reuse analysis_request_id for all retries; returns preparing/ready/failed/expired, snapshot_id and quality. On ready use the same snapshot_id for original read/analysis tools; do not repeatedly refresh each tool.")
+        def prepare_asset_analysis(analysis_request_id: Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')]) -> PrepareResult:
+            try:
+                result = prepare_client.prepare(analysis_request_id)
+                if result.get('state') == 'ready':
+                    from app.asset_views import snapshot_number
+                    snapshot_number(result.get('snapshot_id'))
+                    base = getattr(settings, 'web_base_url', '')
+                    if base:
+                        result['web_view_url'] = base.rstrip('/')+'/#/asset-view/'+result['snapshot_id']
+                return PrepareResult.model_validate(result)
+            except ValueError as exc:
+                raise ToolError(str(exc)) from None
+
     @server.tool(meta=security_meta, annotations=read, description="Existing wealth overview contract and WealthService calculations. Preserve synthetic, integer CNY minor units and partial/unavailable warnings.")
-    def get_wealth_overview(currency: Literal["CNY"] = "CNY") -> overview.Overview:
+    def get_wealth_overview(currency: Literal["CNY"] = "CNY", snapshot_id: str | None = None) -> overview.Overview:
+        if snapshot_id:
+            return overview.Overview.model_validate(client.call("get_wealth_overview", {"snapshot_id":snapshot_id}))
         if settings.real_config:
             return overview.get_wealth_overview(currency)
         return overview.Overview.model_validate(client.call("get_wealth_overview", {}))
 
     @server.tool(meta=security_meta, annotations=read, description="Read existing manual asset/liability detail, including excluded or linked items. CNY current_value and original currency value in major units. No writes or notes/credentials.")
-    def get_manual_wealth_items(kind: Literal["ASSET", "LIABILITY"] | None = None, item_id: int | None = None) -> Details:
-        return Details.model_validate(client.call("get_manual_wealth_items", dict(kind=kind, item_id=item_id)))
+    def get_manual_wealth_items(kind: Literal["ASSET", "LIABILITY"] | None = None, item_id: int | None = None, snapshot_id: str | None = None) -> Details:
+        return Details.model_validate(client.call("get_manual_wealth_items", dict(kind=kind, item_id=item_id, snapshot_id=snapshot_id)))
 
     @server.tool(meta=security_meta, annotations=read, description="Read stored investment account groups and holdings via existing Portfolio services. Returns quantities, CNY market value and P/L, original prices/currency, existing cross-account symbol weights and source dates. Optional opaque account_ref and canonical symbol filter; never raw account credentials. Not live broker balances.")
-    def get_investment_details(account_ref: str | None = None, symbol: str | None = None) -> Details:
-        return Details.model_validate(client.call("get_investment_details", dict(account_ref=account_ref, symbol=symbol)))
+    def get_investment_details(account_ref: str | None = None, symbol: str | None = None, snapshot_id: str | None = None) -> Details:
+        return Details.model_validate(client.call("get_investment_details", dict(account_ref=account_ref, symbol=symbol, snapshot_id=snapshot_id)))
 
     @server.tool(meta=security_meta,
         annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),
@@ -175,6 +201,7 @@ def main():
     parser.add_argument("--analysis-working-directory", help="Reuse the existing complete Web working directory for relative knowledge/rules assets")
     parser.add_argument("--analysis-business-python", help="Reuse the existing complete Web business Python for PEER dependencies")
     parser.add_argument("--analysis-env-file", help="Existing local runtime JSON; only original analysis provider settings are read")
+    parser.add_argument("--prepare-config", help="Opt-in private loopback prepare URL/token-file configuration; seven existing tools stay read-only")
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))

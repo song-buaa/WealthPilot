@@ -32,6 +32,8 @@ class Overview(BaseModel):
     sources: dict[str, str]
     scope: str
     notice: str
+    snapshot_id: str | None = None
+    data_quality: dict | None = None
 
 
 settings = None

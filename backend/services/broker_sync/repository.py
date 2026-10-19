@@ -17,6 +17,13 @@ class SyncBusy(ValueError):
         super().__init__("SYNC_ALREADY_RUNNING")
 
 
+class SyncReusable(ValueError):
+    """Analysis can reuse a recent observation or failure cooldown, not resync."""
+    def __init__(self, run_id):
+        self.run_id = run_id
+        super().__init__("SYNC_RECENT_OBSERVATION")
+
+
 def context(run):
     return json.loads(run.context_json or "{}")
 
@@ -60,7 +67,7 @@ class PositionSnapshotRepository:
                 PositionSnapshotRun.portfolio_id != portfolio_id).first()):
             raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
 
-    def create_run(self, broker, account_id, sync_source="api", triggered_by="manual"):
+    def create_run(self, broker, account_id, sync_source="api", triggered_by="manual", *, freshness_seconds=None):
         portfolio_id = self._portfolio_id()
         existing_id = self.session.info.get("sync_run_id")
         if existing_id is not None:
@@ -94,6 +101,20 @@ class PositionSnapshotRepository:
             active.status, active.finished_at = "failed", now
             active.error_message = "SYNC_LEASE_EXPIRED"
             self.session.flush()
+        if freshness_seconds is not None and active is None:
+            # Check under the SAME write lock as claim creation. A separate
+            # pre-check races with a fast publisher on another connection.
+            recent = self.session.query(PositionSnapshotRun).filter_by(portfolio_id=portfolio_id,
+                broker=broker, account_id=account_id, sync_source=sync_source).order_by(
+                    PositionSnapshotRun.id.desc()).first()
+            if recent and recent.finished_at:
+                finished = recent.finished_at.replace(tzinfo=timezone.utc) if recent.finished_at.tzinfo is None else recent.finished_at
+                age = (now - finished).total_seconds()
+                if (recent.status == "success" and context(recent).get("complete") is True and 0 <= age <= freshness_seconds
+                        or recent.status == "failed" and 0 <= age <= 15):
+                    recent_id = recent.id
+                    self.session.rollback()
+                    raise SyncReusable(recent_id)
         token = uuid.uuid4().hex
         run = PositionSnapshotRun(portfolio_id=portfolio_id, broker=broker, account_id=account_id,
             sync_source=sync_source, triggered_by=triggered_by, status="running", started_at=now,

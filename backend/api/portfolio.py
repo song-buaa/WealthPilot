@@ -21,8 +21,11 @@ def _pid() -> int:
 # ── 总览 ──────────────────────────────────────────────────────────────────────
 
 @router.get("/summary")
-def get_summary():
+def get_summary(snapshot_id: str | None = None):
     """资产总览：BalanceSheet 结构化数据"""
+    if snapshot_id:
+        from backend.api.asset_analysis import fixed_projection
+        return fixed_projection(snapshot_id,"portfolio_summary")
     result = svc.get_summary(_pid())
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
@@ -30,8 +33,13 @@ def get_summary():
 
 
 @router.get("/positions")
-def get_positions(segment: Optional[str] = Query(default=None, description="过滤 segment: 投资|养老|公积金")):
+def get_positions(segment: Optional[str] = Query(default=None, description="过滤 segment: 投资|养老|公积金"), snapshot_id: str | None = None):
     """持仓列表，可按 segment 过滤"""
+    if snapshot_id:
+        from backend.api.asset_analysis import fixed_projection
+        result = fixed_projection(snapshot_id,"positions")
+        items = [i for i in result["items"] if not segment or i["segment"] == segment]
+        return {**result,"items":items,"total":len(items)}
     return svc.get_positions(_pid(), segment=segment)
 
 

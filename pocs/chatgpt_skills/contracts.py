@@ -34,6 +34,18 @@ class Details(BaseModel):
     accounts: list[dict] = Field(default_factory=list)
     portfolio_summary: dict | None = None
     sources: dict[str, str] = Field(default_factory=dict)
+    snapshot_id: str | None = None
+    data_quality: dict | None = None
+    issuer_exposure: dict | None = None
+
+
+class PrepareResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    analysis_request_id: str
+    state: Literal["preparing", "ready", "failed", "expired"]
+    snapshot_id: str | None
+    data_quality: dict
+    web_view_url: str | None = None
 
 
 class TradePreview(ExplicitOrder):

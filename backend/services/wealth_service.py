@@ -345,7 +345,7 @@ def _record_aggregate_snapshot(portfolio_id: int, totals: dict[str, Any] | None 
     try:
         # Append current observations without rewriting historical scope. Repeated
         # reads of unchanged values on the same day must not create duplicates.
-        latest = session.query(WealthSnapshot).filter_by(portfolio_id=portfolio_id).order_by(
+        latest = session.query(WealthSnapshot).filter_by(portfolio_id=portfolio_id, analysis_request_id=None).order_by(
             WealthSnapshot.recorded_at.desc(), WealthSnapshot.id.desc()
         ).first()
         fields = ("total_assets", "total_liabilities", "net_worth", "investment_assets",
@@ -403,7 +403,8 @@ def _month_start_snapshot(portfolio_id: int, today: date) -> WealthSnapshot | No
     session = get_session()
     try:
         return (session.query(WealthSnapshot)
-                .filter(WealthSnapshot.portfolio_id == portfolio_id, WealthSnapshot.recorded_at < start)
+                .filter(WealthSnapshot.portfolio_id == portfolio_id, WealthSnapshot.recorded_at < start,
+                        WealthSnapshot.analysis_request_id.is_(None))
                 .order_by(WealthSnapshot.recorded_at.desc()).first())
     finally:
         session.close()
@@ -412,7 +413,7 @@ def _month_start_snapshot(portfolio_id: int, today: date) -> WealthSnapshot | No
 def _trend(portfolio_id: int, totals: dict[str, Any], days: int | None) -> list[dict[str, Any]]:
     session = get_session()
     try:
-        query = session.query(WealthSnapshot).filter_by(portfolio_id=portfolio_id)
+        query = session.query(WealthSnapshot).filter_by(portfolio_id=portfolio_id, analysis_request_id=None)
         if days:
             since = datetime.combine(date.today().fromordinal(date.today().toordinal() - days), time.min)
             query = query.filter(WealthSnapshot.recorded_at >= since)
@@ -434,9 +435,10 @@ def _trend(portfolio_id: int, totals: dict[str, Any], days: int | None) -> list[
         session.close()
 
 
-def get_summary(portfolio_id: int, trend_days: int | None = None) -> dict[str, Any]:
+def get_summary(portfolio_id: int, trend_days: int | None = None, *, record_snapshot=True) -> dict[str, Any]:
     totals = _current_totals(portfolio_id)
-    _record_aggregate_snapshot(portfolio_id, totals)
+    if record_snapshot:
+        _record_aggregate_snapshot(portfolio_id, totals)
     today = date.today()
     baseline = _month_start_snapshot(portfolio_id, today)
     monthly_change = round(totals["net_worth"] - baseline.net_worth, 2) if baseline else None

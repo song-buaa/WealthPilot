@@ -8,7 +8,7 @@ WealthPilot - 数据库模型定义
 import enum
 from datetime import date, datetime
 from uuid import uuid4
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, ForeignKey, Boolean, Index, text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -217,6 +217,14 @@ class WealthSnapshot(Base):
     investment_profit_loss = Column(Float, nullable=True)
     non_investment_assets = Column(Float, nullable=False)
     pension_benefit_value = Column(Float, nullable=False, default=0)
+    # Explicit analysis requests do not participate in the aggregate trend.
+    # NULL identifies legacy/current trend observations; payload is derived,
+    # immutable once ready, never an independently editable holdings source.
+    analysis_request_id = Column(Text, nullable=True)
+    payload_json = Column(Text, nullable=True)
+
+    __table_args__ = (Index("uq_asset_analysis_request", "portfolio_id", "analysis_request_id",
+                           unique=True, sqlite_where=text("analysis_request_id IS NOT NULL")),)
 
 
 class DecisionLog(Base):

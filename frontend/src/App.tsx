@@ -15,6 +15,7 @@ import { ToastProvider } from '@/components/Toast'
 import UserProfile from '@/pages/UserProfile'
 import DemoPasswordGate from '@/components/DemoPasswordGate'
 import WealthOverview from '@/pages/WealthOverview'
+import AssetView from '@/pages/AssetView'
 import Retirement from '@/pages/Retirement'
 import Consumption from '@/pages/Consumption'
 import { RESTRICTED_WEB } from '@/lib/restricted-web'
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/profile"    element={<FullWebOnly><RouteErrorBoundary><UserProfile /></RouteErrorBoundary></FullWebOnly>} />
           <Route path="/action"        element={<FullWebOnly><RouteErrorBoundary><Action /></RouteErrorBoundary></FullWebOnly>} />
           <Route path="/wealth" element={<RouteErrorBoundary><WealthOverview /></RouteErrorBoundary>} />
+          <Route path="/asset-view/:snapshotId" element={<FullWebOnly><RouteErrorBoundary><AssetView /></RouteErrorBoundary></FullWebOnly>} />
           <Route path="/retirement" element={<FullWebOnly><RouteErrorBoundary><Retirement /></RouteErrorBoundary></FullWebOnly>} />
           <Route path="/consumption" element={<FullWebOnly><RouteErrorBoundary><Consumption /></RouteErrorBoundary></FullWebOnly>} />
 

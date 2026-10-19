@@ -29,6 +29,7 @@ from app.state import startup
 from backend.api import portfolio, discipline, research, decision, tasks, profile, allocation
 from backend.api import conversations as conversations_api
 from backend.api import broker_sync as broker_sync_api
+from backend.api import asset_analysis as asset_analysis_api
 from backend.api import action as action_api
 from backend.api import knowledge as knowledge_api
 from backend.api import philosophy as philosophy_api
@@ -105,6 +106,13 @@ async def lifespan(app: FastAPI):
     import pytz
 
     scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Shanghai"))
+    if _os.environ.get("WEALTHPILOT_ANALYSIS_PREPARE_TOKEN_FILE"):
+        # Reuse the existing lifecycle/scheduler for private task-input expiry.
+        # No broker I/O, no new worker/queue and no cleanup of unrelated files.
+        from app.asset_views import cleanup, cache_root
+        cleanup(cache_root())
+        scheduler.add_job(lambda: cleanup(cache_root()), "interval", minutes=5,
+                          id="expire_analysis_inputs", replace_existing=True)
     scheduler.add_job(
         lambda: [broker_sync_api._run_sync(b, "cron") for b in ["tiger", "futu", "snowball", "guojin"]],
         trigger=CronTrigger(hour=22, minute=0),
@@ -200,6 +208,7 @@ app.include_router(profile.router,    prefix="/api/profile",    tags=["profile"]
 app.include_router(allocation.router, prefix="/api/allocation", tags=["allocation"])
 app.include_router(conversations_api.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(broker_sync_api.router, prefix="/api/broker-sync", tags=["broker-sync"])
+app.include_router(asset_analysis_api.router, prefix="/api/asset-analysis", tags=["asset-analysis"])
 app.include_router(action_api.router, prefix="/api/action", tags=["action"])
 app.include_router(knowledge_api.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(philosophy_api.router, prefix="/api/philosophy", tags=["philosophy"])

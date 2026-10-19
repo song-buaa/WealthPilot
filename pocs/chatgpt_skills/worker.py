@@ -15,6 +15,8 @@ MOCK_APPLICATION_ID = 0x57504D4B
 SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DRAFT_NOT_FOUND",
                "REQUEST_ID_CONFLICT", "EXPLICIT_CONFIRMATION_REQUIRED", "PREVIEW_CHANGED_REVIEW_REQUIRED",
                "RISK_CONFIRMATION_REQUIRED", "DRAFT_NOT_PENDING", "DRAFT_CHANGED_REVIEW_REQUIRED", "BROKER_ORDER_STATE_UNAVAILABLE", "ORDER_CURRENCY_MARKET_MISMATCH", "MOCK_TRADE_FIXTURE_NOT_ENABLED"}
+from app.asset_views import ERRORS as ASSET_ERRORS
+SAFE_ERRORS |= ASSET_ERRORS
 
 
 def init_mock(path, portfolio_id):
@@ -56,6 +58,10 @@ def main():
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--real-config")
     parser.add_argument("--analysis-env-file")
+    parser.add_argument("--frozen-database")
+    parser.add_argument("--asset-view-source")
+    parser.add_argument("--source-contract")
+    parser.add_argument("--synthetic-input", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     logging.getLogger().handlers = [logging.NullHandler()]
@@ -80,12 +86,34 @@ def main():
                 raise ValueError("READ_AND_MOCK_TRADE_DATABASE_MUST_DIFFER")
             from pocs.poc02_wealth_mcp.worker import configure_environment
             configure_environment(config)
+        if args.frozen_database or args.asset_view_source:
+            if config or workflow:
+                raise ValueError("ASSET_VIEW_INVALID")
+            config = dict(database_path=str(Path(args.frozen_database or args.asset_view_source).resolve(strict=True)),
+                          portfolio_id=args.portfolio_id, database_contract_path=args.source_contract)
         for line in sys.stdin:
             try:
                 request = json.loads(line)
                 operation, a = request["operation"], request["arguments"]
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    if operation in ("analyze_position", "review_portfolio", "analyze_performance"):
+                    if operation == "capture_asset_view" and args.frozen_database:
+                        from pocs.chatgpt_skills.asset_view import capture
+                        import socket
+                        previous_connect = socket.socket.connect
+                        def no_network(*_):
+                            raise RuntimeError("FROZEN_CAPTURE_NETWORK_FORBIDDEN")
+                        socket.socket.connect = no_network
+                        try:
+                            result = capture(config["database_path"], args.portfolio_id, a["internal"], synthetic=args.synthetic_input)
+                        finally:
+                            socket.socket.connect = previous_connect
+                    elif a.get("snapshot_id") and operation in ("get_wealth_overview", "get_manual_wealth_items", "get_investment_details"):
+                        from app.asset_views import load_view, frozen_result
+                        view = load_view(config["database_path"] if config else path,
+                            config["portfolio_id"] if config else args.portfolio_id, a["snapshot_id"],
+                            config.get("database_contract_path") if config else None)
+                        result = frozen_result(view, operation, a)
+                    elif operation in ("analyze_position", "review_portfolio", "analyze_performance"):
                         import asyncio
                         from pocs.chatgpt_skills.analysis import analyze
                         if args.analysis_env_file:
@@ -96,11 +124,14 @@ def main():
                             os.environ["WEALTHPILOT_DB_PATH"] = config["database_path"]
                         result = asyncio.run(analyze(config["database_path"] if config else path,
                             config["portfolio_id"] if config else args.portfolio_id, operation, a,
-                            contract=config.get("database_contract_path") if config else None, synthetic=config is None, worker_process=True))
-                    elif operation == "get_wealth_overview" and workflow:
+                            contract=config.get("database_contract_path") if config else None,
+                            synthetic=args.synthetic_input or config is None, worker_process=True))
+                    elif operation == "get_wealth_overview" and (workflow or config):
                         from pocs.poc02_wealth_mcp.reader import read_overview
-                        result = read_overview(path, args.portfolio_id)
-                        result["synthetic"] = True
+                        result = read_overview(config["database_path"] if config else path,
+                            config["portfolio_id"] if config else args.portfolio_id,
+                            database_contract=config.get("database_contract_path") if config else None)
+                        result["synthetic"] = args.synthetic_input or config is None
                     elif operation.startswith("get_") and operation in ("get_manual_wealth_items", "get_investment_details"):
                         from pocs.chatgpt_skills.reader import read_details
                         result = read_details(config["database_path"] if config else path,

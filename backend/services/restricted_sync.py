@@ -83,6 +83,7 @@ class SyncExecutor:
         self.account_resolver = account_resolver or api._sync_account
         self.locks = {b:Lock() for b in self.enabled}
         self.claims = {}
+        self.reused = {}
 
     def recover_interrupted(self):
         # Another process may legitimately be reading. Only expired leases are
@@ -100,12 +101,13 @@ class SyncExecutor:
                     run.error_message = "SYNC_LEASE_EXPIRED"
             db.commit()
 
-    def reserve(self, broker, triggered_by="manual"):
-        if triggered_by not in ("manual", "cron"):
+    def reserve(self, broker, triggered_by="manual", *, freshness_seconds=None):
+        if triggered_by not in ("manual", "cron", "analysis"):
             raise ValueError("INVALID_SYNC_TRIGGER")
         if broker != "all" and broker not in self.enabled:
             raise ValueError("BROKER_NOT_ENABLED")
-        from services.broker_sync.repository import SyncBusy
+        from services.broker_sync.repository import SyncBusy, SyncReusable
+        self.reused = {}
         jobs, busy = [], []
         try:
             for target in self.enabled if broker == "all" else (broker,):
@@ -117,12 +119,15 @@ class SyncExecutor:
                         db.info["portfolio_id"] = self.portfolio_id
                         account = self.account_resolver(db, target)
                         run = PositionSnapshotRepository(db).create_run(target, account,
-                            triggered_by=("restricted:" if getattr(self.factory,"restricted",False) else "")+triggered_by)
+                            triggered_by=("restricted:" if getattr(self.factory,"restricted",False) else "")+triggered_by,
+                            freshness_seconds=freshness_seconds)
                         run_id = run.id
                         self.claims[run_id] = db.info["sync_claims"][run_id]
                         jobs.append({"broker":target,"run_id":run_id})
                 except SyncBusy:
                     lock.release(); busy.append(target)
+                except SyncReusable as recent:
+                    lock.release(); self.reused[target] = recent.run_id
                 except ValueError as error:
                     lock.release()
                     if broker == "all" and str(error) == "SYNC_ACCOUNT_UNCONFIGURED":

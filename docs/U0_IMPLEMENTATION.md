@@ -2,7 +2,7 @@
 
 状态：开发候选，仅开发/隔离测试/PR。基线 `12d9357f1543156db379a94ace8eb359c107c30e`。用户确认 B0 已正式部署；本轮复核其既有发布记录及代码合同，未连接 Mini、生产库、Gateway 或真实券商。生产安装、Schema 迁移和同步验收需单独授权。
 
-架构 owner 见 [当前架构](ARCHITECTURE_CURRENT.md#12-u0-统一同步底座本-pr-候选)，复用索引见 [Registry](CAPABILITY_REGISTRY.md#u0-可复用合同本-pr未部署)，通用流程仍以 [治理规范](PROJECT_GOVERNANCE.md) 为准。
+架构 owner 见 [当前架构](ARCHITECTURE_CURRENT.md#12-u0-统一同步底座已合入)，复用索引见 [Registry](CAPABILITY_REGISTRY.md#u0-可复用合同已合入)，通用流程仍以 [治理规范](PROJECT_GOVERNANCE.md) 为准。
 
 ## 1. 范围与最小实现
 

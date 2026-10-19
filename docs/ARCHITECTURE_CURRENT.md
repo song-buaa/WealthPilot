@@ -1,6 +1,6 @@
 # WealthPilot 当前系统架构
 
-> 2026-10-18：本次核对基线为已合入 B0 的 `12d9357f1543156db379a94ace8eb359c107c30e`；U0 为本 PR 开发候选，未部署。用户已确认 B0 正式生产部署，本轮仅核对已有发布记录，未访问生产。2026-10-16 的功能/部署记录保留为历史观察，本轮未访问生产。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-19：U1 开发基线为 `c63c995d4b7ae1533e08f4f38e071a4c94b15931`，用户已确认 B0、U0 及 CNH 修复正式生产发布；本轮未访问生产。第 13 节为 U1 PR 候选，尚未合并或部署。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -10,7 +10,7 @@
 |---|---|
 | ChatGPT Web / iOS | 个人 Pro 的自然语言交互、相关上下文、工具选择、追问、原专业结果的最终组织与呈现。 |
 | Secure MCP Tunnel | 现有个人范围连接，把 ChatGPT 接到 Mini 上的 Streamable HTTP MCP；不是业务计算或交易引擎。 |
-| 生产 MCP | `pocs/chatgpt_skills/server.py`；real 配置只注册七项只读工具。独立 worker 调原服务，不通过本机 HTTP 绕行。目录名 pocs 保留，不代表当前仍只有试验能力。 |
+| 生产 MCP | `pocs/chatgpt_skills/server.py`；real 配置默认七项只读工具，经独立 worker 调原服务。U1 候选另有可选显式 prepare，经受保护 loopback HTTP 调原同步（第 13 节）；原七工具不刷新、不获得写权限。目录名 pocs 保留，不代表当前仍只有试验能力。 |
 | WealthPilot Core | 完整 `backend/main.py` / `backend/api/` / `backend/services/`、PEER 四 Agent、13 个内部 Skills、数据源、规则/信号、专业 LLM 与报告模板。 |
 | 完整 React Web | `frontend/src/App.tsx` 的 HashRouter，财富、投资账户、消费、投研、决策、投资行动等原页面与可视化；最终人工交易确认。 |
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
@@ -165,7 +165,7 @@ OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领�
 共享模式启动只验证已迁移结构和原严格契约；不自动 DDL 或创建默认 Portfolio。风险警告统一沿用原 RiskEngine，缺数据显式说明；硬交易门与原 Web 最终人工确认保留。B0 没有接通成交后同步消费者或新增 MCP 工具，第 9 节的后续能力缺口保持有效。原开发文档中的生产待验状态属于当时证据；后续部署以独立发布记录为准，不据此扩大真实交易授权。
 
 
-## 12. U0 统一同步底座（本 PR 候选）
+## 12. U0 统一同步底座（已合入）
 
 原完整 backend、手动 API、北京时间 22:00 调度和 restricted 入口复用 [SyncExecutor](../backend/services/restricted_sync.py) → 原四券商 `sync_and_persist` → [PositionSnapshotRepository](../backend/services/broker_sync/repository.py) → 原 Upsert。未创建新调度器、任务队列或资产库。完整 backend 通过原 IBKR adapter 的只读 facade 取数，不更改其已授权交易开关；restricted 保留原严格只读进程前提。
 
@@ -175,4 +175,13 @@ OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领�
 
 [FXService](../app/fx_service.py) 是唯一汇率权威：latest TTL 300 秒，降级 TTL 15 秒；实际来源日期超过 4 个日历日为 stale，失败可复用带原日期的 last-good 或显式 hardcoded fallback。未知币种不再默认 1:1；非零未知 FX 保留账户 last-good，已确认零余额可存 0 但 FX rate 为 NULL/质量未知。CNH 保留独立币种；原 FrankfurterProvider 对涉及 CNH 的折算使用 Frankfurter v2 / Bank Indonesia 同日 USD 两腿报价，原 FXService 验证日期并记录 `provider_frankfurter_v2_BI_USD_cross`；缺腿/混日不使用另一条交叉路径绕过，其他币种仍用原 v1。MCP 仍为原七项只读工具，不执行刷新。
 
-U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite 严格 digest 仍验证，显式迁移流程见 [U0 实现及发布输入](U0_IMPLEMENTATION.md)。同分析 snapshot_id/WealthSnapshot payload、分析前准备、成交触发/水位覆盖和公司经济归属映射均未实施；U1/U2 必须扩展本 owner/执行器，不能复制同步体系。
+U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite 严格 digest 仍验证，显式迁移流程见 [U0 实现及发布输入](U0_IMPLEMENTATION.md)。U0 发布及 CNH 修复的生产验收由用户确认；本任务未重新访问生产。U1 候选扩展见第 13 节，成交触发/水位覆盖仍未实施，不得从视图推断成交已覆盖。
+
+
+## 13. U1 固定资产视图（本 PR 候选，未部署）
+
+[原 prepare 编排](../backend/services/asset_analysis.py) 复用 U0 SyncExecutor/账户 claim/Last-good。显式 prepare 由受保护 loopback Backend 接收；原 MCP 七工具仍只读，另有可选启用、明确非纯只读的 prepare 工具，不能以原只读权限暗中刷新。任务 ID 与 Portfolio 在原 WealthSnapshot 的 nullable 身份字段和 partial unique 索引约束，payload 保存不可变派生视图；原趋势观察排除分析行。
+
+同一 SQLite Backup 版本上的原 Portfolio/Wealth/reader 结果持久化；原 PEER/Skills 在限时、私有、hash 验证且只读的任务输入上运行，不改 decision_engine 或主 Backend 的全局 engine。Web/MCP 按 snapshot_id 读原 payload，不能查询当前表冒充旧 ID。账户同步、证券/行情、FX 和手工日期分列；缺失/过期则降级并取消精确调仓资格。Issuer 映射只合并已证实直接权益的 CNY 敞口，保留证券/数量/成本，不按币种/同名猜测。
+
+权限、字段必要性、输入期限、状态/恢复和生产迁移边界见 [U1 实现说明](U1_IMPLEMENTATION.md)。没有新持仓库、财富算法、订单状态机或成交消费者；新配置/Schema 的生产启用需要另行发布授权。

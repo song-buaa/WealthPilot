@@ -46,7 +46,10 @@ class WealthItemPatch(BaseModel):
 
 
 @router.get("/summary")
-def get_summary(days: int | None = Query(default=None, ge=1, le=7300)):
+def get_summary(days: int | None = Query(default=None, ge=1, le=7300), snapshot_id: str | None = None):
+    if snapshot_id:
+        from backend.api.asset_analysis import fixed_projection
+        return fixed_projection(snapshot_id,"wealth_summary")
     return svc.get_summary(_pid(), trend_days=days)
 
 

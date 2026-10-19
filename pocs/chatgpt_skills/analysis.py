@@ -23,6 +23,7 @@ class AnalysisRequest(BaseModel):
     question: str = Field(min_length=1, max_length=6000, pattern=r'\S')
     symbol: str | None = Field(default=None, min_length=1, max_length=80)
     history: list[Turn] = Field(default_factory=list, max_length=16)
+    snapshot_id: str | None = Field(default=None, pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')
 
 
 class AnalysisResult(BaseModel):
@@ -41,6 +42,7 @@ class AnalysisResult(BaseModel):
     scope: dict = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
     order_created: Literal[False] = False
+    snapshot_id: str | None = None
 
 
 @contextmanager
@@ -181,8 +183,14 @@ def captured_evidence(result, captured, portfolio_id):
     result.limitations.append('Original research may fall back to examples without verified dates; do not present unverified research as live evidence.')
 
 
-async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False):
+async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None):
     request=AnalysisRequest.model_validate(arguments)
+    if request.snapshot_id and asset_view is None:
+        from app.asset_views import load_view, frozen_input, public_view
+        view = load_view(path, portfolio_id, request.snapshot_id, contract)
+        with frozen_input(view) as fixed_path:
+            return await analyze(fixed_path, portfolio_id, scenario, arguments, synthetic=synthetic,
+                                 worker_process=worker_process, asset_view=public_view(view))
     conversation='mcp-analysis-'+uuid.uuid4().hex
     result=AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[],
                           queried_at=datetime.now(timezone.utc).isoformat(),conclusion='')
@@ -203,6 +211,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             captured.update(plan=plan,executed=executed,expressed=expressed,reviewed=reviewed)
         prefix={'analyze_position':'单标的投资决策','review_portfolio':'投资组合与资产配置评估','analyze_performance':'当前持仓收益表现分析'}[scenario]
         question=prefix+'：'+request.question
+        if asset_view and not asset_view['data_quality']['can_propose_rebalance']:
+            question+='\n本次固定资产数据存在过期、未知或不完整证据，仅做一般非交易分析。明确说明限制，不给出可直接执行的精确调仓数量、比例或价格。'
         if request.symbol:
             question+='\n本次明确分析标的：'+request.symbol
         if scenario=='analyze_performance':
@@ -239,5 +249,15 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         finally:
             decision_service.clear_session(conversation)
         result.issues=sorted(set(result.issues+result.data_quality['issues']))
+        if asset_view:
+            result.snapshot_id = request.snapshot_id
+            result.data_quality['asset_view'] = asset_view['data_quality']
+            result.scope['snapshot_id'] = request.snapshot_id
+            result.evidence['asset_view'] = dict(wealth_summary=asset_view['views']['wealth_summary'],
+                portfolio_summary=asset_view['views']['portfolio_summary'], issuer_exposure=asset_view['issuer_exposure'])
+            result.issues = sorted(set(result.issues + asset_view['data_quality']['issues']))
+            if not asset_view['data_quality']['can_propose_rebalance']:
+                result.conclusion = '数据存在过期或未知项；以下仅作一般分析，不构成可直接执行的精确调仓方案。\n'+result.conclusion
+                result.limitations.append('Precise rebalancing requires a new qualified asset view; source, security price and FX times are separate.')
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')

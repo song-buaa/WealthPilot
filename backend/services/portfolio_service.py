@@ -280,6 +280,7 @@ def _position_to_dict(p: Position) -> dict:
         "original_currency":   p.original_currency,
         "original_value":      p.original_value,
         "fx_rate_to_cny":      p.fx_rate_to_cny,
+        "fx_rate_date":        p.fx_rate_date,
         "profit_loss_value":   p.profit_loss_value,
         "profit_loss_rate":    p.profit_loss_rate,
         "segment":             p.segment,

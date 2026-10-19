@@ -1,6 +1,6 @@
 # WealthPilot 已有能力索引
 
-> 2026-10-18，核对基线 `12d9357f1543156db379a94ace8eb359c107c30e`；下述 U0 扩展为本 PR 候选。这是代码复用索引，不是生产实时状态或逐函数清单。本文只维护能力检索信息，不定义开发/发布工作流。新增能力先检查覆盖；入口/职责变更及废弃/迁移/合并必须同步更新；无能力变化可在 PR 说明无需更新及原因。触发条件统一见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)。
+> 2026-10-19，开发基线 `c63c995d4b7ae1533e08f4f38e071a4c94b15931`；U0/CNH 已合入且用户确认生产发布，下述 U1 为本 PR 候选、尚未部署。这是代码复用索引，不是生产实时状态或逐函数清单。本文只维护能力检索信息，不定义开发/发布工作流。新增能力先检查覆盖；入口/职责变更及废弃/迁移/合并必须同步更新；无能力变化可在 PR 说明无需更新及原因。触发条件统一见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)。
 
 任务先读 [AGENTS](../AGENTS.md)、[当前架构](ARCHITECTURE_CURRENT.md) 和[治理工作流](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，再按条目检索代码与测试。状态“已有”只证明仓库存在实现；生产验收及数据质量单列。API 前缀以 [main.py](../backend/main.py) 挂载为准。
 
@@ -29,7 +29,7 @@
 PR #21 定向修复仍使用上述 owner：`existing_submission` 复用发送 key/参数校验，观察归并锁后重读，`review_remaining` 在外部计算后进行版本/linked/事实 CAS；迁移对计划内及应用后的目标碰撞均拒绝。正式回归映射见[评审回归](B0_IMPLEMENTATION.md#pr-21-定向评审回归)，不新增业务服务或 Schema。
 
 
-### U0 可复用合同（本 PR，未部署）
+### U0 可复用合同（已合入）
 
 [原 Executor](../backend/services/restricted_sync.py) 统一完整/restricted/manual/cron，原 [Repository](../backend/services/broker_sync/repository.py) 提供 durable scope claim、过期 fence、完整性与重复校验、FX 预取、原子发布/失败状态；[Upsert](../backend/services/broker_sync/position_upsert_service.py) 不在写事务内联网。各券商仍负责实际来源覆盖和完整性证据。状态 API 原字段兼容，新增 last_successful_run_id/data_quality；内部 token 不对外返回。手动 all 的未配置源留下失败尝试，不阻断已配置源。
 
@@ -38,3 +38,12 @@ U1 可复用 run id/last-good、来源/时间/币种/FX/质量，不得把单源
 PR #22 修复：Tiger 原 SDK 账户逐条核验、真实 SDK 纯现金合同；Upsert 对旧现金/导入/API 碰撞阻断，不自动认领。已核实同笔现金走原离线迁移工具的显式 cash_owner 映射与整行 CAS，生产核对另行授权；没有新 Schema 或现金服务。回归见[定向安全测试](../tests/test_u0_review_regressions.py)。
 
 正式回归：[U0 安全测试](../tests/test_u0_sync_safety.py)、[U0 迁移演练](../tests/test_u0_schema_migration.py)，以及原 cash/upsert/restricted/readonly/browser 测试。迁移、证据及运行待验边界见 [U0 实现说明](U0_IMPLEMENTATION.md)。没有新增 MCP 工具、快照 payload、收益计算、公司映射或 QMT 接入。
+
+
+### U1 分析前准备与固定视图（本 PR 候选）
+
+权威入口：[原同步上的 prepare](../backend/services/asset_analysis.py)、[固定视图合同](../app/asset_views.py)、[原只读 worker](../pocs/chatgpt_skills/worker.py)、[原 PEER 适配](../pocs/chatgpt_skills/analysis.py)。账户刷新和 publish 仍由原 SyncExecutor/Repository/Upsert/FX 负责；金额与手工/养老金去重仍由原 Portfolio/Wealth 计算。复用 WealthSnapshot 的 ID，新增 nullable request/payload 及请求唯一索引；不建账户/持仓/任务表。
+
+接口：受保护 `/api/asset-analysis/prepare`、requests 状态、views 固定读取与评估；原 Wealth/Portfolio/MCP 读取和专业分析可传 snapshot_id。显式启用 `--prepare-config` 后才多注册一个非纯只读 `prepare_asset_analysis`，原七工具权限不变；未提供 ID 的原读取不自动同步。Issuer 证据在原 [instruments 域](../backend/services/instruments/issuers.py)，初始只确认理想双市场身份，未知不猜测，保留成员明细。
+
+测试入口：[任务/隔离/PEER](../tests/test_u1_asset_views.py)、[API 权限](../tests/test_u1_api.py)、[Schema](../tests/test_u1_schema.py)、[MCP loopback](../pocs/chatgpt_skills/test_u1_protocol.py)、[Web](../frontend/tests/e2e/asset-view.spec.ts)。限制：源时间缺失仍 partial；30 分钟副本到期不能重跑旧专业分析，历史 payload 可读；原财富与投资/Allocation 分母不同；不含 U2 成交、B2 历史收益或 QMT。详细合同与发布影响见 [实现说明](U1_IMPLEMENTATION.md)。
