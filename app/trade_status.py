@@ -49,6 +49,8 @@ def query(db, portfolio_id, *, order_id=None, batch_id=None, symbol=None, limit=
                 positions_verified=not p.get('evidence_conflict') and bool(proof.get('positions_verified')) and publication=='matched' and proof.get('target_quantity')==row['filled_quantity'],
                 cash_verified=not p.get('evidence_conflict') and bool(proof.get('cash_verified')) and publication=='matched' and proof.get('target_quantity')==row['filled_quantity'],
                 covered_quantity=p.get('covered_quantity',0),target_quantity=row['filled_quantity'],
+                watermark_verified=bool(proof.get('watermark_verified')),
+                automatic_retry=p.get('auto_retry',True),
                 position_updated_at=latest_good.finished_at.isoformat() if latest_good and latest_good.finished_at else None,
                 last_successful_run_id=latest_good.id if latest_good else None,publication_status=publication,
                 reason_code=safe_reason,issues=sorted(set(proof.get('issues',[])

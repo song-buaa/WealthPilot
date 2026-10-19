@@ -78,7 +78,7 @@ def capture_baseline(session, owner):
     previous = orders(session, owner.portfolio_id, owner.broker, owner.account_id)
     for row in previous:
         progress = decode(row["fill_sync_json"])
-        if progress and (pending(row) or row["status"] not in {"filled","cancelled","expired","rejected"}):
+        if progress and ((pending(row) and progress.get('auto_retry',True)) or row["status"] not in {"filled","cancelled","expired","rejected"}):
             return encode({"version":VERSION, "anchor":progress.get("anchor")})
     if "position_snapshot_runs" not in inspect(session.connection()).get_table_names():
         return encode({"version":VERSION,"anchor":None})
@@ -93,7 +93,9 @@ def capture_baseline(session, owner):
         if 0 <= (datetime.now(timezone.utc)-stamp).total_seconds() <= 300:
             snapshots = _snapshots(session,run.id)
             if len(snapshots) <= 2000:
-                anchor = {"run_id":run.id,"facts":_facts(snapshots),"watermarks":{
+                anchor = {"run_id":run.id,"facts":_facts(snapshots),
+                    "before_dispatch_at":datetime.now(timezone.utc).isoformat(),
+                    "source_times":{k:context(run).get(k) for k in ('positions_as_of','cash_as_of')},"watermarks":{
                     row["id"]:{"quantity":int(row["filled_quantity"] or 0),
                         "notional":str(_notional(row)) if _notional(row) is not None else "0" if not row["filled_quantity"] else None,
                         "commission":decode(row["fill_sync_json"]).get("commission") if row["filled_quantity"] else "0"}
@@ -111,7 +113,7 @@ def observe(order, raw):
     if quantity <= 0:
         return
     if quantity > int(progress.get("target_quantity",0)):
-        progress.update(target_quantity=quantity, next_attempt_at=time.time()+2)
+        progress.update(target_quantity=quantity, next_attempt_at=time.time()+2, auto_retry=True)
     evidence = progress.get("executions",{})
     if raw.get("reconciliation_disputed"):
         progress["evidence_conflict"] = True
@@ -170,12 +172,14 @@ def observe(order, raw):
         progress['covered_quantity']=0
     if progress.get('actual_commissions') and progress['actual_commissions']!=old_commission:
         progress['next_attempt_at']=time.time()+2
+        progress['auto_retry']=True
     order.fill_sync_json = encode(progress)
 
 
 def due(rows, now=None):
     now = time.time() if now is None else now
-    return [r for r in rows if pending(r) and decode(r["fill_sync_json"]).get("next_attempt_at",0)<=now]
+    return [r for r in rows if pending(r) and decode(r["fill_sync_json"]).get('auto_retry',True)
+            and decode(r["fill_sync_json"]).get("next_attempt_at",0)<=now]
 
 
 def bind_targets(session, run, now=None, *, force=False):
@@ -192,6 +196,7 @@ def bind_targets(session, run, now=None, *, force=False):
         progress=decode(row["fill_sync_json"])
         attempt=int(progress.get("attempts",0))+1
         progress.update(last_run_id=run.id,attempted_quantity=targets[row["id"]],attempts=attempt,
+                        auto_retry=True,
                         next_attempt_at=(time.time() if now is None else now)+min(300,5*2**min(attempt,6)))
         session.execute(text("UPDATE order_records SET fill_sync_json=:v WHERE id=:i"),{"i":row["id"],"v":encode(progress)})
     return targets
@@ -214,7 +219,8 @@ def coverage(session, run, snapshots, targets):
         # A fill observed after source I/O cannot be acknowledged by this run.
         reasons=[]
         anchor=progress.get("anchor")
-        position_ok=cash_ok=False
+        position_ok=cash_ok=clock_ok=False
+        clocks_missing=False
         if not anchor:
             reasons.append("PRETRADE_BASELINE_UNAVAILABLE")
         elif int(row["filled_quantity"])!=target:
@@ -269,10 +275,40 @@ def coverage(session, run, snapshots, targets):
                 if delta is None or len(initial)!=1 or len(latest)!=1 or abs(Decimal(latest[0]["quantity"])-(Decimal(initial[0]["quantity"])+delta))>Decimal("0.01"):
                     cash_ok=False
             if not cash_ok:reasons.append("NATIVE_CASH_OR_ACTUAL_FEES_UNVERIFIED")
+            # A matching quantity/cash delta can itself be an older cached
+            # change. Never bless fetched_at/finished_at as a broker watermark.
+            # Require native source clocks bracketing actual executions as
+            # WELL as the independent identity/quantity/cash checks above.
+            def stamp(value):
+                try:
+                    parsed=datetime.fromisoformat(value)
+                    return parsed if parsed.tzinfo is not None else None
+                except (ValueError,TypeError):return None
+            before=stamp(anchor.get('before_dispatch_at'))
+            groups=[[stamp(v.get('timestamp')) for v in p.get('executions',{}).values()]
+                    or [stamp(p.get('broker_filled_at'))] for _,p in relevant]
+            executed=[v for group in groups for v in group if v is not None]
+            clocks=json.loads(run.context_json or '{}')
+            clock_ok=bool(before and groups and all(group and all(v is not None for v in group) for group in groups))
+            for name in ('positions_as_of','cash_as_of'):
+                initial=stamp(anchor.get('source_times',{}).get(name))
+                latest=stamp(clocks.get(name))
+                if initial is None or latest is None:clocks_missing=True
+                if not (initial and latest and before and executed and initial<=before<=min(executed)
+                        and max(executed)<=latest<=datetime.now(timezone.utc)):
+                    clock_ok=False
+            if not clock_ok:reasons.append('BROKER_FILL_WATERMARK_UNVERIFIED')
         verified=position_ok and cash_ok and not reasons
-        progress.update(coverage={"run_id":run.id,"target_quantity":target,"positions_verified":position_ok,
-            "cash_verified":cash_ok,"issues":reasons,"basis":"PRETRADE_ACCOUNT_DELTA_WITH_ACTUAL_FEES" if verified else "UNVERIFIED"})
+        progress.update(coverage={"run_id":run.id,"target_quantity":target,
+            "position_delta_matched":position_ok,"cash_delta_matched":cash_ok,"watermark_verified":clock_ok,
+            "positions_verified":position_ok and clock_ok,"cash_verified":cash_ok and clock_ok,
+            "issues":reasons,"basis":"PRETRADE_ACCOUNT_DELTA_WITH_ACTUAL_FEES_AND_BROKER_WATERMARK" if verified else "UNVERIFIED"})
         progress["covered_quantity"]=target if verified else 0
+        # A successful official publication with permanently absent evidence
+        # stays visibly UNVERIFIED, not a perpetual background source request.
+        # Failures never enter this branch; new fills/manual/prepare re-enable.
+        if not anchor or (position_ok and cash_ok and clocks_missing) or (cash_ok and 'NETTED_FILLS_REQUIRE_BROKER_WATERMARK' in reasons):
+            progress['auto_retry']=False
         session.execute(text("UPDATE order_records SET fill_sync_json=:v WHERE id=:i"),{"i":order_id,"v":encode(progress)})
 
 

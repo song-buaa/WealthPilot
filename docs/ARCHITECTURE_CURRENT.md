@@ -192,7 +192,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
 
-[fill_sync 合同](../app/fill_sync.py) 只核对原交易前快照加已观察成交变化，不写预计持仓/现金，不提供交易状态机或收益计算。缺基线、净零反向交易、未知实际费用/跨币种费用、现金延迟、execution 矛盾均保守未证实；实际成本继续由原券商同步发布，不能把数量对账当历史成本归因。IBKR 继续映射 snowball，同账户/Portfolio 绑定；Tiger 只消费已配置 Owner，Futu/国金不自动启用。
+[fill_sync 合同](../app/fill_sync.py) 只核对原交易前快照加已观察成交变化，不写预计持仓/现金，不提供交易状态机或收益计算。缺基线/原始券商持仓现金水位/实际成交时间、净零反向交易、未知实际费用/跨币种费用、现金延迟、execution 矛盾均保守未证实；同步抓取时间不替代源水位，当前 IBKR 原始持仓时间未知时不会宣称覆盖。实际成本继续由原券商同步发布，不能把数量对账当历史成本归因。IBKR 继续映射 snowball，同账户/Portfolio 绑定；Tiger 只消费已配置 Owner，Futu/国金不自动启用。
 
 [原数据上的只读状态投影](../app/trade_status.py) 经 `/api/action/trade-and-sync-status` 和 MCP `get_trade_and_sync_status` 返回交易事实与同步/覆盖两种状态。新工具无 refresh/broker I/O，原七工具权限不变：默认八项只读，显式 prepare 后九项（其中 prepare 不是纯读取）。没有原账号、Token、anchor 或原始 SDK 回包。U1 冻结副本识别待覆盖进度，`FILL_SYNC_PENDING_OR_UNVERIFIED` 阻止未经说明的精确建议，旧视图不改。
 

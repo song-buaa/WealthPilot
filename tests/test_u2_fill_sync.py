@@ -34,7 +34,7 @@ def context(tmp_path,monkeypatch):
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add_all([Portfolio(id=7,name='Synthetic'),Portfolio(id=8,name='Other')]);session.commit()
-    state=SimpleNamespace(quantity=10,cash=1000,cost=10,calls=0,offline=False,before_publish=None,trading='ibkr')
+    state=SimpleNamespace(quantity=10,cash=1000,cost=10,calls=0,offline=False,before_publish=None,trading='ibkr',source_clock='current')
     def sessions():return Session(engine,info={'portfolio_id':7})
     def factory(broker):
         def sync(session,triggered_by='manual'):
@@ -57,7 +57,8 @@ def context(tmp_path,monkeypatch):
                 return result
             return PositionSnapshotRepository(session).synchronize(broker,'synthetic-owner',fetch,retries=0,
                 triggered_by=triggered_by,metadata=lambda:dict(source='synthetic',complete=True,
-                    positions_as_of=datetime.now(timezone.utc).isoformat(),cash_as_of=datetime.now(timezone.utc).isoformat(),
+                    positions_as_of=None if state.source_clock=='unknown' else (datetime.now(timezone.utc)-timedelta(seconds=60 if state.source_clock=='cached' else 0)).isoformat(),
+                    cash_as_of=None if state.source_clock=='unknown' else (datetime.now(timezone.utc)-timedelta(seconds=60 if state.source_clock=='cached' else 0)).isoformat(),
                     price_as_of=datetime.now(timezone.utc).isoformat()))
         return SimpleNamespace(sync_and_persist=sync)
     def source():return 'snowball' if state.trading=='ibkr' else 'tiger'
@@ -84,16 +85,18 @@ def context(tmp_path,monkeypatch):
             session.commit()
             result=manager.place_order(strategy.id,{**params,'review_id':review})
             return result.id
-    def observe(order_id,quantity,*,fees=True,exec_id=None,shares=None,status=None):
+    def observe(order_id,quantity,*,fees=True,exec_id=None,shares=None,status=None,actual_time='native'):
         with sessions() as session:
             order=session.get(OrderRecord,order_id)
             prior=int(order.filled_quantity or 0)
             raw=dict(observed_account_id='synthetic-owner',con_id=111,contract_currency='USD',perm_id=1)
             if quantity:
+                identity=exec_id or order_id+'-'+str(quantity)
+                prior_execution=decode(order.fill_sync_json).get('executions',{}).get(identity,{})
                 raw['execution_evidence']=[dict(exec_id=exec_id or order_id+'-'+str(quantity),order_ref=order_id,
                     observed_account_id='synthetic-owner',con_id=111,shares=shares if shares is not None else quantity-prior,
                     price=10,commission=1 if fees else None,commission_currency='USD' if fees else None,
-                    timestamp=datetime.now(timezone.utc).isoformat())]
+                    timestamp=(prior_execution.get('timestamp') or datetime.now(timezone.utc).isoformat()) if actual_time=='native' else actual_time)]
             result=OrderManager(session,Broker()).apply_broker_observation(order_id,OrderStatusUpdate(
                 order.broker_order_id,order_id,status or ('filled' if quantity==order.quantity else 'partially_filled'),
                 filled_quantity=quantity,avg_filled_price=Decimal(10) if quantity else None,raw_response=raw))
@@ -413,3 +416,45 @@ def test_unreconciled_zero_quantity_order_blocks_account_delta_proof(context):
     result=c.status(filled)
     assert result['asset_sync']['status']=='SYNC_UNVERIFIED'
     assert 'FILL_IDENTITY_OR_AUTHORITY_UNVERIFIED' in result['asset_sync']['issues']
+
+
+@pytest.mark.parametrize('clock',['unknown','cached'])
+def test_matching_deltas_without_post_fill_broker_watermark_are_not_verified(context,clock):
+    c=context;c.publish();order=c.dispatch(2);c.observe(order,2)
+    c.state.quantity=12;c.state.cash=979;c.state.source_clock=clock
+    c.drain();result=c.status(order)
+    assert result['asset_sync']['status']=='SYNC_UNVERIFIED'
+    assert 'BROKER_FILL_WATERMARK_UNVERIFIED' in result['asset_sync']['issues']
+    calls=c.state.calls
+    if clock=='unknown':
+        assert not result['asset_sync']['automatic_retry']
+        assert c.drain()==[] and c.state.calls==calls
+    else:
+        assert result['asset_sync']['automatic_retry']
+        c.state.source_clock='current';c.drain()
+        assert c.status(order)['asset_sync']['status']=='SYNCED'
+
+
+def test_unproven_pretrade_clock_cannot_be_repaired_with_a_new_posttrade_timestamp(context):
+    c=context;c.state.source_clock='unknown';c.publish();order=c.dispatch(2);c.observe(order,2)
+    c.state.quantity=12;c.state.cash=979;c.state.source_clock='current';c.drain()
+    assert c.status(order)['asset_sync']['status']=='SYNC_UNVERIFIED'
+
+
+def test_every_relevant_fill_needs_actual_time_not_only_one_of_two_orders(context):
+    c=context;c.publish();a=c.dispatch(2);b=c.dispatch(1)
+    c.observe(a,2);c.observe(b,1,actual_time=None)
+    c.state.quantity=13;c.state.cash=968;c.drain()
+    assert c.status(a)['asset_sync']['status']=='SYNC_UNVERIFIED'
+    assert c.status(b)['asset_sync']['status']=='SYNC_UNVERIFIED'
+
+
+def test_closed_unverifiable_history_does_not_poison_new_pretrade_anchor(context):
+    c=context;c.publish();old=c.dispatch(2)
+    with c.sessions() as s:s.get(OrderRecord,old).fill_sync_json=None;s.commit()
+    c.observe(old,2);c.state.quantity=12;c.state.cash=979;c.drain()
+    assert c.status(old)['asset_sync']['status']=='SYNC_UNVERIFIED'
+    assert not c.status(old)['asset_sync']['automatic_retry']
+    new=c.dispatch(2);c.observe(new,2);c.state.quantity=14;c.state.cash=958;c.drain()
+    assert c.status(new)['asset_sync']['status']=='SYNCED'
+    assert c.status(old)['asset_sync']['status']=='SYNC_UNVERIFIED'
