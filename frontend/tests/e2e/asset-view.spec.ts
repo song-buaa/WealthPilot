@@ -47,4 +47,9 @@ test('missing view is explicit and mobile view preserves original security rows'
   await page.goto(`${base}/#/asset-view/${snapshot}`)
   await expect(page.locator('tbody tr')).toHaveCount(3)
   await expect(page.getByRole('heading',{name:'本次分析的固定资产视图'})).toBeVisible()
+  // A hash-route change must not label the previous view/conclusion with a new ID.
+  await page.evaluate(() => { window.location.hash='/asset-view/asset-view:v1:99999' })
+  await expect(page.getByRole('alert')).toContainText('固定资产视图不可用')
+  await expect(page.locator('tbody tr')).toHaveCount(0)
+  await expect(page.getByText('总资产 ¥1,450.00')).toHaveCount(0)
 })

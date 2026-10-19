@@ -23,6 +23,10 @@ async function call<T>(path: string, options?: RequestInit): Promise<T> {
 
 export default function AssetView() {
   const { snapshotId = '' } = useParams()
+  return <FixedAssetView key={snapshotId} snapshotId={snapshotId} />
+}
+
+function FixedAssetView({ snapshotId }: { snapshotId: string }) {
   const [view, setView] = useState<View | null>(null)
   const [error, setError] = useState('')
   const [conclusion, setConclusion] = useState('')
