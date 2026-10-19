@@ -101,3 +101,24 @@ class GuojinAdapter:
         if snapshot_time is None:
             snapshot_time = datetime.now(timezone.utc)
         return [self.to_position(r, snapshot_time) for r in raw_list]
+
+    def from_native_export(self, row: dict, snapshot_time: datetime) -> Position:
+        """CNY broker valuation/cost/P&L; HKD quotes remain separate evidence."""
+        from backend.utils.symbol import normalize_symbol
+        security = normalize_symbol(row["code"], row["market"])
+        ticker, market = security.split(":")
+        symbol = (f"{ticker}.{row['channel'].upper()}:{market}"
+                  if row["channel"] in {"hgt", "sgt"} else security)
+        qty = row["quantity"]
+        # The business model has one price currency. Never put an HKD quote
+        # alongside a CNY cost/value. These unit values aren't live quotes.
+        unit_cost = row["cost_basis"]/qty if qty else Decimal(0)
+        unit_value = row["market_value"]/qty if qty else Decimal(0)
+        original = self.to_position(dict(symbol=symbol, raw_symbol=row["code"], name=row["name"],
+            quantity=qty, available_quantity=row["available_quantity"], cost_price=unit_cost,
+            last_price=unit_value, market_value=row["market_value"], currency="CNY",
+            security_type="QNX_NATIVE_POSITION"), snapshot_time)
+        return original.model_copy(update=dict(cost_basis=row["cost_basis"],
+            unrealized_pnl=row["unrealized_pnl"], unrealized_pnl_pct=row["unrealized_pnl_pct"],
+            raw_data={**row, "source_channel":"guojin_qnx_native", "security_symbol":security,
+                      "price_basis":"BROKER_CNY_VALUE_PER_UNIT"}))

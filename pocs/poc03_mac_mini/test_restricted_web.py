@@ -380,6 +380,12 @@ def test_runner_excludes_inherited_credentials_and_disabled_broker_env(shared,mo
     assert config['portfolio_id']==7
     assert 'OPENAI_API_KEY' not in environment and 'GUOJIN_GATEWAY_SECRET' not in environment
     assert environment['IBKR_READ_ONLY_MODE']=='true' and environment['ENABLE_IBKR_LIVE_TRADING']=='false'
+    common.write_json(root/'config/web.json',{'revision':release.name,'enabled_brokers':['guojin']})
+    common.write_json(root/'config/web-brokers.json',{'GUOJIN_NATIVE_CONFIG':'/private/synthetic-native.json',
+        'GUOJIN_ACCOUNT':'fixture-owner','GUOJIN_GATEWAY_SECRET':'synthetic-unused-secret'})
+    _,_,environment=web_runner.settings(root)
+    assert environment['GUOJIN_NATIVE_CONFIG']=='/private/synthetic-native.json'
+    assert environment['GUOJIN_ACCOUNT']=='fixture-owner' and 'GUOJIN_GATEWAY_SECRET' not in environment
     common.write_json(root/'config/web-brokers.json',{'OPENAI_API_KEY':'forbidden'})
     with pytest.raises(ValueError,match='BROKER_ENV_INVALID'):
         web_runner.settings(root)

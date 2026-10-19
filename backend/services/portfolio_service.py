@@ -251,15 +251,25 @@ def export_liabilities_csv(portfolio_id: int) -> str:
 # ── 内部辅助 ──────────────────────────────────────────────────────────────────
 
 def _position_to_dict(p: Position) -> dict:
+    from backend.utils.symbol import position_security_identity
+    from app.utils.position_aggregator import stored_cost_value_cny
     from backend.services.instruments.classification import (
         economic_asset_class_cn,
         economic_asset_class_value,
     )
 
+    security, security_currency = position_security_identity(p.symbol, p.broker, p.broker_security_type, p.currency)
     return {
         "id":                  p.id,
         "name":                p.name,
         "ticker":              p.ticker,
+        "symbol":              p.symbol,
+        "broker":              p.broker,
+        "security_symbol":     security,
+        "security_currency":   security_currency,
+        "holding_channel":     p.symbol.split(":")[0].rsplit(".",1)[-1].lower()
+                               if p.broker == "guojin" and p.symbol and "." in p.symbol
+                               and security != p.symbol else None,
         "platform":            p.platform,
         "asset_class":         economic_asset_class_cn(p),
         "broker_security_type": getattr(p, "broker_security_type", None),
@@ -275,6 +285,9 @@ def _position_to_dict(p: Position) -> dict:
         "currency":            p.currency,
         "quantity":            p.quantity,
         "cost_price":          p.cost_price,
+        "cost_value_cny":      stored_cost_value_cny(p),
+        "price_basis":         "BROKER_CNY_VALUE_PER_UNIT" if p.broker == "guojin"
+                               and p.broker_security_type == "QNX_NATIVE_POSITION" else None,
         "current_price":       p.current_price,
         "market_value_cny":    p.market_value_cny,
         "original_currency":   p.original_currency,

@@ -28,6 +28,7 @@ from typing import Optional
 
 from app.models import Position, get_session
 from backend.services.instruments.classification import economic_asset_class_cn
+from backend.utils.symbol import position_security_identity
 
 
 # ── 常量（与 discipline.py 保持完全一致）────────────────────────────────────────
@@ -96,6 +97,14 @@ def _norm(name: str) -> str:
 
 # ── 核心公共函数 ───────────────────────────────────────────────────────────────
 
+def stored_cost_value_cny(position: Position) -> float:
+    """Native broker cost and reference P&L are independent source facts."""
+    if (position.broker == "guojin" and position.broker_security_type == "QNX_NATIVE_POSITION"
+            and position.currency == "CNY"):
+        return (position.quantity or 0.0) * (position.cost_price or 0.0)
+    return (position.market_value_cny or 0.0) - (position.profit_loss_value or 0.0)
+
+
 def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
     """
     从数据库加载原始持仓记录，返回序列化 dict 列表。
@@ -113,6 +122,8 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
                 "ticker": p.ticker or "",
                 "currency": getattr(p, "currency", None) or "",
                 "symbol": getattr(p, "symbol", None) or "",  # v3.11: TICKER:MARKET 真值
+                "security_symbol": position_security_identity(p.symbol, p.broker, p.broker_security_type, p.currency)[0] or "",
+                "security_currency": position_security_identity(p.symbol, p.broker, p.broker_security_type, p.currency)[1],
                 "platform": p.platform or "",
                 "asset_class": economic_asset_class_cn(p),
                 "vehicle_type": getattr(p, "vehicle_type", None) or "UNKNOWN",
@@ -123,6 +134,7 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
                 "profit_loss_rate": p.profit_loss_rate or 0.0,
                 "profit_loss_value": p.profit_loss_value or 0.0,
                 "cost_price": p.cost_price or 0.0,
+                "cost_value_cny": stored_cost_value_cny(p),
                 "current_price": p.current_price or 0.0,
                 "is_leverage_etf": _is_leverage_etf(p.name or "", p.ticker or ""),
             }
@@ -167,7 +179,7 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
                 else r["name"]
             )
         elif r.get("symbol") and ":" in r["symbol"]:
-            key = f"{r['symbol']}|{r.get('currency', '')}"
+            key = f"{r.get('security_symbol') or r['symbol']}|{r.get('security_currency') or r.get('currency', '')}"
         elif r["ticker"]:
             key = r["ticker"]
         else:
@@ -178,7 +190,7 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
             buckets[key] = {
                 "name": display_name,
                 "ticker": r["ticker"] or key,
-                "symbol": r.get("symbol", ""),  # v3.11: TICKER:MARKET 真值
+                "symbol": r.get("security_symbol") or r.get("symbol", ""),
                 "asset_class": r["asset_class"],
                 "market_value_cny": 0.0,
                 "profit_loss_value": 0.0,
@@ -190,7 +202,7 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
         b = buckets[key]
         b["market_value_cny"] += r["market_value_cny"]
         b["profit_loss_value"] += r.get("profit_loss_value", 0.0)
-        b["cost_value"] += r["market_value_cny"] - r.get("profit_loss_value", 0.0)
+        b["cost_value"] += r.get("cost_value_cny", r["market_value_cny"] - r.get("profit_loss_value", 0.0))
         if r["platform"] and r["platform"] not in b["platforms"]:
             b["platforms"].append(r["platform"])
 

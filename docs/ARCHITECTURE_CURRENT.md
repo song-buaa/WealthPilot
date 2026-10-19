@@ -1,6 +1,6 @@
 # WealthPilot 当前系统架构
 
-> 2026-10-19：U2 开发基线为 `e06a6995a2f830aa527cb0a0c506b3153d11dc8d`（含已合入 U1）。用户已确认 B0、U0 及 CNH 修复生产发布；本轮未访问生产，U1/U2 的生产启用待另行核实。第 14 节为 U2 PR 候选，尚未合并或部署。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-19：U2 开发基线为 `e06a6995a2f830aa527cb0a0c506b3153d11dc8d`（含已合入 U1）。用户已确认 B0、U0 及 CNH 修复生产发布；本轮未访问生产，U1/U2 的生产启用待另行核实。U2 已合入当前开发基线；本轮未核实 U1/U2 生产启用状态。第 15 节为国金原生来源 PR 候选。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -199,3 +199,12 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 原 OrderRecord JSON 中的有界刷新预算与覆盖证明分开：缺基线不会在首次缓存响应后停刷，永久缺证据也不会无限请求。已验证历史证明保留，后续 Run 派生 checkpoint 仅验证当前发布增量，不签认新目标；真实回退/冲突仍降级。细节由 U2 实现说明维护。
 
 仅一列、零索引、零新表，显式 `--stage u2` 原迁移流程，Digest/receipt/停写/启写后不覆盖旧备份约束保留。设计、证据限制、测试及未来生产验收见 [U2 实现说明](U2_IMPLEMENTATION.md)。本轮不部署或进行真实交易。
+
+
+## 15. 国金原生三文件来源（本 PR 候选）
+
+原 GuojinSyncService/Adapter 增加全能行 GB18030/TAB 三文件读取；旧 MiniQMT HTTP 来源退出，22:00 不再自动拉国金，其他三券商不变。导出与入库解耦，无 GUI 调度/密码逻辑。同步仍由原 SyncExecutor → Repository claim/fence → Snapshot/Upsert 原子发布；Schema 无变化。
+
+同账户的沪/深港通用渠道限定 symbol 保留底层身份；原 symbol 读取投影及聚合器/issuer 曝光复用同一证券身份，数量/成本成员不混合。人民币市值/成本/参考盈亏原样保存，港币报价在 Snapshot 证据中分列，不二次 FX；聚合器对原生行采用已存成本，不用参考盈亏反算成本。
+
+HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI 账户/完整行数/查询时间与文件哈希收据，未知行情日期仍 partial。当前账户的旧 API 汇总/清仓由完整快照替换；未知截图/导入行须显式 CAS 决策，否则整批拒绝且保留 last-good。具体合同、入口与生产核对/回滚见 [国金原生同步](GUOJIN_NATIVE_SYNC.md)。

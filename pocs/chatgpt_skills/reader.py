@@ -12,7 +12,8 @@ MANUAL_FIELDS = ("id", "kind", "name", "item_type", "category", "source_type", "
                  "included_in_net_worth", "already_investment_accounted", "effective_included_in_net_worth",
                  "value_as_of", "last_verified_at", "updated_at", "freshness")
 POSITION_FIELDS = ("id", "name", "ticker", "platform", "asset_class", "currency", "quantity",
-                   "cost_price", "current_price", "market_value_cny", "original_currency", "original_value",
+                   "broker", "broker_security_type", "security_symbol", "security_currency", "holding_channel",
+                   "cost_price", "cost_value_cny", "price_basis", "current_price", "market_value_cny", "original_currency", "original_value",
                    "fx_rate_to_cny", "fx_rate_date", "profit_loss_value", "profit_loss_rate", "segment",
                    "vehicle_type", "economic_asset_class", "economic_asset_subclass")
 
@@ -88,12 +89,12 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                                                "source": row.sync_source, "identity": "opaque_stored_owner_no_raw_account_id"})
                     if arguments.get("account_ref") and ref != arguments["account_ref"]:
                         continue
-                    if arguments.get("symbol") and arguments["symbol"] not in (row.symbol, row.ticker):
+                    if arguments.get("symbol") and arguments["symbol"] not in (row.symbol, row.ticker, by_id[row.id].get("security_symbol")):
                         continue
                     item = {k: by_id[row.id].get(k) for k in POSITION_FIELDS}
                     item.update(symbol=row.symbol, account_ref=ref, source=row.sync_source,
                                 data_updated_date=updated, issues=row_issues,
-                                symbol_weight_of_investments=weights.get(row.symbol or row.ticker))
+                                symbol_weight_of_investments=weights.get(by_id[row.id].get("security_symbol") or row.symbol or row.ticker))
                     items.append(item); issues.extend(row_issues)
                 accounts = list(owner_map.values())
                 if arguments.get("account_ref"):

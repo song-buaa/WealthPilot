@@ -59,3 +59,12 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - U1：新冻结视图含待覆盖 issue，旧 ID/payload 不改；不把 SYNCED 与数据实时性或精确调仓授权混同。
 - Schema：一列 `order_records.fill_sync_json TEXT NULL`，零索引/零新表；原 stage u2 迁移/receipt/Digest，见 [U2 实现与发布输入](U2_IMPLEMENTATION.md)。
 - 测试：[故障/并发/覆盖](../tests/test_u2_fill_sync.py)、[迁移](../tests/test_u2_schema.py)、[MCP](../pocs/chatgpt_skills/test_protocol.py)、[U1 浏览器](../frontend/tests/e2e/asset-view.spec.ts)。无生产/真实交易验收，本批不含完整历史账本或 B2/B3/QMT。
+
+
+### 国金完整原生持仓来源（本 PR 候选）
+
+- 能力/Owner：[原 GuojinSyncService](../backend/services/broker_sync/guojin/sync_service.py)、[Adapter](../backend/services/broker_sync/guojin/adapter.py)、[严格三文件解析](../backend/services/broker_sync/guojin/native_exports.py)，复用原 Executor/Repository/Upsert/FX/Portfolio/Wealth/MCP。旧 MiniQMT HTTP 来源退出；无 Schema 新增。
+- 入口：原 broker-sync trigger/status；[原脚本](../backend/scripts/guojin_sync_e2e.py) 默认仅校验，显式发布仍经原 Executor/严格共享契约。文件由既有 GUI 操作生成，本 PR 不决定长期定时方式。
+- 复用：沪港通/深港通底层身份独立，原聚合/issuer 投影合并敞口；CNY 估值和成本，HKD 报价独立证据；旧汇总/截图按显式归属和 CAS 处理，失败不发布。
+- 测试：[隔离安全回归](../tests/test_guojin_native_sync.py)、原 restricted/U0 与 [浏览器](../frontend/tests/e2e/guojin-native.spec.ts)。
+- 限制：HK 文件无账户号或估值时间，必须依赖私有 GUI 来源收据；mtime 不作报价时间，未知仍 partial；真实生产存量归属、启用及 ChatGPT 验收待授权。只验证过已提供的原生版本；表头/市场代码变化拒绝发布，不宽松猜测。[完整来源/启用合同](GUOJIN_NATIVE_SYNC.md)。

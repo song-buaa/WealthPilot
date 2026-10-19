@@ -1,4 +1,5 @@
 """Small evidenced direct-security issuer projection. Never combine quantities."""
+from backend.utils.symbol import position_security_identity
 VERSION = "issuer.2026-10-19.1"
 EVIDENCE = ["https://ir.lixiang.com/investor-faqs",
             "https://ir.lixiang.com/news-releases/news-release-details/li-auto-inc-files-its-annual-report-form-20-f-3"]
@@ -12,7 +13,8 @@ def exposure(items):
         if item.get("economic_asset_class") != "EQUITY" or item.get("vehicle_type") not in {
                 "COMMON_STOCK", "ADR", "DEPOSITARY_RECEIPT"}:
             continue  # no ETF look-through, country-by-currency or name matching
-        identity = (item.get("symbol"), item.get("original_currency") or item.get("currency"))
+        identity = position_security_identity(item.get("symbol"), item.get("broker"), item.get("broker_security_type"),
+            item.get("original_currency") or item.get("currency"))
         issuer = IDENTITIES.get(identity)
         member = {key:item.get(key) for key in ("id", "symbol", "account_ref", "quantity", "cost_price",
                    "currency", "original_currency", "original_value", "current_price", "market_value_cny")}

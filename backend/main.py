@@ -115,7 +115,9 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(lambda: cleanup(cache_root()), "interval", minutes=5,
                           id="expire_analysis_inputs", replace_existing=True)
     scheduler.add_job(
-        lambda: [broker_sync_api._run_sync(b, "cron") for b in ["tiger", "futu", "snowball", "guojin"]],
+        # Guojin's obsolete MiniQMT pull is retired. Native export generation
+        # is explicitly decoupled; no GUI schedule is enabled by this release.
+        lambda: [broker_sync_api._run_sync(b, "cron") for b in ["tiger", "futu", "snowball"]],
         trigger=CronTrigger(hour=22, minute=0),
         id="daily_broker_sync",
         replace_existing=True,

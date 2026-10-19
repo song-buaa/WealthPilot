@@ -119,7 +119,7 @@ def frozen_result(payload, operation, arguments):
         if ref and ref not in {i["account_ref"] for i in result["accounts"]}:
             raise ValueError("ACCOUNT_NOT_FOUND")
         result["items"] = [i for i in result["items"] if (not ref or i["account_ref"] == ref)
-                           and (not symbol or symbol in (i["symbol"], i["ticker"]))]
+                           and (not symbol or symbol in (i["symbol"], i["ticker"], i.get("security_symbol")))]
         if ref:
             result["accounts"] = [i for i in result["accounts"] if i["account_ref"] == ref]
     result.update(snapshot_id=view["snapshot_id"], data_quality=view["data_quality"])

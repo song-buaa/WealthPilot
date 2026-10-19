@@ -171,8 +171,9 @@ class SyncExecutor:
                 finally:
                     close = getattr(service,"close",None)
                     if close: close()
-        except Exception:
-            self._fail(run_id,"SYNC_SOURCE_FAILED")
+        except Exception as exc:
+            code = str(exc) if str(exc) in api.SAFE_SYNC_CODES else "SYNC_SOURCE_FAILED"
+            self._fail(run_id,code)
             return run_id
         finally:
             self.claims.pop(run_id,None)

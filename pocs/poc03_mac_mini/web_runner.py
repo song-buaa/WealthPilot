@@ -9,6 +9,7 @@ import sys
 from common import ROOT, check_revision, host_guard, private_json, require, safe_cli
 
 BROKER_ENV = {"IBKR_HOST", "IBKR_PORT", "IBKR_CLIENT_ID", "IBKR_ACCOUNT",
+              "GUOJIN_NATIVE_CONFIG", "GUOJIN_ACCOUNT",
               "GUOJIN_GATEWAY_URL", "GUOJIN_GATEWAY_SECRET"}
 
 
@@ -36,6 +37,9 @@ def settings(root):
     extra = private_json(root / "config/web-brokers.json") if (root / "config/web-brokers.json").exists() else {}
     require(set(extra) <= BROKER_ENV and all(type(v) is str and v for v in extra.values()),
             "WEB_BROKER_ENV_INVALID")
+    # Accept old private files for compatibility, but never pass obsolete
+    # gateway credentials to a native-file worker, even when Guojin is enabled.
+    extra = {k:v for k,v in extra.items() if not k.startswith("GUOJIN_GATEWAY_")}
     if "guojin" not in web["enabled_brokers"]:
         extra = {k:v for k,v in extra.items() if not k.startswith("GUOJIN_")}
     if "snowball" not in web["enabled_brokers"]:

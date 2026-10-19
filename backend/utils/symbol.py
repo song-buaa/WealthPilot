@@ -14,6 +14,24 @@ import re
 
 VALID_MARKETS = {"US", "HK", "SH", "SZ", "CN", "LSE"}
 
+
+def position_security_symbol(symbol: str, broker: str | None = None, security_type: str | None = None) -> str:
+    """Guojin native holding channels are distinct rows of the same HK security.
+
+    This is a read projection, never a replacement for a stored holding key or
+    a trade instruction. No name, currency or arbitrary ticker alias inference.
+    """
+    match = re.fullmatch(r"(\d{4,5})\.(HGT|SGT):HK", symbol or "")
+    if broker == "guojin" and security_type == "QNX_NATIVE_POSITION" and match:
+        return normalize_symbol(match[1], "HK")
+    return symbol
+
+
+def position_security_identity(symbol, broker, security_type, valuation_currency):
+    """Source-proven HKD security identity is independent of a CNY valuation."""
+    security = position_security_symbol(symbol, broker, security_type)
+    return security, "HKD" if security != symbol and valuation_currency == "CNY" else valuation_currency
+
 # CN 是 broker_sync 层历史遗留的 A 股市场代码, 统一映射到 SH/SZ
 # 但单独出现 CN 时无法区分 SH/SZ, 需要根据代码规则推断
 _CN_PREFIX_TO_MARKET = {

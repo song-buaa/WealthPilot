@@ -347,7 +347,7 @@ class PositionUpsertService:
         if len(matches) > 1:
             raise ValueError("CASH_IDENTITY_COLLISION_REQUIRES_REVIEW")
 
-    def _upsert_single(self, snap: PositionSnapshot) -> bool:
+    def _upsert_single(self, snap: PositionSnapshot, *, allow_legacy_claim: bool = True) -> bool:
         """单条 upsert。返回 True 表示新增,False 表示更新。"""
         from services.broker_sync.models import PositionSnapshotRun
         run = self.session.get(PositionSnapshotRun, snap.run_id)
@@ -406,7 +406,7 @@ class PositionUpsertService:
 
         # 旧库升级后的首轮同步：只有存在相同 scope 的历史 snapshot 证据时，
         # 才接管旧的 platform+ticker 行，避免把手工/CSV 行误认作 API 持仓。
-        if existing is None and not is_cash_balance(snap):
+        if allow_legacy_claim and existing is None and not is_cash_balance(snap):
             has_snapshot_evidence = self.session.query(PositionSnapshot.id).join(
                 PositionSnapshotRun, PositionSnapshot.run_id == PositionSnapshotRun.id).filter(
                 PositionSnapshotRun.portfolio_id == self.portfolio_id,

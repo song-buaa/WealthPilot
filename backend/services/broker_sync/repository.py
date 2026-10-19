@@ -296,7 +296,9 @@ class PositionSnapshotRepository:
                 code = str(exc) if str(exc) in {"EMPTY_SOURCE_REQUIRES_REVIEW", "INCOMPLETE_SOURCE",
                     "FX_RATE_UNAVAILABLE", "DUPLICATE_SNAPSHOT_IDENTITY", "MIXED_SNAPSHOT_SCOPE",
                     "SYNC_CLAIM_EXPIRED_OR_REPLACED", "ACCOUNT_PORTFOLIO_AMBIGUOUS",
-                    "SOURCE_ACCOUNT_UNPROVEN", "CASH_IDENTITY_COLLISION_REQUIRES_REVIEW"} else "SYNC_SOURCE_FAILED"
+                    "SOURCE_ACCOUNT_UNPROVEN", "CASH_IDENTITY_COLLISION_REQUIRES_REVIEW",
+                    "NATIVE_BATCH_INCOMPLETE", "NATIVE_BATCH_INVALID", "NATIVE_ACCOUNT_UNPROVEN",
+                    "NATIVE_RECONCILIATION_FAILED", "NATIVE_BATCH_STALE", "NATIVE_LEGACY_REVIEW_REQUIRED"} else "SYNC_SOURCE_FAILED"
                 self.mark_run_failed(run_id, code, attempt)
                 raise ValueError(code) from None
 

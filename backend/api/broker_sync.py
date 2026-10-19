@@ -66,7 +66,9 @@ SAFE_SYNC_CODES = {"SYNC_LEASE_EXPIRED","SYNC_ACCOUNT_UNCONFIGURED","SYNC_SOURCE
     "EMPTY_SOURCE_REQUIRES_REVIEW","INCOMPLETE_SOURCE","FX_RATE_UNAVAILABLE",
     "DUPLICATE_SNAPSHOT_IDENTITY","MIXED_SNAPSHOT_SCOPE","SYNC_CLAIM_EXPIRED_OR_REPLACED",
     "ACCOUNT_PORTFOLIO_AMBIGUOUS","SYNC_RESERVATION_FAILED",
-    "SOURCE_ACCOUNT_UNPROVEN","CASH_IDENTITY_COLLISION_REQUIRES_REVIEW"}
+    "SOURCE_ACCOUNT_UNPROVEN","CASH_IDENTITY_COLLISION_REQUIRES_REVIEW",
+    "NATIVE_BATCH_INCOMPLETE","NATIVE_BATCH_INVALID","NATIVE_ACCOUNT_UNPROVEN",
+    "NATIVE_RECONCILIATION_FAILED","NATIVE_BATCH_STALE","NATIVE_LEGACY_REVIEW_REQUIRED"}
 
 
 def safe_sync_reason(run):
@@ -95,7 +97,8 @@ def _public_quality(run):
     import json
     meta = json.loads(run.context_json or "{}") or {"quality":"partial","issues":["SOURCE_EVIDENCE_UNKNOWN"]}
     return {key:meta.get(key) for key in ("quality","issues","source","complete","coverage","markets","empty_confirmed","fetched_at",
-        "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx")}
+        "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx",
+        "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count")}
 
 
 BROKER_PLATFORM_MAP = {
@@ -120,6 +123,18 @@ def _sync_account(db, broker):
     if broker != "guojin":
         return None
     import os
+    if os.environ.get("GUOJIN_NATIVE_CONFIG"):
+        from services.broker_sync.guojin.native_exports import read_config, require
+        try:
+            config = read_config(os.environ["GUOJIN_NATIVE_CONFIG"])
+            require(config["portfolio_id"] == _portfolio_scope(db), "NATIVE_ACCOUNT_UNPROVEN")
+            require(not os.environ.get("GUOJIN_ACCOUNT") or os.environ["GUOJIN_ACCOUNT"] == config["account_id"],
+                    "NATIVE_ACCOUNT_UNPROVEN")
+        except (OSError, ValueError):
+            # Unproven configuration has no owner. Original reservation records
+            # an unconfigured failure; all/status for other brokers still work.
+            return None
+        return config["account_id"]
     if os.environ.get("GUOJIN_ACCOUNT"):
         return os.environ["GUOJIN_ACCOUNT"]
     from services.broker_sync.models import PositionSnapshotRun
