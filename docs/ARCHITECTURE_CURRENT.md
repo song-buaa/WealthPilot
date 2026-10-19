@@ -173,6 +173,6 @@ OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领�
 
 异常空、部分读取失败、重复 canonical symbol/币种、owner 冲突或非零估值未知 FX 都拒绝发布并保留 last-good。Tiger 证券/现金须实际来源账户证据；SDK 3.5.8 合法纯现金用 gross_position_value=0 证明。原币现金与手工/导入/API 余额身份碰撞阻断，成功历史不能自动认领旧现金；已确认的同笔现金只允许显式 CAS 映射，见专项 Runbook。确证空仓须来源独立完成/覆盖证据；Tiger STK/FUND/CASH 与 Futu HK 仅声明支持分区，未覆盖旧持仓保留并标 partial。现金/持仓时间、价格时间与抓取时间分开，无法证明的时间为 NULL；run success 仅表示原子发布成功，不等于实时、全账户质量合格或成交覆盖。
 
-[FXService](../app/fx_service.py) 是唯一汇率权威：latest TTL 300 秒，降级 TTL 15 秒；实际来源日期超过 4 个日历日为 stale，失败可复用带原日期的 last-good 或显式 hardcoded fallback。未知币种不再默认 1:1；非零未知 FX 保留账户 last-good，已确认零余额可存 0 但 FX rate 为 NULL/质量未知。MCP 仍为原七项只读工具，不执行刷新。
+[FXService](../app/fx_service.py) 是唯一汇率权威：latest TTL 300 秒，降级 TTL 15 秒；实际来源日期超过 4 个日历日为 stale，失败可复用带原日期的 last-good 或显式 hardcoded fallback。未知币种不再默认 1:1；非零未知 FX 保留账户 last-good，已确认零余额可存 0 但 FX rate 为 NULL/质量未知。CNH 保留独立币种；原 FrankfurterProvider 对涉及 CNH 的折算使用 Frankfurter v2 / Bank Indonesia 同日 USD 两腿报价，原 FXService 验证日期并记录 `provider_frankfurter_v2_BI_USD_cross`；缺腿/混日不使用另一条交叉路径绕过，其他币种仍用原 v1。MCP 仍为原七项只读工具，不执行刷新。
 
 U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite 严格 digest 仍验证，显式迁移流程见 [U0 实现及发布输入](U0_IMPLEMENTATION.md)。同分析 snapshot_id/WealthSnapshot payload、分析前准备、成交触发/水位覆盖和公司经济归属映射均未实施；U1/U2 必须扩展本 owner/执行器，不能复制同步体系。

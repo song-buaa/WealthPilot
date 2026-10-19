@@ -113,3 +113,14 @@ PYTHON_DOTENV_DISABLED=1 "$PYTHON" scripts/migrate_b0_safety.py verify --stage u
 apply 仅更新指定原行的 broker/account/source 与 canonical symbol/ticker，保留 ID、金额、数量、成本、名称及其他事实；原行在后续同步中更新，不再插入第二条。证明及整行 CAS 留在不可变 plan/receipt；不增加 Schema 或现金账本。第一次真实同步的金额变动应按旧手工记录、来源现金、FX 分别核对，不将新增 CASH 行解释为财富增加。独立现金维持原真实归属；归属仍未知则保持阻断，不猜测配置账户。
 
 验证入口：[三项评审回归](../tests/test_u0_review_regressions.py)、[显式映射/CAS/碰撞演练](../tests/test_u0_schema_migration.py)。使用实际 SDK Position/PortfolioAccount/Segment 类型，覆盖账户错误/混合/缺失、首次/二次/重试现金碰撞、独立现金、合法空仓及异常 Last-good。浏览器/受限端原合成 000001 持仓修正为 COMMON_STOCK；不再把普通证券伪造为 CASH 来绕过现金合同。
+
+
+## 8. CNH 汇率兼容修复与定向发布
+
+原 Frankfurter v1 不支持 CNH，正反向都返回 404；原 USD 交叉链的 CNH 腿同样缺失。沿用原 FrankfurterProvider / FXService，仅涉及 CNH 的报价使用 [Frankfurter v2 具名来源接口](https://frankfurter.dev/providers/bi/)；[Bank Indonesia 原始页面](https://www.bi.go.id/en/statistik/informasi-kurs/transaksi-bi/default.aspx) 分别公布 CNH、CNY。请求 `providers/bi/rates?base=USD&quotes=CNH,CNY`，用同机构、同实际日期的两腿计算 CNY-per-CNH；反向取相反比例，USD 腿按 USD/USD 定义。未对全部币种迁移 Provider，也不依赖未归因的 blended 汇率或无证据的 CNH=CNY。
+
+v2 必须返回所需每条且唯一的 USD base/quote、有限正数及相同有效实际日期；缺腿、混日、未来日期、错误身份、网络错误均进入原不可用/Last-good 分支，不再以另一组 v1/v2 混合腿绕过失败。来源写入原 FXQuote.source / run.context_json；latest 300 秒、降级 15 秒、实际日期超过 4 天 stale、旧日期 Last-good 不变。过期值按原 U0 合同仅能显式 partial，不能宣称实时。回归入口 [test_cnh_fx](../tests/test_cnh_fx.py) 覆盖来源、TTL、异常、反向、历史、USD/HKD 等原路径及 IBKR 原币现金重复同步/失败保留。
+
+无 Schema/索引/数据订正变更，无新服务、MCP 工具或现金模型。合并与 main 四项 CI 通过后，由原 Mac mini Codex 固定 SHA 按正式流程发布；不重复 U0 迁移或 Tiger 验收。切换前保存一致性备份及原组件启动入口，核实共享 digest/owner 不变，保留实际实盘开关。仅显式触发原 IBKR 只读账户同步；来源请求失败或数据异常时停止该同步，保持 Last-good，不人工填汇率。核对 CNH 原币数量、实际汇率日期/质量、BASE 排除和 Web/MCP 同额，分解资产变动为新增/更新原币现金、证券变化及 FX 变化；无未核实平衡项。
+
+回滚优先在不改变 Schema 的情况下恢复已核实兼容的上一 U0 组件入口，保留最新数据库事实。启 writer 后不恢复旧整库或重跑迁移；只读来源同步仍会写本地数据库。本修复不授权测试下单、变更交易开关或启动 U1/U2。正式运行结果另按固定 SHA 的发布证据报告，不以本节候选设计冒充已验收。

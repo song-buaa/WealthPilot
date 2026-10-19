@@ -1,7 +1,7 @@
 """
 WealthPilot - FX 汇率服务
 所有资产以 CNY 为 base currency。
-Provider: Frankfurter API (https://api.frankfurter.app)
+Provider: Frankfurter v1；CNH 使用 v2 Bank Indonesia 同日 USD 交叉报价。
 支持 latest 和 historical 两种模式，保留替换 provider 的能力（接口抽象）。
 """
 
@@ -28,6 +28,7 @@ FALLBACK_RATES = {
 }
 
 FRANKFURTER_BASE_URL = "https://api.frankfurter.app"
+FRANKFURTER_CNH_URL = "https://api.frankfurter.dev/v2/providers/bi/rates"
 
 
 class FXProvider:
@@ -44,6 +45,36 @@ class FXProvider:
 class FrankfurterProvider(FXProvider):
     """Frankfurter API Provider"""
 
+    def source_for(self, from_currency, to_currency):
+        return ("provider_frankfurter_v2_BI_USD_cross"
+                if "CNH" in (from_currency.upper(), to_currency.upper()) else "provider")
+
+    def _fetch_cnh_rate(self, from_currency, to_currency, requested):
+        # v1/ECB has no CNH. Keep CNH distinct and use one named official
+        # source and observation date for BOTH legs, including reverse pairs.
+        needed = {from_currency, to_currency} - {"USD"}
+        params = {"base": "USD", "quotes": ",".join(sorted(needed))}
+        if requested != "latest":
+            params["date"] = requested
+        response = _requests.get(FRANKFURTER_CNH_URL, params=params, timeout=5)
+        response.raise_for_status()
+        rows = response.json()
+        if not isinstance(rows, list) or len(rows) != len(needed):
+            raise ValueError("CNH_FX_INCOMPLETE")
+        rates, dates = {"USD": 1.0}, set()
+        for row in rows:
+            currency = row["quote"]
+            if row["base"] != "USD" or currency not in needed or currency in rates:
+                raise ValueError("CNH_FX_IDENTITY_MISMATCH")
+            actual = calendar_date.fromisoformat(row["date"])
+            if actual > calendar_date.today() or (requested != "latest" and actual > calendar_date.fromisoformat(requested)):
+                raise ValueError("CNH_FX_FUTURE_DATE")
+            dates.add(actual.isoformat())
+            rates[currency] = FXService._valid(row["rate"])
+        if len(dates) != 1 or set(rates) != needed | {"USD"}:
+            raise ValueError("CNH_FX_DATE_MISMATCH")
+        return rates[to_currency] / rates[from_currency], dates.pop()
+
     def fetch_rate(self, from_currency: str, to_currency: str, date: str) -> Tuple[float, str]:
         if _requests is None:
             raise RuntimeError("requests 库未安装")
@@ -51,6 +82,9 @@ class FrankfurterProvider(FXProvider):
         # 同货币直接返回
         if from_currency.upper() == to_currency.upper():
             return 1.0, date if date != "latest" else "latest"
+
+        if "CNH" in (from_currency.upper(), to_currency.upper()):
+            return self._fetch_cnh_rate(from_currency.upper(), to_currency.upper(), date)
 
         url_date = "latest" if date == "latest" else date
         url = f"{FRANKFURTER_BASE_URL}/{url_date}"
@@ -150,10 +184,13 @@ class FXService:
             else:
                 try:
                     rate, actual = self._provider.fetch_rate(*key)
-                    quote = self._provider_quote(rate, actual, date, stamp, "provider")
+                    source = getattr(self._provider, "source_for", lambda *_: "provider")(*key[:2])
+                    quote = self._provider_quote(rate, actual, date, stamp, source)
                 except Exception:
                     quote = None
-                    if key[0] != "USD" and key[1] != "USD":
+                    # The CNH provider already performs a same-source/date cross.
+                    # Do not salvage a rejected pair with mismatched v1/v2 legs.
+                    if "CNH" not in key[:2] and key[0] != "USD" and key[1] != "USD":
                         try:
                             first, d1 = self._provider.fetch_rate(key[0], "USD", date)
                             second, d2 = self._provider.fetch_rate("USD", key[1], date)
