@@ -72,9 +72,32 @@ def load_view(path, portfolio_id, snapshot_id, contract=None):
 def public_view(payload):
     result = {k: v for k, v in payload.items() if k != "internal"}
     result["context_current"] = 0 <= (now() - datetime.fromisoformat(payload["captured_at"])).total_seconds() < VIEW_TTL
+    expired = set()
     if not 0 <= (now() - datetime.fromisoformat(payload["captured_at"])).total_seconds() <= 300:
+        expired.add("STALE_ANALYSIS_VIEW")
+    # Capture does not reset the source clock. A source already 290s old at
+    # capture must not qualify for another 300s merely because this view is new.
+    for account in result["data_quality"].get("accounts", []):
+        stamp = account.get("account_synced_at")
+        if stamp:
+            stamp = datetime.fromisoformat(stamp)
+            if stamp.tzinfo is None:  # original SnapshotRun stores UTC-naive SQL timestamps
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if not 0 <= (now()-stamp).total_seconds() <= 300:
+                expired.add("STALE_ACCOUNT_SYNC")
+        for name, limit in (("positions_as_of",300),("cash_as_of",300),("price_as_of",86400)):
+            if account.get("time_quality", {}).get(name) == "current":
+                value = account[name]
+                if len(value) == 10:  # price source with date precision
+                    from datetime import date
+                    current = 0 <= (date.today()-date.fromisoformat(value)).days <= 1
+                else:
+                    current = 0 <= (now()-datetime.fromisoformat(value)).total_seconds() <= limit
+                if not current:
+                    expired.add("STALE_SOURCE_TIME")
+    if expired:
         result["data_quality"] = {**result["data_quality"], "status":"partial", "can_propose_rebalance": False,
-                                  "issues": sorted(set(result["data_quality"]["issues"] + ["STALE_ANALYSIS_VIEW"]))}
+                                  "issues": sorted(set(result["data_quality"]["issues"]) | expired)}
     return result
 
 

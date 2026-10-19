@@ -29,6 +29,7 @@
 - `GET /api/asset-analysis/views/{snapshot_id}` 返回持久 payload；旧副本到期后历史资产核对仍可读。`/api/wealth/summary`、`/api/portfolio/summary`、`/api/portfolio/positions` 增加可选 snapshot_id，提供后严格按同 ID，未提供沿原行为。
 - Web `/#/asset-view/<snapshot_id>` 展示本次固定财富、证券、时间/质量和公司敞口；其组合评估调用原单次只读 worker/PEER，传同一 ID。MCP 同 ID 的详情/汇总从 payload 读取，PEER 从 hash 验证的同一副本读取。财富分母、投资持仓分母与 Allocation 正值已分类分母仍不同，不混用。
 - 分析请求行可能在准备中具有内部零占位值，绝不能作财富观察。原趋势、月基线及汇总去重明确仅处理 `analysis_request_id IS NULL` 的原观察；分析视图不受金额相同去重吞掉，也不污染趋势。
+- 现有消费账户没有投资 Portfolio 绑定，因此固定资产视图不读取全局消费归因，相关 cashflow 字段为 unavailable/NULL；不把另一作用域的消费收入/支出附到本次资产输入。原非快照 summary 默认行为不变，消费归属及历史归因不在 U1 扩展。
 
 ## 4. MCP 权限与自动准备交互
 

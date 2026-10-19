@@ -34,7 +34,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
         overview["synthetic"] = synthetic
         details = read_details(path, portfolio_id, "get_investment_details", {}, synthetic=synthetic)
         manual = read_details(path, portfolio_id, "get_manual_wealth_items", {}, synthetic=synthetic)
-        wealth = wealth_service.get_summary(portfolio_id, record_snapshot=False)
+        wealth = wealth_service.get_summary(portfolio_id, record_snapshot=False, include_cashflow=False)
         totals = wealth_service._current_totals(portfolio_id)
         positions = portfolio_service.get_positions(portfolio_id)
         companies = exposure(details["items"])
@@ -72,7 +72,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                 if good and good.finished_at:
                     from datetime import timezone, datetime
                     stamp = good.finished_at.replace(tzinfo=timezone.utc) if good.finished_at.tzinfo is None else good.finished_at
-                    if (now()-stamp).total_seconds() > 300:
+                    if not 0 <= (now()-stamp).total_seconds() <= 300:
                         issues.add("STALE_ACCOUNT_SYNC")
                 # Source reading time is not the security price/valuation time.
                 owned = [p for p in rows if p.broker == broker and p.broker_account_id == account]

@@ -80,6 +80,36 @@ def test_prepare_idempotency_and_immutable_views(context):
     assert 'internal' not in public_view(view)
 
 
+def test_fixed_scope_does_not_read_unbound_consumption_cashflow(context,monkeypatch):
+    c=context
+    from backend.services import wealth_service
+    from pocs.chatgpt_skills.analysis import readonly_business_database
+    def forbidden(*args):
+        raise AssertionError('global consumption is not Portfolio-owned')
+    monkeypatch.setattr(wealth_service,'_cashflow_for_month',forbidden)
+    with readonly_business_database(c.db):
+        summary=wealth_service.get_summary(7,record_snapshot=False,include_cashflow=False)
+    assert summary['attribution']['cashflow_available'] is False
+    assert summary['attribution']['cashflow_income'] is None
+    view=ready(c)
+    assert view['views']['wealth_summary']['attribution']['cashflow_available'] is False
+
+
+def test_source_clock_expires_before_new_capture_clock(context,monkeypatch):
+    c=context;view=ready(c)
+    from app import asset_views
+    captured=datetime.fromisoformat(view['captured_at'])
+    source=(captured-timedelta(seconds=290)).isoformat()
+    view['data_quality'].update(status='ok',issues=[],can_propose_rebalance=True,
+        accounts=[{'account_synced_at':source,'cash_as_of':source,'time_quality':{'cash_as_of':'current'}}])
+    monkeypatch.setattr(asset_views,'now',lambda:captured+timedelta(seconds=20))
+    current=public_view(view)
+    assert current['context_current'] is True
+    assert current['data_quality']['can_propose_rebalance'] is False
+    assert 'STALE_ACCOUNT_SYNC' in current['data_quality']['issues']
+    assert 'STALE_SOURCE_TIME' in current['data_quality']['issues']
+
+
 def test_two_connections_only_one_claim_for_same_task(context):
     barrier=Barrier(2);c=context
     def request():

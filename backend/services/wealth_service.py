@@ -435,14 +435,17 @@ def _trend(portfolio_id: int, totals: dict[str, Any], days: int | None) -> list[
         session.close()
 
 
-def get_summary(portfolio_id: int, trend_days: int | None = None, *, record_snapshot=True) -> dict[str, Any]:
+def get_summary(portfolio_id: int, trend_days: int | None = None, *, record_snapshot=True, include_cashflow=True) -> dict[str, Any]:
     totals = _current_totals(portfolio_id)
     if record_snapshot:
         _record_aggregate_snapshot(portfolio_id, totals)
     today = date.today()
     baseline = _month_start_snapshot(portfolio_id, today)
     monthly_change = round(totals["net_worth"] - baseline.net_worth, 2) if baseline else None
-    cashflow = _cashflow_for_month(portfolio_id, today)
+    # Consumption accounts currently have no investment Portfolio binding.
+    # Fixed asset views must not attribute global consumption to this scope.
+    cashflow = _cashflow_for_month(portfolio_id, today) if include_cashflow else {
+        "income": None, "expense": None, "surplus": None, "available": False}
     investment_return = None
     if baseline and baseline.investment_profit_loss is not None and totals["investment_profit_loss"] is not None:
         investment_return = round(float(totals["investment_profit_loss"]) - float(baseline.investment_profit_loss), 2)
