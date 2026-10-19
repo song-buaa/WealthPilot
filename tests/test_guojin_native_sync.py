@@ -363,3 +363,39 @@ def test_cross_broker_same_hk_security_uses_identity_currency_not_valuation_curr
     company=exposure(items)['companies'][0]
     assert company['market_value_cny']==1760 and len(company['members'])==3
     assert {p['currency'] for p in company['members']}=={'CNY','HKD'}
+
+
+def test_publish_cli_reuses_guarded_writer_connections_and_explicit_utc(env,tmp_path):
+    import os,sqlite3
+    from app.shared_sqlite import schema_digest
+    database=Path(env.engine.url.database).resolve();env.engine.dispose();database.chmod(0o600)
+    with sqlite3.connect(database) as db:digest=schema_digest(db)
+    stat=database.stat();contract=tmp_path/'contract.json'
+    write_json(contract,dict(schema='wealthpilot.shared-sqlite.v1',mode='shared_wal',portfolio_id=7,
+        database_path=str(database),file_identity=[stat.st_dev,stat.st_ino],schema_sha256=digest))
+    cli=Path(__file__).resolve().parents[1]/'backend/scripts/guojin_sync_e2e.py'
+    # Observe the existing authority rather than duplicating its checks. Before
+    # the fix preflight passed, but the real writes never used writer_connection.
+    wrapper='''import json,runpy,sys
+import app.shared_sqlite as shared
+original=shared.writer_connection
+calls=[]
+def guarded(*args,**kwargs):
+ calls.append(True)
+ return original(*args,**kwargs)
+shared.writer_connection=guarded
+sys.argv=sys.argv[1:]
+try:runpy.run_path(sys.argv[0],run_name='__main__')
+except SystemExit as exc:
+ assert exc.code==0
+assert calls, 'CLI skipped the strict shared writer guard'
+print(json.dumps({'guarded_connections':len(calls)}))
+'''
+    process=subprocess.run([sys.executable,'-c',wrapper,str(cli),'--config',str(env.config_path),
+        '--publish','--database',str(database),'--contract',str(contract)],capture_output=True,text=True,
+        env={**os.environ,'WEALTHPILOT_ENABLED_SYNC_BROKERS':'guojin','PYTHONPATH':str(cli.parents[2])})
+    assert process.returncode==0,process.stderr+process.stdout
+    result,guard=[json.loads(line) for line in process.stdout.splitlines()]
+    assert result['status']=='success' and result['finished_at'].endswith('+00:00')
+    assert guard['guarded_connections']>0
+    with env.sessions() as db:assert db.query(Position).count()==5

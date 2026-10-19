@@ -5,6 +5,7 @@ No GUI/client/credentials/HTTP gateway is started. Production publication needs
 separate authorization and the existing strict shared-SQLite contract.
 """
 import argparse
+from datetime import timezone
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,7 @@ def main():
                 contract = verify(args.database, args.contract, integrity=True)
                 require(contract["portfolio_id"] == config["portfolio_id"], "NATIVE_ACCOUNT_UNPROVEN")
                 os.environ["WEALTHPILOT_DB_PATH"] = str(args.database.absolute())
+                os.environ["WEALTHPILOT_SQLITE_CONTRACT"] = str(args.contract.absolute())
                 os.environ["GUOJIN_NATIVE_CONFIG"] = str(args.config.absolute())
                 from backend.services.restricted_sync import SyncExecutor, ServiceFactory
                 from app.database import get_session
@@ -61,7 +63,7 @@ def main():
                     with get_session() as db:
                         run = db.get(PositionSnapshotRun,run_id)
                         result = dict(status=run.status, published=run.status == "success", run_id=run.id,
-                            finished_at=run.finished_at.isoformat() if run.finished_at else None,
+                            finished_at=run.finished_at.replace(tzinfo=timezone.utc).isoformat() if run.finished_at else None,
                             position_count=run.position_count, reason_code=safe_sync_reason(run), data_quality=_public_quality(run))
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0 if result["status"] != "failed" else 1
