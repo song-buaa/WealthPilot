@@ -44,6 +44,7 @@ class OrderPoller:
         get_broker_adapter,
         poll_interval: float = 5.0,
         get_broker_adapter_for_order=None,
+        sync_fills=None,
     ):
         """
         Args:
@@ -55,6 +56,7 @@ class OrderPoller:
         self._get_broker_adapter = get_broker_adapter
         self._get_broker_adapter_for_order = get_broker_adapter_for_order
         self._poll_interval = poll_interval
+        self._sync_fills = sync_fills
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -84,16 +86,21 @@ class OrderPoller:
             await asyncio.sleep(self._poll_interval)
 
     def _poll_once(self):
-        return scan_orphan_orders(self._get_session, self._get_broker_adapter,
-                                  self._get_broker_adapter_for_order)
+        count = scan_orphan_orders(self._get_session, self._get_broker_adapter,
+                                   self._get_broker_adapter_for_order)
+        if self._sync_fills:
+            self._sync_fills()  # all order transactions/sessions are CLOSED
+        return count
 
 
 def scan_orphan_orders(get_session, get_broker_adapter, get_broker_adapter_for_order=None) -> int:
     """Read-only broker reconciliation. UNKNOWN/absence never authorizes resend."""
     from backend.services.action.order_manager import OrderManager
+    from app.fill_sync import due
     with get_session() as session:
         rows = [(o.id, o.broker_name) for o in session.query(OrderRecord).filter(
-            OrderRecord.status.in_(POLLABLE_STATUSES)).all()]
+            OrderRecord.status.in_(POLLABLE_STATUSES) | ((OrderRecord.filled_quantity>0) & OrderRecord.fill_sync_json.isnot(None))).all()
+            if o.status in POLLABLE_STATUSES or due([o.__dict__])]
     count = 0
     for order_id, broker_name in rows:
         try:

@@ -90,16 +90,40 @@ def test_ib01_budget_link_is_pure_and_exposes_verified_identity(endpoint, tmp_pa
     asyncio.run(run())
 
 
-def test_real_endpoint_exposes_only_seven_read_only_tools():
+def test_real_endpoint_preserves_seven_tools_and_adds_readonly_trade_sync_query():
     from types import SimpleNamespace
     from pocs.chatgpt_skills.server import create_server
     async def run():
         server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
         async with Client(server,mode='legacy') as client:
             tools=(await client.list_tools()).tools
-            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance'}
+            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status'}
             assert all(t.annotations.read_only_hint for t in tools)
     asyncio.run(run())
+
+
+def test_trade_and_sync_query_is_readonly_and_does_not_expose_raw_sdk(endpoint,tmp_path):
+    import sqlite3
+    db=tmp_path/'synthetic.db'
+    with sqlite3.connect(db) as s:
+        s.execute("INSERT INTO symbol_strategies(id,symbol,side,target_quantity,cumulative_filled_quantity,order_type,status,created_at,updated_at) VALUES('u2-strategy','IB01:LSE','BUY',2,2,'LIMIT','completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        s.execute("INSERT INTO order_records(id,strategy_id,broker_name,portfolio_id,broker_account_id,symbol,side,quantity,filled_quantity,order_type,status,raw_broker_response,fill_sync_json,created_at) VALUES('u2-order','u2-strategy','ibkr',7,'DO_NOT_EXPOSE','IB01:LSE','BUY',2,2,'LIMIT','filled',?, ?,CURRENT_TIMESTAMP)",
+            (json.dumps({'raw_error_message':'DO_NOT_EXPOSE_TOKEN'}),json.dumps({'version':1,'anchor':None,'target_quantity':2})))
+    before=hashlib.sha256(db.read_bytes()).hexdigest()
+    async def run():
+        async with Client(endpoint,mode='legacy') as client:
+            result=await client.call_tool('get_trade_and_sync_status',{'request':{'symbol':'IB01:LSE'}})
+            assert not result.is_error,result.content
+            item=result.structured_content['items'][0]
+            assert item['trade_status']=='filled' and item['asset_sync']['status']=='SYNC_PENDING'
+            assert item['actual_commission']['status']=='UNKNOWN'
+            assert 'DO_NOT_EXPOSE' not in json.dumps(result.structured_content)
+            tools={t.name:t for t in (await client.list_tools()).tools}
+            assert tools['get_trade_and_sync_status'].annotations.read_only_hint
+            rejected=await client.call_tool('get_trade_and_sync_status',{'request':{'order_id':'u2-order','refresh':True}})
+            assert rejected.is_error
+    asyncio.run(run())
+    assert hashlib.sha256(db.read_bytes()).hexdigest()==before
 
 
 def test_discovery_annotations_and_existing_overview_contract(endpoint):
@@ -107,7 +131,8 @@ def test_discovery_annotations_and_existing_overview_contract(endpoint):
         async with Client(endpoint,mode='legacy',read_timeout_seconds=50) as client:
             tools=(await client.list_tools()).tools
             by_name={t.name:t for t in tools}
-            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance'}
+            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status'}
+            assert by_name['get_trade_and_sync_status'].annotations.read_only_hint
             assert by_name['prepare_trade_confirmation_link'].annotations.read_only_hint
             assert all(tool.meta['securitySchemes'] == [{'type':'noauth'}] for tool in tools)
             assert by_name['get_investment_details'].annotations.read_only_hint

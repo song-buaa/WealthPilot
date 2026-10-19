@@ -734,6 +734,8 @@ class OrderManager:
                     limit_price=params["limit_price"], stop_price=params["stop_price"], order_type=params["order_type"],
                     status=OrderStatus.UNKNOWN, batch_id=batch_id, batch_leg_id=leg_id,
                     confirmation_version=order_params.get("confirmation_version"))
+                from app.fill_sync import capture_baseline
+                order.fill_sync_json = capture_baseline(tx, owner)
                 tx.add(order)
                 tx.flush()
                 if leg:
@@ -918,6 +920,8 @@ class OrderManager:
         if disputed:
             raw["reconciliation_disputed"] = True
         order.raw_broker_response = json.dumps(raw, ensure_ascii=False, default=str)
+        from app.fill_sync import observe
+        observe(order, raw)
         self.session.flush()
         strategy = self.get_strategy(order.strategy_id)
         if strategy:

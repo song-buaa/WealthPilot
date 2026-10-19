@@ -204,6 +204,8 @@ class OrderRecord(Base):
     broker_account_id = Column(String(100), nullable=True)
     submission_key = Column(String(64), nullable=True)
     submission_payload_json = Column(Text, nullable=True)
+    # U2: durable fill watermark/coverage progress; not another order status.
+    fill_sync_json = Column(Text, nullable=True)
 
     broker_name = Column(String(20), nullable=False, default="mock")
     # broker_name: mock / tiger / futu / gjzq

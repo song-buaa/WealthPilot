@@ -31,6 +31,7 @@ def init_mock(path, portfolio_id):
     from app.database import Base
     from app.models import Portfolio
     import backend.services.action.models  # noqa: F401
+    import services.broker_sync.models  # noqa: F401 - same synthetic fixture
     engine = create_engine("sqlite:///"+str(path))
     Base.metadata.create_all(engine)
     with Session(engine) as session:
@@ -126,6 +127,17 @@ def main():
                             config["portfolio_id"] if config else args.portfolio_id, operation, a,
                             contract=config.get("database_contract_path") if config else None,
                             synthetic=args.synthetic_input or config is None, worker_process=True))
+                    elif operation == "get_trade_and_sync_status" and (workflow or config):
+                        from pocs.poc02_wealth_mcp.reader import readonly_snapshot
+                        from sqlalchemy.orm import Session
+                        from app.trade_status import query
+                        from pocs.chatgpt_skills.contracts import TradeSyncQuery
+                        request = TradeSyncQuery.model_validate(a)
+                        with readonly_snapshot(config["database_path"] if config else path,
+                                config.get("database_contract_path") if config else None) as connection:
+                            pid=config["portfolio_id"] if config else args.portfolio_id
+                            with Session(bind=connection,autoflush=False,join_transaction_mode="rollback_only") as db:
+                                result=query(db,pid,**request.model_dump(),synthetic=config is None)
                     elif operation == "get_wealth_overview" and (workflow or config):
                         from pocs.poc02_wealth_mcp.reader import read_overview
                         result = read_overview(config["database_path"] if config else path,

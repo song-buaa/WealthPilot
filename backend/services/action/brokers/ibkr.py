@@ -1392,7 +1392,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 result.avg_filled_price = price
             elif price and result.avg_filled_price.quantize(Decimal("0.0001")) != price.quantize(Decimal("0.0001")):
                 result.raw_response["execution_correction"] = True
-            result.raw_response["execution_evidence"] = matching_fills
+            result.raw_response["execution_evidence"] = [item for item in fills
+                if item.get("cum_quantity") is not None and 0 < item["cum_quantity"] <= result.filled_quantity]
         if any(item.get("pending_price_revision") for item in fills):
             result.raw_response["execution_correction"] = True
         result.raw_response.update(recovery_sources=sources, observed_at=datetime.now(timezone.utc).isoformat())

@@ -43,10 +43,13 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
         issues.update(internal.get("prepare_issues", []))
         accounts = []
         with get_session() as session:
+            from app.fill_sync import pending_accounts
+            unsettled = pending_accounts(session,portfolio_id)
             rows = session.query(Position).filter_by(portfolio_id=portfolio_id, segment="投资").all()
             requested = internal.get("owners", [])
             owners = {(p.broker, p.broker_account_id, p.sync_source) for p in rows if p.broker and p.broker_account_id}
             owners.update((o["broker"], o["account"], "api") for o in requested if o["account"])
+            owners.update((broker,account,"api") for broker,account in unsettled if account)
             for broker, account, source in sorted(owners, key=str):
                 runs = session.query(PositionSnapshotRun).filter_by(portfolio_id=portfolio_id,
                     broker=broker, account_id=account, sync_source=source).order_by(PositionSnapshotRun.id.desc()).all()
@@ -65,6 +68,9 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                     last_good_quality=quality["quality"],
                     account_synced_at=good.finished_at.isoformat() if good and good.finished_at else None,
                     **quality)
+                entry["fill_sync_pending"] = (broker,account) in unsettled
+                if entry["fill_sync_pending"]:
+                    issues.add("FILL_SYNC_PENDING_OR_UNVERIFIED")
                 # Recheck the actual frozen input, not a pre-Backup observation.
                 entry["publication_status"] = publication_status(session, good)
                 if entry["publication_status"] != "matched":

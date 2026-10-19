@@ -97,6 +97,7 @@ async def lifespan(app: FastAPI):
         get_broker_adapter_for_order=lambda broker: (
             action_api._get_ibkr_adapter() if broker == "ibkr" else _get_adapter()
         ),
+        sync_fills=lambda: broker_sync_api._executor().sync_fills(),
     )
     await order_poller.start()
 

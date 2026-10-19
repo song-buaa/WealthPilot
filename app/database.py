@@ -74,7 +74,7 @@ def init_db():
     import services.broker_sync.models  # noqa: F401
     engine = get_engine()
     if os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"):
-        from app.u1_schema import verify
+        from app.u2_schema import verify
         with engine.connect() as connection:
             verify(connection.connection.driver_connection)
         return  # no create_all, ALTER, default Portfolio or digest rewrite
@@ -93,6 +93,9 @@ def init_db():
     from app.u1_schema import apply as apply_u1
     with engine.begin() as connection:
         apply_u1(connection.connection.driver_connection)
+    from app.u2_schema import apply as apply_u2
+    with engine.begin() as connection:
+        apply_u2(connection.connection.driver_connection)
     _ensure_consumption_account_ownership_column(engine)
     _ensure_consumption_raw_lifecycle_columns(engine)
 

@@ -23,6 +23,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pocs.chatgpt_skills.contracts import TradeSyncQuery
 
 from app.database import get_session
 from backend.services.action.order_manager import OrderManager
@@ -36,6 +37,22 @@ from pocs.chatgpt_skills.trade_link import LinkPreviewRequest, LinkOrder, draft_
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/trade-and-sync-status")
+def trade_and_sync_status(request: Request, order_id: str | None = None, batch_id: str | None = None,
+                          symbol: str | None = None, limit: int = Query(default=10,ge=1,le=20)):
+    from app.trade_status import query
+    from backend.services.action.ownership import portfolio_scope
+    from pydantic import ValidationError
+    if set(request.query_params)-{'order_id','batch_id','symbol','limit'}:
+        raise HTTPException(422,'INVALID_STATUS_QUERY')
+    try:
+        filters=TradeSyncQuery(order_id=order_id,batch_id=batch_id,symbol=symbol,limit=limit)
+    except ValidationError:
+        raise HTTPException(422,"INVALID_STATUS_QUERY") from None
+    with get_session() as db:
+        return query(db,portfolio_scope(db),**filters.model_dump())
 
 
 import os as _action_os

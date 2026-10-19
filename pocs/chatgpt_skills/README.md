@@ -47,3 +47,7 @@ P1 可复用原 PoC 02 `--real-config /absolute/private/config.json --access-evi
 本轮没有修改 Mini 安装器或生产入口。先审查额外账户/明细数据的私人范围，再在设备阶段安装 CI 通过的完整 SHA，以独立候选端点验证 P1；不要直接覆盖现役配置。Business 写工具先连接独立 Mock 端点，Web/iOS 分别验收后再决定真实券商的后续授权。本轮不启用实盘。
 
 测试结果、平台待验项和 Web 备用路径见 [迭代验收说明](../../docs/WealthPilot_4x_ChatGPT_Skills_Iteration1.md)。
+
+## U2 候选：只读交易与同步查询
+
+在原生产七工具上新增 `get_trade_and_sync_status`，默认八项只读；原 `--prepare-config` 显式启用时共九项，只有 prepare 不是纯读取。查询仅有订单/批次/标的过滤，不允许 refresh、账号或交易操作；返回原成交与独立覆盖状态，未知佣金不替换为 WhatIf。生产启用须固定 SHA/显式迁移及另行验收，详见 [U2 实现](../../docs/U2_IMPLEMENTATION.md)。

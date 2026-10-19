@@ -48,6 +48,24 @@ class PrepareResult(BaseModel):
     web_view_url: str | None = None
 
 
+class TradeSyncQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    order_id: str | None = Field(default=None,pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    batch_id: str | None = Field(default=None,pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    symbol: str | None = Field(default=None,pattern=r"^[A-Za-z0-9:._-]{1,50}$")
+    limit: int = Field(default=10,ge=1,le=20,strict=True)
+
+
+class TradeSyncResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["wealthpilot.trade-sync.v1"]
+    synthetic: bool
+    queried_at: str
+    status: Literal["ok","partial"]
+    scope: str
+    items: list[dict]
+
+
 class TradePreview(ExplicitOrder):
     broker: str
     account_scope: str

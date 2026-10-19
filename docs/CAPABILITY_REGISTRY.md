@@ -1,6 +1,6 @@
 # WealthPilot 已有能力索引
 
-> 2026-10-19，开发基线 `c63c995d4b7ae1533e08f4f38e071a4c94b15931`；U0/CNH 已合入且用户确认生产发布，下述 U1 为本 PR 候选、尚未部署。这是代码复用索引，不是生产实时状态或逐函数清单。本文只维护能力检索信息，不定义开发/发布工作流。新增能力先检查覆盖；入口/职责变更及废弃/迁移/合并必须同步更新；无能力变化可在 PR 说明无需更新及原因。触发条件统一见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)。
+> 2026-10-19，开发基线 `e06a6995a2f830aa527cb0a0c506b3153d11dc8d`；U1 已合入，U2 为本 PR 候选。U0/CNH 生产由用户确认，U1/U2 实机启用本轮未核实。这是代码复用索引，不是生产实时状态或逐函数清单。本文只维护能力检索信息，不定义开发/发布工作流。新增能力先检查覆盖；入口/职责变更及废弃/迁移/合并必须同步更新；无能力变化可在 PR 说明无需更新及原因。触发条件统一见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)。
 
 任务先读 [AGENTS](../AGENTS.md)、[当前架构](ARCHITECTURE_CURRENT.md) 和[治理工作流](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，再按条目检索代码与测试。状态“已有”只证明仓库存在实现；生产验收及数据质量单列。API 前缀以 [main.py](../backend/main.py) 挂载为准。
 
@@ -14,9 +14,9 @@
 | 历史交易与收益 | 部分已有 | [订单模型](../backend/services/action/models.py)、[原收益计算](../decision_engine/llm_engine.py)、[analysis adapter](../pocs/chatgpt_skills/analysis.py) | `/api/action/orders`、timeline；`analyze_performance` | 订单/成交沿用 OrderRecord；收益沿用当前持仓账面盈亏及贡献计算 | [OrderManager tests](../backend/services/action/tests/test_order_manager.py)、[analysis tests](../tests/test_analysis_skills.py) | 不是完整跨券商历史交易账本；TWR/MWR、期间/已实现收益和完整历史归因未实现；不得新建平行收益体系填空 |
 | 交易预填及 Web 确认 | 已有；新入口首次真实成交未验收 | [trade_link](../pocs/chatgpt_skills/trade_link.py)、[link_handoff](../backend/services/execution_batch/link_handoff.py)、[Action](../frontend/src/pages/Action.tsx)、[确认弹窗](../frontend/src/components/ConfirmOrderDialog.tsx) | `prepare_trade_confirmation_link`；action trade-link preview / execution-batch trade-link APIs | 普通单标走原草稿/策略；IB01 预算变体复用 Typed Intent / Batch 和原 Web 编辑/确认体验 | [trade link tests](../tests/test_trade_link.py)、[IB01 tests](../tests/test_ib01_trade_link.py)、[trade-link E2E](../frontend/tests/e2e/trade-link.spec.ts) | URL 不写库/不连接券商；进入 Web 后主动操作才报价/落库；预填/预览不等于交易授权；报价/费用缺失保持阻断 |
 | IBKR / Tiger 交易适配与风控 | 已有，范围各自受限 | [BrokerAdapter](../backend/services/action/brokers/base.py)、[IBKR](../backend/services/action/brokers/ibkr.py)、[Tiger](../backend/services/action/brokers/tiger.py)、[RiskEngine](../backend/services/action/risk_engine.py) | [action API](../backend/api/action.py)、[batch API](../backend/api/execution_batch.py) | 始终经过原 OrderManager；Batch 额外资金/合约/费用/确认哈希校验；不可用风险确认绕过执行安全门 | [IBKR adapter tests](../backend/services/action/tests/test_ibkr_adapter.py)、[batch service tests](../tests/test_execution_batch_service.py) | 默认只读及实盘开关关闭；普通 US/HK 与可信 LSEETF/USD/SMART Batch 路由不可互相冒充；不自动扩大支持市场 |
-| 订单状态及成交 / 批次状态 | 已有轮询与关联回写；无已确认的持仓同步触发闭环 | [OrderPoller](../backend/services/action/order_poller.py)、[OrderManager](../backend/services/action/order_manager.py)、[ExecutionBatchService](../backend/services/execution_batch/service.py) | `/api/action/orders`、`/{order_id}?refresh=true`；batch refresh / reconcile | 复用 OrderRecord 状态机、累计成交量及关联 Leg/Batch 更新；查询带 refresh 会持久化状态，不能当只读 MCP 工具 | [OrderManager tests](../backend/services/action/tests/test_order_manager.py)、[batch service tests](../tests/test_execution_batch_service.py) | 轮询状态不是 Portfolio 快照；超时/unknown 不盲重提；real MCP 目前无订单状态工具 |
+| 订单状态及成交 / 批次状态 | 已有轮询与关联回写；U2 候选增加原 poller 成交消费，详见下节 | [OrderPoller](../backend/services/action/order_poller.py)、[OrderManager](../backend/services/action/order_manager.py)、[ExecutionBatchService](../backend/services/execution_batch/service.py) | `/api/action/orders`、`/{order_id}?refresh=true`；batch refresh / reconcile | 复用 OrderRecord 状态机、累计成交量及关联 Leg/Batch 更新；查询带 refresh 会持久化状态，不能当只读 MCP 工具 | [OrderManager tests](../backend/services/action/tests/test_order_manager.py)、[batch service tests](../tests/test_execution_batch_service.py) | 轮询状态不是 Portfolio 快照；超时/unknown 不盲重提；U2 候选新增不刷券商的只读 trade/sync 查询 |
 | 持仓同步（包括 IBKR 原币现金） | 已有手动及定时；U0 增加跨连接认领和发布 fence | [broker_sync API](../backend/api/broker_sync.py)、[SnowballSyncService](../backend/services/broker_sync/snowball/sync_service.py)、[PositionUpsertService](../backend/services/broker_sync/position_upsert_service.py)、[repository](../backend/services/broker_sync/repository.py) | `/api/broker-sync/trigger`、status；[main lifespan](../backend/main.py) 定时任务 | IBKR 复用历史 snowball 通道及 source_channel=ibkr；统一 SyncExecutor，按 Portfolio/broker/account/source 认领及原子发布；空/部分/重复输入保留 last-good，避免另建同步/现金库 | [cash sync](../backend/services/broker_sync/tests/test_ibkr_cash_sync.py)、[upsert tests](../backend/services/broker_sync/tests/test_position_upsert_service.py)、[sync status](../backend/services/broker_sync/tests/test_sync_status_api.py) | trigger 响应是任务提交，不是成功；IBKR 与 Snowball 标识历史兼容，不能另增 ibkr 通道造成重复。券商只读同步仍会写本地/生产数据库，须授权 |
-| MCP 工具及只读协议 | real 配置七项工具已有 | [server](../pocs/chatgpt_skills/server.py)、[worker](../pocs/chatgpt_skills/worker.py)、[reader](../pocs/chatgpt_skills/reader.py)、[PoC02 readonly reader](../pocs/poc02_wealth_mcp/reader.py) | 七工具名称与边界见[当前架构](ARCHITECTURE_CURRENT.md#3-七个生产工具) | 优先扩展薄适配，原业务 owner 计算；每请求读取已提交数据并报告来源/质量 | [protocol tests](../pocs/chatgpt_skills/test_protocol.py)、[reader tests](../pocs/poc02_wealth_mcp/test_reader.py)、[analysis tests](../tests/test_analysis_skills.py) | Mock 写工具仅隔离测试。没有 real 订单状态查询/主动通知工具；读到最新已提交数据不保证券商已同步；Web/iOS 各自验收 |
+| MCP 工具及只读协议 | real 配置七项工具已有 | [server](../pocs/chatgpt_skills/server.py)、[worker](../pocs/chatgpt_skills/worker.py)、[reader](../pocs/chatgpt_skills/reader.py)、[PoC02 readonly reader](../pocs/poc02_wealth_mcp/reader.py) | 七工具名称与边界见[当前架构](ARCHITECTURE_CURRENT.md#3-七个生产工具) | 优先扩展薄适配，原业务 owner 计算；每请求读取已提交数据并报告来源/质量 | [protocol tests](../pocs/chatgpt_skills/test_protocol.py)、[reader tests](../pocs/poc02_wealth_mcp/test_reader.py)、[analysis tests](../tests/test_analysis_skills.py) | Mock 写工具仅隔离测试。U2 候选增加只读交易/同步状态工具；仍无主动通知；读到最新已提交数据不保证券商已同步；Web/iOS 各自验收 |
 
 新增能力前须填写“候选 owner → 已检索入口/测试 → 缺口 → 最小扩展 → 权限/验收”。本索引未列出某项能力不等于仓库没有实现，应继续检索。消费、技术形态等专属设计保持原 owner，不能因本索引不是完整目录而另建体系。
 
@@ -24,7 +24,7 @@
 
 交易提交、状态与同步的权威入口沿用上表。B0 在 [OrderManager](../backend/services/action/order_manager.py) 增加 `create_order_review` / durable `place_order` / `apply_broker_observation`；在原 [Batch service](../backend/services/execution_batch/service.py) 增加 `review_remaining`，保留已提交腿。原 [IBKR adapter](../backend/services/action/brokers/ibkr.py) 的 `recover_order` / `find_order_by_ref` 使用新鲜账户过滤证据。原 sync Repository/Upsert 和现有两个 MCP reader 统一 Portfolio/run/账户作用域；LSE 身份沿用既有 trusted instruments。
 
-复用时必须显式提交准备事务、传当前 owner/授权和确认参数，不绕过 Review/hash/epoch/TTL/WhatIf/人工风险确认。UNKNOWN/NOT_FOUND 不补单，缺 owner 的历史记录先核实；未订正的 LSE 身份冲突阻断同步。新 Schema 的字段/索引理由与兼容规则见 [Runbook](B0_PRODUCTION_RUNBOOK.md)，故障注入及原 Web 场景入口见 [实现说明](B0_IMPLEMENTATION.md#5-可重放隔离验收入口)。B0 已合入且用户确认已部署；历史开发文档不能作为本轮生产实测；成交后同步消费者、历史收益及 real MCP 订单工具仍未新增。
+复用时必须显式提交准备事务、传当前 owner/授权和确认参数，不绕过 Review/hash/epoch/TTL/WhatIf/人工风险确认。UNKNOWN/NOT_FOUND 不补单，缺 owner 的历史记录先核实；未订正的 LSE 身份冲突阻断同步。新 Schema 的字段/索引理由与兼容规则见 [Runbook](B0_PRODUCTION_RUNBOOK.md)，故障注入及原 Web 场景入口见 [实现说明](B0_IMPLEMENTATION.md#5-可重放隔离验收入口)。B0 已合入且用户确认已部署；历史开发文档不能作为本轮生产实测；B0 不包含成交后同步消费者或 real MCP 订单工具，U2 候选见下节；完整历史收益仍未新增。
 
 PR #21 定向修复仍使用上述 owner：`existing_submission` 复用发送 key/参数校验，观察归并锁后重读，`review_remaining` 在外部计算后进行版本/linked/事实 CAS；迁移对计划内及应用后的目标碰撞均拒绝。正式回归映射见[评审回归](B0_IMPLEMENTATION.md#pr-21-定向评审回归)，不新增业务服务或 Schema。
 
@@ -33,14 +33,14 @@ PR #21 定向修复仍使用上述 owner：`existing_submission` 复用发送 ke
 
 [原 Executor](../backend/services/restricted_sync.py) 统一完整/restricted/manual/cron，原 [Repository](../backend/services/broker_sync/repository.py) 提供 durable scope claim、过期 fence、完整性与重复校验、FX 预取、原子发布/失败状态；[Upsert](../backend/services/broker_sync/position_upsert_service.py) 不在写事务内联网。各券商仍负责实际来源覆盖和完整性证据。状态 API 原字段兼容，新增 last_successful_run_id/data_quality；内部 token 不对外返回。手动 all 的未配置源留下失败尝试，不阻断已配置源。
 
-U1 可复用 run id/last-good、来源/时间/币种/FX/质量，不得把单源 run id 当跨源一致 snapshot_id。U2 可复用同 owner 执行和发布，但成交事务内的 reserve、水位覆盖、崩溃补扫与持久重试仍需后续开发，当前不得从订单事务直接调用会 commit 的 synchronize。
+U1 可复用 run id/last-good、来源/时间/币种/FX/质量，不得把单源 run id 当跨源一致 snapshot_id。U2 复用同 owner 执行和发布；本 PR 候选已补同事务成交进度、事务外认领、水位覆盖、补扫与退避（下节）。仍禁止从订单事务直接调用会 commit 的 synchronize。
 
 PR #22 修复：Tiger 原 SDK 账户逐条核验、真实 SDK 纯现金合同；Upsert 对旧现金/导入/API 碰撞阻断，不自动认领。已核实同笔现金走原离线迁移工具的显式 cash_owner 映射与整行 CAS，生产核对另行授权；没有新 Schema 或现金服务。回归见[定向安全测试](../tests/test_u0_review_regressions.py)。
 
 正式回归：[U0 安全测试](../tests/test_u0_sync_safety.py)、[U0 迁移演练](../tests/test_u0_schema_migration.py)，以及原 cash/upsert/restricted/readonly/browser 测试。迁移、证据及运行待验边界见 [U0 实现说明](U0_IMPLEMENTATION.md)。没有新增 MCP 工具、快照 payload、收益计算、公司映射或 QMT 接入。
 
 
-### U1 分析前准备与固定视图（本 PR 候选）
+### U1 分析前准备与固定视图（已合入）
 
 权威入口：[原同步上的 prepare](../backend/services/asset_analysis.py)、[固定视图合同](../app/asset_views.py)、[原只读 worker](../pocs/chatgpt_skills/worker.py)、[原 PEER 适配](../pocs/chatgpt_skills/analysis.py)。账户刷新和 publish 仍由原 SyncExecutor/Repository/Upsert/FX 负责；金额与手工/养老金去重仍由原 Portfolio/Wealth 计算。复用 WealthSnapshot 的 ID，新增 nullable request/payload 及请求唯一索引；不建账户/持仓/任务表。
 
@@ -49,3 +49,12 @@ PR #22 修复：Tiger 原 SDK 账户逐条核验、真实 SDK 纯现金合同；
 测试入口：[任务/隔离/PEER](../tests/test_u1_asset_views.py)、[API 权限](../tests/test_u1_api.py)、[Schema](../tests/test_u1_schema.py)、[MCP loopback](../pocs/chatgpt_skills/test_u1_protocol.py)、[Web](../frontend/tests/e2e/asset-view.spec.ts)。限制：源时间缺失仍 partial；30 分钟副本到期不能重跑旧专业分析，历史 payload 可读；原财富与投资/Allocation 分母不同；不含 U2 成交、B2 历史收益或 QMT。详细合同与发布影响见 [实现说明](U1_IMPLEMENTATION.md)。
 
 PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用及冻结后核对，旧证据不足不反向补造；原 PEER 最终输出重核时效，Web 使用最终质量；失败尝试时间/脱敏原因与 last-good 分开。安全回归见 [review regressions](../tests/test_u1_review_regressions.py)，不新增服务、表或迁移。
+
+### U2 成交驱动同步与查询（本 PR 候选）
+
+- 权威入口：[原 OrderManager](../backend/services/action/order_manager.py) 原子记录成交进度、[原 poller](../backend/services/action/order_poller.py) 事务外调用原 [Executor](../backend/services/restricted_sync.py)、[Repository](../backend/services/broker_sync/repository.py) 完成 Run claim/fence/持仓发布及覆盖水位。IBKR/snowball 与 Tiger Owner 映射不另建账户通道。
+- 复用/限制：[fill_sync](../app/fill_sync.py) 记录原订单累计量和已发布 snapshot 的差量证明，不手工改现金或成本；缺基线、净零往返、实际费用未知/币种不一致和现金/持仓缓存滞后保持未证实。实际成交状态不因同步失败改变，进程恢复沿原 poller/lease，不自动重放订单。
+- 查询：[trade_status](../app/trade_status.py)、`GET /api/action/trade-and-sync-status`、`get_trade_and_sync_status` MCP 均不联网/不写库。默认八个只读工具；显式 prepare 为第九工具，原七工具合同不变。订单 ID/批次/标的过滤，只读当前 Portfolio，原始账户/SDK 不返回。
+- U1：新冻结视图含待覆盖 issue，旧 ID/payload 不改；不把 SYNCED 与数据实时性或精确调仓授权混同。
+- Schema：一列 `order_records.fill_sync_json TEXT NULL`，零索引/零新表；原 stage u2 迁移/receipt/Digest，见 [U2 实现与发布输入](U2_IMPLEMENTATION.md)。
+- 测试：[故障/并发/覆盖](../tests/test_u2_fill_sync.py)、[迁移](../tests/test_u2_schema.py)、[MCP](../pocs/chatgpt_skills/test_protocol.py)、[U1 浏览器](../frontend/tests/e2e/asset-view.spec.ts)。无生产/真实交易验收，本批不含完整历史账本或 B2/B3/QMT。

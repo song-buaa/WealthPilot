@@ -18,7 +18,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from typing import Annotated
-from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult
+from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
@@ -140,6 +140,11 @@ def create_server(settings):
     @server.tool(meta=security_meta, annotations=read, description="Read stored investment account groups and holdings via existing Portfolio services. Returns quantities, CNY market value and P/L, original prices/currency, existing cross-account symbol weights and source dates. Optional opaque account_ref and canonical symbol filter; never raw account credentials. Not live broker balances.")
     def get_investment_details(account_ref: str | None = None, symbol: str | None = None, snapshot_id: str | None = None) -> Details:
         return Details.model_validate(client.call("get_investment_details", dict(account_ref=account_ref, symbol=symbol, snapshot_id=snapshot_id)))
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=False),
+        description="Read stored original order/fill and asset-sync coverage. Optional order_id/batch_id/canonical symbol, or latest ten orders. NEVER refresh broker or submit/cancel/retry. Distinguish filled from SYNC_PENDING/RUNNING/DELAYED/FAILED/UNVERIFIED/SYNCED; only SYNCED proves target coverage. UNKNOWN commission is not WhatIf fees. After trading use a NEW prepare for analysis, preserving pending warnings; existing fixed views never change.")
+    def get_trade_and_sync_status(request: TradeSyncQuery) -> TradeSyncResult:
+        return TradeSyncResult.model_validate(client.call("get_trade_and_sync_status",request.model_dump()))
 
     @server.tool(meta=security_meta,
         annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),

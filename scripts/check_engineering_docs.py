@@ -23,6 +23,7 @@ DOCUMENTS = (
     "docs/B0_PRODUCTION_RUNBOOK.md",
     "docs/U0_IMPLEMENTATION.md",
     "docs/U1_IMPLEMENTATION.md",
+    "docs/U2_IMPLEMENTATION.md",
     "docs/dev_setup.md",
     "docs/GOVERNANCE_AUDIT.md",
     "docs/GOVERNANCE_VALIDATION_REPORT.md",

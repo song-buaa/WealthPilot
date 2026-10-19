@@ -96,3 +96,14 @@ test('failed attempt reason is shown separately from last-good quality', async (
   await expect(page.getByText('成功数据质量 current',{exact:false})).toBeVisible()
   await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
 })
+
+test('new analysis discloses unverified fill sync and preserves the previous fixed view', async ({ page,request }) => {
+  const response=await request.post(base+'/__test/pending-fill')
+  const prepared=await response.json()
+  expect(prepared.state).toBe('ready')
+  await page.goto(`${base}/#/asset-view/${prepared.snapshot_id}`)
+  await expect(page.getByRole('status')).toContainText('FILL_SYNC_PENDING_OR_UNVERIFIED')
+  await page.goto(`${base}/#/asset-view/${snapshot}`)
+  await expect(page.getByRole('status')).not.toContainText('FILL_SYNC_PENDING_OR_UNVERIFIED')
+  await expect(page.getByTestId('asset-view-id')).toHaveText(snapshot)
+})

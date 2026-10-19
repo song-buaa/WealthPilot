@@ -91,7 +91,7 @@ class PositionSnapshotRepository:
                 PositionSnapshotRun.portfolio_id != portfolio_id).first()):
             raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS")
 
-    def create_run(self, broker, account_id, sync_source="api", triggered_by="manual", *, freshness_seconds=None):
+    def create_run(self, broker, account_id, sync_source="api", triggered_by="manual", *, freshness_seconds=None, fill_only=False):
         portfolio_id = self._portfolio_id()
         existing_id = self.session.info.get("sync_run_id")
         if existing_id is not None:
@@ -132,10 +132,13 @@ class PositionSnapshotRepository:
                 broker=broker, account_id=account_id, sync_source=sync_source).order_by(
                     PositionSnapshotRun.id.desc()).first()
             if recent and recent.finished_at:
+                from app.fill_sync import orders, pending
+                trade_broker = "ibkr" if broker=="snowball" else broker
+                has_pending = any(pending(r) for r in orders(self.session,portfolio_id,trade_broker,account_id))
                 finished = recent.finished_at.replace(tzinfo=timezone.utc) if recent.finished_at.tzinfo is None else recent.finished_at
                 age = (now - finished).total_seconds()
                 if (recent.status == "success" and context(recent).get("complete") is True and 0 <= age <= freshness_seconds
-                        and publication_status(self.session, recent) == "matched"
+                        and publication_status(self.session, recent) == "matched" and not has_pending
                         or recent.status == "failed" and 0 <= age <= 15):
                     recent_id = recent.id
                     self.session.rollback()
@@ -146,7 +149,18 @@ class PositionSnapshotRepository:
             context_json=json.dumps({"version":1, "token":token,
                 "lease_until":(now+timedelta(seconds=self.LEASE_SECONDS)).isoformat(),
                 "quality":"pending", "issues":[]}))
-        self.session.add(run); self.session.commit()
+        self.session.add(run)
+        self.session.flush()
+        from app.fill_sync import bind_targets
+        targets = bind_targets(self.session, run, force=not fill_only)
+        if not targets and fill_only:
+            self.session.rollback()
+            return None
+        if targets:
+            meta = context(run)
+            meta["fill_targets"] = targets
+            run.context_json = json.dumps(meta)
+        self.session.commit()
         run_id = run.id
         self.session.info.setdefault("sync_claims", {})[run_id] = token
         return run
@@ -267,6 +281,9 @@ class PositionSnapshotRepository:
                 meta = context(run)
                 meta["published_positions"] = published_positions(self.session, run)
                 run.context_json = json.dumps(meta)
+                if meta.get("fill_targets"):
+                    from app.fill_sync import coverage, _snapshots
+                    coverage(self.session, run, _snapshots(self.session,run.id), meta["fill_targets"])
                 self.mark_run_succeeded(run_id, len(positions))
                 return run_id
             except Exception as exc:

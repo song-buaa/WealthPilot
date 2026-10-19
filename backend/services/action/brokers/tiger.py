@@ -505,6 +505,16 @@ class TigerBrokerAdapter(BrokerAdapter):
             "outside_rth": False,
         }
         if tiger_order is not None:
+            account = getattr(tiger_order, "account", None)
+            if account:
+                r["observed_account_id"] = str(account)
+            contract = getattr(tiger_order,"contract",None)
+            if contract is not None:
+                r["contract_currency"] = getattr(contract,"currency",None)
+            trade_time = getattr(tiger_order,"trade_time",None)
+            if isinstance(trade_time,(int,float)) and trade_time>0:
+                from datetime import datetime, timezone
+                r["broker_filled_at"] = datetime.fromtimestamp(trade_time/1000,timezone.utc).isoformat()
             r["broker_order_id"] = str(tiger_order.id) if tiger_order.id else None
             r["tiger_status"] = (
                 str(tiger_order.status) if hasattr(tiger_order, "status") else None

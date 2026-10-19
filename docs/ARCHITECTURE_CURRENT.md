@@ -1,6 +1,6 @@
 # WealthPilot 当前系统架构
 
-> 2026-10-19：U1 开发基线为 `c63c995d4b7ae1533e08f4f38e071a4c94b15931`，用户已确认 B0、U0 及 CNH 修复正式生产发布；本轮未访问生产。第 13 节为 U1 PR 候选，尚未合并或部署。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-19：U2 开发基线为 `e06a6995a2f830aa527cb0a0c506b3153d11dc8d`（含已合入 U1）。用户已确认 B0、U0 及 CNH 修复生产发布；本轮未访问生产，U1/U2 的生产启用待另行核实。第 14 节为 U2 PR 候选，尚未合并或部署。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -10,7 +10,7 @@
 |---|---|
 | ChatGPT Web / iOS | 个人 Pro 的自然语言交互、相关上下文、工具选择、追问、原专业结果的最终组织与呈现。 |
 | Secure MCP Tunnel | 现有个人范围连接，把 ChatGPT 接到 Mini 上的 Streamable HTTP MCP；不是业务计算或交易引擎。 |
-| 生产 MCP | `pocs/chatgpt_skills/server.py`；real 配置默认七项只读工具，经独立 worker 调原服务。U1 候选另有可选显式 prepare，经受保护 loopback HTTP 调原同步（第 13 节）；原七工具不刷新、不获得写权限。目录名 pocs 保留，不代表当前仍只有试验能力。 |
+| 生产 MCP | `pocs/chatgpt_skills/server.py`；real 配置默认七项只读工具，经独立 worker 调原服务。U1 已合入可选显式 prepare，经受保护 loopback HTTP 调原同步（第 13 节）；原七工具不刷新、不获得写权限。目录名 pocs 保留，不代表当前仍只有试验能力。 |
 | WealthPilot Core | 完整 `backend/main.py` / `backend/api/` / `backend/services/`、PEER 四 Agent、13 个内部 Skills、数据源、规则/信号、专业 LLM 与报告模板。 |
 | 完整 React Web | `frontend/src/App.tsx` 的 HashRouter，财富、投资账户、消费、投研、决策、投资行动等原页面与可视化；最终人工交易确认。 |
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
@@ -120,7 +120,7 @@ GitHub 为主要发布路径：固定完整 SHA、main ancestry 和 exact-commit
 | 已有投资持仓与账户归属 | [Position / Portfolio](../app/models.py)，由导入或 [broker_sync](../backend/services/broker_sync/position_upsert_service.py) 更新 | [PortfolioService](../backend/services/portfolio_service.py) / [analyzer](../app/analyzer.py) 聚合；本地快照不冒充实时券商账户。同步对账按 broker/account/source 范围，不能仅凭 ticker 跨账户覆盖 |
 | 券商实际订单、成交、实时资金 | 原 [IBKR](../backend/services/action/brokers/ibkr.py) / [Tiger](../backend/services/action/brokers/tiger.py) 返回的证据 | OrderManager 对账并持久化；本地状态是观察投影，失败/unknown 不推定无订单。执行资金另走 Batch 的新鲜原币 snapshot / cash ledger，不从财富净资产反推可买金额 |
 | IBKR 展示现金 | adapter `get_account_info` 的逐币种 CashBalance，经 [IBKRPortfolioAdapter](../backend/services/broker_sync/snowball/adapter.py) 转 CASH 持仓 | 排除 BASE 折算重复，沿用历史 broker=snowball / source_channel=ibkr，不新建第二套 IBKR 持仓；展示现金与可执行预算含义不同 |
-| Tiger 展示现金 | [TigerSyncService](../backend/services/broker_sync/tiger/sync_service.py) 读取逐币种 cash_balance，和持仓同 run 原子持久化为 CASH | U0 候选已移除 Portfolio/Web/MCP 的读时券商现金旁路与虚拟现金追加；不累计 BASE。缺源保留 last-good，不当成余额 0。零/负原币现金保留；执行预算仍走原交易资金权威 |
+| Tiger 展示现金 | [TigerSyncService](../backend/services/broker_sync/tiger/sync_service.py) 读取逐币种 cash_balance，和持仓同 run 原子持久化为 CASH | U0 已移除 Portfolio/Web/MCP 的读时券商现金旁路与虚拟现金追加；不累计 BASE。缺源保留 last-good，不当成余额 0。零/负原币现金保留；执行预算仍走原交易资金权威 |
 | 个人财富及负债 | [WealthService](../backend/services/wealth_service.py) 的手工 WealthItem + 原 Portfolio 投资汇总 | 沿用 included_in_net_worth / already_investment_accounted 去重，养老金仅金额级。不能在财富模块复制持仓/收益权威；WealthSnapshot 是财富汇总快照，不是交易账本 |
 | 汇率、币种与分类 | [FXService](../app/fx_service.py)、[canonical classification](../backend/services/instruments/classification.py) | Web 金额字段与 MCP 最小单位契约分开（overview scale=2；details CNY 元/原币字段见契约）。secType=STK 不证明 Equity，未知分类保留 UNKNOWN，禁止前端/MCP 再映射一套分类 |
 | 配置/专业分析 | [AllocationService](../backend/services/allocation_service.py)、[原 PEER](../backend/services/decision_service_v3.py)、原 Skills 与模板 | 正值已分类投资持仓配置分母、单标投资权重和完整财富分别解释。ChatGPT 组织原专业结果，不替换其数值/证据 owner |
@@ -141,7 +141,7 @@ Web `wealth_service.get_summary` 会记录聚合快照；MCP overview 通过 [re
 
 当前存在两种执行入口，共用原底层订单权威：普通 ActionDraft → SymbolStrategy → OrderManager；Typed Intent / IB01 budget → ExecutionBatch / ExecutionLeg → SymbolStrategy → OrderManager。二者是现有职责分工；本轮不合并或新增交易体系。实际 UI 的简洁编辑及最终确认体验仍需完整验收，不能只证明 Batch 对象存在。
 
-**成交后同步缺口（本轮静态核实）**：OrderPoller → OrderManager 更新订单/累计成交和 Batch linkage；这条调用链未调用 SnowballSyncService / PositionUpsertService。`backend/main.py` 的定时同步与 `/api/broker-sync/trigger` 是独立入口。因此不把“订单 filled”直接写为“持仓及现金已同步”。未发现可直接复用的持久化成交后同步事件闭环；未来最小触发/重试方案仍需设计验证，详见[模拟验证](GOVERNANCE_VALIDATION_REPORT.md)。
+**成交与资产同步分权**：B0/U0/U1 原本没有成交后同步消费者，旧[模拟验证](GOVERNANCE_VALIDATION_REPORT.md)保留当时证据。U2 候选在原观察事务记录进度，原 OrderPoller 在订单事务结束后调用原 SyncExecutor，复用 Run claim/fence/Upsert；只有数量/身份与原币现金/实际费用覆盖核实才报告 SYNCED（第 14 节）。订单 filled 仍不等于资产已同步，未证实必须披露。
 
 生产 real MCP 的七工具没有订单状态查询或主动推送；Mock `get_trade_order_status` 会持久化状态，不能直接复制为生产只读工具。要让 ChatGPT 读订单结果，需另行评审现有 OrderRecord 的只读最小投影及权限；复用已存在的投资详情工具可以查询已同步持仓，不能承诺成交后即时更新。
 
@@ -178,7 +178,7 @@ OrderManager 的 `place_order` 在独立短事务提交 durable UNKNOWN 认领�
 U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite 严格 digest 仍验证，显式迁移流程见 [U0 实现及发布输入](U0_IMPLEMENTATION.md)。U0 发布及 CNH 修复的生产验收由用户确认；本任务未重新访问生产。U1 候选扩展见第 13 节，成交触发/水位覆盖仍未实施，不得从视图推断成交已覆盖。
 
 
-## 13. U1 固定资产视图（本 PR 候选，未部署）
+## 13. U1 固定资产视图（已合入，生产启用另验）
 
 [原 prepare 编排](../backend/services/asset_analysis.py) 复用 U0 SyncExecutor/账户 claim/Last-good。显式 prepare 由受保护 loopback Backend 接收；原 MCP 七工具仍只读，另有可选启用、明确非纯只读的 prepare 工具，不能以原只读权限暗中刷新。任务 ID 与 Portfolio 在原 WealthSnapshot 的 nullable 身份字段和 partial unique 索引约束，payload 保存不可变派生视图；原趋势观察排除分析行。
 
@@ -187,3 +187,13 @@ U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite �
 权限、字段必要性、输入期限、状态/恢复和生产迁移边界见 [U1 实现说明](U1_IMPLEMENTATION.md)。没有新持仓库、财富算法、订单状态机或成交消费者；新配置/Schema 的生产启用需要另行发布授权。
 
 PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影指纹；freshness 复用和冻结副本内均验证，不把最近 success 当当前行完整证明。无旧证据须刷新或降级，不事后认领历史事实。原 PEER 输出前重核同 ID 时效，Web 采用最终质量；最近失败尝试使用原安全错误白名单，与 last-good 质量分列。未新增 Schema。
+
+## 14. U2 成交驱动同步与只读状态（PR 候选）
+
+[OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
+
+[fill_sync 合同](../app/fill_sync.py) 只核对原交易前快照加已观察成交变化，不写预计持仓/现金，不提供交易状态机或收益计算。缺基线、净零反向交易、未知实际费用/跨币种费用、现金延迟、execution 矛盾均保守未证实；实际成本继续由原券商同步发布，不能把数量对账当历史成本归因。IBKR 继续映射 snowball，同账户/Portfolio 绑定；Tiger 只消费已配置 Owner，Futu/国金不自动启用。
+
+[原数据上的只读状态投影](../app/trade_status.py) 经 `/api/action/trade-and-sync-status` 和 MCP `get_trade_and_sync_status` 返回交易事实与同步/覆盖两种状态。新工具无 refresh/broker I/O，原七工具权限不变：默认八项只读，显式 prepare 后九项（其中 prepare 不是纯读取）。没有原账号、Token、anchor 或原始 SDK 回包。U1 冻结副本识别待覆盖进度，`FILL_SYNC_PENDING_OR_UNVERIFIED` 阻止未经说明的精确建议，旧视图不改。
+
+仅一列、零索引、零新表，显式 `--stage u2` 原迁移流程，Digest/receipt/停写/启写后不覆盖旧备份约束保留。设计、证据限制、测试及未来生产验收见 [U2 实现说明](U2_IMPLEMENTATION.md)。本轮不部署或进行真实交易。

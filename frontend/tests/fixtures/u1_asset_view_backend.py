@@ -38,6 +38,7 @@ with tempfile.TemporaryDirectory(prefix='wealthpilot-u1-http-') as temporary:
     import uvicorn
     from app.models import Base,Portfolio,Position,WealthItem
     from app import state
+    from backend.services.action.models import OrderRecord,SymbolStrategy
     from services.broker_sync.models import PositionSnapshotRun  # noqa: F401
     from services.broker_sync.repository import PositionSnapshotRepository
     from services.broker_sync.schema import cash_position
@@ -92,6 +93,17 @@ with tempfile.TemporaryDirectory(prefix='wealthpilot-u1-http-') as temporary:
             for row in session.query(Position):row.market_value_cny=99999
             session.commit()
         return {'changed':True}
+    @app.post('/__test/pending-fill')
+    def pending_fill():
+        with sessions() as session:
+            strategy=SymbolStrategy(symbol='ABC:US',side='BUY',target_quantity=1,status='completed')
+            session.add(strategy);session.flush()
+            session.add(OrderRecord(strategy_id=strategy.id,portfolio_id=7,broker_name='tiger',broker_account_id='synthetic-owner',
+                symbol='ABC:US',side='BUY',quantity=1,filled_quantity=1,status='filled',
+                fill_sync_json=json.dumps({'version':1,'anchor':None,'target_quantity':1})))
+            session.commit()
+        service=preparer();_,claim=service.request('after-fill');service.run(*claim)
+        return service.status('after-fill')
     # Browser tests exercise the fixed-ID UI boundary without paid model calls.
     # Real PEER/Skills execution is separately covered by test_u1_asset_views.
     @app.post('/__test/review')

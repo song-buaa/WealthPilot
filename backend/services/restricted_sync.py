@@ -102,7 +102,7 @@ class SyncExecutor:
             db.commit()
 
     def reserve(self, broker, triggered_by="manual", *, freshness_seconds=None):
-        if triggered_by not in ("manual", "cron", "analysis"):
+        if triggered_by not in ("manual", "cron", "analysis", "fill"):
             raise ValueError("INVALID_SYNC_TRIGGER")
         if broker != "all" and broker not in self.enabled:
             raise ValueError("BROKER_NOT_ENABLED")
@@ -120,7 +120,10 @@ class SyncExecutor:
                         account = self.account_resolver(db, target)
                         run = PositionSnapshotRepository(db).create_run(target, account,
                             triggered_by=("restricted:" if getattr(self.factory,"restricted",False) else "")+triggered_by,
-                            freshness_seconds=freshness_seconds)
+                            freshness_seconds=freshness_seconds, fill_only=triggered_by=="fill")
+                        if run is None:
+                            lock.release()
+                            continue
                         run_id = run.id
                         self.claims[run_id] = db.info["sync_claims"][run_id]
                         jobs.append({"broker":target,"run_id":run_id})
@@ -189,3 +192,31 @@ class SyncExecutor:
                     if item[key] and item[key] not in api.SAFE_SYNC_CODES:
                         item[key] = "SYNC_SOURCE_FAILED"
             return response
+
+    def sync_fills(self):
+        """Original poller invokes after observation commits; no extra scheduler.
+
+        Re-read due work under the original DB claim, not an in-memory queue.
+        A crashed caller leaves order progress and a recoverable leased run.
+        Never enable a source/account by discovering an order in the database.
+        """
+        from app.fill_sync import due, orders, SUPPORTED
+        self.recover_interrupted()
+        jobs = []
+        for broker in (b for b in self.enabled if b in SUPPORTED.values()):
+            with self.session_factory() as db:
+                db.info["portfolio_id"] = self.portfolio_id
+                account = self.account_resolver(db,broker)
+                trading = "ibkr" if broker=="snowball" else broker
+                if not due(orders(db,self.portfolio_id,trading,account)):
+                    continue
+            try:
+                reserved, _ = self.reserve(broker,"fill")
+                for job in reserved:
+                    jobs.append(job)
+                    self.execute(job["broker"],job["run_id"])
+            except ValueError:
+                # Ownership/configuration remains fail-closed. The original
+                # durable pending orders survive until corrected/retried.
+                continue
+        return jobs

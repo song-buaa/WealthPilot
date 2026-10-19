@@ -54,6 +54,8 @@ ChatGPT 提供自然语言交互、上下文及回答组织；Core 内的 Planni
 - 部分券商 Gateway / 数据源尚未配置或可用，单项同步、常驻恢复及跨网事项有实际证据才标 PASS。
 - 历史 PoC02 凭证展示事故保持 FAIL，后续撤销后的权限检查独立记录。以上不阻塞 4.0 功能范围收口，后续优化进入新版本。
 
+U1 已合入：可选显式 prepare 与固定资产视图见 [U1 实现](docs/U1_IMPLEMENTATION.md)。当前 U2 PR 候选复用原订单/同步链路实现成交后同步及只读交易状态查询，见 [U2 实现与发布输入](docs/U2_IMPLEMENTATION.md)；代码候选不代表 Mini 已启用，生产八项只读工具及可选 prepare 须独立验收。
+
 开发入口：[AGENTS.md](AGENTS.md)、[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布](docs/PROJECT_GOVERNANCE.md)、[已有能力索引](docs/CAPABILITY_REGISTRY.md)、[隔离开发/检查](docs/dev_setup.md)。PoC/Batch 报告保留当轮事实，作为历史部署/回滚证据，不再覆盖当前产品基线。
 
 ## 项目简介
