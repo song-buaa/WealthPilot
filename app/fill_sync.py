@@ -12,6 +12,9 @@ from sqlalchemy import inspect, text
 
 VERSION = 1
 SUPPORTED = {"ibkr": "snowball", "tiger": "tiger"}
+# Successful publications, not transient I/O failures, consume this budget.
+MAX_REFRESH_PUBLICATIONS = 4
+EVIDENCE_POLICY_VERSION = 1  # bump when source evidence capabilities change
 
 
 def decode(value):
@@ -67,6 +70,23 @@ def _notional(row):
             if row["avg_filled_price"] is not None else None)
 
 
+def _watermarks(rows):
+    return {row['id']:dict(quantity=int(row['filled_quantity'] or 0),
+        notional=str(_notional(row)) if _notional(row) is not None else '0' if not row['filled_quantity'] else None,
+        commission=decode(row['fill_sync_json']).get('commission') if row['filled_quantity'] else '0',
+        executions=sorted(decode(row['fill_sync_json']).get('executions',{}))) for row in rows}
+
+
+def _evidence(progress):
+    return {k:progress.get(k) for k in ('executions','broker_filled_at','currency','con_id',
+                                       'actual_commissions','evidence_support')}
+
+
+def _activate(progress):
+    progress.update(auto_retry=True, refresh_publications=0, retry_stop_reason=None,
+                    evidence_policy_version=EVIDENCE_POLICY_VERSION)
+
+
 def capture_baseline(session, owner):
     """Called inside original pre-send Tx A, before any broker I/O.
 
@@ -78,7 +98,11 @@ def capture_baseline(session, owner):
     previous = orders(session, owner.portfolio_id, owner.broker, owner.account_id)
     for row in previous:
         progress = decode(row["fill_sync_json"])
-        if progress and ((pending(row) and progress.get('auto_retry',True)) or row["status"] not in {"filled","cancelled","expired","rejected"}):
+        # A verified partial fill is already in the official current state.
+        # Its still-open remainder must not force a new order back into the
+        # old window; unobserved/unresolved submissions still share an anchor.
+        if progress and ((pending(row) and progress.get('auto_retry',True)) or (
+                not row['filled_quantity'] and row["status"] not in {"filled","cancelled","expired","rejected"})):
             return encode({"version":VERSION, "anchor":progress.get("anchor")})
     if "position_snapshot_runs" not in inspect(session.connection()).get_table_names():
         return encode({"version":VERSION,"anchor":None})
@@ -95,11 +119,8 @@ def capture_baseline(session, owner):
             if len(snapshots) <= 2000:
                 anchor = {"run_id":run.id,"facts":_facts(snapshots),
                     "before_dispatch_at":datetime.now(timezone.utc).isoformat(),
-                    "source_times":{k:context(run).get(k) for k in ('positions_as_of','cash_as_of')},"watermarks":{
-                    row["id"]:{"quantity":int(row["filled_quantity"] or 0),
-                        "notional":str(_notional(row)) if _notional(row) is not None else "0" if not row["filled_quantity"] else None,
-                        "commission":decode(row["fill_sync_json"]).get("commission") if row["filled_quantity"] else "0"}
-                    for row in previous}}
+                    "source_times":{k:context(run).get(k) for k in ('positions_as_of','cash_as_of')},
+                    "watermarks":_watermarks(previous)}
     return encode({"version":VERSION,"anchor":anchor})
 
 
@@ -108,12 +129,13 @@ def observe(order, raw):
     if order.broker_name not in SUPPORTED or not order.portfolio_id or not order.broker_account_id:
         return
     progress = decode(order.fill_sync_json) or {"version":VERSION,"anchor":None}
-    old_commission = progress.get("actual_commissions")
+    old_evidence = encode(_evidence(progress))
     quantity = int(order.filled_quantity or 0)
     if quantity <= 0:
         return
     if quantity > int(progress.get("target_quantity",0)):
-        progress.update(target_quantity=quantity, next_attempt_at=time.time()+2, auto_retry=True)
+        _activate(progress)
+        progress.update(target_quantity=quantity, next_attempt_at=time.time()+2)
     evidence = progress.get("executions",{})
     if raw.get("reconciliation_disputed"):
         progress["evidence_conflict"] = True
@@ -132,10 +154,14 @@ def observe(order, raw):
                 progress["evidence_conflict"] = True
             if prior and clean["commission"] is None and prior.get("commission") is not None:
                 clean.update(commission=prior["commission"],commission_currency=prior.get("commission_currency"))
+            if prior and not clean['timestamp']:
+                clean['timestamp']=prior.get('timestamp')
             evidence[item["exec_id"]] = clean
     progress["executions"] = evidence
     if raw.get("broker_filled_at"):
         progress["broker_filled_at"] = raw["broker_filled_at"]
+    if raw.get('fill_evidence_support'):
+        progress['evidence_support'] = raw['fill_evidence_support']
     raw_currency = raw.get("contract_currency") or raw.get("currency")
     claimed = json.loads(order.submission_payload_json or "{}").get("parameters",{}).get("resolved_contract") or {}
     progress["currency"] = claimed.get("currency") or raw_currency or progress.get("currency")
@@ -170,15 +196,16 @@ def observe(order, raw):
         progress.pop("commission",None)
         progress.pop('actual_commissions',None)
         progress['covered_quantity']=0
-    if progress.get('actual_commissions') and progress['actual_commissions']!=old_commission:
+    if encode(_evidence(progress))!=old_evidence:
+        _activate(progress)
         progress['next_attempt_at']=time.time()+2
-        progress['auto_retry']=True
     order.fill_sync_json = encode(progress)
 
 
 def due(rows, now=None):
     now = time.time() if now is None else now
-    return [r for r in rows if pending(r) and decode(r["fill_sync_json"]).get('auto_retry',True)
+    return [r for r in rows if pending(r) and (decode(r["fill_sync_json"]).get('auto_retry',True)
+            or decode(r['fill_sync_json']).get('evidence_policy_version',0)!=EVIDENCE_POLICY_VERSION)
             and decode(r["fill_sync_json"]).get("next_attempt_at",0)<=now]
 
 
@@ -194,9 +221,11 @@ def bind_targets(session, run, now=None, *, force=False):
     targets={r["id"]:int(r["filled_quantity"]) for r in rows}
     for row in rows:
         progress=decode(row["fill_sync_json"])
+        if (run.triggered_by.split(':')[-1] in {'manual','analysis'}
+                or progress.get('evidence_policy_version',0)!=EVIDENCE_POLICY_VERSION):
+            _activate(progress)
         attempt=int(progress.get("attempts",0))+1
         progress.update(last_run_id=run.id,attempted_quantity=targets[row["id"]],attempts=attempt,
-                        auto_retry=True,
                         next_attempt_at=(time.time() if now is None else now)+min(300,5*2**min(attempt,6)))
         session.execute(text("UPDATE order_records SET fill_sync_json=:v WHERE id=:i"),{"i":row["id"],"v":encode(progress)})
     return targets
@@ -218,7 +247,13 @@ def coverage(session, run, snapshots, targets):
         progress=decode(row["fill_sync_json"])
         # A fill observed after source I/O cannot be acknowledged by this run.
         reasons=[]
-        anchor=progress.get("anchor")
+        history=progress.get('verified_coverage',{})
+        # A historical acknowledgement is immutable. Validate the CURRENT
+        # publication from its last verified checkpoint, not the original
+        # pre-buy window after a subsequent independently verified sell.
+        continuing=bool(history.get('quantity')==target and history.get('evidence')==_evidence(progress)
+                        and not progress.get('evidence_conflict') and progress.get('validation_anchor'))
+        anchor=progress.get('validation_anchor') if continuing else progress.get("anchor")
         position_ok=cash_ok=clock_ok=False
         clocks_missing=False
         if not anchor:
@@ -237,10 +272,16 @@ def coverage(session, run, snapshots, targets):
                 # invalidates an account delta proof when its local qty is 0.
                 if other['status']=='unknown':unknown=True
                 before=anchor["watermarks"].get(other["id"],{"quantity":0,"notional":"0","commission":"0"})
+                p=decode(other["fill_sync_json"])
+                if p.get('evidence_conflict'):unknown=True
                 qty=int(other["filled_quantity"] or 0)-int(before["quantity"])
                 if qty<0:unknown=True;continue
-                if qty==0:continue
-                p=decode(other["fill_sync_json"])
+                if qty==0:
+                    if continuing and before['quantity'] and (
+                            before.get('notional')!=str(_notional(other))
+                            or before.get('commission') is not None and before['commission']!=p.get('commission')):
+                        unknown=True
+                    continue
                 ccy=p.get("currency")
                 key=other["symbol"]+"|"+str(ccy)
                 # IBKR LSE aliases must resolve by conId rather than ticker.
@@ -253,21 +294,31 @@ def coverage(session, run, snapshots, targets):
                 sign=1 if other["side"]=="BUY" else -1
                 deltas[key]=deltas.get(key,Decimal(0))+sign*qty
                 expected[key]=expected.get(key,Decimal(0))+sign*qty
-                relevant.append((key,p))
+                relevant.append((key,p,before))
                 amount=_notional(other)
                 if amount is None or before.get("notional") is None or p.get("commission") is None or before.get("commission") is None:
                     cash_deltas[ccy]=None
                 elif cash_deltas.get(ccy,0) is not None:
                     cash_deltas[ccy]=cash_deltas.get(ccy,Decimal(0))-sign*(amount-Decimal(before["notional"]))-(Decimal(p["commission"])-Decimal(before["commission"]))
-            if not deltas or any(delta==0 for delta in deltas.values()):
+            if not continuing and (not deltas or any(delta==0 for delta in deltas.values())):
                 reasons.append("NETTED_FILLS_REQUIRE_BROKER_WATERMARK")
             elif unknown:
                 reasons.append("FILL_IDENTITY_OR_AUTHORITY_UNVERIFIED")
             else:
-                position_ok=all(Decimal(current.get(k,{"quantity":"0"})["quantity"])==expected[k] for k in deltas)
+                keys=({k for k,v in base.items() if not v['cash']} | {k for k,v in current.items() if not v['cash']}
+                      | set(deltas)) if continuing else deltas
+                position_ok=all(Decimal(current.get(k,{"quantity":"0"})["quantity"])==expected.get(k,Decimal(0)) for k in keys)
                 # Same ticker with contradictory contract IDs is not evidence.
-                position_ok=position_ok and all(not p.get("con_id") or k not in current or str(current[k].get("con_id"))==str(p["con_id"]) for k,p in relevant)
+                position_ok=position_ok and all(not p.get("con_id") or k not in current or str(current[k].get("con_id"))==str(p["con_id"]) for k,p,_ in relevant)
+                if continuing:
+                    position_ok=position_ok and all(k not in current or not v.get('con_id')
+                        or str(v['con_id'])==str(current[k].get('con_id')) for k,v in base.items() if not v['cash'])
                 if not position_ok:reasons.append("POSITION_DELTA_NOT_OBSERVED")
+            if continuing:
+                # Even without new fills, a regressed cash publication is not
+                # allowed to borrow an old coverage proof.
+                for value in list(base.values())+list(current.values()):
+                    if value['cash']:cash_deltas.setdefault(value['currency'],Decimal(0))
             cash_ok=bool(cash_deltas)
             for ccy,delta in cash_deltas.items():
                 initial=[v for v in base.values() if v["cash"] and v["currency"]==ccy]
@@ -284,31 +335,52 @@ def coverage(session, run, snapshots, targets):
                     parsed=datetime.fromisoformat(value)
                     return parsed if parsed.tzinfo is not None else None
                 except (ValueError,TypeError):return None
-            before=stamp(anchor.get('before_dispatch_at'))
-            groups=[[stamp(v.get('timestamp')) for v in p.get('executions',{}).values()]
-                    or [stamp(p.get('broker_filled_at'))] for _,p in relevant]
+            before=stamp(anchor.get('validated_at') if continuing else anchor.get('before_dispatch_at'))
+            groups=[[stamp(v.get('timestamp')) for identity,v in p.get('executions',{}).items()
+                     if identity not in mark.get('executions',[])]
+                    or [stamp(p.get('broker_filled_at'))] for _,p,mark in relevant]
             executed=[v for group in groups for v in group if v is not None]
             clocks=json.loads(run.context_json or '{}')
-            clock_ok=bool(before and groups and all(group and all(v is not None for v in group) for group in groups))
+            clock_ok=bool(before and ((continuing and not relevant)
+                or groups and all(group and all(v is not None for v in group) for group in groups)))
             for name in ('positions_as_of','cash_as_of'):
                 initial=stamp(anchor.get('source_times',{}).get(name))
                 latest=stamp(clocks.get(name))
                 if initial is None or latest is None:clocks_missing=True
-                if not (initial and latest and before and executed and initial<=before<=min(executed)
-                        and max(executed)<=latest<=datetime.now(timezone.utc)):
+                monotonic=bool(initial and latest and initial<=latest<=datetime.now(timezone.utc))
+                bracket=bool(initial and latest and before and executed and initial<=before<=min(executed)
+                             and max(executed)<=latest)
+                if not (monotonic and (continuing and not relevant or bracket)):
                     clock_ok=False
             if not clock_ok:reasons.append('BROKER_FILL_WATERMARK_UNVERIFIED')
         verified=position_ok and cash_ok and not reasons
         progress.update(coverage={"run_id":run.id,"target_quantity":target,
             "position_delta_matched":position_ok,"cash_delta_matched":cash_ok,"watermark_verified":clock_ok,
             "positions_verified":position_ok and clock_ok,"cash_verified":cash_ok and clock_ok,
-            "issues":reasons,"basis":"PRETRADE_ACCOUNT_DELTA_WITH_ACTUAL_FEES_AND_BROKER_WATERMARK" if verified else "UNVERIFIED"})
+            "issues":reasons,"basis":("VALIDATED_PUBLICATION_CONTINUATION" if continuing else
+                "PRETRADE_ACCOUNT_DELTA_WITH_ACTUAL_FEES_AND_BROKER_WATERMARK") if verified else "UNVERIFIED"})
+        was_covered=int(progress.get('covered_quantity',0))>=target
         progress["covered_quantity"]=target if verified else 0
-        # A successful official publication with permanently absent evidence
-        # stays visibly UNVERIFIED, not a perpetual background source request.
-        # Failures never enter this branch; new fills/manual/prepare re-enable.
-        if not anchor or (position_ok and cash_ok and clocks_missing) or (cash_ok and 'NETTED_FILLS_REQUIRE_BROKER_WATERMARK' in reasons):
-            progress['auto_retry']=False
+        if verified:
+            # Keep the original proof for this cumulative target. The rolling
+            # checkpoint only validates later official publications; it cannot
+            # establish coverage for an unverified/new target.
+            if not continuing:
+                progress['verified_coverage']=dict(quantity=target,evidence=_evidence(progress),proof=progress['coverage'])
+            progress['validation_anchor']=dict(run_id=run.id,facts=current,watermarks=_watermarks(rows),
+                validated_at=datetime.now(timezone.utc).isoformat(),
+                source_times={k:json.loads(run.context_json or '{}').get(k) for k in ('positions_as_of','cash_as_of')})
+            progress.update(auto_retry=False,retry_stop_reason='VERIFIED')
+        else:
+            if was_covered:
+                _activate(progress)  # a genuine regression gets a new bounded recovery window
+            if progress.get('auto_retry',True):
+                progress['refresh_publications']=int(progress.get('refresh_publications',0))+1
+            if position_ok and cash_ok and clocks_missing:
+                progress.update(auto_retry=False,retry_stop_reason='BROKER_WATERMARK_UNSUPPORTED')
+            elif progress.get('refresh_publications',0)>=MAX_REFRESH_PUBLICATIONS:
+                unsupported=any(str(v).startswith('UNSUPPORTED') for v in progress.get('evidence_support',{}).values())
+                progress.update(auto_retry=False,retry_stop_reason='UNSUPPORTED_EVIDENCE' if unsupported else 'REFRESH_LIMIT_REACHED')
         session.execute(text("UPDATE order_records SET fill_sync_json=:v WHERE id=:i"),{"i":order_id,"v":encode(progress)})
 
 

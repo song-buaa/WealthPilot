@@ -196,4 +196,6 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 [原数据上的只读状态投影](../app/trade_status.py) 经 `/api/action/trade-and-sync-status` 和 MCP `get_trade_and_sync_status` 返回交易事实与同步/覆盖两种状态。新工具无 refresh/broker I/O，原七工具权限不变：默认八项只读，显式 prepare 后九项（其中 prepare 不是纯读取）。没有原账号、Token、anchor 或原始 SDK 回包。U1 冻结副本识别待覆盖进度，`FILL_SYNC_PENDING_OR_UNVERIFIED` 阻止未经说明的精确建议，旧视图不改。
 
+原 OrderRecord JSON 中的有界刷新预算与覆盖证明分开：缺基线不会在首次缓存响应后停刷，永久缺证据也不会无限请求。已验证历史证明保留，后续 Run 派生 checkpoint 仅验证当前发布增量，不签认新目标；真实回退/冲突仍降级。细节由 U2 实现说明维护。
+
 仅一列、零索引、零新表，显式 `--stage u2` 原迁移流程，Digest/receipt/停写/启写后不覆盖旧备份约束保留。设计、证据限制、测试及未来生产验收见 [U2 实现说明](U2_IMPLEMENTATION.md)。本轮不部署或进行真实交易。

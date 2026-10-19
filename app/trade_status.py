@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from sqlalchemy import text
-from app.fill_sync import decode, orders, sync_state, lease_expired
+from app.fill_sync import decode, orders, sync_state, lease_expired, MAX_REFRESH_PUBLICATIONS
 
 
 def query(db, portfolio_id, *, order_id=None, batch_id=None, symbol=None, limit=10, synthetic=False):
@@ -51,6 +51,11 @@ def query(db, portfolio_id, *, order_id=None, batch_id=None, symbol=None, limit=
                 covered_quantity=p.get('covered_quantity',0),target_quantity=row['filled_quantity'],
                 watermark_verified=bool(proof.get('watermark_verified')),
                 automatic_retry=p.get('auto_retry',True),
+                refresh_publications=p.get('refresh_publications',0),
+                refresh_publication_limit=MAX_REFRESH_PUBLICATIONS,
+                retry_stop_reason=p.get('retry_stop_reason'),evidence_support=p.get('evidence_support',{}),
+                historically_covered_quantity=p.get('verified_coverage',{}).get('quantity',0),
+                historical_coverage_run_id=p.get('verified_coverage',{}).get('proof',{}).get('run_id'),
                 position_updated_at=latest_good.finished_at.isoformat() if latest_good and latest_good.finished_at else None,
                 last_successful_run_id=latest_good.id if latest_good else None,publication_status=publication,
                 reason_code=safe_reason,issues=sorted(set(proof.get('issues',[])

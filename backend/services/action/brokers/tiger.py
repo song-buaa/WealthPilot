@@ -503,6 +503,11 @@ class TigerBrokerAdapter(BrokerAdapter):
             "account_id_masked": f"***{self._account_id[-5:]}",
             "action": action,
             "outside_rth": False,
+            # SDK Order has aggregate commission, but this adapter has no
+            # execution/currency-qualified commission contract. Do not guess.
+            "fill_evidence_support": {"actual_commissions":"UNSUPPORTED_BY_ADAPTER",
+                                      "positions_as_of":"UNSUPPORTED_BY_SOURCE",
+                                      "cash_as_of":"UNSUPPORTED_BY_SOURCE"},
         }
         if tiger_order is not None:
             account = getattr(tiger_order, "account", None)

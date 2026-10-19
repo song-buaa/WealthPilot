@@ -454,6 +454,9 @@ def test_closed_unverifiable_history_does_not_poison_new_pretrade_anchor(context
     with c.sessions() as s:s.get(OrderRecord,old).fill_sync_json=None;s.commit()
     c.observe(old,2);c.state.quantity=12;c.state.cash=979;c.drain()
     assert c.status(old)['asset_sync']['status']=='SYNC_UNVERIFIED'
+    # Missing baseline still gets a bounded chance to outwait broker caches.
+    from app.fill_sync import MAX_REFRESH_PUBLICATIONS
+    for _ in range(MAX_REFRESH_PUBLICATIONS-1):c.drain()
     assert not c.status(old)['asset_sync']['automatic_retry']
     new=c.dispatch(2);c.observe(new,2);c.state.quantity=14;c.state.cash=958;c.drain()
     assert c.status(new)['asset_sync']['status']=='SYNCED'

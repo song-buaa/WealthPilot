@@ -54,6 +54,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 
 - 权威入口：[原 OrderManager](../backend/services/action/order_manager.py) 原子记录成交进度、[原 poller](../backend/services/action/order_poller.py) 事务外调用原 [Executor](../backend/services/restricted_sync.py)、[Repository](../backend/services/broker_sync/repository.py) 完成 Run claim/fence/持仓发布及覆盖水位。IBKR/snowball 与 Tiger Owner 映射不另建账户通道。
 - 复用/限制：[fill_sync](../app/fill_sync.py) 记录原订单累计量和已发布 snapshot 的差量证明，不手工改现金或成本；缺基线、原始券商持仓/现金时间水位、实际成交时间、净零往返、实际费用未知/币种不一致和缓存滞后保持未证实，不用抓取时间替代。实际成交状态不因同步失败改变，进程恢复沿原 poller/lease，不自动重放订单。
+- PR #25 修复：原 JSON 分离有界资产刷新（4 次成功发布）和未验证覆盖；Tiger 缺少当前适配器证据时明确 UNSUPPORTED/UNKNOWN；新事实/显式刷新或证据能力版本可恢复。已验证历史覆盖保留，当前发布用官方 checkpoint 增量核验，真实回退和冲突仍降级。回归见 [review regressions](../tests/test_u2_review_regressions.py)，无新增 Schema、服务或事实表。
 - 查询：[trade_status](../app/trade_status.py)、`GET /api/action/trade-and-sync-status`、`get_trade_and_sync_status` MCP 均不联网/不写库。默认八个只读工具；显式 prepare 为第九工具，原七工具合同不变。订单 ID/批次/标的过滤，只读当前 Portfolio，原始账户/SDK 不返回。
 - U1：新冻结视图含待覆盖 issue，旧 ID/payload 不改；不把 SYNCED 与数据实时性或精确调仓授权混同。
 - Schema：一列 `order_records.fill_sync_json TEXT NULL`，零索引/零新表；原 stage u2 迁移/receipt/Digest，见 [U2 实现与发布输入](U2_IMPLEMENTATION.md)。
