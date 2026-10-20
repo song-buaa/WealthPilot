@@ -24,7 +24,7 @@ class TradabilityQuery(BaseModel):
         return self
 
 
-def query(db, portfolio_id, arguments, *, adapter=None, synthetic=False):
+def query(db, portfolio_id, arguments, *, adapter=None, synthetic=False, deadline=None):
     from app.models import Position
     from backend.services.action.ownership import stored_account_ref as account_ref
     from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
@@ -75,7 +75,8 @@ def query(db, portfolio_id, arguments, *, adapter=None, synthetic=False):
     # Resolve immutable scalar scope then release SQLite read transaction for I/O.
     db.rollback()
     try:
-        facts=adapter.instrument_details(request.model_dump(exclude={'account_ref','broker'}))
+        facts=adapter.instrument_details(request.model_dump(exclude={'account_ref','broker'}),
+            **({'deadline':deadline} if request.broker=='ibkr' and deadline is not None else {}))
     except Exception:
         result['issues'].append('BROKER_QUERY_UNAVAILABLE')
         return result  # never expose raw SDK/account/network errors

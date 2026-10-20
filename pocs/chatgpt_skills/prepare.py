@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
+from backend.services.action.brokers.base import IBKR_TRADABILITY_HTTP_SECONDS
 
 
 def _private(path):
@@ -43,11 +44,11 @@ class PrepareClient:
         self.token = private_token(config["token_file"])
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
-    def _call(self, path, body=None, *, base=None):
+    def _call(self, path, body=None, *, base=None, timeout=5):
         request = Request((base or self.base)+path, data=json.dumps(body).encode() if body is not None else None,
             headers={"Authorization":"Bearer "+self.token,"Content-Type":"application/json"})
         try:
-            with self.opener.open(request, timeout=5) as response:
+            with self.opener.open(request, timeout=timeout) as response:
                 data = response.read(4*1024*1024+1)
                 if len(data) > 4*1024*1024:
                     raise ValueError("ANALYSIS_PREPARE_UNAVAILABLE")
@@ -69,4 +70,6 @@ class PrepareClient:
         # Fixed sibling read-only endpoint, same no-redirect loopback token.
         from backend.services.instruments.tradability import TradabilityQuery
         body=TradabilityQuery.model_validate(request).model_dump()
-        return self._call('/instrument-tradability',body,base=self.base.removesuffix('/asset-analysis')+'/action')
+        return self._call('/instrument-tradability',body,
+            base=self.base.removesuffix('/asset-analysis')+'/action',
+            timeout=IBKR_TRADABILITY_HTTP_SECONDS if body['broker']=='ibkr' else 5)

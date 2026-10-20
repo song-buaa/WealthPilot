@@ -88,3 +88,47 @@ def test_business_worker_receives_private_cache_location_only(monkeypatch,tmp_pa
     assert client.call('review_portfolio',{'question':'synthetic'})=={'fixed':True}
     assert seen['WEALTHPILOT_ANALYSIS_CACHE_DIR']==str(tmp_path/'inputs')
     assert 'TIGER_PRIVATE_KEY' not in seen
+
+
+@pytest.mark.parametrize('configured',[False,True])
+def test_b3_runtime_bridge_failure_codes_and_readonly_contract(monkeypatch,tmp_path,configured):
+    """Configured-but-offline differs from absent bridge; never trade/refresh."""
+    from pocs.chatgpt_skills.prepare import PrepareClient
+    template=dict(schema_version='wealthpilot.tradability.v1',synthetic=True,
+        queried_at='2026-10-20T01:00:00+00:00',broker='ibkr',account_ref='account_'+'a'*20,
+        accounts=[{'account_ref':'account_'+'a'*20}],tradability='UNKNOWN',
+        purpose='BUY_STOCK_OR_ETF',instrument=None,supported_order_types=None,
+        trading_hours=None,minimum_quantity=None,fees={'status':'UNKNOWN','amount':None,'currency':None},
+        evidence_source='STORED_IDENTITY_ONLY',evidence_at=None,
+        issues=['ACCOUNT_PERMISSION_UNPROVEN','LIVE_ACCOUNT_QUERY_NOT_CONFIGURED'], limitations=[])
+    calls=[]
+    def stored(self,operation,arguments):
+        calls.append(operation)
+        assert operation=='get_instrument_tradability'
+        return json.loads(json.dumps(template))
+    def offline(self,arguments):
+        raise ValueError('ANALYSIS_PREPARE_UNAVAILABLE')
+    monkeypatch.setattr(BusinessClient,'call',stored)
+    monkeypatch.setattr(PrepareClient,'tradability',offline)
+    token=tmp_path/'token';token.write_text('s'*48);token.chmod(0o600)
+    config=tmp_path/'bridge.json'
+    config.write_text(json.dumps({'base_url':'http://127.0.0.1:18321','token_file':str(token)}));config.chmod(0o600)
+    settings=SimpleNamespace(real_config='not-opened',prepare_config=str(config) if configured else None,
+        business_python=BUSINESS,portfolio_id=7,mock_database=None,web_base_url='http://127.0.0.1:18321')
+    async def run():
+        async with Client(create_server(settings),mode='legacy') as client:
+            tool=next(t for t in (await client.list_tools()).tools if t.name=='get_instrument_tradability')
+            assert tool.annotations.read_only_hint and not tool.annotations.destructive_hint
+            for _ in range(2):
+                response=await client.call_tool(tool.name,{'request':{'broker':'ibkr','symbol':'IB01:LSE'}})
+                assert not response.is_error,response.content
+                result=response.structured_content
+                assert result['tradability']=='UNKNOWN' and result['fees']['amount'] is None
+                assert 'ACCOUNT_PERMISSION_UNPROVEN' in result['issues']
+                expected='LIVE_ACCOUNT_QUERY_UNAVAILABLE' if configured else 'LIVE_ACCOUNT_QUERY_NOT_CONFIGURED'
+                unexpected='LIVE_ACCOUNT_QUERY_NOT_CONFIGURED' if configured else 'LIVE_ACCOUNT_QUERY_UNAVAILABLE'
+                assert result['issues'].count(expected)==1 and unexpected not in result['issues']
+            forbidden=await client.call_tool(tool.name,{'request':{'broker':'ibkr','symbol':'IB01:LSE','portfolio_id':99}})
+            assert forbidden.is_error
+    asyncio.run(run())
+    assert calls==['get_instrument_tradability']*2

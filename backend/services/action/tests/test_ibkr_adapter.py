@@ -86,6 +86,8 @@ def _make_adapter(**kwargs):
     adapter._timeout = 5.0
     adapter._cash_snapshot_lock = None
     adapter._connected = True
+    adapter._connection_guard = threading.Lock()
+    adapter._connection_task = None
     adapter._account_verified = True
     adapter._loop = MagicMock()
     adapter._thread = MagicMock()

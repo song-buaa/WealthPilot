@@ -19,6 +19,8 @@
 """
 import json
 import logging
+import threading
+import time
 from decimal import Decimal
 from typing import Optional
 
@@ -46,6 +48,8 @@ def instrument_tradability(body: dict, authorization: str | None = Header(defaul
     from backend.services.instruments.tradability import TradabilityQuery, query
     from backend.services.action.ownership import portfolio_scope
     _authorized(authorization)
+    from backend.services.action.brokers.base import IBKR_TRADABILITY_QUERY_SECONDS
+    deadline = time.monotonic() + IBKR_TRADABILITY_QUERY_SECONDS
     result = None
     try:
         filters = TradabilityQuery.model_validate(body)
@@ -53,12 +57,14 @@ def instrument_tradability(body: dict, authorization: str | None = Header(defaul
             pid = portfolio_scope(db)
             # Verify client scope before constructing or contacting an adapter.
             result = query(db, pid, filters.model_dump())
+            result['issues'] = [v for v in result['issues'] if v != 'LIVE_ACCOUNT_QUERY_NOT_CONFIGURED']
             if result['account_ref'] is None:
                 return result
             if filters.broker == 'tiger' and 'tiger' not in _BROKER_MODE:
                 return result | {'issues': result['issues'] + ['TIGER_TRADING_ADAPTER_NOT_CONFIGURED']}
             adapter = _get_ibkr_adapter() if filters.broker == 'ibkr' else _get_adapter()
-            return query(db, pid, filters.model_dump(), adapter=adapter)
+            return query(db, pid, filters.model_dump(), adapter=adapter,
+                         deadline=deadline if filters.broker == 'ibkr' else None)
     except ValueError as exc:
         code = str(exc) if str(exc) == 'ACCOUNT_NOT_FOUND' else 'INVALID_TRADABILITY_QUERY'
         raise HTTPException(422, code) from None
@@ -90,6 +96,7 @@ _BROKER_MODE = _action_os.getenv("BROKER_MODE", "mock")
 
 
 _cached_adapter = None  # IBKR adapter 单例（避免同 client_id 多连接冲突）
+_cached_adapter_lock = threading.Lock()
 
 
 def _get_adapter():
@@ -104,24 +111,22 @@ def _get_adapter():
 
     bn = _resolve_broker_name(_BROKER_MODE)
     # mock 和 tiger 每次新建无副作用；IBKR 必须单例(client_id 唯一)
-    if bn == "ibkr" and _cached_adapter is not None:
-        return _cached_adapter
-
-    adapter = get_broker_adapter(
-        broker_name=bn,
-        mode=_BROKER_MODE.split(".")[-1] if "." in _BROKER_MODE else _BROKER_MODE,
-    )
+    mode = _BROKER_MODE.split(".")[-1] if "." in _BROKER_MODE else _BROKER_MODE
     if bn == "ibkr":
-        _cached_adapter = adapter
-    return adapter
+        with _cached_adapter_lock:
+            if _cached_adapter is None:
+                _cached_adapter = get_broker_adapter(broker_name=bn, mode=mode)
+            return _cached_adapter
+    return get_broker_adapter(broker_name=bn, mode=mode)
 
 
 def _get_ibkr_adapter():
     """Reuse the original IBKR singleton even when ordinary orders use Tiger."""
     global _cached_adapter
-    if _cached_adapter is None:
-        _cached_adapter = get_broker_adapter(broker_name="ibkr", mode="readonly")
-    return _cached_adapter
+    with _cached_adapter_lock:
+        if _cached_adapter is None:
+            _cached_adapter = get_broker_adapter(broker_name="ibkr", mode="readonly")
+        return _cached_adapter
 
 
 def _get_manager():

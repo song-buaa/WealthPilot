@@ -125,7 +125,7 @@ def test_protected_endpoint_authentication_and_fixed_owner(holdings,monkeypatch,
     token=tmp_path/'token';token.write_text('s'*48);token.chmod(0o600)
     monkeypatch.setenv('WEALTHPILOT_ANALYSIS_PREPARE_TOKEN_FILE',str(token))
     monkeypatch.setattr(action,'get_session',lambda:Session(holdings,info={'portfolio_id':1}))
-    adapter=SimpleNamespace(broker_name='ibkr',_account_id='synthetic-ibkr',instrument_details=lambda _:evidence())
+    adapter=SimpleNamespace(broker_name='ibkr',_account_id='synthetic-ibkr',instrument_details=lambda _,**kwargs:evidence())
     monkeypatch.setattr(action,'_get_ibkr_adapter',lambda:adapter)
     app=FastAPI();app.include_router(action.router,prefix='/api/action')
     with TestClient(app) as client:
@@ -143,11 +143,11 @@ def test_ibkr_catalog_uses_only_contract_details_not_order_or_whatif():
     from backend.services.action.brokers.ibkr import IBKRBrokerAdapter
     adapter=IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
     adapter._account_id='synthetic-ibkr';adapter._timeout=1
-    adapter._ensure_connected=lambda:None
+    adapter._ensure_connected=lambda **kwargs:None
     seen=[]
     detail=ContractDetails(contract=Contract(conId=354802220,symbol='IB01',localSymbol='IB01',secType='STK',exchange='LSEETF',primaryExchange='LSEETF',currency='USD'),secIdList=[TagValue('ISIN','IE00BGSF1X88')],orderTypes='LMT',validExchanges='LSEETF',minSize=1)
     async def request(contract):seen.append(contract);return [detail]
-    adapter._ib=SimpleNamespace(reqContractDetailsAsync=request)
+    adapter._ib=SimpleNamespace(reqContractDetailsAsync=request,isConnected=lambda:True)
     adapter._run_on_loop=lambda work,**_:asyncio.run(work())
     facts=adapter.instrument_details({'con_id':354802220,'symbol':'IB01:LSE'})
     assert facts['instrument']['con_id']==354802220 and facts['order_types']==['LMT']
@@ -209,7 +209,7 @@ def test_prepare_bridge_targets_only_protected_read_endpoint(holdings,monkeypatc
     config=tmp_path/'bridge';config.write_text(json.dumps({'base_url':'http://127.0.0.1:18321','token_file':str(token)}));config.chmod(0o600)
     monkeypatch.setenv('WEALTHPILOT_ANALYSIS_PREPARE_TOKEN_FILE',str(token))
     monkeypatch.setattr(action,'get_session',lambda:Session(holdings,info={'portfolio_id':1}))
-    adapter=SimpleNamespace(broker_name='ibkr',_account_id='synthetic-ibkr',instrument_details=lambda _:evidence())
+    adapter=SimpleNamespace(broker_name='ibkr',_account_id='synthetic-ibkr',instrument_details=lambda _,**kwargs:evidence())
     monkeypatch.setattr(action,'_get_ibkr_adapter',lambda:adapter)
     app=FastAPI();app.include_router(action.router,prefix='/api/action')
     bridge=PrepareClient(config);calls=[]

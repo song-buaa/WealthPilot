@@ -44,6 +44,12 @@ class OrderStatusUpdate:
     raw_response: dict = field(default_factory=dict)
 
 
+# B3 IBKR metadata only: total backend budget plus bounded HTTP/cleanup margin.
+# U1 prepare and other brokers retain their existing timeout contracts.
+IBKR_TRADABILITY_QUERY_SECONDS = 15.0
+IBKR_TRADABILITY_HTTP_SECONDS = 18.0
+
+
 class BrokerAdapter(ABC):
     """券商适配器抽象基类。"""
 

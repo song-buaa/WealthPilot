@@ -58,3 +58,17 @@
 - [原浏览器回归](../frontend/tests/e2e/trade-link.spec.ts)：桌面与移动端、4000 USD、报价TTL/重核差异/清空确认、批次恢复、同次最终确认、重复点击、FILLED/PARTIAL/UNKNOWN和U2同步；仅HTTP合成结果，不调用真实提交端点。
 - [MCP协议](../pocs/chatgpt_skills/test_protocol.py)：真实工具目录/只读注解/参数校验、无账户证据UNKNOWN、越权拒绝及查询前后库哈希不变。
 - 本地/CI结果由交付报告记录，生产、真实来源字段/账户权限及实际ChatGPT体验均runtime-pending；本批不修改decision_engine、OrderRecord权威归并、原持仓成本、交易授权、实盘配置或历史Owner。
+
+## 6. B3 IBKR运行时定向修复
+
+基线为 `origin/main` 的 `3165c70f5764ee0bfc8388ef931a8cde2b8fa24b`。Mini 的 `B3_Runtime_Closeout_Report.md` / `Minimal_Runtime_Fix_Plan.md` 通过原部署会话的报告生成记录及更新记录读取：其健康串行查询与并发首次连接探针是本次诊断输入，不代表本分支已经生产验收。本轮仅本地 Fake SDK/独立事件循环及临时数据库，不访问 Mini/Gateway。
+
+- 原 `action._get_adapter/_get_ibkr_adapter` 共享创建锁；原 `IBKRBrokerAdapter` 内保留一个专属 loop 和一个初始化 Task。并发等待者共享同次初始化结果，不增加 clientId。候选 IB 对象保持局部，完成原 managedAccounts/Owner/实盘门校验后才发布；失败、取消或超时按 SDK disconnect 清理。断线使连接/账户验证失效，重连重新核验；旧 socket 的迟到断线事件不能清除新连接。
+- 单个等待者超时只取消该等待者，不取消其他请求依赖的共享初始化。初始化由 Adapter 拥有，按原连接预算（默认10秒 SDK timeout，加5秒完整初始化上限）有界完成；后续请求加入同一任务，不能创建同 clientId 的重叠候选。shutdown 取消并等待未完成初始化、断开连接，再停止专属 loop。
+- 仅 IBKR tradability 使用 Backend **15秒单次总预算**（连接与合约查询共用 monotonic deadline），bridge HTTP **18秒**，给原 `_run_on_loop` 最多1秒收敛余量和HTTP序列化留界。Tiger与U1 prepare原5秒HTTP预算不变；不新增用户参数、服务、池或无限重试。
+- 合约查询超时取消本地 SDK Future/协程。IBKR没有 `cancelContractDetails` 协议：不声称可以撤回已发出的只读查询；SDK按不同 reqId处理迟到结果，不能写入后续请求。未完成请求的SDK登记由原结束回包/断线清理，不为此断开仍有效的共享订单连接。真实SDK Future/迟到回包的隔离回归见下方。
+- 已配置并鉴权通过的在线查询失败保持 `UNKNOWN` / `ACCOUNT_PERMISSION_UNPROVEN` / 费用NULL，使用 `BROKER_QUERY_UNAVAILABLE`（Backend SDK失败）或 `LIVE_ACCOUNT_QUERY_UNAVAILABLE`（bridge传输失败）。只读fallback移除互相矛盾的 `LIVE_ACCOUNT_QUERY_NOT_CONFIGURED`；真正无bridge才保留NOT_CONFIGURED。
+
+[运行时故障注入](../tests/test_b3_ibkr_runtime.py)覆盖真实独立loop、并发首次连接、失败共享/重试、候选超时清理、等待者超时、断线/重连、旧事件、shutdown、真实ib_async Future/迟到reqId、工厂并发、受保护HTTP预算及IB01/CBU3身份/Owner；[MCP协议回归](../pocs/chatgpt_skills/test_u1_protocol.py)覆盖已配置/未配置错误投影、只读注解与越权拒绝。原交易确认、B0提交幂等、UNKNOWN恢复、U2同步及固定视图合同不变。Registry无需更新：能力、权威Owner、工具及接口参数没有新增/迁移，仅修复原入口的运行时生命周期。
+
+生产部署输入（需另行授权）：Backend、MCP和业务worker统一本PR固定SHA，按现有流程切换进程以清除旧Adapter状态；Web可同SHA统一发布。**0 Schema/Digest/依赖/权限变更，不执行DDL，不改Gateway/clientId/Owner/token/实盘开关**。先健康串行、再受控并发IB01/CBU3只读合约查询，核对身份、一次初始化、断线/超时后的收敛及错误码；ChatGPT刷新目录后中文只读查询，仍允许权限UNKNOWN和费用NULL。不得通过试探下单/撤单验收。回滚组件到上一固定SHA，保留全部数据库事实，不恢复旧数据库。

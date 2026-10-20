@@ -139,7 +139,9 @@ def create_server(settings):
                 return TradabilityResult.model_validate(prepare_client.tradability(arguments))
             except ValueError:
                 result=client.call('get_instrument_tradability',arguments)
-                result['issues'].append('LIVE_ACCOUNT_QUERY_UNAVAILABLE')
+                result['issues'] = list(dict.fromkeys(
+                    [v for v in result['issues'] if v != 'LIVE_ACCOUNT_QUERY_NOT_CONFIGURED']
+                    + ['LIVE_ACCOUNT_QUERY_UNAVAILABLE']))
                 return TradabilityResult.model_validate(result)
         return TradabilityResult.model_validate(client.call('get_instrument_tradability',arguments))
 

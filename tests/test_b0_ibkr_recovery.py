@@ -13,7 +13,8 @@ from tests.test_b0_order_safety import rig  # noqa: F401; same disposable WAL fi
 
 
 def adapter():
-    result = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
+    result = IBKRBrokerAdapter(client_id=1, account_id="DU-SYNTHETIC", timeout=.05)
+    result._account_verified = True
     result._account_id = "DU-SYNTHETIC"
     result._client_id = 1
     result._timeout = .05
