@@ -24,6 +24,27 @@ def account_ref(portfolio_id, row):
     return "account_" + hashlib.sha256(repr(owner).encode()).hexdigest()[:20]
 
 
+def read_history(path, portfolio_id, arguments, *, database_contract=None, synthetic=False):
+    from pocs.chatgpt_skills.contracts import TradeHistoryQuery
+    from backend.services.portfolio_history.query import query
+    from app.models import Portfolio
+    request=TradeHistoryQuery.model_validate(arguments)
+    if request.snapshot_id:
+        from app.asset_views import load_view, frozen_input
+        view=load_view(path,portfolio_id,request.snapshot_id,database_contract)
+        with frozen_input(view) as fixed:
+            result=read_history(fixed,portfolio_id,request.model_dump(mode='json',exclude={'snapshot_id'}),synthetic=synthetic)
+        result['snapshot_id']=request.snapshot_id
+        return result
+    with readonly_snapshot(path,database_contract) as connection:
+        if database_contract:
+            from app.shared_sqlite import load_contract
+            if load_contract(database_contract)['portfolio_id']!=portfolio_id:raise ReadError('PORTFOLIO_NOT_FOUND')
+        with Session(bind=connection,autoflush=False,join_transaction_mode='rollback_only') as db:
+            if db.get(Portfolio,portfolio_id) is None:raise ReadError('PORTFOLIO_NOT_FOUND')
+            return query(db,portfolio_id,**request.model_dump(mode='json',exclude={'snapshot_id'}),synthetic=synthetic)
+
+
 def source_quality(connection, row):
     issues = []
     updated = None

@@ -25,6 +25,7 @@ DOCUMENTS = (
     "docs/U1_IMPLEMENTATION.md",
     "docs/U2_IMPLEMENTATION.md",
     "docs/D1_IMPLEMENTATION.md",
+    "docs/B2_IMPLEMENTATION.md",
     "docs/dev_setup.md",
     "docs/GOVERNANCE_AUDIT.md",
     "docs/GOVERNANCE_VALIDATION_REPORT.md",

@@ -18,6 +18,21 @@ def _pid() -> int:
     return _state.portfolio_id
 
 
+@router.get('/trade-history')
+def get_trade_history(account_ref: str | None = None, symbol: str | None = None,
+        start: str | None = None, end: str | None = None, limit: int = Query(default=50,ge=1,le=200),
+        offset: int = Query(default=0,ge=0,le=10000), snapshot_id: str | None = None):
+    from app.database import DB_PATH
+    from pocs.chatgpt_skills.reader import read_history
+    import os
+    try:
+        return read_history(DB_PATH,_pid(),dict(account_ref=account_ref,symbol=symbol,start=start,end=end,
+            limit=limit,offset=offset,snapshot_id=snapshot_id),
+            database_contract=os.environ.get('WEALTHPILOT_SQLITE_CONTRACT'))
+    except ValueError:
+        raise HTTPException(422,'HISTORY_QUERY_REFUSED') from None
+
+
 # ── 总览 ──────────────────────────────────────────────────────────────────────
 
 @router.get("/summary")

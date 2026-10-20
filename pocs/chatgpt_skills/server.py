@@ -18,7 +18,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from typing import Annotated
-from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult
+from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult, TradeHistoryQuery, TradeHistoryResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
@@ -148,6 +148,11 @@ def create_server(settings):
         description="Read stored original order/fill and asset-sync coverage. Optional order_id/batch_id/canonical symbol, or latest ten orders. NEVER refresh broker or submit/cancel/retry. Distinguish filled from SYNC_PENDING/RUNNING/DELAYED/FAILED/UNVERIFIED/SYNCED; only SYNCED proves target coverage. UNKNOWN commission is not WhatIf fees. After trading use a NEW prepare for analysis, preserving pending warnings; existing fixed views never change.")
     def get_trade_and_sync_status(request: TradeSyncQuery) -> TradeSyncResult:
         return TradeSyncResult.model_validate(client.call("get_trade_and_sync_status",request.model_dump()))
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=False),
+        description="Read imported broker execution history and deterministic moving-weighted-cost attribution. Never refresh/import or trade. Optional opaque history account_ref, canonical symbol/conid, inclusive start/exclusive end and snapshot_id. Reuse the current analysis snapshot_id; dates filter displayed facts, not reset cost basis. Actual fees may be UNKNOWN. Distinguish current broker book P&L, broker-reported realized P&L, system-calculated realized/unrealized, and holding return; missing opening/coverage/FX blocks unsupported conclusions. No portfolio TWR/MWR or synthetic dividends/interest. Returns separate account/security/currency groups and coverage evidence.")
+    def get_trade_history(request: TradeHistoryQuery) -> TradeHistoryResult:
+        return TradeHistoryResult.model_validate(client.call('get_trade_history',request.model_dump(mode='json')))
 
     @server.tool(meta=security_meta,
         annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),

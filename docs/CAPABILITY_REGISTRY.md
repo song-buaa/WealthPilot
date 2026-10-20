@@ -76,3 +76,11 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 时间/资格 owner：[原 capture](../pocs/chatgpt_skills/asset_view.py) / [public_view](../app/asset_views.py)，复用原 Run/FX 时间。A/B/C 分级按相关 symbol 和 analysis_scope 给出具体 blockers；原 bool 对应 C，原交易门不变。[原市场模块](../backend/services/execution_plan/market_hours.py)用本地 session 库识别近期收盘、开市、过期或未知。
 - 手工核对 owner：[WealthService](../backend/services/wealth_service.py)，保留主/副表及养老金金额去重，按 value_as_of 提醒并返回原更新入口；无自动贷款余额或养老金关联订正。
 - 接口/测试：原 prepare、固定 view、MCP/PEER request 可选 analysis_scope，无新工具/写权限。[D1 合成回归](../tests/test_d1_asset_quality.py)、[固定视图浏览器](../frontend/tests/e2e/asset-view.spec.ts)；[合同及限制](D1_IMPLEMENTATION.md)。零 Schema 迁移；来源不提供的时间、真实手工余额和养老关联仍可能 partial，生产验收须另行授权。
+
+### B2 历史事实与收益（本 PR 候选）
+
+- Owner：[原 Portfolio 域历史事实/算法](../backend/services/portfolio_history)，复用原 IBKR list_execution_details、Position/Run/订单 Owner、FXService、U1 frozen_input；原当前持仓收益算法不改。
+- 来源：显式私有 IBKR Flex XML / 单 Trades 节 CSV EXECUTION；近期 Gateway 永远不冒充完整历史。稳定 execution 身份幂等，费用缺失/异币、历史缺口、修正/Owner 冲突 fail closed，不从持仓反推历史。Tiger/国金原生历史报表待真实样例/权限核实。
+- 查询：原 MCP 新增 get_trade_history（只读），Web /api/portfolio/trade-history 和 PEER historical_attribution；按 Portfolio 与已证实账户隔离、返回不透明引用，不接受 raw account_id/Portfolio/导入/刷新/force。固定 ID 使用旧冻结库，不读新导入。
+- 复用/限制：系统唯一历史收益法为 long-only 移动加权，与券商原口径对账；不覆盖成本、订单或财富。精确归因/HPR/年化的完整性门限及两表必要性见 [B2](B2_IMPLEMENTATION.md)。不新增任务/订单状态机、现金总账或全组合 TWR/MWR。
+- 测试：[金样及隔离](../tests/test_b2_history.py)、[原视图/PEER/API](../tests/test_b2_frozen_and_api.py)、[原迁移](../tests/test_b2_schema.py)、[协议](../pocs/chatgpt_skills/test_protocol.py)。生产真实历史补源/对账 NOT_RUN，不因本地或 CI 通过标真实历史完整。

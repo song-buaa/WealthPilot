@@ -17,6 +17,8 @@ SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DR
                "RISK_CONFIRMATION_REQUIRED", "DRAFT_NOT_PENDING", "DRAFT_CHANGED_REVIEW_REQUIRED", "BROKER_ORDER_STATE_UNAVAILABLE", "ORDER_CURRENCY_MARKET_MISMATCH", "MOCK_TRADE_FIXTURE_NOT_ENABLED"}
 from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
+from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
+SAFE_ERRORS |= HISTORY_ERRORS
 
 
 def init_mock(path, portfolio_id):
@@ -31,6 +33,7 @@ def init_mock(path, portfolio_id):
     from app.database import Base
     from app.models import Portfolio
     import backend.services.action.models  # noqa: F401
+    import backend.services.portfolio_history.models  # noqa: F401 - explicit synthetic fixture only
     import services.broker_sync.models  # noqa: F401 - same synthetic fixture
     engine = create_engine("sqlite:///"+str(path))
     Base.metadata.create_all(engine)
@@ -127,6 +130,12 @@ def main():
                             config["portfolio_id"] if config else args.portfolio_id, operation, a,
                             contract=config.get("database_contract_path") if config else None,
                             synthetic=args.synthetic_input or config is None, worker_process=True))
+                    elif operation == 'get_trade_history' and (workflow or config):
+                        from pocs.chatgpt_skills.reader import read_history
+                        result=read_history(config['database_path'] if config else path,
+                            config['portfolio_id'] if config else args.portfolio_id,a,
+                            database_contract=config.get('database_contract_path') if config else None,
+                            synthetic=args.synthetic_input or config is None)
                     elif operation == "get_trade_and_sync_status" and (workflow or config):
                         from pocs.poc02_wealth_mcp.reader import readonly_snapshot
                         from sqlalchemy.orm import Session

@@ -218,11 +218,20 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 raise ValueError('PORTFOLIO_NOT_FOUND')
         from backend.services.decision_service_v3 import run_chat_stream_v3
         from backend.services import decision_service
+        from backend.services.portfolio_history.query import query as historical_query
+        with get_session() as session:
+            history=historical_query(session,portfolio_id,symbol=request.symbol,synthetic=synthetic)
+        history['snapshot_id']=request.snapshot_id
+        result.evidence['historical_attribution']=history
+        result.limitations.append('Historical attribution is separate from current-holdings book P&L; only broker-imported facts and expressly supported metrics are authoritative. No portfolio TWR/MWR.')
         captured={}
         def capture(plan,executed,expressed,reviewed):
             captured.update(plan=plan,executed=executed,expressed=expressed,reviewed=reviewed)
         prefix={'analyze_position':'单标的投资决策','review_portfolio':'投资组合与资产配置评估','analyze_performance':'当前持仓收益表现分析'}[scenario]
         question=prefix+'：'+request.question
+        question+='\n独立历史归因证据（不可用项必须保持未知；不替代当前持仓账面盈亏；仅展示前20组，完整范围由get_trade_history查询）：'+json.dumps(
+            dict(status=history['status'],issues=history['issues'],attribution=history['attribution'][:20],
+                 coverage=history['coverage'][:20]),ensure_ascii=False)
         if asset_view and asset_view['data_quality'].get('analysis_eligibility'):
             question+='\n本次分析资格（仅限所列范围；不能代替交易授权）：'+json.dumps(
                 {k:asset_view['data_quality'][k] for k in ('qualification_scope','analysis_eligibility')},ensure_ascii=False)

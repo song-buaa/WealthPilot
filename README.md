@@ -1,5 +1,7 @@
 # WealthPilot 4.0
 
+B2 历史成交/收益归因为当前 PR 候选：新增只读 `get_trade_history`，复用原 Portfolio/U1/PEER，当前账面收益与历史收益分开。来源、覆盖、成本法及显式迁移见 [B2 实现说明](docs/B2_IMPLEMENTATION.md)；生产真实补源尚未执行。
+
 私人财富管理与投资决策工作台：**ChatGPT 对话入口 + 七项只读 MCP 工具 + 原 WealthPilot 专业分析 Core + 完整 React Web**。
 
 4.0 第一阶段五大核心场景已完成开发、Mac Mini 生产部署及 ChatGPT Web/iOS 实际验收，用户于 2026-10-16 确认正式收口。原 PEER 四 Agent、13 个内部 Skills、专业 LLM、规则/信号引擎及回答模板均保留；ChatGPT 调用原专业结果，负责交互、解释和最终呈现。

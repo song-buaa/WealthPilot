@@ -1272,6 +1272,8 @@ class TestMisc:
         fill.contract.conId = 79000224
         fill.contract.localSymbol = "CBU3"
         fill.contract.symbol = "CSBGU3"
+        fill.contract.secType = "STK"
+        fill.contract.multiplier = "1"
         adapter._ib.reqExecutionsAsync = AsyncMock(return_value=[fill])
 
         result = adapter.list_execution_details()
@@ -1285,6 +1287,7 @@ class TestMisc:
             "currency": "USD", "cum_quantity": 3.0, "avg_price": 126.25, "pending_price_revision": False,
             "commission": None, "commission_currency": None,
             "con_id": 79000224,
+            "sec_type": "STK", "multiplier": "1",
             "symbol": "CBU3",
             "side": "BOT",
             "shares": 3.0,

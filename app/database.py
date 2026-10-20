@@ -67,6 +67,7 @@ def init_db():
     import backend.services.action.models  # noqa: F401  v3.2 投资行动模块 5 张表
     import backend.services.consumption.models  # noqa: F401  消费 Raw Layer 四张表
     import backend.services.execution_plan.models  # noqa: F401  v3.14 执行计划表
+    import backend.services.portfolio_history.models  # noqa: F401  B2 broker facts only
     # broker_sync retains its original import namespace.
     import sys
     from pathlib import Path
@@ -74,7 +75,7 @@ def init_db():
     import services.broker_sync.models  # noqa: F401
     engine = get_engine()
     if os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"):
-        from app.u2_schema import verify
+        from app.b2_schema import verify
         with engine.connect() as connection:
             verify(connection.connection.driver_connection)
         return  # no create_all, ALTER, default Portfolio or digest rewrite

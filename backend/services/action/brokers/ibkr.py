@@ -1027,6 +1027,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
                     "commission_currency": (fill.commissionReport.currency
                         if fill.commissionReport.execId == fill.execution.execId else None),
                     "con_id": int(fill.contract.conId or 0),
+                    "sec_type": str(getattr(fill.contract, "secType", "") or ""),
+                    "multiplier": str(getattr(fill.contract, "multiplier", "") or "1"),
                     "symbol": fill.contract.localSymbol or fill.contract.symbol or "",
                     "side": str(fill.execution.side or "").upper(),
                     "shares": self._finite_number(fill.execution.shares) or 0,
