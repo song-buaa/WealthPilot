@@ -249,6 +249,7 @@ export default function ConfirmOrderDialog({ open, onClose, strategy = {} as Sym
               {executed && <p role="status" data-testid="ibkr-existing-order">此请求已关联订单：{batch?.status} / {leg?.status}。不会重复准备或提交买单。</p>}
               {tradeStates.map(item => <div key={item.order_id} role="status" data-testid="trade-sync-result">
                 <p>{tradeLabels[item.trade_status] ?? item.trade_status} · 成交 {item.filled_quantity}/{item.ordered_quantity}</p>
+                <details><summary>订单状态诊断</summary><code>{item.trade_status}</code></details>
                 <p>实际成交均价：{item.average_filled_price ?? 'UNKNOWN'} {item.currency ?? ''} · 成交时间：{item.actual_filled_at ?? 'UNKNOWN'}</p>
                 <p>实际佣金：{item.actual_commission?.status === 'KNOWN' ? `${item.actual_commission.amount ?? '多币种，查询详情'} ${item.actual_commission.currency ?? ''}` : 'UNKNOWN，不能以预估费用替代'}</p>
                 <p>{tradeLabels[item.asset_sync.status] ?? item.asset_sync.status}</p>

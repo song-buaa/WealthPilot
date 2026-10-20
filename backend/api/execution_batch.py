@@ -135,6 +135,8 @@ def _serialize_batch(batch) -> dict:
 
 
 def _raise(exc: Exception):
+    if isinstance(exc, ExecutionSafetyError) and str(exc).startswith("CONFIRMATION_CONFLICT:"):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, LookupError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, PermissionError):
@@ -332,10 +334,11 @@ def confirm_batch(batch_id: str, body: dict | None = None):
     session = get_session()
     try:
         service = _service(session)
-        current = service.get_batch(batch_id)
-        if service.is_all_in(current) and (body or {}).get("confirmation_version") != current.confirmation_version:
-            raise ExecutionSafetyError("confirmation version 无效")
-        batch = service.confirm_batch(batch_id, risk_confirmation_text=(body or {}).get("risk_confirmation_text", ""))
+        version = (body or {}).get("confirmation_version")
+        if type(version) is not int or version < 0:
+            raise ExecutionSafetyError("CONFIRMATION_CONFLICT: expected confirmation version required")
+        batch = service.confirm_batch(batch_id, expected_version=version,
+            risk_confirmation_text=(body or {}).get("risk_confirmation_text", ""))
         session.commit()
         return _serialize_batch(batch)
     except Exception as exc:

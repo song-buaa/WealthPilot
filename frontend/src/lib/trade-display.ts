@@ -1,6 +1,7 @@
 // Presentation only: authority remains OrderManager / ExecutionBatch / U2.
 export const tradeLabels: Record<string, string> = {
   created: '待提交', pending: '待提交', submitted_to_broker: '已提交，等待成交',
+  broker_pending: '已提交，等待券商确认或成交',
   partially_filled: '部分成交', filled: '全部成交', cancelled: '已撤销', rejected: '已拒绝',
   expired: '已过期', unknown: 'UNKNOWN / 待券商对账，请勿重复提交',
   SYNC_PENDING: '持仓待同步', SYNC_RUNNING: '持仓同步中', SYNCED: '持仓及现金已同步且覆盖成交',

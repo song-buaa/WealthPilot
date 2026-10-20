@@ -825,19 +825,21 @@ class ExecutionBatchService:
                          for item, leg in zip(facts["legs"], batch.legs)]
         return hashlib.sha256(_json(facts).encode()).hexdigest()
 
-    def _lock_all_in_review(self, batch: ExecutionBatch) -> None:
+    def _lock_review(self, batch: ExecutionBatch) -> None:
         # Use the existing SQLite write-serialization contract for version changes
         # and submission. A simultaneous price edit cannot submit an old review.
-        if self.is_all_in(batch) and self.session.get_bind().dialect.name == "sqlite":
+        if self.session.get_bind().dialect.name == "sqlite":
             from sqlalchemy import text
             connection = self.session.connection().connection.driver_connection
             if not connection.in_transaction:
                 self.session.execute(text("BEGIN IMMEDIATE"))
             self.session.refresh(batch)
+            for leg in batch.legs:
+                self.session.refresh(leg)
 
     def reprice_all_in(self, batch_id: str, limits: dict | None, version: int) -> ExecutionBatch:
         batch = self.get_batch(batch_id)
-        self._lock_all_in_review(batch)
+        self._lock_review(batch)
         if not self.is_all_in(batch) or version != batch.confirmation_version:
             raise ExecutionSafetyError("confirmation version 无效")
         if batch.status in {"CANCELLED", "COMPLETED"} or any(leg.linked_order_id for leg in batch.legs):
@@ -872,12 +874,30 @@ class ExecutionBatchService:
         policy.pop("risk_acknowledged", None)  # changed review always needs its own acknowledgement
         batch.execution_policy = _json(policy)
 
-    def confirm_batch(self, batch_id: str, *, risk_confirmation_text="") -> ExecutionBatch:
+    def confirm_batch(self, batch_id: str, *, expected_version: int | None = None,
+                      risk_confirmation_text="") -> ExecutionBatch:
         from backend.services.action.ownership import execution_owner
         from backend.services.action.risk_engine import CONFIRMATION_TEXT
-        batch = self.get_batch(batch_id)
+        # Do not autoflush a stale caller projection before taking the existing
+        # writer lock. Legacy in-process callers bind their current review;
+        # the Web API always supplies the version the user actually reviewed.
+        with self.session.no_autoflush:
+            batch = self.get_batch(batch_id)
+            version = batch.confirmation_version if expected_version is None else expected_version
+            reviewed = self.review_fingerprint(batch)
+            self._lock_review(batch)
+            if type(version) is not int or version != batch.confirmation_version:
+                raise ExecutionSafetyError("CONFIRMATION_CONFLICT: confirmation version changed")
+            if reviewed != self.review_fingerprint(batch):
+                raise ExecutionSafetyError("CONFIRMATION_CONFLICT: review_fingerprint changed")
         if batch.status != "READY":
-            raise ExecutionSafetyError(f"Batch status={batch.status}，不可确认")
+            raise ExecutionSafetyError(f"CONFIRMATION_CONFLICT: Batch status={batch.status}，不可确认")
+        pending = [leg for leg in batch.legs if not leg.linked_order_id]
+        # The original multi-leg remaining-review path may retain immutable
+        # linked legs. Only its freshly reviewed, unclaimed READY legs qualify.
+        if (not pending or any(leg.status != "READY" for leg in pending)
+                or (self.is_all_in(batch) and len(pending) != len(batch.legs))):
+            raise ExecutionSafetyError("CONFIRMATION_CONFLICT: leg already claimed or not READY")
         self.assert_review_fresh(batch)
         owner = execution_owner(self.session, self.adapter)
         policy = json.loads(batch.execution_policy)

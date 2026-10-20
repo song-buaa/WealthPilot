@@ -400,7 +400,7 @@ test('B3 30-second expiry and changed economics require a new acknowledgement',a
   await resetIBKR(request)
 })
 
-for(const outcome of ['filled','partially_filled','unknown','network_timeout']) {
+for(const outcome of ['filled','partially_filled','broker_pending','unknown','network_timeout']) {
   test(`B3 one final click and duplicate protection: ${outcome}`,async({page,request})=>{
     await resetIBKR(request)
     const before=await(await request.get(`${base}/__test/ibkr-counts`)).json()
@@ -420,8 +420,8 @@ for(const outcome of ['filled','partially_filled','unknown','network_timeout']) 
     })
     await page.route(/\/api\/execution-batches\/[^/]+$/,async route=>{
       if(route.request().method()!=='GET'||!confirmed){await route.fallback();return}
-      const legs=(confirmed.legs as Record<string,unknown>[]).map(leg=>({...leg,linked_order_id:'synthetic-result',status:outcome==='filled'?'FILLED':outcome==='partially_filled'?'PARTIALLY_FILLED':'UNKNOWN'}))
-      await route.fulfill({json:{...confirmed,status:outcome==='filled'?'COMPLETED':'NEEDS_ATTENTION',legs}})
+      const legs=(confirmed.legs as Record<string,unknown>[]).map(leg=>({...leg,linked_order_id:'synthetic-result',status:outcome==='filled'?'FILLED':outcome==='partially_filled'?'PARTIALLY_FILLED':outcome==='broker_pending'?'OPEN':'UNKNOWN'}))
+      await route.fulfill({json:{...confirmed,status:outcome==='filled'?'COMPLETED':outcome==='broker_pending'?'SUBMITTED':'NEEDS_ATTENTION',legs}})
     })
     await page.route('**/action/trade-and-sync-status?*',r=>r.fulfill({json:{items:[{order_id:'synthetic-result',trade_status:outcome==='network_timeout'?'unknown':outcome,filled_quantity:outcome==='filled'?39:outcome==='partially_filled'?10:0,ordered_quantity:39,asset_sync:{status:outcome==='filled'?'SYNC_UNVERIFIED':outcome==='partially_filled'?'SYNC_RUNNING':'SYNC_PENDING'}}]}}))
     await page.goto(ibkrLink())
@@ -434,7 +434,11 @@ for(const outcome of ['filled','partially_filled','unknown','network_timeout']) 
     await final.getByTestId('submit-btn').evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click()})
     await expect(final.getByTestId('submit-btn')).toBeDisabled()
     await expect(final.getByTestId('trade-sync-result')).toBeVisible()
-    await expect(final).toContainText(outcome==='filled'?'覆盖尚未证实':outcome==='partially_filled'?'部分成交':'待券商对账')
+    await expect(final).toContainText(outcome==='filled'?'覆盖尚未证实':outcome==='partially_filled'?'部分成交':outcome==='broker_pending'?'已提交，等待券商确认或成交':'待券商对账')
+    if(outcome==='broker_pending') {
+      await final.getByText('订单状态诊断',{exact:true}).click()
+      await expect(final.locator('code')).toHaveText('broker_pending')
+    }
     expect(submitted).toBe(1)
     const counts=await(await request.get(`${base}/__test/ibkr-counts`)).json()
     expect(counts.real_order_calls).toBe(0)

@@ -239,8 +239,8 @@ def test_price_edit_rebuilds_quote_fees_and_invalidates_confirmed_version(api):
     with Session(engine, info={"portfolio_id": 1}) as s:
         assert s.get(ExecutionBatch,old['id']).status=='CANCELLED'
         assert not s.get(ExecutionBatch,old['id']).confirmation_hash
-    assert client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==422
-    assert client.post('/api/execution-batches/'+new['id']+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==422
+    assert client.post(route+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==409
+    assert client.post('/api/execution-batches/'+new['id']+'/confirm',json={'risk_confirmation_text':'我已知晓风险并坚持下单','confirmation_version':old['confirmation_version']}).status_code==409
     assert not adapter.place_calls
 
 
