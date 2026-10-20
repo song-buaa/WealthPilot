@@ -552,6 +552,7 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnl
   const amount = (value: number | null | undefined) => value == null ? '待获取' : `${value.toLocaleString('en-US', {maximumFractionDigits: 4})} USD`
   const attention = batch?.attention_reason
   return <section data-testid="ibkr-review-fields" style={{fontSize: 13, lineHeight: 1.8, overflowWrap: 'anywhere'}}>
+    <div><b>证券名称：</b><span data-testid="ibkr-security-name">{leg?.long_name || '待券商核实'}</span></div>
     <div><b>标的：</b>IB01:LSE · <b>方向：</b>买入 BUY · <b>券商：</b>IBKR · LIMIT / DAY</div>
     <details><summary>证券身份及诊断</summary><div><b>合约：</b>conId {instrument && ('resolved_con_id' in instrument ? instrument.resolved_con_id : instrument.con_id)} · {instrument?.isin}</div></details>
     <div><b>上市 / 执行 / 币种：</b>LSEETF / SMART / USD · Acc</div>
