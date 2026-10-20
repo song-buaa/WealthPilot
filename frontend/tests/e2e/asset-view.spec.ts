@@ -97,6 +97,19 @@ test('failed attempt reason is shown separately from last-good quality', async (
   await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
 })
 
+test('D1 scoped grades and manual verification tasks preserve the fixed totals', async ({ page }) => {
+  await page.goto(`${base}/#/asset-view/${snapshot}`)
+  const grades = page.getByRole('region', { name: '分析资格' })
+  await expect(grades).toContainText('A · 战略配置分析：可进行')
+  await expect(grades).toContainText('B · 调仓金额规划：条件不足')
+  await expect(grades).toContainText('C · 精确交易参数：条件不足')
+  await expect(grades).toContainText('不能替代实盘行情')
+  const tasks = page.getByRole('region', { name: '人工核对清单' })
+  await expect(tasks).toContainText('PENSION_HOLDING_LINK_UNVERIFIED')
+  await expect(tasks.getByRole('link').first()).toHaveAttribute('href', '/#/wealth')
+  await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
+})
+
 test('new analysis discloses unverified fill sync and preserves the previous fixed view', async ({ page,request }) => {
   const response=await request.post(base+'/__test/pending-fill')
   const prepared=await response.json()

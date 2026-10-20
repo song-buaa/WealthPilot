@@ -54,3 +54,54 @@ def is_market_open(market: str, dt_utc: datetime | None = None) -> bool:
         return morning or afternoon
 
     return False
+
+
+def valuation_quality(value, market, *, at=None, basis=None):
+    """Assess a SOURCE price time against local exchange sessions, never fetch time.
+
+    Trading trigger hours above keep their original semantics. This read-only
+    assessment uses the maintained session library, including holidays/half-days.
+    Unsupported markets/calendar dates fail unknown, never weekday guessing.
+    """
+    at = at or datetime.now(timezone.utc)
+    result = {"status": "unknown", "reason_code": "PRICE_TIME_UNKNOWN", "price_as_of": value}
+    if not value:
+        return result
+    try:
+        import exchange_calendars as calendars
+        import pandas as pd
+        code = {"US":"XNYS", "HK":"XHKG", "SH":"XSHG", "SZ":"XSHG",
+                "LSE":"XLON", "LSEETF":"XLON", "UK":"XLON"}.get(market)
+        if not code:
+            return {**result, "reason_code":"MARKET_CALENDAR_UNKNOWN"}
+        calendar = calendars.get_calendar(code)
+        current = pd.Timestamp(at)
+        if current.tzinfo is None:
+            return result
+        schedule = calendar.schedule.loc[(current-pd.Timedelta(days=20)).date():current.date()]
+        if schedule.empty or current.date() > calendar.last_session.date():
+            return {**result, "reason_code":"MARKET_CALENDAR_OUT_OF_RANGE"}
+        finished = schedule[schedule["close"] <= current]
+        minute = current.floor("min")
+        opened = calendar.is_open_on_minute(minute)
+        daily = len(value) == 10
+        stamp = pd.Timestamp(value)
+        if daily:
+            # A date alone is not a timestamp and only qualifies as an explicit close.
+            if basis != "close":
+                return result
+            closed = not finished.empty and stamp.date() == finished.index[-1].date()
+        else:
+            if stamp.tzinfo is None:
+                return result
+            if stamp > current:
+                return {**result, "status":"stale", "reason_code":"PRICE_TIME_FUTURE"}
+            if opened and (current-stamp).total_seconds() <= 300 and calendar.is_open_on_minute(stamp.floor("min")):
+                return {**result, "status":"intraday", "reason_code":None, "calendar":code}
+            closed = not finished.empty and abs((stamp-finished.iloc[-1]["close"]).total_seconds()) <= 300
+        if not opened and closed:
+            return {**result, "status":"recent_close", "reason_code":None, "calendar":code,
+                    "session_date":finished.index[-1].date().isoformat()}
+        return {**result, "status":"stale", "reason_code":"PRICE_STALE", "calendar":code}
+    except (ImportError, ValueError, TypeError, KeyError, OverflowError):
+        return {**result, "reason_code":"MARKET_CALENDAR_OR_TIME_UNVERIFIED"}

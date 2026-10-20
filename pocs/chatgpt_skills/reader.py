@@ -10,7 +10,8 @@ from pocs.poc02_wealth_mcp.reader import readonly_snapshot, service_sessions, Re
 MANUAL_FIELDS = ("id", "kind", "name", "item_type", "category", "source_type", "sync_mode",
                  "current_value", "currency", "original_value", "fx_rate_to_cny", "fx_rate_date",
                  "included_in_net_worth", "already_investment_accounted", "effective_included_in_net_worth",
-                 "value_as_of", "last_verified_at", "updated_at", "freshness")
+                 "value_as_of", "last_verified_at", "updated_at", "freshness",
+                 "quality_issues", "review_required", "update_path")
 POSITION_FIELDS = ("id", "name", "ticker", "platform", "asset_class", "currency", "quantity",
                    "broker", "broker_security_type", "security_symbol", "security_currency", "holding_channel",
                    "cost_price", "cost_value_cny", "price_basis", "current_price", "market_value_cny", "original_currency", "original_value",

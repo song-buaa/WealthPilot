@@ -95,6 +95,10 @@ class SnowballSyncService:
                 raise ValueError("INCOMPLETE_SOURCE")
             self._source_metadata = {"complete":True, "source":"ibkr_account_download",
                 "positions_as_of":None, "cash_as_of":account_info.get("cash_as_of"),
+                "queried_at":account_info.get("account_queried_at"),
+                "time_evidence":{"positions_as_of":"IBKR_PORTFOLIO_TIME_UNSUPPORTED",
+                    "price_as_of":"IBKR_PORTFOLIO_PRICE_TIME_UNSUPPORTED",
+                    "cash_as_of":"IBKR_ACCOUNT_VALUE_TIME_UNSUPPORTED"},
                 "price_as_of":None, "issues":["BROKER_VALUATION_TIME_UNKNOWN"] if raw_positions else []}
             return self.adapter.to_positions(
                 raw_positions,

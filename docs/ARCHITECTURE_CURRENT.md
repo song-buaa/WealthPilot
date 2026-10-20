@@ -1,6 +1,6 @@
 # WealthPilot 当前系统架构
 
-> 2026-10-19：U2 开发基线为 `e06a6995a2f830aa527cb0a0c506b3153d11dc8d`（含已合入 U1）。用户已确认 B0、U0 及 CNH 修复生产发布；本轮未访问生产，U1/U2 的生产启用待另行核实。U2 已合入当前开发基线；本轮未核实 U1/U2 生产启用状态。第 15 节为国金原生来源 PR 候选。2026-10-16 的功能/部署记录保留为历史观察。版本观察见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。代码、CI、组件部署和运行验收分别记录，main 最新提交不自动代表 Mini 已部署。
+> 2026-10-20：D1 基线为最新 `origin/main` `b4a5047fab1b4d53d46729f98c752b62bb1fd290`，含 U1/U2 和国金原生来源。用户确认相关阶段已生产启用；本轮只读核对到 Mini 国金发布记录报告同一 SHA，未重新探测生产服务。D1 为本 PR 候选，不能当作生产已升级。2026-10-16 等旧记录保留其当时事实。版本/授权见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -141,7 +141,7 @@ Web `wealth_service.get_summary` 会记录聚合快照；MCP overview 通过 [re
 
 当前存在两种执行入口，共用原底层订单权威：普通 ActionDraft → SymbolStrategy → OrderManager；Typed Intent / IB01 budget → ExecutionBatch / ExecutionLeg → SymbolStrategy → OrderManager。二者是现有职责分工；本轮不合并或新增交易体系。实际 UI 的简洁编辑及最终确认体验仍需完整验收，不能只证明 Batch 对象存在。
 
-**成交与资产同步分权**：B0/U0/U1 原本没有成交后同步消费者，旧[模拟验证](GOVERNANCE_VALIDATION_REPORT.md)保留当时证据。U2 候选在原观察事务记录进度，原 OrderPoller 在订单事务结束后调用原 SyncExecutor，复用 Run claim/fence/Upsert；只有数量/身份与原币现金/实际费用覆盖核实才报告 SYNCED（第 14 节）。订单 filled 仍不等于资产已同步，未证实必须披露。
+**成交与资产同步分权**：B0/U0/U1 原本没有成交后同步消费者，旧[模拟验证](GOVERNANCE_VALIDATION_REPORT.md)保留当时证据。U2 在原观察事务记录进度，原 OrderPoller 在订单事务结束后调用原 SyncExecutor，复用 Run claim/fence/Upsert；只有数量/身份与原币现金/实际费用覆盖核实才报告 SYNCED（第 14 节）。订单 filled 仍不等于资产已同步，未证实必须披露。
 
 生产 real MCP 的七工具没有订单状态查询或主动推送；Mock `get_trade_order_status` 会持久化状态，不能直接复制为生产只读工具。要让 ChatGPT 读订单结果，需另行评审现有 OrderRecord 的只读最小投影及权限；复用已存在的投资详情工具可以查询已同步持仓，不能承诺成交后即时更新。
 
@@ -188,7 +188,7 @@ U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite �
 
 PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影指纹；freshness 复用和冻结副本内均验证，不把最近 success 当当前行完整证明。无旧证据须刷新或降级，不事后认领历史事实。原 PEER 输出前重核同 ID 时效，Web 采用最终质量；最近失败尝试使用原安全错误白名单，与 last-good 质量分列。未新增 Schema。
 
-## 14. U2 成交驱动同步与只读状态（PR 候选）
+## 14. U2 成交驱动同步与只读状态（已合入）
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
 
@@ -201,10 +201,18 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 仅一列、零索引、零新表，显式 `--stage u2` 原迁移流程，Digest/receipt/停写/启写后不覆盖旧备份约束保留。设计、证据限制、测试及未来生产验收见 [U2 实现说明](U2_IMPLEMENTATION.md)。本轮不部署或进行真实交易。
 
 
-## 15. 国金原生三文件来源（本 PR 候选）
+## 15. 国金原生三文件来源（已合入）
 
 原 GuojinSyncService/Adapter 增加全能行 GB18030/TAB 三文件读取；旧 MiniQMT HTTP 来源退出，22:00 不再自动拉国金，其他三券商不变。导出与入库解耦，无 GUI 调度/密码逻辑。同步仍由原 SyncExecutor → Repository claim/fence → Snapshot/Upsert 原子发布；Schema 无变化。
 
 同账户的沪/深港通用渠道限定 symbol 保留底层身份；原 symbol 读取投影及聚合器/issuer 曝光复用同一证券身份，数量/成本成员不混合。人民币市值/成本/参考盈亏原样保存，港币报价在 Snapshot 证据中分列，不二次 FX；聚合器对原生行采用已存成本，不用参考盈亏反算成本。
 
 HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI 账户/完整行数/查询时间与文件哈希收据，未知行情日期仍 partial。当前账户的旧 API 汇总/清仓由完整快照替换；未知截图/导入行须显式 CAS 决策，否则整批拒绝且保留 last-good。具体合同、入口与生产核对/回滚见 [国金原生同步](GUOJIN_NATIVE_SYNC.md)。
+
+## 16. D1 资产质量（本 PR 候选）
+
+发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 补充有官方 listing 证据的 Tiger QQQ 例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
+
+原 U1 capture/public_view 在同一不可变输入上输出 A 战略配置、B 大致金额、C 精确参数及逐项阻断；原 can_propose_rebalance 对应 C。可选 analysis_scope 与原 symbol 限定用途/相关证券，贷款陈旧不阻断无关单标；养老金关联未证实继续人工核对。原 WealthService 仍负责主/副表与去重，编辑时间不再冒充余额有效日期。
+
+来源查询/抓取/发布与持仓/现金/行情有效时间分离：Tiger 服务器资产更新时间仅用于现金，IBKR 本地账户读取时间不再填 source cash_as_of。原 market_hours 增加基于本地交易日历的估值评估，原交易触发判断不变。Web/MCP/PEER 共用质量 owner，输出时重新核同一视图；资格不替代任何 B0 交易门。零 Schema 变更，旧固定 payload 不改，详见 [D1 实现与生产验收边界](D1_IMPLEMENTATION.md)。

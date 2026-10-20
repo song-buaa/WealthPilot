@@ -6,7 +6,11 @@ interface View {
   captured_at: string
   context_current: boolean
   data_quality: { status: string; issues: string[]; can_propose_rebalance: boolean;
+    analysis_eligibility?: Record<'A' | 'B' | 'C', { allowed: boolean; blockers: { code: string; symbol?: string; id?: number }[] }>;
+    manual_review_required?: { id: number; name: string; current_value: number; value_as_of: string; reason_codes: string[]; update_path: string }[];
     accounts: { account_ref: string; broker: string; account_synced_at: string | null; price_as_of?: string | null;
+      fetched_at?: string | null; queried_at?: string | Record<string, string> | null;
+      positions_as_of?: string | null; cash_as_of?: string | null;
       last_attempt_time?: string | null; last_attempt_status?: string; last_attempt_reason_code?: string | null;
       last_good_quality?: string | null }[] }
   views: {
@@ -68,6 +72,17 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
         数据部分过期或证据不足，仅作一般分析，不能直接用于精确调仓。
         <p className="text-sm">{view.data_quality.issues.join('、')}</p>
       </div>}
+      {view.data_quality.analysis_eligibility && <section aria-label="分析资格" className="space-y-2">
+        <h2 className="font-semibold">分析资格</h2>
+        {(['A', 'B', 'C'] as const).map(level => {
+          const q = view.data_quality.analysis_eligibility![level]
+          return <div key={level}>
+            <p>{level} · {{ A: '战略配置分析', B: '调仓金额规划', C: '精确交易参数' }[level]}：{q.allowed ? '可进行' : '条件不足'}</p>
+            {!q.allowed && <p className="text-sm">{q.blockers.map(b => `${b.symbol ?? (b.id ? `项目 ${b.id}` : '')} ${b.code}`).join('；')}</p>}
+          </div>
+        })}
+        <p className="text-sm">资格仅适用于本次分析范围；不能替代实盘行情、WhatIf、资金检查和 Web 最终人工确认。</p>
+      </section>}
       <div className="grid gap-4 sm:grid-cols-3">
         <p>总资产 ¥{money(view.views.wealth_summary.total_assets)}</p>
         <p>负债 ¥{money(view.views.wealth_summary.total_liabilities)}</p>
@@ -77,8 +92,17 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
       {view.data_quality.accounts.map(a => <p key={a.account_ref}>
         {a.broker}：最近尝试 {a.last_attempt_time ?? '未知'}（{a.last_attempt_status ?? '未知'}）
         {a.last_attempt_reason_code && <>；失败原因 {a.last_attempt_reason_code}</>}；
-        最近成功同步 {a.account_synced_at ?? '未知'}；成功数据质量 {a.last_good_quality ?? '未知'}；证券估值 {a.price_as_of ?? '未知'}
+        最近成功同步 {a.account_synced_at ?? '未知'}；成功数据质量 {a.last_good_quality ?? '未知'}；证券估值 {a.price_as_of ?? '未知'}；
+        抓取时间 {a.fetched_at ?? '未知'}；来源查询 {typeof a.queried_at === 'object' ? JSON.stringify(a.queried_at) : a.queried_at ?? '未知'}；
+        持仓有效时间 {a.positions_as_of ?? '未知'}；现金有效时间 {a.cash_as_of ?? '未知'}
       </p>)}
+      {!!view.data_quality.manual_review_required?.length && <section aria-label="人工核对清单">
+        <h2 className="font-semibold">待用户复核的手工资产与负债</h2>
+        {view.data_quality.manual_review_required.map(item => <p key={item.id}>
+          {item.name}：¥{money(item.current_value)}；有效日期 {item.value_as_of ?? '未知'}；{item.reason_codes.join('、')}。
+          <a className="underline" href={item.update_path}>使用原财富页面更新</a>
+        </p>)}
+      </section>}
       <h2 className="font-semibold">证券明细</h2>
       <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>
         <th>证券</th><th>账户</th><th>数量</th><th>原币成本单价</th><th>CNY 市值</th>

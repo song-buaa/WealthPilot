@@ -13,6 +13,7 @@ from typing import Any
 
 from backend.services.instruments.verified_classifications import (
     find_verified_classification,
+    find_verified_listing,
 )
 
 
@@ -84,6 +85,7 @@ class AssetClassificationEvidence:
     exchange: str | None = None
     primary_exchange: str | None = None
     currency: str | None = None
+    listing_symbol: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +224,10 @@ def classify_instrument(evidence: AssetClassificationEvidence) -> AssetClassific
         con_id=evidence.con_id,
         isin=evidence.isin,
     )
+    listing, listing_conflict = find_verified_listing(evidence)
+    identity_conflict = identity_conflict or listing_conflict
+    if verified is None:
+        verified = listing
     if identity_conflict:
         return AssetClassification(
             broker_security_type=broker_security_type,

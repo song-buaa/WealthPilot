@@ -47,8 +47,21 @@ def _now() -> datetime:
 
 def _item_to_dict(item: WealthItem) -> dict[str, Any]:
     today = date.today()
-    age_days = max((today - item.updated_at.date()).days, 0)
+    # Editing a label today must not rejuvenate a previously confirmed balance.
+    age_days = max((today - item.value_as_of).days, (today-item.last_verified_at.date()).days,
+                   (today-item.updated_at.date()).days, 0)
     freshness = "latest" if age_days <= 30 else "suggested_update" if age_days <= 90 else "long_unupdated"
+    quality_issues = []
+    if not 0 <= (today-item.value_as_of).days <= 30:
+        quality_issues.append("MANUAL_VALUE_STALE")
+    if age_days > 30 and "MANUAL_VALUE_STALE" not in quality_issues:
+        quality_issues.append("MANUAL_CONFIRMATION_STALE")
+    if item.currency != "CNY":
+        from app.fx_service import fx_date_is_current
+        if not fx_date_is_current(item.fx_rate_date) or not item.fx_rate_to_cny or item.fx_rate_to_cny <= 0:
+            quality_issues.append("MANUAL_FX_UNVERIFIED")
+    if item.already_investment_accounted:
+        quality_issues.append("PENSION_HOLDING_LINK_UNVERIFIED")
     effective_included = bool(item.included_in_net_worth)
     return {
         "id": item.id,
@@ -71,6 +84,9 @@ def _item_to_dict(item: WealthItem) -> dict[str, Any]:
         "updated_at": item.updated_at.isoformat(),
         "age_days": age_days,
         "freshness": freshness,
+        "quality_issues": quality_issues,
+        "review_required": bool(quality_issues),
+        "update_path": "/#/wealth",
         "notes": item.notes,
     }
 

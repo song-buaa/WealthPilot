@@ -1279,7 +1279,10 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 # Dashboard 现金以逐币种 CashBalance 为真值；BASE 是折算汇总，
                 # 与各原币行同时使用会重复计算。
                 info["cash_balances"] = self._native_cash_balances(values)
-                info["cash_as_of"] = datetime.now(timezone.utc).isoformat()
+                # accountDownloadEnd proves completion of this read, not the
+                # effective source time of each cached CashBalance fact.
+                info["account_queried_at"] = datetime.now(timezone.utc).isoformat()
+                info["cash_as_of"] = None
                 info["account_snapshot_complete"] = True  # awaited accountDownloadEnd above
                 return info
 

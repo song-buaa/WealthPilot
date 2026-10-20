@@ -1,8 +1,8 @@
 """Data-driven economic classifications verified by stable instrument IDs.
 
-Symbols are deliberately absent from the lookup keys.  A ticker is a mutable
-listing alias; conId and ISIN are the durable evidence used by the canonical
-classifier.
+The main lookup uses durable conId/ISIN evidence. The narrowly source-qualified
+QQQ listing correction below handles Tiger STK ambiguity; it is versioned,
+officially evidenced and never takes precedence over conflicting stable IDs.
 """
 from __future__ import annotations
 
@@ -89,6 +89,21 @@ BY_ISIN = {
     for item in VERIFIED_ASSET_CLASSIFICATIONS
     if item.isin
 }
+
+
+def find_verified_listing(evidence):
+    """Narrow source-qualified correction for Tiger's STK wrapper ambiguity.
+
+    No generic ticker/name heuristics. Conflicting stable IDs fail closed.
+    Official listing/ISIN: https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html
+    """
+    if (evidence.broker, evidence.listing_symbol, evidence.currency) != ("tiger", "QQQ:US", "USD"):
+        return None, False
+    if evidence.con_id or evidence.isin and evidence.isin.upper() != "US46090E1038":
+        return None, True
+    return VerifiedAssetClassification(None, "US46090E1038", "ETF", "EQUITY", "EQUITY_LARGE_CAP",
+        "https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html",
+        "2026-10-20"), False
 
 
 def find_verified_classification(

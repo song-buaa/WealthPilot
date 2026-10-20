@@ -68,6 +68,10 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                     last_good_quality=quality["quality"],
                     account_synced_at=good.finished_at.isoformat() if good and good.finished_at else None,
                     **quality)
+                if entry["account_synced_at"]:
+                    from datetime import timezone
+                    stamp = good.finished_at
+                    entry["account_synced_at"] = (stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp).isoformat()
                 entry["fill_sync_pending"] = (broker,account) in unsettled
                 if entry["fill_sync_pending"]:
                     issues.add("FILL_SYNC_PENDING_OR_UNVERIFIED")
@@ -91,8 +95,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                 entry['time_quality'] = {name:time_quality(quality.get(name), limit, daily=(name=='price_as_of'))
                     for name,limit in [('positions_as_of',300),('cash_as_of',300),('price_as_of',86400)]}
                 for relevant,name,code in [(any(p.vehicle_type!='CASH' for p in owned),'positions_as_of','POSITION_TIME'),
-                        (any(p.vehicle_type=='CASH' for p in owned),'cash_as_of','CASH_TIME'),
-                        (any(p.vehicle_type!='CASH' for p in owned),'price_as_of','SECURITY_VALUATION_DATE')]:
+                        (any(p.vehicle_type=='CASH' for p in owned),'cash_as_of','CASH_TIME')]:
                     if relevant and entry['time_quality'][name]!='current':
                         issues.add(code+'_'+entry['time_quality'][name].upper())
                 if quality.get("quality") != "current":
@@ -113,15 +116,28 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                 from app.fx_service import fx_date_is_current
                 if not fx_date_is_current(item["fx_rate_date"]):
                     issues.add("MANUAL_FX_UNVERIFIED")
-        quality = dict(status="partial" if issues else "ok", issues=sorted(issues),
+        by_ref = {a["account_ref"]:a for a in accounts}
+        security_inputs = []
+        for item in details["items"]:
+            a = by_ref.get(item["account_ref"], {})
+            security_inputs.append({**{k:item.get(k) for k in ("id","symbol","ticker","account_ref","security_symbol",
+                "vehicle_type","economic_asset_class","market_value_cny","currency","original_currency","fx_rate_date","fx_rate_to_cny",
+                "quantity","current_price","price_basis")},
+                "fx_quality":(a.get("fx") or {}).get(item.get("original_currency") or item.get("currency"),{}).get("quality","unverified"),
+                **{k:a.get(k) for k in ("positions_as_of","cash_as_of","price_as_of","price_time_basis","time_evidence")}})
+        quality = dict(status="partial" if issues else "ok", issues=sorted(issues), policy_version="d1.1",
             can_propose_rebalance=not issues, accounts=accounts,
+            security_inputs=security_inputs,
             manual_inputs=[{k:item[k] for k in ('id','source_type','sync_mode','value_as_of','last_verified_at',
                 'included_in_net_worth','already_investment_accounted')} for item in manual['items']],
             time_contract="account_synced_at / positions_as_of / cash_as_of / price_as_of / fx.rate_date / manual.value_as_of are distinct; captured_at is not a source date")
-        return dict(schema_version=VERSION, pipeline=PIPELINE, state="ready", portfolio_id=portfolio_id,
+        result = dict(schema_version=VERSION, pipeline=PIPELINE, state="ready", portfolio_id=portfolio_id,
             captured_at=internal.get("frozen_at",now().isoformat()), data_quality=quality, issuer_exposure=companies,
             views=dict(get_wealth_overview=overview, get_manual_wealth_items=manual,
                        get_investment_details=details, wealth_summary=wealth,
                        portfolio_summary=details["portfolio_summary"], positions=positions),
             totals={k:totals[k] for k in ("total_assets", "total_liabilities", "net_worth", "investment_assets",
                  "investment_profit_loss", "non_investment_assets", "pension_benefit_value")}, internal=internal)
+        from app.asset_views import qualify_view
+        qualify_view(result, at=now())
+        return result

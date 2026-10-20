@@ -24,6 +24,7 @@ class AnalysisRequest(BaseModel):
     symbol: str | None = Field(default=None, min_length=1, max_length=80)
     history: list[Turn] = Field(default_factory=list, max_length=16)
     snapshot_id: str | None = Field(default=None, pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')
+    analysis_scope: Literal['investments', 'net_worth'] = 'investments'
 
 
 class AnalysisResult(BaseModel):
@@ -190,7 +191,9 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         view = load_view(path, portfolio_id, request.snapshot_id, contract)
         with frozen_input(view) as fixed_path:
             return await analyze(fixed_path, portfolio_id, scenario, arguments, synthetic=synthetic,
-                                 worker_process=worker_process, asset_view=public_view(view))
+                                 worker_process=worker_process, asset_view=public_view(view,
+                                     symbol=request.symbol if scenario == 'analyze_position' else None,
+                                     analysis_scope=request.analysis_scope))
     conversation='mcp-analysis-'+uuid.uuid4().hex
     result=AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[],
                           queried_at=datetime.now(timezone.utc).isoformat(),conclusion='')
@@ -211,8 +214,11 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             captured.update(plan=plan,executed=executed,expressed=expressed,reviewed=reviewed)
         prefix={'analyze_position':'单标的投资决策','review_portfolio':'投资组合与资产配置评估','analyze_performance':'当前持仓收益表现分析'}[scenario]
         question=prefix+'：'+request.question
+        if asset_view and asset_view['data_quality'].get('analysis_eligibility'):
+            question+='\n本次分析资格（仅限所列范围；不能代替交易授权）：'+json.dumps(
+                {k:asset_view['data_quality'][k] for k in ('qualification_scope','analysis_eligibility')},ensure_ascii=False)
         if asset_view and not asset_view['data_quality']['can_propose_rebalance']:
-            question+='\n本次固定资产数据存在过期、未知或不完整证据，仅做一般非交易分析。明确说明限制，不给出可直接执行的精确调仓数量、比例或价格。'
+            question+='\n本次固定资产数据存在过期、未知或不完整证据。仅在明确允许的 A 战略配置/B 金额规划范围内分析并披露限制；不提供可直接执行的精确数量或限价。'
         if request.symbol:
             question+='\n本次明确分析标的：'+request.symbol
         if scenario=='analyze_performance':

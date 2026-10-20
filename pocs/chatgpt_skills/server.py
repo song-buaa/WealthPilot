@@ -96,7 +96,9 @@ def create_server(settings):
     prepare_instructions = (" For a new portfolio evaluation, FIRST call prepare_asset_analysis once with a new stable analysis_request_id. "
         "Reuse the SAME ID after timeout/pending; do not create another task to retry. When ready pass its snapshot_id to all wealth, holdings and professional analysis reads for this task. "
         "If pending, wait/retry the same prepare; if expired or unavailable, explain the limitation. Never silently substitute live data for a snapshot_id. "
-        "When can_propose_rebalance=false, offer general analysis with explicit warnings, not a precise executable rebalancing plan.") if prepare_config else ""
+        "Follow data_quality.analysis_eligibility A/B/C and their scoped blockers: A strategic allocation, B approximate amounts, C precise quantities/prices. "
+        "Use request.analysis_scope=net_worth for net-worth/loan/solvency planning and request.symbol for an explicit single-security scope. "
+        "When can_propose_rebalance=false, preserve warnings and do not give precise executable quantities/prices. Eligibility never replaces final Web authorization.") if prepare_config else ""
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
         instructions=("For professional analysis use analyze_position/review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else

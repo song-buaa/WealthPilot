@@ -120,9 +120,23 @@ class TigerSyncService:
             positions.append(cash_position("tiger", self.account_id, currency, amount, snapshot_time))
         if not any(p.broker_security_type == "CASH" for p in positions):
             raise ValueError("INCOMPLETE_SOURCE")
+        # PortfolioAccount.update_timestamp is the SDK's server asset-update
+        # millisecond epoch, NOT a security quote/position timestamp.
+        cash_time = None
+        try:
+            value = getattr(assets, "update_timestamp", None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 10**12:
+                stamp = datetime.fromtimestamp(value/1000, timezone.utc)
+                if stamp <= datetime.now(timezone.utc):
+                    cash_time = stamp.isoformat()
+        except (ValueError, OverflowError, OSError):
+            pass
         self._source_metadata = {"complete":True, "source":"tiger_api",
             "coverage":["STK","FUND","CASH"], "positions_as_of":None,
-            "cash_as_of":None, "price_as_of":None, "issues":["BROKER_VALUATION_TIME_UNKNOWN"]}
+            "cash_as_of":cash_time, "price_as_of":None, "issues":["BROKER_VALUATION_TIME_UNKNOWN"],
+            "time_evidence":{"positions_as_of":"TIGER_3_5_8_POSITION_TIME_UNSUPPORTED",
+                "price_as_of":"TIGER_3_5_8_PRICE_TIME_UNSUPPORTED",
+                "cash_as_of":"TIGER_PORTFOLIO_ACCOUNT_UPDATE_TIMESTAMP" if cash_time else "TIGER_CASH_TIME_UNAVAILABLE"}}
         return positions
 
     def fetch_account_summary(self) -> dict:

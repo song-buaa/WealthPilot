@@ -96,9 +96,17 @@ def _public_quality(run):
         return {"quality":"unavailable","issues":["NO_SUCCESSFUL_SYNC"]}
     import json
     meta = json.loads(run.context_json or "{}") or {"quality":"partial","issues":["SOURCE_EVIDENCE_UNKNOWN"]}
-    return {key:meta.get(key) for key in ("quality","issues","source","complete","coverage","markets","empty_confirmed","fetched_at",
+    result = {key:meta.get(key) for key in ("quality","issues","source","complete","coverage","markets","empty_confirmed","fetched_at",
         "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx",
-        "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count")}
+        "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count",
+        "time_evidence","price_time_basis")}
+    # Pre-D1 IBKR cash_as_of was a local download clock. Reusing that last-good
+    # must not turn it into authoritative source time in a NEW analysis view.
+    # Preserve stored Run/history; only the current quality projection degrades.
+    if meta.get("source") == "ibkr_account_download" and not (meta.get("time_evidence") or {}).get("cash_as_of"):
+        result.update(cash_as_of=None, time_evidence={"cash_as_of":"LEGACY_IBKR_CASH_SOURCE_TIME_UNVERIFIED"},
+            quality="partial", issues=sorted(set(meta.get("issues") or []) | {"LEGACY_IBKR_CASH_SOURCE_TIME_UNVERIFIED"}))
+    return result
 
 
 BROKER_PLATFORM_MAP = {

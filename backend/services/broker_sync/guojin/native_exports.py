@@ -227,6 +227,7 @@ def load_batch(config):
     batch_id = sha(json.dumps(receipt, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode())
     metadata = dict(source="guojin_qnx_native", complete=True, positions_as_of=None, cash_as_of=None,
         price_as_of=None, issues=["SOURCE_VALUATION_TIME_UNKNOWN"],
+        time_evidence={k:"QNX_NATIVE_SOURCE_TIME_UNSUPPORTED" for k in ("positions_as_of","cash_as_of","price_as_of")},
         queried_at={k:v.isoformat() for k,v in queried.items()},
         native_batch_id=batch_id, account_total_assets_cny=str(parsed.total_assets),
         cash_balance_cny=str(parsed.cash), security_count=len(parsed.rows),
