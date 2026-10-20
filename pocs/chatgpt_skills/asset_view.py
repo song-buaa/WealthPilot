@@ -121,7 +121,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
         for item in details["items"]:
             a = by_ref.get(item["account_ref"], {})
             security_inputs.append({**{k:item.get(k) for k in ("id","symbol","ticker","account_ref","security_symbol",
-                "vehicle_type","economic_asset_class","market_value_cny","currency","original_currency","fx_rate_date","fx_rate_to_cny",
+                "vehicle_type","economic_asset_class","market_value_cny","currency","original_currency","security_currency","fx_rate_date","fx_rate_to_cny",
                 "quantity","current_price","price_basis")},
                 "fx_quality":(a.get("fx") or {}).get(item.get("original_currency") or item.get("currency"),{}).get("quality","unverified"),
                 **{k:a.get(k) for k in ("positions_as_of","cash_as_of","price_as_of","price_time_basis","time_evidence")}})

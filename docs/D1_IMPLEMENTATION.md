@@ -47,6 +47,13 @@
 
 重要性规则明确为选定投资资产**绝对市值总和的 1%**；仅用于 B 级重要未知项判断，所有金额仍保留和披露，不能豁免目标证券的 C 级条件。这是版本化、明示的分析政策，不是 force 开关。单标相关证券仍需其自身账户现金；其他账户的旧现金不越权授予或阻断该单标资格。
 
+PR #27 定向修复政策（原 qualify_view 负责，不增加服务/Schema）：
+
+- **B 级重要现金上限为 24 小时**，不同于 C 的 300 秒。最近成功券商读取必须在 24 小时内；存在明确 cash_as_of 时，该来源时间也必须在 24 小时内，不能用新 Run 或 captured_at 洗新。来源天然不提供时间时，保留 UNKNOWN/partial，可用有界的最近成功读取支持大致金额；小额或范围外现金不因此一律否决 B。重要现金已超期且刷新失败分别返回 CASH_SOURCE_TIME_UNVERIFIED_OR_STALE_FOR_PLANNING、CASH_SUCCESSFUL_SYNC_UNVERIFIED_OR_STALE_FOR_PLANNING、CASH_REFRESH_NOT_SUCCESSFUL_FOR_PLANNING。无效金额仍沿原金额校验拒绝。A 保留降级分析、原金额及 Last-good；重复 prepare 不更改来源时间。
+- **C 级现金匹配同账户及证券结算币种**，优先已有 security_currency，否则 original_currency/currency。未区分 BUY/SELL 的通用分析须有同币种现金事实，缺少时返回 SETTLEMENT_CURRENCY_CASH_UNAVAILABLE 和 required_currency；不假设自动换汇、融资或购买力。已有可信 USD 现金时，同账户无关 HKD 的旧时间仍披露，但不单独否决 USD 单标 C。完整组合仍检查其全部相关现金。已知零/负余额可以分析，不代表足够下单，B0 原资金检查决定真实可支付性。
+- **A/B/C 是不同用途资格，不要求机械嵌套**。单标 C 不代表全组合 B 金额规划获批；例如公司归属未知可阻断公司敞口规划，但不必阻断证据完整的单标参数。ChatGPT/Web 应显示 qualification_scope、各级资格及实际 blockers，不能把一个范围的资格扩大到另一范围。所有等级都不替代 B0 实时行情、WhatIf、资金、风控与 Web 最终人工授权。
+- QQQ listing 修正仅用于已有证据覆盖的 Tiger STK/ETF 原生 wrapper，不能覆盖 OPT/FUT/其他不兼容类型；稳定 ID 冲突仍 fail closed，未知基金不猜测。
+
 原 AnalysisRequest 新增可选 `analysis_scope=investments|net_worth`（默认 investments），原 symbol 仅在单标专业分析中限定相关证券（组合/收益分析不能借此缩小全组合检查）；不存在 force=true。贷款陈旧仅在 net_worth/偿债用途阻断 B/C，不阻断无关单标。未证实的 linked pension 影响全组合投资分母，保持保守阻断及人工待办；不通过重复计入解决。
 
 PEER 获得同一视图及其等级/具体 blockers，返回时重新评估同一冻结来源。上下文到期依原 U1 拒绝专业结果；不切换 snapshot_id、不偷偷刷新。Web 使用最终质量，显示三级资格、来源时间和原财富更新链接。MCP 工具权限不变，只有既有 prepare 能触发受控同步。
@@ -54,6 +61,7 @@ PEER 获得同一视图及其等级/具体 blockers，返回时重新评估同�
 ## 4. 测试与证据
 
 - [D1 合成回归](../tests/test_d1_asset_quality.py)：发行主体跨账户/通道、未知身份、证券分类、来源时间、现金/FX、假日/半日市/开市、A/B/C 及范围、人工贷款、养老金待核、同视图一致性和失败 Last-good。
+- [D1 评审安全回归](../tests/test_d1_review_regressions.py)：将六个评审探针转为安全断言，覆盖现金 Last-good/失败/重复 prepare、24 小时 B 边界、小额与 UNKNOWN、结算币种和账户隔离、QQQ wrapper/ID 冲突，以及独立等级语义。
 - [原 U1 故障/输出重核](../tests/test_u1_review_regressions.py)、[U1](../tests/test_u1_asset_views.py)、[U0](../tests/test_u0_review_regressions.py)、[U2](../tests/test_u2_review_regressions.py)及原 B0/同步/共享库/协议回归保持。
 - [浏览器固定视图](../frontend/tests/e2e/asset-view.spec.ts)覆盖资格、人工待办、相同金额/ID及最终返回质量；原国金/财富/交易确认场景同时回归。
 - v1:56 私有金样仅核对三家企业/投资分母/四个理想成员，未把真实账户或完整财务 payload 提交 Git；公开测试使用不同的合成数量/金额。旧生产视图保持不可变、到期状态不被伪装为当前。

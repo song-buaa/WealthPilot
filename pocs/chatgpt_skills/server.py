@@ -97,6 +97,7 @@ def create_server(settings):
         "Reuse the SAME ID after timeout/pending; do not create another task to retry. When ready pass its snapshot_id to all wealth, holdings and professional analysis reads for this task. "
         "If pending, wait/retry the same prepare; if expired or unavailable, explain the limitation. Never silently substitute live data for a snapshot_id. "
         "Follow data_quality.analysis_eligibility A/B/C and their scoped blockers: A strategic allocation, B approximate amounts, C precise quantities/prices. "
+        "These are independent purposes, not nested permissions: single-security C never grants portfolio-wide B. Show the qualification_scope and actual blockers; never assume FX conversion or margin from another currency's cash. "
         "Use request.analysis_scope=net_worth for net-worth/loan/solvency planning and request.symbol for an explicit single-security scope. "
         "When can_propose_rebalance=false, preserve warnings and do not give precise executable quantities/prices. Eligibility never replaces final Web authorization.") if prepare_config else ""
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,

@@ -17,6 +17,7 @@ import uuid
 VERSION = "wealthpilot.asset-view.v1"
 PIPELINE = "u1.1"
 VIEW_TTL = 1800
+B_CASH_MAX_AGE = 24 * 60 * 60  # Approximate amounts, not the 300s precision gate.
 MAX_PAYLOAD = 4 * 1024 * 1024
 MAX_DATABASE = 256 * 1024 * 1024
 MAX_COPIES = 8
@@ -144,13 +145,12 @@ def qualify_view(view, *, at, symbol=None, analysis_scope="investments"):
     quality = view["data_quality"]
     inputs = quality.get("security_inputs", [])
     selected = [i for i in inputs if not symbol or symbol in (i.get("symbol"), i.get("security_symbol"), i.get("ticker"))]
-    refs = {i.get("account_ref") for i in selected}
     accounts = {a["account_ref"]:a for a in quality.get("accounts", []) if a.get("account_ref")}
     levels = {k:{"allowed":False, "blockers":[]} for k in ("A","B","C")}
     def block(tiers, code, item=None):
         detail = {"code":code}
         if item:
-            detail.update({k:item[k] for k in ("id","symbol","account_ref") if item.get(k) is not None})
+            detail.update({k:item[k] for k in ("id","symbol","account_ref","required_currency") if item.get(k) is not None})
         for tier in tiers:
             if detail not in levels[tier]["blockers"]:
                 levels[tier]["blockers"].append(detail)
@@ -228,23 +228,49 @@ def qualify_view(view, *, at, symbol=None, analysis_scope="investments"):
                 block("C", "SECURITY_PRICE_OR_QUANTITY_UNVERIFIED", item)
         if cash and not cash_current:
             block("C", "CASH_TIME_UNKNOWN_OR_STALE", item)
+        if cash and material:
+            # Unknown source time can use a bounded successful broker read for
+            # approximate planning, with the UNKNOWN warning preserved. A known
+            # old source time is never rejuvenated by a new Run or captured_at.
+            source_time = item.get("cash_as_of")
+            source_ok = _source_current(source_time, at, B_CASH_MAX_AGE)
+            read_ok = _source_current(a.get("account_synced_at"), at, B_CASH_MAX_AGE)
+            if source_time and not source_ok:
+                block("B", "CASH_SOURCE_TIME_UNVERIFIED_OR_STALE_FOR_PLANNING", item)
+            if not read_ok:
+                block("B", "CASH_SUCCESSFUL_SYNC_UNVERIFIED_OR_STALE_FOR_PLANNING", item)
+            if (source_time and not source_ok or not read_ok) and a.get("last_attempt_status") != "success":
+                block("B", "CASH_REFRESH_NOT_SUCCESSFUL_FOR_PLANNING", item)
         if not _source_current(a.get("account_synced_at"), at):
             block("C", "STALE_ACCOUNT_SYNC", item)
         if a.get("last_attempt_status") != "success":
             block("C", "LATEST_SYNC_NOT_SUCCESSFUL", item)
         if a.get("fill_sync_pending"):
             block("BC", "FILL_SYNC_PENDING_OR_UNVERIFIED", item)
-    # Precision for one security still requires its OWN account's cash; other
-    # accounts' unknown balances cannot grant permission or veto this scope.
-    for ref in refs:
-        cash_rows = [i for i in inputs if i.get("account_ref") == ref and i.get("vehicle_type") == "CASH"]
+    # An unspecified buy/sell analysis cannot assume FX conversion or margin.
+    # Require known same-currency cash, not buying power or sufficient funds:
+    # the original B0 execution checks still decide actual order affordability.
+    cash_requirements = set()
+    for item in selected:
+        currency = item.get("security_currency") or item.get("original_currency") or item.get("currency")
+        ref = item.get("account_ref")
+        if not ref or not currency:
+            block("C", "SETTLEMENT_CURRENCY_OR_ACCOUNT_UNVERIFIED", item)
+        else:
+            cash_requirements.add((ref, currency))
+    for ref, currency in sorted(cash_requirements):
+        dependency = {"account_ref":ref, "required_currency":currency}
+        cash_rows = [i for i in inputs if i.get("account_ref") == ref and i.get("vehicle_type") == "CASH"
+                     and (i.get("original_currency") or i.get("currency")) == currency]
         if not cash_rows:
-            block("C", "CASH_BALANCE_UNAVAILABLE", {"account_ref":ref})
+            block("C", "SETTLEMENT_CURRENCY_CASH_UNAVAILABLE", dependency)
         for cash in cash_rows:
+            if amount(cash) is None:
+                block("C", "CASH_AMOUNT_UNVERIFIED", {**cash, **dependency})
             if not _source_current(cash.get("cash_as_of"), at):
-                block("C", "CASH_TIME_UNKNOWN_OR_STALE", cash)
+                block("C", "CASH_TIME_UNKNOWN_OR_STALE", {**cash, **dependency})
             if not _stored_fx_current(cash, at):
-                block("C", "FX_STORED_VALUATION_UNVERIFIED", cash)
+                block("C", "FX_STORED_VALUATION_UNVERIFIED", {**cash, **dependency})
     if not symbol:
         for member in view["issuer_exposure"].get("unmapped_direct_holdings", []):
             if abs(amount(member) or 0) >= gross*.01:
@@ -282,8 +308,12 @@ def qualify_view(view, *, at, symbol=None, analysis_scope="investments"):
     if quality["issues"] or not levels["C"]["allowed"]:
         quality["status"] = "partial"
     quality.update(security_inputs=qualified_inputs, manual_review_required=tasks,
-        qualification_scope={"symbol":symbol,"analysis_scope":analysis_scope},
+        qualification_scope={"symbol":symbol,"analysis_scope":analysis_scope,
+            "cash_requirements":[{"account_ref":ref,"currency":currency} for ref,currency in sorted(cash_requirements)],
+            "cash_purpose":"Unspecified buy/sell: same-currency evidence required; no FX conversion or margin assumed"},
         analysis_eligibility=levels, can_propose_rebalance=levels["C"]["allowed"],
+        cash_planning_policy={"max_age_seconds":B_CASH_MAX_AGE,"materiality":"1% of gross selected investment value",
+            "unknown_source_time":"Disclosed UNKNOWN; bounded last successful broker read required"},
         materiality_policy="1% of gross selected investment CNY value; all unknowns disclosed; no exemption for target precision",
         execution_boundary="Analysis eligibility never replaces live quote TTL, WhatIf, funds/risk checks or final Web authorization.")
 

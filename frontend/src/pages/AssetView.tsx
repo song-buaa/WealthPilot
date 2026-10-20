@@ -6,7 +6,8 @@ interface View {
   captured_at: string
   context_current: boolean
   data_quality: { status: string; issues: string[]; can_propose_rebalance: boolean;
-    analysis_eligibility?: Record<'A' | 'B' | 'C', { allowed: boolean; blockers: { code: string; symbol?: string; id?: number }[] }>;
+    analysis_eligibility?: Record<'A' | 'B' | 'C', { allowed: boolean; blockers: { code: string; symbol?: string; id?: number; required_currency?: string }[] }>;
+    qualification_scope?: { symbol: string | null; analysis_scope: 'investments' | 'net_worth' };
     manual_review_required?: { id: number; name: string; current_value: number; value_as_of: string; reason_codes: string[]; update_path: string }[];
     accounts: { account_ref: string; broker: string; account_synced_at: string | null; price_as_of?: string | null;
       fetched_at?: string | null; queried_at?: string | Record<string, string> | null;
@@ -74,14 +75,15 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
       </div>}
       {view.data_quality.analysis_eligibility && <section aria-label="分析资格" className="space-y-2">
         <h2 className="font-semibold">分析资格</h2>
+        <p>分析范围：{view.data_quality.qualification_scope?.symbol ?? '全组合'}；用途：{view.data_quality.qualification_scope?.analysis_scope === 'net_worth' ? '净资产及偿债规划' : '投资资产分析'}。</p>
         {(['A', 'B', 'C'] as const).map(level => {
           const q = view.data_quality.analysis_eligibility![level]
           return <div key={level}>
             <p>{level} · {{ A: '战略配置分析', B: '调仓金额规划', C: '精确交易参数' }[level]}：{q.allowed ? '可进行' : '条件不足'}</p>
-            {!q.allowed && <p className="text-sm">{q.blockers.map(b => `${b.symbol ?? (b.id ? `项目 ${b.id}` : '')} ${b.code}`).join('；')}</p>}
+            {!q.allowed && <p className="text-sm">{q.blockers.map(b => `${b.symbol ?? (b.id ? `项目 ${b.id}` : '')} ${b.required_currency ?? ''} ${b.code}`).join('；')}</p>}
           </div>
         })}
-        <p className="text-sm">资格仅适用于本次分析范围；不能替代实盘行情、WhatIf、资金检查和 Web 最终人工确认。</p>
+        <p className="text-sm">A/B/C 是不同用途，非逐级授权；单标 C 不代表全组合 B 获准。资格仅适用于本次分析范围；不能替代实盘行情、WhatIf、资金检查和 Web 最终人工确认。</p>
       </section>}
       <div className="grid gap-4 sm:grid-cols-3">
         <p>总资产 ¥{money(view.views.wealth_summary.total_assets)}</p>

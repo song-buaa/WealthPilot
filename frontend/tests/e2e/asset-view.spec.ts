@@ -104,9 +104,32 @@ test('D1 scoped grades and manual verification tasks preserve the fixed totals',
   await expect(grades).toContainText('B · 调仓金额规划：条件不足')
   await expect(grades).toContainText('C · 精确交易参数：条件不足')
   await expect(grades).toContainText('不能替代实盘行情')
+  await expect(grades).toContainText('分析范围：全组合；用途：投资资产分析')
+  await expect(grades).toContainText('单标 C 不代表全组合 B 获准')
   const tasks = page.getByRole('region', { name: '人工核对清单' })
   await expect(tasks).toContainText('PENSION_HOLDING_LINK_UNVERIFIED')
   await expect(tasks.getByRole('link').first()).toHaveAttribute('href', '/#/wealth')
+  await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
+})
+
+test('D1 scoped currency and cash-planning blockers remain explicit', async ({ page }) => {
+  await page.route('**/api/asset-analysis/views/*', async route => {
+    const response = await route.fetch()
+    const fixed = await response.json()
+    fixed.data_quality.qualification_scope = { symbol: 'LI:US', analysis_scope: 'investments' }
+    fixed.data_quality.can_propose_rebalance = false
+    fixed.data_quality.analysis_eligibility = {
+      A: { allowed: true, blockers: [] },
+      B: { allowed: false, blockers: [{ code: 'CASH_REFRESH_NOT_SUCCESSFUL_FOR_PLANNING' }] },
+      C: { allowed: false, blockers: [{ code: 'SETTLEMENT_CURRENCY_CASH_UNAVAILABLE', required_currency: 'USD' }] },
+    }
+    await route.fulfill({ response, json: fixed })
+  })
+  await page.goto(`${base}/#/asset-view/${snapshot}`)
+  const grades = page.getByRole('region', { name: '分析资格' })
+  await expect(grades).toContainText('分析范围：LI:US；用途：投资资产分析')
+  await expect(grades).toContainText('CASH_REFRESH_NOT_SUCCESSFUL_FOR_PLANNING')
+  await expect(grades).toContainText('USD SETTLEMENT_CURRENCY_CASH_UNAVAILABLE')
   await expect(page.getByText('总资产 ¥1,450.00')).toBeVisible()
 })
 

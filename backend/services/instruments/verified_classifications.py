@@ -101,6 +101,12 @@ def find_verified_listing(evidence):
         return None, False
     if evidence.con_id or evidence.isin and evidence.isin.upper() != "US46090E1038":
         return None, True
+    # Tiger's verified STK ambiguity and its native ETF wrapper only. The same
+    # underlying symbol does not turn an option/future/other contract into QQQ.
+    security_type = str(evidence.broker_security_type or "").strip().upper()
+    vehicle_hint = str(evidence.vehicle_type_hint or "").strip().upper()
+    if security_type not in {"STK", "ETF"} or vehicle_hint not in {"", "COMMON", "COMMON_STOCK", "ETF"}:
+        return None, False
     return VerifiedAssetClassification(None, "US46090E1038", "ETF", "EQUITY", "EQUITY_LARGE_CAP",
         "https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html",
         "2026-10-20"), False
