@@ -352,3 +352,11 @@ def test_local_order_link_requires_matching_owner_side_and_security(history_db):
 @pytest.mark.parametrize('row',[{'assetCategory':''},{'symbol':'IB01:US'},{'taxes':'NaN'},{'ibCommission':'NaN'}])
 def test_missing_security_evidence_or_bad_signed_fees_fail_closed(row):
     with pytest.raises(ValueError):parse_flex(flex([row]),'fixture',zone='UTC')
+
+
+def test_date_precision_and_negative_zero_do_not_invent_execution_facts(history_db):
+    from backend.services.portfolio_history.sources import number
+    assert number('-0.000')==number('0')=='0'
+    with pytest.raises(ValueError):parse_flex(flex([{'dateTime':'20240102'}]),'fixture',zone='UTC')
+    f=closed();f[0]['taxes']='-0.0';persist(history_db,f);persist(history_db)
+    with Session(history_db.engine) as db:assert db.query(HistoryEvent).count()==2

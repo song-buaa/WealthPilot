@@ -31,15 +31,16 @@ def number(value, *, positive=False):
     try:
         result = Decimal(str(value))
         if not result.is_finite() or abs(result) > Decimal('1e20') or (positive and result <= 0):fail()
-        return format(result.normalize(), 'f')
+        return '0' if result==0 else format(result.normalize(), 'f')
     except (InvalidOperation, TypeError):fail()
 
 
 def timestamp(value, zone=None, *, date_only=False):
     text = str(value).strip()
     try:
-        if date_only and re.fullmatch(r'\d{8}|\d{4}-\d{2}-\d{2}', text):
-            return date.fromisoformat(text).isoformat()
+        if re.fullmatch(r'\d{8}|\d{4}-\d{2}-\d{2}', text):
+            if date_only:return date.fromisoformat(text).isoformat()
+            fail()  # No invented midnight precision for executions/coverage.
         stamp = datetime.fromisoformat(text.replace(';', 'T'))
         if stamp.tzinfo is None:
             if not zone:fail()
