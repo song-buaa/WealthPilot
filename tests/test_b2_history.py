@@ -343,7 +343,7 @@ def test_local_order_link_requires_matching_owner_side_and_security(history_db):
     with Session(history_db.engine) as db:
         db.add(OrderRecord(id='owned-buy',strategy_id='legacy',portfolio_id=7,broker_account_id='fixture',
             symbol='IB01:LSE',side='BUY',quantity=10,broker_name='ibkr',broker_order_id='100',status='filled'));db.commit()
-    persist(history_db)
+    facts=closed();facts[0]['order_ref']='owned-buy';persist(history_db,facts)
     with Session(history_db.engine) as db:
         r=query(db,7)
         assert r['items'][0]['local_order_id']=='owned-buy' and r['items'][1]['local_order_id'] is None
@@ -360,3 +360,18 @@ def test_date_precision_and_negative_zero_do_not_invent_execution_facts(history_
     with pytest.raises(ValueError):parse_flex(flex([{'dateTime':'20240102'}]),'fixture',zone='UTC')
     f=closed();f[0]['taxes']='-0.0';persist(history_db,f);persist(history_db)
     with Session(history_db.engine) as db:assert db.query(HistoryEvent).count()==2
+
+
+@pytest.mark.parametrize('field,value',[('TransactionType','TradeCancel'),('OrigTradeID','prior-fill'),('OrigOrderID','prior-order')])
+def test_native_csv_correction_fields_cannot_bypass_xml_safety(field,value):
+    data=('ClientAccountID,Symbol,Conid,CurrencyPrimary,AssetClass,LevelOfDetail,IBExecID,DateTime,Buy/Sell,Quantity,TradePrice,'+field+'\nfixture,IB01,354802220,USD,STK,EXECUTION,c1,20240102;15:00:00,BUY,1,100,'+value+'\n').encode()
+    with pytest.raises(ValueError,match='CORRECTION'):parse_flex(data,'fixture',zone='UTC')
+
+
+def test_order_id_number_alone_is_not_a_permanent_local_order_identity(history_db):
+    from backend.services.action.models import OrderRecord
+    with Session(history_db.engine) as db:
+        db.add(OrderRecord(id='same-number',strategy_id='legacy',portfolio_id=7,broker_account_id='fixture',
+            symbol='IB01:LSE',side='BUY',quantity=10,broker_name='ibkr',broker_order_id='100',status='filled'));db.commit()
+    persist(history_db)
+    with Session(history_db.engine) as db:assert query(db,7)['items'][0]['local_order_id'] is None

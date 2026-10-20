@@ -128,7 +128,8 @@ def parse_flex(data, account, *, zone):
                 'IB Execution ID':'ibExecID','DateTime':'dateTime','Buy/Sell':'buySell','Quantity':'quantity',
                 'TradePrice':'tradePrice','IBCommission':'ibCommission','IBCommissionCurrency':'ibCommissionCurrency',
                 'LevelOfDetail':'levelOfDetail','IBOrderID':'ibOrderID','OrderReference':'orderReference',
-                'FifoPnlRealized':'fifoPnlRealized','CostBasis':'costBasis','Taxes':'taxes','Multiplier':'multiplier'}
+                'FifoPnlRealized':'fifoPnlRealized','CostBasis':'costBasis','Taxes':'taxes','Multiplier':'multiplier',
+                'TransactionType':'transactionType','OrigTradeID':'origTradeID','OrigOrderID':'origOrderID'}
             if len(reader.fieldnames or [])!=len(set(reader.fieldnames or [])):fail()
             for original in reader:
                 if None in original:fail()
@@ -141,7 +142,7 @@ def parse_flex(data, account, *, zone):
     events = []
     for row in rows:
         if row.get('levelOfDetail','').upper()!='EXECUTION':fail()
-        if row.get('origTradeID') or row.get('transactionType','ExchTrade') not in {'ExchTrade','Trade'}:
+        if any(row.get(k) not in (None,'','0') for k in ('origTradeID','origOrderID')) or row.get('transactionType','ExchTrade') not in {'ExchTrade','Trade'}:
             fail('HISTORY_CORRECTION_REQUIRES_REVIEW')
         e = event(row,'EXECUTION',row.get('ibExecID'),timestamp(row.get('dateTime'),zone))
         side = str(row.get('buySell','')).upper()

@@ -165,5 +165,5 @@ def _local_order(db, pid, broker, account, event):
     q=db.query(OrderRecord).filter_by(portfolio_id=pid,broker_name=broker,broker_account_id=account)
     matches=[o for o in q if o.side==event.get('side') and o.symbol==event['symbol'] and (
         (event.get('order_ref') and o.id==event['order_ref']) or
-        (o.broker_order_id and o.broker_order_id in {event.get('perm_id'),event.get('broker_order_id')}))]
+        (event.get('perm_id') not in (None,'','0') and o.broker_order_id==event['perm_id']))]
     return matches[0].id if len(matches)==1 else None
