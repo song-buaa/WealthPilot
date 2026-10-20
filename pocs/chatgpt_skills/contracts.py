@@ -88,6 +88,7 @@ class TradeHistoryQuery(BaseModel):
 
 class TradeHistoryResult(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    uncertain_events: list[dict] = Field(default_factory=list)
     schema_version: Literal['wealthpilot.trade-history.v1']
     synthetic: bool
     queried_at: str

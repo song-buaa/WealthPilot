@@ -223,4 +223,6 @@ HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI
 
 历史成交新增权威为原 Portfolio 域 [portfolio_history](../backend/services/portfolio_history)，仅存券商 execution/现金流及独立覆盖/来源证据；OrderRecord 仍是原订单权威，Position/Run 仍是持仓/现金权威，Wealth 统计不变。两张事实表不是持仓或余额账本，原均价不能反推历史。原 IBKR Adapter/FXService 只在显式导入阶段读取；原 MCP 新增只读 get_trade_history，Web/PEER 读同一确定性结果，snapshot_id 沿原冻结数据库，旧视图不改。
 
+覆盖权威沿原 evidence_json v2 的来源哈希/范围和独立期初事实，人工标记本身不授予完整资格；来源业务日、纯日期区间及共同计算截止合同见 [B2 定向修复](B2_IMPLEMENTATION.md#7-pr-29-定向修复后的覆盖日期与截止合同)。
+
 系统移动加权成本、券商报表法及当前账面盈亏分开呈现；缺期初/连续覆盖/费用/分红/历史 FX 时相关计算保持未知。未实现全组合 TWR/MWR、Tiger/国金原生历史报表和自动历史采集。Schema 是 2 表/2 显式唯一索引，复用原迁移 --stage b2 与严格 Digest；本轮不部署/补真实数据。合同、Gap、成本/收益条件、权限与生产回滚见 [B2 实现说明](B2_IMPLEMENTATION.md)。

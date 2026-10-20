@@ -22,13 +22,14 @@ def main():
     from sqlalchemy.orm import Session
     from app.shared_sqlite import verify, private_file, writer_connection
     from pocs.poc02_wealth_mcp.reader import readonly_snapshot
-    from backend.services.portfolio_history.imports import Coverage, owner_scope, import_batch
+    from backend.services.portfolio_history.imports import Coverage, owner_scope, import_batch, build_evidence, qualified_coverage
     from backend.services.portfolio_history.sources import parse_flex, recent_ibkr, historical_fx, dumps, MAX_REPORT, fail
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',required=True);parser.add_argument('--contract',required=True)
     parser.add_argument('--portfolio-id',type=int,required=True);parser.add_argument('--account-id',required=True)
     source=parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--flex-file');source.add_argument('--recent-ibkr',action='store_true')
+    parser.add_argument('--evidence-document',action='append',default=[],help='Private independent opening/export-definition evidence; bytes hashed, never stored')
     parser.add_argument('--coverage',required=True,help='Private reviewed evidence JSON, never infer complete from empty rows')
     parser.add_argument('--historical-fx',action='store_true',help='Explicit import-time historical FXService reads, no latest fallback')
     parser.add_argument('--apply',action='store_true',help='Persist only B2 history facts; default no DB writes')
@@ -38,6 +39,11 @@ def main():
     coverage=Coverage.model_validate_json(private_file(args.coverage,0o600).read_text())
     with readonly_snapshot(args.database,args.contract) as connection, Session(bind=connection,autoflush=False) as db:
         owner_scope(db,args.portfolio_id,'ibkr',args.account_id)
+    documents=[]
+    for name in args.evidence_document:
+        document=private_file(name,0o600)
+        if document.stat().st_size>MAX_REPORT:fail()
+        documents.append(document.read_bytes())
     metadata={}
     if args.flex_file:
         source_path=private_file(args.flex_file,0o600)
@@ -57,7 +63,11 @@ def main():
         events=historical_fx(events,fx_service)
     from backend.services.portfolio_history.imports import validate_events
     events=validate_events(events,coverage)
+    _,_,proof=build_evidence('ibkr',args.account_id,source_name,source_sha,events,coverage.model_dump(),metadata,evidence_documents=documents)
+    qualified,reasons=qualified_coverage(proof)
     result=dict(status='validated_only',events=len(events),source=source_name,
+        coverage_quality='complete' if qualified['complete_executions'] and qualified['complete_cashflows'] and qualified['opening_zero_keys'] else 'partial',
+        coverage_issues=reasons,
         no_order_or_position_mutation=True,source_issues=metadata.get('issues',[]))
     if args.apply:
         engine=create_engine('sqlite://',creator=lambda:writer_connection(args.database,args.contract))
@@ -67,7 +77,7 @@ def main():
                 verify_history_schema(connection.connection.driver_connection)
             with Session(engine) as db:
                 result.update(import_batch(db,args.portfolio_id,'ibkr',args.account_id,source_name,source_sha,
-                    events,coverage.model_dump(),metadata))
+                    events,coverage.model_dump(),metadata,evidence_documents=documents))
         finally:engine.dispose()
     print(json.dumps(result))
 

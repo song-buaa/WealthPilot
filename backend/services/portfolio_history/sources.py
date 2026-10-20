@@ -4,6 +4,7 @@ Reports/SDK are authorities. Orders, closed lots and holding snapshots are not
 executions. No credentials, external fetch, trading calls or DB writes here.
 """
 import csv
+import hashlib
 from datetime import datetime, date, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import io
@@ -53,6 +54,62 @@ def timestamp(value, zone=None, *, date_only=False):
     except (ValueError, TypeError, KeyError):fail()
 
 
+def event_bounds(event):
+    """UTC interval for a source day, or an exact instant; never invent midnight precision."""
+    value = event['executed_at']
+    if event.get('time_precision') != 'date' and len(value) > 10:
+        stamp = datetime.fromisoformat(timestamp(value))
+        return stamp, stamp
+    zone = event.get('source_timezone')
+    if not zone:
+        return None
+    try:
+        day = date.fromisoformat(value)
+        return (datetime.combine(day, time.min, ZoneInfo(zone)).astimezone(timezone.utc),
+                datetime.combine(day + timedelta(days=1), time.min, ZoneInfo(zone)).astimezone(timezone.utc))
+    except (ValueError, KeyError):
+        return None
+
+
+def window_membership(event, start=None, end=None):
+    """inside/outside/uncertain using [start,end); a day must fit wholly inside."""
+    bounds = event_bounds(event)
+    if bounds is None:
+        return 'uncertain' if start or end else 'inside'
+    lower, upper = bounds
+    a = datetime.fromisoformat(timestamp(start)) if start else None
+    b = datetime.fromisoformat(timestamp(end)) if end else None
+    if lower == upper:
+        return 'outside' if (a and lower < a) or (b and lower >= b) else 'inside'
+    if (a and upper <= a) or (b and lower >= b):
+        return 'outside'
+    return 'uncertain' if (a and lower < a) or (b and upper > b) else 'inside'
+
+
+def source_dates(raw, zone, *, cashflow=False, settlement=None):
+    """Keep source calendar evidence separate from normalized UTC execution time."""
+    text = str(raw).strip()
+    daily = bool(re.fullmatch(r'\d{8}|\d{4}-\d{2}-\d{2}', text))
+    local = date.fromisoformat(text).isoformat() if daily else datetime.fromisoformat(text.replace(';','T')).date().isoformat()
+    result = dict(source_time_raw=text, source_timezone=zone, source_local_date=local,
+                  source_date_semantics='cashflow' if cashflow else 'execution', fx_date=None, fx_date_basis=None)
+    if settlement:
+        result.update(fx_date=date.fromisoformat(str(settlement)).isoformat(), fx_date_basis='broker_settlement_date')
+    elif cashflow and (zone or (not daily and datetime.fromisoformat(text.replace(';','T')).tzinfo)):
+        result.update(fx_date=local, fx_date_basis='broker_cashflow_date')
+    return result
+
+
+def cashflow_fx_date(event):
+    day = event.get('fx_date')
+    if event.get('fx_date_basis') not in {'broker_settlement_date','broker_cashflow_date'} or not day:
+        return None
+    try:
+        return date.fromisoformat(day).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
 def instrument(row):
     from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
     conid = str(row.get('conid') or row.get('con_id') or '').strip()
@@ -100,6 +157,8 @@ def parse_flex(data, account, *, zone):
     except UnicodeDecodeError:fail()
     if '<!DOCTYPE' in text.upper() or '<!ENTITY' in text.upper():fail()
     rows, cash, periods, issues, found = [], [], [], set(), False
+    sections = None
+    report_format = 'xml' if text.lstrip().startswith('<') else 'csv'
     try:
         if text.lstrip().startswith('<'):
             root = ET.fromstring(text)
@@ -107,6 +166,8 @@ def parse_flex(data, account, *, zone):
                 owner = statement.get('accountId')
                 if owner != account:continue
                 found=True
+                present = {node.tag for node in statement}
+                sections = present if sections is None else sections & present
                 start, end = statement.get('fromDate'), statement.get('toDate')
                 if not start or not end:fail('HISTORY_COVERAGE_INVALID')
                 if start and end:
@@ -129,7 +190,7 @@ def parse_flex(data, account, *, zone):
                 'TradePrice':'tradePrice','IBCommission':'ibCommission','IBCommissionCurrency':'ibCommissionCurrency',
                 'LevelOfDetail':'levelOfDetail','IBOrderID':'ibOrderID','OrderReference':'orderReference',
                 'FifoPnlRealized':'fifoPnlRealized','CostBasis':'costBasis','Taxes':'taxes','Multiplier':'multiplier',
-                'TransactionType':'transactionType','OrigTradeID':'origTradeID','OrigOrderID':'origOrderID'}
+                'SettleDateTarget':'settleDateTarget','TradeDate':'tradeDate','TransactionType':'transactionType','OrigTradeID':'origTradeID','OrigOrderID':'origOrderID'}
             if len(reader.fieldnames or [])!=len(set(reader.fieldnames or [])):fail()
             for original in reader:
                 if None in original:fail()
@@ -145,6 +206,7 @@ def parse_flex(data, account, *, zone):
         if any(row.get(k) not in (None,'','0') for k in ('origTradeID','origOrderID')) or row.get('transactionType','ExchTrade') not in {'ExchTrade','Trade'}:
             fail('HISTORY_CORRECTION_REQUIRES_REVIEW')
         e = event(row,'EXECUTION',row.get('ibExecID'),timestamp(row.get('dateTime'),zone))
+        e.update(source_dates(row.get('dateTime'),zone,settlement=row.get('settleDateTarget')))
         side = str(row.get('buySell','')).upper()
         if side not in {'BUY','SELL'}:fail()
         qty = Decimal(number(row.get('quantity')))
@@ -167,12 +229,15 @@ def parse_flex(data, account, *, zone):
         # Account-wide fees without security identity cannot be assigned to a holding.
         if not row.get('symbol'):
             issues.add('UNALLOCATED_CASHFLOW');continue
-        e=event(row,kind,row.get('transactionID'),timestamp(row.get('dateTime') or row.get('date'),zone,date_only=True))
+        raw_time=row.get('dateTime') or row.get('date')
+        e=event(row,kind,row.get('transactionID'),timestamp(raw_time,zone,date_only=True))
+        e.update(source_dates(raw_time,zone,cashflow=True,settlement=row.get('settleDate')))
         if kind=='FEE':issues.add('FEE_ALLOCATION_UNVERIFIED')
         e['amount']=number(row.get('amount'));events.append(e)
     bounds=[(timestamp(a.isoformat()+'T00:00:00',zone),
         timestamp((b+timedelta(days=1)).isoformat()+'T00:00:00',zone)) for a,b in periods]
-    return events,dict(report_periods=[(a.isoformat(),b.isoformat()) for a,b in periods],
+    return events,dict(source_sha256=hashlib.sha256(data).hexdigest(),account_id=account,source_timezone=zone,
+        format=report_format,sections_present=sorted(sections or []),report_periods=[(a.isoformat(),b.isoformat()) for a,b in periods],
         report_bounds_utc=bounds,issues=sorted(issues))
 
 
@@ -186,6 +251,7 @@ def recent_ibkr(adapter, account):
         if row.get('observed_account_id')!=account:fail('HISTORY_OWNER_UNPROVEN')
         if row.get('pending_price_revision'):fail('HISTORY_CORRECTION_REQUIRES_REVIEW')
         e=event(row,'EXECUTION',row.get('exec_id'),timestamp(row.get('timestamp')))
+        e.update(source_dates(row.get('timestamp'),None))
         side={'BOT':'BUY','SLD':'SELL','BUY':'BUY','SELL':'SELL'}.get(row.get('side'))
         if not side:fail()
         e.update(side=side,quantity=number(row.get('shares'),positive=True),price=number(row.get('price'),positive=True),
@@ -201,7 +267,9 @@ def historical_fx(events, service):
     """Optional import-time enrichment using existing FXService, never query-time I/O."""
     result=[]
     for event_ in events:
-        e=dict(event_);day=e['executed_at'][:10]
+        e=dict(event_);day=cashflow_fx_date(e)
+        if day is None:
+            e['fx']=None;result.append(e);continue
         try:
             quote=service.get_quote(e['currency'],'CNY',day)
             if quote.quality=='historical' and quote.rate_date==day and Decimal(number(quote.rate,positive=True)):

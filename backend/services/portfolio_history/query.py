@@ -4,8 +4,8 @@ import hashlib
 import json
 from sqlalchemy import inspect, text
 from .models import HistoryEvent, HistoryImport
-from .sources import MAX_EVENTS, number, fail, timestamp
-from .imports import owner_scope
+from .sources import MAX_EVENTS, number, fail, timestamp, window_membership
+from .imports import owner_scope, qualified_coverage
 from .calculation import attribution
 
 
@@ -48,6 +48,13 @@ def valuation(db, portfolio_id, broker, account, key, *, at):
             recent=0<=(at-stamp).total_seconds()<=86400
         except ValueError:recent=False
         qualified=q['status'] in {'intraday','recent_close'} and recent and publication_status(db,run)=='matched'
+    price_effective=source_time
+    if qualified and len(source_time)==10:
+        try:
+            import exchange_calendars as calendars
+            price_effective=calendars.get_calendar(q['calendar']).schedule.loc[source_time,'close'].isoformat()
+        except (ValueError,KeyError):
+            qualified=False;price_effective=None
     fx=None
     if row.original_currency==row.currency and row.fx_rate_date and row.fx_rate_to_cny and row.fx_rate_to_cny>0:
         fx=dict(rate=number(row.fx_rate_to_cny,positive=True),rate_date=row.fx_rate_date,source='stored_U0_FX',pair=row.currency+'/CNY')
@@ -55,7 +62,7 @@ def valuation(db, portfolio_id, broker, account, key, *, at):
         broker_cost_basis=number(row.cost_price*row.quantity),broker_reference_pnl=number(row.profit_loss_original_value),
         as_of=source_time or None,positions_as_of=positions_time,qualified=qualified,fx=fx,
         account_synced_at=run.finished_at.isoformat() if run and run.finished_at else None,
-        price_as_of=source_time,quality='trusted_stored_source' if qualified else 'unknown_or_stale')
+        price_as_of=source_time,valuation_effective_at=price_effective,price_time_basis=meta.get('price_time_basis'),quality='trusted_stored_source' if qualified else 'unknown_or_stale')
 
 
 def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=None, limit=50, offset=0,
@@ -70,7 +77,7 @@ def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=No
     if not db.connection().connection.driver_connection.in_transaction:db.execute(text('BEGIN'))
     result=dict(schema_version='wealthpilot.trade-history.v1',synthetic=synthetic,
         queried_at=(at or datetime.now(timezone.utc)).isoformat(),snapshot_id=None,
-        status='partial',issues=[],accounts=[],items=[],attribution=[],coverage=[],total=0,next_offset=None,
+        status='partial',issues=[],uncertain_events=[],accounts=[],items=[],attribution=[],coverage=[],total=0,next_offset=None,
         scope='Stored broker execution/cashflow facts. No broker refresh, account inference or transaction. Attribution uses full available pre-window history; item dates only filter presentation.')
     tables=inspect(db.connection()).get_table_names()
     if not {'portfolio_history_events','portfolio_history_imports'}<=set(tables):
@@ -93,15 +100,24 @@ def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=No
     if len(events)>MAX_EVENTS:fail('HISTORY_QUERY_LIMIT')
     groups={};shown=[];contradicted_execution=set();contradicted_cash=set()
     allowed=set(allowed)
+    uncertain_groups=set()
     for r in events:
         if (r.broker,r.account_id) not in allowed:continue
         e=json.loads(r.payload_json)
         if symbol and symbol not in {r.symbol,r.instrument_key}:continue
-        if end and e['executed_at']>=end:continue
-        groups.setdefault((r.broker,r.account_id,r.instrument_key),[]).append(e)
-        if start and e['executed_at']<start:continue
+        group=(r.broker,r.account_id,r.instrument_key)
+        until=window_membership(e,end=end)
+        visible=window_membership(e,start=start,end=end)
+        if until=='uncertain' or visible=='uncertain':
+            result['issues'].append('HISTORY_TIME_BOUNDARY_UNCERTAIN')
+            result['uncertain_events'].append(dict(kind=r.kind,external_id=r.external_id,
+                account_ref=history_account_ref(portfolio_id,r.broker,r.account_id),reason_code='HISTORY_TIME_BOUNDARY_UNCERTAIN'))
+        if until=='uncertain':uncertain_groups.add(group)
+        if until!='inside':continue
+        groups.setdefault(group,[]).append(e)
+        if visible!='inside':continue
         public={k:e.get(k) for k in ('kind','external_id','instrument_key','symbol','currency','sec_type',
-            'executed_at','time_precision','side','quantity','price','multiplier','commission','commission_currency',
+            'executed_at','time_precision','source_time_raw','source_timezone','source_local_date','source_date_semantics','source_time_evidence','fx_date','fx_date_basis','side','quantity','price','multiplier','commission','commission_currency',
             'taxes','broker_realized_pnl','broker_cost_basis','broker_order_id','perm_id','amount','fx')}
         public.update(account_ref=history_account_ref(portfolio_id,r.broker,r.account_id),broker=r.broker,
             commission_status='KNOWN' if e.get('commission') is not None and e.get('commission_currency') else 'UNKNOWN',
@@ -122,8 +138,7 @@ def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=No
         for imported,proof in zip(matching,evidence):
             c=proof['coverage'];ids=proof.get('event_identities',[])
             in_scope=c['scope']=='account' or key in c['instrument_keys']
-            missing=[e for e in facts if in_scope and c['coverage_start']<=
-                (e['executed_at'] if len(e['executed_at'])>10 else e['executed_at']+'T00:00:00+00:00')<c['coverage_end']
+            missing=[e for e in facts if in_scope and window_membership(e,c['coverage_start'],c['coverage_end'])!='outside'
                 and [e['kind'],e['external_id']] not in ids]
             if any(e['kind']=='EXECUTION' for e in missing):
                 c['complete_executions']=False;contradicted_execution.add(imported.id)
@@ -131,26 +146,27 @@ def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=No
                 c['complete_cashflows']=False;contradicted_cash.add(imported.id)
             if missing:result['issues'].append('REPORT_COVERAGE_CONTRADICTED_BY_IMPORTED_FACTS')
         current=valuation(db,portfolio_id,broker,account,key,at=at or datetime.now(timezone.utc))
-        if end and current and (not current['as_of'] or current['as_of']>=end):current=None
-        calculated=attribution(facts,evidence,current)
+        if end and current and (not current['positions_as_of'] or
+                datetime.fromisoformat(timestamp(current['positions_as_of']))>=datetime.fromisoformat(end)):current=None
+        calculated=attribution(facts,evidence,current,boundary_uncertain=(broker,account,key) in uncertain_groups)
         calculated.update(account_ref=history_account_ref(portfolio_id,broker,account),broker=broker,
             instrument_key=key,symbol=facts[0]['symbol'])
         result['attribution'].append(calculated)
         result['issues'].extend(calculated['issues'])
     for r in imports:
         if (r.broker,r.account_id) not in allowed:continue
-        e=json.loads(r.evidence_json);c=e['coverage']
+        e=json.loads(r.evidence_json);declared=e['coverage'];c,reasons=qualified_coverage(e)
         if symbol and c['scope']=='instruments' and not any(
                 g[2] in c['instrument_keys'] for g in groups if g[:2]==(r.broker,r.account_id)):continue
         result['coverage'].append(dict(import_id=r.id,account_ref=history_account_ref(portfolio_id,r.broker,r.account_id),
             broker=r.broker,source=r.source,imported_at=r.imported_at,coverage_start=r.coverage_start,
             coverage_end=r.coverage_end,scope=c['scope'],instrument_keys=c['instrument_keys'],
-            declared_complete_executions=c['complete_executions'],declared_complete_cashflows=c['complete_cashflows'],
+            declared_complete_executions=declared['complete_executions'],declared_complete_cashflows=declared['complete_cashflows'],
             complete_executions=c['complete_executions'] and r.id not in contradicted_execution,
             complete_cashflows=c['complete_cashflows'] and r.id not in contradicted_cash,
             corporate_actions_reviewed=c['corporate_actions_reviewed'],opening_zero_keys=c['opening_zero_keys'],
             completeness_authority=e['completeness_authority'],source_sha256=e['source_sha256'],
-            issues=e['source_metadata'].get('issues',[])))
+            issues=sorted(set(e['source_metadata'].get('issues',[])+reasons))))
     result['total']=len(shown);result['items']=shown[offset:offset+limit]
     if offset+limit<len(shown):result['next_offset']=offset+limit
     if not groups:result['issues'].append('HISTORICAL_COVERAGE_UNKNOWN_NO_FACTS')

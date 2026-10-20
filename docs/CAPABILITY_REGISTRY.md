@@ -83,4 +83,5 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 来源：显式私有 IBKR Flex XML / 单 Trades 节 CSV EXECUTION；近期 Gateway 永远不冒充完整历史。稳定 execution 身份幂等，费用缺失/异币、历史缺口、修正/Owner 冲突 fail closed，不从持仓反推历史。Tiger/国金原生历史报表待真实样例/权限核实。
 - 查询：原 MCP 新增 get_trade_history（只读），Web /api/portfolio/trade-history 和 PEER historical_attribution；按 Portfolio 与已证实账户隔离、返回不透明引用，不接受 raw account_id/Portfolio/导入/刷新/force。固定 ID 使用旧冻结库，不读新导入。
 - 复用/限制：系统唯一历史收益法为 long-only 移动加权，与券商原口径对账；不覆盖成本、订单或财富。精确归因/HPR/年化的完整性门限及两表必要性见 [B2](B2_IMPLEMENTATION.md)。不新增任务/订单状态机、现金总账或全组合 TWR/MWR。
-- 测试：[金样及隔离](../tests/test_b2_history.py)、[原视图/PEER/API](../tests/test_b2_frozen_and_api.py)、[原迁移](../tests/test_b2_schema.py)、[协议](../pocs/chatgpt_skills/test_protocol.py)。生产真实历史补源/对账 NOT_RUN，不因本地或 CI 通过标真实历史完整。
+- 覆盖/日期：沿原 evidence_json 校验 v2 报表与独立期初附件，纯日期按来源时区整日处理，FX 采用已证实业务/结算日；共同归因截止与旧收盘价时间分离，缺证保持未知，无新增 Schema。合同见 [B2 第 7 节](B2_IMPLEMENTATION.md#7-pr-29-定向修复后的覆盖日期与截止合同)。
+- 测试：[PR29 安全回归](../tests/test_b2_review_regressions.py)、[金样及隔离](../tests/test_b2_history.py)、[原视图/PEER/API](../tests/test_b2_frozen_and_api.py)、[原迁移](../tests/test_b2_schema.py)、[协议](../pocs/chatgpt_skills/test_protocol.py)。生产真实历史补源/对账 NOT_RUN，不因本地或 CI 通过标真实历史完整。
