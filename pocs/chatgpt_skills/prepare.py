@@ -43,8 +43,8 @@ class PrepareClient:
         self.token = private_token(config["token_file"])
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
-    def _call(self, path, body=None):
-        request = Request(self.base+path, data=json.dumps(body).encode() if body is not None else None,
+    def _call(self, path, body=None, *, base=None):
+        request = Request((base or self.base)+path, data=json.dumps(body).encode() if body is not None else None,
             headers={"Authorization":"Bearer "+self.token,"Content-Type":"application/json"})
         try:
             with self.opener.open(request, timeout=5) as response:
@@ -64,3 +64,9 @@ class PrepareClient:
             time.sleep(.5)
             result = self._call("/requests/"+request_id)
         return result
+
+    def tradability(self, request):
+        # Fixed sibling read-only endpoint, same no-redirect loopback token.
+        from backend.services.instruments.tradability import TradabilityQuery
+        body=TradabilityQuery.model_validate(request).model_dump()
+        return self._call('/instrument-tradability',body,base=self.base.removesuffix('/asset-analysis')+'/action')

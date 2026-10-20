@@ -97,7 +97,7 @@ def test_real_endpoint_preserves_seven_tools_and_adds_readonly_trade_sync_query(
         server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
         async with Client(server,mode='legacy') as client:
             tools=(await client.list_tools()).tools
-            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history'}
+            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability'}
             assert all(t.annotations.read_only_hint for t in tools)
     asyncio.run(run())
 
@@ -116,7 +116,7 @@ def test_analysis_discovery_and_calls_keep_nonblank_validation_without_regex(mon
         server = create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
         async with Client(server,mode='legacy') as client:
             tools = {t.name:t for t in (await client.list_tools()).tools}
-            assert len(tools) == 9 and all(t.annotations.read_only_hint for t in tools.values())
+            assert len(tools) == 10 and all(t.annotations.read_only_hint for t in tools.values())
             for name in ('review_portfolio','analyze_position','analyze_performance'):
                 schema = tools[name].input_schema
                 # Resolve through JSON Schema, not a handwritten mirror of it.
@@ -169,7 +169,7 @@ def test_discovery_annotations_and_existing_overview_contract(endpoint):
         async with Client(endpoint,mode='legacy',read_timeout_seconds=50) as client:
             tools=(await client.list_tools()).tools
             by_name={t.name:t for t in tools}
-            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history'}
+            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability'}
             assert by_name['get_trade_and_sync_status'].annotations.read_only_hint
             assert by_name['prepare_trade_confirmation_link'].annotations.read_only_hint
             assert all(tool.meta['securitySchemes'] == [{'type':'noauth'}] for tool in tools)
@@ -289,3 +289,28 @@ persist(SimpleNamespace(engine=engine))
                 assert rejected.is_error
     asyncio.run(run())
     assert hashlib.sha256(db.read_bytes()).hexdigest()==before
+
+
+def test_b3_tradability_tool_is_readonly_unknown_without_account_evidence(endpoint,tmp_path):
+    import sqlite3
+    with sqlite3.connect(tmp_path/'synthetic.db') as db:
+        db.execute("UPDATE positions SET broker='snowball',broker_account_id='synthetic-owner',sync_source='api' WHERE portfolio_id=7")
+    async def run():
+        before=hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()
+        async with Client(endpoint,mode='legacy') as client:
+            tools={t.name:t for t in (await client.list_tools()).tools}
+            tool=tools['get_instrument_tradability']
+            assert tool.annotations.read_only_hint and not tool.annotations.destructive_hint
+            result=await client.call_tool(tool.name,{'request':{'broker':'ibkr','symbol':'IB01:LSE'}})
+            assert not result.is_error,result.content
+            assert result.structured_content['tradability']=='UNKNOWN'
+            assert result.structured_content['fees']['status']=='UNKNOWN'
+            assert result.structured_content['account_ref'].startswith('account_')
+            assert 'synthetic-owner' not in json.dumps(result.structured_content)
+            for changes in ({'account_id':'raw-secret'},{'portfolio_id':999},{'force':True},{'refresh':True},{'submit':True}):
+                rejected=await client.call_tool(tool.name,{'request':{'broker':'ibkr','symbol':'IB01:LSE'}|changes})
+                assert rejected.is_error
+            foreign=await client.call_tool(tool.name,{'request':{'broker':'ibkr','symbol':'IB01:LSE','account_ref':'account_'+'0'*20}})
+            assert foreign.is_error
+        assert hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()==before
+    asyncio.run(run())

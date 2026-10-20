@@ -17,6 +17,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
+from backend.services.instruments.tradability import TradabilityQuery
+from pocs.chatgpt_skills.contracts import TradabilityResult
 from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult, TradeHistoryQuery, TradeHistoryResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
@@ -127,6 +129,19 @@ def create_server(settings):
                 return PrepareResult.model_validate(result)
             except ValueError as exc:
                 raise ToolError(str(exc)) from None
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=True),
+        description="Read account-scoped stock/ETF tradability evidence (YES/NO/UNKNOWN). Reuse opaque account_ref from holdings (stored snowball means IBKR); never pass raw accounts/Portfolio/credentials. With the existing protected prepare bridge, query original broker contract metadata read-only; otherwise stored identity only. Contract existence, past fills, trade=True or successful WhatIf do NOT prove account BUY permission. Missing authoritative account permission returns UNKNOWN. Fees remain UNKNOWN without a real estimate; never place/test/cancel an order or assume mutual fund subscription support.")
+    def get_instrument_tradability(request: TradabilityQuery) -> TradabilityResult:
+        arguments=request.model_dump()
+        if getattr(settings,'prepare_config',None):
+            try:
+                return TradabilityResult.model_validate(prepare_client.tradability(arguments))
+            except ValueError:
+                result=client.call('get_instrument_tradability',arguments)
+                result['issues'].append('LIVE_ACCOUNT_QUERY_UNAVAILABLE')
+                return TradabilityResult.model_validate(result)
+        return TradabilityResult.model_validate(client.call('get_instrument_tradability',arguments))
 
     @server.tool(meta=security_meta, annotations=read, description="Existing wealth overview contract and WealthService calculations. Preserve synthetic, integer CNY minor units and partial/unavailable warnings.")
     def get_wealth_overview(currency: Literal["CNY"] = "CNY", snapshot_id: str | None = None) -> overview.Overview:

@@ -326,6 +326,23 @@ class TigerBrokerAdapter(BrokerAdapter):
             logger.warning("[TigerBrokerAdapter] list_open_orders ApiException: %s", e)
             return []
 
+    def instrument_details(self, identity: dict) -> dict:
+        # SDK contract requests include the TradeClient configured account. That
+        # does not make trade=True a positive account permission grant.
+        symbol=identity.get('symbol')
+        if not symbol or identity.get('con_id') or identity.get('isin'):return {}
+        ticker,market=symbol.split(':')
+        if market not in {'US','HK'}:return {}
+        if str(getattr(self._trade_client,'_account','')) != self._account_id:
+            raise ValueError('ACCOUNT_NOT_FOUND')
+        contract=self._trade_client.get_contract(ticker,sec_type='STK',currency='USD' if market=='US' else 'HKD')
+        if contract is None:return {}
+        return dict(instrument=dict(symbol=contract.symbol,local_symbol=contract.local_symbol,
+            currency=contract.currency,sec_type=contract.sec_type,exchange=contract.exchange,
+            long_name=contract.name),market=contract.market,source='TIGER_GET_CONTRACT',
+            minimum_quantity=getattr(contract,'lot_size',None),
+            buy_restricted=getattr(contract,'trade',None) is False or getattr(contract,'close_only',None) is True)
+
     def get_positions(self) -> list[dict]:
         try:
             positions = self._trade_client.get_positions(account=self._account_id)

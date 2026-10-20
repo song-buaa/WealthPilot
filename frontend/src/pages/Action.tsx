@@ -121,9 +121,7 @@ export default function Action() {
       }
       if (params.get('trade') === 'ibkr') {
         const preview = await executionBatchApi.previewTradeLink(values)
-        const existing = (await executionBatchApi.list(preview.request_id)).items.find(batch =>
-          batch.source_conversation_id === preview.request_id &&
-          (batch.status === 'COMPLETED' || batch.legs.some(leg => Boolean(leg.linked_order_id))))
+        const existing = (await executionBatchApi.restoreTradeLink({...preview.order, request_id: preview.request_id})).batch
         if (active) {
           setIbkrLink(preview); setIbkrOrder(preview.order)
           if (existing) setIbkrBatch(existing)
@@ -250,7 +248,7 @@ export default function Action() {
           onLimitChange: value => { quoteSequence.current++; setIbkrLimit(value); setIbkrDirty(true); setIbkrBusy(false) },
           onJoin: joinIBKRAction, onBack: editIBKR,
           onRecalculate: () => { void quoteIBKR(ibkrLink, ibkrLimit) }, onConfirm: confirmIBKRIntent}} />}
-      {ibkrBatch && ibkrLink && <ConfirmOrderDialog key={`${ibkrBatch.id}:${ibkrBatch.confirmation_version}`} open
+      {ibkrBatch && ibkrLink && <ConfirmOrderDialog key={ibkrLink.request_id} open
         onClose={closeIBKR} onOrderPlaced={() => {}}
         ibkr={{batch: ibkrBatch, requestId: ibkrLink.request_id, onChanged: batch => {
           if (batch.source_conversation_id === ibkrLink.request_id) setIbkrBatch(batch)

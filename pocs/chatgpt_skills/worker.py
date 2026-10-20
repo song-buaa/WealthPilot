@@ -130,6 +130,12 @@ def main():
                             config["portfolio_id"] if config else args.portfolio_id, operation, a,
                             contract=config.get("database_contract_path") if config else None,
                             synthetic=args.synthetic_input or config is None, worker_process=True))
+                    elif operation == 'get_instrument_tradability' and (workflow or config):
+                        from pocs.chatgpt_skills.reader import read_tradability
+                        result=read_tradability(config['database_path'] if config else path,
+                            config['portfolio_id'] if config else args.portfolio_id,a,
+                            database_contract=config.get('database_contract_path') if config else None,
+                            synthetic=args.synthetic_input or config is None)
                     elif operation == 'get_trade_history' and (workflow or config):
                         from pocs.chatgpt_skills.reader import read_history
                         result=read_history(config['database_path'] if config else path,

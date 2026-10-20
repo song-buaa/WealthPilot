@@ -818,6 +818,9 @@ export interface IBKRQuote {
 }
 
 export const executionBatchApi = {
+  restoreTradeLink: (params: Record<string, unknown>) => request<{batch: ExecutionBatchResponse | null}>(
+    '/execution-batches/trade-link/restore', {method: 'POST', body: JSON.stringify(params)},
+  ),
   quoteTradeLink: (params: Record<string, unknown>) => request<IBKRQuote>(
     '/execution-batches/trade-link/quote', { method: 'POST', body: JSON.stringify(params) },
   ),

@@ -737,6 +737,31 @@ class IBKRBrokerAdapter(BrokerAdapter):
             )
         return result
 
+    def instrument_details(self, identity: dict) -> dict:
+        """Contract catalog only; no WhatIf, order binding, mutation or takeover."""
+        self._ensure_connected()
+        async def read():
+            from ib_async import Contract
+            symbol = identity.get('symbol')
+            market = symbol.split(':')[1] if symbol else None
+            exchange = 'LSEETF' if market in {'LSE','LSEETF','UK'} else 'SMART'
+            if identity.get('con_id'):
+                contract = Contract(conId=identity['con_id'], exchange=exchange)
+            elif identity.get('isin'):
+                contract = Contract(secIdType='ISIN', secId=identity['isin'], exchange=exchange)
+            else:
+                contract = Contract(symbol=symbol.split(':')[0], secType='STK', exchange=exchange,
+                                    currency='HKD' if market=='HK' else 'USD')
+            details = await self._ib.reqContractDetailsAsync(contract)
+            if len(details) != 1:return {}
+            detail=details[0];snapshot=self._contract_snapshot(detail, exchange)
+            return dict(instrument=snapshot,source='IBKR_REQ_CONTRACT_DETAILS',
+                market='LSEETF' if exchange=='LSEETF' else 'HK' if snapshot['primary_exchange']=='SEHK' else 'US' if snapshot['primary_exchange'] in {'NYSE','NASDAQ','ARCA','AMEX','ISLAND','BATS'} else None,
+                order_types=[v for v in str(getattr(detail,'orderTypes','') or '').split(',') if v] or None,
+                trading_hours={k:snapshot.get(k) for k in ('trading_hours','liquid_hours','time_zone_id')},
+                minimum_quantity=self._finite_number(getattr(detail,'minSize',None)))
+        return self._run_on_loop(read, timeout=self._timeout + 5)
+
     def qualify_execution_route(
         self, resolved: dict, *, exchange: str = "SMART",
     ) -> dict:

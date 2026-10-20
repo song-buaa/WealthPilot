@@ -113,3 +113,7 @@ class BrokerAdapter(ABC):
         默认空实现，子类按需覆盖。
         """
         pass
+
+    def instrument_details(self, identity: dict) -> dict:
+        """Optional read-only product evidence; never an order/permission probe."""
+        return {}

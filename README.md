@@ -1,6 +1,6 @@
 # WealthPilot 4.0
 
-B2 历史成交/收益归因为当前 PR 候选：新增只读 `get_trade_history`，复用原 Portfolio/U1/PEER，当前账面收益与历史收益分开。来源、覆盖、成本法及显式迁移见 [B2 实现说明](docs/B2_IMPLEMENTATION.md)；生产真实补源尚未执行。
+B2 历史成交/收益归因已合入 main：新增只读 `get_trade_history`，复用原 Portfolio/U1/PEER，当前账面收益与历史收益分开。来源、覆盖、成本法及显式迁移见 [B2 实现说明](docs/B2_IMPLEMENTATION.md)；真实补源/生产完整性须以独立验收为准，本轮不调查生产。
 
 私人财富管理与投资决策工作台：**ChatGPT 对话入口 + 七项只读 MCP 工具 + 原 WealthPilot 专业分析 Core + 完整 React Web**。
 
@@ -56,7 +56,7 @@ ChatGPT 提供自然语言交互、上下文及回答组织；Core 内的 Planni
 - 部分券商 Gateway / 数据源尚未配置或可用，单项同步、常驻恢复及跨网事项有实际证据才标 PASS。
 - 历史 PoC02 凭证展示事故保持 FAIL，后续撤销后的权限检查独立记录。以上不阻塞 4.0 功能范围收口，后续优化进入新版本。
 
-U1/U2 与国金原生来源已合入，用户已确认生产启用。原受控 prepare/固定资产视图见 [U1](docs/U1_IMPLEMENTATION.md)，成交同步及只读交易状态见 [U2](docs/U2_IMPLEMENTATION.md)。D1 当前资产质量收尾为本 PR 候选：复用原发行主体、分类、手工财富及固定视图质量合同，详见 [D1 实现与验收边界](docs/D1_IMPLEMENTATION.md)；本轮不部署或修改生产数据。
+U1/U2 与国金原生来源已合入，用户已确认生产启用。原受控 prepare/固定资产视图见 [U1](docs/U1_IMPLEMENTATION.md)，成交同步及只读交易状态见 [U2](docs/U2_IMPLEMENTATION.md)。D1 当前资产质量收尾已合入：复用原发行主体、分类、手工财富及固定视图质量合同，详见 [D1 实现与验收边界](docs/D1_IMPLEMENTATION.md)；本轮不部署或修改生产数据。
 
 开发入口：[AGENTS.md](AGENTS.md)、[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布](docs/PROJECT_GOVERNANCE.md)、[已有能力索引](docs/CAPABILITY_REGISTRY.md)、[隔离开发/检查](docs/dev_setup.md)。PoC/Batch 报告保留当轮事实，作为历史部署/回滚证据，不再覆盖当前产品基线。
 
@@ -305,3 +305,5 @@ python scripts/m5_e2e_18_cases.py --mode offline
 ## License
 
 本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE) 文件。
+
+B3交易体验/产品查询为当前PR候选：原批次恢复、最终确认及U2状态呈现，账户权限缺证据保持UNKNOWN。无Schema迁移，详见[实现与验收合同](docs/B3_IMPLEMENTATION.md)。

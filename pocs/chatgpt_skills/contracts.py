@@ -150,3 +150,24 @@ class TradeResult(BaseModel):
     risk: RiskPreview
     orders: list[OrderState]
     queried_at: str
+
+
+class TradabilityResult(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    schema_version: Literal['wealthpilot.tradability.v1']
+    synthetic: bool
+    queried_at: str
+    broker: Literal['ibkr','tiger']
+    account_ref: str | None
+    accounts: list[dict]
+    tradability: Literal['YES','NO','UNKNOWN']
+    purpose: Literal['BUY_STOCK_OR_ETF']
+    instrument: dict | None
+    supported_order_types: list[str] | None
+    trading_hours: dict | None
+    minimum_quantity: float | None
+    fees: dict
+    evidence_source: str
+    evidence_at: str | None
+    issues: list[str]
+    limitations: list[str]

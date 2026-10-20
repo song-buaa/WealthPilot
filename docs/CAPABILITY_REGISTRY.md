@@ -1,6 +1,6 @@
 # WealthPilot 已有能力索引
 
-> 2026-10-20，D1 开发基线为最新 origin/main `b4a5047fab1b4d53d46729f98c752b62bb1fd290`，包含已合入的 U1/U2 与国金原生同步。用户已确认生产启用；本轮核对已有部署记录及固定视图，未重新探测生产服务。D1 为本 PR 候选。本文仅维护能力检索索引，不定义开发/发布流程；Registry 维护触发见[治理规则](PROJECT_GOVERNANCE.md#registry-维护检查)。
+> 2026-10-20：B3开发基线为最新 origin/main `791f058074c67f6d258d73d7320a03b96da2c8de`，含B0/U0/U1/U2/D1/B2和国金原生同步。用户确认B2生产版本，本轮不访问生产。B3为PR候选。本文只维护能力索引，不定义第二套流程，维护规则见[治理文档](PROJECT_GOVERNANCE.md#registry-维护检查)。
 
 任务先读 [AGENTS](../AGENTS.md)、[当前架构](ARCHITECTURE_CURRENT.md) 和[治理工作流](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，再按条目检索代码与测试。状态“已有”只证明仓库存在实现；生产验收及数据质量单列。API 前缀以 [main.py](../backend/main.py) 挂载为准。
 
@@ -69,7 +69,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 测试：[隔离安全回归](../tests/test_guojin_native_sync.py)、原 restricted/U0 与 [浏览器](../frontend/tests/e2e/guojin-native.spec.ts)。
 - 限制：HK 文件无账户号或估值时间，必须依赖私有 GUI 来源收据；mtime 不作报价时间，未知仍 partial；生产首次同步已有独立验收记录，D1 后续真实源验收仍须另行授权。只验证过已提供的原生版本；表头/市场代码变化拒绝发布，不宽松猜测。[完整来源/启用合同](GUOJIN_NATIVE_SYNC.md)。
 
-### D1 当前资产质量（本 PR 候选）
+### D1 当前资产质量（已合入）
 
 - 发行主体 owner：[issuers](../backend/services/instruments/issuers.py)，LI_AUTO / MEITUAN / PDD_HOLDINGS 按证据映射；给出已知中国公司直持风险金额/投资分母、未映射金额及独立成员。基金不穿透，economic_region 不等同注册地或上市地。
 - 分类 owner：[原 classifier](../backend/services/instruments/classification.py) / [verified 数据](../backend/services/instruments/verified_classifications.py)，修正 Tiger QQQ STK wrapper；未来正常同步更新投影，不回写旧视图或猜未知证券。
@@ -77,7 +77,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 手工核对 owner：[WealthService](../backend/services/wealth_service.py)，保留主/副表及养老金金额去重，按 value_as_of 提醒并返回原更新入口；无自动贷款余额或养老金关联订正。
 - 接口/测试：原 prepare、固定 view、MCP/PEER request 可选 analysis_scope，无新工具/写权限。[D1 合成回归](../tests/test_d1_asset_quality.py)、[固定视图浏览器](../frontend/tests/e2e/asset-view.spec.ts)；[合同及限制](D1_IMPLEMENTATION.md)。零 Schema 迁移；来源不提供的时间、真实手工余额和养老关联仍可能 partial，生产验收须另行授权。
 
-### B2 历史事实与收益（本 PR 候选）
+### B2 历史事实与收益（已合入）
 
 - Owner：[原 Portfolio 域历史事实/算法](../backend/services/portfolio_history)，复用原 IBKR list_execution_details、Position/Run/订单 Owner、FXService、U1 frozen_input；原当前持仓收益算法不改。
 - 来源：显式私有 IBKR Flex XML / 单 Trades 节 CSV EXECUTION；近期 Gateway 永远不冒充完整历史。稳定 execution 身份幂等，费用缺失/异币、历史缺口、修正/Owner 冲突 fail closed，不从持仓反推历史。Tiger/国金原生历史报表待真实样例/权限核实。
@@ -85,3 +85,10 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 复用/限制：系统唯一历史收益法为 long-only 移动加权，与券商原口径对账；不覆盖成本、订单或财富。精确归因/HPR/年化的完整性门限及两表必要性见 [B2](B2_IMPLEMENTATION.md)。不新增任务/订单状态机、现金总账或全组合 TWR/MWR。
 - 覆盖/日期：沿原 evidence_json 校验 v2 报表与独立期初附件，纯日期按来源时区整日处理，FX 采用已证实业务/结算日；共同归因截止与旧收盘价时间分离，缺证保持未知，无新增 Schema。合同见 [B2 第 7 节](B2_IMPLEMENTATION.md#7-pr-29-定向修复后的覆盖日期与截止合同)。
 - 测试：[PR29 安全回归](../tests/test_b2_review_regressions.py)、[金样及隔离](../tests/test_b2_history.py)、[原视图/PEER/API](../tests/test_b2_frozen_and_api.py)、[原迁移](../tests/test_b2_schema.py)、[协议](../pocs/chatgpt_skills/test_protocol.py)。生产真实历史补源/对账 NOT_RUN，不因本地或 CI 通过标真实历史完整。
+
+### B3 交易体验与产品证据（PR 候选）
+
+- Owner：原 [link handoff/API](../backend/api/execution_batch.py)、[ConfirmOrderDialog](../frontend/src/components/ConfirmOrderDialog.tsx)；原请求完整参数/Portfolio精确恢复，最终人工操作顺序调用原confirm/submit，报价、版本、资金、WhatIf、风险及B0幂等保持原权威。U2状态在原弹窗展示。
+- 产品证据：[instruments/tradability](../backend/services/instruments/tradability.py)及原IBKR/Tiger Adapter只读合约能力；新MCP `get_instrument_tradability`。复用原prepare的受保护loopback bridge查询产品，不触发prepare/同步/交易；未配bridge时原RO worker仅给存储身份及UNKNOWN。
+- 三态合同：缺账户级肯定证据UNKNOWN；产品明确禁止买入可NO；当前SDK的肯定合约/WhatIf不授予YES。账户、证券身份、时区、来源、未知费用及实际验收边界见 [B3](B3_IMPLEMENTATION.md)。零Schema/依赖/新服务。
+- 测试：[B3隔离](../tests/test_b3_trade_experience.py)、原trade-link浏览器及MCP协议。生产真实账户/ChatGPT工具目录待单独授权验收，不以Mock冒充。

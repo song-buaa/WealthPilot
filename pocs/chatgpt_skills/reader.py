@@ -1,6 +1,5 @@
 """Allowlisted details from existing services; one enforced read-only snapshot."""
 from datetime import date, datetime, timezone
-import hashlib
 import logging
 
 from sqlalchemy import inspect, text
@@ -19,10 +18,7 @@ POSITION_FIELDS = ("id", "name", "ticker", "platform", "asset_class", "currency"
                    "vehicle_type", "economic_asset_class", "economic_asset_subclass")
 
 
-def account_ref(portfolio_id, row):
-    owner = [portfolio_id, row.broker, row.broker_account_id, row.platform]
-    return "account_" + hashlib.sha256(repr(owner).encode()).hexdigest()[:20]
-
+from backend.services.action.ownership import stored_account_ref as account_ref
 
 def read_history(path, portfolio_id, arguments, *, database_contract=None, synthetic=False):
     from pocs.chatgpt_skills.contracts import TradeHistoryQuery
@@ -43,6 +39,16 @@ def read_history(path, portfolio_id, arguments, *, database_contract=None, synth
         with Session(bind=connection,autoflush=False,join_transaction_mode='rollback_only') as db:
             if db.get(Portfolio,portfolio_id) is None:raise ReadError('PORTFOLIO_NOT_FOUND')
             return query(db,portfolio_id,**request.model_dump(mode='json',exclude={'snapshot_id'}),synthetic=synthetic)
+
+
+def read_tradability(path, portfolio_id, arguments, *, database_contract=None, synthetic=False):
+    from backend.services.instruments.tradability import query
+    with readonly_snapshot(path,database_contract) as connection:
+        if database_contract:
+            from app.shared_sqlite import load_contract
+            if load_contract(database_contract)['portfolio_id']!=portfolio_id:raise ReadError('ACCOUNT_NOT_FOUND')
+        with Session(bind=connection,autoflush=False,join_transaction_mode='rollback_only') as db:
+            return query(db,portfolio_id,arguments,synthetic=synthetic)
 
 
 def source_quality(connection, row):

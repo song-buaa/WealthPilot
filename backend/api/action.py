@@ -22,7 +22,7 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Header
 from pocs.chatgpt_skills.contracts import TradeSyncQuery
 
 from app.database import get_session
@@ -37,6 +37,35 @@ from pocs.chatgpt_skills.trade_link import LinkPreviewRequest, LinkOrder, draft_
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/instrument-tradability")
+def instrument_tradability(body: dict, authorization: str | None = Header(default=None)):
+    # Reuse the existing protected loopback bridge, not MCP database credentials.
+    from backend.api.asset_analysis import _authorized
+    from backend.services.instruments.tradability import TradabilityQuery, query
+    from backend.services.action.ownership import portfolio_scope
+    _authorized(authorization)
+    result = None
+    try:
+        filters = TradabilityQuery.model_validate(body)
+        with get_session() as db:
+            pid = portfolio_scope(db)
+            # Verify client scope before constructing or contacting an adapter.
+            result = query(db, pid, filters.model_dump())
+            if result['account_ref'] is None:
+                return result
+            if filters.broker == 'tiger' and 'tiger' not in _BROKER_MODE:
+                return result | {'issues': result['issues'] + ['TIGER_TRADING_ADAPTER_NOT_CONFIGURED']}
+            adapter = _get_ibkr_adapter() if filters.broker == 'ibkr' else _get_adapter()
+            return query(db, pid, filters.model_dump(), adapter=adapter)
+    except ValueError as exc:
+        code = str(exc) if str(exc) == 'ACCOUNT_NOT_FOUND' else 'INVALID_TRADABILITY_QUERY'
+        raise HTTPException(422, code) from None
+    except Exception:
+        # A transport or SDK failure is not a definitive account rejection.
+        if result is None:raise HTTPException(503, 'TRADABILITY_UNAVAILABLE') from None
+        return result | {'issues': result['issues'] + ['BROKER_QUERY_UNAVAILABLE']}
 
 
 @router.get("/trade-and-sync-status")

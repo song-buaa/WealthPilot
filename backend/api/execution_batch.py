@@ -190,6 +190,30 @@ def preview_ibkr_link(body: IBKRLinkPreviewRequest):
             "draft_created": False, "order_submitted": False}
 
 
+@router.post("/trade-link/restore")
+def restore_ibkr_link(body: IBKRLinkPreviewRequest):
+    """Read the exact original request, without broker I/O or new intent/Batch."""
+    from app.models import ConversationMessage
+    from backend.services.action.models import ExecutionBatch
+    from backend.services.action.ownership import portfolio_scope
+    with get_session() as session:
+        pid = portfolio_scope(session)
+        batches = session.query(ExecutionBatch).filter_by(
+            source_conversation_id=str(body.request_id)).order_by(ExecutionBatch.created_at.desc()).all()
+        for batch in batches:
+            policy = _load_json(batch.execution_policy) or {}
+            if policy.get("portfolio_id") != pid:
+                continue
+            if batch.status == "CANCELLED" and policy.get("review_refresh_pending"):
+                continue
+            message = session.get(ConversationMessage, batch.source_message_id)
+            metadata = _load_json(message.metadata_json) if message else None
+            if not metadata or metadata.get("trade_link_order") != body.model_dump(mode="json"):
+                raise HTTPException(422, "TRADE_LINK_REQUEST_ID_PARAMETER_MISMATCH")
+            return {"batch": _serialize_batch(batch)}
+        return {"batch": None}
+
+
 @router.post("/trade-link/confirm-intent")
 def confirm_ibkr_link(body: IBKRLinkConfirmation):
     from backend.services.execution_batch.link_handoff import create_link_batch

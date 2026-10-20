@@ -1,8 +1,8 @@
 # WealthPilot 当前系统架构
 
-> B2 历史事实/归因为本 PR 候选，新增权威与原链路关系见本文第 15 节；不代表生产已补齐历史。
+> B3 开发基线为最新 origin/main `791f058074c67f6d258d73d7320a03b96da2c8de`；B2已合入，权威关系见第15节，B3候选见文末。用户确认B2生产版本，本轮不访问生产，不能推定真实历史已完整。
 
-> 2026-10-20：D1 基线为最新 `origin/main` `b4a5047fab1b4d53d46729f98c752b62bb1fd290`，含 U1/U2 和国金原生来源。用户确认相关阶段已生产启用；本轮只读核对到 Mini 国金发布记录报告同一 SHA，未重新探测生产服务。D1 为本 PR 候选，不能当作生产已升级。2026-10-16 等旧记录保留其当时事实。版本/授权见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。
+> 2026-10-20：D1 基线为最新 `origin/main` `b4a5047fab1b4d53d46729f98c752b62bb1fd290`，含 U1/U2 和国金原生来源。用户确认相关阶段已生产启用；本轮只读核对到 Mini 国金发布记录报告同一 SHA，未重新探测生产服务。此处D1候选描述是当轮记录，不作为本轮生产证明。2026-10-16 等旧记录保留其当时事实。版本/授权见 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md#4-版本tag-与发布)。
 
 本文维护当前架构、模块/数据权威关系；详细开发与发布流程统一见[治理文档](PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。实现文档与代码/运行证据冲突时必须报告并修正，未核实项保留 UNKNOWN。任务从 [AGENTS](../AGENTS.md) 进入，复用入口/测试见[能力索引](CAPABILITY_REGISTRY.md)。现有专项设计保留其职责，不新增第二份 ARCHITECTURE.md。
 
@@ -211,7 +211,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI 账户/完整行数/查询时间与文件哈希收据，未知行情日期仍 partial。当前账户的旧 API 汇总/清仓由完整快照替换；未知截图/导入行须显式 CAS 决策，否则整批拒绝且保留 last-good。具体合同、入口与生产核对/回滚见 [国金原生同步](GUOJIN_NATIVE_SYNC.md)。
 
-## 16. D1 资产质量（本 PR 候选）
+## 16. D1 资产质量（已合入）
 
 发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 补充有官方 listing 证据的 Tiger QQQ 例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
 
@@ -219,10 +219,14 @@ HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI
 
 来源查询/抓取/发布与持仓/现金/行情有效时间分离：Tiger 服务器资产更新时间仅用于现金，IBKR 本地账户读取时间不再填 source cash_as_of。原 market_hours 增加基于本地交易日历的估值评估，原交易触发判断不变。Web/MCP/PEER 共用质量 owner，输出时重新核同一视图；资格不替代任何 B0 交易门。零 Schema 变更，旧固定 payload 不改，详见 [D1 实现与生产验收边界](D1_IMPLEMENTATION.md)。
 
-## 15. B2 历史成交与归因（本 PR 候选）
+## 15. B2 历史成交与归因（已合入）
 
 历史成交新增权威为原 Portfolio 域 [portfolio_history](../backend/services/portfolio_history)，仅存券商 execution/现金流及独立覆盖/来源证据；OrderRecord 仍是原订单权威，Position/Run 仍是持仓/现金权威，Wealth 统计不变。两张事实表不是持仓或余额账本，原均价不能反推历史。原 IBKR Adapter/FXService 只在显式导入阶段读取；原 MCP 新增只读 get_trade_history，Web/PEER 读同一确定性结果，snapshot_id 沿原冻结数据库，旧视图不改。
 
 覆盖权威沿原 evidence_json v2 的来源哈希/范围和独立期初事实，人工标记本身不授予完整资格；来源业务日、纯日期区间及共同计算截止合同见 [B2 定向修复](B2_IMPLEMENTATION.md#7-pr-29-定向修复后的覆盖日期与截止合同)。
 
 系统移动加权成本、券商报表法及当前账面盈亏分开呈现；缺期初/连续覆盖/费用/分红/历史 FX 时相关计算保持未知。未实现全组合 TWR/MWR、Tiger/国金原生历史报表和自动历史采集。Schema 是 2 表/2 显式唯一索引，复用原迁移 --stage b2 与严格 Digest；本轮不部署/补真实数据。合同、Gap、成本/收益条件、权限与生产回滚见 [B2 实现说明](B2_IMPLEMENTATION.md)。
+
+### B3 交易交互与只读产品查询（PR 候选）
+
+原 ActionDraftCard/ConfirmOrderDialog 消费原link_handoff/ExecutionBatch及U2交易同步投影；最终人工操作仍由原confirm/version/hash/TTL/WhatIf/资金/OrderManager约束。新增只读恢复不取报价、不落库。产品证据归原 [instruments 域](../backend/services/instruments/tradability.py)及原Adapter；MCP薄适配复用U1固定loopback/token读取端点，未配置时只读已有身份。产品查询不调用prepare/sync/WhatIf或订单动作，不改变共享SQLite权限；缺账户权限证据UNKNOWN而非授予YES。详见 [B3](B3_IMPLEMENTATION.md)，没有新订单状态机、现金账本、Schema或服务。

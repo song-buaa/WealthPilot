@@ -60,6 +60,16 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_
             conversation_id=request_id, role="assistant").first()
         if message is None or json.loads(message.metadata_json).get("trade_link_order") != parameters:
             raise ValueError("TRADE_LINK_REQUEST_ID_PARAMETER_MISMATCH")
+    # A known request cannot be adopted by a different Portfolio or broker
+    # account. Check before meaning-confirmation commits, not only at submit.
+    from backend.services.action.ownership import execution_owner
+    prior = session.query(ExecutionBatch).filter_by(source_message_id=message.id).order_by(
+        ExecutionBatch.created_at.desc()).first()
+    if prior is not None:
+        owner = execution_owner(session, adapter)
+        policy = json.loads(prior.execution_policy or '{}')
+        if policy.get('portfolio_id') != owner.portfolio_id or prior.account_ref != owner.account_id:
+            raise ValueError('TRADE_LINK_OWNER_MISMATCH')
     confirm_trade_intent(session, conversation_id=request_id, message_id=message.id,
                          intent_id="ti_"+order.request_id.hex)
     # confirm_trade_intent commits the original meaning-only confirmation.

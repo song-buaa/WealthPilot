@@ -11,6 +11,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { X, AlertTriangle, CheckCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import type { ActionDraftResponse, SymbolStrategyDraft, IBKRLinkPreview, IBKRQuote, ExecutionBatchResponse } from '@/lib/api'
 import { actionApi } from '@/lib/api'
+import { tradeError } from '@/lib/trade-display'
 import { formatDataSource, formatDegraded, formatFactors, formatConstraints } from '@/lib/plan-display'
 
 interface MissingField {
@@ -552,7 +553,7 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnl
   const attention = batch?.attention_reason
   return <section data-testid="ibkr-review-fields" style={{fontSize: 13, lineHeight: 1.8, overflowWrap: 'anywhere'}}>
     <div><b>标的：</b>IB01:LSE · <b>方向：</b>买入 BUY · <b>券商：</b>IBKR · LIMIT / DAY</div>
-    <div><b>合约：</b>conId {instrument && ('resolved_con_id' in instrument ? instrument.resolved_con_id : instrument.con_id)} · {instrument?.isin}</div>
+    <details><summary>证券身份及诊断</summary><div><b>合约：</b>conId {instrument && ('resolved_con_id' in instrument ? instrument.resolved_con_id : instrument.con_id)} · {instrument?.isin}</div></details>
     <div><b>上市 / 执行 / 币种：</b>LSEETF / SMART / USD · Acc</div>
     <div><b>账户：</b>{batch?.account_masked ?? '现有 IBKR 账户，读取中'} · Portfolio {String(batch?.execution_policy.portfolio_id ?? '待核实')}</div>
     <div><b>总支出上限（含费用和安全垫）：</b><span data-testid="ibkr-link-target">{amount(batch?.stated_cash ?? Number(preview?.order.target_amount))}</span></div>
@@ -565,11 +566,15 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnl
     <div><b>订单名义金额：</b>{amount(batch?.estimated_total)}</div>
     <div><b>预计费用：</b>{leg?.what_if?.status === 'PASS' ? amount(batch?.estimated_fees) : '未取得，不可提交'}</div>
     <div><b>WhatIf：</b>{String(leg?.what_if?.status ?? '待校验')}</div>
+    <div><b>可用原币现金：</b>{amount(batch?.usable_cash)}</div>
+    <div><b>预算余量：</b>{amount(batch?.estimated_residual)}</div>
+    <div><b>报价来源与有效期：</b>IBKR · {String(batch?.execution_policy.quote_max_age_seconds ?? 30)} 秒</div>
+    <div><b>预计总支出（不含安全垫）：</b>{batch ? amount(batch.estimated_total + batch.estimated_fees) : '待计算'}</div>
     <div><b>资金安全垫：</b>{amount(batch?.safety_cushion)}</div>
     <div><b>资金占用（含费用及安全垫）：</b><span data-testid="ibkr-total-outlay">{batch ? amount(batch.estimated_total + batch.estimated_fees + batch.safety_cushion) : '待计算'}</span></div>
     <div><b>状态：</b>{batch?.status ?? '读取中'}</div>
-    {batch && <div><b>当前批次 / 确认版本：</b>{batch.id} / {batch.confirmation_version}</div>}
-    {attention && <p role="alert">风险及阻断：{Array.isArray(attention) ? attention.join('；') : attention}</p>}
+    {batch && <details><summary>批次诊断</summary><div>{batch.id} / {batch.confirmation_version}</div></details>}
+    {attention && <p role="alert">风险及阻断：{tradeError(Array.isArray(attention) ? attention.join('；') : attention)}</p>}
     <p style={{color: '#B45309'}}>金额、数量和费用均须经 IBKR 校验；报价过期、费用未知或资金不足时不可提交。</p>
   </section>
 }

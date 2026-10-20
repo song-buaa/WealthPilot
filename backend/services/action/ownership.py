@@ -63,3 +63,10 @@ def execution_owner(session, adapter):
     if conflict or order_conflict:
         raise ValueError("ACCOUNT_PORTFOLIO_AMBIGUOUS_RECONCILIATION_REQUIRED")
     return ExecutionOwner(pid, broker, str(account))
+
+
+def stored_account_ref(portfolio_id, row):
+    """Existing opaque holdings-group identity; stable across Web/MCP readers."""
+    import hashlib
+    owner = [portfolio_id, row.broker, row.broker_account_id, row.platform]
+    return 'account_' + hashlib.sha256(repr(owner).encode()).hexdigest()[:20]
