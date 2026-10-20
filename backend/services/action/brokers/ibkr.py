@@ -194,6 +194,9 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._connected = False
         self._connection_guard = threading.Lock()
         self._connection_task: asyncio.Task | None = None
+        self._closing = False
+        self._shutdown_complete = threading.Event()
+        self._active_calls: set[asyncio.Task] = set()
 
         # M2.5: error callback 抓取的 errorCode 映射
         # key: orderId (int), value: {"errorCode": int, "errorString": str}
@@ -206,32 +209,40 @@ class IBKRBrokerAdapter(BrokerAdapter):
         self._open_order_sync_lock: asyncio.Lock | None = None
         self._cash_snapshot_lock: asyncio.Lock | None = None
 
-    def _run_on_loop(self, operation, *, timeout: float | None = None):
-        """在 adapter 专属 event loop 执行一次 IB 调用并等待普通结果。
+    def _run_on_loop(self, operation, *, timeout: float | None = None,
+                     _during_shutdown: bool = False):
+        """Run on the original loop; admission is atomic with shutdown.
 
-        ``operation`` 必须在 loop thread 内创建和消费 IB runtime 对象；调用者只能
-        得到已脱离 ib_async 生命周期的普通 Python 数据。超时会取消 coroutine，不能
-        被静默转换为“空持仓/空订单”。
+        Only enqueue while holding the lifecycle lock. All waits and SDK I/O
+        happen after releasing it. Shutdown owns cancellation of admitted calls.
         """
-        if self._loop is None or not self._loop.is_running():
-            raise ConnectionError("IBKR event loop 未运行")
-
         call_timeout = timeout if timeout is not None else self._timeout
 
         async def invoke():
-            result = operation()
-            if inspect.isawaitable(result):
-                return await asyncio.wait_for(result, timeout=call_timeout)
-            return result
+            task = asyncio.current_task()
+            if not _during_shutdown:
+                self._active_calls.add(task)
+            try:
+                if self._closing and not _during_shutdown:
+                    raise ConnectionError("IBKR_ADAPTER_SHUTDOWN")
+                result = operation()
+                if inspect.isawaitable(result):
+                    return await asyncio.wait_for(result, timeout=call_timeout)
+                return result
+            finally:
+                self._active_calls.discard(task)
 
-        future = asyncio.run_coroutine_threadsafe(invoke(), self._loop)
+        with self._connection_guard:
+            if self._closing and not _during_shutdown:
+                raise ConnectionError("IBKR_ADAPTER_SHUTDOWN")
+            if self._loop is None or not self._loop.is_running():
+                raise ConnectionError("IBKR event loop 未运行")
+            future = asyncio.run_coroutine_threadsafe(invoke(), self._loop)
         try:
             return future.result(timeout=call_timeout + 1)
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
-            raise TimeoutError(
-                f"IBKR 调用超时（{call_timeout}s）"
-            ) from exc
+            raise TimeoutError(f"IBKR 调用超时（{call_timeout}s）") from exc
 
     def _ensure_connected(self, *, deadline: float | None = None) -> None:
         """确保 IB 连接已建立。首次调用时启动后台线程。"""
@@ -239,6 +250,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
         if type(self._client_id) is not int or self._client_id <= 0:
             raise ConnectionError("RECOVERY_REQUIRES_VERIFIED_NONZERO_CLIENT_ID")
         with self._connection_guard:
+            if self._closing:
+                raise ConnectionError("IBKR_ADAPTER_SHUTDOWN")
             if (self._connected and self._account_verified and self._ib
                     and self._ib.isConnected()):
                 return
@@ -266,19 +279,24 @@ class IBKRBrokerAdapter(BrokerAdapter):
             ) from e
 
     async def _connect_single_flight(self):
-        # Runs only on the one adapter loop. A waiter timeout must not cancel
-        # another request's shared initialization or launch another clientId.
-        if (self._connected and self._account_verified and self._ib
-                and self._ib.isConnected()):
-            return
-        if self._connection_task is None or self._connection_task.done():
-            self._connection_task = asyncio.create_task(self._initialize_connection())
-            self._connection_task.add_done_callback(
-                lambda task: task.exception() if not task.cancelled() else None)
-        await asyncio.shield(self._connection_task)
+        # This second admission check also rejects a waiter queued before close.
+        with self._connection_guard:
+            if self._closing:
+                raise ConnectionError("IBKR_ADAPTER_SHUTDOWN")
+            if (self._connected and self._account_verified and self._ib
+                    and self._ib.isConnected()):
+                return
+            if self._connection_task is None or self._connection_task.done():
+                self._connection_task = asyncio.create_task(self._initialize_connection())
+                self._connection_task.add_done_callback(
+                    lambda task: task.exception() if not task.cancelled() else None)
+            task = self._connection_task
+        await asyncio.shield(task)
 
     async def _initialize_connection(self):
         from ib_async import IB
+        if self._closing:
+            raise ConnectionError("IBKR_ADAPTER_SHUTDOWN")
         self._connected = self._account_verified = False
         if self._ib is not None:
             self._ib.disconnect()  # retire only the disconnected previous socket
@@ -294,6 +312,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
             self._ib = candidate  # publish only after original account validation
             self._open_order_sync_lock = self._cash_snapshot_lock = None
             self._install_open_order_evidence_hook()
+            self._install_contract_details_guard()
             candidate.errorEvent += self._on_ib_error
             def disconnected():
                 if self._ib is candidate:
@@ -791,10 +810,18 @@ class IBKRBrokerAdapter(BrokerAdapter):
                                     currency='HKD' if market=='HK' else 'USD')
             if self._ib is not connection or not connection.isConnected():
                 raise ConnectionError("IBKR metadata session changed")
-            # reqContractDetails has request IDs, but no broker cancellation API.
-            # Cancelling its Future discards late replies without closing the
-            # valid shared order session or touching any other request.
-            details = await connection.reqContractDetailsAsync(contract)
+            # There is no wire cancellation for this read. Retire only its
+            # exact SDK registration; late replies are guarded on this wrapper.
+            pending = connection.reqContractDetailsAsync(contract)
+            try:
+                details = await pending
+            finally:
+                if asyncio.isfuture(pending) and pending.cancelled():
+                    wrapper = connection.wrapper
+                    for req_id, future in list(wrapper._futures.items()):
+                        if future is pending:
+                            wrapper._endReq(req_id)
+                            break
             if len(details) != 1:return {}
             detail=details[0];snapshot=self._contract_snapshot(detail, exchange)
             return dict(instrument=snapshot,source='IBKR_REQ_CONTRACT_DETAILS',
@@ -1362,30 +1389,48 @@ class IBKRBrokerAdapter(BrokerAdapter):
             raise ConnectionError(f"IBKR 查询账户摘要失败: {exc}") from exc
 
     def shutdown(self) -> None:
+        # Never block the very loop that must perform cancellation/cleanup.
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("IBKR_SHUTDOWN_REQUIRES_EXTERNAL_THREAD")
         with self._connection_guard:
-            async def close():
-                task = self._connection_task
-                if task is not None and not task.done():
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
-                if self._ib is not None:
-                    self._ib.disconnect()
-                self._connected = self._account_verified = False
-            if self._loop and self._loop.is_running():
-                try:
-                    self._run_on_loop(close, timeout=self._timeout + 1)
-                except Exception as exc:
-                    logger.warning("[IBKR] shutdown cleanup failed: %s", type(exc).__name__)
-                finally:
-                    self._loop.call_soon_threadsafe(self._loop.stop)
-                    if self._thread:
-                        self._thread.join(timeout=5)
-                    if not self._thread or not self._thread.is_alive():
-                        self._loop.close()
+            already_closing = self._closing
+            self._closing = True  # terminal: this instance can never reopen
+            loop, thread = self._loop, self._thread
+        if already_closing:
+            if not self._shutdown_complete.wait(timeout=self._timeout + 7):
+                raise ConnectionError("IBKR_SHUTDOWN_NOT_COMPLETE")
+            return
+
+        async def close():
+            tasks = set(self._active_calls)
+            if self._connection_task is not None and not self._connection_task.done():
+                tasks.add(self._connection_task)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if self._ib is not None:
+                self._ib.disconnect()
+            self._connected = self._account_verified = False
+
+        # No lifecycle lock across cancellation waits or SDK disconnect. If
+        # cleanup fails, retain ownership/references and fail closed, not success.
+        if loop and loop.is_running():
+            self._run_on_loop(close, timeout=self._timeout + 1, _during_shutdown=True)
+            loop.call_soon_threadsafe(loop.stop)
+            if thread:
+                thread.join(timeout=5)
+                if thread.is_alive():
+                    raise ConnectionError("IBKR_SHUTDOWN_NOT_COMPLETE")
+        if loop and not loop.is_closed():
+            loop.close()
+        with self._connection_guard:
             self._ib = None
             self._connected = self._account_verified = False
             self._loop = self._thread = self._connection_task = None
+            self._active_calls.clear()
             self._open_order_sync_lock = self._cash_snapshot_lock = None
+            self._shutdown_complete.set()
         logger.info("[IBKR] shutdown 完成")
 
     # ── orderRef 幂等反查（PRD §3.6.1）──────────────────────
@@ -1479,6 +1524,24 @@ class IBKRBrokerAdapter(BrokerAdapter):
         return result
 
     # ── 内部: error callback 处理（M2.5）─────────────────────
+
+    def _install_contract_details_guard(self) -> None:
+        """ib_async 2.1 indexes _results directly for STK/bond details.
+
+        A timed-out read is locally retired via the SDK's _endReq. Ignore only
+        replies without a live results container, with no growing tombstone set;
+        valid requests still use the original callback and reqId. No order hook.
+        """
+        wrapper = self._ib.wrapper
+        if getattr(wrapper, "_wealthpilot_contract_guard", False):
+            return
+        for name in ("contractDetails", "bondContractDetails"):
+            original = getattr(wrapper, name)
+            def guarded(req_id, details, _original=original):
+                if req_id in wrapper._results:
+                    return _original(req_id, details)
+            setattr(wrapper, name, guarded)
+        wrapper._wealthpilot_contract_guard = True
 
     def _install_open_order_evidence_hook(self) -> None:
         """Capture ``openOrder`` OrderState before ib_async discards it.

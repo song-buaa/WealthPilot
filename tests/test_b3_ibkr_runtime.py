@@ -30,6 +30,8 @@ def runtime(monkeypatch):
         hang_query = False
         def __init__(self):
             self.connected = False
+            self.wrapper = SimpleNamespace(_results={}, contractDetails=lambda *args:None,
+                                           bondContractDetails=lambda *args:None)
             self.disconnections = 0
             self.errorEvent = Event()
             self.disconnectedEvent = Event()
@@ -282,12 +284,16 @@ def test_real_sdk_late_contract_reply_cannot_complete_next_request(runtime):
         sdk.client.getReqId=lambda:len(sent)+1
         sdk.client.reqContractDetails=lambda req_id,contract:sent.append(req_id)
         connection.reqContractDetailsAsync=sdk.reqContractDetailsAsync
+        connection.wrapper=sdk.wrapper
+        adapter._install_contract_details_guard()
         return sdk
     sdk=adapter._run_on_loop(install)
     with pytest.raises(TimeoutError):
         adapter.instrument_details({'symbol':'IB01:LSE'},deadline=time.monotonic()+.02)
     def late_old_reply():
-        assert sdk.wrapper._futures[1].cancelled()
+        assert 1 not in sdk.wrapper._futures
+        assert 1 not in sdk.wrapper._results
+        assert 1 not in sdk.wrapper._reqId2Contract
         sdk.wrapper.contractDetails(1,ContractDetails(contract=Contract(conId=354802220)))
         sdk.wrapper.contractDetailsEnd(1)
         assert not sdk.wrapper._futures

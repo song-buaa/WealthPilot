@@ -88,9 +88,13 @@ def _make_adapter(**kwargs):
     adapter._connected = True
     adapter._connection_guard = threading.Lock()
     adapter._connection_task = None
+    adapter._closing = False
+    adapter._shutdown_complete = threading.Event()
+    adapter._active_calls = set()
     adapter._account_verified = True
     adapter._loop = MagicMock()
     adapter._thread = MagicMock()
+    adapter._thread.is_alive.return_value = False
     adapter._ib = MagicMock()
     adapter._ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
     adapter._ib.reqCompletedOrdersAsync = AsyncMock(return_value=[])
@@ -652,6 +656,9 @@ class TestDedicatedLoopReadPath:
     def _loop_adapter(timeout=0.1):
         adapter = IBKRBrokerAdapter.__new__(IBKRBrokerAdapter)
         adapter._timeout = timeout
+        adapter._connection_guard = threading.Lock()
+        adapter._closing = False
+        adapter._active_calls = set()
         adapter._loop = asyncio.new_event_loop()
         adapter._thread = threading.Thread(
             target=adapter._loop.run_forever, daemon=True,
@@ -733,13 +740,16 @@ class TestDedicatedLoopReadPath:
         with pytest.raises(ConnectionError):
             adapter.list_open_orders()
 
-    def test_shutdown_clears_loop_state_for_reconnect(self):
+    def test_shutdown_clears_loop_state_and_permanently_closes_admission(self):
         adapter = _make_adapter()
         adapter.shutdown()
         assert adapter._connected is False
         assert adapter._ib is None
         assert adapter._loop is None
         assert adapter._thread is None
+        assert adapter._closing and adapter._shutdown_complete.is_set()
+        with pytest.raises(ConnectionError, match="IBKR_ADAPTER_SHUTDOWN"):
+            adapter._ensure_connected()
 
 
 class TestReadOnlyOrderSnapshots:
