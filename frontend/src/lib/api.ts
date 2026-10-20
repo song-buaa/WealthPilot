@@ -788,6 +788,7 @@ export interface ExecutionBatchResponse {
   reserved_amount: number
   estimated_total: number
   estimated_residual: number
+  all_in_budget_remaining?: number | null
   status: string
   confirmation_version: number
   confirmation_hash: string | null

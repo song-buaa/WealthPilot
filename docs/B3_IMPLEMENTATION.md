@@ -24,7 +24,7 @@
 - `POST /api/execution-batches/trade-link/restore` 仅查询与 request_id、完整原始参数及当前 Portfolio 精确匹配的原批次。恢复 READY/CONFIRMED/已关联订单及终态；不取新报价、不创建批次或订单。失败重核的已失效批次按原 refresh_pending 合同重新核对，不复活旧授权。
 - 只把已有可信参数直接恢复；新链接未产生数量/费用前仍明确“待计算”。重开同请求不重复填写或建 Batch，篡改原预算/参数拒绝。link_handoff在原意图确认提交前额外核对已存在批次的Owner，拒绝跨Portfolio/账户认领，不等到submit再阻止。
 - 原 `reprice_all_in` 先撤销旧确认再联网，重核后清空风险文字/勾选，显示前后数量、限价及费用；新版本必须重新取得最终人工确认。
-- 原币可用现金、预算余量、预计名义金额/佣金/总支出及安全垫分开；WhatIf费用只是预估，不是实际佣金。conId/request/batch/version放诊断折叠区。
+- 原币可用现金、原账户现金余量、只读投影的本次all-in预算余量、预计名义金额/佣金/总支出及安全垫分开（不得把10000账户余额扣3930后的6070称为4000预算的70余额）；WhatIf费用只是预估，不是实际佣金。conId/request/batch/version放诊断折叠区。
 - 浏览器 busy ref 阻止重复点击；传输异常不能证明下单失败，当前弹窗冻结发送并查询原 Batch。UNKNOWN 只对账不自动重发。原 B0 durable claim/orderRef/幂等不改。
 - 结果通过原 U2 `/api/action/trade-and-sync-status?batch_id=…` 读取，区分交易与资产同步。`SYNC_UNVERIFIED` 不表示成交失败；U2只读查询不触发真实刷新。原订单轮询/对账仍由原 Owner 处理。
 

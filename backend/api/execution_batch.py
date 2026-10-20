@@ -17,7 +17,7 @@ from pydantic import Field
 from pocs.chatgpt_skills.trade_link import IBKRLinkPreviewRequest, ibkr_instrument
 
 from app.database import get_session
-from backend.services.execution_batch.calculator import ExecutionSafetyError
+from backend.services.execution_batch.calculator import ExecutionSafetyError, money
 from backend.services.execution_batch.service import ExecutionBatchService
 from backend.utils.datetime_utils import utc_iso
 
@@ -118,6 +118,11 @@ def _serialize_batch(batch) -> dict:
         "reserved_amount": float(batch.reserved_amount),
         "estimated_total": float(batch.estimated_total),
         "estimated_residual": float(batch.estimated_residual),
+        # Display projection of the existing all-in cap; account residual above
+        # remains the original cash ledger fact and authorization is unchanged.
+        "all_in_budget_remaining": (float(money(batch.stated_cash) - money(batch.estimated_total)
+            - money(batch.estimated_fees) - money(batch.safety_cushion))
+            if ExecutionBatchService.is_all_in(batch) and batch.stated_cash is not None else None),
         "status": batch.status,
         "confirmation_version": batch.confirmation_version,
         "confirmation_hash": batch.confirmation_hash,

@@ -367,6 +367,8 @@ test('B3 prepared request restores parameters without another quote or intent co
   await expect(final.getByTestId('ibkr-quantity')).toHaveText('39')
   await expect(final.getByLabel('IBKR 限价')).toHaveValue('100')
   await expect(final).toContainText('可用原币现金：10,000 USD')
+  await expect(final.getByTestId('ibkr-budget-remaining')).toHaveText('70 USD')
+  await expect(final.getByTestId('ibkr-account-cash-remaining')).toHaveText('6,070 USD')
   expect(repeated).toBe(0)
   expect(await(await request.get(`${base}/__test/ibkr-counts`)).json()).toEqual(before)
 })

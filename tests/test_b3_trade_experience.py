@@ -225,3 +225,21 @@ def test_prepare_bridge_targets_only_protected_read_endpoint(holdings,monkeypatc
         assert result['evidence_source']=='SYNTHETIC_CONTRACT_READ' and result['tradability']=='UNKNOWN'
         with pytest.raises(ValueError):bridge.tradability({'broker':'ibkr','symbol':'IB01:LSE','base_url':'http://other'})
     assert len(calls)==1  # No prepare, synchronize, WhatIf or order endpoint.
+
+
+def test_budget_remaining_is_not_account_cash_remaining(api):
+    from backend.api.execution_batch import _serialize_batch
+    from backend.services.execution_batch.service import ExecutionBatchService
+    from decimal import Decimal
+    client,engine,_=api;_,batch=prepared(client)
+    with Session(engine) as db:
+        row=db.get(ExecutionBatch,batch['id'])
+        row.stated_cash=Decimal('4000');row.usable_cash=Decimal('10000')
+        row.estimated_total=Decimal('3900');row.estimated_fees=Decimal('5')
+        row.safety_cushion=Decimal('25');row.estimated_residual=Decimal('6070')
+        fingerprint=ExecutionBatchService.review_fingerprint(row)
+        result=_serialize_batch(row)
+        assert result['all_in_budget_remaining']==70
+        assert result['estimated_residual']==6070 and result['usable_cash']==10000
+        assert result['estimated_total']==3900 and result['estimated_fees']==5
+        assert fingerprint==ExecutionBatchService.review_fingerprint(row)

@@ -567,7 +567,8 @@ export function IBKRReviewFields({ batch, preview, limit, onLimitChange, readOnl
     <div><b>预计费用：</b>{leg?.what_if?.status === 'PASS' ? amount(batch?.estimated_fees) : '未取得，不可提交'}</div>
     <div><b>WhatIf：</b>{String(leg?.what_if?.status ?? '待校验')}</div>
     <div><b>可用原币现金：</b>{amount(batch?.usable_cash)}</div>
-    <div><b>预算余量：</b>{amount(batch?.estimated_residual)}</div>
+    <div><b>本次总预算剩余（含安全垫预留后）：</b><span data-testid="ibkr-budget-remaining">{amount(batch?.all_in_budget_remaining)}</span></div>
+    <div><b>预计账户现金余量：</b><span data-testid="ibkr-account-cash-remaining">{amount(batch?.estimated_residual)}</span></div>
     <div><b>报价来源与有效期：</b>IBKR · {String(batch?.execution_policy.quote_max_age_seconds ?? 30)} 秒</div>
     <div><b>预计总支出（不含安全垫）：</b>{batch ? amount(batch.estimated_total + batch.estimated_fees) : '待计算'}</div>
     <div><b>资金安全垫：</b>{amount(batch?.safety_cushion)}</div>
