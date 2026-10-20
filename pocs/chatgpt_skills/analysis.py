@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 import uuid
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Turn(BaseModel):
@@ -20,11 +20,20 @@ class Turn(BaseModel):
 
 class AnalysisRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    question: str = Field(min_length=1, max_length=6000, pattern=r'\S')
+    question: str = Field(min_length=1, max_length=6000)
     symbol: str | None = Field(default=None, min_length=1, max_length=80)
     history: list[Turn] = Field(default_factory=list, max_length=16)
     snapshot_id: str | None = Field(default=None, pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')
     analysis_scope: Literal['investments', 'net_worth'] = 'investments'
+
+    @field_validator('question')
+    @classmethod
+    def question_has_content(cls, value: str) -> str:
+        # Some connector validators full-match JSON Schema patterns instead of
+        # searching. Keep the nonblank rule server-side, without changing text.
+        if not value.strip():
+            raise ValueError('question must contain non-whitespace content')
+        return value
 
 
 class AnalysisResult(BaseModel):

@@ -97,6 +97,9 @@ def _snapshot_classification(
         exchange=source.get("exchange"),
         primary_exchange=source.get("primary_exchange"),
         currency=snap.currency,
+        # Preserve the adapter's canonical listing proof through publication;
+        # a raw ticker/name alone must not enable a verified listing exception.
+        listing_symbol=stored_evidence.get("listing_symbol"),
     )
     return classify_instrument(evidence), evidence
 

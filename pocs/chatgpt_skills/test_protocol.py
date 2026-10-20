@@ -102,6 +102,44 @@ def test_real_endpoint_preserves_seven_tools_and_adds_readonly_trade_sync_query(
     asyncio.run(run())
 
 
+def test_analysis_discovery_and_calls_keep_nonblank_validation_without_regex(monkeypatch):
+    """Live tools/list + call over the MCP runtime, no business/provider I/O."""
+    from types import SimpleNamespace
+    from pocs.chatgpt_skills.server import create_server, BusinessClient
+    calls = []
+    def original_business_contract(self, operation, arguments):
+        calls.append((operation, arguments))
+        return dict(synthetic=True,scenario=operation,status='partial',issues=['SYNTHETIC_ONLY'],
+            queried_at='2026-10-20T00:00:00+00:00',conclusion=arguments['question'])
+    monkeypatch.setattr(BusinessClient, 'call', original_business_contract)
+    async def run():
+        server = create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
+        async with Client(server,mode='legacy') as client:
+            tools = {t.name:t for t in (await client.list_tools()).tools}
+            assert len(tools) == 8 and all(t.annotations.read_only_hint for t in tools.values())
+            for name in ('review_portfolio','analyze_position','analyze_performance'):
+                schema = tools[name].input_schema
+                # Resolve through JSON Schema, not a handwritten mirror of it.
+                for question in ('请重新评估我的投资组合', 'Review my portfolio allocation'):
+                    arguments = {'request':{'question':question,'analysis_scope':'net_worth'}}
+                    jsonschema.validate(arguments, schema)
+                    result = await client.call_tool(name, arguments)
+                    assert not result.is_error, result.content
+                    assert result.structured_content['conclusion'] == question
+                    assert calls[-1][1]['analysis_scope'] == 'net_worth'
+                assert '"pattern": "\\\\S"' not in json.dumps(schema)
+                assert 'analysis_scope' in json.dumps(schema)
+                before = len(calls)
+                for request in ({'question':' \t\n\u3000'}, {'question':''}, {'question':'x'*6001},
+                        {'question':'Valid question','analysis_scope':'all'},
+                        {'question':'Valid question','force':True},
+                        {'question':'Valid question','snapshot_id':'invalid'}):
+                    result = await client.call_tool(name, {'request':request})
+                    assert result.is_error
+                assert len(calls) == before  # Reject before reaching business/PEER.
+    asyncio.run(run())
+
+
 def test_trade_and_sync_query_is_readonly_and_does_not_expose_raw_sdk(endpoint,tmp_path):
     import sqlite3
     db=tmp_path/'synthetic.db'

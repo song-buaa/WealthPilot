@@ -76,3 +76,13 @@ PEER 获得同一视图及其等级/具体 blockers，返回时重新评估同�
 真实验收须另行授权：核对组件 SHA/严格 Digest；三家只读来源及 Tiger 真实 update_timestamp；必要同步写入须按原流程获得授权。新 U1 view 下比对 Web/MCP/PEER 金额、三公司成员、QQQ 分类及所有真实时间；无时间的来源允许 partial，不编造行情。贷款/银行现金/养老金关联由用户核实，验证主/副表、投资分母与外币日期；不自动订正生产数据。
 
 回滚为原固定兼容组件 SHA；无需反向 DDL，不回填旧日期，不以旧数据库覆盖新业务事实。已产生的新固定 view 保留，只读展示新字段可降级；旧固定 view 不改。保留 U0/U2 后台任务和交易开关，本批不开展 B2/B3 或其他接入。
+
+## 6. D1 生产验收遗留修复
+
+用户报告 D1 已在 `933d15f07f84be554daedbd909b235e1f5d797dd` 完成生产验收，仅余以下两项；本次 Dev 修复从该最新 main 创建独立分支，不部署、不修改生产数据：
+
+- **QQQ 发布证据**：Tiger Adapter 的原 classification_evidence 已保存 listing_symbol，但 PositionUpsert 重建证据时未传入。原 stock_type=COMMON 因此覆盖 verified ETF，后续发行主体投影误把 QQQ 当直持未知公司。原 `_snapshot_classification` 现在只传递已存 classification_evidence 中的 listing_symbol，不从 raw ticker/name 猜测；继续调用同一 canonical classifier/verified listing，保留 OPT/FUT 及 conId/ISIN 冲突保护。数量、成本、市值、Owner 和旧固定视图不改；生产后续正常同步的当前投影可修正，不能把代码交付当作已完成数据订正。
+- **question Schema 兼容**：当前会话连接器元数据缺 analysis_scope；非敏感、带无效 snapshot_id 的参数探针显示，多字符问题在本地模型有效，却被连接器按 `\S` 拒绝，单字符 A 则通过该项检查。两次均在连接器参数层拒绝，未调用 PEER/券商。现有“刷新工具”入口已尝试，当前会话元数据仍旧，不把点击当刷新已生效。仅移除 question 在公开 JSON Schema 中的 pattern，改由原 AnalysisRequest 的 field_validator 拒绝空白；保留 min/max=1/6000、原问题文本、extra=forbid、analysis_scope 枚举、snapshot/账户/权限等约束。没有新工具或平行插件。
+- **元数据发布验收**：后续另行授权部署新固定 SHA 后，在现有连接器刷新工具目录，确认分析工具 request 含 analysis_scope、question 无不兼容 pattern，再开新会话验证中文/多字符问题和净资产范围；空白、超长、错误枚举/额外字段必须仍在进入业务服务前拒绝。若仍不一致，核对 live tools/list 与实际进程/导入路径，不以部署 SHA 或本地 Schema 代替生产原始目录证据。本轮未直采生产原始 tools/list；不能用当前缓存继续失败来声称新代码已生产验证。[官方元数据刷新流程](https://developers.openai.com/plugins/deploy/connect-chatgpt)。
+
+[发布链路及输入合同回归](../tests/test_d1_publication_regressions.py)覆盖真实 SDK 对象→原 Repository Snapshot→Upsert→固定视图、重复同步/旧视图不变及证券类型/身份冲突；[原 MCP 协议测试](../pocs/chatgpt_skills/test_protocol.py)验证实际 tools/list 与调用的 Schema、非空白服务端校验和原只读边界。零 Schema/Digest/服务/权限变化；真实生产重同步和 ChatGPT 新会话仍待发布授权后的验收。
