@@ -68,7 +68,7 @@ def single_run(root):
         os.close(fd)
 
 
-def bounded(argv, *, timeout):
+def bounded(argv, *, timeout, allow_failure=False):
     """No shell, credentials or raw stdout in diagnostics; kill our process group."""
     with subprocess.Popen([str(a) for a in argv], stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, start_new_session=True) as process:
@@ -78,7 +78,7 @@ def bounded(argv, *, timeout):
             os.killpg(process.pid, signal.SIGKILL)
             process.communicate()
             raise ValueError("AUTO_TIMEOUT") from None
-        require(process.returncode == 0, "AUTO_GUI_UNAVAILABLE")
+        require(process.returncode == 0 or allow_failure, "AUTO_GUI_UNAVAILABLE")
         return out
 
 
@@ -250,12 +250,13 @@ def publish(config_path, database, contract):
     # The existing explicit CLI performs strict Digest/Owner/allowlist checks and
     # original Executor claim/fence. It never starts backend lifespan or other brokers.
     out = bounded([sys.executable, SYNC_SCRIPT, "--config", config_path, "--publish",
-        "--database", database, "--contract", contract, "--reuse-published"], timeout=90)
+        "--database", database, "--contract", contract, "--reuse-published"], timeout=90, allow_failure=True)
     try:
         result = json.loads(out)
     except ValueError:
         raise ValueError("AUTO_SYNC_FAILED") from None
-    require(result.get("published") is True, "AUTO_SYNC_FAILED")
+    require(result.get("published") is True, result.get("reason_code")
+            if result.get("reason_code") in CODES else "AUTO_SYNC_FAILED")
     return result
 
 

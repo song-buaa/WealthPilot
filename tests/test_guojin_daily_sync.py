@@ -301,3 +301,14 @@ def test_scheduler_template_is_existing_codex_timer_not_new_service(daily):
     doc=(Path(__file__).resolve().parents[1]/'docs/GUOJIN_NATIVE_SYNC.md').read_text()
     assert '--trigger cron' in doc and '--trigger manual' in doc
     assert '17:30' in doc and '17:30–18:00' in doc
+
+
+@pytest.mark.parametrize('code,expected',[
+    ('NATIVE_LEGACY_REVIEW_REQUIRED','NATIVE_LEGACY_REVIEW_REQUIRED'),
+    ('raw secret owner or credential','AUTO_SYNC_FAILED')])
+def test_publication_failure_preserves_only_safe_original_reason(daily,monkeypatch,code,expected):
+    def child(argv,timeout,allow_failure=False):
+        assert allow_failure is True
+        return json.dumps(dict(status='failed',published=False,reason_code=code)).encode()
+    monkeypatch.setattr(daily.module,'bounded',child)
+    with pytest.raises(ValueError,match=expected):daily.module.publish('config','database','contract')
