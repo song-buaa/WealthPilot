@@ -230,3 +230,5 @@ HK 文本不具备账户/估值时间；受信任导出者必须提供私有 GUI
 ### B3 交易交互与只读产品查询（PR 候选）
 
 原 ActionDraftCard/ConfirmOrderDialog 消费原link_handoff/ExecutionBatch及U2交易同步投影；最终人工操作仍由原confirm/version/hash/TTL/WhatIf/资金/OrderManager约束。新增只读恢复不取报价、不落库。产品证据归原 [instruments 域](../backend/services/instruments/tradability.py)及原Adapter；MCP薄适配复用U1固定loopback/token读取端点，未配置时只读已有身份。产品查询不调用prepare/sync/WhatIf或订单动作，不改变共享SQLite权限；缺账户权限证据UNKNOWN而非授予YES。详见 [B3](B3_IMPLEMENTATION.md)，没有新订单状态机、现金账本、Schema或服务。
+
+国金最终上线合同：原解析器记录精确PASS/双上限估值WARNING/超限阻断；原生v2来源仅用真实观察动作排序，券商时间和完整性缺证据保留UNKNOWN。原Repository的默认关闭观察行选项仅供国金显式reconcile使用，不清仓/删除未观察到的行，不退役旧汇总；Run.complete=false供原U1质量判定。具体权限与政策以[原国金合同](GUOJIN_NATIVE_SYNC.md#最终上线政策估值-warning-与可观察来源当前合同)为准。

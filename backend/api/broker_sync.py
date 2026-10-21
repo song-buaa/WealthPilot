@@ -99,6 +99,7 @@ def _public_quality(run):
     result = {key:meta.get(key) for key in ("quality","issues","source","complete","coverage","markets","empty_confirmed","fetched_at",
         "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx",
         "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count",
+        "query_action_at","source_completeness","counter_status","publication_mode","reconciliation",
         "time_evidence","price_time_basis")}
     # Pre-D1 IBKR cash_as_of was a local download clock. Reusing that last-good
     # must not turn it into authoritative source time in a NEW analysis view.

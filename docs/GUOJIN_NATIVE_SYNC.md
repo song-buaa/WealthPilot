@@ -233,3 +233,19 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 未来固定PR合并SHA部署获准后，沿原Mini定时机制在北京时间11:45及17:30各触发一次原CLI（命令相同，窗口由源时间判定，不新增强制窗口参数）。启用前确认真实GUI合同、Owner及共享路径；先独立inbox默认validate，再另获持仓写入/每日任务启用授权。窗口边界内错过时只做原有有界恢复，不新增后台无限补偿。回滚先停新触发/automation.enabled=false，保留ready、两个窗口收据及Last-good；无数据库回滚/DDL，不恢复MiniQMT。
 
 用户报告UIA当前无法识别xiadan可见窗口：该问题保持真实运行PENDING，不因调度修改消失。本批不改native_export.ps1、不伪造目标id/class/name、不关闭任何鼠标或账户检查。真实GUI合同须由Mini独立提供证据后另做必要适配；不等待、不取消或干扰原2026-10-21 17:30单次验收。
+
+### 最终上线政策：估值 WARNING 与可观察来源（当前合同）
+
+本节按用户最终上线授权更新前文的金额容限和来源要求；旧v1收据继续读取，但不得把旧GUI完整性要求或旧两分估值容限当成新v2来源已具备的证据。
+
+- 原明细与资金页独立总资产精确一致为PASS；差异同时满足独立总资产的0.5%及2,000 CNY上限为WARNING，超限仍NATIVE_RECONCILIATION_FAILED。比较使用未舍入Decimal，两个上限同时包含边界；总资产非正时不能以比例放行非零差异。资金页自身“股票市值+资金余额=总资产”仍保留两分原生舍入校验。
+- 原始证券行、人民币市值/成本/盈亏、资金余额和资金页总资产均不改动；`reconciliation`记录明细合计、独立总资产、带符号差额、绝对差额、比例及政策版本。WARNING只属于估值金额；错误Owner、证券/通道、文件/哈希、时间或证据仍失败。现金不补平，可用/冻结余额不再扣除。
+- 新`guojin.gui-profile.v2`复用原worker及PR34/35窗口/owned保存窗保护，使用已核实的只读导航/刷新/导出动作。A股先打开已验证的原生菜单，再只允许唯一`Item 32793 / 保存 / ControlType.MenuItem`进入TXT保存路径；其他菜单项、外来PID、模糊目标均拒绝。前台、FromPoint、鼠标实际坐标、原生HWND/PID及DPI检查不放宽。
+- 自绘页面可用Mini已验证的Windows.Media.Ocr仅核对可见账户/股东身份和页面；OCR不是金额、柜台SUCCESS、完整行数或查询完成证明。Owner仍来自原配置及其明确股东allowlist，已识别出不符资金账户时不允许再用股东匹配绕过。OCR输出和截图只在私有批次目录，不进入公共日志。
+- v2 profile显式`complete=false`、`counter_status=UNKNOWN`、`source_time_quality=UNKNOWN`，不再要求不存在的query/rows/SUCCESS字段。`guojin.gui-observations.v2`和`guojin.native-batch.v2`保留`queried_at=null`、真实`query_action_at/observed_at/exported_at`、HWND/PID/DPI/页面/账户/只读动作证明及文件/截图哈希。行数明确为EXPORTED_ROWS，由原严格解析器计算，不用导出行数自证账户完整。资金页总资产取原TXT资金头，不伪造GUI数值控件。
+- 查询动作时间只用于批次排序/15分钟恢复/双窗口去重，不冒充券商查询、持仓、行情或现金估值时间。旧24小时导入容限不变。完成收据继续保存两槽，并明确`publication_mode=observed_rows`、`complete=false`和原动作时钟；它只证明本窗口已发布可观察事实，不证明完整账户刷新。
+- 未证明完整性的v2批次只更新已观察到的正数量/正金额事实，仍走原SyncExecutor、Run、claim/fence、Upsert短事务。没有观察到的证券、零值证券/现金和既有Last-good记录保持；不删除旧持仓，不执行待退役旧汇总的删除决策，不把不完整来源替换成完整账户。没有任何可更新正事实时拒绝空发布。Run保留`complete=false`及SOURCE_COMPLETENESS_UNKNOWN等partial质量，U1不能据此授予完整数据资格。
+- 唯一必要通用入口调整是原Repository增加默认关闭的`observed_rows_only`参数，只允许国金原生来源配合原显式reconcile使用；其他券商不启用且仍拒绝不完整来源。没有新表、Schema、Digest、依赖、同步引擎、持仓/现金算法或任务平台。
+- 正式PS1仍用既有guest parent/child看门狗和当前执行策略，不设置Bypass。为避免扩大原生命令行，压缩worker通过已有Parallels共享目录的私有临时文件传送，guest核对SHA-256后写本地UTF-8 BOM PS1并执行；原有有界超时、仅清理自身child和临时文件不变。无需文件传输服务。
+
+部署与启用：先固定合并SHA及四项CI，沿原Runbook停写/一致性备份/安装并统一相关组件，无DDL；保留Owner、allowlist、ready、Last-good及交易权限。先在独立inbox运行原CLI默认validate取得真实三文件/身份/差额/partial证据。展示真实证据与精确执行计划后，分别取得生产持仓写入和双次任务启用确认，再进行原受控同步和Web/MCP/固定视图/幂等验收。确认后才启用原机制11:45、17:30两个触发并暂停旧17:30单次验收；manual仍共用CLI。回滚先停新触发，保留原件/ready/收据/新事实并恢复已确认组件，不用旧DB覆盖新事实。

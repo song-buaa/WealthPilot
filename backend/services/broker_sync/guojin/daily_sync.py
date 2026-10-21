@@ -20,7 +20,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 from services.broker_sync.guojin.native_exports import (
-    FILES, ERRORS, load_batch, private_json, read_config, require, sha, stamp,
+    FILES, ERRORS, load_batch, parse_exports, private_json, read_config, require, sha, stamp, source_times,
 )
 
 CODES = ERRORS | {"AUTO_DISABLED", "AUTO_BUSY", "AUTO_TIMEOUT", "AUTO_CONFIG_INVALID",
@@ -75,14 +75,14 @@ def completed_window(state, now):
         return (receipt.get("run_id") is not None and receipt.get("native_batch_id") and
                 scheduled_window(finished) == window and receipt.get("window", window) == window and
                 finished <= now and finished.astimezone(SHANGHAI).date() == now.astimezone(SHANGHAI).date()
-                and source_in_window(receipt["queried_at"], finished))
+                and source_in_window(source_times(receipt), finished))
     except (ValueError, TypeError, KeyError, AttributeError):
         return False
 
 
 def recoverable_source(metadata, now, trigger):
     try:
-        queries = metadata["queried_at"]
+        queries = source_times(metadata)
         window = scheduled_window(now)
         return (set(queries) == set(FILES) and all(
             -timedelta(seconds=60) <= now - stamp(t) <= RECOVERY_MAX_AGE
@@ -166,14 +166,16 @@ def automation_config(config):
     guest = PureWindowsPath(auto.get("guest_root", ""))
     require(guest.is_absolute() and ".." not in guest.parts, "AUTO_CONFIG_INVALID")
     profile = private_json(Path(auto.get("profile", "")))
-    require(profile.get("schema") == "guojin.gui-profile.v1" and
+    require(profile.get("schema") in {"guojin.gui-profile.v1", "guojin.gui-profile.v2"} and
             profile.get("verified_readonly") is True and profile.get("evidence_ref"),
             "AUTO_GUI_CONTRACT_UNVERIFIED")
     require(set(profile.get("markets", {})) == set(FILES), "AUTO_GUI_CONTRACT_UNVERIFIED")
+    observed_source = profile.get("schema") == "guojin.gui-profile.v2"
     def nonempty(value):
         return isinstance(value, str) and 0 < len(value) <= 2048
     def selector(value, *, read=False, button=False):
-        require(isinstance(value, dict) and nonempty(value.get("id")) and nonempty(value.get("class"))
+        require(isinstance(value, dict) and nonempty(value.get("id")) and (nonempty(value.get("class"))
+            or observed_source and value.get("class") == "" and value.get("control_type") == "MenuItem")
             and (not read or nonempty(value.get("pattern")) and "(?<value>" in value["pattern"])
             and (not button or nonempty(value.get("name"))), "AUTO_GUI_CONTRACT_UNVERIFIED")
     require(all(nonempty(profile.get(k)) for k in ("window_pattern", "account_pattern", "save_title",
@@ -181,12 +183,24 @@ def automation_config(config):
             all(type(profile.get(k)) is int and 0 < profile[k] <= 10000 for k in ("width", "height")),
             "AUTO_GUI_CONTRACT_UNVERIFIED")
     selector(profile.get("filename"))
+    if observed_source:
+        require(type(profile.get("dpi")) is int and 0 < profile["dpi"] <= 768
+                and profile.get("account_proof") == "shareholder_allowlist"
+                and profile.get("ocr_identity") is True, "AUTO_GUI_CONTRACT_UNVERIFIED")
+        require(profile.get("stock_save_menu") == {"id":"Item 32793", "class":"", "name":"保存",
+                "control_type":"MenuItem"}, "AUTO_GUI_CONTRACT_UNVERIFIED")
     for key in ("save_button", "excel_no"):
         selector(profile.get(key), button=True)
     for key, market in profile["markets"].items():
         require(nonempty(market.get("page_pattern")), "AUTO_GUI_CONTRACT_UNVERIFIED")
-        for field in ("query", "rows", "success") + (("total",) if key == "stock" else ()):
-            selector(market.get(field), read=True)
+        if observed_source:
+            require(market.get("source_time_quality") == "UNKNOWN" and market.get("complete") is False
+                    and market.get("counter_status") == "UNKNOWN", "AUTO_GUI_CONTRACT_UNVERIFIED")
+            require(all(market.get(f) is None for f in ("query", "rows", "success", "total")),
+                    "AUTO_GUI_CONTRACT_UNVERIFIED")
+        else:
+            for field in ("query", "rows", "success") + (("total",) if key == "stock" else ()):
+                selector(market.get(field), read=True)
         for steps in (market.get("open"), market.get("export"), [market.get("refresh")]):
             require(isinstance(steps, list) and len(steps) <= 16, "AUTO_GUI_CONTRACT_UNVERIFIED")
             for step in steps:
@@ -209,49 +223,61 @@ def export_windows(config, auto, profile, batch, now):
         bounded([executable, verb, auto["vm"]], timeout=60)
     require("running" in bounded([executable, "status", auto["vm"]], timeout=15).decode(errors="replace"),
             "AUTO_SESSION_UNAVAILABLE")
-    request = dict(batch=batch, account_id=config["account_id"], profile=profile,
+    request = dict(batch=batch, account_id=config["account_id"], shareholder_accounts=config["shareholder_accounts"], profile=profile,
         directory=str(PureWindowsPath(auto["guest_root"])/batch),
         deadline=(now.timestamp()+600))
     payload = base64.b64encode(json.dumps(request, ensure_ascii=False).encode()).decode()
     script = "$WPRequest='"+payload+"'\n"+PS_SCRIPT.read_text()
-    compressed = base64.b64encode(gzip.compress(script.encode("utf-8"), mtime=0)).decode()
-    # prlctl timeout alone doesn't cancel a guest process. A guest-side parent
-    # owns ONLY this exporter child and kills it after the finite budget; never
-    # kill xiadan or any shared trading process. Abandoned mutexes are recoverable.
-    launcher = r'''
-$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
-[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
-$out=[IO.Path]::GetTempFileName(); $err=[IO.Path]::GetTempFileName(); $child=$null
-$taskfile=Join-Path ([IO.Path]::GetTempPath()) ('wp-guojin-'+[Guid]::NewGuid().ToString('N')+'.ps1')
-try {
- $bytes=[Convert]::FromBase64String('COMPRESSED')
- $memory=New-Object IO.MemoryStream(,$bytes)
- $zip=New-Object IO.Compression.GzipStream($memory,[IO.Compression.CompressionMode]::Decompress)
- $reader=New-Object IO.StreamReader($zip,[Text.Encoding]::UTF8)
- try { $source=$reader.ReadToEnd() } finally { $reader.Dispose(); $zip.Dispose(); $memory.Dispose() }
- [IO.File]::WriteAllText($taskfile,$source,(New-Object Text.UTF8Encoding($true)))
- $child=Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-File',('"'+$taskfile+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
- if (-not $child.WaitForExit(610000)) {
-  $child.Kill(); $child.WaitForExit()
-  [Console]::WriteLine('{"status":"FAILED","reason_code":"AUTO_TIMEOUT"}')
- } else { [Console]::WriteLine([IO.File]::ReadAllText($out)) }
-} finally {
- if ($child -and -not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
- Remove-Item -LiteralPath $out,$err,$taskfile -Force -ErrorAction SilentlyContinue
-}
-'''.replace("COMPRESSED", compressed)
-    command = base64.b64encode(launcher.encode("utf-16le")).decode()
-    require(len(command) < 28000, "AUTO_GUI_CONTRACT_UNVERIFIED")  # Windows CreateProcess 32767-char ceiling
-    result = bounded([executable, "exec", auto["vm"], "--current-user", "powershell.exe",
-        "-NoProfile", "-NonInteractive", "-EncodedCommand",
-        command], timeout=640)
+    compressed = gzip.compress(script.encode("utf-8"), mtime=0)
+    fd, transport_name = tempfile.mkstemp(dir=auto["shared_root"], prefix="wp-guojin-worker-", suffix=".gz")
+    with os.fdopen(fd, "wb") as transport:
+        transport.write(compressed)
+        transport.flush()
+        os.fsync(transport.fileno())
+    guest_transport = str(PureWindowsPath(auto["guest_root"])/Path(transport_name).name)
     try:
-        response = json.loads(result.decode("utf-8-sig"))
-    except (ValueError, UnicodeError):
-        raise ValueError("AUTO_GUI_UNAVAILABLE") from None
-    require(response.get("status") == "EXPORTED", response.get("reason_code")
-            if response.get("reason_code") in CODES else "AUTO_GUI_UNAVAILABLE")
-    return Path(auto["shared_root"])/batch
+        # prlctl timeout alone doesn't cancel a guest process. A guest-side parent
+        # owns ONLY this exporter child and kills it after the finite budget; never
+        # kill xiadan or any shared trading process. Abandoned mutexes are recoverable.
+        launcher = r'''
+    $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
+    [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+    $out=[IO.Path]::GetTempFileName(); $err=[IO.Path]::GetTempFileName(); $child=$null
+    $taskfile=Join-Path ([IO.Path]::GetTempPath()) ('wp-guojin-'+[Guid]::NewGuid().ToString('N')+'.ps1')
+    try {
+     $bytes=[IO.File]::ReadAllBytes('TRANSPORT_PATH')
+     $hasher=[Security.Cryptography.SHA256]::Create()
+     try { $actual=([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-','').ToLower() } finally { $hasher.Dispose() }
+     if ($actual -cne 'TRANSPORT_SHA256') { throw 'AUTO_EVIDENCE_INVALID' }
+     $memory=New-Object IO.MemoryStream(,$bytes)
+     $zip=New-Object IO.Compression.GzipStream($memory,[IO.Compression.CompressionMode]::Decompress)
+     $reader=New-Object IO.StreamReader($zip,[Text.Encoding]::UTF8)
+     try { $source=$reader.ReadToEnd() } finally { $reader.Dispose(); $zip.Dispose(); $memory.Dispose() }
+     [IO.File]::WriteAllText($taskfile,$source,(New-Object Text.UTF8Encoding($true)))
+     $child=Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-File',('"'+$taskfile+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+     if (-not $child.WaitForExit(610000)) {
+      $child.Kill(); $child.WaitForExit()
+      [Console]::WriteLine('{"status":"FAILED","reason_code":"AUTO_TIMEOUT"}')
+     } else { [Console]::WriteLine([IO.File]::ReadAllText($out)) }
+    } finally {
+     if ($child -and -not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+     Remove-Item -LiteralPath $out,$err,$taskfile -Force -ErrorAction SilentlyContinue
+    }
+    '''.replace("TRANSPORT_PATH", guest_transport.replace("'", "''")).replace("TRANSPORT_SHA256", sha(compressed))
+        command = base64.b64encode(launcher.encode("utf-16le")).decode()
+        require(len(command) < 28000, "AUTO_GUI_CONTRACT_UNVERIFIED")  # Windows CreateProcess 32767-char ceiling
+        result = bounded([executable, "exec", auto["vm"], "--current-user", "powershell.exe",
+            "-NoProfile", "-NonInteractive", "-EncodedCommand",
+            command], timeout=640)
+        try:
+            response = json.loads(result.decode("utf-8-sig"))
+        except (ValueError, UnicodeError):
+            raise ValueError("AUTO_GUI_UNAVAILABLE") from None
+        require(response.get("status") == "EXPORTED", response.get("reason_code")
+                if response.get("reason_code") in CODES else "AUTO_GUI_UNAVAILABLE")
+        return Path(auto["shared_root"])/batch
+    finally:
+        Path(transport_name).unlink(missing_ok=True)
 
 
 def seal_candidate(config, directory, source, started, finished):
@@ -261,18 +287,30 @@ def seal_candidate(config, directory, source, started, finished):
     require(not observation_path.is_symlink() and observation_path.stat().st_size <= 1024*1024,
             "AUTO_EVIDENCE_INVALID")
     observed = json.loads(observation_path.read_text(encoding="utf-8-sig"))
-    require(observed.get("schema") == "guojin.gui-observations.v1" and
+    observed_source = observed.get("schema") == "guojin.gui-observations.v2"
+    if observed_source:
+        require(private_json(Path(config["automation"]["profile"])).get("schema") == "guojin.gui-profile.v2",
+                "AUTO_GUI_CONTRACT_UNVERIFIED")
+    require(observed.get("schema") in {"guojin.gui-observations.v1", "guojin.gui-observations.v2"} and
             observed.get("batch") == directory.name and observed.get("status") == "EXPORTED",
             "AUTO_EVIDENCE_INVALID")
     require(set(observed.get("markets", {})) == set(FILES), "NATIVE_BATCH_INCOMPLETE")
     files = {}
     for key, name in FILES.items():
         item = observed["markets"][key]
-        require(item.get("account_id") == config["account_id"] and item.get("complete") is True,
+        require(item.get("account_id") == config["account_id"] and
+                item.get("complete") is (False if observed_source else True),
                 "AUTO_ACCOUNT_MISMATCH")
-        query, before = stamp(item["queried_at"]), stamp(item["query_before"])
-        require(started-timedelta(seconds=1) <= query <= finished and before < query, "AUTO_QUERY_UNCHANGED")
-        require(type(item.get("row_count")) is int and item["row_count"] >= 0, "AUTO_EVIDENCE_INVALID")
+        if observed_source:
+            require(item.get("queried_at") is None and item.get("source_time_quality") == "UNKNOWN"
+                    and item.get("counter_status") == "UNKNOWN", "AUTO_EVIDENCE_INVALID")
+            query = stamp(item["query_action_at"])
+            require(query <= stamp(item["observed_at"]) <= stamp(item["exported_at"]), "AUTO_EVIDENCE_INVALID")
+        else:
+            query, before = stamp(item["queried_at"]), stamp(item["query_before"])
+            require(before < query, "AUTO_QUERY_UNCHANGED")
+            require(type(item.get("row_count")) is int and item["row_count"] >= 0, "AUTO_EVIDENCE_INVALID")
+        require(started-timedelta(seconds=1) <= query <= finished, "AUTO_QUERY_UNCHANGED")
         require(stamp(item["exported_at"]) >= query and stamp(item["exported_at"]) <= finished,
                 "AUTO_EVIDENCE_INVALID")
         for filename in (name, key+".png"):
@@ -288,9 +326,22 @@ def seal_candidate(config, directory, source, started, finished):
             destination.chmod(0o600)
         files[key] = dict(account_id=item["account_id"], account_verified_in_gui=True,
             evidence_ref=key+".png#sha256="+item["evidence_sha256"], queried_at=item["queried_at"],
-            row_count=item["row_count"], sha256=item["sha256"])
+            row_count=item.get("row_count"), sha256=item["sha256"])
+        if observed_source:
+            files[key].update(complete=False, queried_at=None, query_action_at=item["query_action_at"],
+                observed_at=item["observed_at"], exported_at=item["exported_at"], source_time_quality="UNKNOWN",
+                counter_status="UNKNOWN", row_count_basis="EXPORTED_ROWS", query_evidence=item.get("query_evidence"))
     atomic_json(directory/"observations.json", observed)
-    atomic_json(directory/"batch.json", dict(schema="guojin.native-batch.v1",
+    if observed_source:
+        parsed = parse_exports({k:(directory/name).read_bytes() for k,name in FILES.items()})
+        for key in FILES:
+            require(files[key]["row_count"] in (None, parsed.counts[key]), "NATIVE_BATCH_INCOMPLETE")
+            files[key]["row_count"] = parsed.counts[key]
+        # This is the broker's funds-header total, independent of row summation;
+        # no nonexistent GUI numeric field is invented.
+        require(observed.get("account_total_assets_cny") is None, "AUTO_EVIDENCE_INVALID")
+        observed["account_total_assets_cny"] = str(parsed.total_assets)
+    atomic_json(directory/"batch.json", dict(schema="guojin.native-batch.v2" if observed_source else "guojin.native-batch.v1",
         portfolio_id=config["portfolio_id"], account_id=config["account_id"],
         account_total_assets_cny=observed["account_total_assets_cny"], files=files))
     return load_batch(config, candidate=directory.name)
@@ -306,7 +357,7 @@ def advance_ready(config, batch, metadata):
         new = metadata["native_batch"]["queries"]
         # Stale existing ready may be >24h old; compare raw bound source times,
         # not its current eligibility. Never regress ready even before DB fence.
-        require(previous == batch or all(stamp(new[k]) > stamp(old["files"][k]["queried_at"])
+        require(previous == batch or all(stamp(new[k]) > stamp(old["files"][k].get("query_action_at") or old["files"][k]["queried_at"])
             for k in FILES), "NATIVE_BATCH_STALE")
     atomic_json(root/"ready.json", {"batch":batch})
 
@@ -387,8 +438,11 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                 source = exporter(config, auto, profile, batch, now)
                 _, metadata = seal_candidate(config, directory, source, now, clock())
             current["queried_at"] = metadata["queried_at"]
+            if metadata.get("query_action_at"):
+                current["query_action_at"] = metadata["query_action_at"]
+                current["publication_mode"] = "observed_rows"
             current["source_age_seconds"] = max((clock() - stamp(t)).total_seconds()
-                                                 for t in metadata["queried_at"].values())
+                                                 for t in source_times(metadata).values())
             if not publish_assets:
                 current.update(status="VALIDATED", finished_at=clock().isoformat(),
                     native_batch_id=metadata["native_batch_id"], security_count=metadata["security_count"],
@@ -405,11 +459,14 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                 last_success_day=local.date().isoformat(), last_success_at=finished.isoformat(),
                 native_batch_id=metadata["native_batch_id"], run_id=result.get("run_id"),
                 security_count=metadata["security_count"], account_total_assets_cny=metadata["account_total_assets_cny"])
-            if source_in_window(metadata["queried_at"], finished):
+            if source_in_window(source_times(metadata), finished):
                 completed = scheduled_window(finished)
                 current["completed_windows"][completed] = dict(window=completed,
                     queried_at=metadata["queried_at"], published_at=finished.isoformat(),
                     native_batch_id=metadata["native_batch_id"], run_id=result.get("run_id"))
+                if metadata.get("query_action_at"):
+                    current["completed_windows"][completed].update(query_action_at=metadata["query_action_at"],
+                        source_time_quality="UNKNOWN", publication_mode="observed_rows", complete=False)
         except Exception as exc:
             current.update(status="FAILED", finished_at=clock().isoformat(),
                 reason_code=str(exc) if str(exc) in CODES else "AUTO_EVIDENCE_INVALID")

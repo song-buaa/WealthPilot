@@ -11,7 +11,8 @@ namespace System.Windows { public struct Point{public double X,Y; public Point(d
 namespace System.Windows.Automation {
  public enum TreeScope{Children,Descendants}
  public class Condition{ public static Condition TrueCondition=new Condition(); }
- public class NodeState{public string Name="",ClassName="",AutomationId="";public int ProcessId=7,NativeWindowHandle=10;public bool IsOffscreen=false,IsEnabled=true;public Rect BoundingRectangle=new Rect();}
+ public class NodeControlType{public string ProgrammaticName="ControlType.Button";}
+ public class NodeState{public NodeControlType ControlType=new NodeControlType();public string Name="",ClassName="",AutomationId="";public int ProcessId=7,NativeWindowHandle=10;public bool IsOffscreen=false,IsEnabled=true;public Rect BoundingRectangle=new Rect();}
  public class Rect{public double X=10,Y=20,Width=100,Height=100;}
  public class AutomationElement{
   public static AutomationElement RootElement=new AutomationElement();
@@ -197,4 +198,48 @@ $before=[WPGuojinNative]::Clicks
 Click-Observed $step
 if([WPGuojinNative]::Clicks -ne $before+2){throw 'NORMAL_CLICK_FAILED'}
 $passed++
+# The same guarded click supports the observed native stock Save menu only.
+$guiProfile.stock_save_menu=@{id='Item 32793';class='';name='保存';control_type='MenuItem'}
+$guiProfile.markets=@{stock=@{page_pattern='Account:synthetic'}}
+$menu=Node 'Native context menu' 'menu' '#32768'
+$saveItem=Node '保存' 'Item 32793' ''
+$saveItem.Current.ControlType.ProgrammaticName='ControlType.MenuItem'
+$menu.Children.Add($saveItem)
+[System.Windows.Automation.AutomationElement]::RootElement.Children.Add($menu)
+[System.Windows.Automation.AutomationElement]::Hit=$saveItem
+$before=[WPGuojinNative]::Clicks
+Select-StockNativeSave
+if([WPGuojinNative]::Clicks -ne $before+2){throw 'NATIVE_SAVE_MENU_NOT_CLICKED'}
+$passed++
+$saveItem.Current.Name='买入'
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Select-StockNativeSave}
+if([WPGuojinNative]::Clicks -ne $before+2){throw 'WRONG_MENU_SENT_INPUT'}
+$saveItem.Current.Name='保存';$saveItem.Current.ProcessId=999
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Select-StockNativeSave}
+$saveItem.Current.ProcessId=7
+$menu.Children.Add($saveItem)
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Select-StockNativeSave}
+$menu.Children.RemoveAt(1)
+[WPGuojinNative]::Move=$false
+No-Click {Select-StockNativeSave}
+[WPGuojinNative]::Move=$true
+$saveItem.Current.ControlType.ProgrammaticName='ControlType.Button'
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Select-StockNativeSave}
+$saveItem.Current.ControlType.ProgrammaticName='ControlType.MenuItem'
+[System.Windows.Automation.AutomationElement]::RootElement.Children.Clear()
+# v2 account proof uses only the existing explicit shareholder allowlist. A
+# mismatching reported funding account must not fall back to a matching share ID.
+$guiProfile.schema='guojin.gui-profile.v2';$guiProfile.account_proof='shareholder_allowlist'
+$request.shareholder_accounts=@('SYNTHETIC-SHARE')
+$window.Children[0].Current.Name='股东: SYNTHETIC-SHARE'
+$null=Controls $window;$passed++
+$window.Children[0].Current.Name='股东: OTHER-SHARE'
+Expect 'AUTO_ACCOUNT_MISMATCH' {Controls $window}
+$window.Children[0].Current.Name='Account:other 股东: SYNTHETIC-SHARE'
+Expect 'AUTO_ACCOUNT_MISMATCH' {Controls $window}
+$window.Children[0].Current.Name='股东: SYNTHETIC-SHARE-FAKE'
+# A suffix of a longer identifier cannot prove the selected owner's identity.
+$request.shareholder_accounts=@('SHARE')
+Expect 'AUTO_ACCOUNT_MISMATCH' {Controls $window}
+
 "Portable production-function probes: $passed PASS; fake nodes/native calls only, no desktop accessed"

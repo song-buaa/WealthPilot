@@ -233,7 +233,7 @@ class PositionSnapshotRepository:
         self.session.commit()
 
     def synchronize(self, broker, account_id, fetch, *, triggered_by="manual", metadata=None,
-                    reconcile=None, retries=2, retry_delay=5):
+                    reconcile=None, retries=2, retry_delay=5, observed_rows_only=False):
         """Reuse original Snapshot+Upsert commit for every sync entrypoint."""
         from app.fx_service import fx_service, FXRateUnavailable
         from services.broker_sync.position_upsert_service import PositionUpsertService
@@ -248,7 +248,10 @@ class PositionSnapshotRepository:
                 info = dict(metadata() if metadata else {})
                 if not positions and not (info.get("complete") and info.get("empty_confirmed")):
                     raise ValueError("EMPTY_SOURCE_REQUIRES_REVIEW")
-                if info.get("complete") is False:
+                partial = (observed_rows_only and broker == "guojin" and reconcile is not None
+                           and info.get("source") == "guojin_qnx_native"
+                           and info.get("publication_mode") == "observed_rows" and info.get("complete") is False)
+                if info.get("complete") is False and not partial:
                     raise ValueError("INCOMPLETE_SOURCE")
                 quotes = {ccy:fx_service.get_quote(ccy,"CNY").to_dict() for ccy in {p.currency for p in positions}}
                 if any(quotes[p.currency]["rate"] is None and
@@ -259,7 +262,7 @@ class PositionSnapshotRepository:
                     issues.add("SOURCE_EVIDENCE_UNKNOWN")
                 for q in quotes.values(): issues.update(q["issues"])
                 if any(p.broker_security_type != "CASH" for p in positions) and not info.get("price_as_of"): issues.add("PRICE_TIME_UNKNOWN")
-                prepared = {**info, "complete":True, "fx":quotes,
+                prepared = {**info, "complete":not partial, "fx":quotes,
                     "fetched_at":datetime.now(timezone.utc).isoformat(),
                     "currencies":sorted(quotes), "row_count":len(positions),
                     "quality":"partial" if issues else "current", "issues":sorted(issues)}

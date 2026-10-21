@@ -48,6 +48,11 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def source_times(metadata):
+    """Ordering clock; observed action time is explicitly NOT broker valuation time."""
+    return metadata.get("query_action_at") or metadata["queried_at"]
+
+
 def private_json(path):
     from app.shared_sqlite import private_file
     try:
@@ -107,6 +112,28 @@ class ParsedExports:
     counts: dict
     shareholders: frozenset
     saved_at: str
+    reconciliation: dict
+
+
+def reconcile_assets(securities_value, cash, reported_securities, total_assets):
+    """Keep both broker facts; valuation tolerance never proves source completeness."""
+    require(abs(reported_securities + cash - total_assets) <= Decimal("0.02"),
+            "NATIVE_RECONCILIATION_FAILED")
+    detail_total = securities_value + cash
+    difference = detail_total - total_assets
+    securities_difference = securities_value - reported_securities
+    absolute = max(abs(difference), abs(securities_difference))
+    ratio = absolute / abs(total_assets) if total_assets else None
+    exact = absolute == 0
+    warning = total_assets > 0 and absolute <= Decimal("2000") and ratio <= Decimal("0.005")
+    require(exact or warning, "NATIVE_RECONCILIATION_FAILED")
+    return dict(status="PASS" if exact else "WARNING", currency="CNY",
+        details_securities_cny=str(securities_value), cash_balance_cny=str(cash),
+        details_total_cny=str(detail_total), reported_securities_cny=str(reported_securities),
+        account_total_assets_cny=str(total_assets), difference_cny=str(difference),
+        securities_difference_cny=str(securities_difference), absolute_difference_cny=str(absolute),
+        difference_ratio=str(ratio) if ratio is not None else None,
+        max_ratio="0.005", max_absolute_cny="2000", policy="guojin.valuation-difference.v1")
 
 
 def parse_exports(contents):
@@ -176,10 +203,9 @@ def parse_exports(contents):
                     unrealized_pnl=pnl, unrealized_pnl_pct=ratio, quote=quote, quote_cost=quote_cost,
                     quote_currency=quote_currency, valuation_currency="CNY"))
         value = sum((row["market_value"] for row in rows), Decimal(0))
-        require(abs(value-fields["股票市值"]) <= Decimal("0.02"), "NATIVE_RECONCILIATION_FAILED")
-        require(abs(value+fields["资金余额"]-fields["总资产"]) <= Decimal("0.02"), "NATIVE_RECONCILIATION_FAILED")
+        reconciliation = reconcile_assets(value, fields["资金余额"], fields["股票市值"], fields["总资产"])
         return ParsedExports(rows, fields["资金余额"], value, fields["总资产"], fields["可用余额"],
-            {k:len(v) for k,v in tables.items()}, frozenset(shareholders), saved[0])
+            {k:len(v) for k,v in tables.items()}, frozenset(shareholders), saved[0], reconciliation)
     except (UnicodeError, csv.Error, KeyError, IndexError, StopIteration, TypeError):
         raise ValueError("NATIVE_BATCH_INVALID") from None
 
@@ -199,26 +225,41 @@ def load_batch(config, *, candidate=None):
     require(directory.is_dir() and directory.resolve() == directory)
     receipt_bytes = batch_bytes(directory/"batch.json")
     receipt = json.loads(receipt_bytes)
-    require(receipt.get("schema") == "guojin.native-batch.v1")
+    observed_source = receipt.get("schema") == "guojin.native-batch.v2"
+    require(observed_source or receipt.get("schema") == "guojin.native-batch.v1")
     require((receipt.get("portfolio_id"),receipt.get("account_id")) ==
             (config["portfolio_id"],config["account_id"]), "NATIVE_ACCOUNT_UNPROVEN")
     require(set(receipt.get("files", {})) == set(FILES), "NATIVE_BATCH_INCOMPLETE")
-    data, queried = {}, {}
+    data, queried, actions = {}, {}, {}
     for key, filename in FILES.items():
         evidence = receipt["files"][key]
         require(evidence.get("account_id") == config["account_id"] and
                 evidence.get("account_verified_in_gui") is True and
                 isinstance(evidence.get("evidence_ref"),str) and bool(evidence["evidence_ref"].strip()), "NATIVE_ACCOUNT_UNPROVEN")
-        queried[key] = stamp(evidence.get("queried_at"))
+        if observed_source:
+            require(evidence.get("complete") is False and evidence.get("counter_status") == "UNKNOWN"
+                    and evidence.get("row_count_basis") == "EXPORTED_ROWS")
+            require(evidence.get("queried_at") is None and evidence.get("source_time_quality") == "UNKNOWN")
+            actions[key] = stamp(evidence.get("query_action_at"))
+            observed, exported = stamp(evidence.get("observed_at")), stamp(evidence.get("exported_at"))
+            require(actions[key] <= observed <= exported <= actions[key] + timedelta(minutes=15), "NATIVE_BATCH_STALE")
+            proof = evidence.get("query_evidence", {})
+            require(proof.get("page_verified") is True and proof.get("account_verified") is True
+                    and proof.get("readonly_action_verified") is True
+                    and all(type(proof.get(k)) is int and proof[k] > 0 for k in ("pid", "hwnd", "dpi")),
+                    "NATIVE_ACCOUNT_UNPROVEN")
+        else:
+            queried[key] = stamp(evidence.get("queried_at"))
         data[key] = batch_bytes(directory/filename)
         require(0 < len(data[key]) <= 2*1024*1024, "NATIVE_BATCH_INCOMPLETE")
         require(sha(data[key]) == evidence.get("sha256"))
     now = datetime.now(timezone.utc)
-    require(max(queried.values())-min(queried.values()) <= timedelta(minutes=15))
-    require(all(-60 <= (now-t).total_seconds() <= 86400 for t in queried.values()), "NATIVE_BATCH_STALE")
+    clocks = actions if observed_source else queried
+    require(max(clocks.values())-min(clocks.values()) <= timedelta(minutes=15))
+    require(all(-60 <= (now-t).total_seconds() <= 86400 for t in clocks.values()), "NATIVE_BATCH_STALE")
     parsed = parse_exports(data)
     exported = datetime.strptime(parsed.saved_at, "%Y-%m-%d  %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-    require(-60 <= (exported-queried["stock"]).total_seconds() <= 900, "NATIVE_BATCH_STALE")
+    require(-60 <= (exported-clocks["stock"]).total_seconds() <= 900, "NATIVE_BATCH_STALE")
     require(parsed.shareholders <= set(config["shareholder_accounts"]), "NATIVE_ACCOUNT_UNPROVEN")
     for key in FILES:
         require(type(receipt["files"][key].get("row_count")) is int and
@@ -226,12 +267,22 @@ def load_batch(config, *, candidate=None):
     require(abs(number(receipt.get("account_total_assets_cny"))-parsed.total_assets) <= Decimal("0.02"), "NATIVE_RECONCILIATION_FAILED")
     # No time precision is invented for prices. Source text has no quote timestamp.
     batch_id = sha(json.dumps(receipt, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode())
-    metadata = dict(source="guojin_qnx_native", complete=True, positions_as_of=None, cash_as_of=None,
+    metadata = dict(source="guojin_qnx_native", complete=not observed_source, positions_as_of=None, cash_as_of=None,
         price_as_of=None, issues=["SOURCE_VALUATION_TIME_UNKNOWN"],
         time_evidence={k:"QNX_NATIVE_SOURCE_TIME_UNSUPPORTED" for k in ("positions_as_of","cash_as_of","price_as_of")},
-        queried_at={k:v.isoformat() for k,v in queried.items()},
+        queried_at={k:(None if observed_source else queried[k].isoformat()) for k in FILES},
         native_batch_id=batch_id, account_total_assets_cny=str(parsed.total_assets),
+        reconciliation=parsed.reconciliation,
         cash_balance_cny=str(parsed.cash), security_count=len(parsed.rows),
-        native_batch={"id":batch_id, "queries":{k:v.isoformat() for k,v in queried.items()},
+        native_batch={"id":batch_id, "queries":{k:v.isoformat() for k,v in clocks.items()},
+                      "clock_basis":"OBSERVED_ACTION" if observed_source else "BROKER_QUERY",
                       "hashes":{k:sha(v) for k,v in data.items()}, "export_saved_at":parsed.saved_at})
+    if parsed.reconciliation["status"] == "WARNING":
+        metadata["issues"].append("NATIVE_VALUATION_DIFFERENCE_WARNING")
+    if observed_source:
+        metadata.update(publication_mode="observed_rows",
+            query_action_at={k:v.isoformat() for k,v in actions.items()},
+            source_completeness="UNKNOWN", counter_status="UNKNOWN")
+        metadata["issues"].extend(["SOURCE_QUERY_TIME_UNKNOWN", "SOURCE_COMPLETENESS_UNKNOWN",
+                                   "OBSERVED_ROWS_ONLY_LAST_GOOD_RETAINED"])
     return parsed, metadata

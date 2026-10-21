@@ -31,6 +31,10 @@ class GuojinSyncService:
         now = datetime.now(timezone.utc)
         positions = [self.adapter.from_native_export(row, now) for row in parsed.rows]
         positions.append(cash_position("guojin", self.adapter.account_id, "CNY", parsed.cash, now))
+        if metadata.get("complete") is False:
+            # Incomplete sources cannot clear a security or cash balance. Keep
+            # prior facts, including cash=0 and disappeared rows, until proved.
+            positions = [p for p in positions if p.quantity > 0 and p.market_value > 0]
         return positions, metadata
 
     def sync_and_persist(self, db_session, triggered_by="manual"):
@@ -48,17 +52,18 @@ class GuojinSyncService:
         def reconcile(db, upsert, snapshots):
             native = metadata.get("native_batch")
             if native:
-                self._validate_publication(db, upsert, native)
+                self._validate_publication(db, upsert, native, complete=metadata.get("complete") is not False)
             # Preserve the normalized injection contract used by existing
             # restricted/backend integration callers; no HTTP source remains.
             for snap in snapshots:
                 upsert._upsert_single(snap, allow_legacy_claim=not bool(native))
-            self._remove_qmt_stale_positions(db, upsert, snapshots)
+            if metadata.get("complete") is not False:
+                self._remove_qmt_stale_positions(db, upsert, snapshots)
         return PositionSnapshotRepository(db_session).synchronize("guojin", account, fetch,
             triggered_by=triggered_by, metadata=lambda:metadata, reconcile=reconcile,
-            retries=self.MAX_RETRIES, retry_delay=self.RETRY_DELAY_SECONDS)
+            retries=self.MAX_RETRIES, retry_delay=self.RETRY_DELAY_SECONDS, observed_rows_only=True)
 
-    def _validate_publication(self, db, upsert, native):
+    def _validate_publication(self, db, upsert, native, *, complete=True):
         """Under original write lock: reject old batches and ambiguous legacy rows."""
         previous = db.query(PositionSnapshotRun).filter_by(portfolio_id=upsert.portfolio_id,
             broker="guojin", account_id=self.config["account_id"], sync_source="api", status="success").order_by(
@@ -101,6 +106,7 @@ class GuojinSyncService:
             require(position_fingerprint(row) == item.get("fingerprint"), "NATIVE_LEGACY_REVIEW_REQUIRED")
             decided.add(key)
             if item["action"] == "retire":
+                require(complete, "NATIVE_LEGACY_REVIEW_REQUIRED")
                 retired[str(key)] = item["fingerprint"]
                 db.delete(row)
         require(decided == set(candidates), "NATIVE_LEGACY_REVIEW_REQUIRED")
