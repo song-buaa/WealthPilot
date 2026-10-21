@@ -49,8 +49,10 @@ public class WPGuojinNative {
         return $found[0]
     }
     function Controls($window) {
-        $nodes = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition)
+        # Hidden tabs can retain old account/page text. Only the currently
+        # visible controls may prove owner, page or query completion.
+        $nodes = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { -not $_.Current.IsOffscreen })
         $names = (@($window.Current.Name) + @($nodes | ForEach-Object {$_.Current.Name})) -join "`n"
         # Never dismiss broker/auth errors and continue with a cached screen.
         if ($names -match '120022|sys_status\s*=\s*6') { throw 'AUTO_COUNTER_120022' }
@@ -58,7 +60,7 @@ public class WPGuojinNative {
         $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
         foreach ($w in $all) {
-            if ($w.Current.ProcessId -eq $qnx.Id -and $w.Current.ClassName -eq '#32770') {
+            if ($w.Current.ProcessId -eq $qnx.Id -and -not $w.Current.IsOffscreen -and $w.Current.ClassName -eq '#32770') {
                 $dialogText = ($w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                     [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {$_.Current.Name}) -join "`n"
                 if ($dialogText -match '120022') { throw 'AUTO_COUNTER_120022' }
