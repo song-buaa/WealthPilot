@@ -11,15 +11,19 @@ try {
     if (-not $locked) { throw 'AUTO_BUSY' }
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
+    Add-Type -AssemblyName WindowsBase
     Add-Type -AssemblyName System.Drawing
     Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Sequential)]
+public struct WPGuojinPoint { public int X; public int Y; }
 public class WPGuojinNative {
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern bool GetCursorPos(out WPGuojinPoint point);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
  [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint f,bool inherit,uint access);
  [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr h);
@@ -98,7 +102,32 @@ public class WPGuojinNative {
         [void][WPGuojinNative]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle)
         if ([WPGuojinNative]::GetForegroundWindow().ToInt64() -ne $window.Current.NativeWindowHandle) { throw 'AUTO_GUI_UNAVAILABLE' }
         Check-Deadline
-        [void][WPGuojinNative]::SetCursorPos([int]($rect.X+$step.x),[int]($rect.Y+$step.y))
+        $x = [int]($rect.X+$step.x); $y = [int]($rect.Y+$step.y)
+        if (-not [WPGuojinNative]::SetCursorPos($x,$y)) { throw 'AUTO_GUI_UNAVAILABLE' }
+        $point = New-Object WPGuojinPoint
+        if (-not [WPGuojinNative]::GetCursorPos([ref]$point) -or $point.X -ne $x -or $point.Y -ne $y) {
+            throw 'AUTO_GUI_UNAVAILABLE'
+        }
+        # Re-observe after moving: coordinates alone cannot authorize input.
+        $current = Current-Window
+        $state = Controls $current
+        if ($current.Current.NativeWindowHandle -ne $window.Current.NativeWindowHandle -or
+            [WPGuojinNative]::GetForegroundWindow().ToInt64() -ne $window.Current.NativeWindowHandle -or
+            $state.names -notmatch $step.expect) { throw 'AUTO_GUI_UNAVAILABLE' }
+        if (-not $step.target.id -or -not $step.target.class -or -not $step.target.name) {
+            throw 'AUTO_GUI_CONTRACT_UNVERIFIED'
+        }
+        $hit = [System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($x,$y))
+        if (-not $hit -or $hit.Current.IsOffscreen -or -not $hit.Current.IsEnabled -or
+            $hit.Current.ProcessId -ne $qnx.Id -or $hit.Current.AutomationId -cne $step.target.id -or
+            $hit.Current.ClassName -cne $step.target.class -or $hit.Current.Name -cne $step.target.name) {
+            throw 'AUTO_GUI_UNAVAILABLE'
+        }
+        Check-Deadline
+        if ([WPGuojinNative]::GetForegroundWindow().ToInt64() -ne $window.Current.NativeWindowHandle -or
+            -not [WPGuojinNative]::GetCursorPos([ref]$point) -or $point.X -ne $x -or $point.Y -ne $y) {
+            throw 'AUTO_GUI_UNAVAILABLE'
+        }
         if ($step.button -eq 'right') { $down=8; $up=16 } else { $down=2; $up=4 }
         [WPGuojinNative]::mouse_event($down,0,0,0,[UIntPtr]::Zero)
         [WPGuojinNative]::mouse_event($up,0,0,0,[UIntPtr]::Zero)

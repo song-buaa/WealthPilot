@@ -163,7 +163,7 @@ python backend/scripts/guojin_sync_e2e.py --config /private/native-config.json
 Profile `schema=guojin.gui-profile.v1`，`verified_readonly=true` 和 `evidence_ref` 仅在真实步骤复核后设置。它是国金特定的声明式 GUI 合同，不接受 PowerShell/命令/通用键盘宏，不是 RPA 框架。必要字段：
 
 - `window_pattern`、`account_pattern`（命名捕获 `account`，与原私有 Owner 精确匹配）、`width/height`（Windows guest 当前坐标系）。窗口按当前 xiadan PID/会话/可见标题枚举，不能复用隐藏 MainWindowHandle 或历史 HWND。
-- `markets` 恰好为 stock/hgt/sgt。各项 `open[]`、`refresh`、`export[]` 只存已核验的只读点击：`x/y` 相对窗口坐标、`expect` 必须匹配当前页面、可选 `button=right`。不允许密码或任意键盘输入。
+- `markets` 恰好为 stock/hgt/sgt。各项 `open[]`、`refresh`、`export[]` 只存已核验的只读点击：`x/y` 相对窗口坐标、`expect` 必须匹配当前页面、可选 `button=right`。每个点击还必须有 `target={"id":"真实AutomationId","class":"真实ClassName","name":"真实控件名称"}`，来自真实只读控件证据；缺失时不操作。移动必须成功、GetCursorPos 实际坐标必须一致，点击前重新核对窗口/Owner/页面及 UIA FromPoint 命中的目标身份、可见/启用和所属进程；失败/裁剪/焦点变化/命中不符均不发送鼠标事件。不允许密码或任意键盘输入。
 - 各项 `page_pattern`、`query`、`rows`、`success`，stock 另有 `total`。读数 selector 为 `id`（AutomationId）+ `class`（ClassName）+ `pattern`（命名捕获 `value`），必须唯一且可见。query 为中国时区 `yyyy-MM-dd HH:mm:ss`；rows 是完整结果数；total 是独立完整账户总资产；success 必须是本次查询成功的独立来源证据并捕获为 `SUCCESS`。不能选择固定标签冒充本次完成结果。
 - `save_title` 精确原生保存窗口名、`filename`（唯一 id/class）、`save_button`（id/class/name）；仅文件名 Edit ValuePattern 可输入当前导出路径，保存前重读确认。`excel_prompt_title` 与 `excel_no`（id/class/name）仅匹配已观察的“是否打开 Excel”提示并选否。未知弹窗/登录/柜台错误停止。
 
@@ -185,11 +185,12 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 
 仍需原 `WEALTHPILOT_ENABLED_SYNC_BROKERS` 显式含 guojin。严格 Digest/文件身份/Portfolio 合同由原发布入口核验，不执行 DDL。CLI 不启动 Backend lifespan、不连接其他券商、不提供任何交易动作。默认不加 `--publish` 时只生成/验证候选（VALIDATED），不切换 ready、不访问数据库；生产前真实 GUI 只读验收使用这一默认模式，确认授权后才加 `--publish`。
 
-- cron 使用原 D1 exchange-calendars 的 XSHG/XHKG，至少一市场当日开市才执行；超出日历范围 fail closed，不按周一至周五猜节假日。北京时间 **17:30–18:00** 窗口内才执行，成功日持久化去重；机器/应用恢复后在该窗口重新调用可续接，错过窗口跳过，下一交易日再运行。不是常驻补偿队列。按需允许 09:00–18:00，120022 一次即停，不在清算窗口无限重试。
+- cron 使用原 D1 exchange-calendars 的 XSHG/XHKG，至少一市场当日开市才执行；超出日历范围 fail closed，不按周一至周五猜节假日。北京时间 **17:30–18:00** 窗口内才执行，按已成功发布的收盘后来源窗口持久化去重；机器/应用恢复后在该窗口重新调用可续接，错过窗口跳过，下一交易日再运行。不是常驻补偿队列。按需允许 09:00–18:00，120022 一次即停，不在清算窗口无限重试。
 - Mac inbox 内内核 flock，Windows 同会话 named mutex，双层互斥。锁不删除/换 inode；Mac 崩溃/重启释放内核锁。被放弃的 Windows mutex 可恢复。VM 仅 start/resume 已配置 VM，不重启客户端，不解锁/登录、不改变设置。
 - guest worker 单次 deadline 600 秒，guest parent 610 秒强制结束**自己创建的 exporter child**，Mac transport 640 秒；不会终止 xiadan、共享券商任务或其他进程。VM 启动/状态查询另有 60/15 秒上限。原同步发布 child 90 秒上限；事务回滚/过期 claim 沿原 Executor 恢复。未提供后台无限续跑或无限重试。
 - `automation-status.json` 保存 RUNNING/SUCCESS/FAILED、trigger/batch/起止时间、安全 reason_code、最后成功时间/日；成功有 run_id、证券数和账户总资产。每个候选目录另留每次尝试独立的私有 run_<attempt_id>.json 结果，重试不会抹去前次失败记录；公共日志仅安全字段。不是资产权威或第二个持仓库。
-- crash 时保留候选。若上次同日批次已封存验证、只是同步失败/响应丢失，下一次窗口内调用自动复核该批次，避免再操作 GUI。也可显式 `--retry-batch <原名称>`（原 24 小时来源有效期仍适用），不复制旧证据进新批次。半成品新建独立批次重取，不认领部分文件。
+- crash 时保留候选。自动恢复只允许三市场原始 `queried_at` 均在 15 分钟内（沿用原批次跨市场15分钟窗口作为最小有界恢复上限；保留原60秒时钟偏差），且仍为同日；cron 恢复还要求来源位于当前17:30–18:00窗口。年龄不取 started_at，也不因重启/重新封存重置。超龄必须新建批次重新查询；新导出失败不发布旧来源，Last-good 不变。近期同步失败/ready切换后崩溃/响应丢失仍复核封存批次。显式 `--retry-batch <原名称>` 是历史来源重放，不是一次新刷新（原24小时解析容限不变）；结果及CLI输出保留 `source_mode=explicit_retry`、原 `queried_at` 和来源年龄，不复制旧证据进新批次。半成品新建独立批次重取，不认领部分文件。
+- 晚间完成证明使用原私有状态的 `completed_window`，绑定三市场原查询时间、成功发布时间、native_batch_id及run_id；仅来源和成功发布时间均在当日17:30–18:00且发布时来源未超15分钟才成立。上午manual成功及旧来源重放不消耗晚间任务；17:35合格manual可供同窗口cron去重。重启从同一收据恢复，last_success_day仅保留历史展示，不决定跳过。
 - sealed 候选验证通过才原子 replace ready；新批次三个渠道时间必须全都更晚，不能倒退 ready。随后原 Executor 发布，DB 再做 Owner/claim/fence/旧持仓 CAS。同步失败可能留下有效 ready，当前 Last-good 持仓不变；安全重试同一 ready。已成功且事实仍匹配时原 CLI 返回 reused，不再次写 Run/持仓；事实变更则不假称复用成功。
 
 ### 生产启用、17:30 合同接入与回滚
@@ -202,4 +203,9 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 
 回滚先停原每日触发、设 automation.enabled=false，保留既有 ready/原件/运行收据及 Last-good；恢复已确认旧组件 SHA。无 DDL/Digest回滚，不用旧数据库覆盖新事实，不重新启用 MiniQMT/22:00国金拉取；Tiger/IBKR及原交易授权不变。
 
-回归入口：[编排/故障注入](../tests/test_guojin_daily_sync.py)、[原国金安全回归](../tests/test_guojin_native_sync.py)。Windows 的真实控件/锁屏/导出可用性、实际交易日柜台窗口及每天长期稳定性为 production-runtime-pending，不能用隔离 fixture 或 CI 代替。
+回归入口：[编排/故障注入](../tests/test_guojin_daily_sync.py)、[原国金安全回归](../tests/test_guojin_native_sync.py)、[PowerShell实际函数Fake安全断言](../tests/test_guojin_native_input.ps1)（含移动失败/坐标裁剪/焦点变化/命中不符，CI沿原Backend job执行，无真实GUI）。Windows 的真实控件/锁屏/导出可用性、实际交易日柜台窗口及每天长期稳定性为 production-runtime-pending，不能用隔离 fixture 或 CI 代替。
+
+
+### PR #32 定向修订验收边界
+
+R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry入口/职责未变，无需另增能力条目；本文件更新具体合同。无Schema、Digest、项目依赖或交易权限变更。原私有profile必须补齐每个只读点击的target控件身份，不接受旧坐标配置自动升级。Windows真实AutomationId/ClassName/名称及UIA命中可用性仍须Mini原17:30验收报告证明；如控件无可信身份则保持AUTO_GUI_CONTRACT_UNVERIFIED，不能靠Fake或填造标识放行。不修改、不重复安排原单次任务。

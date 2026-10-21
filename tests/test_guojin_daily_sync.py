@@ -20,7 +20,8 @@ def daily(env, tmp_path):
     profile = tmp_path/'profile.json'
     field=dict(id='synthetic',class_='Static',pattern='(?<value>synthetic)')
     field['class']=field.pop('class_')
-    step=dict(x=10,y=10,expect='synthetic read-only page')
+    step=dict(x=10,y=10,expect='synthetic read-only page',
+        target={'id':'synthetic','class':'Button','name':'Read-only refresh'})
     write_json(profile, dict(schema='guojin.gui-profile.v1', verified_readonly=True,
         evidence_ref='synthetic read-only contract', window_pattern='synthetic',account_pattern='(?<account>synthetic)',
         width=100,height=100,save_title='Save',excel_prompt_title='Open Excel',filename=field,
@@ -201,7 +202,7 @@ def test_schedule_and_manual_share_flow_restart_misfire_and_once_per_day(daily,m
     times=iter([now,now+timedelta(seconds=5)]+[now+timedelta(seconds=6)]*10)
     result=execute(daily,trigger='cron',clock=lambda:next(times))
     assert result['status']=='SUCCESS',result
-    assert execute(daily,trigger='cron',clock=lambda:now)['reason_code']=='ALREADY_PUBLISHED_TODAY'
+    assert execute(daily,trigger='cron',clock=lambda:now+timedelta(seconds=10))['reason_code']=='ALREADY_PUBLISHED_TODAY'
     assert execute(daily,trigger='cron',clock=lambda:now+timedelta(hours=1))['reason_code']=='AUTO_WINDOW_CLOSED'
     # New process sees same private status, not an in-memory scheduling flag.
     assert json.loads((daily.root/'automation-status.json').read_text())['last_success_day']==now.astimezone(daily.module.SHANGHAI).date().isoformat()
@@ -312,3 +313,121 @@ def test_publication_failure_preserves_only_safe_original_reason(daily,monkeypat
         return json.dumps(dict(status='failed',published=False,reason_code=code)).encode()
     monkeypatch.setattr(daily.module,'bounded',child)
     with pytest.raises(ValueError,match=expected):daily.module.publish('config','database','contract')
+
+
+# PR #32 independent review probes converted to fail-closed assertions.
+def _source_clock(daily, monkeypatch, hour=9, minute=30):
+    daily.now=daily.now.astimezone(daily.module.SHANGHAI).replace(
+        hour=hour,minute=minute,second=0,microsecond=0).astimezone(timezone.utc)
+    from services.broker_sync.guojin import native_exports
+    class Frozen(datetime):
+        @classmethod
+        def now(cls,tz=None):return daily.now+timedelta(seconds=10)
+    monkeypatch.setattr(native_exports,'datetime',Frozen)
+    monkeypatch.setattr(daily.module,'scheduled_day',lambda _:True)
+    make_batch(daily.root.parent,batch='baseline',query=daily.now-timedelta(minutes=20))
+    write_json(daily.config_path,daily.config)
+
+
+@pytest.mark.parametrize('status',['VALIDATED','FAILED_READY','RUNNING_READY'])
+@pytest.mark.parametrize('export_fails',[False,True])
+def test_old_same_day_source_never_recovers_as_fresh(daily,monkeypatch,status,export_fails):
+    _source_clock(daily,monkeypatch)
+    assert original_publish(daily).status=='success'
+    before=facts(daily)
+    candidate=execute(daily,publish_assets=False)
+    assert candidate['status']=='VALIDATED'
+    state=json.loads((daily.root/'automation-status.json').read_text())
+    if status!='VALIDATED':
+        state.update(status=status.split('_')[0],stage='READY')
+    # A restart/new local timestamp cannot refresh actual source age.
+    state['started_at']=(daily.now+timedelta(hours=8)).isoformat()
+    write_json(daily.root/'automation-status.json',state)
+    daily.now+=timedelta(hours=8)
+    pointer=(daily.root/'ready.json').read_bytes();calls=[]
+    def fresh(*args):
+        calls.append(1)
+        if export_fails:raise ValueError('AUTO_GUI_UNAVAILABLE')
+        return daily.exporter(*args)
+    result=execute(daily,trigger='cron',exporter=fresh)
+    assert calls==[1] and result['batch']!=candidate['batch']
+    assert result['source_mode']=='fresh_query'
+    if export_fails:
+        assert result['status']=='FAILED'
+        assert facts(daily)==before and (daily.root/'ready.json').read_bytes()==pointer
+    else:
+        assert result['status']=='SUCCESS' and result['queried_at']!=candidate['queried_at']
+
+
+def test_recent_crash_auto_recovery_preserves_source(daily,monkeypatch):
+    _source_clock(daily,monkeypatch,17)
+    failed=execute(daily,publisher=lambda *a:(_ for _ in ()).throw(ValueError('AUTO_SYNC_FAILED')))
+    assert failed['status']=='FAILED'
+    daily.now+=timedelta(minutes=2)
+    def forbidden(*a):raise AssertionError('recent sealed batch should recover')
+    result=execute(daily,trigger='cron',exporter=forbidden)
+    assert result['status']=='SUCCESS' and result['batch']==failed['batch']
+    assert result['source_mode']=='automatic_recovery' and result['queried_at']==failed['queried_at']
+    assert result['source_age_seconds']>=120
+
+
+def test_previous_day_source_reexports(daily,monkeypatch):
+    _source_clock(daily,monkeypatch)
+    old=execute(daily,publish_assets=False)
+    daily.now+=timedelta(days=1,hours=8)
+    calls=[]
+    def fresh(*a):calls.append(1);return daily.exporter(*a)
+    result=execute(daily,trigger='cron',exporter=fresh)
+    assert result['status']=='SUCCESS' and result['batch']!=old['batch'] and calls==[1]
+
+
+def test_explicit_old_retry_preserves_provenance_not_scheduled_completion(daily,monkeypatch):
+    _source_clock(daily,monkeypatch)
+    old=execute(daily,publish_assets=False)
+    daily.now+=timedelta(hours=8)
+    def forbidden(*a):raise AssertionError('explicit replay does not request new source')
+    result=execute(daily,retry_batch=old['batch'],exporter=forbidden)
+    assert result['status']=='SUCCESS' and result['source_mode']=='explicit_retry'
+    assert result['queried_at']==old['queried_at'] and result['source_age_seconds']>7*3600
+    assert not result['completed_window']
+    fresh=execute(daily,trigger='cron')
+    assert fresh['status']=='SUCCESS' and fresh['source_mode']=='fresh_query'
+
+
+@pytest.mark.parametrize('hour,minute,expect_skip',[(9,30,False),(17,35,True)])
+def test_manual_success_only_completes_matching_postclose_window(daily,monkeypatch,hour,minute,expect_skip):
+    _source_clock(daily,monkeypatch,hour,minute)
+    manual=execute(daily,trigger='manual')
+    assert manual['status']=='SUCCESS'
+    daily.now+=timedelta(hours=8) if hour==9 else timedelta(minutes=1)
+    calls=[]
+    def fresh(*a):calls.append(1);return daily.exporter(*a)
+    # The next invocation reloads the persisted receipt as a restarted process does.
+    result=execute(daily,trigger='cron',exporter=fresh)
+    if expect_skip:
+        assert result['status']=='SKIPPED' and result['reason_code']=='ALREADY_PUBLISHED_TODAY' and calls==[]
+    else:
+        assert result['status']=='SUCCESS' and calls==[1]
+    daily.now+=timedelta(minutes=1)
+    assert execute(daily,trigger='cron',exporter=fresh)['status']=='SKIPPED'
+
+
+def test_legacy_success_day_without_source_does_not_skip_cron(daily,monkeypatch):
+    _source_clock(daily,monkeypatch,17)
+    write_json(daily.root/'automation-status.json',dict(status='SUCCESS',
+        last_success_day=daily.now.astimezone(daily.module.SHANGHAI).date().isoformat()))
+    assert execute(daily,trigger='cron')['status']=='SUCCESS'
+
+
+def test_missing_click_target_rejected_before_gui(daily):
+    path=Path(daily.config['automation']['profile']);profile=json.loads(path.read_text())
+    profile['markets']['hgt']['refresh'].pop('target');write_json(path,profile)
+    with pytest.raises(ValueError,match='AUTO_GUI_CONTRACT_UNVERIFIED'):execute(daily)
+    assert not daily.calls
+
+
+@pytest.mark.parametrize('age,eligible',[(899,True),(900,True),(901,False)])
+def test_recovery_window_uses_oldest_of_all_three_source_times(daily,age,eligible):
+    metadata={'queried_at':{k:(daily.now-timedelta(seconds=1)).isoformat() for k in ('stock','hgt','sgt')}}
+    metadata['queried_at']['sgt']=(daily.now-timedelta(seconds=age)).isoformat()
+    assert daily.module.recoverable_source(metadata,daily.now,'manual') is eligible

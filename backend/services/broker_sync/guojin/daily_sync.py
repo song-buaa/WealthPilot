@@ -28,6 +28,46 @@ CODES = ERRORS | {"AUTO_DISABLED", "AUTO_BUSY", "AUTO_TIMEOUT", "AUTO_CONFIG_INV
     "AUTO_QUERY_UNCHANGED", "AUTO_COUNTER_120022", "AUTO_GUI_CONTRACT_UNVERIFIED",
     "AUTO_EVIDENCE_INVALID", "AUTO_SYNC_FAILED", "AUTO_CALENDAR_UNKNOWN", "AUTO_WINDOW_CLOSED"}
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+# Reuse the native batch's 15-minute cross-market query window as the maximum
+# automatic crash-recovery age. The parser's separate 24-hour ingest TTL stays unchanged.
+RECOVERY_MAX_AGE = timedelta(minutes=15)
+
+
+def source_in_window(queries, finished):
+    """Only original post-close source + publication inside this window count."""
+    try:
+        local = finished.astimezone(SHANGHAI)
+        start = local.replace(hour=17, minute=30, second=0, microsecond=0)
+        end = start.replace(hour=18, minute=0)
+        return (start <= local < end and set(queries) == set(FILES) and
+                all(start <= stamp(t).astimezone(SHANGHAI) <= local and
+                    finished - stamp(t) <= RECOVERY_MAX_AGE for t in queries.values()))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def completed_window(state, now):
+    """Persisted source evidence, never last_success_day or a restarted clock."""
+    receipt = state.get("completed_window") or {}
+    try:
+        finished = stamp(receipt["published_at"])
+        return (receipt.get("run_id") is not None and receipt.get("native_batch_id") and
+                finished <= now and finished.astimezone(SHANGHAI).date() == now.astimezone(SHANGHAI).date()
+                and source_in_window(receipt["queried_at"], finished))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def recoverable_source(metadata, now, trigger):
+    try:
+        queries = metadata["queried_at"]
+        return (set(queries) == set(FILES) and all(
+            -timedelta(seconds=60) <= now - stamp(t) <= RECOVERY_MAX_AGE
+            and stamp(t).astimezone(SHANGHAI).date() == now.astimezone(SHANGHAI).date()
+            for t in queries.values()) and
+            (trigger != "cron" or source_in_window(queries, now)))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
 PS_SCRIPT = Path(__file__).with_name("native_export.ps1")
 SYNC_SCRIPT = Path(__file__).resolve().parents[3]/"scripts/guojin_sync_e2e.py"
 
@@ -130,6 +170,7 @@ def automation_config(config):
                     step.get("button", "left") in {"left", "right"} and
                     all(type(step.get(c)) is int and 0 <= step[c] < profile[limit]
                         for c, limit in (("x", "width"), ("y", "height"))), "AUTO_GUI_CONTRACT_UNVERIFIED")
+                selector(step.get("target"), button=True)
         require(bool(market["export"]), "AUTO_GUI_CONTRACT_UNVERIFIED")
     return auto, profile
 
@@ -264,6 +305,7 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
         publish_assets=False, exporter=export_windows, publisher=publish, clock=lambda:datetime.now(timezone.utc)):
     require(trigger in {"manual", "cron"}, "AUTO_CONFIG_INVALID")
     require(not publish_assets or database is not None and contract is not None, "AUTO_CONFIG_INVALID")
+    explicit_retry = retry_batch is not None
     config = read_config(config_path)
     auto, profile = automation_config(config)
     root = Path(config["inbox"])
@@ -276,15 +318,15 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
             if not scheduled_day(now):
                 return {"status":"SKIPPED", "reason_code":"NON_TRADING_DAY"}
             state = private_json(root/"automation-status.json") if (root/"automation-status.json").exists() else {}
-            if state.get("last_success_day") == local.date().isoformat():
+            if completed_window(state, now):
                 return {"status":"SKIPPED", "reason_code":"ALREADY_PUBLISHED_TODAY"}
         else:
             require(time(9) <= local.time().replace(tzinfo=None) < time(18), "AUTO_WINDOW_CLOSED")
         state_path = root/"automation-status.json"
         state = private_json(state_path) if state_path.exists() else {}
         if retry_batch is None and state.get("status") in {"RUNNING", "FAILED", "VALIDATED"} and state.get("batch"):
-            # Restart during publication: recover only our already-sealed same-day
-            # source, never mistake a half-written export for an eligible batch.
+            # Only a recent sealed source may avoid this invocation's GUI query.
+            # Source age survives restarts; same-day alone is not freshness.
             old_batch = state["batch"]
             try:
                 ready = private_json(root/"ready.json").get("batch") if (root/"ready.json").exists() else None
@@ -292,8 +334,7 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                         "AUTO_EVIDENCE_INVALID")
                 _, old_metadata = load_batch(config, candidate=old_batch)
                 receipt = private_json(root/old_batch/"observations.json")
-                if receipt.get("batch") == old_batch and all(stamp(t).astimezone(SHANGHAI).date() == local.date()
-                        for t in old_metadata["queried_at"].values()):
+                if receipt.get("batch") == old_batch and recoverable_source(old_metadata, now, trigger):
                     retry_batch = old_batch
             except (ValueError, OSError, KeyError, TypeError):
                 pass
@@ -301,6 +342,8 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
         require(re.fullmatch(r"[A-Za-z0-9_-]{1,80}", batch), "AUTO_CONFIG_INVALID")
         current = dict(status="RUNNING", started_at=now.isoformat(), trigger=trigger, batch=batch,
             last_success_day=state.get("last_success_day"), last_success_at=state.get("last_success_at"),
+            completed_window=state.get("completed_window"),
+            source_mode="explicit_retry" if explicit_retry else "automatic_recovery" if retry_batch else "fresh_query",
             attempt_id=uuid.uuid4().hex)
         atomic_json(state_path, current)
         try:
@@ -315,6 +358,9 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                 atomic_json(directory/("run_"+current["attempt_id"]+".json"), current)
                 source = exporter(config, auto, profile, batch, now)
                 _, metadata = seal_candidate(config, directory, source, now, clock())
+            current["queried_at"] = metadata["queried_at"]
+            current["source_age_seconds"] = max((clock() - stamp(t)).total_seconds()
+                                                 for t in metadata["queried_at"].values())
             if not publish_assets:
                 current.update(status="VALIDATED", finished_at=clock().isoformat(),
                     native_batch_id=metadata["native_batch_id"], security_count=metadata["security_count"],
@@ -326,10 +372,15 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
             current["stage"] = "READY"
             atomic_json(state_path, current)
             result = publisher(config_path, database, contract)
-            current.update(status="SUCCESS", finished_at=clock().isoformat(),
-                last_success_day=local.date().isoformat(), last_success_at=clock().isoformat(),
+            finished = clock()
+            current.update(status="SUCCESS", finished_at=finished.isoformat(),
+                last_success_day=local.date().isoformat(), last_success_at=finished.isoformat(),
                 native_batch_id=metadata["native_batch_id"], run_id=result.get("run_id"),
                 security_count=metadata["security_count"], account_total_assets_cny=metadata["account_total_assets_cny"])
+            if source_in_window(metadata["queried_at"], finished):
+                current["completed_window"] = dict(queried_at=metadata["queried_at"],
+                    published_at=finished.isoformat(), native_batch_id=metadata["native_batch_id"],
+                    run_id=result.get("run_id"))
         except Exception as exc:
             current.update(status="FAILED", finished_at=clock().isoformat(),
                 reason_code=str(exc) if str(exc) in CODES else "AUTO_EVIDENCE_INVALID")

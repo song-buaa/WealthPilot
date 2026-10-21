@@ -50,6 +50,9 @@ jobs:
         run: python scripts/check_engineering_docs.py
       - name: Run backend tests
         run: python -m pytest
+      - name: Test native input fail-closed with isolated PowerShell fakes
+        shell: pwsh
+        run: ./tests/test_guojin_native_input.ps1
 
   frontend-checks:
     name: Frontend checks
