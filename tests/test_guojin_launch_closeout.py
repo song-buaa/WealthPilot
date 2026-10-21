@@ -198,3 +198,10 @@ def test_private_shared_worker_is_hash_bound_and_cleaned(daily,monkeypatch,timeo
             daily.module.export_windows(daily.config,auto,profile,'synthetic',daily.now)
     else: daily.module.export_windows(daily.config,auto,profile,'synthetic',daily.now)
     assert len(seen)==1 and not seen[0].exists()
+
+
+def test_warning_boundary_uses_detail_total_against_independent_total(env):
+    from services.broker_sync.guojin.native_exports import reconcile_assets
+    result=reconcile_assets(Decimal('301500'),Decimal(0),Decimal('299999.98'),Decimal('300000'))
+    assert result['status']=='WARNING' and result['absolute_difference_cny']=='1500'
+    assert result['securities_difference_cny']=='1500.02'

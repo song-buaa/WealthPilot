@@ -122,7 +122,7 @@ def reconcile_assets(securities_value, cash, reported_securities, total_assets):
     detail_total = securities_value + cash
     difference = detail_total - total_assets
     securities_difference = securities_value - reported_securities
-    absolute = max(abs(difference), abs(securities_difference))
+    absolute = abs(difference)
     ratio = absolute / abs(total_assets) if total_assets else None
     exact = absolute == 0
     warning = total_assets > 0 and absolute <= Decimal("2000") and ratio <= Decimal("0.005")
