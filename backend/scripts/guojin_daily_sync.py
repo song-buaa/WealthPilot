@@ -26,7 +26,7 @@ def main():
         result = run(args.config, database=args.database, contract=args.contract,
                      trigger=args.trigger, retry_batch=args.retry_batch, publish_assets=args.publish)
         # Private status contains financial summary; operational stdout doesn't.
-        print(json.dumps({k:result[k] for k in ("status", "reason_code", "run_id", "finished_at", "source_mode", "queried_at", "source_age_seconds") if k in result}))
+        print(json.dumps({k:result[k] for k in ("status", "reason_code", "run_id", "finished_at", "schedule_window", "source_mode", "queried_at", "source_age_seconds") if k in result}))
         return 1 if result["status"] == "FAILED" else 0
     except Exception as exc:
         print(json.dumps({"status":"FAILED", "reason_code":str(exc) if str(exc) in CODES else "AUTO_CONFIG_INVALID"}))

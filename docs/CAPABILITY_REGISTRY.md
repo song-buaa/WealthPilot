@@ -64,7 +64,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 ### 国金完整原生持仓来源（已合入）
 
 - 能力/Owner：[原 GuojinSyncService](../backend/services/broker_sync/guojin/sync_service.py)、[Adapter](../backend/services/broker_sync/guojin/adapter.py)、[严格三文件解析](../backend/services/broker_sync/guojin/native_exports.py)，复用原 Executor/Repository/Upsert/FX/Portfolio/Wealth/MCP。旧 MiniQMT HTTP 来源退出；无 Schema 新增。
-- 入口：原 broker-sync trigger/status；[原脚本](../backend/scripts/guojin_sync_e2e.py) 默认仅校验，显式发布仍经原 Executor/严格共享契约。文件由既有 GUI 操作生成；每日/按需编排候选复用 [Guojin CLI](../backend/scripts/guojin_daily_sync.py) 和原 Mini 定时机制，候选先验再原子 ready、同批次恢复，实际 Windows profile/17:30 三文件待验收，尚未启用。
+- 入口：原 broker-sync trigger/status；[原脚本](../backend/scripts/guojin_sync_e2e.py) 默认仅校验，显式发布仍经原 Executor/严格共享契约。文件由既有 GUI 操作生成；午间11:45及收盘后17:30双窗口/按需编排候选复用 [Guojin CLI](../backend/scripts/guojin_daily_sync.py) 和原 Mini 定时机制，候选先验再原子 ready、同批次恢复，实际 Windows profile/17:30 三文件待验收，尚未启用。
 - 复用：沪港通/深港通底层身份独立，原聚合/issuer 投影合并敞口；CNY 估值和成本，HKD 报价独立证据；旧汇总/截图按显式归属和 CAS 处理，失败不发布。
 - 测试：[隔离安全回归](../tests/test_guojin_native_sync.py)、原 restricted/U0 与 [浏览器](../frontend/tests/e2e/guojin-native.spec.ts)。
 - 限制：HK 文件无账户号或估值时间，必须依赖私有 GUI 来源收据；mtime 不作报价时间，未知仍 partial；生产首次同步已有独立验收记录，D1 后续真实源验收仍须另行授权。只验证过已提供的原生版本；表头/市场代码变化拒绝发布，不宽松猜测。[完整来源/启用合同](GUOJIN_NATIVE_SYNC.md)。
