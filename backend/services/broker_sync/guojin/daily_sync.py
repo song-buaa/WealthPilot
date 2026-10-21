@@ -31,14 +31,28 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 # Reuse the native batch's 15-minute cross-market query window as the maximum
 # automatic crash-recovery age. The parser's separate 24-hour ingest TTL stays unchanged.
 RECOVERY_MAX_AGE = timedelta(minutes=15)
+SCHEDULE_WINDOWS = {
+    "midday": (time(11, 45), time(12, 15)),
+    "post_close": (time(17, 30), time(18)),
+}
+
+
+def scheduled_window(instant):
+    local_time = instant.astimezone(SHANGHAI).time().replace(tzinfo=None)
+    return next((key for key, (start, end) in SCHEDULE_WINDOWS.items()
+                 if start <= local_time < end), None)
 
 
 def source_in_window(queries, finished):
-    """Only original post-close source + publication inside this window count."""
+    """Original source and publication must belong to the same named window."""
     try:
         local = finished.astimezone(SHANGHAI)
-        start = local.replace(hour=17, minute=30, second=0, microsecond=0)
-        end = start.replace(hour=18, minute=0)
+        window = scheduled_window(finished)
+        if window is None:
+            return False
+        start_time, end_time = SCHEDULE_WINDOWS[window]
+        start = local.replace(hour=start_time.hour, minute=start_time.minute, second=0, microsecond=0)
+        end = local.replace(hour=end_time.hour, minute=end_time.minute, second=0, microsecond=0)
         return (start <= local < end and set(queries) == set(FILES) and
                 all(start <= stamp(t).astimezone(SHANGHAI) <= local and
                     finished - stamp(t) <= RECOVERY_MAX_AGE for t in queries.values()))
@@ -48,10 +62,18 @@ def source_in_window(queries, finished):
 
 def completed_window(state, now):
     """Persisted source evidence, never last_success_day or a restarted clock."""
-    receipt = state.get("completed_window") or {}
+    window = scheduled_window(now)
+    if window is None:
+        return False
+    # The PR #32 singular receipt could only prove post-close completion.
+    receipt = (state.get("completed_windows") or {}).get(window)
+    if receipt is None and window == "post_close":
+        receipt = state.get("completed_window")
+    receipt = receipt or {}
     try:
         finished = stamp(receipt["published_at"])
         return (receipt.get("run_id") is not None and receipt.get("native_batch_id") and
+                scheduled_window(finished) == window and receipt.get("window", window) == window and
                 finished <= now and finished.astimezone(SHANGHAI).date() == now.astimezone(SHANGHAI).date()
                 and source_in_window(receipt["queried_at"], finished))
     except (ValueError, TypeError, KeyError, AttributeError):
@@ -61,11 +83,13 @@ def completed_window(state, now):
 def recoverable_source(metadata, now, trigger):
     try:
         queries = metadata["queried_at"]
+        window = scheduled_window(now)
         return (set(queries) == set(FILES) and all(
             -timedelta(seconds=60) <= now - stamp(t) <= RECOVERY_MAX_AGE
             and stamp(t).astimezone(SHANGHAI).date() == now.astimezone(SHANGHAI).date()
             for t in queries.values()) and
-            (trigger != "cron" or source_in_window(queries, now)))
+            ((trigger == "manual" and window is None) or
+             (window is not None and all(scheduled_window(stamp(t)) == window for t in queries.values()))))
     except (ValueError, TypeError, KeyError, AttributeError):
         return False
 PS_SCRIPT = Path(__file__).with_name("native_export.ps1")
@@ -312,18 +336,21 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
     with single_run(root):
         now = clock()
         local = now.astimezone(SHANGHAI)
+        window = scheduled_window(now)
         if trigger == "cron":
-            if not time(17,30) <= local.time().replace(tzinfo=None) < time(18):
+            if window is None:
                 return {"status":"SKIPPED", "reason_code":"AUTO_WINDOW_CLOSED"}
-            if not scheduled_day(now):
-                return {"status":"SKIPPED", "reason_code":"NON_TRADING_DAY"}
-            state = private_json(root/"automation-status.json") if (root/"automation-status.json").exists() else {}
-            if completed_window(state, now):
-                return {"status":"SKIPPED", "reason_code":"ALREADY_PUBLISHED_TODAY"}
         else:
             require(time(9) <= local.time().replace(tzinfo=None) < time(18), "AUTO_WINDOW_CLOSED")
+        if not scheduled_day(now):
+            return {"status":"SKIPPED", "reason_code":"NON_TRADING_DAY", "schedule_window":window}
         state_path = root/"automation-status.json"
         state = private_json(state_path) if state_path.exists() else {}
+        if trigger == "cron" and completed_window(state, now):
+            return {"status":"SKIPPED", "reason_code":"ALREADY_PUBLISHED_WINDOW", "schedule_window":window}
+        receipts = dict(state.get("completed_windows") or {})
+        if state.get("completed_window") and "post_close" not in receipts:
+            receipts["post_close"] = state["completed_window"]
         if retry_batch is None and state.get("status") in {"RUNNING", "FAILED", "VALIDATED"} and state.get("batch"):
             # Only a recent sealed source may avoid this invocation's GUI query.
             # Source age survives restarts; same-day alone is not freshness.
@@ -342,7 +369,8 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
         require(re.fullmatch(r"[A-Za-z0-9_-]{1,80}", batch), "AUTO_CONFIG_INVALID")
         current = dict(status="RUNNING", started_at=now.isoformat(), trigger=trigger, batch=batch,
             last_success_day=state.get("last_success_day"), last_success_at=state.get("last_success_at"),
-            completed_window=state.get("completed_window"),
+            completed_window=state.get("completed_window"),  # legacy, never re-labelled as midday
+            completed_windows=receipts, schedule_window=window,
             source_mode="explicit_retry" if explicit_retry else "automatic_recovery" if retry_batch else "fresh_query",
             attempt_id=uuid.uuid4().hex)
         atomic_json(state_path, current)
@@ -378,9 +406,10 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                 native_batch_id=metadata["native_batch_id"], run_id=result.get("run_id"),
                 security_count=metadata["security_count"], account_total_assets_cny=metadata["account_total_assets_cny"])
             if source_in_window(metadata["queried_at"], finished):
-                current["completed_window"] = dict(queried_at=metadata["queried_at"],
-                    published_at=finished.isoformat(), native_batch_id=metadata["native_batch_id"],
-                    run_id=result.get("run_id"))
+                completed = scheduled_window(finished)
+                current["completed_windows"][completed] = dict(window=completed,
+                    queried_at=metadata["queried_at"], published_at=finished.isoformat(),
+                    native_batch_id=metadata["native_batch_id"], run_id=result.get("run_id"))
         except Exception as exc:
             current.update(status="FAILED", finished_at=clock().isoformat(),
                 reason_code=str(exc) if str(exc) in CODES else "AUTO_EVIDENCE_INVALID")

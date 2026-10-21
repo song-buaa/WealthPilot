@@ -174,7 +174,7 @@ Windows 输出 `observations.json`（`guojin.gui-observations.v1`）包含 batch
 在未来另行获准的生产环境，同一个 CLI 由原 Codex 定时任务或用户按需调用：
 
 ```bash
-# 定时：17:30 原任务调用；本 PR 不创建/启用/修改任何自动化。
+# 定时：未来获准后由原Mini机制在11:45、17:30调用同一命令；本PR不修改/启用任何任务。
 python backend/scripts/guojin_daily_sync.py --trigger cron --publish \
   --config /private/native-config.json --database /private/wealthpilot.db --contract /private/database-contract.json
 
@@ -185,12 +185,12 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 
 仍需原 `WEALTHPILOT_ENABLED_SYNC_BROKERS` 显式含 guojin。严格 Digest/文件身份/Portfolio 合同由原发布入口核验，不执行 DDL。CLI 不启动 Backend lifespan、不连接其他券商、不提供任何交易动作。默认不加 `--publish` 时只生成/验证候选（VALIDATED），不切换 ready、不访问数据库；生产前真实 GUI 只读验收使用这一默认模式，确认授权后才加 `--publish`。
 
-- cron 使用原 D1 exchange-calendars 的 XSHG/XHKG，至少一市场当日开市才执行；超出日历范围 fail closed，不按周一至周五猜节假日。北京时间 **17:30–18:00** 窗口内才执行，按已成功发布的收盘后来源窗口持久化去重；机器/应用恢复后在该窗口重新调用可续接，错过窗口跳过，下一交易日再运行。不是常驻补偿队列。按需允许 09:00–18:00，120022 一次即停，不在清算窗口无限重试。
+- cron 使用原 D1 exchange-calendars 的 XSHG/XHKG，至少一市场当日开市才执行；超出日历范围 fail closed，不按周一至周五猜节假日。北京时间 **11:45–12:15（midday）**、**17:30–18:00（post_close）** 两个独立窗口内执行，起点包含、终点排除，按已成功发布的对应来源窗口持久化去重；机器/应用恢复后在当前窗口重新调用可续接，错过窗口跳过，下一窗口/交易日再运行，不是常驻补偿队列。按需仍为同CLI，交易日09:00–18:00；两种触发均沿原日历，非交易日不操作GUI。120022、登录失效或来源不完整停止当前尝试，不在清算窗口循环重试。
 - Mac inbox 内内核 flock，Windows 同会话 named mutex，双层互斥。锁不删除/换 inode；Mac 崩溃/重启释放内核锁。被放弃的 Windows mutex 可恢复。VM 仅 start/resume 已配置 VM，不重启客户端，不解锁/登录、不改变设置。
 - guest worker 单次 deadline 600 秒，guest parent 610 秒强制结束**自己创建的 exporter child**，Mac transport 640 秒；不会终止 xiadan、共享券商任务或其他进程。VM 启动/状态查询另有 60/15 秒上限。原同步发布 child 90 秒上限；事务回滚/过期 claim 沿原 Executor 恢复。未提供后台无限续跑或无限重试。
 - `automation-status.json` 保存 RUNNING/SUCCESS/FAILED、trigger/batch/起止时间、安全 reason_code、最后成功时间/日；成功有 run_id、证券数和账户总资产。每个候选目录另留每次尝试独立的私有 run_<attempt_id>.json 结果，重试不会抹去前次失败记录；公共日志仅安全字段。不是资产权威或第二个持仓库。
-- crash 时保留候选。自动恢复只允许三市场原始 `queried_at` 均在 15 分钟内（沿用原批次跨市场15分钟窗口作为最小有界恢复上限；保留原60秒时钟偏差），且仍为同日；cron 恢复还要求来源位于当前17:30–18:00窗口。年龄不取 started_at，也不因重启/重新封存重置。超龄必须新建批次重新查询；新导出失败不发布旧来源，Last-good 不变。近期同步失败/ready切换后崩溃/响应丢失仍复核封存批次。显式 `--retry-batch <原名称>` 是历史来源重放，不是一次新刷新（原24小时解析容限不变）；结果及CLI输出保留 `source_mode=explicit_retry`、原 `queried_at` 和来源年龄，不复制旧证据进新批次。半成品新建独立批次重取，不认领部分文件。
-- 晚间完成证明使用原私有状态的 `completed_window`，绑定三市场原查询时间、成功发布时间、native_batch_id及run_id；仅来源和成功发布时间均在当日17:30–18:00且发布时来源未超15分钟才成立。上午manual成功及旧来源重放不消耗晚间任务；17:35合格manual可供同窗口cron去重。重启从同一收据恢复，last_success_day仅保留历史展示，不决定跳过。
+- crash 时保留候选。自动恢复只允许三市场原始 `queried_at` 均在 15 分钟内（沿用原批次跨市场15分钟窗口作为最小有界恢复上限；保留原60秒时钟偏差），且仍为同日；cron及命名窗口内的manual恢复还要求三市场来源均位于当前窗口；不能把窗口前/午间来源复用于另一窗口。年龄不取 started_at，也不因重启/重新封存重置。超龄必须新建批次重新查询；新导出失败不发布旧来源，Last-good 不变。近期同步失败/ready切换后崩溃/响应丢失仍复核封存批次。显式 `--retry-batch <原名称>` 是历史来源重放，不是一次新刷新（原24小时解析容限不变）；结果及CLI输出保留 `source_mode=explicit_retry`、原 `queried_at` 和来源年龄，不复制旧证据进新批次。半成品新建独立批次重取，不认领部分文件。
+- 两个完成收据保存在原私有状态 `completed_windows.midday` / `completed_windows.post_close`。每项含 `window`、三市场原 `queried_at`、`published_at`、`native_batch_id`、原 `run_id`；仅来源和成功发布时间均属于同一交易日/同一窗口且发布时来源未超15分钟才成立。11:50合格manual可满足午间cron，但不能消耗下午资格；17:35合格manual同理。重复cron返回 `SKIPPED/ALREADY_PUBLISHED_WINDOW` 并给出 `schedule_window`，不会查询/发布。重启读取同一收据；仅保留两个窗口最近一次成功，不无限增长历史状态，历次批次/Run证据仍保留。下午失败不覆盖午间完成收据/Last-good。旧PR #32单个 `completed_window` 仅兼容为post_close证明，不推断午间完成；新成功写入对应map槽，`last_success_day`仅作历史展示。
 - sealed 候选验证通过才原子 replace ready；新批次三个渠道时间必须全都更晚，不能倒退 ready。随后原 Executor 发布，DB 再做 Owner/claim/fence/旧持仓 CAS。同步失败可能留下有效 ready，当前 Last-good 持仓不变；安全重试同一 ready。已成功且事实仍匹配时原 CLI 返回 reused，不再次写 Run/持仓；事实变更则不假称复用成功。
 
 ### 生产启用、17:30 合同接入与回滚
@@ -199,7 +199,7 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 
 生产前只需：固定获准合并 SHA/CI；保留原服务/Owner/严格 Digest/权限/实盘开关；将 17:30 报告的真实窗口、独立成功/行数控件、保存对话框、共享路径填入私有 profile。先在独立 inbox 做同一 CLI 和真实 Windows 只读导出/原验证器验收（不加 --publish，不切换正式 ready/写库）；差异只修原 `native_export.ps1` 对应适配/私有 profile，不重写解析/同步。若独立成功或完整行数尚无法取得，应明确阻断正式启用，不填造证据。没有新增数据库迁移、依赖安装或服务。
 
-获得生产持仓写入授权后，按第 6 节完成 Owner/旧行只读核对、备份/单次发布及 Web/MCP/新 U1 视图一致性，旧固定视图保持不变；再单独授权将**原 Mini 定时机制**改为交易日17:30调用本 CLI。Mac 重启后 Codex/原任务必须恢复，17:30–18:00内可调用恢复，应用未运行不伪称可调度；生产需验证这一设备条件。按需和定时不能分别维护两套脚本。
+获得生产持仓写入授权后，按第 6 节完成 Owner/旧行只读核对、备份/单次发布及 Web/MCP/新 U1 视图一致性，旧固定视图保持不变；再单独授权将**原 Mini 定时机制**改为交易日11:45和17:30调用同一CLI。Mac 重启后 Codex/原任务必须恢复，只在11:45–12:15或17:30–18:00当前窗口内调用恢复，应用未运行不伪称可调度；生产需验证这一设备条件。按需和定时不能分别维护两套脚本。
 
 回滚先停原每日触发、设 automation.enabled=false，保留既有 ready/原件/运行收据及 Last-good；恢复已确认旧组件 SHA。无 DDL/Digest回滚，不用旧数据库覆盖新事实，不重新启用 MiniQMT/22:00国金拉取；Tiger/IBKR及原交易授权不变。
 
@@ -217,3 +217,11 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 此修复只改变窗口发现，不放宽点击目标/FromPoint、独立柜台 SUCCESS、完整行数、来源时间、保存对话框或原严格对账。没有可信 profile 时仍不发送输入、不导出、不发布。Registry 入口和职责未变，无需更新。
 
 现场另发现 Windows PowerShell 的有效执行策略为 `Restricted`，原 `-File` 临时导出脚本被系统以 `UnauthorizedAccess` 拒绝。真实只读 Win32 诊断使用已有交互命令及已有 Windows Python 的 ctypes，未改变策略；它不代表正式 PS1 worker 获准运行。正式启用前须有符合现有系统策略的受信任脚本执行方案；本实现不设置执行策略、不使用 Bypass/Unrestricted、不通过 IEX 等方式绕过脚本限制。真实 GUI 三文件及 SUCCESS/行数合同尚未通过时，保持 runtime-pending，不用窗口发现或隔离测试替代来源验收。
+
+### 双次调度候选与Mini启用输入
+
+本次仅在原daily_sync/CLI扩展两个窗口及原私有JSON收据，无新scheduler/GUI平台/服务/表/Schema/Digest/依赖；同一flock、Windows mutex、ready、Owner、原严格验证器和SyncExecutor不变。生产SHA由用户报告为e25fd8f，本轮不探测生产、不修改原配置或任何定时任务。
+
+未来固定PR合并SHA部署获准后，沿原Mini定时机制在北京时间11:45及17:30各触发一次原CLI（命令相同，窗口由源时间判定，不新增强制窗口参数）。启用前确认真实GUI合同、Owner及共享路径；先独立inbox默认validate，再另获持仓写入/每日任务启用授权。窗口边界内错过时只做原有有界恢复，不新增后台无限补偿。回滚先停新触发/automation.enabled=false，保留ready、两个窗口收据及Last-good；无数据库回滚/DDL，不恢复MiniQMT。
+
+用户报告UIA当前无法识别xiadan可见窗口：该问题保持真实运行PENDING，不因调度修改消失。本批不改native_export.ps1、不伪造目标id/class/name、不关闭任何鼠标或账户检查。真实GUI合同须由Mini独立提供证据后另做必要适配；不等待、不取消或干扰原2026-10-21 17:30单次验收。
