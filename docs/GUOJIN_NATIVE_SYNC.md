@@ -209,3 +209,11 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 ### PR #32 定向修订验收边界
 
 R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry入口/职责未变，无需另增能力条目；本文件更新具体合同。无Schema、Digest、项目依赖或交易权限变更。原私有profile必须补齐每个只读点击的target控件身份，不接受旧坐标配置自动升级。Windows真实AutomationId/ClassName/名称及UIA命中可用性仍须Mini原17:30验收报告证明；如控件无可信身份则保持AUTO_GUI_CONTRACT_UNVERIFIED，不能靠Fake或填造标识放行。不修改、不重复安排原单次任务。
+
+### owned 原生窗口定位
+
+真实 Mini 只读调查发现：可见 MFC 交易窗口可由另一进程的窗口拥有，因而未出现在 UIA 根节点直接子窗口中；`xiadan.MainWindowHandle` 也可能指向零尺寸隐藏 IE 辅助窗口。定位改为每次 `EnumWindows` 核实当前 xiadan PID、可见性、非零窗口矩形及已验证标题，再以 `UIA.FromHandle` 读取该确切 HWND，并重新校验 UIA PID/HWND、可见性、标题和 Win32 进程归属。候选不唯一或 UIA 无法证实时返回 `AUTO_GUI_CONTRACT_UNVERIFIED`，不据此宣称登录失效，也不接受 owner 进程的 UIA peer。
+
+此修复只改变窗口发现，不放宽点击目标/FromPoint、独立柜台 SUCCESS、完整行数、来源时间、保存对话框或原严格对账。没有可信 profile 时仍不发送输入、不导出、不发布。Registry 入口和职责未变，无需更新。
+
+现场另发现 Windows PowerShell 的有效执行策略为 `Restricted`，原 `-File` 临时导出脚本被系统以 `UnauthorizedAccess` 拒绝。真实只读 Win32 诊断使用已有交互命令及已有 Windows Python 的 ctypes，未改变策略；它不代表正式 PS1 worker 获准运行。正式启用前须有符合现有系统策略的受信任脚本执行方案；本实现不设置执行策略、不使用 Bypass/Unrestricted、不通过 IEX 等方式绕过脚本限制。真实 GUI 三文件及 SUCCESS/行数合同尚未通过时，保持 runtime-pending，不用窗口发现或隔离测试替代来源验收。
