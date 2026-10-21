@@ -218,6 +218,14 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 
 现场另发现 Windows PowerShell 的有效执行策略为 `Restricted`，原 `-File` 临时导出脚本被系统以 `UnauthorizedAccess` 拒绝。真实只读 Win32 诊断使用已有交互命令及已有 Windows Python 的 ctypes，未改变策略；它不代表正式 PS1 worker 获准运行。正式启用前须有符合现有系统策略的受信任脚本执行方案；本实现不设置执行策略、不使用 Bypass/Unrestricted、不通过 IEX 等方式绕过脚本限制。真实 GUI 三文件及 SUCCESS/行数合同尚未通过时，保持 runtime-pending，不用窗口发现或隔离测试替代来源验收。
 
+### owned 保存对话框及真实合同边界
+
+后续 Mini 验收在明确用户批准后，仅将 Windows `CurrentUser` 从 `Undefined` 改为 `RemoteSigned`，其他 scope/组策略不变；本地无券商操作的 `.ps1 -File` 探针启动并正常退出。该批准不是安装器自动调整策略的许可。独立隐藏进程中的有界 MTA 只读诊断能读取实际控件；交互 `prlctl` 启动的终端曾遮挡 FromPoint 目标，前台或命中不符必须继续拒绝。
+
+实际“另存为”是当前交易窗拥有的 `#32770` 窗口，同样可能不在 UIA 根直接子节点中。保存路径改用原 native 窗口发现，严格匹配配置的字面标题、唯一 HWND、相同 PID/UIA 身份、可见性及当前交易窗的原生 owner，再读写文件名；不持久化现场 PID/HWND。真实诊断已证明文件名 ValuePattern 读回和取消有效，未执行保存或导出。这不代表其他错误/Excel 提示窗口、完整 GUI 流程已经验收。
+
+真实持仓表为自绘控件，现场未提供 GridPattern/完整行数；状态栏的 GridPattern 行数只是状态栏布局，不能作为持仓数。“完成/已连接”、查询时间及日志中的网页 DOM ready 均不能充当独立柜台 SUCCESS。尚无完整来源合同，不生成 verified profile/批次，不刷新、不导出、不更新 ready 或持仓。此修订只修复已证明的保存窗发现，Registry 入口、数据 owner、解析/对账、Schema、依赖及交易权限无变化，无需更新 Registry。
+
 ### 双次调度候选与Mini启用输入
 
 本次仅在原daily_sync/CLI扩展两个窗口及原私有JSON收据，无新scheduler/GUI平台/服务/表/Schema/Digest/依赖；同一flock、Windows mutex、ready、Owner、原严格验证器和SyncExecutor不变。生产SHA由用户报告为e25fd8f，本轮不探测生产、不修改原配置或任何定时任务。

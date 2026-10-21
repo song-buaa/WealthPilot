@@ -27,6 +27,8 @@ public struct WPGuojinPoint {public int X,Y;}
 public class WPGuojinNative {
  public static IntPtr[] Windows=new IntPtr[0];
  public static Dictionary<long,string> Titles=new Dictionary<long,string>();
+ public static Dictionary<long,long> Owners=new Dictionary<long,long>();
+ public static IntPtr WindowOwner(IntPtr h){return new IntPtr(Owners[h.ToInt64()]);}
  public static bool NativeIdentity=true;
  public static IntPtr[] VisibleProcessWindows(int p){return Windows;}
  public static string WindowTitle(IntPtr h){return Titles[h.ToInt64()];}
@@ -91,6 +93,31 @@ $window.Current.Name='Guojin synthetic';[WPGuojinNative]::NativeIdentity=$false
 Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
 [WPGuojinNative]::NativeIdentity=$true
 if([WPGuojinNative]::Clicks -ne 0){throw 'WINDOW_DISCOVERY_SENT_INPUT'}
+# A real owned Save dialog was also absent from UIA root children. Its owner,
+# native/UIA identity and literal title must be proven before filename input.
+$dialog=Node 'Save [safe].' '0' '#32770'
+$dialog.Current.NativeWindowHandle=20
+[WPGuojinNative]::Windows=@([IntPtr]20)
+[WPGuojinNative]::Titles[20]='Save [safe].'
+[WPGuojinNative]::Owners[20]=10
+[System.Windows.Automation.AutomationElement]::Handles[20]=$dialog
+if((Resolve-SaveDialog 7 'Save [safe].' 10) -ne $dialog){throw 'OWNED_SAVE_NOT_RESOLVED'}
+$passed++
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save safeX' 10}
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'save [safe].' 10}
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save [safe].' 999}
+$dialog.Current.ClassName='Button'
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save [safe].' 10}
+$dialog.Current.ClassName='#32770';$dialog.Current.ProcessId=999
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save [safe].' 10}
+$dialog.Current.ProcessId=7;$dialog.Current.NativeWindowHandle=999
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save [safe].' 10}
+$dialog.Current.NativeWindowHandle=20
+[WPGuojinNative]::Titles[21]='Save [safe].'
+[WPGuojinNative]::Windows=@([IntPtr]20,[IntPtr]21)
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-SaveDialog 7 'Save [safe].' 10}
+[WPGuojinNative]::Windows=@([IntPtr]10)
+if([WPGuojinNative]::Clicks -ne 0){throw 'SAVE_DISCOVERY_SENT_INPUT'}
 if((Source-Time '2026-10-21 17:30:00').ToUniversalTime().ToString('HH:mm') -ne '09:30'){throw 'SOURCE_TIME_CHANGED'}
 $passed++
 $selector=@{id='rows';class='Static';pattern='^(?<value>[0-9]+)$'}

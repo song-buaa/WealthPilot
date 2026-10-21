@@ -48,6 +48,8 @@ public class WPGuojinNative {
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr h, uint relation);
+ public static IntPtr WindowOwner(IntPtr h) { return GetWindow(h, 4); }
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern bool GetCursorPos(out WPGuojinPoint point);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
@@ -80,6 +82,19 @@ public class WPGuojinNative {
             throw 'AUTO_GUI_CONTRACT_UNVERIFIED'
         }
         return $window
+    }
+    function Resolve-SaveDialog($processId, $title, $owner) {
+        # An owned Save dialog can be absent from UIA root children too.
+        # Reuse native discovery and require its literal title and native owner
+        # before any filename value or button receives input.
+        $dialog = Resolve-NativeWindow $processId ('^' + [regex]::Escape($title) + '$')
+        $handle = [IntPtr]$dialog.Current.NativeWindowHandle
+        if ($dialog.Current.ClassName -cne '#32770' -or $dialog.Current.Name -cne $title -or
+            [WPGuojinNative]::WindowTitle($handle) -cne $title -or
+            [WPGuojinNative]::WindowOwner($handle).ToInt64() -ne $owner) {
+            throw 'AUTO_GUI_CONTRACT_UNVERIFIED'
+        }
+        return $dialog
     }
     function Current-Window {
         Check-Deadline
@@ -226,12 +241,7 @@ public class WPGuojinNative {
         Check-Deadline
         # Only the verified native Save dialog may receive text. No general
         # SendKeys/password typing and no arbitrary command/script execution.
-        $dialogs = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-        $dialogs = @($dialogs | Where-Object { $_.Current.ProcessId -eq $qnx.Id -and
-            $_.Current.ClassName -eq '#32770' -and $_.Current.Name -ceq $guiProfile.save_title })
-        if ($dialogs.Count -ne 1) { throw 'AUTO_GUI_UNAVAILABLE' }
-        $dialog = $dialogs[0]
+        $dialog = Resolve-SaveDialog $qnx.Id $guiProfile.save_title $window.Current.NativeWindowHandle
         $children = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition)
         $file = @{stock='stock.txt';hgt='hgt.xls';sgt='sgt.xls'}[$market]
