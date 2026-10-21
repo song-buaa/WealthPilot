@@ -299,7 +299,8 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
         batch = retry_batch or "qnx_"+now.strftime("%Y%m%dT%H%M%S")+"_"+uuid.uuid4().hex[:12]
         require(re.fullmatch(r"[A-Za-z0-9_-]{1,80}", batch), "AUTO_CONFIG_INVALID")
         current = dict(status="RUNNING", started_at=now.isoformat(), trigger=trigger, batch=batch,
-            last_success_day=state.get("last_success_day"), last_success_at=state.get("last_success_at"))
+            last_success_day=state.get("last_success_day"), last_success_at=state.get("last_success_at"),
+            attempt_id=uuid.uuid4().hex)
         atomic_json(state_path, current)
         try:
             directory = root/batch
@@ -310,7 +311,7 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                         "AUTO_EVIDENCE_INVALID")
             else:
                 directory.mkdir(mode=0o700)
-                atomic_json(directory/"run.json", current)
+                atomic_json(directory/("run_"+current["attempt_id"]+".json"), current)
                 source = exporter(config, auto, profile, batch, now)
                 _, metadata = seal_candidate(config, directory, source, now, clock())
             if not publish_assets:
@@ -318,7 +319,7 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                     native_batch_id=metadata["native_batch_id"], security_count=metadata["security_count"],
                     account_total_assets_cny=metadata["account_total_assets_cny"])
                 atomic_json(state_path, current)
-                atomic_json(directory/"run.json", current)
+                atomic_json(directory/("run_"+current["attempt_id"]+".json"), current)
                 return current  # no ready update or database access
             advance_ready(config, batch, metadata)
             current["stage"] = "READY"
@@ -333,5 +334,5 @@ def run(config_path, *, trigger="manual", database=None, contract=None, retry_ba
                 reason_code=str(exc) if str(exc) in CODES else "AUTO_EVIDENCE_INVALID")
         atomic_json(state_path, current)
         if directory.is_dir() and directory.resolve() == directory:
-            atomic_json(directory/"run.json", current)
+            atomic_json(directory/("run_"+current["attempt_id"]+".json"), current)
         return current

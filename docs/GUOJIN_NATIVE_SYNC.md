@@ -188,7 +188,7 @@ python backend/scripts/guojin_daily_sync.py --trigger manual --publish \
 - cron 使用原 D1 exchange-calendars 的 XSHG/XHKG，至少一市场当日开市才执行；超出日历范围 fail closed，不按周一至周五猜节假日。北京时间 **17:30–18:00** 窗口内才执行，成功日持久化去重；机器/应用恢复后在该窗口重新调用可续接，错过窗口跳过，下一交易日再运行。不是常驻补偿队列。按需允许 09:00–18:00，120022 一次即停，不在清算窗口无限重试。
 - Mac inbox 内内核 flock，Windows 同会话 named mutex，双层互斥。锁不删除/换 inode；Mac 崩溃/重启释放内核锁。被放弃的 Windows mutex 可恢复。VM 仅 start/resume 已配置 VM，不重启客户端，不解锁/登录、不改变设置。
 - guest worker 单次 deadline 600 秒，guest parent 610 秒强制结束**自己创建的 exporter child**，Mac transport 640 秒；不会终止 xiadan、共享券商任务或其他进程。VM 启动/状态查询另有 60/15 秒上限。原同步发布 child 90 秒上限；事务回滚/过期 claim 沿原 Executor 恢复。未提供后台无限续跑或无限重试。
-- `automation-status.json` 保存 RUNNING/SUCCESS/FAILED、trigger/batch/起止时间、安全 reason_code、最后成功时间/日；成功有 run_id、证券数和账户总资产。每个候选目录另留私有 run.json 结果，后续运行不会抹去前次失败记录；公共日志仅安全字段。不是资产权威或第二个持仓库。
+- `automation-status.json` 保存 RUNNING/SUCCESS/FAILED、trigger/batch/起止时间、安全 reason_code、最后成功时间/日；成功有 run_id、证券数和账户总资产。每个候选目录另留每次尝试独立的私有 run_<attempt_id>.json 结果，重试不会抹去前次失败记录；公共日志仅安全字段。不是资产权威或第二个持仓库。
 - crash 时保留候选。若上次同日批次已封存验证、只是同步失败/响应丢失，下一次窗口内调用自动复核该批次，避免再操作 GUI。也可显式 `--retry-batch <原名称>`（原 24 小时来源有效期仍适用），不复制旧证据进新批次。半成品新建独立批次重取，不认领部分文件。
 - sealed 候选验证通过才原子 replace ready；新批次三个渠道时间必须全都更晚，不能倒退 ready。随后原 Executor 发布，DB 再做 Owner/claim/fence/旧持仓 CAS。同步失败可能留下有效 ready，当前 Last-good 持仓不变；安全重试同一 ready。已成功且事实仍匹配时原 CLI 返回 reused，不再次写 Run/持仓；事实变更则不假称复用成功。
 

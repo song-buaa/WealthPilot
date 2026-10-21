@@ -26,7 +26,7 @@ public class WPGuojinNative {
 }
 '@
     [void][WPGuojinNative]::SetProcessDPIAware()
-    $profile = $request.profile
+    $guiProfile = $request.profile
     function Check-Deadline {
         if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $request.deadline) { throw 'AUTO_TIMEOUT' }
     }
@@ -44,7 +44,7 @@ public class WPGuojinNative {
         $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
         $found = @($windows | Where-Object { $_.Current.ProcessId -eq $qnx.Id -and
-            -not $_.Current.IsOffscreen -and $_.Current.Name -match $profile.window_pattern })
+            -not $_.Current.IsOffscreen -and $_.Current.Name -match $guiProfile.window_pattern })
         if ($found.Count -ne 1) { throw 'AUTO_LOGIN_REQUIRED' }
         return $found[0]
     }
@@ -65,7 +65,7 @@ public class WPGuojinNative {
                 if ($dialogText -match '密码|验证码|禁止|错误|失败') { throw 'AUTO_GUI_UNAVAILABLE' }
             }
         }
-        $match = [regex]::Match($names,$profile.account_pattern)
+        $match = [regex]::Match($names,$guiProfile.account_pattern)
         if (-not $match.Success -or $match.Groups['account'].Value -cne $request.account_id) {
             throw 'AUTO_ACCOUNT_MISMATCH'
         }
@@ -89,7 +89,7 @@ public class WPGuojinNative {
         $state = Controls $window
         if (-not $step.expect -or $state.names -notmatch $step.expect) { throw 'AUTO_GUI_UNAVAILABLE' }
         $rect = $window.Current.BoundingRectangle
-        if ($rect.Width -ne $profile.width -or $rect.Height -ne $profile.height) { throw 'AUTO_GUI_UNAVAILABLE' }
+        if ($rect.Width -ne $guiProfile.width -or $rect.Height -ne $guiProfile.height) { throw 'AUTO_GUI_UNAVAILABLE' }
         if ($step.x -lt 0 -or $step.y -lt 0 -or $step.x -ge $rect.Width -or $step.y -ge $rect.Height) {
             throw 'AUTO_GUI_CONTRACT_UNVERIFIED'
         }
@@ -107,12 +107,12 @@ public class WPGuojinNative {
         return [DateTimeOffset]::ParseExact($text+' +08:00','yyyy-MM-dd HH:mm:ss zzz',
             [Globalization.CultureInfo]::InvariantCulture)
     }
-    if (-not $profile.verified_readonly -or -not $profile.evidence_ref) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
+    if (-not $guiProfile.verified_readonly -or -not $guiProfile.evidence_ref) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
     if (Test-Path -LiteralPath $request.directory) { throw 'AUTO_EVIDENCE_INVALID' }
     $null = New-Item -ItemType Directory -Path $request.directory
     $result = @{schema='guojin.gui-observations.v1';status='EXPORTED';batch=$request.batch;markets=@{}}
     foreach ($market in @('stock','hgt','sgt')) {
-        $spec = $profile.markets.$market
+        $spec = $guiProfile.markets.$market
         foreach ($step in $spec.open) { Click-Observed $step }
         $state = Controls (Current-Window)
         if (-not $spec.page_pattern -or $state.names -notmatch $spec.page_pattern) { throw 'AUTO_GUI_UNAVAILABLE' }
@@ -156,19 +156,19 @@ public class WPGuojinNative {
         $dialogs = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
         $dialogs = @($dialogs | Where-Object { $_.Current.ProcessId -eq $qnx.Id -and
-            $_.Current.ClassName -eq '#32770' -and $_.Current.Name -ceq $profile.save_title })
+            $_.Current.ClassName -eq '#32770' -and $_.Current.Name -ceq $guiProfile.save_title })
         if ($dialogs.Count -ne 1) { throw 'AUTO_GUI_UNAVAILABLE' }
         $dialog = $dialogs[0]
         $children = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition)
         $file = @{stock='stock.txt';hgt='hgt.xls';sgt='sgt.xls'}[$market]
         $path = Join-Path $request.directory $file
-        $edit = Field $children $profile.filename
+        $edit = Field $children $guiProfile.filename
         $value = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
         $value.SetValue($path)
         if ($value.Current.Value -cne $path) { throw 'AUTO_GUI_UNAVAILABLE' }
-        $save = Field $children $profile.save_button
-        if ($save.Current.Name -cne $profile.save_button.name) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
+        $save = Field $children $guiProfile.save_button
+        if ($save.Current.Name -cne $guiProfile.save_button.name) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
         $invoke = $save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         Check-Deadline
         $invoke.Invoke()
@@ -181,11 +181,11 @@ public class WPGuojinNative {
             $wins = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
                 [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
             foreach ($w in $wins) {
-                if ($w.Current.ProcessId -eq $qnx.Id -and $w.Current.Name -ceq $profile.excel_prompt_title) {
+                if ($w.Current.ProcessId -eq $qnx.Id -and $w.Current.Name -ceq $guiProfile.excel_prompt_title) {
                     $controls = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                         [System.Windows.Automation.Condition]::TrueCondition)
-                    $no = Field $controls $profile.excel_no
-                    if ($no.Current.Name -cne $profile.excel_no.name) { throw 'AUTO_GUI_UNAVAILABLE' }
+                    $no = Field $controls $guiProfile.excel_no
+                    if ($no.Current.Name -cne $guiProfile.excel_no.name) { throw 'AUTO_GUI_UNAVAILABLE' }
                     $no.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
                 }
             }

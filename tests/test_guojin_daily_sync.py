@@ -169,6 +169,8 @@ def test_crash_after_ready_retries_sealed_batch_without_new_gui(daily):
     def forbidden(*args):raise AssertionError('recovery must not re-export')
     result=execute(daily,retry_batch=batch,exporter=forbidden)
     assert result['status']=='SUCCESS' and len(daily.calls)==1
+    logs=[json.loads(p.read_text()) for p in (daily.root/batch).glob('run_*.json')]
+    assert {r['status'] for r in logs}=={'FAILED','SUCCESS'}
 
 
 def test_cannot_regress_ready_even_before_original_db_fence(daily):
