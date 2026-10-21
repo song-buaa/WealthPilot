@@ -15,10 +15,36 @@ try {
     Add-Type -AssemblyName System.Drawing
     Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 [StructLayout(LayoutKind.Sequential)]
 public struct WPGuojinPoint { public int X; public int Y; }
 public class WPGuojinNative {
+ private delegate bool EnumWindowProc(IntPtr h, IntPtr parameter);
+ [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+ [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback, IntPtr parameter);
+ [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
+ [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint processId);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr h, StringBuilder text, int length);
+ public static bool HasProcessWindow(IntPtr h, int processId) {
+  uint actual; Rect rect;
+  GetWindowThreadProcessId(h, out actual);
+  return actual == processId && IsWindowVisible(h) && GetWindowRect(h, out rect)
+   && rect.Right > rect.Left && rect.Bottom > rect.Top;
+ }
+ public static IntPtr[] VisibleProcessWindows(int processId) {
+  var windows = new List<IntPtr>();
+  if (!EnumWindows((h, parameter) => { if (HasProcessWindow(h, processId)) windows.Add(h); return true; }, IntPtr.Zero))
+   return new IntPtr[0];
+  return windows.ToArray();
+ }
+ public static string WindowTitle(IntPtr h) {
+  var text = new StringBuilder(2048);
+  GetWindowText(h, text, text.Capacity);
+  return text.ToString();
+ }
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -34,6 +60,27 @@ public class WPGuojinNative {
     function Check-Deadline {
         if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $request.deadline) { throw 'AUTO_TIMEOUT' }
     }
+    function Resolve-NativeWindow($processId, $pattern) {
+        Check-Deadline
+        # EnumWindows includes owned top-level frames. UIA root children can
+        # omit them when a different process owns the native trading frame.
+        $handles = @([WPGuojinNative]::VisibleProcessWindows($processId) | Where-Object {
+            [WPGuojinNative]::WindowTitle($_) -match $pattern })
+        if ($handles.Count -ne 1) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
+        $handle = [IntPtr]$handles[0]
+        try { $window = [System.Windows.Automation.AutomationElement]::FromHandle($handle) }
+        catch { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
+        # UIA must still resolve the same native process/window. Ownership by
+        # another process is not permission to accept that owner's UIA peer.
+        if (-not $window -or $window.Current.IsOffscreen -or
+            $window.Current.ProcessId -ne $processId -or
+            $window.Current.NativeWindowHandle -ne $handle.ToInt64() -or
+            $window.Current.Name -notmatch $pattern -or
+            -not [WPGuojinNative]::HasProcessWindow($handle, $processId)) {
+            throw 'AUTO_GUI_CONTRACT_UNVERIFIED'
+        }
+        return $window
+    }
     function Current-Window {
         Check-Deadline
         $desktop = [WPGuojinNative]::OpenInputDesktop(0,$false,1)
@@ -43,14 +90,9 @@ public class WPGuojinNative {
         if ($processes.Count -ne 1 -or -not [Environment]::UserInteractive -or
             $processes[0].SessionId -ne (Get-Process -Id $PID).SessionId) { throw 'AUTO_SESSION_UNAVAILABLE' }
         $script:qnx = $processes[0]
-        # MainWindowHandle was a hidden IE window in the real probe. Locate the
-        # visible trading window by process + observed title, never a saved HWND.
-        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-        $found = @($windows | Where-Object { $_.Current.ProcessId -eq $qnx.Id -and
-            -not $_.Current.IsOffscreen -and $_.Current.Name -match $guiProfile.window_pattern })
-        if ($found.Count -ne 1) { throw 'AUTO_LOGIN_REQUIRED' }
-        return $found[0]
+        # MainWindowHandle can identify a zero-size hidden IE helper. Re-find
+        # the visible native frame on every call; never persist a runtime HWND.
+        return Resolve-NativeWindow $qnx.Id $guiProfile.window_pattern
     }
     function Controls($window) {
         # Hidden tabs can retain old account/page text. Only the currently

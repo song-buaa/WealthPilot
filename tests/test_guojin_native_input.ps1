@@ -16,6 +16,8 @@ namespace System.Windows.Automation {
  public class AutomationElement{
   public static AutomationElement RootElement=new AutomationElement();
   public static AutomationElement Hit; public static AutomationElement FromPoint(System.Windows.Point p){return Hit;}
+  public static Dictionary<long,AutomationElement> Handles=new Dictionary<long,AutomationElement>();
+  public static AutomationElement FromHandle(IntPtr h){return Handles.ContainsKey(h.ToInt64())?Handles[h.ToInt64()]:null;}
   public NodeState Current=new NodeState();
   public List<AutomationElement> Children=new List<AutomationElement>();
   public AutomationElement[] FindAll(TreeScope scope,Condition c){return Children.ToArray();}
@@ -23,6 +25,12 @@ namespace System.Windows.Automation {
 }
 public struct WPGuojinPoint {public int X,Y;}
 public class WPGuojinNative {
+ public static IntPtr[] Windows=new IntPtr[0];
+ public static Dictionary<long,string> Titles=new Dictionary<long,string>();
+ public static bool NativeIdentity=true;
+ public static IntPtr[] VisibleProcessWindows(int p){return Windows;}
+ public static string WindowTitle(IntPtr h){return Titles[h.ToInt64()];}
+ public static bool HasProcessWindow(IntPtr h,int p){return NativeIdentity;}
  public static long Foreground=10; public static int X,Y,Clicks; public static bool Move=true,Read=true,Clip=false,StealFocus=false;
  public static bool SetForegroundWindow(IntPtr p){return true;}
  public static IntPtr GetForegroundWindow(){return new IntPtr(Foreground);}
@@ -57,6 +65,32 @@ function Expect($code,$action){
   $script:passed++
  }
 }
+# The actual native frame need not be a UIA root child. Its external owner and
+# a hidden MainWindowHandle never become candidate identities.
+[WPGuojinNative]::Windows=@([IntPtr]10)
+[WPGuojinNative]::Titles[10]='Guojin synthetic'
+[System.Windows.Automation.AutomationElement]::Handles[10]=$window
+if((Resolve-NativeWindow 7 '^Guojin synthetic$') -ne $window){throw 'OWNED_FRAME_NOT_RESOLVED'}
+$passed++
+[WPGuojinNative]::Windows=@()
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+[WPGuojinNative]::Windows=@([IntPtr]10,[IntPtr]11)
+[WPGuojinNative]::Titles[11]='Guojin synthetic'
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+[WPGuojinNative]::Windows=@([IntPtr]10)
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'different title'}
+$window.Current.ProcessId=999
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+$window.Current.ProcessId=7;$window.Current.NativeWindowHandle=999
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+$window.Current.NativeWindowHandle=10;$window.Current.IsOffscreen=$true
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+$window.Current.IsOffscreen=$false;$window.Current.Name='different UIA peer'
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+$window.Current.Name='Guojin synthetic';[WPGuojinNative]::NativeIdentity=$false
+Expect 'AUTO_GUI_CONTRACT_UNVERIFIED' {Resolve-NativeWindow 7 'Guojin'}
+[WPGuojinNative]::NativeIdentity=$true
+if([WPGuojinNative]::Clicks -ne 0){throw 'WINDOW_DISCOVERY_SENT_INPUT'}
 if((Source-Time '2026-10-21 17:30:00').ToUniversalTime().ToString('HH:mm') -ne '09:30'){throw 'SOURCE_TIME_CHANGED'}
 $passed++
 $selector=@{id='rows';class='Static';pattern='^(?<value>[0-9]+)$'}
