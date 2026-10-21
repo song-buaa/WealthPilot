@@ -205,7 +205,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 ## 15. 国金原生三文件来源（已合入）
 
-原 GuojinSyncService/Adapter 增加全能行 GB18030/TAB 三文件读取；旧 MiniQMT HTTP 来源退出，22:00 不再自动拉国金，其他三券商不变。导出与入库解耦，无 GUI 调度/密码逻辑。同步仍由原 SyncExecutor → Repository claim/fence → Snapshot/Upsert 原子发布；Schema 无变化。
+原 GuojinSyncService/Adapter 增加全能行 GB18030/TAB 三文件读取；旧 MiniQMT HTTP 来源退出，22:00 不再自动拉国金，其他三券商不变。导出与入库解耦；国金特定的 [每日/按需批次生成入口](../backend/services/broker_sync/guojin/daily_sync.py) 为开发候选，由原 Mini 定时/按需共用，先 Windows 原生只读导出与证据校验，再原子 ready；无新增调度服务/密码逻辑，真实 GUI profile 和正式启用待独立验收。同步仍由原 SyncExecutor → Repository claim/fence → Snapshot/Upsert 原子发布；Schema 无变化。
 
 同账户的沪/深港通用渠道限定 symbol 保留底层身份；原 symbol 读取投影及聚合器/issuer 曝光复用同一证券身份，数量/成本成员不混合。人民币市值/成本/参考盈亏原样保存，港币报价在 Snapshot 证据中分列，不二次 FX；聚合器对原生行采用已存成本，不用参考盈亏反算成本。
 

@@ -184,15 +184,16 @@ def parse_exports(contents):
         raise ValueError("NATIVE_BATCH_INVALID") from None
 
 
-def load_batch(config):
+def load_batch(config, *, candidate=None):
     """Operator's private receipt binds otherwise ownerless HK text to the GUI query.
 
     It is provenance from the existing exporter, not proof supplied by the XLS.
     A process running as this OS user is already inside the trusted boundary.
     """
     root = Path(config["inbox"])
-    pointer = private_json(root/"ready.json")
-    name = pointer.get("batch")
+    # The existing producer validates a sealed candidate BEFORE switching ready.
+    # Normal sync callers continue to consume only the ready pointer.
+    name = candidate if candidate is not None else private_json(root/"ready.json").get("batch")
     require(isinstance(name,str) and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name))
     directory = root/name
     require(directory.is_dir() and directory.resolve() == directory)

@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--publish", action="store_true", help="Explicit authorized publication; default is validate only")
     parser.add_argument("--database", type=Path)
     parser.add_argument("--contract", type=Path)
+    parser.add_argument("--reuse-published", action="store_true", help="Recover producer crash: reuse this exact successful batch")
     args = parser.parse_args()
     try:
         if args.files:
@@ -52,7 +53,19 @@ def main():
                 from backend.services.restricted_sync import SyncExecutor, ServiceFactory
                 from app.database import get_session
                 from services.broker_sync.models import PositionSnapshotRun
-                from backend.api.broker_sync import _public_quality, safe_sync_reason
+                from services.broker_sync.repository import context, publication_status
+                from backend.api.broker_sync import _public_quality, safe_sync_reason, _sync_account
+                if args.reuse_published:
+                    with get_session() as db:
+                        db.info["portfolio_id"] = config["portfolio_id"]
+                        require(_sync_account(db, "guojin") == config["account_id"], "NATIVE_ACCOUNT_UNPROVEN")
+                        previous = db.query(PositionSnapshotRun).filter_by(portfolio_id=config["portfolio_id"],
+                            broker="guojin", account_id=config["account_id"], sync_source="api", status="success").order_by(
+                                PositionSnapshotRun.id.desc()).first()
+                        if (previous and context(previous).get("native_batch_id") == metadata["native_batch_id"]
+                                and publication_status(db, previous) == "matched"):
+                            print(json.dumps(dict(status="success", published=True, reused=True, run_id=previous.id)))
+                            return 0
                 executor = SyncExecutor(["guojin"], config["portfolio_id"], ServiceFactory(restricted=False))
                 jobs, busy = executor.reserve("guojin", "manual")
                 if busy:
