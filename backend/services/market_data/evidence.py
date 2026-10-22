@@ -127,6 +127,11 @@ def record(kind, value, *, at, symbol=None):
     if kind=="fundamentals" and raw.get("pe_ttm") is not None and not raw.get("valuation_currency"):
         issues.append("VALUATION_CURRENCY_UNVERIFIED")
         quality="unknown" if quality=="valid" else quality
+    expected_currency={"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])
+    observed_currency=raw.get("currency") if kind=="quote" else raw.get("valuation_currency") if kind=="fundamentals" else None
+    if expected_currency and observed_currency and observed_currency!=expected_currency:
+        issues.append("LISTED_MARKET_CURRENCY_CONFLICT")
+        quality="conflict"
     host = urlparse(str(source_url or "")).hostname or ""
     primary = any(host == domain or host.endswith("."+domain) for domain in
                   ("sec.gov", "hkexnews.hk", "lixiang.com", "pddholdings.com", "meituan.com"))

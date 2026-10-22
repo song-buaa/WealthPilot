@@ -151,3 +151,12 @@ def test_legacy_dataframe_technical_degrades_without_blocking_peer():
     assert result["technical_levels"] is None
     assert "TECHNICAL_UNAVAILABLE" in result["issues"]
     assert result["qualification"]["L1"]["allowed"]
+
+
+def test_hk_cny_or_usd_valuation_cannot_masquerade_as_hkd_market_quote():
+    quote=verified("quote",current_price=60,currency="CNY",price_basis="close")
+    quote.update(symbol="3690:HK",data_as_of="2026-10-21")
+    result=assess(dict(symbol="3690:HK",quote=quote),at=AT)
+    assert "LISTED_MARKET_CURRENCY_CONFLICT" in result["issues"]
+    assert result["records"][0]["quality"]=="conflict"
+    assert not result["qualification"]["L3"]["allowed"]

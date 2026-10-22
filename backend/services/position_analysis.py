@@ -182,7 +182,7 @@ def report(assessment, plan, decision):
         content=r["values"].get("content") or r["values"].get("text")
         if content:
             values.append(str(content))
-        facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}："+"；".join(values))
+        facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；报告币种 {r['values'].get('report_currency') or '未核验'}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")
     technical_lines=[]
