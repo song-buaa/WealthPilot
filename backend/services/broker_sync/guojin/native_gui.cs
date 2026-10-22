@@ -25,13 +25,20 @@ public static class WPGuojinReadonly {
     static void Deadline(long deadline) {
         if (Stop.Value.IsCancellationRequested || DateTimeOffset.UtcNow.ToUnixTimeSeconds() >= deadline) throw new Exception("AUTO_TIMEOUT");
     }
+    static Exception Contract(string field, string actual, string expected) {
+        var error = new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
+        error.Data["field"] = field; error.Data["actual"] = actual; error.Data["expected"] = expected;
+        return error;
+    }
     static AutomationElement Frame(long hwnd, int pid, int width, int height, int dpi, long deadline) {
         Deadline(deadline);
         var w = AutomationElement.FromHandle(new IntPtr(hwnd)); var a = w.Current;
         if (a.ProcessId != pid || a.NativeWindowHandle != hwnd || a.IsOffscreen ||
             a.Name != "国金全能行远航版" || a.BoundingRectangle.Width != width || a.BoundingRectangle.Height != height ||
             WPGuojinNative.GetDpiForWindow(new IntPtr(hwnd)) != dpi ||
-            !WPGuojinNative.HasProcessWindow(new IntPtr(hwnd), pid)) throw new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
+            !WPGuojinNative.HasProcessWindow(new IntPtr(hwnd), pid))
+            throw Contract("frame", a.ProcessId+"/"+a.NativeWindowHandle+"/"+a.Name+"/"+a.IsOffscreen+"/"+a.BoundingRectangle+"/"+WPGuojinNative.GetDpiForWindow(new IntPtr(hwnd)),
+                pid+"/"+hwnd+"/国金全能行远航版/False/"+width+"x"+height+"/"+dpi);
         return w;
     }
     static AutomationElement[] Nodes(AutomationElement w) {
@@ -150,10 +157,11 @@ public static class WPGuojinReadonly {
                 var peer = AutomationElement.FromPoint(new Point(market == "stock" ? 40 : 140, market == "stock" ? 1643 : 1683));
                 if (Visible(peer,pid) && peer.Current.AutomationId == "1001" && peer.Current.ClassName == "CustomTabCtrl") found.Add(peer);
             }
+            if (found.Count != 1) throw Contract("channel.count", found.Count.ToString(), "1");
             var tab = Unique(found); var b = tab.Current.BoundingRectangle;
             // Actual native tab region verified on Mini; layout changes fail
             // closed. These are read-only channel tabs, never order controls.
-            if (b.X != 1 || b.Y != 1623 || b.Width != 340 || b.Height != 80) throw new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
+            if (b.X != 1 || b.Y != 1623 || b.Width != 340 || b.Height != 80) throw Contract("channel.bounds", b.ToString(), "1,1623,340,80");
             x = b.X + (market == "stock" ? 39 : 139); y = b.Y + (market == "stock" ? 20 : 60);
             id = "1001"; cls = "CustomTabCtrl";
         } else if (kind == "query" || kind == "branch") {

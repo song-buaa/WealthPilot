@@ -454,6 +454,9 @@ public class WPGuojinNative {
         try {
             $diagnosis = @{status='FAILED';reason_code=$code;observed_at=[DateTimeOffset]::UtcNow.ToString('o');
                 failure_line=[int]$_.InvocationInfo.ScriptLineNumber;failure_stack=$_.ScriptStackTrace}
+            if ($cause.Data.Contains('field')) {
+                $diagnosis.contract=@{field=$cause.Data['field'];actual=$cause.Data['actual'];expected=$cause.Data['expected']}
+            }
             if ($window -and [WPGuojinNative]::GetForegroundWindow().ToInt64() -eq $window.Current.NativeWindowHandle) {
                 $bounds = $window.Current.BoundingRectangle
                 $image = New-Object Drawing.Bitmap([int]$bounds.Width,[int]$bounds.Height)
