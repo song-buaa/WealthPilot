@@ -281,6 +281,11 @@ public class WPGuojinNative {
     }
     function Native-Click($kind,$market) {
         $w=Current-Window
+        # OCR requires the already-verified native frame to be foreground.
+        # Activate it before Controls, not only later inside the input helper.
+        if ($guiProfile.ocr_identity) {
+            [void][WPGuojinNative]::SetForegroundWindow([IntPtr]$w.Current.NativeWindowHandle)
+        }
         $null=Controls $w
         [WPGuojinReadonly]::Click($w.Current.NativeWindowHandle,$qnx.Id,$guiProfile.width,$guiProfile.height,
             $guiProfile.dpi,$request.deadline,[string[]]$request.shareholder_accounts,$kind,$market)
