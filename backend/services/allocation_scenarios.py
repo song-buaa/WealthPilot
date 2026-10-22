@@ -49,6 +49,12 @@ class StageTargets(BaseModel):
 
 
 def select_targets(versions, *, at=None):
+    """Validate request proposals, without treating client claims as confirmation.
+
+    There is currently no authoritative stage-target confirmation record. The
+    legacy confirmed_* input fields remain accepted for wire compatibility;
+    neither those fields nor a content digest establish a user confirmation.
+    """
     at = at or datetime.now(timezone.utc)
     indexed = {}
     for raw in versions:
@@ -66,7 +72,8 @@ def select_targets(versions, *, at=None):
     if len(active)>1 and active[-1][0].supersedes != active[-2][0].version:
         raise ValueError("TARGET_VERSION_LINEAGE_REQUIRED")
     target,digest = active[-1]
-    return {**target.model_dump(mode="json"),"digest":digest,"basis":"user_confirmed_analysis_targets"}
+    return {**target.model_dump(mode="json"),"digest":digest,
+            "basis":"request_proposal_unverified","confirmation_status":"unverified"}
 
 
 def target_context(view, issuer_id, versions, formal_rules, defaults, *, at=None):
@@ -78,14 +85,20 @@ def target_context(view, issuer_id, versions, formal_rules, defaults, *, at=None
         cash_min = formal.get("min_cash_pct")
         if cash_min is not None and target.get("investment_cash_max") is not None and cash_min>target["investment_cash_max"]:
             warnings.append("TARGET_DISCIPLINE_CASH_CONFLICT")
+        concentration_max = formal.get("max_single_position")
+        if concentration_max is not None:
+            for issuer in target["issuers"]:
+                if issuer["target_weight"] + issuer["tolerance"] > concentration_max:
+                    warnings.append("TARGET_DISCIPLINE_CONCENTRATION_CONFLICT:"+issuer["issuer_id"])
         effective=defaults.get("effective_rules",{}) if isinstance(defaults,dict) else {}
         if (not formal and target.get("investment_cash_max") is not None
                 and effective.get("min_cash_pct",0)>target["investment_cash_max"]):
             warnings.append("DEFAULT_OR_UNVERIFIED_POLICY_TARGET_CASH_DIFFERENCE")
     return dict(snapshot_id=(view or {}).get("snapshot_id"),issuer_id=issuer_id,
         company_exposure=group,denominator_cny=(view or {}).get("issuer_exposure",{}).get("investment_denominator_cny"),
-        formal_discipline=formal_rules,confirmed_stage_targets=target,system_defaults=defaults,
-        warnings=warnings,authority="Formal discipline is not overwritten; stage targets are analysis preferences, not forced sale or trading authorization.")
+        formal_discipline=formal_rules,confirmed_stage_targets=None,proposed_stage_targets=target,system_defaults=defaults,
+        target_confirmation_status="unverified" if target else "missing",
+        warnings=warnings,authority="Request stage targets are unverified scenario assumptions. No authoritative stage-target confirmation is available; formal discipline is not overwritten and these inputs grant no L3 or trading qualification.")
 
 
 def qualification_view(view, legs=(), *, at=None):
@@ -216,7 +229,7 @@ def simulate(view, legs, *, amount_qualified=False, target=None):
                 warnings.append("INVESTMENT_CASH_ABOVE_STAGE_TARGET")
             expected_destination=target.get("funding_policy",{}).get(leg.account_ref)
             if expected_destination and expected_destination!=leg.destination:
-                warnings.append("FUNDING_DESTINATION_DIFFERS_FROM_CONFIRMED_POLICY")
+                warnings.append("FUNDING_DESTINATION_DIFFERS_FROM_REQUEST_PROPOSAL")
         known_cn=sum((companies[g["issuer_id"]] for g in exposure["companies"] if g.get("economic_region")=="CN"),Decimal(0))
         if target and target.get("china_equity_max") is not None and known_cn/denominator>dec(target["china_equity_max"]):
             warnings.append("KNOWN_CHINA_DIRECT_EQUITY_ABOVE_STAGE_TARGET")

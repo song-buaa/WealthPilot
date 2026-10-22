@@ -61,8 +61,8 @@ def test_three_stock_limited_exit_reports(symbol,issuer):
     assert v==original
 
 
-def test_qualified_plan_uses_reproducible_price_band_and_rule_quantity():
-    from backend.services.market_data.evidence import assess
+@pytest.mark.parametrize("supplied_targets",[False,True])
+def test_missing_or_self_confirmed_targets_cannot_grant_precise_exit_plan(supplied_targets):
     v,executed,planner,t=setup_case("LI:US")
     v["data_quality"].update(can_propose_rebalance=True,analysis_eligibility={"B":dict(allowed=True)})
     v["data_quality"]["security_inputs"] += [dict(id=1,security_symbol="LI:US",original_currency="USD",
@@ -71,24 +71,31 @@ def test_qualified_plan_uses_reproducible_price_band_and_rule_quantity():
     data["fundamentals"]=verified("fundamentals",pe_ttm=20,valuation_currency="USD")
     data["quote"]=verified("quote",current_price=20,currency="USD",price_basis="close")
     data["quote"]["data_as_of"]="2026-10-21"
-    assessment=assess(data,symbol="LI:US",at=AT,asset_view=v,
-        research=[verified("research")],events=[verified("event")],principles_available=True,
-        planner=dict(status="success",fallback_type=None))
-    from backend.services.allocation_scenarios import target_context, simulate, select_targets
-    context=target_context(v,"LI_AUTO",[t],{},[],at=AT)
-    context["security_inputs"]=v["data_quality"]["security_inputs"]
-    assessment["allocation_context"]=context
-    assessment["scenarios"]=simulate(v,[leg("LI_AUTO",1,"account_tiger","offshore_fixed_income",14000)],
-        amount_qualified=True,target=select_targets([t],at=AT))
+    executed.market_data=data
+    executed.loaded_data.rules={}
+    executed.loaded_data.retrieved_principles=["available"]
+    executed.loaded_data.research_evidence=[verified("research"),
+        verified("event",metadata={"evidence_kind":"event"})]
+    options=dict(target_versions=[t] if supplied_targets else [],
+        scenario_legs=[leg("LI_AUTO",1,"account_tiger","offshore_fixed_income",14000)])
+    assessment=prepare(planner,executed,asset_view=v,options=options,at=AT)
     result=exit_plan(assessment,at=AT)
-    assert assessment["qualification"]["L3"]["allowed"]
-    assert result["price_trigger"]["currency"]=="USD"
+    assert assessment["qualification"]["L2"]["allowed"]
+    assert not assessment["qualification"]["L3"]["allowed"]
+    assert "CONFIRMED_STAGE_TARGETS_REQUIRED" in assessment["qualification"]["L3"]["blockers"]
+    assert result["price_trigger"] is None
     row=[r for r in result["tranches"] if r["stage"]=="scenario"][0]
-    assert row["quantity"]==100 and row["amount_cny"]==14000
+    assert row["quantity"] is None and row["amount_cny"]==14000
+    assert result["target_allocation"]["confirmation_status"]==("unverified" if supplied_targets else "missing")
     assert not result["manual_trade_preparation_allowed"]
+    if supplied_targets:
+        assert "STAGE_TARGET_CONFIRMATION_UNVERIFIED" in assessment["infoNeeded"]
+        text=report(assessment,result,"trim")
+        assert "未核验的请求目标版本" in text
+        assert "确认的资金去向规则" not in text
     # A US observation band never becomes a Hong Kong channel's price trigger.
-    assessment["scenarios"]=simulate(v,[leg("LI_AUTO",3,"account_guojin","repay_cny_loan",14000)],
-        amount_qualified=True,target=select_targets([t],at=AT))
+    options["scenario_legs"]=[leg("LI_AUTO",3,"account_guojin","repay_cny_loan",14000)]
+    assessment=prepare(planner,executed,asset_view=v,options=options,at=AT)
     cross=exit_plan(assessment,at=AT)
     cross_row=[r for r in cross["tranches"] if r["stage"]=="scenario"][0]
     assert cross_row["price_trigger"] is None and cross_row["quantity"] is None

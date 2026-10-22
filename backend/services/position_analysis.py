@@ -40,7 +40,15 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     context["security_inputs"]=[r for r in rows if r.get("id") in member_ids]
     assessment["allocation_context"]=context
     if not context["confirmed_stage_targets"]:
-        assessment["infoNeeded"].append("CONFIRMED_STAGE_TARGETS_REQUIRED")
+        blockers=["CONFIRMED_STAGE_TARGETS_REQUIRED"]
+        if context["proposed_stage_targets"]:
+            blockers.append("STAGE_TARGET_CONFIRMATION_UNVERIFIED")
+        for level in ("L3","L4"):
+            assessment["qualification"][level]["allowed"]=False
+            assessment["qualification"][level]["blockers"]+=blockers
+        assessment["issues"]+=blockers
+        assessment["infoNeeded"]+=blockers
+        assessment["confidence_ceiling"]=min(assessment["confidence_ceiling"],.6)
     if context["warnings"]:
         for level in ("L3","L4"):
             assessment["qualification"][level]["allowed"]=False
@@ -52,7 +60,7 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
         if not asset_view:
             raise ValueError("FIXED_ASSET_VIEW_REQUIRED")
         assessment["scenarios"]=simulate_exit_scenario(asset_view,options["scenario_legs"],
-            amount_qualified=assessment["qualification"]["L2"]["allowed"],target=context["confirmed_stage_targets"])
+            amount_qualified=assessment["qualification"]["L2"]["allowed"],target=context["proposed_stage_targets"])
     return assessment
 
 
@@ -60,7 +68,7 @@ def exit_plan(assessment, *, at=None):
     """A reviewable suggestion; no ActionDraft, confirmation URL or order object."""
     at=at or datetime.now(timezone.utc)
     context=assessment.get("allocation_context",{})
-    targets=context.get("confirmed_stage_targets") or {}
+    targets=context.get("confirmed_stage_targets") or context.get("proposed_stage_targets") or {}
     issuer=context.get("issuer_id")
     group=context.get("company_exposure") or {}
     target=next((t for t in targets.get("issuers",[]) if t["issuer_id"]==issuer),{})
@@ -118,7 +126,7 @@ def exit_plan(assessment, *, at=None):
                 blockers.append("NATIVE_QUOTE_FX_UNIT_OR_L3_UNVERIFIED")
             tranches.append(dict(stage="scenario",position_id=step["position_id"],account_ref=step["account_ref"],
                 symbol=native_symbol,
-                condition="仅在本静态情景假设和确认目标仍有效时人工复核",
+                condition="仅在本静态情景及请求目标假设仍有效时人工复核；目标确认来源尚未核验",
                 amount_cny=step["sale_value_cny"] if levels["L2"]["allowed"] and scenarios["mode"]=="qualified_static_scenario" else None,
                 quantity=quantity,quantity_basis="whole US listed units; no ADR or cross-market conversion" if quantity else None,
                 quantity_blockers=blockers,market=market,currency=quote.get("currency") if quantity else "CNY",
@@ -131,7 +139,8 @@ def exit_plan(assessment, *, at=None):
             funds_destination=None,price_trigger=price_trigger,status="research_milestone"))
     return dict(schema_version="wealthpilot.exit-plan.v1",issuer_id=issuer,snapshot_id=assessment["snapshot_id"],
         target_allocation=dict(current=current,target=target.get("target_weight"),tolerance=target.get("tolerance"),
-            stage=targets.get("stage"),version=targets.get("version"),digest=targets.get("digest")),
+            stage=targets.get("stage"),version=targets.get("version"),digest=targets.get("digest"),
+            confirmation_status=context.get("target_confirmation_status","missing"),basis=targets.get("basis")),
         account_holdings=group.get("members",[]),tranches=tranches,price_trigger=price_trigger,
         fundamental_trigger=dict(condition="核验交付/收入/利润率/现金流及竞争变化；未知指标不得填造",
             evidence=[{k:r[k] for k in ("kind","source","source_url","record_id","period","data_as_of")}
@@ -143,7 +152,7 @@ def exit_plan(assessment, *, at=None):
         review_deadline=deadline,review_deadline_basis="system default seven-day review, not a sale deadline",
         evidence_quality=dict(qualification=levels,issues=assessment["issues"],
             missing=assessment["infoNeeded"],facts=[{k:r[k] for k in ("kind","source","record_id","data_as_of","quality")} for r in valid],
-            assumptions=["阶段目标是确认偏好，非正式纪律覆盖或交易授权。","情景基于固定估值，不预测未来收益。"],
+            assumptions=["请求阶段目标仅为未核验情景假设，未取得可信用户确认，不覆盖正式纪律或授予L3资格。","情景基于固定估值，不预测未来收益。"],
             excluded=[{k:r[k] for k in ("kind","source","data_as_of","quality")} for r in assessment["records"] if r["quality"]!="valid"]),
         order_created=False,execution_authorized=False,manual_trade_preparation_allowed=False)
 
@@ -151,7 +160,7 @@ def exit_plan(assessment, *, at=None):
 def report(assessment, plan, decision):
     """Seven-layer human report; numerical statements come from verified inputs."""
     context=assessment.get("allocation_context",{})
-    targets=context.get("confirmed_stage_targets") or {}
+    targets=context.get("confirmed_stage_targets") or context.get("proposed_stage_targets") or {}
     group=context.get("company_exposure") or {}
     levels=assessment["qualification"]
     sections=[]
@@ -165,7 +174,7 @@ def report(assessment, plan, decision):
     allocation=plan["target_allocation"]
     text=(mode+f"\n固定快照：{plan['snapshot_id'] or '未提供'}；公司：{plan['issuer_id'] or '尚未确认'}。"
         +f"\n公司跨账户参考市值 {amount(group.get('market_value_cny'))}；投资资产分母 {amount(context.get('denominator_cny'))}。"
-        +f"当前参考占比 {weight(allocation['current'])}；阶段目标 {weight(allocation['target'])}。"
+        +f"当前参考占比 {weight(allocation['current'])}；请求假设目标 {weight(allocation['target'])}。"
         +"\n冻结估值不代表实时可交易报价；来源过期时，金额仅作示意。")
     if group.get("members"):
         text+="\n\n| 账户 | 市场证券 | 本账户数量 | 参考人民币市值 |\n|---|---|---:|---:|"
@@ -200,17 +209,17 @@ def report(assessment, plan, decision):
     direction={"trim":"减仓研究","exit":"逐步退出研究","hold":"持有并复核","watch":"继续观察",
                "buy_init":"新建仓评估","buy_more":"加仓评估"}.get(decision,"继续观察")
     lines=[f"原专业链路方向：{direction}（分析推断，不能独立授予交易资格）。",
-        f"用户确认目标版本：{targets['version']}，阶段：{targets['stage']}。" if targets else "缺少有效的用户确认目标；系统默认配置不能代表个人目标。"]
+        f"未核验的请求目标版本：{targets['version']}，阶段：{targets['stage']}；仅为情景假设，尚无可信用户确认。" if targets else "缺少有效的用户确认目标；系统默认配置不能代表个人目标。"]
     for row in plan["tranches"]:
         line=f"- 阶段 {row['stage']}：{row['condition']}。"
         if row.get("target_weight") is not None:
-            line+=f"目标占比 {weight(row['target_weight'])}，并非无条件卖出要求。"
+            line+=f"假设目标占比 {weight(row['target_weight'])}，并非已确认目标或无条件卖出要求。"
         if row.get("amount_cny") is not None:
             line+=f"假设减仓额 {amount(row['amount_cny'])}，账户 {row['account_ref']}，去向 {row['funds_destination']}。"
         lines.append(line)
     if plan["funds_policy"]:
         destination_names={"offshore_fixed_income":"境外固收","repay_cny_loan":"偿还人民币贷款","investment_cash":"投资账户现金"}
-        lines.append("确认的资金去向规则："+"；".join(f"{a} → {destination_names[d]}" for a,d in plan["funds_policy"].items())+"。")
+        lines.append("请求假设的资金去向："+"；".join(f"{a} → {destination_names[d]}" for a,d in plan["funds_policy"].items())+"；未核验确认来源。")
     scenario=assessment.get("scenarios")
     if scenario:
         lines.append("\n静态情景测算（"+("示意、证据资格不足" if scenario["mode"]=="illustrative_unqualified" else "金额资格达标、仍依赖列明假设")+"，不是收益预测或交易指令）：")

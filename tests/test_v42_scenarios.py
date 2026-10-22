@@ -102,7 +102,10 @@ def test_reusing_same_position_cannot_oversell_and_debt_cap_is_enforced():
 def test_targets_versioned_confirmed_expiring_separate_from_formal_rules():
     t=target();rules={"min_cash_pct":.2,"max_single_position":.4}
     context=target_context(view(),"LI_AUTO",[t],rules,[dict(default=True)],at=AT)
-    assert context["confirmed_stage_targets"]["investment_cash_max"]==.01
+    assert context["confirmed_stage_targets"] is None
+    assert context["proposed_stage_targets"]["investment_cash_max"]==.01
+    assert context["proposed_stage_targets"]["basis"]=="request_proposal_unverified"
+    assert context["target_confirmation_status"]=="unverified"
     assert context["formal_discipline"]==rules
     assert context["warnings"]==["TARGET_DISCIPLINE_CASH_CONFLICT"]
     changed={**t,"investment_cash_max":.02}
@@ -116,6 +119,24 @@ def test_targets_versioned_confirmed_expiring_separate_from_formal_rules():
     assert select_targets([t],at=datetime(2027,1,1,tzinfo=timezone.utc)) is None
     with pytest.raises(ValueError):
         select_targets([{**t,"confirmed_by_user":False}],at=AT)
+
+
+def test_request_boolean_and_digest_never_establish_target_confirmation():
+    context=target_context(view(),"LI_AUTO",[target()],{},[],at=AT)
+    proposal=context["proposed_stage_targets"]
+    assert proposal["confirmed_by_user"] is True  # Legacy input remains compatible.
+    assert proposal["digest"]
+    assert proposal["confirmation_status"]=="unverified"
+    assert context["confirmed_stage_targets"] is None
+    empty=target_context(view(),"LI_AUTO",[],{},[],at=AT)
+    assert empty["target_confirmation_status"]=="missing"
+    assert empty["proposed_stage_targets"] is None
+
+
+def test_proposal_cannot_silently_exceed_formal_concentration_limit():
+    t=target();t["issuers"][0]["target_weight"]=.6
+    context=target_context(view(),"LI_AUTO",[t],{"max_single_position":.4},{},at=AT)
+    assert context["warnings"]==["TARGET_DISCIPLINE_CONCENTRATION_CONFLICT:LI_AUTO"]
 
 
 def test_single_symbol_d1_permission_cannot_bless_other_denominator_assets():
