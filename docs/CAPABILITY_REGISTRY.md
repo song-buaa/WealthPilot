@@ -92,3 +92,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 - 产品证据：[instruments/tradability](../backend/services/instruments/tradability.py)及原IBKR/Tiger Adapter只读合约能力；新MCP `get_instrument_tradability`。复用原prepare的受保护loopback bridge查询产品，不触发prepare/同步/交易；未配bridge时原RO worker仅给存储身份及UNKNOWN。
 - 三态合同：缺账户级肯定证据UNKNOWN；产品明确禁止买入可NO；当前SDK的肯定合约/WhatIf不授予YES。账户、证券身份、时区、来源、未知费用及实际验收边界见 [B3](B3_IMPLEMENTATION.md)。零Schema/依赖/新服务。
 - 测试：[B3隔离](../tests/test_b3_trade_experience.py)、原trade-link浏览器及MCP协议。B3已生产交付；账户/证券权限与费用证据依具体查询判断，不以Mock或合约存在冒充账户可买。
+
+### 4.2 开发：单标证据门槛
+
+沿原 PEER 增加 [证据 Skill](../skills/wp-assess-position-evidence/SKILL.md)（原13项基础上第14项）；[evidence](../backend/services/market_data/evidence.py)负责统一来源/时间、冲突与L1-L4，[output_policy](../backend/services/market_data/output_policy.py)负责原Expressing输出限制。原 [KlineProvider](../backend/services/execution_plan/kline_provider.py) 与 [technical_evidence](../backend/services/market_data/technical_evidence.py)提供可复算日周线，不替换Pattern治理或交易价格/数量Owner。测试：[证据回归](../tests/test_v42_evidence.py)。状态为隔离开发，非生产交付；实施证据见[4.2记录](V42_IMPLEMENTATION.md)。

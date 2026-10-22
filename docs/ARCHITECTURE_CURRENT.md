@@ -232,3 +232,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 原 ActionDraftCard/ConfirmOrderDialog 消费原link_handoff/ExecutionBatch及U2交易同步投影；最终人工操作仍由原confirm/version/hash/TTL/WhatIf/资金/OrderManager约束。新增只读恢复不取报价、不落库。产品证据归原 [instruments 域](../backend/services/instruments/tradability.py)及原Adapter；MCP薄适配复用U1固定loopback/token读取端点，未配置时只读已有身份。产品查询不调用prepare/sync/WhatIf或订单动作，不改变共享SQLite权限；缺账户权限证据UNKNOWN而非授予YES。详见 [B3](B3_IMPLEMENTATION.md)，没有新订单状态机、现金账本、Schema或服务。
 
 国金最终上线合同：原解析器记录精确PASS/双上限估值WARNING/超限阻断；原生v2来源仅用真实观察动作排序，券商时间和完整性缺证据保留UNKNOWN。原Repository的默认关闭观察行选项仅供国金显式reconcile使用，不清仓/删除未观察到的行，不退役旧汇总；Run.complete=false供原U1质量判定。具体权限与政策以[原国金合同](GUOJIN_NATIVE_SYNC.md#最终上线政策估值-warning-与可观察来源当前合同)为准。
+
+## 4.2 开发扩展：分析证据资格
+
+原 PEER / invoke_skill 仍是唯一专业链路。新增内部证据Skill在原行情/Pattern收集后评估来源时效和冲突，再由原Expressing限制输出粒度。证据来源时钟与抓取时间分开；原行情Registry产生OHLCV，日/周观测与实际订单限价分开。L1方向、L2静态测算、L3精确建议、L4人工交易准备分别门控；4.2不授予L4或任何订单/同步权限。复用入口见[能力索引](CAPABILITY_REGISTRY.md#42-开发单标证据门槛)，开发/验收记录见[4.2记录](V42_IMPLEMENTATION.md)。

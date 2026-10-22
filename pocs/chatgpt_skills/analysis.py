@@ -144,11 +144,13 @@ def captured_evidence(result, captured, portfolio_id):
         'validator':result.professional_result.get('validator'),
     }
     result.evidence.update(holdings=encode(loaded.positions),target_position=encode(loaded.target_position),
+        position_evidence=encode(getattr(executed,"position_evidence",{})),
         new_entry=loaded.is_new_entry,rules=encode(loaded.rules),rule_result=encode(executed.rule_result),
         signals=encode(executed.signal_result),market_data=encode(executed.market_data),research=encode(loaded.research),
         pattern_evidence=pattern,
         retrieved_principles=encode(loaded.retrieved_principles),retrieved_research_views=encode(loaded.retrieved_research_views),
         invoked_skills=executed.invoked_skills,data_warnings=encode(loaded.data_warnings))
+    result.issues.extend(getattr(executed,'position_evidence',{}).get('issues',[]))
     if loaded.data_warnings:
         result.issues.append('DATA_LOADER_WARNINGS')
     if expressed.mode=='fallback' or getattr(expressed.llm_result,'is_fallback',False):
@@ -246,7 +248,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         try:
             async with asyncio.timeout(240):
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
-                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,analysis_only=True):
+                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,analysis_only=True,analysis_context=asset_view):
                     event_type,data=event.split('\n',1)
                     data=json.loads(data.split('data: ',1)[1]);kind=event_type.removeprefix('event: ')
                     if kind=='text':text.append(data.get('delta',''))

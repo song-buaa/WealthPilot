@@ -301,6 +301,7 @@ class PlanningAgent:
             out.route = raw_result.get("route", "")
             out.sse_handler = raw_result.get("sse_handler", "")
             out.rationale = raw_result.get("planner_rationale", "")
+            out.planner_trace = raw_result.get("planner_trace", {"status":"unknown", "fallback_type":None})
             out.multi_assets = raw_result.get("multi_assets", [])
             out.needs_clarification = raw_result.get("needs_clarification", False)
             out.candidate_holdings = raw_result.get("candidate_holdings", [])
@@ -407,6 +408,7 @@ class PlanningAgent:
             "route": result_state.get("route", ""),
             "sse_handler": result_state.get("sse_handler", ""),
             "planner_rationale": result_state.get("planner_rationale", ""),
+            "planner_trace": result_state.get("planner_trace", {"status":"unknown", "fallback_type":None}),
             "multi_assets": result_state.get("multi_assets", []),
             "needs_clarification": result_state.get("needs_clarification", False),
             "candidate_holdings": result_state.get("candidate_holdings", []),

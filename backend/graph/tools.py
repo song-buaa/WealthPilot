@@ -1170,7 +1170,13 @@ TOOL_SCHEMAS = [
     RETRIEVE_PRINCIPLES_SCHEMA,
 ]
 
+def execute_assess_position_evidence(**kwargs):
+    from backend.services.market_data.evidence import assess
+    return assess(**kwargs)
+
+
 TOOL_EXECUTORS = {
+    "assess_position_evidence": execute_assess_position_evidence,
     "fetch_holdings":             execute_fetch_holdings,
     "check_discipline_rules":     execute_check_discipline,
     "calc_allocation_deviation":  execute_calc_deviation,

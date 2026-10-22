@@ -88,6 +88,7 @@ class PlanningOutput:
     # === 路由决策（兼容 v2.6 路由协议）===
     route: str = ""               # position_single / position_multi / portfolio / general / clarify / low_confidence
     sse_handler: str = ""         # 兼容 v2.6 字符串分派（v3.1 删除）
+    planner_trace: dict = field(default_factory=lambda: {"status":"unknown", "fallback_type":None})
     rationale: str = ""           # LLM Planner 给出的路由理由
 
     # === Skill 选择（v3.0 新增）===
@@ -150,6 +151,7 @@ class ExecutionOutput:
     invoked_skills: list[str] = field(default_factory=list)
     """实际调用的 Skill 名称列表（按顺序）。"""
 
+    position_evidence: dict = field(default_factory=dict)
     skill_results: dict = field(default_factory=dict)
     """
     每个 Skill 的执行结果，key 是 Skill 名称。

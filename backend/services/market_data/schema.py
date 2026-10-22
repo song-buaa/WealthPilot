@@ -30,6 +30,7 @@ class QuoteData:
     update_frequency: Literal["realtime"] = "realtime"
     data_as_of: Optional[datetime] = None
     source: str = "futu"
+    provenance: dict = field(default_factory=dict)
     missing_fields: list[str] = field(default_factory=list)
 
 
@@ -51,6 +52,9 @@ class AnalystData:
 class FundamentalsData:
     """财报关键指标 + 分析师。来源:Alpha Vantage OVERVIEW + INCOME_STATEMENT。"""
     symbol: str
+    valuation_currency: Optional[str] = None
+    eps_share_basis: Optional[str] = None
+    report_currency: Optional[str] = None
     pe_ttm: Optional[float] = None
     pe_forward: Optional[float] = None
     peg_ratio: Optional[float] = None
@@ -70,6 +74,7 @@ class FundamentalsData:
     update_frequency: Literal["daily"] = "daily"
     data_as_of: Optional[str] = None
     source: str = "alphavantage"
+    provenance: dict = field(default_factory=dict)
     missing_fields: list[str] = field(default_factory=list)
 
 
@@ -104,6 +109,8 @@ class TechnicalData:
     data_as_of: str = ""
     bars_count: int = 0
     source: str = "tiger"
+    series: dict = field(default_factory=dict)
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass

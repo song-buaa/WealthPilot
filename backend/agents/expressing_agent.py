@@ -368,6 +368,8 @@ class ExpressingAgent:
 
             # v3.2: actionable 硬规则判断
             out.actionable, out.actionable_hint = _is_actionable(out)
+            if getattr(execution_output,"position_evidence",{}):
+                out.actionable, out.actionable_hint = False, None
 
             logger.info(
                 f"[ExpressingAgent] task={out.task_id} intent={intent_type} "
@@ -409,6 +411,18 @@ class ExpressingAgent:
             return
 
         loaded = execution_output.loaded_data
+        assessment = getattr(execution_output, "position_evidence", {})
+        prompt_market = getattr(execution_output, "market_data", None)
+        if assessment:
+            from copy import copy
+            from backend.services.market_data.evidence import safe_market
+            from backend.services.market_data.output_policy import prompt_context
+            loaded = copy(loaded)
+            loaded.research = [str(r["values"].get("content") or r["values"].get("text") or "")
+                for r in assessment["records"] if r["kind"]=="research" and r["quality"]=="valid"]
+            loaded.retrieved_research_views = []
+            prompt_market = safe_market(prompt_market,assessment)
+            user_query += prompt_context(assessment)
 
         from backend.services.technical_patterns.ai_integration import (
             build_pattern_ai_context,
@@ -431,7 +445,13 @@ class ExpressingAgent:
             async for chunk in self._express_new_entry(
                 out, execution_output, user_query, pattern_ai_context,
             ):
-                yield chunk
+                if not assessment:
+                    yield chunk
+            if assessment:
+                from backend.services.market_data.output_policy import enforce
+                enforce(out,assessment)
+                async for chunk in _emit_text_chunks(out.chat_answer):
+                    yield chunk
             return
 
         rule_result = execution_output.rule_result
@@ -457,7 +477,7 @@ class ExpressingAgent:
                 rule_result,
                 signal_result,
                 conversation_history or [],
-                getattr(execution_output, "market_data", None),
+                prompt_market,
                 pattern_ai_context=pattern_ai_context,
             )
         except Exception as e:
@@ -475,6 +495,9 @@ class ExpressingAgent:
             out.structured_payload = structured
 
         out.mode = "fallback" if llm_result.is_fallback else "structured"
+        if assessment:
+            from backend.services.market_data.output_policy import enforce
+            enforce(out,assessment)
 
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk

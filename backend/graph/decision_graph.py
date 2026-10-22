@@ -69,6 +69,7 @@ class DecisionState(TypedDict):
     # ── 调试与评测 ──
     agents_invoked: list[str]
     tool_calls: list[dict]
+    planner_trace: dict
     planner_rationale: str
 
     # ── 路由决策（OrchestratorNode 填充）──
@@ -243,6 +244,7 @@ def orchestrator_node(state: DecisionState) -> dict:
   "rationale": "<用一句话说明为什么选这条路径，要基于用户输入的具体内容>"
 }}"""
 
+    planner_trace = {"status":"success", "fallback_type":None, "impact":"routing only; evidence independently qualified"}
     try:
         client = get_client()
         response = client.chat.completions.create(
@@ -250,16 +252,17 @@ def orchestrator_node(state: DecisionState) -> dict:
             messages=[{"role": "user", "content": planner_prompt}],
             temperature=0,
             max_tokens=200,
+            response_format={"type":"json_object"},
             timeout=10,
         )
-        raw = response.choices[0].message.content.strip()
-        plan = json.loads(raw)
+        plan = _parse_planner_response(response.choices[0].message.content)
         route = plan.get("route", "general")
         rationale = plan.get("rationale", "")
     except Exception as e:
         # Planner 失败时降级到规则路由
         route = _intent_to_route_fallback(intent, asset, asset_unambiguous, multi_assets)
-        rationale = f"Planner 调用失败（{e}），降级到规则路由"
+        planner_trace = {"status":"fallback", "fallback_type":type(e).__name__, "impact":"rule routing used; research evidence not upgraded"}
+        rationale = "Planner 调用失败，降级到规则路由"
 
     # 后置校验：操作关键词 + 模糊标的 → 重路由到 clarify
     # 豁免 1：Education 且无明确标的（纯语义描述行为习惯，不触发）
@@ -311,6 +314,7 @@ def orchestrator_node(state: DecisionState) -> dict:
         "sse_handler": sse_handler,
         "sse_kwargs": sse_kwargs,
         "planner_rationale": rationale,
+        "planner_trace": planner_trace,
         "agents_invoked": ["orchestrator"],
     }
 
@@ -425,3 +429,20 @@ def build_decision_graph():
 
 # 模块级单例
 decision_graph = build_decision_graph()
+
+
+def _parse_planner_response(raw):
+    """Accept strict JSON or a single fenced JSON object; reject invalid routes."""
+    import json
+    text = (raw or "").strip()
+    if text.startswith("```json") and text.endswith("```"):
+        text = text[7:-3].strip()
+    elif text.startswith("```") and text.endswith("```"):
+        text = text[3:-3].strip()
+    plan = json.loads(text)
+    if not isinstance(plan, dict) or plan.get("route") not in {
+            "position_single","position_multi","portfolio","general","clarify"}:
+        raise ValueError("INVALID_PLANNER_ROUTE")
+    if not isinstance(plan.get("rationale", ""), str):
+        raise ValueError("INVALID_PLANNER_RATIONALE")
+    return plan

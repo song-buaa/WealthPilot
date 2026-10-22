@@ -101,6 +101,7 @@ async def run_chat_stream_v3(
     *,
     result_callback=None,
     analysis_only: bool = False,
+    analysis_context: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     v3.0 决策流：4 Agent 协作。
@@ -348,6 +349,24 @@ async def run_chat_stream_v3(
         )
         exec_out.pattern_evidence = snapshot
 
+        if plan_out.route == "position_single":
+            from backend.skills import invoke_skill
+            loaded = exec_out.loaded_data
+            market = exec_out.market_data
+            symbol = getattr(market, "symbol", None) or (target.requested_symbol if target else None)
+            native_price = None
+            if analysis_context and symbol:
+                # Use only the SAME listed identity and native market currency.
+                currency = "HKD" if symbol.endswith(":HK") else "USD" if symbol.endswith(":US") else None
+                rows = analysis_context.get("data_quality", {}).get("security_inputs", [])
+                native = [r for r in rows if r.get("security_symbol")==symbol and r.get("currency")==currency]
+                native_price = native[0].get("current_price") if native else None
+            exec_out.position_evidence = invoke_skill("wp-assess-position-evidence",
+                market_data=market, symbol=symbol, asset_view=analysis_context,
+                research=getattr(loaded,"retrieved_research_views",[]) or getattr(loaded,"research",[]),
+                planner=plan_out.planner_trace, stored_price=native_price,
+                principles_available=bool(getattr(loaded,"retrieved_principles",[])))
+            exec_out.invoked_skills.append("wp-assess-position-evidence")
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})

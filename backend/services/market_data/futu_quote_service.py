@@ -79,8 +79,10 @@ def fetch_quote(wp_symbol: str) -> Optional[QuoteData]:
             eps=get_field("earning_per_share"),
             dividend_yield=get_field("dividend_ratio_ttm"),
             turnover_rate=get_field("turnover_rate"),
-            currency="HKD" if ".HK" in wp_symbol else "USD",
-            data_as_of=datetime.now(timezone.utc),
+            currency="HKD" if wp_symbol.endswith(":HK") or ".HK" in wp_symbol else "USD",
+            data_as_of=_source_time(row.get("update_time"), wp_symbol),
+            provenance=dict(source="futu",record_id=f"futu:snapshot:{wp_symbol}",
+                fetched_at=datetime.now(timezone.utc).isoformat(),period="snapshot",scope=wp_symbol),
             missing_fields=missing,
         )
 
@@ -89,4 +91,18 @@ def fetch_quote(wp_symbol: str) -> Optional[QuoteData]:
 
     except Exception as e:
         logger.error(f"富途 snapshot 异常: {wp_symbol}: {e}")
+        return None
+
+
+def _source_time(value, symbol):
+    """Futu update_time is exchange-local; fetch time cannot substitute for it."""
+    from zoneinfo import ZoneInfo
+    try:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        parsed = datetime.fromisoformat(value)
+        market = symbol.rsplit(":", 1)[-1]
+        zone = "Asia/Hong_Kong" if market=="HK" or ".HK" in symbol else "America/New_York"
+        return parsed.replace(tzinfo=ZoneInfo(zone)) if parsed.tzinfo is None else parsed
+    except ValueError:
         return None

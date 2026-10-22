@@ -95,7 +95,11 @@ def test_real_peer_services_scope_results_and_no_writes(analysis_db,peer,scenari
     result=asyncio.run(analyze(analysis_db,7,scenario,{'question':'fixture query','history':[{'role':'user','content':'earlier context'}]},synthetic=True))
     assert result['status']=='partial',json.dumps(result,ensure_ascii=False)
     assert result['intent']['primary_intent']==intent
-    assert result['conclusion']=='FIXTURE professional conclusion'
+    if scenario=='analyze_position':
+        assert result['professional_result']['analysis_result']['analysisQualification']['L1']['allowed']
+        assert 'FIXTURE professional conclusion' not in result['conclusion']
+    else:
+        assert result['conclusion']=='FIXTURE professional conclusion'
     assert result['scope']['investment_holdings_total_cny']==15000
     assert len(result['evidence']['holdings'])==2
     assert 'OTHER_PRIVATE' not in json.dumps(result) and 'LIFE_ONLY' not in json.dumps(result)
@@ -228,7 +232,8 @@ def test_existing_new_entry_path_preserves_its_original_structured_result(analys
     assert result['evidence']['new_entry'] is True
     assert result['evidence']['target_position']['is_virtual'] is True
     assert result['professional_result']['analysis_result']['is_new_entry'] is True
-    assert result['conclusion']=='FIXTURE observe new entry'
+    assert result['professional_result']['analysis_result']['analysisQualification']['L3']['allowed'] is False
+    assert 'FIXTURE observe new entry' not in result['conclusion']
 
 
 def test_ephemeral_analysis_does_not_create_knowledge_index(tmp_path,monkeypatch):

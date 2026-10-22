@@ -9,7 +9,7 @@ import logging
 import urllib.request
 import urllib.parse
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from services.market_data.schema import FundamentalsData, AnalystData
 from services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
@@ -271,7 +271,14 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         net_income_ttm=net_income_ttm,
         net_income_yoy=net_income_yoy,
         analyst=analyst,
-        data_as_of=datetime.now().strftime("%Y-%m-%d"),
+        # OVERVIEW has no verified valuation time. LatestQuarter is a fiscal period.
+        data_as_of=None,
+        valuation_currency=overview.get("Currency"),
+        report_currency=(income or {}).get("quarterlyReports", [{}])[0].get("reportedCurrency") if (income or {}).get("quarterlyReports") else None,
+        provenance=dict(source="alphavantage",source_url="https://www.alphavantage.co/documentation/#company-overview",
+            record_id=f"AV:OVERVIEW:{ticker}",published_at=None,data_as_of=None,
+            fetched_at=datetime.now(timezone.utc).isoformat(),period=overview.get("LatestQuarter"),
+            scope="TTM and valuation; valuation time unverified",is_fallback=False),
         missing_fields=missing,
     )
 
