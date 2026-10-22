@@ -366,6 +366,9 @@ async def run_chat_stream_v3(
             from backend.services.position_analysis import prepare
             exec_out.position_evidence = prepare(plan_out,exec_out,asset_view=analysis_context,options=analysis_options)
             exec_out.invoked_skills.append("wp-assess-position-evidence")
+        elif plan_out.route == "portfolio":
+            from backend.services.position_analysis import prepare_portfolio
+            exec_out.portfolio_evidence = prepare_portfolio(plan_out,exec_out)
 
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
@@ -420,7 +423,10 @@ async def run_chat_stream_v3(
             from backend.agents.expressing_agent import _emit_text_chunks
             final_view = analysis_context
             final_view = _final_analysis_view(final_view)
-            enforce_portfolio(expr_out, asset_view=final_view, options=analysis_options, loaded=exec_out.loaded_data)
+            from backend.services.position_analysis import prepare_portfolio
+            exec_out.portfolio_evidence=prepare_portfolio(plan_out,exec_out)
+            enforce_portfolio(expr_out, asset_view=final_view or {"portfolio_id":plan_out.portfolio_id},
+                options=analysis_options, loaded=exec_out.loaded_data,evidence_assessments=exec_out.portfolio_evidence)
             async for chunk in _emit_text_chunks(expr_out.chat_answer):
                 yield _sse("text", {"delta": chunk})
 
@@ -434,6 +440,7 @@ async def run_chat_stream_v3(
             user_input=user_input,
             trade_intent=trade_intent,
             pattern_evidence_metadata=pattern_evidence_metadata,
+            analysis_context=analysis_context, analysis_options=analysis_options,
         )
         trade_event = _trade_intent_event(trade_intent, assistant_message_id)
         if trade_event:
@@ -713,6 +720,10 @@ async def _handle_position_multi(
         result._position_evidence = executed.position_evidence
         result._market_data = safe_market(executed.market_data, executed.position_evidence)
         _DECISION_STORE.setdefault(conversation_id, {})[result.decision_id] = result
+        from backend.services.explain_policy import remember
+        remember(conversation_id, result.decision_id, portfolio_id=portfolio_id,
+            assessments=[executed.position_evidence], projected=final_output.structured_payload,
+            asset_view=final_view, options=analysis_options)
     answer = "\n\n---\n\n".join(reports) if reports else "未能成功分析任何标的，建议您逐个标的单独询问。"
 
     # 流式发送
@@ -760,6 +771,8 @@ async def _write_stores_v3(
     user_input: str = "",
     trade_intent: StructuredTradeIntent | None = None,
     pattern_evidence_metadata: dict | None = None,
+    analysis_context: dict | None = None,
+    analysis_options: dict | None = None,
 ) -> int | None:
     """
     v3 决策完成后写入 _DECISION_STORE / _ALLOC_EXPLAIN_STORE / _PRIMARY_INTENT_CACHE
@@ -884,6 +897,15 @@ async def _write_stores_v3(
                 "portfolioResult": portfolio_result,
             }
             _ALLOC_EXPLAIN_STORE[f"{conversation_id}:{decision_id}"] = explain_data
+
+        if expr_out and (getattr(exec_out, "position_evidence", {}) or
+                (route == "portfolio" and primary_intent in {"PortfolioReview", "AssetAllocation"})):
+            from backend.services.explain_policy import remember
+            assessment = getattr(exec_out, "position_evidence", {})
+            remember(conversation_id, decision_id, portfolio_id=plan_out.portfolio_id,
+                assessments=[assessment] if assessment else getattr(exec_out, "portfolio_evidence", []),
+                projected=expr_out.structured_payload or {}, asset_view=analysis_context,
+                options=analysis_options)
 
         # ── R2 修复：保存对话历史 ──
         chat_answer = getattr(expr_out, "chat_answer", "") if expr_out else ""

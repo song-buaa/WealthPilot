@@ -7,7 +7,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+from backend.services.allocation_scenarios import StageTargets, ScenarioLeg
 
 from app import state as _state
 from backend.services import decision_service as svc
@@ -25,6 +26,15 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str
     portfolio_id: Optional[int] = None  # 不传则用默认 portfolio
+    snapshot_id: str | None = Field(default=None,pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')
+    target_versions: list[StageTargets] = Field(default_factory=list,max_length=16)
+    scenario_legs: list[ScenarioLeg] = Field(default_factory=list,max_length=20)
+
+    @model_validator(mode='after')
+    def same_snapshot(self):
+        if self.scenario_legs and (not self.snapshot_id or any(s.snapshot_id!=self.snapshot_id for s in self.scenario_legs)):
+            raise ValueError('CROSS_SNAPSHOT_SCENARIO_REJECTED')
+        return self
 
 
 class ConfirmTradeIntentRequest(BaseModel):
@@ -60,9 +70,26 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=422, detail="conversation_id 不能为空")
 
     pid = req.portfolio_id if req.portfolio_id is not None else _pid()
+    view = None
+    if req.snapshot_id:
+        from app.asset_views import load_view
+        from app.database import DB_PATH
+        import os
+        try:
+            view=load_view(DB_PATH,pid,req.snapshot_id,os.environ.get('WEALTHPILOT_SQLITE_CONTRACT'))
+        except ValueError as exc:
+            raise HTTPException(status_code=422,detail=str(exc)) from None
 
     async def event_stream():
-        async for chunk in svc.run_chat_stream(req.message, req.conversation_id, pid):
+        options=dict(target_versions=[t.model_dump(mode='json') for t in req.target_versions],
+                     scenario_legs=[s.model_dump(mode='json') for s in req.scenario_legs])
+        if view is not None:
+            from backend.services.snapshot_chat import stream_snapshot_chat
+            stream=stream_snapshot_chat(req.message,req.conversation_id,pid,view,options=options)
+        else:
+            stream=svc.run_chat_stream(req.message,req.conversation_id,pid,
+                                      analysis_context=None,analysis_options=options)
+        async for chunk in stream:
             yield chunk
 
     return StreamingResponse(

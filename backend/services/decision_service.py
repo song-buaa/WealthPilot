@@ -619,13 +619,15 @@ async def run_chat_stream(
     message: str,
     conversation_id: str,
     portfolio_id: int,
+    *, analysis_context: dict | None = None, analysis_options: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     投资决策 SSE 流式接口核心逻辑。
     委托给 v3 PEER Agents 路径实现。
     """
     from backend.services.decision_service_v3 import run_chat_stream_v3
-    async for event in run_chat_stream_v3(message, conversation_id, portfolio_id):
+    async for event in run_chat_stream_v3(message, conversation_id, portfolio_id,
+            analysis_context=analysis_context, analysis_options=analysis_options):
         yield event
 
 
@@ -634,7 +636,8 @@ def get_decision_explain(conversation_id: str, decision_id: str) -> Optional[dic
     alloc_key = f"{conversation_id}:{decision_id}"
     alloc_explain = _ALLOC_EXPLAIN_STORE.get(alloc_key)
     if alloc_explain is not None:
-        return alloc_explain
+        from backend.services.explain_policy import project
+        return project(conversation_id, decision_id, alloc_explain)
 
     session_store = _DECISION_STORE.get(conversation_id, {})
     result = session_store.get(decision_id)
@@ -644,11 +647,14 @@ def get_decision_explain(conversation_id: str, decision_id: str) -> Optional[dic
     primary_intent = _PRIMARY_INTENT_CACHE.get(conversation_id)
     if primary_intent and "intent" in d:
         d["intent"]["primary_intent"] = primary_intent
-    return d
+    from backend.services.explain_policy import project
+    return project(conversation_id, decision_id, d)
 
 
 def clear_session(conversation_id: str) -> None:
     """清除服务端会话（对话重置时调用）"""
+    from backend.services.explain_policy import clear
+    clear(conversation_id)
     _DECISION_STORE.pop(conversation_id, None)
     _PRIMARY_INTENT_CACHE.pop(conversation_id, None)
     _ALLOC_SESSION_CTX.pop(conversation_id, None)
