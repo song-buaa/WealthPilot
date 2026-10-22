@@ -1,5 +1,5 @@
 """
-Alpha Vantage 财报 + 分析师数据 adapter。
+Alpha Vantage 财报、现金流 + 分析师数据 adapter。
 输入: WP symbol（如 LI:US / MSFT:US，兼容旧格式 LI.US）
 输出: FundamentalsData（失败时返回 None）
 """
@@ -11,8 +11,8 @@ import urllib.parse
 from typing import Optional
 from datetime import datetime, timezone
 
-from services.market_data.schema import FundamentalsData, AnalystData
-from services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
+from backend.services.market_data.schema import FundamentalsData, AnalystData
+from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def _safe_float(val, default=None) -> Optional[float]:
     try:
         f = float(val)
         import math
-        return None if math.isnan(f) else f
+        return f if math.isfinite(f) else None
     except (ValueError, TypeError):
         return default
 
@@ -88,6 +88,92 @@ def _safe_int(val, default=None) -> Optional[int]:
     except (ValueError, TypeError):
         return default
 
+
+
+def _quarter_window(payload, limit=4):
+    """Require complete, unique, consecutive fiscal quarters in one report currency."""
+    rows = (payload or {}).get("quarterlyReports") or []
+    if not isinstance(rows, list):
+        return None
+    try:
+        rows = sorted(rows, key=lambda row: row["fiscalDateEnding"], reverse=True)[:limit]
+        dates = [datetime.strptime(row["fiscalDateEnding"], "%Y-%m-%d").date() for row in rows]
+        currencies = {row.get("reportedCurrency") for row in rows}
+        currency = next(iter(currencies), None)
+        if (len(rows) != limit or len(set(dates)) != limit or len(currencies) != 1
+                or not isinstance(currency, str) or len(currency) != 3 or not currency.isupper()
+                or any(not 60 <= (a-b).days <= 120 for a, b in zip(dates, dates[1:]))):
+            return None
+        return rows
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _complete_sum(rows, field, *, nonnegative=False):
+    values = [_safe_float(row.get(field)) for row in (rows or [])]
+    if not values or any(value is None or (nonnegative and value < 0) for value in values):
+        return None
+    import math
+    total = sum(values)
+    return total if math.isfinite(total) else None
+
+
+def _report_provenance(ticker, function, rows, fetched_at):
+    # Fiscal period is never substituted for disclosure time.
+    published = [row.get("published_at") or row.get("publicationDate") for row in rows]
+    return dict(source="alphavantage", source_url="https://www.alphavantage.co/documentation/#" +
+                ("cash-flow" if function == "CASH_FLOW" else "income-statement"),
+        record_id=f"AV:{function}:{ticker}:{rows[0]['fiscalDateEnding']}",
+        fiscal_period_start=None, fiscal_period_end=rows[0]["fiscalDateEnding"],
+        fiscal_quarter_ends=[row["fiscalDateEnding"] for row in rows],
+        period=rows[0]["fiscalDateEnding"], period_basis="quarterly_ttm",
+        currency=rows[0]["reportedCurrency"], data_as_of=rows[0]["fiscalDateEnding"],
+        published_at=max(published) if all(isinstance(value, str) and value for value in published) else None,
+        fetched_at=fetched_at, valuation_observed_at=None)
+
+
+def statement_metrics(ticker, income, cashflow, *, fetched_at):
+    """Pure AV projection; never infer missing period, amount or publication."""
+    values, provenance, missing = {}, {}, []
+    reports = _quarter_window(income)
+    history = _quarter_window(income, 8)
+    previous = history[4:] if history else None
+    if reports:
+        meta = _report_provenance(ticker, "INCOME_STATEMENT", reports, fetched_at)
+        for source, field in (("totalRevenue", "revenue_ttm"), ("netIncome", "net_income_ttm")):
+            value = _complete_sum(reports, source)
+            if value is not None:
+                values[field], provenance[field] = value, dict(meta, source_field=source)
+            else:
+                missing.append(field)
+            prior = _complete_sum(previous, source)
+            if value is not None and prior not in (None, 0) and previous and previous[0]["reportedCurrency"] == reports[0]["reportedCurrency"]:
+                growth = "revenue_yoy" if source == "totalRevenue" else "net_income_yoy"
+                values[growth] = round((value-prior)/abs(prior)*100, 1)
+                provenance[growth] = dict(meta, scope="TTM year over year", source_field=source)
+        values.update(report_currency=meta["currency"], fiscal_period_start=meta["fiscal_period_start"],
+                      fiscal_period_end=meta["fiscal_period_end"], published_at=meta["published_at"])
+    else:
+        missing += ["revenue_ttm", "net_income_ttm", "INCOME_QUARTERS_INCOMPLETE_OR_INCONSISTENT"]
+    cash = _quarter_window(cashflow)
+    aligned = (reports and cash and [r["fiscalDateEnding"] for r in reports] == [r["fiscalDateEnding"] for r in cash]
+               and reports[0]["reportedCurrency"] == cash[0]["reportedCurrency"])
+    if aligned:
+        operating = _complete_sum(cash, "operatingCashflow")
+        capex = _complete_sum(cash, "capitalExpenditures", nonnegative=True)
+        if operating is not None and capex is not None:
+            meta = _report_provenance(ticker, "CASH_FLOW", cash, fetched_at)
+            for field, value, source in (("operating_cash_flow_ttm", operating, "operatingCashflow"),
+                    ("capital_expenditures_ttm", capex, "capitalExpenditures"),
+                    ("free_cash_flow_ttm", operating-capex, "operatingCashflow - capitalExpenditures")):
+                values[field], provenance[field] = value, dict(meta, source_field=source,
+                    capex_convention="positive_cash_outflow", computation="sum_four_consecutive_quarters")
+        else:
+            missing.append("CASH_FLOW_FIELDS_OR_CAPEX_SIGN_UNVERIFIED")
+    else:
+        missing.append("CASH_FLOW_PERIOD_OR_CURRENCY_UNVERIFIED")
+    missing += [field for field in ("operating_cash_flow_ttm", "capital_expenditures_ttm", "free_cash_flow_ttm") if field not in values]
+    return values, provenance, missing
 
 def _load_seed_fundamentals(ticker: str) -> Optional[FundamentalsData]:
     """从种子文件加载兜底基本面数据（AV 不覆盖或 API 失败时）。"""
@@ -122,7 +208,7 @@ def _load_seed_fundamentals(ticker: str) -> Optional[FundamentalsData]:
 
 
 def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
-    """调 AV OVERVIEW + INCOME_STATEMENT。失败/不支持时降级到种子数据。"""
+    """调 AV OVERVIEW + INCOME_STATEMENT + CASH_FLOW；现金流缺源保持 None。"""
     try:
         ticker = _wp_symbol_to_av_ticker(wp_symbol)
     except (ValueError, Exception):
@@ -211,31 +297,25 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
     import time
     time.sleep(1.5)  # AV 免费版限频
 
-    revenue_yoy = None
-    net_income_yoy = None
-    revenue_ttm = None
-    net_income_ttm = None
-
     income = _av_get("INCOME_STATEMENT", ticker, api_key)
-    if income and "quarterlyReports" in income:
-        quarterly = income["quarterlyReports"]
-        if len(quarterly) >= 8:
-            def sum_4(reports, fld):
-                vals = [_safe_float(r.get(fld)) for r in reports[:4]]
-                return sum(v for v in vals if v is not None) if any(v is not None for v in vals) else None
-
-            r_now = sum_4(quarterly[:4], "totalRevenue")
-            r_prev = sum_4(quarterly[4:8], "totalRevenue")
-            n_now = sum_4(quarterly[:4], "netIncome")
-            n_prev = sum_4(quarterly[4:8], "netIncome")
-
-            revenue_ttm = r_now
-            net_income_ttm = n_now
-
-            if r_now and r_prev and r_prev != 0:
-                revenue_yoy = round((r_now - r_prev) / abs(r_prev) * 100, 1)
-            if n_now and n_prev and n_prev != 0:
-                net_income_yoy = round((n_now - n_prev) / abs(n_prev) * 100, 1)
+    time.sleep(1.5)
+    cashflow = _av_get("CASH_FLOW", ticker, api_key)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    statement, field_provenance, statement_missing = statement_metrics(
+        ticker, income, cashflow, fetched_at=fetched_at)
+    missing += statement_missing
+    revenue_ttm = statement.get("revenue_ttm")
+    net_income_ttm = statement.get("net_income_ttm")
+    revenue_yoy = statement.get("revenue_yoy")
+    net_income_yoy = statement.get("net_income_yoy")
+    # OVERVIEW provides no trustworthy valuation observation timestamp.
+    for name in ("pe_ttm", "pe_forward", "peg_ratio", "beta", "market_cap", "high_52w", "low_52w", "eps_ttm", "roe", "gross_margin", "profit_margin", "analyst"):
+        field_provenance[name] = dict(source="alphavantage",
+            source_url="https://www.alphavantage.co/documentation/#company-overview",
+            record_id=f"AV:OVERVIEW:{ticker}", period=overview.get("LatestQuarter"),
+            period_basis="valuation" if name in {"pe_ttm", "pe_forward", "peg_ratio", "market_cap", "high_52w", "low_52w", "beta", "analyst"} else "quarterly_ttm",
+            currency=overview.get("Currency"), data_as_of=None, published_at=None,
+            valuation_observed_at=None, fetched_at=fetched_at)
 
     # gross_margin: AV GrossProfitTTM 是绝对值,转百分比
     gross_margin_val = _safe_float(overview.get("GrossProfitTTM"))
@@ -271,10 +351,17 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         net_income_ttm=net_income_ttm,
         net_income_yoy=net_income_yoy,
         analyst=analyst,
+        operating_cash_flow_ttm=statement.get("operating_cash_flow_ttm"),
+        capital_expenditures_ttm=statement.get("capital_expenditures_ttm"),
+        free_cash_flow_ttm=statement.get("free_cash_flow_ttm"),
+        fiscal_period_start=statement.get("fiscal_period_start"),
+        fiscal_period_end=statement.get("fiscal_period_end"),
+        published_at=statement.get("published_at"),
+        field_provenance=field_provenance,
         # OVERVIEW has no verified valuation time. LatestQuarter is a fiscal period.
         data_as_of=None,
         valuation_currency=overview.get("Currency"),
-        report_currency=(income or {}).get("quarterlyReports", [{}])[0].get("reportedCurrency") if (income or {}).get("quarterlyReports") else None,
+        report_currency=statement.get("report_currency"),
         provenance=dict(source="alphavantage",source_url="https://www.alphavantage.co/documentation/#company-overview",
             record_id=f"AV:OVERVIEW:{ticker}",published_at=None,data_as_of=None,
             fetched_at=datetime.now(timezone.utc).isoformat(),period=overview.get("LatestQuarter"),

@@ -17,6 +17,7 @@ def verified(kind, **kwargs):
     kwargs.setdefault("text","synthetic dated evidence")
     if kind=="fundamentals":
         kwargs.setdefault("pe_ttm",20)
+        kwargs.setdefault("revenue_ttm",1000)
         kwargs.setdefault("valuation_currency","USD")
     return dict(symbol="LI:US",source="vendor",record_id=f"fixture:{kind}",
         data_as_of="2026-10-22T07:00:00+00:00",published_at="2026-10-21",fetched_at=AT.isoformat(),

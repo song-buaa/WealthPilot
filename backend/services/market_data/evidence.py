@@ -38,6 +38,77 @@ def number(value):
         return None
 
 
+
+FINANCIAL_FIELDS = ("revenue_ttm", "revenue_yoy", "net_income_ttm", "net_income_yoy",
+    "operating_cash_flow_ttm", "capital_expenditures_ttm", "free_cash_flow_ttm",
+    "roe", "gross_margin", "profit_margin", "eps_ttm")
+VALUATION_FIELDS = ("pe_ttm", "pe_forward", "peg_ratio", "market_cap", "high_52w", "low_52w", "beta", "analyst")
+
+
+def fundamental_field_quality(raw, *, at, symbol=None):
+    """Fields have independent clocks; fetching never rejuvenates fiscal or valuation facts."""
+    result = {}
+    expected_currency = {"US":"USD", "HK":"HKD"}.get((symbol or "").rsplit(":", 1)[-1])
+    for field in FINANCIAL_FIELDS + VALUATION_FIELDS:
+        if raw.get(field) is None:
+            continue
+        meta = mapping(mapping(raw.get("field_provenance")).get(field))
+        issues = []
+        source = str(meta.get("source") or "unknown").lower()
+        clock = meta.get("valuation_observed_at") if field in VALUATION_FIELDS else meta.get("fiscal_period_end")
+        observed, fetched, published = stamp(clock), stamp(meta.get("fetched_at")), stamp(meta.get("published_at"))
+        if (any(token in source for token in ("seed", "mock", "demo", "synthetic", "fixture"))
+                or meta.get("is_seed") or meta.get("is_mock")
+                or meta.get("quality") in {"seed", "mock", "stale", "superseded", "conflict"}):
+            issues.append("SYNTHETIC")
+        if source == "unknown" or not (meta.get("source_url") or meta.get("record_id")):
+            issues.append("PROVENANCE_UNVERIFIED")
+        if fetched is None:
+            issues.append("FETCH_TIME_UNKNOWN")
+        elif fetched > at:
+            issues.append("FETCH_TIME_FUTURE")
+        if observed is None:
+            issues.append("VALUATION_TIME_UNKNOWN" if field in VALUATION_FIELDS else "FISCAL_PERIOD_UNKNOWN")
+        elif observed > at or (fetched and observed > fetched):
+            issues.append("SOURCE_CLOCK_CONFLICT")
+        else:
+            ttl = 86400 if field in VALUATION_FIELDS else (450 if meta.get("period_basis") == "annual" else 150)*86400
+            if (at-observed).total_seconds() > ttl:
+                issues.append("STALE")
+        if field in FINANCIAL_FIELDS:
+            start = stamp(meta.get("fiscal_period_start"))
+            quarters_raw = meta.get("fiscal_quarter_ends")
+            quarters = [stamp(value) for value in quarters_raw] if isinstance(quarters_raw, list) else []
+            quarter_window = (len(quarters) == 4 and all(quarters) and len(set(quarters)) == 4
+                and quarters[0] == observed and all(60 <= (a-b).days <= 120 for a, b in zip(quarters, quarters[1:])))
+            if ((meta.get("period_basis") == "quarterly_ttm" and not quarter_window)
+                    or (meta.get("period_basis") != "quarterly_ttm" and (not start or (observed and start > observed)))
+                    or not meta.get("period_basis")):
+                issues.append("FISCAL_PERIOD_UNKNOWN")
+            if published is None:
+                issues.append("PUBLICATION_TIME_UNKNOWN")
+            elif published > at or (fetched and published > fetched) or (observed and published < observed):
+                issues.append("PUBLICATION_CLOCK_CONFLICT")
+            currency = meta.get("currency")
+            if not currency or (raw.get("report_currency") and currency != raw["report_currency"]):
+                issues.append("REPORT_CURRENCY_UNVERIFIED")
+        elif not meta.get("currency") or (expected_currency and meta["currency"] != expected_currency):
+            issues.append("LISTED_MARKET_CURRENCY_CONFLICT")
+        if field == "eps_ttm" and raw.get("eps_share_basis") != "listed_unit":
+            issues.append("EPS_LISTED_UNIT_BASIS_UNVERIFIED")
+        if field != "analyst" and number(raw.get(field)) is None:
+            issues.append("VALUE_UNAVAILABLE")
+        result[field] = dict(quality="valid" if not issues else "unknown",
+            issues=sorted(set(issues)), provenance=meta)
+    income = result.get("net_income_ttm", {}).get("provenance", {})
+    cash = result.get("free_cash_flow_ttm", {}).get("provenance", {})
+    if income and cash and any(income.get(key) != cash.get(key) for key in
+            ("currency", "period_basis", "fiscal_period_end", "fiscal_quarter_ends")):
+        for field in ("net_income_ttm", "free_cash_flow_ttm"):
+            result[field]["quality"] = "unknown"
+            result[field]["issues"].append("CASH_FLOW_FINANCIAL_BASIS_CONFLICT")
+    return result
+
 def technical_verified(technical, symbol, at):
     """Recompute the supplied OHLCV, never trust a model/status label alone."""
     try:
@@ -153,6 +224,19 @@ def record(kind, value, *, at, symbol=None):
     if expected_currency and observed_currency and observed_currency!=expected_currency:
         issues.append("LISTED_MARKET_CURRENCY_CONFLICT")
         quality="conflict"
+    field_quality = {}
+    if kind == "fundamentals" and raw.get("field_provenance"):
+        field_quality = fundamental_field_quality(raw, at=at, symbol=symbol)
+        fields_valid = [name for name, state in field_quality.items() if state["quality"] == "valid"]
+        # Keep the original invalid source observations in field_quality, not facts.
+        for name, state in field_quality.items():
+            if state["quality"] != "valid":
+                raw[name] = None
+            issues += ["FUNDAMENTALS_" + name.upper() + "_" + issue for issue in state["issues"]]
+        if quality not in {"seed", "mock", "conflict"}:
+            quality = "valid" if fields_valid and len(fields_valid) == len(field_quality) else "partial" if fields_valid else "unknown"
+        # The generic seven-day envelope does not apply to separately clocked reports.
+        issues = [issue for issue in issues if issue not in {"FUNDAMENTALS_SOURCE_DATE_UNKNOWN", "FUNDAMENTALS_STALE_OR_FUTURE", "FUNDAMENTALS_PERIOD_UNKNOWN"}]
     host = urlparse(str(source_url or "")).hostname or ""
     primary = any(host == domain or host.endswith("."+domain) for domain in
                   ("sec.gov", "hkexnews.hk", "lixiang.com", "pddholdings.com", "meituan.com"))
@@ -162,7 +246,7 @@ def record(kind, value, *, at, symbol=None):
         fetched_at=merged.get("fetched_at"), scope=merged.get("scope") or kind,
         period=merged.get("period"), quality=quality,
         is_seed=quality=="seed", is_mock=quality=="mock", is_fallback=bool(merged.get("is_fallback")),
-        primary=primary, issues=issues, values=raw)
+        primary=primary, issues=issues, values=raw, field_quality=field_quality)
 
 
 def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
@@ -179,6 +263,8 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         if not any(r["kind"] == kind for r in records):
             issues.append(kind.upper()+"_UNAVAILABLE")
     quote, fundamental = mapping(market.get("quote")), mapping(market.get("fundamentals"))
+    if fundamental.get("field_provenance"):
+        fundamental = next((row["values"] for row in records if row["kind"] == "fundamentals"), {})
     price = number(quote.get("current_price")) or number(stored_price)
     conflicts = []
     low, high = number(fundamental.get("low_52w")), number(fundamental.get("high_52w"))
@@ -225,6 +311,8 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                 r["quality"] = "unknown"
     if not principles_available:
         issues.append("PRINCIPLES_RETRIEVAL_UNAVAILABLE")
+    if fundamental and number(fundamental.get("free_cash_flow_ttm")) is None:
+        issues.append("FREE_CASH_FLOW_UNAVAILABLE")
     issues += conflicts + [i for r in records for i in r["issues"]]
     valid = {r["kind"] for r in records if r["quality"] == "valid"}
     view = asset_view or {}
@@ -243,6 +331,20 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         l2.append("ASSET_AMOUNT_QUALIFICATION_REQUIRED")
     l3 = l2 + [kind.upper()+"_VERIFIED_EVIDENCE_REQUIRED" for kind in
                 ("quote", "fundamentals", "technical", "research", "event") if kind not in valid]
+    fundamental_records = [row for row in records if row["kind"] == "fundamentals"]
+    for row in fundamental_records:
+        fields = row.get("field_quality")
+        if not fields:
+            values = row["values"] if row["quality"] == "valid" else {}
+            if not any(number(values.get(name)) is not None for name in ("pe_ttm", "pe_forward", "peg_ratio", "market_cap")):
+                l3.append("FUNDAMENTALS_VALUATION_EVIDENCE_REQUIRED")
+            if not any(number(values.get(name)) is not None for name in ("revenue_ttm", "net_income_ttm", "profit_margin")):
+                l3.append("FUNDAMENTALS_OPERATING_EVIDENCE_REQUIRED")
+            continue
+        if not any(fields.get(name, {}).get("quality") == "valid" for name in ("pe_ttm", "pe_forward", "peg_ratio", "market_cap")):
+            l3.append("FUNDAMENTALS_VALUATION_EVIDENCE_REQUIRED")
+        if not any(fields.get(name, {}).get("quality") == "valid" for name in ("revenue_ttm", "net_income_ttm", "profit_margin")):
+            l3.append("FUNDAMENTALS_OPERATING_EVIDENCE_REQUIRED")
     if not quality.get("can_propose_rebalance", False):
         l3.append("CAN_PROPOSE_REBALANCE_FALSE")
     l3 += conflicts
@@ -251,12 +353,28 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     for level, blockers in (("L1", l1), ("L2", l2), ("L3", l3),
                             ("L4", l3+["MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED"])):
         levels[level] = dict(allowed=not blockers, blockers=sorted(set(blockers)))
+    verified_field_records = []
+    for parent in records:
+        if parent["kind"] != "fundamentals" or parent["quality"] not in {"valid", "partial"}:
+            continue
+        for field, state in parent.get("field_quality", {}).items():
+            if state["quality"] != "valid":
+                continue
+            meta = state["provenance"]
+            verified_field_records.append(dict(kind="fundamental_field", field=field,
+                symbol=parent["symbol"], source=meta.get("source"), source_url=meta.get("source_url"),
+                record_id=str(meta.get("record_id") or meta.get("source_url"))+":"+field, quality="valid", issues=[],
+                data_as_of=meta.get("valuation_observed_at") if field in VALUATION_FIELDS else meta.get("fiscal_period_end"),
+                published_at=meta.get("published_at"), fetched_at=meta.get("fetched_at"),
+                period=meta.get("period"), scope=meta.get("period_basis"), currency=meta.get("currency"),
+                fiscal_quarter_ends=meta.get("fiscal_quarter_ends"),
+                values={field:parent["values"][field]}, is_seed=False, is_mock=False, is_fallback=parent["is_fallback"]))
     planner = planner or {"status":"unknown", "fallback_type":None}
     if planner.get("status") != "success":
         issues.append("PLANNER_"+str(planner.get("status", "unknown")).upper())
     ceiling = .85 if levels["L3"]["allowed"] else .6 if levels["L2"]["allowed"] else .35
     return dict(schema_version="wealthpilot.position-evidence.v1", as_of=at.isoformat(), symbol=symbol,
-        snapshot_id=view.get("snapshot_id"), records=records, conflicts=conflicts,
+        snapshot_id=view.get("snapshot_id"), records=records, verified_field_records=verified_field_records, conflicts=conflicts,
         issues=sorted(set(issues)), planner=planner, qualification=levels,
         confidence_ceiling=ceiling, technical_levels=series if "technical" in valid else None,
         infoNeeded=sorted(set(l3)), execution_authorized=False)
@@ -269,6 +387,18 @@ def safe_market(market_data, assessment):
         return None
     result = copy(market_data)
     for kind in ("quote", "fundamentals", "technical", "capital_flow"):
-        if not any(r["kind"] == kind and r["quality"] == "valid" for r in assessment["records"]):
+        records = [r for r in assessment["records"] if r["kind"] == kind]
+        if kind == "fundamentals" and records and records[0].get("field_quality"):
+            if records[0]["quality"] not in {"valid", "partial"}:
+                setattr(result, kind, None)
+                continue
+            original = getattr(result, kind, None)
+            if original is not None:
+                original = copy(original)
+                for name in FINANCIAL_FIELDS + VALUATION_FIELDS:
+                    if records[0]["field_quality"].get(name, {}).get("quality") != "valid":
+                        setattr(original, name, None)
+                setattr(result, kind, original if any(state["quality"] == "valid" for state in records[0]["field_quality"].values()) else None)
+        elif not any(r["quality"] == "valid" for r in records):
             setattr(result, kind, None)
     return result

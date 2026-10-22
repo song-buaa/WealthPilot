@@ -50,7 +50,7 @@ class AnalystData:
 
 @dataclass
 class FundamentalsData:
-    """财报关键指标 + 分析师。来源:Alpha Vantage OVERVIEW + INCOME_STATEMENT。"""
+    """财报关键指标/现金流 + 分析师。来源:Alpha Vantage OVERVIEW + INCOME_STATEMENT + CASH_FLOW。"""
     symbol: str
     valuation_currency: Optional[str] = None
     eps_share_basis: Optional[str] = None
@@ -70,6 +70,14 @@ class FundamentalsData:
     revenue_yoy: Optional[float] = None
     net_income_ttm: Optional[float] = None
     net_income_yoy: Optional[float] = None
+    operating_cash_flow_ttm: Optional[float] = None
+    capital_expenditures_ttm: Optional[float] = None
+    free_cash_flow_ttm: Optional[float] = None
+    fiscal_period_start: Optional[str] = None
+    fiscal_period_end: Optional[str] = None
+    published_at: Optional[str] = None
+    valuation_observed_at: Optional[str] = None
+    field_provenance: dict = field(default_factory=dict)
     analyst: Optional[AnalystData] = None
     update_frequency: Literal["daily"] = "daily"
     data_as_of: Optional[str] = None
@@ -167,6 +175,10 @@ class MarketDataBundle:
             "grossMargin": f.gross_margin if f else None,
             "revenueGrowthYoY": f.revenue_yoy if f else None,
             "netIncomeGrowthYoY": f.net_income_yoy if f else None,
+            "operatingCashFlowTTM": f.operating_cash_flow_ttm if f else None,
+            "capitalExpendituresTTM": f.capital_expenditures_ttm if f else None,
+            "freeCashFlowTTM": f.free_cash_flow_ttm if f else None,
+            "reportCurrency": f.report_currency if f else None,
             "analystConsensus": a.consensus if a else None,
             "analystCount": a.analyst_count if a else None,
             "analystTargetPrice": a.target_price_avg if a else None,
