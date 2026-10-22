@@ -160,3 +160,11 @@ def test_hk_cny_or_usd_valuation_cannot_masquerade_as_hkd_market_quote():
     assert "LISTED_MARKET_CURRENCY_CONFLICT" in result["issues"]
     assert result["records"][0]["quality"]=="conflict"
     assert not result["qualification"]["L3"]["allowed"]
+
+
+def test_pe_eps_consistency_cannot_assume_adr_or_hk_share_basis():
+    fundamentals=verified("fundamentals",pe_ttm=20,eps_ttm=1)
+    result=assess(dict(symbol="LI:US",fundamentals=fundamentals),at=AT)
+    assert "EPS_LISTED_UNIT_BASIS_UNVERIFIED" in result["issues"]
+    assert result["records"][0]["quality"]=="unknown"
+    assert not result["qualification"]["L3"]["allowed"]
