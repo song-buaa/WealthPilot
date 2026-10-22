@@ -263,3 +263,10 @@ TitleBar 系统菜单刷新/保存及 CVirtualGridCtrl 右键保存；不能在�
 此适配不改变来源 v2 的 UNKNOWN 时间/完整性、不改变 PR #36 双上限 WARNING、
 ready/SyncExecutor 或部分事实仅 Upsert、不清仓的政策。真实三文件导出和候选验证应使用
 私有测试配置及独立目录，不能切换生产 ready；代码合并不等于生产持仓发布或定时启用。
+
+[原生辅助函数隔离探针](../tests/test_guojin_native_gui.ps1)编译实际 C# 函数并使用
+Fake UIA/user32 核验正常只读点击及移动/坐标/焦点/账户/树节点/命中/布局异常。
+Linux/macOS CI 的 `-PortableFake` 仅在合成程序集内省略 COM apartment 设置，
+不能证明真实 Windows MTA、原生控件或三文件导出成功。2026-10-22 本轮真实 worker
+验收尚未完成；恢复屏幕共享后须在独立候选目录完成正式 worker 导出与原验证器校验，
+不能用历史辅助脚本成功或这些 Fake 探针替代。

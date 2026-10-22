@@ -52,7 +52,9 @@ jobs:
         run: python -m pytest
       - name: Test native input fail-closed with isolated PowerShell fakes
         shell: pwsh
-        run: ./tests/test_guojin_native_input.ps1
+        run: |
+          ./tests/test_guojin_native_input.ps1
+          ./tests/test_guojin_native_gui.ps1 -PortableFake
 
   frontend-checks:
     name: Frontend checks
