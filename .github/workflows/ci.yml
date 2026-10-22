@@ -53,8 +53,10 @@ jobs:
       - name: Test native input fail-closed with isolated PowerShell fakes
         shell: pwsh
         run: |
-          ./tests/test_guojin_native_input.ps1
-          ./tests/test_guojin_native_gui.ps1 -PortableFake
+          pwsh -NoProfile -File ./tests/test_guojin_native_input.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File ./tests/test_guojin_native_gui.ps1 -PortableFake
+          exit $LASTEXITCODE
 
   frontend-checks:
     name: Frontend checks
