@@ -7,7 +7,9 @@ def prompt_context(assessment):
     records = [{k:v for k,v in r.items() if k != "values"} for r in assessment["records"]]
     return "\n确定性证据门槛（优先于旧实时行情模板；未知不得补全）："+json.dumps(
         dict(records=records,qualification=assessment["qualification"],issues=assessment["issues"],
-             planner=assessment["planner"],confidence_ceiling=assessment["confidence_ceiling"]),
+             planner=assessment["planner"],confidence_ceiling=assessment["confidence_ceiling"],
+             allocation_context=assessment.get("allocation_context"),scenarios=assessment.get("scenarios"),
+             authority="Use frozen cross-account issuer exposure for company concentration. Confirmed stage targets, formal discipline and defaults are separate; a legacy single-security rule pass does not establish that company targets are met. Static scenarios are assumptions, never orders."),
         ensure_ascii=False,default=str)
 
 

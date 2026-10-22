@@ -124,3 +124,16 @@ def test_scenario_request_is_bound_to_its_analysis_snapshot():
     raw=dict(question="fixture",snapshot_id="asset-view:v1:61",scenario_legs=first_steps())
     with pytest.raises(ValueError,match="CROSS_SNAPSHOT"):
         AnalysisRequest.model_validate(raw)
+
+
+def test_original_professional_prompt_receives_issuer_targets_and_static_scenarios():
+    from backend.services.market_data.output_policy import prompt_context
+    v,executed,planner,t=setup_case("LI:US")
+    assessment=prepare(planner,executed,asset_view=v,
+        options=dict(target_versions=[t],scenario_legs=first_steps()),at=AT)
+    text=prompt_context(assessment)
+    assert "LI_AUTO" in text and "303800" in text
+    assert t["version"] in text and "account_guojin" in text
+    assert "illustrative_unqualified" in text
+    assert "formal_discipline" in text and "system_defaults" in text
+    assert "never orders" in text
