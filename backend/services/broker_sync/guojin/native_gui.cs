@@ -142,6 +142,14 @@ public static class WPGuojinReadonly {
         string id = "", name = "", cls = "", parent = "";
         if (kind == "channel") {
             foreach (var n in nodes) if (Visible(n,pid) && n.Current.AutomationId == "1001" && n.Current.ClassName == "CustomTabCtrl") found.Add(n);
+            // The native provider can omit this peer from FindAll even while
+            // FromPoint exposes its verified identity and exact rectangle.
+            // Resolve only the already observed read-only channel point; all
+            // identity, layout, owner and final hit checks still apply.
+            if (found.Count == 0) {
+                var peer = AutomationElement.FromPoint(new Point(market == "stock" ? 40 : 140, market == "stock" ? 1643 : 1683));
+                if (Visible(peer,pid) && peer.Current.AutomationId == "1001" && peer.Current.ClassName == "CustomTabCtrl") found.Add(peer);
+            }
             var tab = Unique(found); var b = tab.Current.BoundingRectangle;
             // Actual native tab region verified on Mini; layout changes fail
             // closed. These are read-only channel tabs, never order controls.
