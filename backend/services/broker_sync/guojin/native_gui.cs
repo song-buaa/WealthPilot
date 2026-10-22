@@ -174,7 +174,13 @@ public static class WPGuojinReadonly {
         } else throw new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
         AutomationElement target = null;
         if (found.Count > 0) { target = Unique(found); if (kind != "channel") {var b = target.Current.BoundingRectangle; x=b.X+b.Width/2; y=b.Y+b.Height/2;} }
-        else if (kind != "gear") throw new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
+        else if (kind != "gear") {
+            var observed = new StringBuilder();
+            if (kind == "branch" || kind == "query") foreach (var n in nodes)
+                if (n.Current.ControlType == ControlType.TreeItem && (n.Current.Name.Contains("查询") || n.Current.Name == "资金股票"))
+                    observed.Append("["+n.Current.Name+";parent="+Parent(n)+"]");
+            throw Contract("target."+kind, "count=0;market="+market+";readonly_nodes="+observed, "unique "+name+";parent="+parent);
+        }
         if (kind != "channel" && kind != "query" && kind != "branch") {
             bool page = false; foreach (var n in nodes) if (Tree(n,pid,"资金股票",Branch(market)) && Selected(n)) page=true;
             if (!page) throw new Exception("AUTO_GUI_UNAVAILABLE");
