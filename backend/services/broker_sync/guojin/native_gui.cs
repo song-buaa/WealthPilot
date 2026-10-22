@@ -52,6 +52,25 @@ public static class WPGuojinReadonly {
         foreach (var n in Nodes(AutomationElement.FromHandle(new IntPtr(hwnd)))) b.AppendLine(n.Current.Name);
         return b.ToString();
     }); }
+    // First UIA access must originate on MTA: initializing the native provider
+    // on the PowerShell pipeline can permanently omit tree peers in this host.
+    public static void Initialize(long hwnd, int pid, int width, int height, int dpi, long deadline) { Mta(() => {
+        Deadline(deadline);
+        foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children,Condition.TrueCondition)) {
+            var observed = top.Current;
+        }
+        var w = Frame(hwnd,pid,width,height,dpi,deadline);
+        foreach (var n in Nodes(w)) { var observed = n.Current; }
+        return true;
+    }); }
+    static string Query(string market) {
+        return market == "hgt" ? "资金股票查询" : "资金股票";
+    }
+    static string Root(string market) {
+        if (market == "hgt") return "沪港通";
+        if (market == "sgt") return "深港通";
+        throw new Exception("AUTO_GUI_CONTRACT_UNVERIFIED");
+    }
     static bool Visible(AutomationElement n, int pid) {
         return n != null && n.Current.ProcessId == pid && !n.Current.IsOffscreen && n.Current.IsEnabled;
     }
@@ -77,7 +96,7 @@ public static class WPGuojinReadonly {
     }
     public static bool Page(long hwnd, int pid, string market) { return Mta(() => {
         foreach (var n in Nodes(AutomationElement.FromHandle(new IntPtr(hwnd))))
-            if (Tree(n, pid, "资金股票", Branch(market)) && Selected(n)) return true;
+            if (Tree(n, pid, Query(market), Branch(market)) && Selected(n)) return true;
         return false;
     }); }
     static AutomationElement Unique(List<AutomationElement> nodes) {
@@ -85,7 +104,7 @@ public static class WPGuojinReadonly {
     }
     public static bool HasQuery(long hwnd, int pid, string market) { return Mta(() => {
         int count = 0; foreach (var n in Nodes(AutomationElement.FromHandle(new IntPtr(hwnd))))
-            if (Tree(n, pid, "资金股票", Branch(market))) count++;
+            if (Tree(n, pid, Query(market), Branch(market))) count++;
         return count == 1;
     }); }
     public static bool DismissExcel(long hwnd, int pid, int width, int height, int dpi, long deadline) { return Mta(() => {
@@ -156,15 +175,15 @@ public static class WPGuojinReadonly {
             if (b.X != 1 || b.Y != 1623 || b.Width != 340 || b.Height != 80) throw Contract("channel.bounds", b.ToString(), "1,1623,340,80");
             x = b.X + (market == "stock" ? 39 : 139); y = b.Y + (market == "stock" ? 20 : 60);
             id = "1001"; cls = "CCustomTabCtrl";
-        } else if (kind == "query" || kind == "branch") {
-            name = kind == "query" ? "资金股票" : Branch(market); parent = kind == "query" ? Branch(market) : "";
+        } else if (kind == "query" || kind == "branch" || kind == "root") {
+            name = kind == "query" ? Query(market) : kind == "root" ? Root(market) : Branch(market); parent = kind == "query" ? Branch(market) : "";
             foreach (var n in nodes) if (Tree(n,pid,name,parent)) found.Add(n);
         } else if (kind == "gear") {
             var b = w.Current.BoundingRectangle; x = b.X+3625; y = b.Y+32;
             id = "TitleBar"; name = "国金全能行远航版";
         } else if (kind == "grid") {
-            foreach (var n in nodes) if (Visible(n,pid) && n.Current.AutomationId == "100" && n.Current.ClassName == "CVirtualGridCtrl" && n.Current.Name == "") found.Add(n);
-            id = "100"; cls = "CVirtualGridCtrl";
+            foreach (var n in nodes) if (Visible(n,pid) && n.Current.AutomationId == (market == "stock" ? "1047" : "100") && n.Current.ClassName == "CVirtualGridCtrl" && n.Current.Name == (market == "stock" ? "Custom1" : "")) found.Add(n);
+            id = market == "stock" ? "1047" : "100"; name = market == "stock" ? "Custom1" : ""; cls = "CVirtualGridCtrl";
         } else if (kind == "refresh" || kind == "save_stock" || kind == "save_hk") {
             id = kind == "refresh" ? "Item 32833" : kind == "save_stock" ? "Item 32793" : "Item 32827";
             name = kind == "refresh" ? "刷新" : kind == "save_stock" ? "保存" : "保存(S)...";
@@ -181,8 +200,8 @@ public static class WPGuojinReadonly {
                     observed.Append("["+n.Current.Name+";parent="+Parent(n)+"]");
             throw Contract("target."+kind, "count=0;market="+market+";readonly_nodes="+observed, "unique "+name+";parent="+parent);
         }
-        if (kind != "channel" && kind != "query" && kind != "branch") {
-            bool page = false; foreach (var n in nodes) if (Tree(n,pid,"资金股票",Branch(market)) && Selected(n)) page=true;
+        if (kind != "channel" && kind != "query" && kind != "branch" && kind != "root") {
+            bool page = false; foreach (var n in nodes) if (Tree(n,pid,Query(market),Branch(market)) && Selected(n)) page=true;
             if (!page) throw new Exception("AUTO_GUI_UNAVAILABLE");
         }
         WPGuojinNative.SetForegroundWindow(new IntPtr(hwnd));
@@ -191,7 +210,7 @@ public static class WPGuojinReadonly {
         if (!WPGuojinNative.SetCursorPos(ix,iy) || !WPGuojinNative.GetCursorPos(out point) || point.X!=ix || point.Y!=iy) throw new Exception("AUTO_GUI_UNAVAILABLE");
         var hit=AutomationElement.FromPoint(new Point(ix,iy));
         if (!Visible(hit,pid)) throw new Exception("AUTO_GUI_UNAVAILABLE");
-        if (kind=="query" || kind=="branch") { if (!Tree(hit,pid,name,parent)) throw new Exception("AUTO_GUI_UNAVAILABLE"); }
+        if (kind=="query" || kind=="branch" || kind=="root") { if (!Tree(hit,pid,name,parent)) throw new Exception("AUTO_GUI_UNAVAILABLE"); }
         else if (hit.Current.AutomationId!=id || hit.Current.ClassName!=cls ||
                  (kind!="channel" && hit.Current.Name!=name) ||
                  (kind=="gear" && hit.Current.ControlType!=ControlType.TitleBar) ||

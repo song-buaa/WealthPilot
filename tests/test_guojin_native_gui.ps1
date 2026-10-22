@@ -91,3 +91,39 @@ foreach($fault in @('identity','class','old_class','pid','layout','hidden','disa
  if([WPGuojinNative]::Clicks -ne $before){throw 'UNSAFE_CHANNEL_INPUT'};$passed++
 }
 "Native channel identity safety probes included: $passed PASS"
+# Complete real-window calibration: market-specific tree identities remain
+# literal and still require the original native-tree ancestry and hit guards.
+$tab.Current.ClassName='CCustomTabCtrl';$tab.Current.ProcessId=7;$tab.Current.IsOffscreen=$false;$tab.Current.IsEnabled=$true
+$tab.Current.BoundingRectangle=[System.Windows.Automation.Rect]@{X=1;Y=1623;Width=340;Height=80}
+foreach($market in @('stock','hgt','sgt')){
+ $branch.Current.Name=@{stock='查询[F4]';hgt='沪港通查询';sgt='深港通查询'}[$market]
+ $query.Current.Name=if($market -eq 'hgt'){'资金股票查询'}else{'资金股票'}
+ [System.Windows.Automation.AutomationElement]::Hit=$query
+ $before=[WPGuojinNative]::Clicks
+ [WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'query',$market)
+ if([WPGuojinNative]::Clicks -ne $before+2 -or ![WPGuojinReadonly]::Page(10,7,$market)){throw 'MARKET_QUERY_FAILED'};$passed++
+ $query.Current.Name=if($market -eq 'hgt'){'资金股票'}else{'资金股票查询'}
+ $before=[WPGuojinNative]::Clicks
+ try{[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'query',$market);throw 'MISSING_MARKET_FAILURE'}catch{$e=$_.Exception;while($e.InnerException){$e=$e.InnerException};if($e.Message -ne 'AUTO_GUI_CONTRACT_UNVERIFIED'){throw $_}}
+ if([WPGuojinNative]::Clicks -ne $before -or [WPGuojinReadonly]::Page(10,7,$market)){throw 'WRONG_MARKET_ACCEPTED'};$passed++
+}
+$root=N '深港通';$root.Current.ControlType=[System.Windows.Automation.ControlType]::TreeItem;$root.Parent=$tree;$frame.Children.Add($root)
+[System.Windows.Automation.AutomationElement]::Hit=$root
+$before=[WPGuojinNative]::Clicks
+[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'root','sgt')
+if([WPGuojinNative]::Clicks -ne $before+2){throw 'SGT_ROOT_FAILED'};$passed++
+$root.Current.Name='买入';$before=[WPGuojinNative]::Clicks
+try{[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'root','sgt');throw 'MISSING_ROOT_FAILURE'}catch{$e=$_.Exception;while($e.InnerException){$e=$e.InnerException};if($e.Message -ne 'AUTO_GUI_CONTRACT_UNVERIFIED'){throw $_}}
+if([WPGuojinNative]::Clicks -ne $before){throw 'UNSAFE_ROOT_INPUT'};$passed++
+$branch.Current.Name='查询[F4]';$query.Current.Name='资金股票'
+$grid=N 'Custom1' '1047' 'CVirtualGridCtrl';$frame.Children.Add($grid);[System.Windows.Automation.AutomationElement]::Hit=$grid
+$before=[WPGuojinNative]::Clicks
+[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'grid','stock')
+if([WPGuojinNative]::Clicks -ne $before+2){throw 'STOCK_GRID_FAILED'};$passed++
+$grid.Current.AutomationId='100';$grid.Current.Name='';$before=[WPGuojinNative]::Clicks
+try{[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'grid','stock');throw 'MISSING_GRID_FAILURE'}catch{$e=$_.Exception;while($e.InnerException){$e=$e.InnerException};if($e.Message -ne 'AUTO_GUI_CONTRACT_UNVERIFIED'){throw $_}}
+if([WPGuojinNative]::Clicks -ne $before){throw 'WRONG_GRID_ACCEPTED'};$passed++
+$before=[WPGuojinNative]::Clicks
+[WPGuojinReadonly]::Initialize(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60)
+if([WPGuojinNative]::Clicks -ne $before){throw 'INITIALIZE_SENT_INPUT'};$passed++
+"Complete market identity probes included: $passed PASS (Fake only)"

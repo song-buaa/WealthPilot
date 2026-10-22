@@ -254,7 +254,7 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 
 `guojin.gui-profile.v2` 可显式选择 `native_readonly_path=qnx_verified_readonly_v1`。
 这只复用 Mini 已验证的 CCustomTabCtrl 通道、SysTreeView32 只读查询节点、
-TitleBar 系统菜单刷新/保存及 CVirtualGridCtrl 右键保存；不能在该模式追加任意坐标步骤。
+A股 CVirtualGridCtrl 右键刷新、TitleBar 系统菜单保存及港股网格右键保存；不能在该模式追加任意坐标步骤。
 该路径的窗口几何合同为 3866×1774、DPI 192，变化即停止。空名称/空 Class 作为真实
 原生属性保留，通过当前 PID/HWND、账户 allowlist、只读树父节点、精确菜单 ID/名称、
 边界及 FromPoint 命中联合核验，不填造控件身份。UIA 原生树/菜单与保存操作在有界 MTA
@@ -284,3 +284,34 @@ Linux/macOS CI 的 `-PortableFake` 仅在合成程序集内省略 COM apartment 
 误写为 `CustomTabCtrl`，导致枚举数量 0（预期 1）。按既有成功操作记录修正字面值；
 仍要求唯一控件、ID 1001、当前 PID、可见/启用、精确矩形 1,1623,340,80 和最终
 FromPoint 命中。私有 failure.json 保留实际/预期字段，不能由隔离探针推定真实导出通过。
+
+
+### 2026-10-22 全目标实测校准（PR #37）
+
+先在同一 Mini/Windows 会话采集三个市场的树、网格、菜单、owned 保存窗和导出提示，
+再统一修改原 helper。私有 `contract-survey-full` 的 `inventory.json`、
+`inventory-hk-complete.json`、`inventory-sgt.json` 与 `target-matrix.json` 保留实际
+ClassName、Name、AutomationId、祖先路径、动态 HWND、可见性及观察阶段；不可读属性为
+UNKNOWN，原生空字符串和虚拟节点 HWND=0 保留原值。运行句柄不写入 profile。
+
+| 目标 | 已验证的字面身份 / 差异 |
+|---|---|
+| 初次 UIA 读取 | 先在原有有界 MTA helper 读取 desktop/frame，再允许 PowerShell pipeline 访问；仅改 child 为 MTA 不能修复树缺失 |
+| 通道 | `CCustomTabCtrl / 1001`，原精确几何、FromPoint 和账户校验不变 |
+| A股 | `查询[F4] → 资金股票`，树叶 Class/ID 为空、HWND=0，原 SysTreeView32 祖先校验 |
+| 沪港通 | `沪港通 → 沪港通查询 → 资金股票查询`，不是 A股的“资金股票” |
+| 深港通 | `深港通 → 深港通查询 → 资金股票`；先显式打开只读市场父节点，不能假定子树已经展开 |
+| A股刷新 | `CVirtualGridCtrl / 1047 / Custom1` 右键 → `Item 32833 / 刷新` |
+| A股 TXT 保存 | 原 TitleBar 菜单 → `Item 32793 / 保存` |
+| 港股查询动作 | 市场父节点、只读查询分类、查询叶逐一命中；重新打开查询页作为实际查询动作，不声称不存在的独立 refresh/SUCCESS 控件 |
+| 港股 XLS 保存 | `CVirtualGridCtrl / 100 / 空 Name` 右键 → `Item 32827 / 保存(S)...`；菜单无“刷新” |
+| 三市场保存窗 | 原当前 frame owned `#32770 / 另存为`；`Edit / 1001` 与 `Button / 1 / 保存(S)`，同 PID，唯一目标 |
+| 港股导出提示/关闭 | 原 owned `#32770`；`Static / 1040 / Excel导出成功…是否需要直接打开Excel?`，仅 `Button / 7 / 否(N)` |
+
+所有输入继续验证当前前台、账户 allowlist、PID/HWND、只读页面/祖先、精确目标、
+DPI、实际鼠标坐标及 FromPoint；不点击交易节点、不保存密码。港股动作时间只记录
+真实导航/查询动作，`queried_at=null`、完整性 UNKNOWN、不清仓政策不变。
+三份校准导出只用于枚举保存/提示目标，不替代正式 `daily_sync.run(publish_assets=False)`
+三文件与 PR #36 WARNING 候选验收。后者结果另记交付证据，不切换生产 ready。
+
+Registry 无需更新：原能力入口、数据 owner 和同步职责不变，仅修正既有 GUI 合同。

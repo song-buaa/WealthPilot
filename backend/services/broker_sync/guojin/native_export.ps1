@@ -73,6 +73,13 @@ public class WPGuojinNative {
             [WPGuojinNative]::WindowTitle($_) -match $pattern })
         if ($handles.Count -ne 1) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
         $handle = [IntPtr]$handles[0]
+        if ($guiProfile.native_readonly_path -and
+            [WPGuojinNative]::WindowTitle($handle) -ceq '国金全能行远航版' -and
+            $script:nativeInitializedHandle -ne $handle.ToInt64()) {
+            [WPGuojinReadonly]::Initialize($handle.ToInt64(),$processId,$guiProfile.width,$guiProfile.height,
+                $guiProfile.dpi,$request.deadline)
+            $script:nativeInitializedHandle = $handle.ToInt64()
+        }
         try { $window = [System.Windows.Automation.AutomationElement]::FromHandle($handle) }
         catch { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
         # UIA must still resolve the same native process/window. Ownership by
@@ -293,11 +300,17 @@ public class WPGuojinNative {
     }
     function Native-Query($market) {
         Native-Click 'channel' $market
-        $w=Current-Window
-        if (-not [WPGuojinReadonly]::HasQuery($w.Current.NativeWindowHandle,$qnx.Id,$market)) { Native-Click 'branch' $market }
+        # Select the verified read-only category before the query leaf. This
+        # exposes a collapsed HK root and leaves any previously selected leaf;
+        # reopening the query is the observed HK refresh action, not a made-up
+        # refresh menu or an authoritative broker timestamp.
+        if ($market -ne 'stock') { Native-Click 'root' $market }
+        Native-Click 'branch' $market
+        $queryAction = [DateTimeOffset]::UtcNow
         Native-Click 'query' $market
         $w=Current-Window
         if (-not [WPGuojinReadonly]::Page($w.Current.NativeWindowHandle,$qnx.Id,$market)) { throw 'AUTO_GUI_UNAVAILABLE' }
+        return $queryAction
     }
     if (-not $guiProfile.verified_readonly -or -not $guiProfile.evidence_ref) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
     if (Test-Path -LiteralPath $request.directory) { throw 'AUTO_EVIDENCE_INVALID' }
@@ -307,7 +320,7 @@ public class WPGuojinNative {
     $result = @{schema=$schema;status='EXPORTED';batch=$request.batch;markets=@{}}
     foreach ($market in @('stock','hgt','sgt')) {
         $spec = $guiProfile.markets.$market
-        if ($guiProfile.native_readonly_path) { Native-Query $market }
+        if ($guiProfile.native_readonly_path) { $nativeQueryAction = Native-Query $market }
         else { foreach ($step in $spec.open) { Click-Observed $step } }
         $state = Controls (Current-Window)
         if (-not $spec.page_pattern -or $state.names -notmatch $spec.page_pattern) { throw 'AUTO_GUI_UNAVAILABLE' }
@@ -315,7 +328,10 @@ public class WPGuojinNative {
             # The actual HK pages expose no authoritative query time/SUCCESS or
             # total count. Observe the guarded action, never manufacture them.
             $actionTime = [DateTimeOffset]::UtcNow
-            if ($guiProfile.native_readonly_path) { Native-Click 'gear' $market; Native-Click 'refresh' $market }
+            if ($guiProfile.native_readonly_path) {
+                if ($market -eq 'stock') { Native-Click 'grid' $market; Native-Click 'refresh' $market }
+                else { $actionTime = $nativeQueryAction }
+            }
             else { Click-Observed $spec.refresh }
             Start-Sleep -Milliseconds 1000
             $window = Current-Window
