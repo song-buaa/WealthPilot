@@ -177,8 +177,10 @@ def test_original_kline_provider_reuses_configured_private_key_without_live_sdk_
     monkeypatch.setenv("TIGER_PRIVATE_KEY_PATH",str(private_path))
     monkeypatch.setenv("TIGER_ID","synthetic-id")
     monkeypatch.setenv("TIGER_ACCOUNT","synthetic-account")
+    from backend.utils.symbol import symbol_to_tiger_ticker
+    sdk_ticker=symbol_to_tiger_ticker("3690:HK")
     sdk=Mock()
-    sdk.get_bars.return_value=pd.DataFrame(dict(symbol=["3690"],time=["2026-10-21"],
+    sdk.get_bars.return_value=pd.DataFrame(dict(symbol=[sdk_ticker],time=["2026-10-21"],
         open=[10],high=[11],low=[9],close=[10],volume=[1000]))
     with patch("tigeropen.common.util.signature_utils.read_private_key",return_value="synthetic-key") as reader, \
          patch("tigeropen.tiger_open_config.TigerOpenClientConfig",return_value=SimpleNamespace()), \
@@ -186,5 +188,5 @@ def test_original_kline_provider_reuses_configured_private_key_without_live_sdk_
         result=BrokerKlineProvider().get_kline("3690:HK","HK")
     assert result is not None and result.source=="broker"
     reader.assert_called_once_with(str(private_path))
-    sdk.get_bars.assert_called_once()
+    sdk.get_bars.assert_called_once_with([sdk_ticker],period="day",limit=260)
     assert not private_path.exists()  # No credential file was created or read.
