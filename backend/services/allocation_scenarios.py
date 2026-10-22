@@ -19,6 +19,13 @@ class IssuerTarget(BaseModel):
     direction: Literal["concentration_control","gradual_exit"] = "concentration_control"
     phases: list[float] = Field(default_factory=list,max_length=8)
 
+    @model_validator(mode='after')
+    def decreasing_phases(self):
+        points=[self.target_weight]+self.phases
+        if any(a<=b for a,b in zip(points,points[1:])):
+            raise ValueError('TARGET_EXIT_PHASES_MUST_DECREASE')
+        return self
+
 
 class StageTargets(BaseModel):
     model_config = ConfigDict(extra="forbid",allow_inf_nan=False)
@@ -51,8 +58,8 @@ class StageTargets(BaseModel):
 def select_targets(versions, *, at=None):
     """Validate request proposals, without treating client claims as confirmation.
 
-    There is currently no authoritative stage-target confirmation record. The
-    legacy confirmed_* input fields remain accepted for wire compatibility;
+    Server confirmation is resolved separately by target_context. The legacy
+    confirmed_* input fields remain accepted for wire compatibility;
     neither those fields nor a content digest establish a user confirmation.
     """
     at = at or datetime.now(timezone.utc)
@@ -77,9 +84,19 @@ def select_targets(versions, *, at=None):
 
 
 def target_context(view, issuer_id, versions, formal_rules, defaults, *, at=None):
-    target = select_targets(versions,at=at)
+    proposed = select_targets(versions,at=at)
+    from backend.services.stage_targets import read_target_context
+    server = read_target_context((view or {}).get("portfolio_id"), at=at)
+    confirmed = server["confirmed"]
+    if proposed is None:
+        proposed = server["candidate"]
+    target = confirmed or proposed
     group = next((g for g in (view or {}).get("issuer_exposure",{}).get("companies",[]) if g["issuer_id"]==issuer_id),None)
-    warnings=[]
+    warnings=list(server["issues"])
+    if confirmed and proposed:
+        fields = set(StageTargets.model_fields) - {"confirmed_by_user", "confirmed_at"}
+        if any(confirmed.get(key) != proposed.get(key) for key in fields):
+            warnings.append("TARGET_REQUEST_DIFFERS_FROM_SERVER_CONFIRMED")
     formal = formal_rules if isinstance(formal_rules,dict) else {}
     if target:
         cash_min = formal.get("min_cash_pct")
@@ -96,9 +113,9 @@ def target_context(view, issuer_id, versions, formal_rules, defaults, *, at=None
             warnings.append("DEFAULT_OR_UNVERIFIED_POLICY_TARGET_CASH_DIFFERENCE")
     return dict(snapshot_id=(view or {}).get("snapshot_id"),issuer_id=issuer_id,
         company_exposure=group,denominator_cny=(view or {}).get("issuer_exposure",{}).get("investment_denominator_cny"),
-        formal_discipline=formal_rules,confirmed_stage_targets=None,proposed_stage_targets=target,system_defaults=defaults,
-        target_confirmation_status="unverified" if target else "missing",
-        warnings=warnings,authority="Request stage targets are unverified scenario assumptions. No authoritative stage-target confirmation is available; formal discipline is not overwritten and these inputs grant no L3 or trading qualification.")
+        formal_discipline=formal_rules,confirmed_stage_targets=confirmed,proposed_stage_targets=proposed,system_defaults=defaults,
+        target_confirmation_status="confirmed" if confirmed else "unverified" if proposed else "missing",
+        warnings=warnings,authority="Only portfolio-bound local server configuration can confirm stage targets. Request proposals remain assumptions; targets do not overwrite formal discipline or authorize trades.")
 
 
 def qualification_view(view, legs=(), *, at=None):

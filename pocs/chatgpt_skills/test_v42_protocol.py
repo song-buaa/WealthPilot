@@ -48,3 +48,29 @@ def test_v42_targets_and_scenarios_roundtrip_actual_mcp_schema(monkeypatch):
                 assert rejected.is_error
                 assert len(calls) == before
     asyncio.run(run())
+
+
+def test_server_target_configuration_crosses_business_process_boundary(monkeypatch, tmp_path):
+    """The path is server configuration, never a tool argument or confirmation."""
+    import subprocess
+    import sys
+    from pocs.chatgpt_skills import server
+    configured = str(tmp_path / 'private-target-store.json')
+    monkeypatch.setenv('WEALTHPILOT_STAGE_TARGETS_PATH', configured)
+    original = subprocess.Popen
+    probe = ('import sys,json,os\n'
+        'for line in sys.stdin:\n'
+        ' request=json.loads(line)\n'
+        ' print(json.dumps({"ok":True,"result":{"configured_path":os.environ.get("WEALTHPILOT_STAGE_TARGETS_PATH"),'
+        '"live_trading":os.environ.get("ENABLE_IBKR_LIVE_TRADING")}}),flush=True)\n')
+    def spawn(command, **kwargs):
+        return original([sys.executable, '-u', '-c', probe], **kwargs)
+    monkeypatch.setattr(server.subprocess, 'Popen', spawn)
+    client = BusinessClient(SimpleNamespace(business_python=sys.executable, portfolio_id=7,
+        real_config=None, mock_database='not-opened'))
+    try:
+        result = client.call('analyze_position', {'confirmed_by_user':True,
+            'WEALTHPILOT_STAGE_TARGETS_PATH':'caller-selected.json'})
+        assert result == {'configured_path':configured, 'live_trading':'false'}
+    finally:
+        client.close()

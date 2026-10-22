@@ -122,7 +122,7 @@ def main():
                         from pocs.chatgpt_skills.analysis import analyze
                         if args.analysis_env_file:
                             values = json.loads(Path(args.analysis_env_file).read_text())
-                            allowed = {"WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2", "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
+                            allowed = {"WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2", "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "WEALTHPILOT_STAGE_TARGETS_PATH"}
                             os.environ.update({k:v for k,v in values.items() if k in allowed and isinstance(v,str)})
                         if config:
                             os.environ["WEALTHPILOT_DB_PATH"] = config["database_path"]
