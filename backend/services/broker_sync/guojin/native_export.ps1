@@ -53,6 +53,7 @@ public class WPGuojinNative {
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr h, uint relation);
  public static IntPtr WindowOwner(IntPtr h) { return GetWindow(h, 4); }
+ public static int WindowProcess(IntPtr h) { uint pid; GetWindowThreadProcessId(h,out pid); return (int)pid; }
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern bool GetCursorPos(out WPGuojinPoint point);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
@@ -388,8 +389,10 @@ public class WPGuojinNative {
         $file = @{stock='stock.txt';hgt='hgt.xls';sgt='sgt.xls'}[$market]
         $path = Join-Path $request.directory $file
         if ($guiProfile.native_readonly_path) {
-            [WPGuojinReadonly]::Save($window.Current.NativeWindowHandle,$qnx.Id,$guiProfile.width,$guiProfile.height,
+            $saveEvidence=[WPGuojinReadonly]::Save($window.Current.NativeWindowHandle,$qnx.Id,$guiProfile.width,$guiProfile.height,
                 $guiProfile.dpi,$request.deadline,$path)
+            [IO.File]::WriteAllText((Join-Path $request.directory "save-$market.json"),
+                ($saveEvidence|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
         } else {
         $dialog = Resolve-SaveDialog $qnx.Id $guiProfile.save_title $window.Current.NativeWindowHandle
         $children = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -473,6 +476,7 @@ public class WPGuojinNative {
             if ($cause.Data.Contains('field')) {
                 $diagnosis.contract=@{field=$cause.Data['field'];actual=$cause.Data['actual'];expected=$cause.Data['expected']}
             }
+            if ($cause.Data.Contains('save_diagnostics')) { $diagnosis.save=$cause.Data['save_diagnostics'] }
             if ($window -and [WPGuojinNative]::GetForegroundWindow().ToInt64() -eq $window.Current.NativeWindowHandle) {
                 $bounds = $window.Current.BoundingRectangle
                 $image = New-Object Drawing.Bitmap([int]$bounds.Width,[int]$bounds.Height)
@@ -482,7 +486,7 @@ public class WPGuojinNative {
                     $image.Save((Join-Path $request.directory 'failure.png'),[Drawing.Imaging.ImageFormat]::Png)
                 } finally { $graphics.Dispose(); $image.Dispose() }
             }
-            [IO.File]::WriteAllText((Join-Path $request.directory 'failure.json'),($diagnosis|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $request.directory 'failure.json'),($diagnosis|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
         } catch { } # guest watchdog still bounds a stuck UIA/provider call
     }
     [Console]::WriteLine((@{status='FAILED';reason_code=$code} | ConvertTo-Json -Compress))

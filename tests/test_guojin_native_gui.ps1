@@ -20,7 +20,7 @@ public class WPGuojinNative{
  public static bool HasProcessWindow(IntPtr h,int p){return Native;}public static uint GetDpiForWindow(IntPtr h){return 192;}
  public static bool SetForegroundWindow(IntPtr h){Foreground=h.ToInt64();return true;}public static IntPtr GetForegroundWindow(){return new IntPtr(Foreground);}
  public static bool SetCursorPos(int x,int y){X=Clip?x-1:x;Y=y;if(Steal)Foreground=99;return Move;}public static bool GetCursorPos(out WPGuojinPoint p){p=new WPGuojinPoint{X=X,Y=Y};return Read;}
- public static void mouse_event(uint f,uint x,uint y,uint d,UIntPtr p){Clicks++;}public static IntPtr[] Windows=new IntPtr[0];public static IntPtr[] VisibleProcessWindows(int p){return Windows;}public static string WindowTitle(IntPtr h){return "";}public static IntPtr WindowOwner(IntPtr h){return new IntPtr(10);}
+ public static void mouse_event(uint f,uint x,uint y,uint d,UIntPtr p){Clicks++;}public static IntPtr[] Windows=new IntPtr[0];public static IntPtr[] VisibleProcessWindows(int p){return Windows;}public static bool SaveTitle=false;public static string WindowTitle(IntPtr h){return SaveTitle?"另存为":"";}public static IntPtr WindowOwner(IntPtr h){return new IntPtr(10);}public static int WindowProcess(IntPtr h){return 7;}
 }
 '@
 $source=Get-Content -Raw (Join-Path $PSScriptRoot '../backend/services/broker_sync/guojin/native_gui.cs')
@@ -127,3 +127,27 @@ $before=[WPGuojinNative]::Clicks
 [WPGuojinReadonly]::Initialize(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60)
 if([WPGuojinNative]::Clicks -ne $before){throw 'INITIALIZE_SENT_INPUT'};$passed++
 "Complete market identity probes included: $passed PASS (Fake only)"
+
+# Save diagnostics retain separate counts and ownership without filenames/data.
+[WPGuojinNative]::Windows=@();[WPGuojinNative]::SaveTitle=$true
+function Save-Fault($field,$dialogs,$edits,$buttons){
+ $before=[System.Windows.Automation.InvokePattern]::Invocations
+ try{$null=[WPGuojinReadonly]::Save(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,'synthetic.txt');throw 'MISSING_SAVE_FAILURE'}catch{
+  $e=$_.Exception;while($e.InnerException){$e=$e.InnerException}
+  if($e.Data['field'] -ne $field){throw $_};$d=$e.Data['save_diagnostics']
+  if($d['dialog_count'] -ne $dialogs -or $d['edit1001_count'] -ne $edits -or $d['button1_count'] -ne $buttons -or $d['expected_owner_hwnd'] -ne 10 -or $d['foreground_pid'] -ne 7){throw 'SAVE_DIAGNOSTICS_INCOMPLETE'}
+ }
+ if([System.Windows.Automation.InvokePattern]::Invocations -ne $before){throw 'UNSAFE_SAVE'};$script:passed++
+}
+Save-Fault 'save.dialog_count' 0 -1 -1
+$dialog.Children.Clear();$dialog.Current.Name='另存为';[WPGuojinNative]::Windows=@([IntPtr]20)
+Save-Fault 'save.edit1001_count' 1 0 0
+$edit=N '文件名:' '1001' 'Edit';$dialog.Children.Add($edit)
+Save-Fault 'save.button1_count' 1 1 0
+$save=N '保存(S)' '1' 'Button';$dialog.Children.Add($save)
+$before=[System.Windows.Automation.InvokePattern]::Invocations
+$d=[WPGuojinReadonly]::Save(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,'synthetic.txt')
+if($d['status'] -ne 'SAVED' -or $d['dialog_count'] -ne 1 -or $d['edit1001_count'] -ne 1 -or $d['button1_count'] -ne 1 -or [System.Windows.Automation.InvokePattern]::Invocations -ne $before+1){throw 'SAVE_SUCCESS_FAILED'};$passed++
+$dialog.Children.Add($save)
+Save-Fault 'save.button1_count' 1 1 2
+"Save diagnostic safety probes included: $passed PASS (Fake only)"
