@@ -31,6 +31,12 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 # Reuse the native batch's 15-minute cross-market query window as the maximum
 # automatic crash-recovery age. The parser's separate 24-hour ingest TTL stays unchanged.
 RECOVERY_MAX_AGE = timedelta(minutes=15)
+# Windows records exported_at before the EXPORTED acknowledgement; the Mac
+# samples finished only after receiving it. UTC does not synchronize their wall
+# clocks (the real SGT export led Mac completion by 58.632ms). Match the existing
+# 1s start-edge allowance ONLY at this cross-host completion edge. Same-guest
+# action/observation/export ordering and all freshness/batch checks stay strict.
+EXPORT_COMPLETION_CLOCK_SKEW = timedelta(seconds=1)
 SCHEDULE_WINDOWS = {
     "midday": (time(11, 45), time(12, 15)),
     "post_close": (time(17, 30), time(18)),
@@ -331,7 +337,7 @@ def seal_candidate(config, directory, source, started, finished):
             require(before < query, "AUTO_QUERY_UNCHANGED")
             require(type(item.get("row_count")) is int and item["row_count"] >= 0, "AUTO_EVIDENCE_INVALID")
         require(started-timedelta(seconds=1) <= query <= finished, "AUTO_QUERY_UNCHANGED")
-        require(stamp(item["exported_at"]) >= query and stamp(item["exported_at"]) <= finished,
+        require(query <= stamp(item["exported_at"]) <= finished + EXPORT_COMPLETION_CLOCK_SKEW,
                 "AUTO_EVIDENCE_INVALID")
         for filename in (name, key+".png"):
             original = source/filename

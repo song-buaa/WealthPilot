@@ -157,6 +157,61 @@ def observed_exporter(daily):
     return export
 
 
+@pytest.mark.parametrize('lead_us,allowed', [(58632, True), (1000000, True),
+                                           (1000001, False), (60000000, False)])
+def test_export_completion_cross_host_clock_edge(daily, lead_us, allowed):
+    observed_profile(daily)
+    exporter = observed_exporter(daily)
+    ready = (daily.root/'ready.json').read_bytes()
+    def export(*args):
+        source = exporter(*args)
+        path = source/'observations.json'
+        receipt = json.loads(path.read_text())
+        # Fake Mac completion is start+5s; only the guest's final export leads it.
+        receipt['markets']['sgt']['exported_at'] = (
+            daily.now+timedelta(seconds=5, microseconds=lead_us)).isoformat()
+        write_json(path, receipt)
+        return source
+    result = execute(daily, exporter=export, publish_assets=False)
+    assert result['status'] == ('VALIDATED' if allowed else 'FAILED'), result
+    if not allowed:
+        assert result['reason_code'] == 'AUTO_EVIDENCE_INVALID'
+    else:
+        sealed = json.loads((daily.root/result['batch']/'batch.json').read_text())
+        # No clock rewrite, truncation or upgrade of UNKNOWN source time.
+        assert sealed['files']['sgt']['exported_at'] == (
+            daily.now+timedelta(seconds=5, microseconds=lead_us)).isoformat()
+        assert sealed['files']['sgt']['queried_at'] is None
+    assert (daily.root/'ready.json').read_bytes() == ready
+    assert not daily.calls and facts(daily) == []
+
+
+@pytest.mark.parametrize('case', ['old_query', 'mixed_batch', 'guest_order', 'future_query'])
+def test_completion_skew_never_relaxes_source_or_batch_identity(daily, case):
+    observed_profile(daily)
+    exporter = observed_exporter(daily)
+    ready = (daily.root/'ready.json').read_bytes()
+    def export(*args):
+        source = exporter(*args)
+        path = source/'observations.json'
+        receipt = json.loads(path.read_text())
+        if case == 'old_query':
+            receipt['markets']['sgt']['query_action_at'] = (daily.now-timedelta(days=1)).isoformat()
+        elif case == 'mixed_batch':
+            receipt['batch'] = 'previous_batch'
+        elif case == 'future_query':
+            for field, us in [('query_action_at', 10000), ('observed_at', 20000), ('exported_at', 58632)]:
+                receipt['markets']['sgt'][field] = (daily.now+timedelta(seconds=5, microseconds=us)).isoformat()
+        else:
+            receipt['markets']['sgt']['observed_at'] = (daily.now+timedelta(seconds=3)).isoformat()
+        write_json(path, receipt)
+        return source
+    result = execute(daily, exporter=export, publish_assets=False)
+    assert result['status'] == 'FAILED', result
+    assert (daily.root/'ready.json').read_bytes() == ready
+    assert not daily.calls and facts(daily) == []
+
+
 def test_observed_action_windows_remain_independent_and_source_time_unknown(daily,monkeypatch):
     _source_clock(daily,monkeypatch,11,45);observed_profile(daily)
     exporter=observed_exporter(daily)

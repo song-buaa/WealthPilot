@@ -329,3 +329,17 @@ Registry 无需更新：原能力入口、数据 owner 和同步职责不变，�
 watchdog，不增加总超时，不重发保存菜单点击。实际变化由私有`save-<market>.json`记录；
 失败则在原`failure.json`记录独立计数、期望/实际owner HWND/PID、前台、失败字段及有界
 观察序列。字段未知以-1表示未读取，不伪装零匹配；不写账号、凭证或真实资产到公共日志。
+
+### Windows/Mac完成时间边界（PR #37）
+
+Windows worker使用`DateTimeOffset.UtcNow.ToString('o')`记录动作、观察和文件稳定后的
+`exported_at`（带UTC偏移，文本最多7位小数）；随后写observations并返回`EXPORTED`。
+Mac原编排收到该完成响应后才用`datetime.now(timezone.utc)`采样`finished`（微秒精度）。
+完成响应证明执行顺序；两台系统的UTC墙钟仍可能存在偏差，精度不同不等于时钟同步。
+
+真实三文件导出已成功，SGT导出时间比Mac失败结束记录快58.632毫秒。仅在原封存器
+`exported_at <= finished`这一跨主机边界允许最多1秒偏差，复用原启动边界1秒容差量级，
+不扩大为原来源未来保护的60秒。超过1秒仍拒绝；不修改、舍入或重新生成原始时间。
+Windows同机动作≤观察≤导出顺序、查询必须属于本轮、批次身份、文件哈希、24小时
+导入TTL、15分钟恢复窗口及ready/Owner/Last-good规则不变。历史候选复验必须保留
+原运行起止和原收据，不可把复验时间冒充来源或获得新的调度完成资格。
