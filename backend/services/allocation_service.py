@@ -185,3 +185,9 @@ def get_unclassified_holdings(portfolio_id: int) -> list:
                     "market_value_cny": pos.market_value_cny,
                 })
         return unclassified
+
+
+def simulate_exit_scenario(asset_view, legs, *, amount_qualified=False, target=None):
+    """4.2 static scenario on existing U1 inputs; never persists positions or orders."""
+    from backend.services.allocation_scenarios import simulate
+    return simulate(asset_view,legs,amount_qualified=amount_qualified,target=target)

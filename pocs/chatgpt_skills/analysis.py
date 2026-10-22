@@ -18,6 +18,9 @@ class Turn(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
 
 
+from backend.services.allocation_scenarios import StageTargets, ScenarioLeg
+
+
 class AnalysisRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     question: str = Field(min_length=1, max_length=6000)
@@ -25,6 +28,8 @@ class AnalysisRequest(BaseModel):
     history: list[Turn] = Field(default_factory=list, max_length=16)
     snapshot_id: str | None = Field(default=None, pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')
     analysis_scope: Literal['investments', 'net_worth'] = 'investments'
+    target_versions: list[StageTargets] = Field(default_factory=list,max_length=16)
+    scenario_legs: list[ScenarioLeg] = Field(default_factory=list,max_length=20)
 
     @field_validator('question')
     @classmethod
@@ -234,6 +239,10 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         question+='\n独立历史归因证据（不可用项必须保持未知；不替代当前持仓账面盈亏；仅展示前20组，完整范围由get_trade_history查询）：'+json.dumps(
             dict(status=history['status'],issues=history['issues'],attribution=history['attribution'][:20],
                  coverage=history['coverage'][:20]),ensure_ascii=False)
+        if request.target_versions:
+            from backend.services.allocation_scenarios import select_targets
+            confirmed = select_targets([t.model_dump(mode="json") for t in request.target_versions])
+            question+='\n用户确认的版本化分析目标（不修改正式纪律）：'+json.dumps(confirmed,ensure_ascii=False)
         if asset_view and asset_view['data_quality'].get('analysis_eligibility'):
             question+='\n本次分析资格（仅限所列范围；不能代替交易授权）：'+json.dumps(
                 {k:asset_view['data_quality'][k] for k in ('qualification_scope','analysis_eligibility')},ensure_ascii=False)
@@ -248,7 +257,9 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         try:
             async with asyncio.timeout(240):
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
-                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,analysis_only=True,analysis_context=asset_view):
+                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,analysis_only=True,analysis_context=asset_view,
+                            analysis_options=dict(target_versions=[t.model_dump(mode="json") for t in request.target_versions],
+                                scenario_legs=[s.model_dump(mode="json") for s in request.scenario_legs])):
                     event_type,data=event.split('\n',1)
                     data=json.loads(data.split('data: ',1)[1]);kind=event_type.removeprefix('event: ')
                     if kind=='text':text.append(data.get('delta',''))
@@ -275,6 +286,17 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         finally:
             decision_service.clear_session(conversation)
         result.issues=sorted(set(result.issues+result.data_quality['issues']))
+        if scenario=='review_portfolio' and asset_view:
+            from backend.services.allocation_scenarios import target_context
+            from backend.services.allocation_service import get_targets, simulate_exit_scenario
+            context=target_context(asset_view,None,[t.model_dump(mode="json") for t in request.target_versions],
+                result.evidence.get('rules',{}),[t.model_dump(mode="json") for t in get_targets()])
+            result.evidence['allocation_context']=encode(context)
+            if request.scenario_legs:
+                result.evidence['allocation_scenarios']=simulate_exit_scenario(asset_view,
+                    [s.model_dump(mode="json") for s in request.scenario_legs],
+                    amount_qualified=asset_view['data_quality'].get('analysis_eligibility',{}).get('B',{}).get('allowed',False),
+                    target=context['confirmed_stage_targets'])
         if asset_view:
             from app.asset_views import public_view
             # A model may take minutes. Requalify the SAME immutable input at

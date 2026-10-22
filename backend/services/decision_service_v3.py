@@ -102,6 +102,7 @@ async def run_chat_stream_v3(
     result_callback=None,
     analysis_only: bool = False,
     analysis_context: dict | None = None,
+    analysis_options: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     v3.0 决策流：4 Agent 协作。
@@ -367,6 +368,31 @@ async def run_chat_stream_v3(
                 planner=plan_out.planner_trace, stored_price=native_price,
                 principles_available=bool(getattr(loaded,"retrieved_principles",[])))
             exec_out.invoked_skills.append("wp-assess-position-evidence")
+            from backend.services.allocation_scenarios import target_context
+            from backend.services.instruments.issuers import IDENTITIES
+            from backend.services.market_data.evidence import mapping
+            from backend.services.allocation_service import get_targets, simulate_exit_scenario
+            options = analysis_options or {}
+            currency = "HKD" if (symbol or "").endswith(":HK") else "USD"
+            issuer_id = IDENTITIES.get((symbol,currency))
+            context = target_context(analysis_context,issuer_id,options.get("target_versions",[]),
+                mapping(getattr(loaded,"rules",{})),[t.model_dump(mode="json") for t in get_targets()])
+            exec_out.position_evidence["allocation_context"] = context
+            if context["warnings"]:
+                for level in ("L3","L4"):
+                    exec_out.position_evidence["qualification"][level]["allowed"] = False
+                    exec_out.position_evidence["qualification"][level]["blockers"] += context["warnings"]
+                exec_out.position_evidence["issues"] += context["warnings"]
+                exec_out.position_evidence["infoNeeded"] += context["warnings"]
+            legs = options.get("scenario_legs",[])
+            if legs:
+                if not analysis_context:
+                    raise ValueError("FIXED_ASSET_VIEW_REQUIRED")
+                exec_out.position_evidence["scenarios"] = simulate_exit_scenario(analysis_context,legs,
+                    amount_qualified=exec_out.position_evidence["qualification"]["L2"]["allowed"],
+                    target=context["confirmed_stage_targets"])
+
+
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
