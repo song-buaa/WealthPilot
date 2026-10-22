@@ -582,14 +582,16 @@ def execute_load_decision_context(
         # Preserve the original read contract while carrying source records to
         # the evidence Skill. No provider refresh, card write or narrative KPI.
         symbol=getattr(getattr(loaded,"target_position",None),"symbol",None)
-        if symbol:
+        symbols=[symbol] if symbol else list(dict.fromkeys(getattr(p,'symbol',None) for p in loaded.positions if getattr(p,'symbol',None)))[:30]
+        if symbols:
             from app.database import get_session
             from research_v2 import repository
             from sqlalchemy.exc import SQLAlchemyError
             try:
                 with get_session() as session:
-                    loaded.research_evidence=repository.evidence_records(repository.query_cards(
-                        session,symbol=symbol,entity_scope=False,top_k=20))
+                    loaded.research_evidence=repository.evidence_records([
+                        card for research_symbol in symbols for card in repository.query_cards(
+                            session,symbol=research_symbol,entity_scope=False,top_k=20)])
             except (SQLAlchemyError,ValueError):
                 loaded.research_evidence=[]
 

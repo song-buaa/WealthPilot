@@ -539,6 +539,12 @@ class ExpressingAgent:
         )
 
         prompt = _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload)
+        assessment = getattr(execution_output, "position_evidence", {})
+        if assessment:
+            from backend.services.market_data.output_policy import explanation_prompt
+            prompt += ("\n本次有确定性证据资格控制。请输出JSON对象，包含chat_answer和professional_explanation；"
+                       "chat_answer不会直接显示，专业解释必须遵循以下附加契约。"
+                       + explanation_prompt(assessment))
         from backend.services.technical_patterns.ai_integration import (
             format_pattern_ai_prompt_section,
         )
@@ -583,6 +589,22 @@ class ExpressingAgent:
             "asset_name": getattr(virtual_pos, "name", ""),
             "ticker": getattr(virtual_pos, "ticker", ""),
         }
+        if assessment:
+            # New-entry has a smaller JSON contract than held-position
+            # DecisionResult. Extract only its untrusted explanation candidate;
+            # the caller buffers this response and enforce() validates it.
+            import json
+            candidate = chat_answer.strip()
+            if candidate.startswith("```") and candidate.endswith("```"):
+                candidate = candidate[3:-3].strip()
+                if candidate.startswith("json"):
+                    candidate = candidate[4:].lstrip()
+            try:
+                parsed = json.loads(candidate)
+            except (json.JSONDecodeError, TypeError):
+                parsed = {}
+            if isinstance(parsed, dict):
+                out.structured_payload["professional_explanation"] = parsed.get("professional_explanation")
 
         async for chunk in _emit_text_chunks(chat_answer):
             yield chunk
@@ -609,7 +631,20 @@ class ExpressingAgent:
             return
 
         loaded = execution_output.loaded_data
-
+        if intent_type in ("PortfolioReview", "AssetAllocation"):
+            from copy import copy
+            from backend.services.market_data.output_policy import explanation_prompt, _evidence_index
+            assessments = getattr(execution_output, "portfolio_evidence", [])
+            evidence = {"records":[record for assessment in assessments
+                                   for record in _evidence_index(assessment).values()]}
+            # Reuse the same original model call while removing unqualified
+            # legacy/RAG research from the model's current-fact context.
+            loaded = copy(loaded)
+            loaded.research = [str(record.get("values", {}).get("content") or
+                                   record.get("values", {}).get("text") or "")
+                               for record in evidence["records"] if record.get("kind") == "research"]
+            loaded.retrieved_research_views = []
+            user_query += explanation_prompt(evidence)
         try:
             if intent_type == "PortfolioReview":
                 # P1 修复: 检测宏观问句，注入针对性分析指令

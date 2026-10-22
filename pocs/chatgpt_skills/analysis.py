@@ -311,7 +311,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             asset_view['data_quality']['can_propose_rebalance'] &= original_precision
             if scenario == 'review_portfolio':
                 asset_view = qualification_view(asset_view, request.scenario_legs)
-        if (scenario == 'analyze_position' and asset_view
+        if (scenario == 'analyze_position'
                 and all(key in captured for key in ('plan', 'executed', 'expressed', 'reviewed'))):
             from backend.services.position_analysis import prepare
             from backend.services.market_data.output_policy import enforce
@@ -327,20 +327,27 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             if result.status != 'unavailable':
                 result.conclusion = expressed.chat_answer
                 result.professional_result['analysis_result'] = encode(expressed.structured_payload)
-        if scenario=='review_portfolio' and asset_view:
+        if scenario=='review_portfolio':
             from backend.services.allocation_scenarios import target_context
             from backend.services.allocation_service import get_targets, simulate_exit_scenario
             rule_source=result.evidence.get('effective_rules_provenance',{})
             effective=result.evidence.get('rules',{})
-            context=target_context(asset_view,None,[t.model_dump(mode="json") for t in request.target_versions],
+            context=target_context(asset_view or {'portfolio_id':portfolio_id},None,[t.model_dump(mode="json") for t in request.target_versions],
                 effective if rule_source.get('basis')=='configured_rule_file' else None,
                 dict(allocation=[t.model_dump(mode="json") for t in get_targets()],effective_rules=effective,rule_source=rule_source))
             result.evidence['allocation_context']=encode(context)
-            if request.scenario_legs:
+            if request.scenario_legs and asset_view:
                 result.evidence['allocation_scenarios']=simulate_exit_scenario(asset_view,
                     [s.model_dump(mode="json") for s in request.scenario_legs],
                     amount_qualified=asset_view['data_quality'].get('analysis_eligibility',{}).get('B',{}).get('allowed',False),
                     target=context.get('confirmed_stage_targets') or context.get('proposed_stage_targets'))
+            elif asset_view:
+                from backend.services.exit_candidates import build_candidates
+                result.evidence['exit_candidates']=[candidate
+                    for group in asset_view.get('issuer_exposure',{}).get('companies',[])
+                    for candidate in build_candidates(asset_view,group['issuer_id'],
+                        context.get('confirmed_stage_targets') or context.get('proposed_stage_targets'),
+                        amount_qualified=asset_view['data_quality'].get('analysis_eligibility',{}).get('B',{}).get('allowed',False))]
         if asset_view:
             result.snapshot_id = request.snapshot_id
             result.data_quality['asset_view'] = asset_view['data_quality']
@@ -373,6 +380,23 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 allocation_facts=result.evidence.get('allocation'),
                 analysis_eligibility=(asset_view or {}).get('data_quality', {}).get('analysis_eligibility', {}),
                 can_propose_rebalance=False, execution_authorized=False))
+            from backend.services.position_analysis import prepare_portfolio
+            from backend.services.market_data.output_policy import project_explanation, render_explanation
+            assessments=prepare_portfolio(captured['plan'],captured['executed']) if captured else []
+            explanation=project_explanation(
+                (captured['expressed'].structured_payload or {}).get('professional_explanation') if captured else [],
+                {'records':[r for a in assessments for r in a['records']]})
+            result.professional_result['analysis_result']['professional_explanation']=explanation
+            result.professional_result['analysis_result']['exit_candidates']=result.evidence.get('exit_candidates',[])
+            result.conclusion+=render_explanation(explanation)
             result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:] != ['--snapshot-chat-worker']:
+        raise SystemExit('Explicit snapshot worker mode required')
+    from backend.services.snapshot_chat import worker_main
+    worker_main()

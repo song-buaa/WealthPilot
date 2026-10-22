@@ -152,6 +152,7 @@ class ExecutionOutput:
     """实际调用的 Skill 名称列表（按顺序）。"""
 
     position_evidence: dict = field(default_factory=dict)
+    portfolio_evidence: list[dict] = field(default_factory=list)
     skill_results: dict = field(default_factory=dict)
     """
     每个 Skill 的执行结果，key 是 Skill 名称。

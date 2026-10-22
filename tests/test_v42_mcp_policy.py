@@ -171,3 +171,75 @@ def test_position_nested_trace_requalifies_at_final_mcp_boundary(analysis_db, mo
         assert not payload['analysisQualification']['L2']['allowed']
         assert all(row['amount_cny'] is None and row['quantity'] is None
                    for row in payload['exitPlan']['tranches'])
+
+
+@pytest.mark.parametrize('tool', ['analyze_position', 'review_portfolio'])
+def test_original_peer_cited_explanation_survives_final_mcp_without_snapshot(analysis_db, peer, monkeypatch, tool):
+    """Real PEER + adapter, source fixture only; no second model or asset write."""
+    from datetime import datetime, timedelta, timezone
+    import hashlib
+    from backend.agents import executing_agent
+    from decision_engine import llm_engine
+    from decision_engine.llm_engine import GenericLLMResult, LLMResult
+    from tests.test_v42_professional_explanation import TEXT
+    now = datetime.now(timezone.utc)
+    source = dict(symbol='AAPL:US', source='vendor', record_id='fixture:current-research',
+        published_at=(now-timedelta(hours=1)).isoformat(), data_as_of=(now-timedelta(hours=1)).isoformat(),
+        fetched_at=now.isoformat(), period='current', text='产品组合与现金转化需要对照竞争压力评估。')
+    original = executing_agent.invoke_skill
+    def invoke(name, **kwargs):
+        result = original(name, **kwargs)
+        if name == 'wp-load-context':
+            result.loaded_data.research_evidence = [deepcopy(source)]
+        return result
+    monkeypatch.setattr(executing_agent, 'invoke_skill', invoke)
+    explanation = dict(topic='investment_thesis', basis='inference', text=TEXT,
+                       evidence_refs=['fixture:current-research'])
+    model_calls = []
+    def reason(*args, **kwargs):
+        model_calls.append('position')
+        return LLMResult('HOLD', ['unsafe 987654'], [], [], chat_answer='unsafe 987654',
+            structured_result={'decisionType':'hold', 'professional_explanation':[explanation]})
+    def portfolio(*args, **kwargs):
+        model_calls.append('portfolio')
+        return GenericLLMResult(intent_type='PortfolioReview', chat_answer='unsafe 987654',
+            raw_payload={'chat_answer':'unsafe 987654','professional_explanation':[explanation]})
+    monkeypatch.setattr(llm_engine, 'reason', reason)
+    monkeypatch.setattr(llm_engine, 'review_portfolio', portfolio)
+    before = hashlib.sha256(analysis_db.read_bytes()).hexdigest()
+    result = asyncio.run(analyze(analysis_db, 7, tool, {'question':'fixture'}, synthetic=True))
+    assert TEXT in result['conclusion']
+    assert '987654' not in json.dumps(result)
+    projected = result['professional_result']['analysis_result']
+    assert projected['professional_explanation'][0]['basis'] == 'inference'
+    assert projected['professional_explanation'][0]['sources'][0]['symbol'] == 'AAPL:US'
+    assert len(model_calls) == 1
+    assert hashlib.sha256(analysis_db.read_bytes()).hexdigest() == before
+
+
+def test_portfolio_automatic_repayment_rechecks_full_loan_amount_scope(monkeypatch):
+    from backend.agents.contracts import ExpressionOutput
+    from backend.services.market_data.output_policy import enforce_portfolio
+    from backend.services import allocation_scenarios
+    from tests.test_v42_exit_plan import setup_case
+    from tests.test_v42_account_candidates import auto_case
+    v, executed, _, t = auto_case('3690:HK')
+    v['data_quality']['analysis_eligibility']['B']['allowed'] = True
+    calls = []
+    original = allocation_scenarios.qualification_view
+    def loan_scope(view, legs, **kwargs):
+        calls.append(deepcopy(legs))
+        result = original(view, legs, **kwargs)
+        if any(leg['destination'] == 'repay_cny_loan' for leg in legs):
+            result = deepcopy(result)
+            result['data_quality']['analysis_eligibility']['B']['allowed'] = False
+        return result
+    monkeypatch.setattr(allocation_scenarios, 'qualification_view', loan_scope)
+    out = ExpressionOutput(structured_payload={})
+    enforce_portfolio(out, asset_view=v, options={'target_versions':[t]}, loaded=executed.loaded_data)
+    result = out.structured_payload
+    assert any(legs for legs in calls)
+    assert result['exit_candidates']
+    assert not result['amount_qualified']
+    assert all(row['amount_cny'] is None for candidate in result['exit_candidates'] for row in candidate['tranches'])
+    assert all(not c['scenario'] or c['scenario']['mode'] == 'illustrative_unqualified' for c in result['exit_candidates'])
