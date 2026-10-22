@@ -171,3 +171,14 @@ MCP实际SDK新增协议测试`pocs/chatgpt_skills/test_v42_protocol.py`覆盖�
 - LI/PDD/美团真实业务验收均NOT_RUN。现有三份报告仍仅SYNTHETIC_FIXTURE；本阶段未调用生产professional模型、真实Provider、券商同步、交易prepare/confirm或订单API。
 - decision_engine核心、生产同步实现、订单/Batch、ORM/schema、依赖和前端业务代码不变。报告与组合解释收缩须明确评审，CI不能证明投资判断质量或生产版本。
 - 没有合并main、创建Tag、生产迁移或部署。任务分支保留等待用户决定下一步；不以绿色CI自动推定发布可用。
+
+
+### 本轮提交与本地检查记录
+
+- `fa5f3bd4d008f5566fe1141ae96079217feaceb5`：目标确认来源降级、缺可信目标阻断L3及纪律冲突。
+- `9b06097ac5f453e5e49aaf49759aa2f6bdb2a052`：最终Web/MCP/Explain过滤、快照/时效、不升级false、协议与回归。
+- `d35e70830c51ed49a31d033c237ffb3167ef976e`：独立审查报告及能力完成状态更正。
+- `c8771c5258dc11d721370053df15e1f469df5a21`：保留既有“仅作一般分析”降级提示以兼容原U1合同。此后仅文档修正；最终PR HEAD及exact-HEAD四项CI在PR验收清单记录。
+- 定向121 passed（`/tmp/wp42-review-targeted-final.log`）；补充原U1与MCP边界32 passed（`/tmp/wp42-review-u1-final.log`）；独立SDK实际schema协议1 passed（`/tmp/wp42-review-protocol.log`）。
+- Offline M5 18/18且公网0（`/tmp/wp42-review-m5-final.log`）；frontend lint/build、compileall及工程文档检查通过。既有大bundle提示保留。
+- 修复期间全量1 failed/1757 passed/7 skipped，唯一失败是上述U1旧提示文案；已最小恢复并通过32项重测。该次混合工作树运行不作为最终候选PASS；冻结代码全量最终结果、CI链接及完整HEAD在PR #39最终工程验收清单中单列。
