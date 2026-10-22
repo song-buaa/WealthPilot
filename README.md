@@ -1,64 +1,48 @@
-# WealthPilot 4.0
+# WealthPilot 4.1
 
-B2 历史成交/收益归因已合入 main：新增只读 `get_trade_history`，复用原 Portfolio/U1/PEER，当前账面收益与历史收益分开。来源、覆盖、成本法及显式迁移见 [B2 实现说明](docs/B2_IMPLEMENTATION.md)；真实补源/生产完整性须以独立验收为准，本轮不调查生产。
+**RELEASED — 已完成生产交付，少量数据覆盖及自然运行观察项持续跟踪。**
 
-私人财富管理与投资决策工作台：**ChatGPT 对话入口 + 七项只读 MCP 工具 + 原 WealthPilot 专业分析 Core + 完整 React Web**。
+4.1已验收生产代码：`e0df7211f462f07ec0147f40e84f65321d0f6b50`（2026-10-22）。
+正式交付、PR/实现入口、证据与遗留事项统一见[4.1版本结项](docs/releases/v4.1.md)。本次仅文档更新，后续main文档提交不是新的生产代码版本，也不触发部署或创建发布Tag。
 
-4.0 第一阶段五大核心场景已完成开发、Mac Mini 生产部署及 ChatGPT Web/iOS 实际验收，用户于 2026-10-16 确认正式收口。原 PEER 四 Agent、13 个内部 Skills、专业 LLM、规则/信号引擎及回答模板均保留；ChatGPT 调用原专业结果，负责交互、解释和最终呈现。
+私人财富管理与投资决策工作台：**ChatGPT对话入口 + MCP适配 + 原PEER/Skills专业分析 + React Web最终人工交易确认**。
 
-## 五大 ChatGPT 场景
+## 4.1交付与下一阶段
 
-| 场景 | 当前能力与工具 | 状态 / 边界 |
+| 批次 | 已交付能力 | 实现与边界 |
 |---|---|---|
-| P1 资产负债查询 | `get_wealth_overview`、`get_manual_wealth_items`、`get_investment_details`：总览、手工资产/负债、账户及持仓明细 | DONE，Web/iOS 实测 |
-| P2 明确交易指令 | `prepare_trade_confirmation_link`：个人 Pro 中生成预填链接，原 Web 展示、人工确认后走原交易链路 | DONE，MacBook/iPhone 预填已验收；新入口首次真实提交/成交未验收 |
-| P3 单标决策 | `analyze_position`：原 PositionDecision、持仓/新建仓路径、规则/信号/研究与 PEER 专业报告 | DONE，Web/iOS 实测 |
-| P4 组合评估 | `review_portfolio`：原 PortfolioReview / AssetAllocation、配置快照、目标偏离与集中度 | DONE，Web/iOS 实测 |
-| P5 收益分析 | `analyze_performance`：原 PerformanceAnalysis、持仓账面盈亏与贡献结构 | DONE，Web/iOS 实测；不含完整历史收益归因 |
+| B0 | 持久化提交、幂等、状态归并、跨重启恢复及账户隔离 | [交易安全](docs/B0_IMPLEMENTATION.md)；UNKNOWN不自动补单 |
+| U0 | 原同步执行器、claim/fence、原币现金、FX与Last-good | [统一同步](docs/U0_IMPLEMENTATION.md) |
+| U1 | 显式分析前prepare、固定资产视图及Web/MCP/PEER一致输入 | [固定视图](docs/U1_IMPLEMENTATION.md)；旧视图不可变 |
+| U2 | 成交水位驱动同步、有限重试、交易与同步状态分别查询 | [成交同步](docs/U2_IMPLEMENTATION.md)；覆盖未证实不冒充SYNCED |
+| D1 | 发行主体与分类、来源时间、手工财富核对及A/B/C分析资格 | [数据质量](docs/D1_IMPLEMENTATION.md) |
+| B2 | 逐笔execution、实际费用及覆盖证据、移动平均成本和条件历史归因 | [历史归因](docs/B2_IMPLEMENTATION.md)；真实补源仍不完整 |
+| B3 | 原Web交易确认、报价重核、预算/现金展示与账户可交易性三态 | [交易体验](docs/B3_IMPLEMENTATION.md)；缺权限证据UNKNOWN |
+| 国金 | Windows原生三文件自动导出、来源验证、WARNING、原Executor受控发布与双次/按需触发 | [原生同步及运维](docs/GUOJIN_NATIVE_SYNC.md) |
 
-七工具均为生产只读工具。P2 只校验参数和生成 URL，不在 MCP 创建草稿或委托；原 ActionDraft、SymbolStrategy、OrderManager、BrokerAdapter、风控和人工确认全部保留。IB01 含费用总预算入口先显示 ActionDraftCard 简洁参数编辑，点击“加入投资行动”后核对报价/费用，通过后主动进入 ConfirmOrderDialog；打开链接不自动取报价或落库。底层保留原 IBKR Typed Intent / ExecutionBatch / SMART；改价需重新取行情、计算 WhatIf 并重新确认，不走普通美股/Tiger 路径。当前使用个人 Pro，不使用 Business/Edu，不部署独立 Mock ChatGPT 应用。
+国金双次任务已启用并加载：适用交易日北京时间11:45和17:30，窗口11:45–12:15、17:30–18:00分别去重。任务加载PASS与自然执行/长期稳定性分开；来源时间、完整性未知仍partial，不由缺失行推断清仓或以来源现金0覆盖Last-good。
 
-IBKR 合约、行情和 WhatIf 权限分别验收。挂单资金检查使用新鲜的只读账户快照；Gateway 只读模式拒绝 WhatIf 时保留 DRAFT，费用和最终确认不能标为通过，也不会自动开启实盘。
+**下一阶段：4.2单标的决策优化，尚未在本轮启动。** 继续沿用既有2026-10-20《WealthPilot Phase 3｜单标的投研与减仓决策能力优化需求 v1.0》及既有设计/阶段边界，私有PRD原文保留不变；独立对话授权后开展，不在结项中重新设计。
 
-同一 IB01 链接重新报价或刷新页面后，确认入口会更新未提交的过期批次并撤销旧确认版本；新鲜的相同重试复用当前批次。行情仍须在原 30 秒 TTL 内，金额、费用或报价变化须重新核对，最终下单仍由用户在 Web 主动授权。
+## ChatGPT与Web入口
 
-IBKR 资金校验使用新鲜的逐币种 CashBalance（兼容 Gateway `$LEDGER-` 前缀），不把账户折算现金、保证金可用资金或购买力视为可支出 USD。账户现金通过原持仓同步按账户/币种持久化；BASE 汇总不重复计入。已成交请求重新打开显示原订单结果，不重新准备同额买单。
+原财富总览、手工资产/负债、投资明细、单标分析、组合评估、当前收益分析及交易预填链接保留；4.1补充只读`get_trade_and_sync_status`、`get_trade_history`、`get_instrument_tradability`。显式`prepare_asset_analysis`使用独立鉴权触发只读券商同步及本地视图更新，不能当成原读取工具的隐式写权限。工具注册/权限以[当前架构](docs/ARCHITECTURE_CURRENT.md#3-七个生产工具)及原server为准。
 
-## 当前架构与环境
+交易仍复用ActionDraft、Typed Intent、ExecutionBatch和OrderManager；原30秒报价TTL、WhatIf、新鲜原币现金、风险、确认版本/哈希及Web最终人工授权全部保留。UNKNOWN不重发，SYNC_UNVERIFIED不等于交易失败；合约存在、历史成交或WhatIf成功均不能直接证明当前账户可交易。
 
-```mermaid
-flowchart LR
-  Chat[ChatGPT Web / iOS] --> Tunnel[Secure MCP Tunnel]
-  Tunnel --> MCP[七项只读 MCP 工具]
-  MCP --> Core[WealthPilot Core：原服务 / PEER / Skills]
-  Core --> DB[(共享 SQLite WAL)]
-  MCP --> Link[交易预填链接]
-  Link --> Web[完整 React Web]
-  Web --> API[完整 FastAPI 后端]
-  API --> DB
-  API --> Confirm[原 Web 人工最终确认]
-  Confirm --> Orders[原 OrderManager / ExecutionBatch / BrokerAdapter]
-```
+## 当前架构与运行边界
 
-ChatGPT 提供自然语言交互、上下文及回答组织；Core 内的 Planning、Executing、Expressing、Reviewing 继续生成和校验原专业结论，ChatGPT 再组织呈现。Web 保留财富/投资可视化、消费、投研、决策与交易确认等原有功能。业务计算、风控和券商权威状态继续由原服务负责。
+**MacBook = Dev，Mac mini = Prod。** 原完整FastAPI/React、MCP/Tunnel、业务worker与共享SQLite沿用现有分层。同步发布更新当前Position；新U1视图冻结同一版本的Portfolio/Wealth及质量输入；已有视图不被后续同步改写。PEER、Skills及decision_engine原权威不替换。
 
-**MacBook = Dev，Mac Mini = Prod。** Mini 运行完整 Web、完整 FastAPI、MCP/Tunnel、生产数据库及原有业务服务，使用 macOS 原生环境和 launchd。私人 Web 通过 Tailscale Serve HTTPS / 原生 SSH 转发访问；Web 和后端保留 loopback 监听，不开放无认证公网接口。浏览器代理与各网络的可达性需分别验证。
+开发入口：[AGENTS](AGENTS.md)、[当前架构](docs/ARCHITECTURE_CURRENT.md)、[工程治理](docs/PROJECT_GOVERNANCE.md)、[能力索引](docs/CAPABILITY_REGISTRY.md)、[隔离开发](docs/dev_setup.md)。历史PRD、PoC和各批实现说明保留当时事实，当前发布状态以[4.1结项记录](docs/releases/v4.1.md)为准。
 
-发布路线：最新 main → 独立分支 → PR / 四项 CI → 经授权合入 main → Mini 拉取确认的完整 SHA → 预检 / 切换 / 验收。各组件独立固定版本，发布文档不会自动部署或改动数据库。代码、配置、数据、备份、日志及凭证分离；离线包仅应急。
+## 非阻断数据与运行观察项
 
-版本观察：本次文档整理基于 main `8b648db4cf7c714cd43eef0d4e437f22d061eae6`（含 P3/P4/P5 后的 PR #10 IB01 修复）；2026-10-16 的 Mini 只读核对显示 MCP/Core/Web 启动入口引用同一业务版本。环境与历史资产仍可能固定其他 SHA，不能用全局 current 代替组件版本。详情见 [版本观察表](docs/PROJECT_GOVERNANCE.md#4-版本tag-与发布)。历史最新 SemVer Tag 为 `v3.15.1`；尚未创建 `v4.0.0`，本次收口不自动创建 Tag/Release。前端 package / FastAPI 包版本不是产品版本。
-
-## 已知限制与后续迭代
-
-- 部分数据仍为 PARTIAL：日期未知/过期、研究来源未验证、原则检索不可用或演示 fallback；`synthetic=false` 不证明所有底层证据实时可信，不直接作为实时交易信号。
-- P2 新入口首次真实订单提交及成交未验收；历史其他入口的实盘记录不能替代该项。
-- P5 仅当前持仓账面盈亏，未覆盖历史已实现交易、TWR/MWR 或决策因果归因。投资持仓、已分类配置快照与完整个人财富分母须区分；默认目标/画像不是已核实个人设定。
-- 部分券商 Gateway / 数据源尚未配置或可用，单项同步、常驻恢复及跨网事项有实际证据才标 PASS。
-- 历史 PoC02 凭证展示事故保持 FAIL，后续撤销后的权限检查独立记录。以上不阻塞 4.0 功能范围收口，后续优化进入新版本。
-
-U1/U2 与国金原生来源已合入，用户已确认生产启用。原受控 prepare/固定资产视图见 [U1](docs/U1_IMPLEMENTATION.md)，成交同步及只读交易状态见 [U2](docs/U2_IMPLEMENTATION.md)。D1 当前资产质量收尾已合入：复用原发行主体、分类、手工财富及固定视图质量合同，详见 [D1 实现与验收边界](docs/D1_IMPLEMENTATION.md)；本轮不部署或修改生产数据。
-
-开发入口：[AGENTS.md](AGENTS.md)、[当前架构](docs/ARCHITECTURE_CURRENT.md)、[治理与发布](docs/PROJECT_GOVERNANCE.md)、[已有能力索引](docs/CAPABILITY_REGISTRY.md)、[隔离开发/检查](docs/dev_setup.md)。PoC/Batch 报告保留当轮事实，作为历史部署/回滚证据，不再覆盖当前产品基线。
+- B2能力已交付；真实IBKR Flex历史、实际佣金/现金流/历史FX及独立覆盖证据仍需补齐，缺证结论保持UNKNOWN/partial，不输出虚假完整收益。未建设全组合TWR/MWR。
+- U2由自然发生的真实成交继续验证端到端触发和覆盖，不为结项制造订单。
+- 国金任务启用不代表每次自然运行成功，持续观察Windows/券商会话、休眠/重启及双窗口收据；不为观察新增开发阶段。
+- 国金来源查询/估值/完整性UNKNOWN不升级；手工资产负债/养老金关联仍按原合同提示核实，不自动改余额。
+- IBKR/Tiger合约、当前账户权限及费用/限制证据分别表达；缺证不承诺所有产品可买。研究、行情和原则缺源的降级不包装为实时决策事实。
 
 ## 项目简介
 
@@ -135,7 +119,7 @@ WealthPilot 维护两种明确隔离的本地运行模式：
 
 ![WealthPilot 历史 v3.6 架构图](./docs/wealthpilot_v36_arch.svg)
 
-该图是历史说明；当前 4.0 生产调用边界以 [ARCHITECTURE_CURRENT.md](docs/ARCHITECTURE_CURRENT.md) 为准。
+该图是历史说明；当前4.1生产调用边界以 [ARCHITECTURE_CURRENT.md](docs/ARCHITECTURE_CURRENT.md) 为准。
 
 详细分层、PEER / 内部 Skills、数据权威和交易边界统一维护在[当前架构](docs/ARCHITECTURE_CURRENT.md)，服务、接口及测试入口见[能力索引](docs/CAPABILITY_REGISTRY.md)。README 保留产品与上手说明，避免重复维护架构及模型清单；模型和 Provider 配置以代码与任务环境为准。
 
@@ -275,6 +259,8 @@ python scripts/m5_e2e_18_cases.py --mode offline
 
 ## 版本历史
 
+- **v4.1 RELEASED**（2026-10-22）：交易安全、统一资产数据与固定视图、成交同步、数据质量、条件历史归因、交易体验及国金双次自动同步；[正式结项与观察边界](docs/releases/v4.1.md)。
+
 - **v4.0 功能范围收口**（2026-10-16）：五大 ChatGPT 场景、七只读 MCP 工具、完整原 Core/Web 与 Mini 生产部署；Tag 尚未创建。
 
 详见 [CHANGELOG.md](CHANGELOG.md)。
@@ -306,4 +292,4 @@ python scripts/m5_e2e_18_cases.py --mode offline
 
 本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE) 文件。
 
-B3交易体验/产品查询为当前PR候选：原批次恢复、最终确认及U2状态呈现，账户权限缺证据保持UNKNOWN。无Schema迁移，详见[实现与验收合同](docs/B3_IMPLEMENTATION.md)。
+B3交易体验/产品查询已随4.1交付：原批次恢复、最终确认及U2状态呈现，账户权限缺证据保持UNKNOWN。B3无Schema迁移，详见[实现与验收合同](docs/B3_IMPLEMENTATION.md)及[当前结项状态](docs/releases/v4.1.md)。

@@ -1,12 +1,27 @@
 # 国金全能行原生文件同步
 
-本 PR 候选；开发基线为 `ff265cb3fcaea229610e91ccb23f64b9835dad34`。代码/隔离验证不代表生产已启用。工程流程仍以 [PROJECT_GOVERNANCE](PROJECT_GOVERNANCE.md) 为准。
+4.1已RELEASED（2026-10-22），国金生产代码固定`e0df7211f462f07ec0147f40e84f65321d0f6b50`。真实三文件、受控发布及双次任务加载已验收；自然运行和数据质量限制见[4.1结项](releases/v4.1.md)。下文各PR“候选/未启用/待验收”保留其当轮历史，不覆盖本节现状。
+
+## 4.1生产运维现状（2026-10-22）
+
+- Windows原生worker自动生成三文件，批次/账户/证券及哈希校验后经原ready与SyncExecutor受控发布；不保存/输入交易密码、不调用订单接口。PR #26、#32–#37演变保持追溯，不重建解析器。
+- `com.wealthpilot.guojin-native-twice-daily`已启用并加载，按适用交易日北京时间11:45、17:30调用同一CLI；窗口11:45–12:15、17:30–18:00开始含/结束不含。两窗口独立完成收据，同窗口合格manual可复用，午间不会消耗下午资格；旧单次验收任务已暂停。
+- 原CLI：`backend/scripts/guojin_daily_sync.py --config <私有配置> --trigger manual|cron`。默认仅验证候选；`--publish --database <原库> --contract <严格契约>`是明确授权的ready/数据库写入，不能把验证命令当发布。`--retry-batch`只重试原密封来源，不重置来源年龄，不代替新查询。
+- 状态读取私有`config.inbox/automation-status.json`，关注status/reason_code/run_id/finished_at/schedule_window/source_mode及`completed_windows.midday/post_close`；历次批次收据为`inbox/<batch>/run_<attempt>.json`，原broker-sync status保留Run结果。GUI错误诊断为该批次`failure.json`，保存就绪为`save-<market>.json`；这些均留私有目录。
+- launchd只读检查用`launchctl print gui/<uid>/com.wealthpilot.guojin-native-twice-daily`；实际启动参数、StandardOutPath/StandardErrorPath从原私有LaunchAgent/Runbook读取，不在Git猜测固定路径或暴露profile/账号。任务加载≠自然执行成功。
+- 2026-10-22受控发布Run198、U1复核Run199及`asset-view:v1:64`一致，证券4条、新增0/删除0、精确对账差额0；同批次幂等及其他账户/订单/旧视图不变由用户确认。先前候选WARNING与本次生产PASS是不同批次，不混用金额。具体资产总额只保留私有验收记录。
+- 截至2026-10-22 16:54（北京时间）证据核对，未取得启用后自然双窗口的新成功收据，首个17:30尚未到达；远端后续记录的只读检索未获可用结果，不能宣称未执行或长期成功。后续只观察既有日志/收据，不为结项等待或追加验收任务。
+- 失败/120022/登录失效/源不完整：当次停止并保留Last-good，不无限重试清算时段。必要时用户解锁/恢复既有会话，按同一manual入口验证新来源；明确授权后才发布。不要重放交易、伪造时间或修改历史收据。
+- v2来源query/positions/price/cash时间与完整性UNKNOWN/partial仍保留；仅更新已证实正持仓，缺失行不推断清仓，来源现金0不覆盖Last-good，不授予完整账户精确分析资格。金额双上限WARNING只豁免小额估值差异，不豁免Owner/证券/文件/来源保护。
+
+本次只更新文档，不重跑生产同步、不改服务/任务或ready。后续停用/回滚沿原Runbook：保留原件/收据/Last-good，先停触发再恢复已知组件，不用旧DB覆盖新事实、不启用旧MiniQMT。私有配置、授权及数据路径仍由生产Runbook维护。
+
 
 ## 1. 原入口与边界
 
 - 原 [GuojinSyncService](../backend/services/broker_sync/guojin/sync_service.py) 改为三文件来源，复用 [GuojinAdapter](../backend/services/broker_sync/guojin/adapter.py)、原 SyncExecutor、SnapshotRun claim/lease/fence、Repository、Upsert、FX、Portfolio/Wealth 和 MCP。没有新服务、队列、账户库或持仓库。
 - **零 Schema 列、零索引、零表**。批次水位、来源及订正收据使用现有 Run.context_json，原严格 SQLite Digest 不变。
-- 已退出 MiniQMT HTTP 拉取，旧 URL/Secret 不再用于国金同步。完整后端 22:00 只保留 Tiger/Futu/snowball 的原任务；本次不启用任何国金 GUI 定时器。manual/all/restricted/显式 cron 仍走原 Executor；国金只消费已准备的原生批次。
+- 已退出 MiniQMT HTTP 拉取，旧 URL/Secret 不再用于国金同步。完整后端22:00只保留Tiger/Futu/snowball的原任务；PR #26当时不启用GUI定时器，现双次任务状态见本文生产运维现状。manual/all/restricted/显式 cron 仍走原 Executor；国金只消费已准备的原生批次。
 - 导出与入库解耦：用户必要时解锁 → 原 Parallels 操作查询/导出 → 生成私有批次收据 → 切换 ready 指针 → 调原同步。以后无人值守导出也只复用此流程，不在服务里保存密码或驱动 GUI。
 - 不增加 MCP 写工具或上传页面，不触碰 decision_engine、下单、交易授权及实盘开关。
 
@@ -269,9 +284,9 @@ ready/SyncExecutor 或部分事实仅 Upsert、不清仓的政策。真实三文
 [原生辅助函数隔离探针](../tests/test_guojin_native_gui.ps1)编译实际 C# 函数并使用
 Fake UIA/user32 核验正常只读点击及移动/坐标/焦点/账户/树节点/命中/布局异常。
 Linux/macOS CI 的 `-PortableFake` 仅在合成程序集内省略 COM apartment 设置，
-不能证明真实 Windows MTA、原生控件或三文件导出成功。2026-10-22 本轮真实 worker
-验收尚未完成；恢复屏幕共享后须在独立候选目录完成正式 worker 导出与原验证器校验，
-不能用历史辅助脚本成功或这些 Fake 探针替代。
+不能证明真实Windows MTA、原生控件或三文件导出成功。PR #37开发阶段曾待真实worker
+验收；后续正式worker约44秒三文件导出及候选验证均已PASS，生产Run198另有独立验收，
+见本文生产运维现状。Fake探针不替代上述真实证据，以下保留当时排错过程。
 
 2026-10-22 启动超时复现：10:56:32 至 11:07:13（约 641 秒）触发 Mac 通信
 640 秒上限，Windows 批次目录未创建。普通 `-File`/短 `-EncodedCommand` 查询正常；

@@ -1,5 +1,7 @@
 # WealthPilot 4.1 B0 实现与隔离验收
 
+> 2026-10-22 状态更新：本模块随4.1 **RELEASED — 已完成生产交付**；完整验收边界及非阻断观察项见[4.1结项记录](releases/v4.1.md)。下文保留原开发/隔离测试/待发布时点，不再作为当前部署状态；不据此推定真实数据已完整或全部自然场景已验证。
+
 开发基线：`origin/main` / `6a7927009a9d0364e57c1b14ef4ee1a7a52bd25c`。范围是已授权的交易安全、状态收敛与数据隔离底座；B1 成交后同步消费者、收益账本、MCP 新工具与生产发布均不在本轮。
 
 技术依据为用户确认的《WealthPilot 4.1 B0 Technical Review》。本文记录最终实现，不替代 [当前架构](ARCHITECTURE_CURRENT.md)、[能力索引](CAPABILITY_REGISTRY.md) 或 [工程治理](PROJECT_GOVERNANCE.md)。生产操作的条件和步骤只在 [B0 Runbook](B0_PRODUCTION_RUNBOOK.md) 维护。
