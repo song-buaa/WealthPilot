@@ -362,7 +362,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             # D1 precision is a holdings-quality gate, not L3 research/technical
             # qualification. Missing snapshots and a true D1 C flag must never
             # allow free model text or nested numerical trade instructions.
-            result.conclusion = '组合仅作配置方向与静态情景复核；未完成逐标的L3证据核验，不提供可执行股数或限价。'
+            result.conclusion = '组合仅作一般分析、配置方向与静态情景复核；未完成逐标的L3证据核验，不提供可执行股数或限价。'
             scenarios = result.evidence.get('allocation_scenarios')
             if scenarios:
                 result.conclusion += '\n静态情景（非交易建议）：' + json.dumps(encode(scenarios), ensure_ascii=False)
