@@ -238,10 +238,12 @@ def test_current_four_two_explain_cannot_return_excluded_loader_rag_text():
     original=dict(decision_id="d",data=dict(research=["Seed: sell 987654"],
         retrieved_research_views=[{"content":"old research 987654"}],
         retrieved_principles=[{"content":"unverified risk number 987654"}]),
+        signals={"fundamental":"old-research-positive-987654","position":"偏高"},
         llm={"chat_answer":"已有来源绑定的专业报告。"},analysis_result=payload)
     remember(payload=payload)
     result=explain_policy.project("c","d",original)
     assert result["analysisFreshness"]["status"]=="current"
     assert "987654" not in json.dumps(result)
     assert result["data"]==dict(research=[],retrieved_research_views=[],retrieved_principles=[])
+    assert result["signals"] == {"fundamental":"N/A","position":"偏高"}
     assert "987654" in json.dumps(original)  # no cached owner input mutation

@@ -127,6 +127,10 @@ def project(conversation_id, decision_id, value, *, at=None):
         for name in ("research", "retrieved_research_views", "retrieved_principles"):
             if name in result["data"]:
                 result["data"][name] = []
+    if isinstance(result.get("signals"), dict) and "fundamental" in result["signals"]:
+        # The legacy signal is a keyword count over the same raw research,
+        # computed before evidence qualification. It cannot certify a fact.
+        result["signals"]["fundamental"] = "N/A"
     result["analysisFreshness"] = dict(status="current", generated_at=context["generated_at"],
         checked_at=at.isoformat(), execution_authorized=False)
     return result
