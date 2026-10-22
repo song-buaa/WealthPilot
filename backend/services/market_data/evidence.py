@@ -38,6 +38,35 @@ def number(value):
         return None
 
 
+def technical_verified(technical, symbol, at):
+    """Recompute the supplied OHLCV, never trust a model/status label alone."""
+    try:
+        import pandas as pd
+        from backend.services.execution_plan.kline_provider import KlineResult
+        from backend.services.market_data.technical_evidence import from_bars
+        series=technical.get("series",{})
+        daily=series["day"]
+        value=from_bars(symbol,KlineResult(pd.DataFrame(daily["bars"]),technical.get("source","unknown")),at=at)
+        if value is None:
+            return False
+        for period in ("day","week"):
+            expected=value.series[period]
+            actual=series[period]
+            if (expected["status"]!="valid" or actual.get("symbol")!=symbol
+                    or actual.get("currency")!=expected["currency"] or actual.get("end_at")!=expected["end_at"]
+                    or actual.get("parameters")!=expected["parameters"]):
+                return False
+            if actual.get("bars")!=expected["bars"]:
+                return False
+            for key,n in expected["indicators"].items():
+                got=number(actual.get("indicators",{}).get(key))
+                if n is None or got is None or not math.isclose(got,n,rel_tol=1e-8,abs_tol=1e-8):
+                    return False
+        return True
+    except (KeyError,TypeError,ValueError,IndexError,ImportError):
+        return False
+
+
 def record(kind, value, *, at, symbol=None):
     raw = mapping(value)
     provenance = {**mapping(raw.get("metadata")), **mapping(raw.get("provenance"))}
@@ -47,7 +76,7 @@ def record(kind, value, *, at, symbol=None):
     text = (source + " " + str(data_as_of)).lower()
     quality = "valid"
     issues = []
-    if any(x in text for x in ("seed", "demo", "mock")) or merged.get("is_seed") or merged.get("is_mock"):
+    if any(x in text for x in ("seed", "demo", "mock", "fixture", "synthetic")) or merged.get("is_seed") or merged.get("is_mock"):
         quality = "mock" if "mock" in text or merged.get("is_mock") else "seed"
         issues.append(kind.upper()+"_SYNTHETIC")
     date = stamp(data_as_of)
@@ -77,6 +106,27 @@ def record(kind, value, *, at, symbol=None):
         issues.append(kind.upper()+"_PERIOD_UNKNOWN")
         if quality == "valid":
             quality = "unknown"
+    if stamp(merged.get("fetched_at")) is None:
+        issues.append(kind.upper()+"_FETCH_TIME_UNKNOWN")
+        if quality=="valid":
+            quality="unknown"
+    if kind in {"research","event"} and not (raw.get("text") or raw.get("content")):
+        issues.append(kind.upper()+"_CONTENT_UNAVAILABLE")
+        quality="unknown" if quality=="valid" else quality
+    if kind=="quote" and (number(raw.get("current_price")) or 0)<=0:
+        issues.append("QUOTE_PRICE_INVALID")
+        quality="unknown" if quality=="valid" else quality
+    if kind=="fundamentals" and not any(number(raw.get(k)) is not None for k in
+            ("pe_ttm","revenue_ttm","net_income_ttm","profit_margin")):
+        issues.append("FUNDAMENTAL_VALUES_UNAVAILABLE")
+        quality="unknown" if quality=="valid" else quality
+    if (merged.get("fiscal_period") and merged.get("period")
+            and merged["fiscal_period"]!=merged["period"]):
+        issues.append("FINANCIAL_PERIOD_CONFLICT")
+        quality="conflict"
+    if kind=="fundamentals" and raw.get("pe_ttm") is not None and not raw.get("valuation_currency"):
+        issues.append("VALUATION_CURRENCY_UNVERIFIED")
+        quality="unknown" if quality=="valid" else quality
     host = urlparse(str(source_url or "")).hostname or ""
     primary = any(host == domain or host.endswith("."+domain) for domain in
                   ("sec.gov", "hkexnews.hk", "lixiang.com", "pddholdings.com", "meituan.com"))
@@ -95,7 +145,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     market = mapping(market_data)
     symbol = symbol or market.get("symbol")
     records = [record(kind, market[kind], at=at, symbol=symbol)
-               for kind in ("quote", "fundamentals", "technical") if market.get(kind)]
+               for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
     records += [record("research", r, at=at, symbol=symbol) for r in research]
     records += [record("event", r, at=at, symbol=symbol) for r in events]
     issues = []
@@ -116,6 +166,9 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         conflicts.append("PE_EPS_PRICE_CONFLICT")
     if quote and fundamental.get("valuation_currency") and quote.get("currency") != fundamental["valuation_currency"]:
         conflicts.append("VALUATION_CURRENCY_CONFLICT")
+    income, cashflow=number(fundamental.get("net_income_ttm")),number(fundamental.get("free_cash_flow_ttm"))
+    if income is not None and cashflow is not None and income>0>cashflow:
+        conflicts.append("EARNINGS_CASH_FLOW_DIVERGENCE_REQUIRES_REVIEW")
     for r in records:
         if r["symbol"] and symbol and r["symbol"] != symbol:
             r["quality"] = "conflict"
@@ -138,7 +191,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                 r["quality"] = "conflict"
     technical = mapping(market.get("technical"))
     series = technical.get("series", {})
-    if not all(series.get(p, {}).get("status") == "valid" for p in ("day", "week")):
+    if not technical_verified(technical,symbol,at):
         issues.append("TECHNICAL_UNAVAILABLE")
         for r in records:
             if r["kind"] == "technical":
@@ -188,7 +241,7 @@ def safe_market(market_data, assessment):
     if market_data is None:
         return None
     result = copy(market_data)
-    for kind in ("quote", "fundamentals", "technical"):
+    for kind in ("quote", "fundamentals", "technical", "capital_flow"):
         if not any(r["kind"] == kind and r["quality"] == "valid" for r in assessment["records"]):
             setattr(result, kind, None)
     return result

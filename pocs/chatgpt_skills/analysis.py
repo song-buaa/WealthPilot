@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 import uuid
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Turn(BaseModel):
@@ -30,6 +30,12 @@ class AnalysisRequest(BaseModel):
     analysis_scope: Literal['investments', 'net_worth'] = 'investments'
     target_versions: list[StageTargets] = Field(default_factory=list,max_length=16)
     scenario_legs: list[ScenarioLeg] = Field(default_factory=list,max_length=20)
+
+    @model_validator(mode="after")
+    def scenarios_use_same_view(self):
+        if self.scenario_legs and (not self.snapshot_id or any(s.snapshot_id!=self.snapshot_id for s in self.scenario_legs)):
+            raise ValueError("CROSS_SNAPSHOT_SCENARIO_REJECTED")
+        return self
 
     @field_validator('question')
     @classmethod
@@ -150,6 +156,7 @@ def captured_evidence(result, captured, portfolio_id):
     }
     result.evidence.update(holdings=encode(loaded.positions),target_position=encode(loaded.target_position),
         position_evidence=encode(getattr(executed,"position_evidence",{})),
+        effective_rules_provenance=encode(getattr(loaded,"rules_provenance",{})),
         new_entry=loaded.is_new_entry,rules=encode(loaded.rules),rule_result=encode(executed.rule_result),
         signals=encode(executed.signal_result),market_data=encode(executed.market_data),research=encode(loaded.research),
         pattern_evidence=pattern,
@@ -289,8 +296,11 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         if scenario=='review_portfolio' and asset_view:
             from backend.services.allocation_scenarios import target_context
             from backend.services.allocation_service import get_targets, simulate_exit_scenario
+            rule_source=result.evidence.get('effective_rules_provenance',{})
+            effective=result.evidence.get('rules',{})
             context=target_context(asset_view,None,[t.model_dump(mode="json") for t in request.target_versions],
-                result.evidence.get('rules',{}),[t.model_dump(mode="json") for t in get_targets()])
+                effective if rule_source.get('basis')=='configured_rule_file' else None,
+                dict(allocation=[t.model_dump(mode="json") for t in get_targets()],effective_rules=effective,rule_source=rule_source))
             result.evidence['allocation_context']=encode(context)
             if request.scenario_legs:
                 result.evidence['allocation_scenarios']=simulate_exit_scenario(asset_view,

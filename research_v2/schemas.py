@@ -8,7 +8,7 @@ ViewpointCard v2 Pydantic schemas — 三层分离结构。
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -202,7 +202,7 @@ class FactsLayer(BaseModel):
     source_type: SourceType
     source_refs: list[SourceRef] = Field(default_factory=list)
     as_of: datetime
-    ingested_at: datetime = Field(default_factory=datetime.now)
+    ingested_at: datetime = Field(default_factory=lambda:datetime.now(timezone.utc))
     raw_facts: dict = Field(default_factory=dict)
     sentiment_raw: Optional[dict] = None
 

@@ -78,10 +78,32 @@ def target_context(view, issuer_id, versions, formal_rules, defaults, *, at=None
         cash_min = formal.get("min_cash_pct")
         if cash_min is not None and target.get("investment_cash_max") is not None and cash_min>target["investment_cash_max"]:
             warnings.append("TARGET_DISCIPLINE_CASH_CONFLICT")
+        effective=defaults.get("effective_rules",{}) if isinstance(defaults,dict) else {}
+        if (not formal and target.get("investment_cash_max") is not None
+                and effective.get("min_cash_pct",0)>target["investment_cash_max"]):
+            warnings.append("DEFAULT_OR_UNVERIFIED_POLICY_TARGET_CASH_DIFFERENCE")
     return dict(snapshot_id=(view or {}).get("snapshot_id"),issuer_id=issuer_id,
         company_exposure=group,denominator_cny=(view or {}).get("issuer_exposure",{}).get("investment_denominator_cny"),
         formal_discipline=formal_rules,confirmed_stage_targets=target,system_defaults=defaults,
         warnings=warnings,authority="Formal discipline is not overwritten; stage targets are analysis preferences, not forced sale or trading authorization.")
+
+
+def qualification_view(view, legs=(), *, at=None):
+    """Concentration needs ALL denominator inputs; repayment also needs loan facts.
+
+    D1 single-symbol qualification must not bless other accounts in a scenario.
+    Requalification can only restrict the original precise-rebalance boolean.
+    """
+    from copy import deepcopy
+    result=deepcopy(view)
+    if result and result.get("captured_at") and result.get("data_quality",{}).get("policy_version")=="d1.1":
+        from app.asset_views import qualify_view
+        original_allowed=result["data_quality"].get("can_propose_rebalance",False)
+        repayment=any((r.model_dump() if hasattr(r,"model_dump") else r).get("destination")=="repay_cny_loan" for r in legs)
+        qualify_view(result,at=at or datetime.now(timezone.utc),symbol=None,
+            analysis_scope="net_worth" if repayment else "investments")
+        result["data_quality"]["can_propose_rebalance"] &= original_allowed
+    return result
 
 
 class ScenarioLeg(BaseModel):
@@ -114,8 +136,9 @@ def simulate(view, legs, *, amount_qualified=False, target=None):
         if not result.is_finite():
             raise ValueError("NONFINITE_SCENARIO_INPUT")
         return result
-    amount_qualified = (amount_qualified and view.get("context_current",False)
-        and view.get("data_quality",{}).get("analysis_eligibility",{}).get("B",{}).get("allowed",False))
+    qualified=qualification_view(view,legs)
+    amount_qualified = (amount_qualified and qualified.get("context_current",False)
+        and qualified.get("data_quality",{}).get("analysis_eligibility",{}).get("B",{}).get("allowed",False))
     exposure = view["issuer_exposure"]
     denominator=dec(exposure["investment_denominator_cny"])
     if denominator<=0:
@@ -185,11 +208,24 @@ def simulate(view, legs, *, amount_qualified=False, target=None):
             for it in target["issuers"]:
                 if companies.get(it["issuer_id"],0)/denominator>dec(it["target_weight"]+it["tolerance"]):
                     warnings.append("PASSIVE_OR_REMAINING_OVERWEIGHT:"+it["issuer_id"])
+            if target.get("fixed_income_target") is not None and fixed/denominator<dec(target["fixed_income_target"]):
+                warnings.append("FIXED_INCOME_BELOW_STAGE_TARGET")
+            if target.get("fixed_income_ceiling") is not None and fixed/denominator>dec(target["fixed_income_ceiling"]):
+                warnings.append("FIXED_INCOME_ABOVE_STAGE_CEILING")
+            if target.get("investment_cash_max") is not None and cash/denominator>dec(target["investment_cash_max"]):
+                warnings.append("INVESTMENT_CASH_ABOVE_STAGE_TARGET")
+            expected_destination=target.get("funding_policy",{}).get(leg.account_ref)
+            if expected_destination and expected_destination!=leg.destination:
+                warnings.append("FUNDING_DESTINATION_DIFFERS_FROM_CONFIRMED_POLICY")
+        known_cn=sum((companies[g["issuer_id"]] for g in exposure["companies"] if g.get("economic_region")=="CN"),Decimal(0))
+        if target and target.get("china_equity_max") is not None and known_cn/denominator>dec(target["china_equity_max"]):
+            warnings.append("KNOWN_CHINA_DIRECT_EQUITY_ABOVE_STAGE_TARGET")
         rows.append(dict(position_id=leg.position_id,account_ref=leg.account_ref,issuer_id=owner,
             sale_value_cny=sale,destination=leg.destination,proceeds_cny=net,
             costs_cny=cost,investment_assets_cny=denominator,assets_cny=assets,liabilities_cny=debt,
             net_assets_cny=net_assets,fixed_income_cny=fixed,fixed_income_weight=fixed/denominator,
             investment_cash_cny=cash,company_values_cny=dict(companies),
+            known_china_direct_equity_weight=known_cn/denominator,loan_balances_cny=dict(loan_balances),
             company_weights={k:v/denominator for k,v in companies.items()},
             conservation_verified=conserved,assumptions=leg.assumptions,warnings=warnings))
     def serial(value):

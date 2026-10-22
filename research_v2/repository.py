@@ -441,3 +441,41 @@ def query_for_decision_relaxed(
             else:
                 result.append(cl)
     return result
+
+
+def evidence_records(cards):
+    """4.2 read projection of original facts; narrative KPI/as_of are not facts clocks.
+
+    A card's ingestion/as_of may be fetch time. Only explicit source publication
+    or data_as_of fields qualify it; old cards remain traceable but unverified.
+    """
+    from datetime import datetime, timezone
+    output=[]
+    for card in cards:
+        if card.status=="discarded":
+            continue
+        facts=card.facts
+        raw=facts.raw_facts
+        raw=raw if isinstance(raw,dict) else {}
+        published=raw.get("published_at") or raw.get("time_published")
+        if isinstance(published,str) and len(published)==15 and "T" in published:
+            try:
+                published=datetime.strptime(published,"%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc).isoformat()
+            except ValueError:
+                published=None
+        source=getattr(facts.source_type,"value",str(facts.source_type))
+        refs=[r.ref_value for r in facts.source_refs if r.ref_type=="url"]
+        event=getattr(card.narrative.event_type,"value",str(card.narrative.event_type))
+        content=raw.get("content") or raw.get("text") or raw.get("summary") or raw.get("title")
+        period=raw.get("period") or raw.get("fiscal_period") or raw.get("LatestQuarter")
+        if not period and published and event!="fundamental_snapshot":
+            period="event:"+str(published)[:10]
+        output.append(dict(symbol=facts.primary_symbol or (facts.affected_symbols[0] if len(facts.affected_symbols)==1 else None),
+            source=source,source_url=refs[0] if refs else None,record_id=card.card_id,
+            published_at=published,data_as_of=raw.get("data_as_of") or published,
+            fetched_at=facts.ingested_at.isoformat() if facts.ingested_at else None,
+            scope="stored research fact; narrative KPIs not independently verified",period=period,
+            topic=raw.get("topic") or event,content=content,
+            metadata={"evidence_kind":"event" if event!="fundamental_snapshot" else "research"},
+            quality="unverified_until_source_checks",is_fallback=False))
+    return output

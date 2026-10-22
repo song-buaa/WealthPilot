@@ -442,8 +442,15 @@ class ExpressingAgent:
 
         # M8.4: 新建仓分支
         if getattr(loaded, "is_new_entry", False):
+            new_entry_execution = execution_output
+            if assessment:
+                new_entry_execution = copy(execution_output)
+                new_entry_execution.loaded_data = loaded
+                new_entry_execution.market_data = prompt_market
+                if not any(r["kind"]=="fundamentals" and r["quality"]=="valid" for r in assessment["records"]):
+                    loaded.av_fundamentals = None
             async for chunk in self._express_new_entry(
-                out, execution_output, user_query, pattern_ai_context,
+                out, new_entry_execution, user_query, pattern_ai_context,
             ):
                 if not assessment:
                     yield chunk

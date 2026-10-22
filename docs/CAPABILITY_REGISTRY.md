@@ -98,3 +98,5 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 沿原 PEER 增加 [证据 Skill](../skills/wp-assess-position-evidence/SKILL.md)（原13项基础上第14项）；[evidence](../backend/services/market_data/evidence.py)负责统一来源/时间、冲突与L1-L4，[output_policy](../backend/services/market_data/output_policy.py)负责原Expressing输出限制。原 [KlineProvider](../backend/services/execution_plan/kline_provider.py) 与 [technical_evidence](../backend/services/market_data/technical_evidence.py)提供可复算日周线，不替换Pattern治理或交易价格/数量Owner。测试：[证据回归](../tests/test_v42_evidence.py)。状态为隔离开发，非生产交付；实施证据见[4.2记录](V42_IMPLEMENTATION.md)。
 
 4.2阶段目标及情景复用原 [AllocationService](../backend/services/allocation_service.py)，纯计算合同见[allocation_scenarios](../backend/services/allocation_scenarios.py)，回归见[情景金样](../tests/test_v42_scenarios.py)。请求携带确认版本，不写正式纪律或资产表；单标与组合读取同一固定视图，回款保留投资分母/还贷缩小分母分别计算。
+
+4.2结构化ExitPlan/七层报告由[原PEER组合函数](../backend/services/position_analysis.py)复用上述证据/配置owner；[原Research Repository](../research_v2/repository.py)仅投影事实来源，不以叙事KPI/入库时间充当源事实。原Web/SSE/MCP接口返回可选exitPlan，L4关闭，不连交易准备。测试见[三标/资格/边界](../tests/test_v42_exit_plan.py)，报告及生产待验收见[4.2记录](V42_IMPLEMENTATION.md)。

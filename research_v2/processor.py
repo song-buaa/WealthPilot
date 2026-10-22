@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 import openai
 
@@ -115,7 +115,7 @@ def _build_facts_layer(raw_fact: RawFact) -> FactsLayer:
         source_type=raw_fact.source_type,
         source_refs=raw_fact.source_refs,
         as_of=raw_fact.as_of,
-        ingested_at=datetime.now(),
+        ingested_at=datetime.now(timezone.utc),
         raw_facts=raw_fact.payload,
         sentiment_raw={"ticker_sentiment": raw_fact.payload.get("ticker_sentiment", []),
                        "overall_sentiment_score": raw_fact.payload.get("overall_sentiment_score"),

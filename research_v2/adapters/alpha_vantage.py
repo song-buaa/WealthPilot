@@ -236,6 +236,7 @@ class AlphaVantageAdapter(InfoAdapter):
                 affected_symbols=[symbol],
                 payload={
                     "title": article.get("title", ""),
+                    "time_published": article.get("time_published"),
                     "summary": article.get("summary", ""),
                     "source": article.get("source", ""),
                     "topics": [t.get("topic", "") for t in article.get("topics", [])],

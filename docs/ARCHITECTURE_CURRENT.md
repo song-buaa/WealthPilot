@@ -236,3 +236,5 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 ## 4.2 开发扩展：分析证据资格
 
 原 PEER / invoke_skill 仍是唯一专业链路。新增内部证据Skill在原行情/Pattern收集后评估来源时效和冲突，再由原Expressing限制输出粒度。证据来源时钟与抓取时间分开；原行情Registry产生OHLCV，日/周观测与实际订单限价分开。L1方向、L2静态测算、L3精确建议、L4人工交易准备分别门控；4.2不授予L4或任何订单/同步权限。复用入口见[能力索引](CAPABILITY_REGISTRY.md#42-开发单标证据门槛)，开发/验收记录见[4.2记录](V42_IMPLEMENTATION.md)。
+
+4.2的[组合函数](../backend/services/position_analysis.py)把原证据Skill、issuer、AllocationService和原研究事实投影连接到同一个专业分析结果，自己不保存资产/贷款/订单、不调用新模型。版本化目标由分析请求携带，正式纪律/默认参数保留各自owner。情景复算不改变U1快照、手工负债或账户，资金保留投资域与还贷流出分别影响分母。原Expressing/Review后再次核对同一视图，结构化ExitPlan与七层文字报告共用资格；四级分析门槛不能提升原D1拒绝的精确资格。

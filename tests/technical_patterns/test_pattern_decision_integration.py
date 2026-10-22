@@ -649,7 +649,8 @@ def test_single_decision_completes_with_identical_persisted_and_done_snapshot(
         if event.startswith("event: text")
     )
 
-    assert text == "answer unchanged"
+    assert "①目标配置" in text and "⑦来源" in text
+    assert "L4未授权" in text
     assert len(reviewed) == 1
     assert reviewed[0].pattern_evidence is not None
     assert done_payload["actionable"] is False

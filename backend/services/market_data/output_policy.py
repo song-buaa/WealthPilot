@@ -1,5 +1,6 @@
 """Output enforcement shared by original Expressing and MCP final recheck."""
 import json
+import math
 
 
 def prompt_context(assessment):
@@ -16,19 +17,20 @@ def enforce(output, assessment):
     prior = payload.get("confidence")
     try:
         prior = min(max(float(prior),0),1)
+        prior = prior if math.isfinite(prior) else 0
     except (ValueError,TypeError):
         prior = 0
-    if not assessment["qualification"]["L3"]["allowed"]:
-        # Remove ALL unverified model numerical fields, including nested snapshots,
-        # free-form rationale, position size and stale valuation displays.
-        decision = payload.get("decisionType", "hold")
-        if decision not in {"hold","trim","exit","buy_init","buy_more","watch"}:
-            decision = "watch"
-        payload = dict(decisionType=decision,recommendedAction="仅供方向性研究，待补证后复核",
-                       is_new_entry=bool(payload.get("is_new_entry",False)))
-        output.chat_answer = ("单标方向性研究："+decision+"。证据未达到精确减仓资格，不提供价格或股数。\n"
-            +"待补证："+"、".join(assessment["infoNeeded"]))
-        output.raw_text = ""
+    # Numerical recommendations always come from the deterministic plan, even L3.
+    decision = payload.get("decisionType", "hold")
+    if not isinstance(decision,str) or decision not in {"hold","trim","exit","buy_init","buy_more","watch"}:
+        decision = "watch"
+    payload = dict(decisionType=decision,recommendedAction="人工复核下述结构化分析计划",
+                   is_new_entry=payload.get("is_new_entry") is True)
+    from backend.services.position_analysis import exit_plan, report
+    plan=exit_plan(assessment)
+    output.chat_answer=report(assessment,plan,decision)
+    output.raw_text=""
+    payload["exitPlan"]=plan
     payload.update(confidence=min(prior,assessment["confidence_ceiling"]),
         infoNeeded=assessment["infoNeeded"],blockers=assessment["infoNeeded"],
         analysisQualification=assessment["qualification"],

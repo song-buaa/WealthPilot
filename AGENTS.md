@@ -1,6 +1,6 @@
 # AGENTS.md
 
-WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 已 RELEASED，交付证据及持续观察边界见[结项记录](docs/releases/v4.1.md)。下一阶段为4.2，须独立授权；发布状态不代表每个数据源或自然场景全面验证。详细架构、流程和能力索引各自维护，职责分工见[治理文档第 8 节](docs/PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。
+WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 已 RELEASED，交付证据及持续观察边界见[结项记录](docs/releases/v4.1.md)。4.2已在独立分支开展隔离开发，生产操作仍须单独授权；发布状态不代表每个数据源或自然场景全面验证。详细架构、流程和能力索引各自维护，职责分工见[治理文档第 8 节](docs/PROJECT_GOVERNANCE.md#8-文档权威与仓库卫生)。
 
 ## 每个任务的启动顺序
 

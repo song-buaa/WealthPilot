@@ -351,47 +351,9 @@ async def run_chat_stream_v3(
         exec_out.pattern_evidence = snapshot
 
         if plan_out.route == "position_single":
-            from backend.skills import invoke_skill
-            loaded = exec_out.loaded_data
-            market = exec_out.market_data
-            symbol = getattr(market, "symbol", None) or (target.requested_symbol if target else None)
-            native_price = None
-            if analysis_context and symbol:
-                # Use only the SAME listed identity and native market currency.
-                currency = "HKD" if symbol.endswith(":HK") else "USD" if symbol.endswith(":US") else None
-                rows = analysis_context.get("data_quality", {}).get("security_inputs", [])
-                native = [r for r in rows if r.get("security_symbol")==symbol and r.get("currency")==currency]
-                native_price = native[0].get("current_price") if native else None
-            exec_out.position_evidence = invoke_skill("wp-assess-position-evidence",
-                market_data=market, symbol=symbol, asset_view=analysis_context,
-                research=getattr(loaded,"retrieved_research_views",[]) or getattr(loaded,"research",[]),
-                planner=plan_out.planner_trace, stored_price=native_price,
-                principles_available=bool(getattr(loaded,"retrieved_principles",[])))
+            from backend.services.position_analysis import prepare
+            exec_out.position_evidence = prepare(plan_out,exec_out,asset_view=analysis_context,options=analysis_options)
             exec_out.invoked_skills.append("wp-assess-position-evidence")
-            from backend.services.allocation_scenarios import target_context
-            from backend.services.instruments.issuers import IDENTITIES
-            from backend.services.market_data.evidence import mapping
-            from backend.services.allocation_service import get_targets, simulate_exit_scenario
-            options = analysis_options or {}
-            currency = "HKD" if (symbol or "").endswith(":HK") else "USD"
-            issuer_id = IDENTITIES.get((symbol,currency))
-            context = target_context(analysis_context,issuer_id,options.get("target_versions",[]),
-                mapping(getattr(loaded,"rules",{})),[t.model_dump(mode="json") for t in get_targets()])
-            exec_out.position_evidence["allocation_context"] = context
-            if context["warnings"]:
-                for level in ("L3","L4"):
-                    exec_out.position_evidence["qualification"][level]["allowed"] = False
-                    exec_out.position_evidence["qualification"][level]["blockers"] += context["warnings"]
-                exec_out.position_evidence["issues"] += context["warnings"]
-                exec_out.position_evidence["infoNeeded"] += context["warnings"]
-            legs = options.get("scenario_legs",[])
-            if legs:
-                if not analysis_context:
-                    raise ValueError("FIXED_ASSET_VIEW_REQUIRED")
-                exec_out.position_evidence["scenarios"] = simulate_exit_scenario(analysis_context,legs,
-                    amount_qualified=exec_out.position_evidence["qualification"]["L2"]["allowed"],
-                    target=context["confirmed_stage_targets"])
-
 
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
@@ -403,7 +365,8 @@ async def run_chat_stream_v3(
         async for chunk in expressing.run_streaming(
             plan_out, exec_out, user_input, effective_history,
         ):
-            yield _sse("text", {"delta": chunk})
+            if not exec_out.position_evidence:
+                yield _sse("text", {"delta": chunk})
 
         expr_out = expressing.last_output
 
@@ -425,6 +388,20 @@ async def run_chat_stream_v3(
                 "message": f"输出质量待优化（评分 {review_out.score:.2f}）",
                 "failed_rules": review_out.failed_rules,
             })
+
+        if exec_out.position_evidence:
+            from backend.services.position_analysis import prepare
+            from backend.services.market_data.output_policy import enforce
+            from backend.agents.expressing_agent import _emit_text_chunks
+            final_view=analysis_context
+            if final_view and final_view.get("captured_at"):
+                from app.asset_views import public_view
+                final_view=public_view(final_view)
+            # Review/model latency cannot rejuvenate source clocks or view TTL.
+            exec_out.position_evidence=prepare(plan_out,exec_out,asset_view=final_view,options=analysis_options)
+            enforce(expr_out,exec_out.position_evidence)
+            async for chunk in _emit_text_chunks(expr_out.chat_answer):
+                yield _sse("text", {"delta":chunk})
 
         # Optional in-process result adapter; Web SSE behavior stays unchanged.
         if result_callback is not None:

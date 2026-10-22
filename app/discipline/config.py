@@ -11,6 +11,25 @@ from pathlib import Path
 
 _RULES_FILE = Path("data/rules_config.json")
 
+
+def describe_effective_rules(effective):
+    """Read-only provenance for analysis; never changes the active rules.
+
+    Configuration existence does not prove a new user confirmation. A missing,
+    invalid or concurrently changed file cannot relabel defaults as formal rules.
+    """
+    import hashlib
+    encoded=json.dumps(effective,sort_keys=True,ensure_ascii=False).encode()
+    result={"basis":"effective_rules_unverified","digest":hashlib.sha256(encoded).hexdigest(),
+            "user_confirmation":"not_inferred","record_id":"existing-discipline-config"}
+    try:
+        configured=json.loads(_RULES_FILE.read_text(encoding="utf-8"))
+        result["basis"]="configured_rule_file" if configured==effective else "config_changed_or_fallback"
+    except (OSError,ValueError):
+        if effective==_DEFAULT_RULES:
+            result["basis"]="system_default_fallback"
+    return result
+
 # ── v1.4 内置默认值（手册文件缺失时的保底）─────────────────────────────────
 _DEFAULT_RULES: dict = {
     "single_asset_limits": {

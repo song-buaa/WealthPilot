@@ -39,6 +39,7 @@ def _calc_rsi(closes: pd.Series, period: int = 14) -> Optional[float]:
     avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.where(avg_loss != 0, 100.0).where((avg_gain != 0) | (avg_loss != 0),50.0)
     last = rsi.iloc[-1]
     return float(last) if not np.isnan(last) else None
 

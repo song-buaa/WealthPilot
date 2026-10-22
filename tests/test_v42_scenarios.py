@@ -116,3 +116,32 @@ def test_targets_versioned_confirmed_expiring_separate_from_formal_rules():
     assert select_targets([t],at=datetime(2027,1,1,tzinfo=timezone.utc)) is None
     with pytest.raises(ValueError):
         select_targets([{**t,"confirmed_by_user":False}],at=AT)
+
+
+def test_single_symbol_d1_permission_cannot_bless_other_denominator_assets():
+    from tests.test_d1_asset_quality import quality_view, AT as QUALITY_AT
+    from app.asset_views import qualify_view
+    from backend.services.allocation_scenarios import qualification_view
+    v=quality_view()
+    other=deepcopy(v["data_quality"]["security_inputs"][0])
+    other.update(id=99,symbol="PDD:US",security_symbol="PDD:US",price_as_of=None)
+    v["data_quality"]["security_inputs"].append(other)
+    qualify_view(v,at=QUALITY_AT,symbol="LI:US")
+    assert v["data_quality"]["analysis_eligibility"]["B"]["allowed"]
+    v["data_quality"]["can_propose_rebalance"]=False
+    widened=qualification_view(v,at=QUALITY_AT)
+    assert not widened["data_quality"]["analysis_eligibility"]["B"]["allowed"]
+    assert not widened["data_quality"]["can_propose_rebalance"]
+    assert v["data_quality"]["analysis_eligibility"]["B"]["allowed"]
+
+
+def test_default_rule_file_provenance_cannot_claim_formal_confirmation(tmp_path,monkeypatch):
+    from app.discipline import config
+    monkeypatch.setattr(config,"_RULES_FILE",tmp_path/"absent.json")
+    result=config.describe_effective_rules(config._DEFAULT_RULES)
+    assert result["basis"]=="system_default_fallback"
+    assert result["user_confirmation"]=="not_inferred"
+    import json
+    config._RULES_FILE.write_text(json.dumps(config._DEFAULT_RULES))
+    assert config.describe_effective_rules(config._DEFAULT_RULES)["basis"]=="configured_rule_file"
+    assert config.describe_effective_rules({"different":True})["basis"]=="config_changed_or_fallback"

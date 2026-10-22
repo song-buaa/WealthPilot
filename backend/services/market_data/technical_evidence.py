@@ -7,7 +7,7 @@ import pandas as pd
 
 def from_bars(symbol, result, *, at=None):
     import exchange_calendars as calendars
-    from backend.services.market_data.tiger_kline_service import _calc_macd, _calc_rsi
+    from backend.services.market_data.tiger_kline_service import _calc_macd, _calc_rsi, _determine_ma_position, _determine_trend
     from backend.services.market_data.schema import TechnicalData
     at = at or datetime.now(timezone.utc)
     market = symbol.rsplit(":", 1)[-1]
@@ -41,7 +41,7 @@ def from_bars(symbol, result, *, at=None):
     monday = pd.Timestamp(local.date()) - pd.Timedelta(days=local.weekday())
     weekly = weekly[weekly.index < monday]  # unfinished week never masquerades as closed
     series = {}
-    synthetic = any(x in result.source.lower() for x in ("seed","mock","demo"))
+    synthetic = any(x in result.source.lower() for x in ("seed","mock","demo","fixture","synthetic"))
     for period, data in (("day",frame),("week",weekly)):
         if data.empty:
             series[period] = dict(status="unavailable", bars=[])
@@ -74,6 +74,8 @@ def from_bars(symbol, result, *, at=None):
     return TechnicalData(symbol=symbol,current_price=float(frame["close"].iloc[-1]),
         ma5=daily["ma5"],ma20=daily["ma20"],rsi14=daily["rsi14"],macd=daily["macd"],
         macd_signal=daily["macd_signal"],macd_hist=daily["macd_hist"],data_as_of=str(frame.index[-1].date()),
+        ma_position=_determine_ma_position(float(frame["close"].iloc[-1]),daily["ma5"],daily["ma20"]),
+        trend_signal=_determine_trend(_determine_ma_position(float(frame["close"].iloc[-1]),daily["ma5"],daily["ma20"]),daily["rsi14"],daily["macd_hist"]),
         bars_count=len(frame),source=result.source,series=series,
         provenance=dict(source=result.source,record_id=series["day"]["record_id"],
             data_as_of=str(frame.index[-1].date()),fetched_at=at.isoformat(),period="day/week",
