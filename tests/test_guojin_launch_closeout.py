@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from tests.test_guojin_native_sync import native_api, env, facts, publish, refresh_hash
-from tests.test_guojin_daily_sync import daily, execute, _source_clock
+from tests.test_guojin_daily_sync import daily, execute, _source_clock, fixed_synthetic_source_clock
 from tests.guojin_native_fixtures import make_batch, write_json
 
 
