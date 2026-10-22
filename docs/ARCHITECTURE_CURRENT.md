@@ -237,6 +237,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 原 PEER / invoke_skill 仍是唯一专业链路。新增内部证据Skill在原行情/Pattern收集后评估来源时效和冲突，再由原Expressing限制输出粒度。证据来源时钟与抓取时间分开；原行情Registry产生OHLCV，日/周观测与实际订单限价分开。L1方向、L2静态测算、L3精确建议、L4人工交易准备分别门控；4.2不授予L4或任何订单/同步权限。复用入口见[能力索引](CAPABILITY_REGISTRY.md#42-开发单标证据门槛)，开发/验收记录见[4.2记录](V42_IMPLEMENTATION.md)。
 
-4.2的[组合函数](../backend/services/position_analysis.py)把原证据Skill、issuer、AllocationService和原研究事实投影连接到同一个专业分析结果，自己不保存资产/贷款/订单、不调用新模型。版本化目标由分析请求携带，仅作未核验假设；尚无可信用户确认owner，L3关闭。正式纪律/默认参数保留各自owner。情景复算不改变U1快照、手工负债或账户，资金保留投资域与还贷流出分别影响分母。原Expressing/Review后再次核对同一视图，结构化ExitPlan与七层文字报告共用资格；四级分析门槛不能提升原D1拒绝的精确资格。
+4.2的[组合函数](../backend/services/position_analysis.py)连接原证据Skill、issuer、AllocationService和原研究事实投影，不新增资产/贷款/订单Owner。阶段目标复用本地配置真相源模式，[独立配置服务](../backend/services/stage_targets.py)维护候选/确认/期限/停用；仅服务端显式配置的当前有效记录可满足目标门槛，请求布尔或digest不可自证。正式纪律/默认参数保留原owner。候选尚未激活。
 
-4.2远端审查修复：Web多标逐腿和最终输出、组合及MCP adapter均保守门控，原false不能被时效重评升级；Explain不查询新持仓替代固定快照。组合确定性事实报告替代原自由叙事，多标改为受控逐标报告；属于需明确评审的体验收缩。完整P0/P1尚有缺口，不能用CI或合成三标报告宣称功能全部验收，见[工程记录](V42_IMPLEMENTATION.md#远端工程验收与独立代码审查2026-10-22)。
+[自动退出候选](../backend/services/exit_candidates.py)只选择阶段和账户顺序，资金与分母由原simulate_exit_scenario计算；支持不同去向及其他退出后的被动集中比较。原Expressing单次调用保留引用型专业推论，全部数值仍由程序提供。单标、多标、组合、MCP与Explain最终统一门控；L4关闭，D1 false不可升级，缺单位/费用不猜股数。原AV扩展FCF与字段级时钟，缺源降级。
+
+[Web固定快照适配](../backend/services/snapshot_chat.py)以一次性子进程复用U1 frozen_input和既有MCP只读数据库边界，在同一冻结库执行原PEER；不在共享Web进程改绑数据库，不启动后端lifespan。返回后复核资产、贷款、目标、原证据和单位/费用时效，只保存/返回安全投影；会话沿用原conversation服务。无快照仍走原入口，无新增模型引擎、Schema或依赖。工程与真实业务验收边界见[4.2记录](V42_IMPLEMENTATION.md)。

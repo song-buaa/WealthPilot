@@ -97,8 +97,8 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 
 沿原 PEER 增加 [证据 Skill](../skills/wp-assess-position-evidence/SKILL.md)（原13项基础上第14项）；[evidence](../backend/services/market_data/evidence.py)负责统一来源/时间、冲突与L1-L4，[output_policy](../backend/services/market_data/output_policy.py)负责原Expressing输出限制。原 [KlineProvider](../backend/services/execution_plan/kline_provider.py) 与 [technical_evidence](../backend/services/market_data/technical_evidence.py)提供可复算日周线，不替换Pattern治理或交易价格/数量Owner。测试：[证据回归](../tests/test_v42_evidence.py)。状态为隔离开发，非生产交付；实施证据见[4.2记录](V42_IMPLEMENTATION.md)。
 
-4.2阶段目标及情景复用原 [AllocationService](../backend/services/allocation_service.py)，纯计算合同见[allocation_scenarios](../backend/services/allocation_scenarios.py)，回归见[情景金样](../tests/test_v42_scenarios.py)。请求携带未核验版本假设，不写正式纪律或资产表；缺少可信阶段目标确认记录，confirmed_stage_targets为空，L3关闭；单标与组合读取同一固定视图，回款保留投资分母/还贷缩小分母分别计算。
+4.2阶段目标及情景复用原 [AllocationService](../backend/services/allocation_service.py)，纯计算合同见[allocation_scenarios](../backend/services/allocation_scenarios.py)，回归见[情景金样](../tests/test_v42_scenarios.py)。请求携带未核验版本假设；[服务端目标配置](../backend/services/stage_targets.py)提供候选/受控激活/期限/组合隔离，[本地CLI](../scripts/stage_targets.py)不对外暴露写能力；仅显式配置的有效确认记录进入L3必要条件，不写正式纪律或资产表；单标与组合读取同一固定视图，回款保留投资分母/还贷缩小分母分别计算。
 
 4.2结构化ExitPlan/七层报告由[原PEER组合函数](../backend/services/position_analysis.py)复用上述证据/配置owner；[原Research Repository](../research_v2/repository.py)仅投影事实来源，不以叙事KPI/入库时间充当源事实。原Web/SSE/MCP接口返回可选exitPlan，L4关闭，不连交易准备。测试见[三标/资格/边界](../tests/test_v42_exit_plan.py)，报告及生产待验收见[4.2记录](V42_IMPLEMENTATION.md)。
 
-远端review补充：最终单标、多标、组合及MCP adapter统一执行输出限制；组合只保留owner事实/L2静态情景，原自由叙事及多标二次比较被受控报告替代。ExitPlan需调用方提供scenario_legs才有具体账户情景行，完整自动退出路径未交付。实际需求缺口及CI见[工程验收](V42_IMPLEMENTATION.md#远端工程验收与独立代码审查2026-10-22)。
+PR #39 收口：[账户候选](../backend/services/exit_candidates.py)无需手填scenario_legs，复用原计算Owner形成分阶段账户/去向/被动集中比较；[专业解释投影](../backend/services/market_data/output_policy.py)保留原模型引用型定性推论，多入口最终重核。原AV补OCF/CapEx/FCF及字段级期间/披露/估值/抓取时钟；[Web快照适配](../backend/services/snapshot_chat.py)复用U1冻结库及原PEER隔离执行。正式目标未激活、真实三标仍待验收；完成矩阵及CI见[4.2记录](V42_IMPLEMENTATION.md)。

@@ -182,3 +182,91 @@ MCP实际SDK新增协议测试`pocs/chatgpt_skills/test_v42_protocol.py`覆盖�
 - 定向121 passed（`/tmp/wp42-review-targeted-final.log`）；补充原U1与MCP边界32 passed（`/tmp/wp42-review-u1-final.log`）；独立SDK实际schema协议1 passed（`/tmp/wp42-review-protocol.log`）。
 - Offline M5 18/18且公网0（`/tmp/wp42-review-m5-final.log`）；frontend lint/build、compileall及工程文档检查通过。既有大bundle提示保留。
 - 修复期间全量1 failed/1757 passed/7 skipped，唯一失败是上述U1旧提示文案；已最小恢复并通过32项重测。该次混合工作树运行不作为最终候选PASS；冻结代码全量最终结果、CI链接及完整HEAD在PR #39最终工程验收清单中单列。
+
+## PR #39 剩余四项收口（2026-10-22）
+
+本节更新上一轮工程审查留下的 A–D 实际需求缺口；前文测试与“未完成”判断保留为历史记录，以本节最终矩阵为准。开发基线为 `05d6b1de078550f73080174cd8312c0e7991291c`，继续使用原分支和 PR，不改生产环境。
+
+### 定向勘探与最小实施点
+
+| 缺口 | 原 owner 与最小修改 | 依赖和风险 |
+|---|---|---|
+| A 可信阶段目标 | 原 StageTargets 合同 + 本地 File-as-Source-of-Truth 配置；新增 stage_targets 服务与本地管理 CLI，分析只读解析 | 配置路径只能由服务端设置；候选/确认/期限/组合隔离；正式纪律不变 |
+| B 账户级退出 | exit_candidates 只决定账户顺序和阶段，全部金额继续委托原 AllocationService.simulate_exit_scenario；原 ExitPlan/报告展示 | 费用、流动性与划转仍为明确假设；真实单位/费用不足不输出数量 |
+| C 专业解释 | 原 Expressing 模型一次调用增加引用型定性解释合同；原输出 Owner 在所有最终入口重新投影 | 不恢复任意模型交易文本；无合格证据降级；未新增投研或模型引擎 |
+| D FCF/时钟 | 原 AV Fundamentals 客户端增加 CASH_FLOW 字段映射；原 Schema/证据 Owner 按字段重核 | 官方源不保证披露与估值观察时钟；未知不能用抓取日替代 |
+
+### A：候选、受控激活与可信读取
+
+[StageTargetStore](../backend/services/stage_targets.py)保存组合绑定的版本、前驱、内容摘要、候选来源、确认来源/时间、生效与失效日期及状态。写入使用私有权限、锁与原子替换；拒绝符号链接、损坏内容、相同版本篡改、错误摘要、过期及无确认的激活。该文件是独立的用户配置真相源，没有修改正式交易纪律或 SQLite schema。
+
+[管理 CLI](../scripts/stage_targets.py)仅供本地受信操作者使用，不暴露 MCP/Web 写工具，不借用订单确认。服务端必须显式配置 `WEALTHPILOT_STAGE_TARGETS_PATH`，MCP 主进程到业务 Worker 的既有配置白名单透传该路径。请求里的 `confirmed_by_user`、摘要或自填确认来源均不能获得服务端资格；与当前权威版本内容不符也不能升级 L3。可信目标只是 L3 的必要条件，不能绕过行情/财报/全资产质量/正式规则；L4 仍关闭。
+
+使用方法（示例占位值，不代表用户确认）：
+
+```bash
+python scripts/stage_targets.py --store /private/stage-targets.json --portfolio-id 1 candidate --content /private/proposal.json --source user-reviewed-prd-candidate
+python scripts/stage_targets.py --store /private/stage-targets.json --portfolio-id 1 show
+# 仅在取得用户对完整内容、组合、期限、版本及摘要的明确确认后：
+python scripts/stage_targets.py --store /private/stage-targets.json --portfolio-id 1 activate --version VERSION --digest DIGEST --operator OPERATOR --confirmation-reference USER_CONFIRMATION_REFERENCE --confirm-stage-target I_CONFIRM_THIS_VERSION_AND_DIGEST
+python scripts/stage_targets.py --store /private/stage-targets.json --portfolio-id 1 deactivate --version VERSION --reason USER_REQUEST
+```
+
+已根据私有 PRD 方向在用户私有目录准备候选记录，未纳入 Git、未配置到生产、未激活。组合身份、阶段点位及有效期仍须用户正式核对；本次不能代替确认。候选可参与标明假设的研究方案，不能成为权威目标。
+
+### B：无需手填情景腿的分批方案
+
+[账户候选](../backend/services/exit_candidates.py)根据原 issuer 全成员、目标阶段和资金政策自动构造方案：比较不同账户优先、境外转固收与境内偿还人民币信用贷；逐阶段由原计算 Owner 复算分母、负债与净资产。对逐步退出但未指定中间阶段的目标，采用明确标注的三次默认复核；不是新用户目标。集中度方案额外比较“其他逐步退出目标先完成”造成的被动集中，前提假设明确列出，互斥方案不相加。
+
+唯一纳入净资产的人民币信用贷可自动选择；房贷不能冒充信用贷，多个信用贷或未找到时保留方向方案并要求选择。账户资金政策可使用准确 account_ref 或既有 broker 别名，包括 snowball 存储名到 IBKR。缺政策、划转/贷款约束失败及目标未达明确保留 blockers。
+
+金额是静态情景结果，费用/税/换汇成本及最低现金按零时明确标为未核验示意。港股/美股报价、原币、当前 FX、证券/账户绑定的交易单位、费用证据及累计持仓约束齐备后，才可由确定性程序生成数量；否则价格触发/数量为空。真实 Provider 未提供单位和费用证据时不声称已可精确执行。全部候选 `execution_authorized=false`，不创建或准备订单。
+
+### C：专业解释与所有入口的最终门槛
+
+原 PEER 的原模型调用继续解释经营变化、投资逻辑、竞争机制、风险情景、减仓理由及复核条件。新增 `professional_explanation` 为逐段 `basis=inference`、主题、正文与 evidence_refs；事实和数值由原确定性报告展示。有效研究、事件、技术和单独通过质量检查的财报字段可以支撑推论。引用只解析 Owner 返回的当前证据；排除 Seed、Mock、过期、冲突、错误标的和伪造记录。相同新闻同时投影为 research/event 的一致记录兼容，内容不同仍拒绝。
+
+最终过滤保留合格的定性经营分析，剔除模型任意正文、价格/股数/量化交易指令及旧 Explain 残留字段。Web 单标/新建仓、多标、组合、MCP adapter 与 Explain 使用同一投影；最终时效变化会再次降级。无可引用证据时不补写经营结论。Explain 每次读取重新核验服务端保存的同一资产/目标/证据上下文；过期或缺少重核上下文时，返回明确历史状态并撤去旧价格、数量、有效资格及旧专业正文，不重拉数据或调用模型。原自由多标比较不重新开放，仍由逐标受控分析和账户方案比较提供研究依据。
+
+Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_chat.py)复用现有 U1 frozen_input、MCP 只读数据库边界及原 PEER，在一次性隔离子进程中读取同一冻结库；避免共享 Web 进程改绑数据库。返回前复核资产/贷款、目标、原始证据及单位/费用时效，只向 SSE/Explain 发送最终投影。不启动后台同步或订单生命周期；原无快照请求继续原入口。会话历史与最终安全消息复用原 conversation 服务，不另建记忆系统。
+
+### D：真实字段能力与时效语义
+
+原 Alpha Vantage 客户端已支持 `operatingCashflow`、`capitalExpenditures`；严格使用四个连续季度、同币种和可靠支出口径计算 `FCF = OCF - CapEx`，不以绝对值猜测负数编码。数据缺失、季度不齐、币种/期间冲突或口径不明均缺失降级；补齐 FCF 与利润冲突检查。年度/季度原报告、财政期间、正式发布日期、抓取时间和估值观察时间分开保存。
+
+季度经营字段按期间使用 150 日窗口，年度按 450 日；实时估值按 1 日窗口；另外验证披露与抓取时序，不能机械共用 TTL。字段级质量相互独立：合格经营数据可支撑定性解释，但估值缺钟不会因此合格，L3 同时要求经营与估值的可靠证据。FCF 缺失明确标注，不用夹具填真实值。
+
+官方能力依据：[AV CASH_FLOW](https://www.alphavantage.co/documentation/#cash-flow)、[GAAP 字段文档](https://documentation.alphavantage.co/FundamentalDataDocs/gaap_documentation.html)。字段存在不等于账户当前可获取：接口不保证逐报告正式发布日期、估值观察时钟及所有 CapEx 符号口径。原 AV 港股限制、访问额度、最新报告/日周线实际可用性仍须运行环境验收。本轮无真实 Provider 请求或付费模型调用。
+
+### 更新后的完成矩阵
+
+| 需求 | 本轮可交付实现 | 待授权/真实来源验收 |
+|---|---|---|
+| P0-A / D | FCF 正式字段合同、缺失降级、期间/披露/估值/抓取独立时钟、字段质量与冲突 | 三标真实最新披露、AV字段/额度、港股来源 |
+| P0-B | 既有日周线/指标及质量门槛保持，数量另需真实单位/费用 | 原 Provider 实际日周数据和币种 |
+| P0-C / A | 服务端独立目标配置、版本候选/确认/有效期/停用、请求伪造隔离、MCP配置透传 | 用户确认实际候选；尚未激活正式目标 |
+| P0-D | L1–L4 与 false veto 保持，多入口最终重核；可信目标不能自证行情或风控 | 真实资产质量不足时保持降级 |
+| P1-A / B | 三标无完整 scenario_legs 自动形成阶段/账户/资金去向方案、被动集中比较、累计持仓约束 | 真实交易单位、费用、划转及贷款余额；不是交易准备 |
+| P1-B | 原计算 Owner 保持资产守恒、同快照、资金去向与还贷分母 | 实际账户划转/FX/税费不是零假设 |
+| P1-C / C | 原模型的引用型专业解释恢复，事实/推论分开，Web/MCP/Explain/多标统一最终过滤 | 三标真实证据上的专业结论质量验收 |
+
+核心四项实现闭环不等于真实业务验收。LI、PDD、美团的真实生产分析均 **NOT_RUN**；历史三份报告仍仅 SYNTHETIC_FIXTURE，不替代真实验收。正式目标待用户确认，真实单位/费用和来源时钟不足时继续关闭相应精度。没有生产配置/资产写入、迁移、同步、交易准备或订单操作；4.1 生产状态不变。
+
+最终提交、冻结后测试、exact-HEAD 四项 CI、独立审查结果以 PR #39 工程验收清单及最终交付列出的完整 SHA 为准；不把开发期间测试或先前 HEAD 的绿色继承到新 HEAD。满足工程检查后停在待合并评审，不自动合并/Tag/发布。
+
+独立审查附加修复：少见 Unicode 数词（廿、貳、罗马数字等）及全仓语义不能进入定性模型段落；保留日常定性中文。组合自动还贷方案生成后重核 net_worth 负债资格，不能仅沿用投资资产 B。固定快照追问复用现有服务端会话历史，仅存最终过滤后的回答。
+
+### 本轮提交与冻结后验证
+
+| SHA | 职责 |
+|---|---|
+| `68a51d31c78d001098a2c1389d834ec26e6e911e` | A：独立服务端目标候选/确认、原MCP配置路径及协议边界 |
+| `827838b8adda870665dc3ba22cd9526026505483` | D：OCF/CapEx/FCF正式字段、财报和估值独立时钟 |
+| `b8b1d850f6e300e3f6d9114ffcda1578d266f7df` | B：自动账户级阶段退出、原币/单位/费用与累计持仓 |
+| `5f04c3d6488c02ac00b4bba9f1791f9a4749c2a7` | C：原模型引用型专业解释及多入口最终过滤 |
+| `7efbe7dd73f36258329bd804bbdea0e817ac37e0` | Web同快照隔离和原会话兼容、Explain读时重核 |
+| `87699d15af6b267e02932141afbe8596c5bcd426` | Explain排除旧研究的派生信号；最终业务冻结 |
+
+交叉独立审查（AI工程review，不是人工approval）覆盖目标授权、账户/资金守恒、FCF口径、专业解释及Web/MCP/Explain。发现并修复Unicode具体股数、Explain过期/原研究与派生信号、组合自动还贷scope、快照追问历史。最终审查无剩余阻断发现。最新专项：A/B/C/D与MCP124 passed；Explain15、快照14及证据28合计57 passed；独立SDK19 passed；Offline M5 18/18、公网尝试0；前端lint/build通过。完整冻结后pytest结果、最终exact-HEAD CI链接和工程合并判断在PR #39最终清单记载。
+
+本轮任何测试修正均只针对隔离夹具：Explain新增测试首轮全局mock在模块首次导入时污染后续测试引用，已收窄；首次snapshot mock不接受新增可选时钟参数已兼容。实现期间混合工作树的1871 passed、后续中止运行均只作排错，不作为最终冻结候选证明。`decision_engine/`、资产/订单ORM、真实同步/订单/Batch、依赖及前端业务代码没有变更。仅保留用户既有未跟踪归档文件，未读取或纳入提交。
