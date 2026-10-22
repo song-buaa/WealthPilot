@@ -156,6 +156,11 @@ public static class WPGuojinReadonly {
             if (found.Count == 0) {
                 var peer = AutomationElement.FromPoint(new Point(market == "stock" ? 40 : 140, market == "stock" ? 1643 : 1683));
                 if (Visible(peer,pid) && peer.Current.AutomationId == "1001" && peer.Current.ClassName == "CustomTabCtrl") found.Add(peer);
+                else if (peer != null) {
+                    var p = peer.Current;
+                    throw Contract("channel.hit", p.ProcessId+"/"+p.AutomationId+"/"+p.ClassName+"/"+p.IsOffscreen+"/"+p.IsEnabled+"/"+p.BoundingRectangle,
+                        pid+"/1001/CustomTabCtrl/False/True/1,1623,340,80; market="+market);
+                }
             }
             if (found.Count != 1) throw Contract("channel.count", found.Count.ToString(), "1");
             var tab = Unique(found); var b = tab.Current.BoundingRectangle;
