@@ -13,6 +13,30 @@ from tests.guojin_native_fixtures import make_batch, write_json
 from tests.test_guojin_native_sync import native_api, env, facts, publish as original_publish
 
 
+@pytest.fixture(autouse=True)
+def fixed_synthetic_source_clock(monkeypatch, native_api):
+    """Keep source fixtures inside a workday regardless of the runner wall clock.
+
+    Both the existing ready batch and later GUI receipts use the same clock.
+    Individual scheduling tests still override their own completion timestamps.
+    Production scheduling, source freshness and window guards are unchanged.
+    """
+    from tests import guojin_native_fixtures
+    from services.broker_sync.guojin import native_exports
+    instant=datetime(2026,10,22,3,44,45,tzinfo=timezone.utc)
+    class SourceClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+    class ValidationClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value=instant+timedelta(seconds=30)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+    monkeypatch.setattr(guojin_native_fixtures,"datetime",SourceClock)
+    monkeypatch.setattr(native_exports,"datetime",ValidationClock)
+
+
 @pytest.fixture
 def daily(env, tmp_path, monkeypatch):
     from services.broker_sync.guojin import daily_sync as module
