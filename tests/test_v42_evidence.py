@@ -52,6 +52,50 @@ def test_fetched_at_cannot_repair_unknown_source_time():
     assert "FUNDAMENTALS_SOURCE_DATE_UNKNOWN" in result["issues"]
 
 
+@pytest.mark.parametrize("change,issue",[
+    ({"published_at":None}, "RESEARCH_PUBLICATION_TIME_UNKNOWN"),
+    ({"published_at":"2027-01-01"}, "RESEARCH_PUBLICATION_CLOCK_CONFLICT"),
+    ({"published_at":"2026-01-01"}, "RESEARCH_PUBLICATION_STALE"),
+    ({"fetched_at":"2027-01-01"}, "RESEARCH_SOURCE_CLOCK_CONFLICT"),
+    ({"fetched_at":"2026-10-20"}, "RESEARCH_SOURCE_CLOCK_CONFLICT"),
+])
+def test_source_publication_and_fetch_clocks_cannot_rejuvenate_evidence(change,issue):
+    raw=verified("research")
+    raw.update(change)
+    result=assess(research=[raw],symbol="LI:US",at=AT)
+    assert issue in result["issues"]
+    assert result["records"][0]["quality"]!="valid"
+
+
+def test_explain_payload_cannot_retain_model_numeric_strategy():
+    from backend.agents.contracts import ExpressionOutput
+    from decision_engine.llm_engine import LLMResult
+    llm=LLMResult("SELL",["sell at 98765"],["stop 98765"],["sell 98765 shares"],
+        raw_output="98765",original_decision="98765")
+    out=ExpressionOutput(llm_result=llm,structured_payload={"decisionType":"trim","confidence":.9})
+    enforce(out,assess(symbol="LI:US",at=AT))
+    assert "98765" not in str(llm)
+    assert llm.reasoning==llm.risk==llm.strategy==[]
+
+
+def test_explain_uses_frozen_holdings_without_current_db_or_assumed_fx(monkeypatch):
+    from backend.services.decision_service import _serialize_target_position
+    import app.database
+    def forbidden():
+        raise AssertionError("current database must not be consulted")
+    monkeypatch.setattr(app.database,"get_session",forbidden)
+    target=SimpleNamespace(name="LI",ticker="LI",weight=.2,market_value_cny=100,
+        profit_loss_rate=0,platforms=[])
+    evidence=dict(symbol="LI:US",snapshot_id="asset-view:v1:58",records=[],
+        allocation_context=dict(company_exposure=dict(members=[
+            dict(security_symbol="LI:US",quantity=7),dict(security_symbol="2015:HK",quantity=99)])))
+    result=SimpleNamespace(_position_evidence=evidence)
+    value=_serialize_target_position(SimpleNamespace(target_position=target),result)
+    assert value["estimated_shares"]==7 and "current_price" not in value
+    evidence["allocation_context"]={}
+    assert "estimated_shares" not in _serialize_target_position(SimpleNamespace(target_position=target),result)
+
+
 @pytest.mark.parametrize("rebalance,amount,expected",[(True,True,"L3"),(False,True,"L2"),(True,False,"L1")])
 def test_four_independent_qualification_levels(rebalance,amount,expected):
     from dataclasses import asdict

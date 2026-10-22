@@ -187,11 +187,11 @@ def create_server(settings):
             finally:
                 analysis_client.close()
 
-    @server.tool(meta=security_meta, annotations=read, description="Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
+    @server.tool(meta=security_meta, annotations=read, description="Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Pass target_versions and scenario_legs in request; bind each scenario to the same snapshot_id. Client claimed target confirmation is an assumption unless server evidence verifies it. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
     def analyze_position(request: AnalysisRequest) -> AnalysisResult:
         return analysis_call("analyze_position", request)
 
-    @server.tool(meta=security_meta, annotations=read, description="Review investment portfolio/allocation via original PortfolioReview/AssetAllocation PEER and AllocationService snapshot/default targets/deviation. Weights refer to investment holdings, NOT full personal wealth. No sector inference without evidence. Preserve partial/failed sources. No trades.")
+    @server.tool(meta=security_meta, annotations=read, description="Review investment portfolio/allocation via original PortfolioReview/AssetAllocation PEER and AllocationService snapshot/default targets/deviation. Pass target_versions and scenario_legs in request with one snapshot_id; client claimed target confirmation alone is unverified. Weights refer to investment holdings, NOT full personal wealth. No sector inference without evidence. Preserve partial/failed sources. No trades.")
     def review_portfolio(request: AnalysisRequest) -> AnalysisResult:
         return analysis_call("review_portfolio", request)
 

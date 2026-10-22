@@ -713,6 +713,26 @@ def _serialize_target_position(ld, result) -> dict:
         "platforms":        tp.platforms,
     }
 
+    evidence = getattr(result, "_position_evidence", None)
+    if evidence is not None:
+        # A 4.2 explanation must keep the frozen input. Do not query newer
+        # Position rows or reverse-engineer quantities with assumed FX.
+        symbol = evidence.get("symbol")
+        context = evidence.get("allocation_context", {})
+        members = (context.get("company_exposure") or {}).get("members", [])
+        quantities = [m.get("quantity") for m in members
+                      if (m.get("security_symbol") or m.get("symbol")) == symbol]
+        if quantities and all(isinstance(q, (int, float)) and q >= 0 for q in quantities):
+            info["estimated_shares"] = sum(quantities)
+        quote = next((r["values"] for r in evidence.get("records", [])
+                      if r["kind"] == "quote" and r["quality"] == "valid"), {})
+        if quote:
+            info["current_price"] = quote.get("current_price")
+            info["currency"] = quote.get("currency")
+        info.update(symbol=symbol, symbol_source="qualified_analysis_context",
+                    snapshot_id=evidence.get("snapshot_id"))
+        return info
+
     # 持仓股数: 优先从 positions 表直查(不依赖行情)
     if tp.ticker:
         try:

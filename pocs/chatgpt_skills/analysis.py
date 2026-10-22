@@ -249,7 +249,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         if request.target_versions:
             from backend.services.allocation_scenarios import select_targets
             confirmed = select_targets([t.model_dump(mode="json") for t in request.target_versions])
-            question+='\n用户确认的版本化分析目标（不修改正式纪律）：'+json.dumps(confirmed,ensure_ascii=False)
+            question+='\n版本化分析目标及确认来源（未核验目标仅作假设，不修改正式纪律）：'+json.dumps(confirmed,ensure_ascii=False)
         if asset_view and asset_view['data_quality'].get('analysis_eligibility'):
             question+='\n本次分析资格（仅限所列范围；不能代替交易授权）：'+json.dumps(
                 {k:asset_view['data_quality'][k] for k in ('qualification_scope','analysis_eligibility')},ensure_ascii=False)
@@ -282,8 +282,10 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             if errors:result.issues.extend('PEER_'+str(e).upper() for e in errors)
             elif route in ('clarify','low_confidence'):
                 result.status='partial';result.issues.append('NEEDS_CLARIFICATION')
-            elif intent not in expected or route not in ('position_single','portfolio'):
+            elif intent not in expected or route != ('position_single' if scenario == 'analyze_position' else 'portfolio'):
                 result.issues.append('ANALYSIS_ROUTE_MISMATCH')
+                result.conclusion = '分析路由与请求不符；请明确单一标的或组合范围后重试。'
+                result.professional_result = {}
             elif done.get('conclusion_level')=='aborted' or not captured or not result.conclusion:
                 result.issues.append('PROFESSIONAL_ANALYSIS_UNAVAILABLE')
             else:
@@ -292,7 +294,39 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             result.issues.append('ANALYSIS_TIMEOUT')
         finally:
             decision_service.clear_session(conversation)
+        if result.status == 'unavailable':
+            # Failed/partial streams can already contain model text. Never
+            # return it as a recommendation after route/error/timeout failure.
+            result.professional_result = {}
+            if 'ANALYSIS_ROUTE_MISMATCH' not in result.issues:
+                result.conclusion = '专业分析未完成；请根据来源与错误信息补齐条件后重试。'
         result.issues=sorted(set(result.issues+result.data_quality['issues']))
+        if asset_view:
+            from app.asset_views import public_view
+            from backend.services.allocation_scenarios import qualification_view
+            # Recheck before computing scenarios. Portfolio amounts need the
+            # entire denominator, and repayments also need current loan facts.
+            original_precision = asset_view['data_quality'].get('can_propose_rebalance', False)
+            asset_view = public_view(asset_view)
+            asset_view['data_quality']['can_propose_rebalance'] &= original_precision
+            if scenario == 'review_portfolio':
+                asset_view = qualification_view(asset_view, request.scenario_legs)
+        if (scenario == 'analyze_position' and asset_view
+                and all(key in captured for key in ('plan', 'executed', 'expressed', 'reviewed'))):
+            from backend.services.position_analysis import prepare
+            from backend.services.market_data.output_policy import enforce
+            # Reuse the captured PEER result and the SAME immutable snapshot.
+            # Adapter latency may invalidate an initially qualified nested plan.
+            executed, expressed = captured['executed'], captured['expressed']
+            executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
+                options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
+                             scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
+            enforce(expressed, executed.position_evidence)
+            result.evidence['position_evidence'] = encode(executed.position_evidence)
+            result.issues = sorted(set(result.issues + executed.position_evidence.get('issues', [])))
+            if result.status != 'unavailable':
+                result.conclusion = expressed.chat_answer
+                result.professional_result['analysis_result'] = encode(expressed.structured_payload)
         if scenario=='review_portfolio' and asset_view:
             from backend.services.allocation_scenarios import target_context
             from backend.services.allocation_service import get_targets, simulate_exit_scenario
@@ -306,12 +340,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 result.evidence['allocation_scenarios']=simulate_exit_scenario(asset_view,
                     [s.model_dump(mode="json") for s in request.scenario_legs],
                     amount_qualified=asset_view['data_quality'].get('analysis_eligibility',{}).get('B',{}).get('allowed',False),
-                    target=context['confirmed_stage_targets'])
+                    target=context.get('confirmed_stage_targets') or context.get('proposed_stage_targets'))
         if asset_view:
-            from app.asset_views import public_view
-            # A model may take minutes. Requalify the SAME immutable input at
-            # output time; never fetch new data or swap the snapshot identity.
-            asset_view = public_view(asset_view)
             result.snapshot_id = request.snapshot_id
             result.data_quality['asset_view'] = asset_view['data_quality']
             result.data_quality['context_current'] = asset_view['context_current']
@@ -327,5 +357,22 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 result.professional_result = {}
                 result.issues = sorted(set(result.issues + ['ANALYSIS_CONTEXT_EXPIRED']))
                 result.conclusion = '分析上下文已到期，请重新准备资产数据；本次结果不可用于精确调仓。'
+        if (scenario == 'review_portfolio' and result.status != 'unavailable'
+                and (not asset_view or asset_view['context_current'])):
+            # D1 precision is a holdings-quality gate, not L3 research/technical
+            # qualification. Missing snapshots and a true D1 C flag must never
+            # allow free model text or nested numerical trade instructions.
+            result.conclusion = '组合仅作配置方向与静态情景复核；未完成逐标的L3证据核验，不提供可执行股数或限价。'
+            scenarios = result.evidence.get('allocation_scenarios')
+            if scenarios:
+                result.conclusion += '\n静态情景（非交易建议）：' + json.dumps(encode(scenarios), ensure_ascii=False)
+            result.professional_result = dict(analysis_result=dict(
+                mode='restricted_portfolio_analysis',
+                allocation_context=result.evidence.get('allocation_context'),
+                allocation_scenarios=scenarios,
+                allocation_facts=result.evidence.get('allocation'),
+                analysis_eligibility=(asset_view or {}).get('data_quality', {}).get('analysis_eligibility', {}),
+                can_propose_rebalance=False, execution_authorized=False))
+            result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')

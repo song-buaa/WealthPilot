@@ -36,6 +36,16 @@ logger = logging.getLogger(__name__)
 _PATTERN_SIDECAR_TIMEOUT_SECONDS = 30.0
 
 
+def _final_analysis_view(view):
+    """Refresh source age on the same view without upgrading an original veto."""
+    if view and view.get("captured_at"):
+        from app.asset_views import public_view
+        original_allowed = view.get("data_quality", {}).get("can_propose_rebalance", False)
+        view = public_view(view)
+        view["data_quality"]["can_propose_rebalance"] &= original_allowed
+    return view
+
+
 def _sse(event_type: str, data: dict) -> str:
     """SSE 事件格式化（同 v2.6）。"""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -266,6 +276,8 @@ async def run_chat_stream_v3(
                 plan_out, plan_out.multi_assets, user_input,
                 conversation_id, portfolio_id, decision_id,
                 trade_intent,
+                analysis_context=analysis_context,
+                analysis_options=analysis_options,
             ):
                 yield event
             return
@@ -360,12 +372,14 @@ async def run_chat_stream_v3(
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
 
         expressing = get_expressing_agent()
+        guarded_portfolio = (plan_out.route == "portfolio" and isinstance(plan_out.intent, dict)
+                             and plan_out.intent.get("primary_intent") in {"PortfolioReview", "AssetAllocation"})
         # 澄清解析成功后清空 history，让 LLM 用首轮结构化格式输出（对齐 v2.6 L457）
         effective_history = [] if clarification_resolved else conversation_history
         async for chunk in expressing.run_streaming(
             plan_out, exec_out, user_input, effective_history,
         ):
-            if not exec_out.position_evidence:
+            if not exec_out.position_evidence and not guarded_portfolio:
                 yield _sse("text", {"delta": chunk})
 
         expr_out = expressing.last_output
@@ -394,14 +408,21 @@ async def run_chat_stream_v3(
             from backend.services.market_data.output_policy import enforce
             from backend.agents.expressing_agent import _emit_text_chunks
             final_view=analysis_context
-            if final_view and final_view.get("captured_at"):
-                from app.asset_views import public_view
-                final_view=public_view(final_view)
+            final_view = _final_analysis_view(final_view)
             # Review/model latency cannot rejuvenate source clocks or view TTL.
             exec_out.position_evidence=prepare(plan_out,exec_out,asset_view=final_view,options=analysis_options)
             enforce(expr_out,exec_out.position_evidence)
             async for chunk in _emit_text_chunks(expr_out.chat_answer):
                 yield _sse("text", {"delta":chunk})
+
+        if guarded_portfolio:
+            from backend.services.market_data.output_policy import enforce_portfolio
+            from backend.agents.expressing_agent import _emit_text_chunks
+            final_view = analysis_context
+            final_view = _final_analysis_view(final_view)
+            enforce_portfolio(expr_out, asset_view=final_view, options=analysis_options, loaded=exec_out.loaded_data)
+            async for chunk in _emit_text_chunks(expr_out.chat_answer):
+                yield _sse("text", {"delta": chunk})
 
         # Optional in-process result adapter; Web SSE behavior stays unchanged.
         if result_callback is not None:
@@ -518,6 +539,9 @@ async def _handle_position_multi(
     portfolio_id: int,
     decision_id: str,
     trade_intent: StructuredTradeIntent | None = None,
+    *,
+    analysis_context: dict | None = None,
+    analysis_options: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Position multi 路由：循环分析多个标的，拼接结果。
@@ -527,7 +551,7 @@ async def _handle_position_multi(
     from decision_engine.decision_flow import DecisionResult, FlowStage
     from decision_engine.types import IntentResult
     from backend.services.decision_service import (
-        _build_multi_asset_answer, _DECISION_STORE, save_conversation_turn,
+        _DECISION_STORE, save_conversation_turn,
     )
     from backend.agents.expressing_agent import _emit_text_chunks
 
@@ -622,6 +646,12 @@ async def _handle_position_multi(
             {"stage": "reasoning", "label": f"分析 {asset_name} 中..."},
         )
         try:
+            from backend.services.position_analysis import prepare
+            exec_out.position_evidence = prepare(
+                single_plan, exec_out, asset_view=analysis_context,
+                options=analysis_options,
+            )
+            exec_out.invoked_skills.append("wp-assess-position-evidence")
             async for _ in expressing.run_streaming(
                 single_plan, exec_out, user_input, [],
             ):
@@ -643,90 +673,47 @@ async def _handle_position_multi(
                 llm=llm_result,
             )
             results.append((asset_name, dr))
-            _DECISION_STORE.setdefault(conversation_id, {})[dr.decision_id] = dr
         except Exception as e:
             logger.warning(f"[v3] position_multi 表达 {asset_name} 失败: {e}")
             results.append((asset_name, None))
 
-    # P2 修复：调综合 LLM 生成横向对比报告（替代机械拼接）
-    valid_results = [(a, r) for a, r in results if r is not None]
-    if valid_results:
-        try:
-            from decision_engine import llm_engine as _llm
-
-            # 提取全局纪律（从第一个结果的 data.rules，单一数据源，不硬编码 default）
-            global_rules: dict = {}
-            first_data = valid_results[0][1].data if valid_results[0][1] else None
-            if first_data:
-                data_rules = getattr(first_data, "rules", None)
-                if data_rules:
-                    max_pos = getattr(data_rules, "max_single_position", None)
-                    max_eq = getattr(data_rules, "max_equity_pct", None)
-                    min_cash = getattr(data_rules, "min_cash_pct", None)
-                    if max_pos is not None:
-                        global_rules["max_single_position_pct"] = round(max_pos * 100, 1)
-                    if max_eq is not None:
-                        global_rules["max_equity_pct"] = round(max_eq * 100, 1)
-                    if min_cash is not None:
-                        global_rules["min_cash_pct"] = round(min_cash * 100, 1)
-                else:
-                    logger.warning("[v3] data.rules 不存在, global_rules 将为空")
-
-            summaries = []
-            for asset_name, r in valid_results:
-                s: dict = {"name": asset_name}
-                if r.data and r.data.target_position:
-                    tp = r.data.target_position
-                    s["weight_pct"] = round(getattr(tp, "weight", 0) * 100, 2)
-                    s["pnl_rate_pct"] = round(getattr(tp, "profit_loss_rate", 0) * 100, 2)
-                    s["market_value_cny"] = getattr(tp, "market_value_cny", 0)
-                    s["asset_class"] = getattr(tp, "asset_class", "")
-                # 信号
-                if r.signals:
-                    s["signals"] = {
-                        "fundamental": getattr(r.signals, "fundamental_signal", None),
-                        "position": getattr(r.signals, "position_signal", None),
-                        "sentiment": getattr(r.signals, "sentiment_signal", None),
-                    }
-                # 投研数据（含 AV 数据）
-                if r.data and getattr(r.data, "research", None):
-                    s["research"] = [str(item)[:200] for item in list(r.data.research)[:3]]
-                # LLM 分析摘要
-                if r.llm:
-                    s["decision"] = getattr(r.llm, "decision_cn", "") or getattr(r.llm, "decision", "")
-                    s["reasoning"] = list(getattr(r.llm, "reasoning", []) or [])[:5]
-                    s["risk"] = list(getattr(r.llm, "risk", []) or [])[:3]
-                    if r.llm.structured_result:
-                        s["confidence"] = r.llm.structured_result.get("confidence")
-                summaries.append(s)
-
-            yield _sse("stage", {"stage": "reasoning", "label": "生成横向对比报告..."})
-            from backend.services.technical_patterns.ai_integration import (
-                build_pattern_ai_context,
-            )
-
-            pattern_ai_context = (
-                build_pattern_ai_context(snapshot)
-                if invocation_scope is PatternInvocationScope.COMPARE
-                else None
-            )
-            answer = await asyncio.to_thread(
-                _llm.compare_multi_assets, user_input, summaries,
-                global_rules=global_rules,
-                pattern_ai_context=pattern_ai_context,
-            )
-            logger.info(f"[v3] P2 综合对比报告生成成功, 长度={len(answer)}")
-        except Exception as e:
-            logger.warning(f"[v3] compare_multi_assets 失败, 降级到拼接: {e}")
-            try:
-                answer = _build_multi_asset_answer(valid_results, user_input)
-            except Exception:
-                answer = "\n\n---\n\n".join(
-                    f"**{a}**\n\n{getattr(r.llm, 'chat_answer', '') if r and r.llm else '分析完成'}"
-                    for a, r in valid_results
-                )
-    else:
-        answer = "未能成功分析任何标的，建议您逐个标的单独询问。"
+    # Requalify every leg after ALL model latency, against the same frozen view.
+    # An unrestricted comparison model must not reintroduce prices/quantities
+    # removed by the single-position policy. Compose only the gated reports.
+    from backend.services.position_analysis import prepare
+    from backend.services.market_data.output_policy import enforce
+    final_view = analysis_context
+    final_view = _final_analysis_view(final_view)
+    row_by_name = {name: (single_plan, executed)
+                   for name, single_plan, executed in execution_rows}
+    valid_results = []
+    reports = []
+    qualifications = []
+    for name, result in results:
+        single_plan, executed = row_by_name[name]
+        if result is None or executed is None or executed.aborted or result.llm is None:
+            reports.append(f"**{name}**\n\n本标的分析不可用，请补齐证据后单独复核。")
+            continue
+        executed.position_evidence = prepare(
+            single_plan, executed, asset_view=final_view, options=analysis_options,
+        )
+        # Reuse the original result object and policy without another model call.
+        from backend.agents.contracts import ExpressionOutput
+        final_output = ExpressionOutput(
+            llm_result=result.llm,
+            structured_payload=result.llm.structured_result,
+        )
+        enforce(final_output, executed.position_evidence)
+        reports.append(f"**{name}**\n\n{final_output.chat_answer}")
+        qualifications.append(dict(asset=name,
+            qualification=executed.position_evidence["qualification"],
+            snapshot_id=executed.position_evidence["snapshot_id"]))
+        valid_results.append((name, result))
+        from backend.services.market_data.evidence import safe_market
+        result._position_evidence = executed.position_evidence
+        result._market_data = safe_market(executed.market_data, executed.position_evidence)
+        _DECISION_STORE.setdefault(conversation_id, {})[result.decision_id] = result
+    answer = "\n\n---\n\n".join(reports) if reports else "未能成功分析任何标的，建议您逐个标的单独询问。"
 
     # 流式发送
     async for chunk in _emit_text_chunks(answer):
@@ -756,6 +743,8 @@ async def _handle_position_multi(
         "decision_id": last_did,
         "conclusion_level": "multi_asset",
         "conclusion_label": f"已分析 {len(valid_results)} 个标的",
+        "position_qualifications": qualifications,
+        "actionable": False,
     }
     if pattern_evidence_metadata is not None:
         done_payload["pattern_evidence"] = pattern_evidence_metadata
@@ -811,8 +800,12 @@ async def _write_stores_v3(
                 signals=getattr(exec_out, "signal_result", None),
                 llm=getattr(expr_out, "llm_result", None) if expr_out else None,
             )
-            # 附加 market_data 供 explain 序列化时反算持仓股数
+            # Explain uses the same gated snapshot evidence as the final response.
+            dr._position_evidence = getattr(exec_out, "position_evidence", {})
             dr._market_data = getattr(exec_out, "market_data", None)
+            if dr._position_evidence:
+                from backend.services.market_data.evidence import safe_market
+                dr._market_data = safe_market(dr._market_data, dr._position_evidence)
             _DECISION_STORE.setdefault(conversation_id, {})[decision_id] = dr
 
         # ── Portfolio 类 → _ALLOC_EXPLAIN_STORE ──

@@ -98,6 +98,9 @@ def test_real_peer_services_scope_results_and_no_writes(analysis_db,peer,scenari
     if scenario=='analyze_position':
         assert result['professional_result']['analysis_result']['analysisQualification']['L1']['allowed']
         assert 'FIXTURE professional conclusion' not in result['conclusion']
+    elif scenario=='review_portfolio':
+        assert 'FIXTURE professional conclusion' not in result['conclusion']
+        assert result['professional_result']['analysis_result']['mode']=='restricted_portfolio_analysis'
     else:
         assert result['conclusion']=='FIXTURE professional conclusion'
     assert result['scope']['investment_holdings_total_cny']==15000

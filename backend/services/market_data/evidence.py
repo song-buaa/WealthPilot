@@ -106,10 +106,25 @@ def record(kind, value, *, at, symbol=None):
         issues.append(kind.upper()+"_PERIOD_UNKNOWN")
         if quality == "valid":
             quality = "unknown"
-    if stamp(merged.get("fetched_at")) is None:
+    fetched = stamp(merged.get("fetched_at"))
+    if fetched is None:
         issues.append(kind.upper()+"_FETCH_TIME_UNKNOWN")
         if quality=="valid":
             quality="unknown"
+    elif fetched > at or (date is not None and date > fetched):
+        issues.append(kind.upper()+"_SOURCE_CLOCK_CONFLICT")
+        quality="conflict"
+    if kind in {"research", "event"}:
+        published = stamp(merged.get("published_at"))
+        if published is None:
+            issues.append(kind.upper()+"_PUBLICATION_TIME_UNKNOWN")
+            quality="unknown" if quality=="valid" else quality
+        elif published > at or (fetched is not None and published > fetched):
+            issues.append(kind.upper()+"_PUBLICATION_CLOCK_CONFLICT")
+            quality="conflict"
+        elif (at-published).total_seconds() > (90 if kind=="research" else 7)*86400:
+            issues.append(kind.upper()+"_PUBLICATION_STALE")
+            quality="stale" if quality=="valid" else quality
     if kind in {"research","event"} and not (raw.get("text") or raw.get("content")):
         issues.append(kind.upper()+"_CONTENT_UNAVAILABLE")
         quality="unknown" if quality=="valid" else quality
@@ -132,6 +147,9 @@ def record(kind, value, *, at, symbol=None):
         quality="unknown" if quality=="valid" else quality
     expected_currency={"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])
     observed_currency=raw.get("currency") if kind=="quote" else raw.get("valuation_currency") if kind=="fundamentals" else None
+    if kind=="quote" and expected_currency and not observed_currency:
+        issues.append("QUOTE_CURRENCY_UNVERIFIED")
+        quality="unknown" if quality=="valid" else quality
     if expected_currency and observed_currency and observed_currency!=expected_currency:
         issues.append("LISTED_MARKET_CURRENCY_CONFLICT")
         quality="conflict"
@@ -189,6 +207,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
             old_date = stamp(older["published_at"] or older["data_as_of"])
             new_date = stamp(newer["published_at"] or newer["data_as_of"])
             if (old_date and new_date and old_date < new_date
+                    and older["values"].get("topic")
                     and older["values"].get("topic") == newer["values"].get("topic")
                     and older["kind"] in {"research", "fundamentals"}):
                 older["quality"] = "superseded"
