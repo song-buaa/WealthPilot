@@ -20,7 +20,7 @@ public class WPGuojinNative{
  public static bool HasProcessWindow(IntPtr h,int p){return Native;}public static uint GetDpiForWindow(IntPtr h){return 192;}
  public static bool SetForegroundWindow(IntPtr h){Foreground=h.ToInt64();return true;}public static IntPtr GetForegroundWindow(){return new IntPtr(Foreground);}
  public static bool SetCursorPos(int x,int y){X=Clip?x-1:x;Y=y;if(Steal)Foreground=99;return Move;}public static bool GetCursorPos(out WPGuojinPoint p){p=new WPGuojinPoint{X=X,Y=Y};return Read;}
- public static void mouse_event(uint f,uint x,uint y,uint d,UIntPtr p){Clicks++;}public static IntPtr[] Windows=new IntPtr[0];public static IntPtr[] VisibleProcessWindows(int p){return Windows;}public static bool SaveTitle=false;public static string WindowTitle(IntPtr h){return SaveTitle?"另存为":"";}public static IntPtr WindowOwner(IntPtr h){return new IntPtr(10);}public static int WindowProcess(IntPtr h){return 7;}
+ public static void mouse_event(uint f,uint x,uint y,uint d,UIntPtr p){Clicks++;}public static IntPtr[] Windows=new IntPtr[0];public static int DelayWindowsCalls=0;public static IntPtr[] VisibleProcessWindows(int p){if(DelayWindowsCalls-->0)return new IntPtr[0];return Windows;}public static bool SaveTitle=false;public static string WindowTitle(IntPtr h){return SaveTitle?"另存为":"";}public static long Owner=10;public static IntPtr WindowOwner(IntPtr h){return new IntPtr(Owner);}public static int WindowProcess(IntPtr h){return 7;}
 }
 '@
 $source=Get-Content -Raw (Join-Path $PSScriptRoot '../backend/services/broker_sync/guojin/native_gui.cs')
@@ -151,3 +151,18 @@ if($d['status'] -ne 'SAVED' -or $d['dialog_count'] -ne 1 -or $d['edit1001_count'
 $dialog.Children.Add($save)
 Save-Fault 'save.button1_count' 1 1 2
 "Save diagnostic safety probes included: $passed PASS (Fake only)"
+
+# Native Save can precede creation of the owned dialog. Retry observations only;
+# validate the full same-owner identity again before the single Invoke.
+$dialog.Children.Remove($save);[WPGuojinNative]::DelayWindowsCalls=2
+$before=[System.Windows.Automation.InvokePattern]::Invocations
+$d=[WPGuojinReadonly]::Save(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,'synthetic-delayed.txt')
+if($d['attempts'].Count -ne 3 -or $d['attempts'][0].dialog_count -ne 0 -or $d['attempts'][2].dialog_count -ne 1 -or [System.Windows.Automation.InvokePattern]::Invocations -ne $before+1){throw 'ASYNC_SAVE_READINESS_FAILED'};$passed++
+[WPGuojinNative]::Owner=99
+Save-Fault 'save.owner_hwnd' 0 -1 -1
+[WPGuojinNative]::Owner=10
+$before=[System.Windows.Automation.InvokePattern]::Invocations
+$edit.Current.ProcessId=99
+try{$null=[WPGuojinReadonly]::Save(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,'synthetic.txt');throw 'MISSING_FOREIGN_EDIT_FAILURE'}catch{$e=$_.Exception;while($e.InnerException){$e=$e.InnerException};if($e.Data['field'] -ne 'save.edit1001_visible'){throw $_}}
+if([System.Windows.Automation.InvokePattern]::Invocations -ne $before){throw 'FOREIGN_EDIT_INPUT'};$passed++
+"Bounded Save readiness probes included: $passed PASS (Fake only)"

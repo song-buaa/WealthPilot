@@ -136,44 +136,75 @@ public static class WPGuojinReadonly {
         evidence["dialog_count"]=-1; evidence["edit1001_count"]=-1; evidence["button1_count"]=-1;
         string stage="frame";
         try {
-            Frame(hwnd,pid,width,height,dpi,deadline);
-            stage="dialog"; var dialogs=new List<AutomationElement>(); var candidates=new List<object>();
-            foreach(var h in WPGuojinNative.VisibleProcessWindows(pid)) {
-                if(WPGuojinNative.WindowTitle(h)!="另存为") continue;
-                var owner=WPGuojinNative.WindowOwner(h);
-                candidates.Add(new {hwnd=h.ToInt64(),pid=WPGuojinNative.WindowProcess(h),
-                    owner_hwnd=owner.ToInt64(),owner_pid=WPGuojinNative.WindowProcess(owner)});
-                if(owner.ToInt64()!=hwnd) continue;
-                var d=AutomationElement.FromHandle(h);
-                if(Visible(d,pid) && d.Current.ClassName=="#32770" && d.Current.Name=="另存为") dialogs.Add(d);
+            var watch=System.Diagnostics.Stopwatch.StartNew();
+            var attempts=new List<object>(); evidence["attempts"]=attempts;
+            AutomationElement dialog=null,edit=null,save=null; IntPtr handle=IntPtr.Zero;
+            // Opening a native dialog is asynchronous. The observed 300ms click
+            // delay can end before its title/controls exist; do not extend the
+            // global watchdog or send input to an unready/ambiguous target.
+            while(true) {
+                Frame(hwnd,pid,width,height,dpi,deadline);
+                stage="dialog"; var dialogs=new List<AutomationElement>(); var candidates=new List<object>();
+                evidence["edit1001_count"]=-1; evidence["button1_count"]=-1;
+                evidence["dialog_candidates"]=candidates; evidence["dialog_count"]=0;
+                foreach(var h in WPGuojinNative.VisibleProcessWindows(pid)) {
+                    if(WPGuojinNative.WindowTitle(h)!="另存为") continue;
+                    var owner=WPGuojinNative.WindowOwner(h);
+                    candidates.Add(new {hwnd=h.ToInt64(),pid=WPGuojinNative.WindowProcess(h),
+                        owner_hwnd=owner.ToInt64(),owner_pid=WPGuojinNative.WindowProcess(owner)});
+                    if(owner.ToInt64()!=hwnd) throw Contract("save.owner_hwnd",owner.ToInt64().ToString(),hwnd.ToString());
+                    var d=AutomationElement.FromHandle(h);
+                    if(Visible(d,pid) && d.Current.ClassName=="#32770" && d.Current.Name=="另存为") dialogs.Add(d);
+                }
+                evidence["dialog_candidates"]=candidates; evidence["dialog_count"]=dialogs.Count;
+                if(dialogs.Count>1) throw Contract("save.dialog_count",dialogs.Count.ToString(),"1 visible owned #32770/另存为");
+                if(dialogs.Count==1) {
+                    dialog=dialogs[0]; handle=new IntPtr(dialog.Current.NativeWindowHandle);
+                    evidence["dialog_hwnd"]=handle.ToInt64(); evidence["dialog_pid"]=dialog.Current.ProcessId;
+                    evidence["owner_hwnd"]=WPGuojinNative.WindowOwner(handle).ToInt64();
+                    evidence["owner_pid"]=WPGuojinNative.WindowProcess(WPGuojinNative.WindowOwner(handle));
+                    stage="controls"; var edits=new List<AutomationElement>(); var buttons=new List<AutomationElement>();
+                    foreach(var n in Nodes(dialog)) {
+                        if(n.Current.AutomationId=="1001" && n.Current.ClassName=="Edit") edits.Add(n);
+                        if(n.Current.AutomationId=="1" && n.Current.ClassName=="Button" && n.Current.Name=="保存(S)") buttons.Add(n);
+                    }
+                    evidence["edit1001_count"]=edits.Count; evidence["button1_count"]=buttons.Count;
+                    if(edits.Count>1) throw Contract("save.edit1001_count",edits.Count.ToString(),"1 Edit/1001");
+                    if(buttons.Count>1) throw Contract("save.button1_count",buttons.Count.ToString(),"1 Button/1/保存(S)");
+                    if(edits.Count==1 && buttons.Count==1) {
+                        edit=edits[0]; save=buttons[0];
+                        evidence["edit1001_pid"]=edit.Current.ProcessId; evidence["edit1001_hwnd"]=edit.Current.NativeWindowHandle;
+                        evidence["button1_pid"]=save.Current.ProcessId; evidence["button1_hwnd"]=save.Current.NativeWindowHandle;
+                        if(!Visible(edit,pid)) throw Contract("save.edit1001_visible",edit.Current.ProcessId+"/"+edit.Current.IsOffscreen+"/"+edit.Current.IsEnabled,pid+"/False/True");
+                        if(!Visible(save,pid)) throw Contract("save.button1_visible",save.Current.ProcessId+"/"+save.Current.IsOffscreen+"/"+save.Current.IsEnabled,pid+"/False/True");
+                    }
+                }
+                var foreground=WPGuojinNative.GetForegroundWindow();
+                attempts.Add(new {elapsed_ms=watch.ElapsedMilliseconds,dialog_count=evidence["dialog_count"],
+                    edit1001_count=evidence["edit1001_count"],button1_count=evidence["button1_count"],
+                    foreground_hwnd=foreground.ToInt64(),foreground_pid=WPGuojinNative.WindowProcess(foreground),
+                    foreground_owner_hwnd=WPGuojinNative.WindowOwner(foreground).ToInt64()});
+                if(edit!=null && save!=null) break;
+                if(watch.ElapsedMilliseconds>=5000) {
+                    string field=dialogs.Count==0?"dialog_count":(int)evidence["edit1001_count"]==0?"edit1001_count":"button1_count";
+                    throw Contract("save."+field,evidence[field].ToString(),"1 verified target within 5000ms and original deadline");
+                }
+                Thread.Sleep(100);
             }
-            evidence["dialog_candidates"]=candidates; evidence["dialog_count"]=dialogs.Count;
-            if(dialogs.Count!=1) throw Contract("save.dialog_count",dialogs.Count.ToString(),"1 visible owned #32770/另存为");
-            var dialog=dialogs[0]; var handle=new IntPtr(dialog.Current.NativeWindowHandle);
-            evidence["dialog_hwnd"]=handle.ToInt64(); evidence["dialog_pid"]=dialog.Current.ProcessId;
-            evidence["owner_hwnd"]=WPGuojinNative.WindowOwner(handle).ToInt64();
-            evidence["owner_pid"]=WPGuojinNative.WindowProcess(WPGuojinNative.WindowOwner(handle));
-            stage="controls"; var edits=new List<AutomationElement>(); var buttons=new List<AutomationElement>();
-            foreach(var n in Nodes(dialog)) {
-                if(n.Current.AutomationId=="1001" && n.Current.ClassName=="Edit") edits.Add(n);
-                if(n.Current.AutomationId=="1" && n.Current.ClassName=="Button" && n.Current.Name=="保存(S)") buttons.Add(n);
-            }
-            evidence["edit1001_count"]=edits.Count; evidence["button1_count"]=buttons.Count;
-            if(edits.Count!=1) throw Contract("save.edit1001_count",edits.Count.ToString(),"1 Edit/1001");
-            if(buttons.Count!=1) throw Contract("save.button1_count",buttons.Count.ToString(),"1 Button/1/保存(S)");
-            var edit=edits[0]; var save=buttons[0];
-            evidence["edit1001_pid"]=edit.Current.ProcessId; evidence["edit1001_hwnd"]=edit.Current.NativeWindowHandle;
-            evidence["button1_pid"]=save.Current.ProcessId; evidence["button1_hwnd"]=save.Current.NativeWindowHandle;
-            if(!Visible(edit,pid)) throw Contract("save.edit1001_visible",edit.Current.ProcessId+"/"+edit.Current.IsOffscreen+"/"+edit.Current.IsEnabled,pid+"/False/True");
-            if(!Visible(save,pid)) throw Contract("save.button1_visible",save.Current.ProcessId+"/"+save.Current.IsOffscreen+"/"+save.Current.IsEnabled,pid+"/False/True");
             stage="foreground"; WPGuojinNative.SetForegroundWindow(handle);
             if(WPGuojinNative.GetForegroundWindow()!=handle) throw Contract("save.foreground",WPGuojinNative.GetForegroundWindow().ToInt64().ToString(),handle.ToInt64().ToString());
+            evidence["foreground_hwnd"]=WPGuojinNative.GetForegroundWindow().ToInt64();
+            evidence["foreground_pid"]=WPGuojinNative.WindowProcess(WPGuojinNative.GetForegroundWindow());
             stage="filename"; Deadline(deadline);
             var value=(ValuePattern)edit.GetCurrentPattern(ValuePattern.Pattern); value.SetValue(path);
             if(value.Current.Value!=path) throw Contract("save.filename_readback","MISMATCH","EXACT_REQUESTED_PATH");
             stage="authorize_save"; Frame(hwnd,pid,width,height,dpi,deadline);
             if(WPGuojinNative.WindowOwner(handle).ToInt64()!=hwnd || WPGuojinNative.WindowProcess(handle)!=pid ||
                 WPGuojinNative.GetForegroundWindow()!=handle) throw Contract("save.owner_or_foreground","CHANGED","original owner/pid/foreground");
+            if(!Visible(dialog,pid) || dialog.Current.ClassName!="#32770" || dialog.Current.Name!="另存为" ||
+                !Visible(edit,pid) || edit.Current.ClassName!="Edit" || edit.Current.AutomationId!="1001" ||
+                !Visible(save,pid) || save.Current.ClassName!="Button" || save.Current.AutomationId!="1" || save.Current.Name!="保存(S)")
+                throw Contract("save.identity","CHANGED","same visible owned dialog/Edit1001/Button1");
             ((InvokePattern)save.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
             evidence["status"]="SAVED"; return evidence;
         } catch(Exception e) {
