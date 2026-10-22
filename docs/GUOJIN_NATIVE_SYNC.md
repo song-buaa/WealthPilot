@@ -253,7 +253,7 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 ### 正式 worker 的已验证原生路径适配
 
 `guojin.gui-profile.v2` 可显式选择 `native_readonly_path=qnx_verified_readonly_v1`。
-这只复用 Mini 已验证的 CustomTabCtrl 通道、SysTreeView32 只读查询节点、
+这只复用 Mini 已验证的 CCustomTabCtrl 通道、SysTreeView32 只读查询节点、
 TitleBar 系统菜单刷新/保存及 CVirtualGridCtrl 右键保存；不能在该模式追加任意坐标步骤。
 该路径的窗口几何合同为 3866×1774、DPI 192，变化即停止。空名称/空 Class 作为真实
 原生属性保留，通过当前 PID/HWND、账户 allowlist、只读树父节点、精确菜单 ID/名称、
@@ -279,3 +279,8 @@ Linux/macOS CI 的 `-PortableFake` 仅在合成程序集内省略 COM apartment 
 私有 UTF-8 BOM PS1 的 `-File` 在 1.84 秒完成。正式入口只改变启动器传递方式，
 保留 worker 哈希、600/610/640 秒上限及自身子进程收尾；不推定具体桥接参数长度上限。
 该对照仅证明启动通信修复依据，真实三文件和 WARNING 候选验收仍须单独通过。
+
+2026-10-22 首次点击合同核对：真实频道 ClassName 为 `CCustomTabCtrl`，原 worker
+误写为 `CustomTabCtrl`，导致枚举数量 0（预期 1）。按既有成功操作记录修正字面值；
+仍要求唯一控件、ID 1001、当前 PID、可见/启用、精确矩形 1,1623,340,80 和最终
+FromPoint 命中。私有 failure.json 保留实际/预期字段，不能由隔离探针推定真实导出通过。

@@ -71,22 +71,23 @@ foreach($fault in @('body','button')){
  $text.Current.Name='Excel导出成功是否需要直接打开Excel?';$passed++
 }
 "Native helper safety probes: $passed PASS; synthetic types, no desktop access"
-# Native provider omission: direct hit must independently prove the same exact
-# read-only tab. Missing/incorrect evidence still sends zero mouse events.
+# The actual Mini native class has two leading Cs. The old misspelling and
+# missing/incorrect evidence must send zero mouse events.
 [WPGuojinNative]::Windows=@();[WPGuojinNative]::Foreground=10
-$tab=N '' '1001' 'CustomTabCtrl'
+$tab=N '' '1001' 'CCustomTabCtrl'
 $tab.Current.BoundingRectangle=[System.Windows.Automation.Rect]@{X=1;Y=1623;Width=340;Height=80}
+$frame.Children.Add($tab)
 [System.Windows.Automation.AutomationElement]::Hit=$tab
 function Channel {[WPGuojinReadonly]::Click(10,7,3866,1774,192,[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+60,@('synthetic-owner'),'channel','stock')}
 $before=[WPGuojinNative]::Clicks
 Channel
-if([WPGuojinNative]::Clicks -ne $before+2){throw 'OMITTED_TAB_NOT_RESOLVED'};$passed++
-foreach($fault in @('identity','class','pid','layout','hidden','disabled')){
- $tab.Current.AutomationId='1001';$tab.Current.ClassName='CustomTabCtrl';$tab.Current.ProcessId=7;$tab.Current.IsOffscreen=$false;$tab.Current.IsEnabled=$true
+if([WPGuojinNative]::Clicks -ne $before+2){throw 'VERIFIED_TAB_NOT_RESOLVED'};$passed++
+foreach($fault in @('identity','class','old_class','pid','layout','hidden','disabled')){
+ $tab.Current.AutomationId='1001';$tab.Current.ClassName='CCustomTabCtrl';$tab.Current.ProcessId=7;$tab.Current.IsOffscreen=$false;$tab.Current.IsEnabled=$true
  $tab.Current.BoundingRectangle=[System.Windows.Automation.Rect]@{X=1;Y=1623;Width=340;Height=80}
- switch($fault){identity{$tab.Current.AutomationId='other'} class{$tab.Current.ClassName='Button'} pid{$tab.Current.ProcessId=99} layout{$tab.Current.BoundingRectangle=[System.Windows.Automation.Rect]@{X=2;Y=1623;Width=340;Height=80}} hidden{$tab.Current.IsOffscreen=$true} disabled{$tab.Current.IsEnabled=$false}}
+ switch($fault){identity{$tab.Current.AutomationId='other'} class{$tab.Current.ClassName='Button'} old_class{$tab.Current.ClassName='CustomTabCtrl'} pid{$tab.Current.ProcessId=99} layout{$tab.Current.BoundingRectangle=[System.Windows.Automation.Rect]@{X=2;Y=1623;Width=340;Height=80}} hidden{$tab.Current.IsOffscreen=$true} disabled{$tab.Current.IsEnabled=$false}}
  $before=[WPGuojinNative]::Clicks
  try{Channel;throw 'MISSING_CHANNEL_FAILURE'}catch{$e=$_.Exception;while($e.InnerException){$e=$e.InnerException};if($e.Message -notmatch '^AUTO_GUI_'){throw $_}}
  if([WPGuojinNative]::Clicks -ne $before){throw 'UNSAFE_CHANNEL_INPUT'};$passed++
 }
-"Native channel omission safety probes included: $passed PASS"
+"Native channel identity safety probes included: $passed PASS"

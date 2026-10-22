@@ -148,27 +148,14 @@ public static class WPGuojinReadonly {
         var found = new List<AutomationElement>(); double x = 0, y = 0; bool right = kind == "grid";
         string id = "", name = "", cls = "", parent = "";
         if (kind == "channel") {
-            foreach (var n in nodes) if (Visible(n,pid) && n.Current.AutomationId == "1001" && n.Current.ClassName == "CustomTabCtrl") found.Add(n);
-            // The native provider can omit this peer from FindAll even while
-            // FromPoint exposes its verified identity and exact rectangle.
-            // Resolve only the already observed read-only channel point; all
-            // identity, layout, owner and final hit checks still apply.
-            if (found.Count == 0) {
-                var peer = AutomationElement.FromPoint(new Point(market == "stock" ? 40 : 140, market == "stock" ? 1643 : 1683));
-                if (Visible(peer,pid) && peer.Current.AutomationId == "1001" && peer.Current.ClassName == "CustomTabCtrl") found.Add(peer);
-                else if (peer != null) {
-                    var p = peer.Current;
-                    throw Contract("channel.hit", p.ProcessId+"/"+p.AutomationId+"/"+p.ClassName+"/"+p.IsOffscreen+"/"+p.IsEnabled+"/"+p.BoundingRectangle,
-                        pid+"/1001/CustomTabCtrl/False/True/1,1623,340,80; market="+market);
-                }
-            }
+            foreach (var n in nodes) if (Visible(n,pid) && n.Current.AutomationId == "1001" && n.Current.ClassName == "CCustomTabCtrl") found.Add(n);
             if (found.Count != 1) throw Contract("channel.count", found.Count.ToString(), "1");
             var tab = Unique(found); var b = tab.Current.BoundingRectangle;
             // Actual native tab region verified on Mini; layout changes fail
             // closed. These are read-only channel tabs, never order controls.
             if (b.X != 1 || b.Y != 1623 || b.Width != 340 || b.Height != 80) throw Contract("channel.bounds", b.ToString(), "1,1623,340,80");
             x = b.X + (market == "stock" ? 39 : 139); y = b.Y + (market == "stock" ? 20 : 60);
-            id = "1001"; cls = "CustomTabCtrl";
+            id = "1001"; cls = "CCustomTabCtrl";
         } else if (kind == "query" || kind == "branch") {
             name = kind == "query" ? "资金股票" : Branch(market); parent = kind == "query" ? Branch(market) : "";
             foreach (var n in nodes) if (Tree(n,pid,name,parent)) found.Add(n);
