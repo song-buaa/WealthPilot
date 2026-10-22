@@ -13,11 +13,13 @@ try {
     Add-Type -AssemblyName UIAutomationTypes
     Add-Type -AssemblyName WindowsBase
     Add-Type -AssemblyName System.Drawing
-    Add-Type @'
+    Add-Type -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location,
+        [System.Windows.Automation.ControlType].Assembly.Location,[System.Windows.Point].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+// NATIVE_READONLY_HELPER
 [StructLayout(LayoutKind.Sequential)]
 public struct WPGuojinPoint { public int X; public int Y; }
 public class WPGuojinNative {
@@ -153,6 +155,7 @@ public class WPGuojinNative {
         $nodes = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { -not $_.Current.IsOffscreen })
         $names = (@($window.Current.Name) + @($nodes | ForEach-Object {$_.Current.Name})) -join "`n"
+        if ($guiProfile.native_readonly_path) { $names += "`n" + [WPGuojinReadonly]::Names($window.Current.NativeWindowHandle) }
         if ($guiProfile.ocr_identity) {
             if ([WPGuojinNative]::GetForegroundWindow().ToInt64() -ne $window.Current.NativeWindowHandle) { throw 'AUTO_GUI_UNAVAILABLE' }
             $names += "`n" + (Read-WindowIdentity $window)
@@ -276,6 +279,21 @@ public class WPGuojinNative {
         return [DateTimeOffset]::ParseExact($text+' +08:00','yyyy-MM-dd HH:mm:ss zzz',
             [Globalization.CultureInfo]::InvariantCulture)
     }
+    function Native-Click($kind,$market) {
+        $w=Current-Window
+        $null=Controls $w
+        [WPGuojinReadonly]::Click($w.Current.NativeWindowHandle,$qnx.Id,$guiProfile.width,$guiProfile.height,
+            $guiProfile.dpi,$request.deadline,[string[]]$request.shareholder_accounts,$kind,$market)
+        Start-Sleep -Milliseconds 300
+    }
+    function Native-Query($market) {
+        Native-Click 'channel' $market
+        $w=Current-Window
+        if (-not [WPGuojinReadonly]::HasQuery($w.Current.NativeWindowHandle,$qnx.Id,$market)) { Native-Click 'branch' $market }
+        Native-Click 'query' $market
+        $w=Current-Window
+        if (-not [WPGuojinReadonly]::Page($w.Current.NativeWindowHandle,$qnx.Id,$market)) { throw 'AUTO_GUI_UNAVAILABLE' }
+    }
     if (-not $guiProfile.verified_readonly -or -not $guiProfile.evidence_ref) { throw 'AUTO_GUI_CONTRACT_UNVERIFIED' }
     if (Test-Path -LiteralPath $request.directory) { throw 'AUTO_EVIDENCE_INVALID' }
     $null = New-Item -ItemType Directory -Path $request.directory
@@ -284,14 +302,16 @@ public class WPGuojinNative {
     $result = @{schema=$schema;status='EXPORTED';batch=$request.batch;markets=@{}}
     foreach ($market in @('stock','hgt','sgt')) {
         $spec = $guiProfile.markets.$market
-        foreach ($step in $spec.open) { Click-Observed $step }
+        if ($guiProfile.native_readonly_path) { Native-Query $market }
+        else { foreach ($step in $spec.open) { Click-Observed $step } }
         $state = Controls (Current-Window)
         if (-not $spec.page_pattern -or $state.names -notmatch $spec.page_pattern) { throw 'AUTO_GUI_UNAVAILABLE' }
         if ($observedSource) {
             # The actual HK pages expose no authoritative query time/SUCCESS or
             # total count. Observe the guarded action, never manufacture them.
             $actionTime = [DateTimeOffset]::UtcNow
-            Click-Observed $spec.refresh
+            if ($guiProfile.native_readonly_path) { Native-Click 'gear' $market; Native-Click 'refresh' $market }
+            else { Click-Observed $spec.refresh }
             Start-Sleep -Milliseconds 1000
             $window = Current-Window
             $state = Controls $window
@@ -334,11 +354,22 @@ public class WPGuojinNative {
             $graphics.CopyFromScreen([int]$rect.X,[int]$rect.Y,0,0,$image.Size)
             $image.Save((Join-Path $request.directory "$market.png"),[Drawing.Imaging.ImageFormat]::Png)
         } finally { $graphics.Dispose(); $image.Dispose() }
-        foreach ($step in $spec.export) { Click-Observed $step }
-        if ($observedSource -and $market -ceq 'stock') { Select-StockNativeSave }
+        if ($guiProfile.native_readonly_path) {
+            if ($market -ceq 'stock') { Native-Click 'gear' $market; Native-Click 'save_stock' $market }
+            else { Native-Click 'grid' $market; Native-Click 'save_hk' $market }
+        } else {
+            foreach ($step in $spec.export) { Click-Observed $step }
+            if ($observedSource -and $market -ceq 'stock') { Select-StockNativeSave }
+        }
         Check-Deadline
         # Only the verified native Save dialog may receive text. No general
         # SendKeys/password typing and no arbitrary command/script execution.
+        $file = @{stock='stock.txt';hgt='hgt.xls';sgt='sgt.xls'}[$market]
+        $path = Join-Path $request.directory $file
+        if ($guiProfile.native_readonly_path) {
+            [WPGuojinReadonly]::Save($window.Current.NativeWindowHandle,$qnx.Id,$guiProfile.width,$guiProfile.height,
+                $guiProfile.dpi,$request.deadline,$path)
+        } else {
         $dialog = Resolve-SaveDialog $qnx.Id $guiProfile.save_title $window.Current.NativeWindowHandle
         $children = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition)
@@ -353,6 +384,7 @@ public class WPGuojinNative {
         $invoke = $save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         Check-Deadline
         $invoke.Invoke()
+        }
         $limit = [DateTimeOffset]::UtcNow.AddSeconds(20)
         $lastSize = -1
         do {
@@ -401,6 +433,10 @@ public class WPGuojinNative {
     [Console]::WriteLine('{"status":"EXPORTED"}')
 } catch {
     $code = $_.Exception.Message
+    # Reflection wrappers must preserve the bounded, safe reason code.
+    $cause=$_.Exception
+    while ($cause.InnerException) { $cause=$cause.InnerException }
+    if ($cause.Message -match '^(AUTO_[A-Z_0-9]+|NATIVE_BATCH_INCOMPLETE)$') { $code=$cause.Message }
     if ($code -notmatch '^(AUTO_[A-Z_0-9]+|NATIVE_BATCH_INCOMPLETE)$') { $code='AUTO_GUI_UNAVAILABLE' }
     # Best effort private diagnosis, never a usable receipt. No extra query,
     # dismissal or retry on 120022/authentication/timeouts.

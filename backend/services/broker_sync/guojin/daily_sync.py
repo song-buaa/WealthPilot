@@ -171,6 +171,11 @@ def automation_config(config):
             "AUTO_GUI_CONTRACT_UNVERIFIED")
     require(set(profile.get("markets", {})) == set(FILES), "AUTO_GUI_CONTRACT_UNVERIFIED")
     observed_source = profile.get("schema") == "guojin.gui-profile.v2"
+    native_path = profile.get("native_readonly_path")
+    if native_path:
+        require(observed_source and native_path == "qnx_verified_readonly_v1" and
+                (profile.get("width"), profile.get("height"), profile.get("dpi")) == (3866,1774,192),
+                "AUTO_GUI_CONTRACT_UNVERIFIED")
     def nonempty(value):
         return isinstance(value, str) and 0 < len(value) <= 2048
     def selector(value, *, read=False, button=False):
@@ -201,6 +206,9 @@ def automation_config(config):
         else:
             for field in ("query", "rows", "success") + (("total",) if key == "stock" else ()):
                 selector(market.get(field), read=True)
+        if native_path:
+            require(all(market.get(k) is None for k in ("open","refresh","export")), "AUTO_GUI_CONTRACT_UNVERIFIED")
+            continue
         for steps in (market.get("open"), market.get("export"), [market.get("refresh")]):
             require(isinstance(steps, list) and len(steps) <= 16, "AUTO_GUI_CONTRACT_UNVERIFIED")
             for step in steps:
@@ -227,7 +235,8 @@ def export_windows(config, auto, profile, batch, now):
         directory=str(PureWindowsPath(auto["guest_root"])/batch),
         deadline=(now.timestamp()+600))
     payload = base64.b64encode(json.dumps(request, ensure_ascii=False).encode()).decode()
-    script = "$WPRequest='"+payload+"'\n"+PS_SCRIPT.read_text()
+    script = "$WPRequest='"+payload+"'\n"+PS_SCRIPT.read_text().replace(
+        "// NATIVE_READONLY_HELPER", PS_SCRIPT.with_name("native_gui.cs").read_text())
     compressed = gzip.compress(script.encode("utf-8"), mtime=0)
     fd, transport_name = tempfile.mkstemp(dir=auto["shared_root"], prefix="wp-guojin-worker-", suffix=".gz")
     with os.fdopen(fd, "wb") as transport:

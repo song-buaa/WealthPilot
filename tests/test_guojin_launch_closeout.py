@@ -205,3 +205,21 @@ def test_warning_boundary_uses_detail_total_against_independent_total(env):
     result=reconcile_assets(Decimal('301500'),Decimal(0),Decimal('299999.98'),Decimal('300000'))
     assert result['status']=='WARNING' and result['absolute_difference_cny']=='1500'
     assert result['securities_difference_cny']=='1500.02'
+
+
+def test_verified_native_path_rejects_guessed_layout_and_arbitrary_actions(daily):
+    observed_profile(daily)
+    path=Path(daily.config['automation']['profile']);p=json.loads(path.read_text())
+    p.update(native_readonly_path='qnx_verified_readonly_v1',width=3866,height=1774)
+    for m in p['markets'].values():
+        for k in ('open','refresh','export'): m.pop(k,None)
+    write_json(path,p)
+    assert daily.module.automation_config(daily.config)[1]['native_readonly_path']=='qnx_verified_readonly_v1'
+    for changed in ({'dpi':96},{'width':3840},{'native_readonly_path':'blind_clicks'},
+                    {'schema':'guojin.gui-profile.v1'}):
+        write_json(path,{**p,**changed})
+        with pytest.raises(ValueError,match='AUTO_GUI_CONTRACT_UNVERIFIED'):
+            daily.module.automation_config(daily.config)
+    p['markets']['hgt']['open']=[{'x':0,'y':0}];write_json(path,p)
+    with pytest.raises(ValueError,match='AUTO_GUI_CONTRACT_UNVERIFIED'):
+        daily.module.automation_config(daily.config)

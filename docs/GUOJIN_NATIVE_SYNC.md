@@ -249,3 +249,17 @@ R01/R02/I01仅修改来源恢复、原生点击保护及调度去重。Registry�
 - 正式PS1仍用既有guest parent/child看门狗和当前执行策略，不设置Bypass。为避免扩大原生命令行，压缩worker通过已有Parallels共享目录的私有临时文件传送，guest核对SHA-256后写本地UTF-8 BOM PS1并执行；原有有界超时、仅清理自身child和临时文件不变。无需文件传输服务。
 
 部署与启用：先固定合并SHA及四项CI，沿原Runbook停写/一致性备份/安装并统一相关组件，无DDL；保留Owner、allowlist、ready、Last-good及交易权限。先在独立inbox运行原CLI默认validate取得真实三文件/身份/差额/partial证据。展示真实证据与精确执行计划后，分别取得生产持仓写入和双次任务启用确认，再进行原受控同步和Web/MCP/固定视图/幂等验收。确认后才启用原机制11:45、17:30两个触发并暂停旧17:30单次验收；manual仍共用CLI。回滚先停新触发，保留原件/ready/收据/新事实并恢复已确认组件，不用旧DB覆盖新事实。
+
+### 正式 worker 的已验证原生路径适配
+
+`guojin.gui-profile.v2` 可显式选择 `native_readonly_path=qnx_verified_readonly_v1`。
+这只复用 Mini 已验证的 CustomTabCtrl 通道、SysTreeView32 只读查询节点、
+TitleBar 系统菜单刷新/保存及 CVirtualGridCtrl 右键保存；不能在该模式追加任意坐标步骤。
+该路径的窗口几何合同为 3866×1774、DPI 192，变化即停止。空名称/空 Class 作为真实
+原生属性保留，通过当前 PID/HWND、账户 allowlist、只读树父节点、精确菜单 ID/名称、
+边界及 FromPoint 命中联合核验，不填造控件身份。UIA 原生树/菜单与保存操作在有界 MTA
+线程内执行；超时取消本地后续输入，原 guest watchdog 仍负责进程收尾。
+
+此适配不改变来源 v2 的 UNKNOWN 时间/完整性、不改变 PR #36 双上限 WARNING、
+ready/SyncExecutor 或部分事实仅 Upsert、不清仓的政策。真实三文件导出和候选验证应使用
+私有测试配置及独立目录，不能切换生产 ready；代码合并不等于生产持仓发布或定时启用。
