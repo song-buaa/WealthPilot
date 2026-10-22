@@ -447,7 +447,8 @@ public class WPGuojinNative {
     # dismissal or retry on 120022/authentication/timeouts.
     if ($locked -and (Test-Path -LiteralPath $request.directory)) {
         try {
-            $diagnosis = @{status='FAILED';reason_code=$code;observed_at=[DateTimeOffset]::UtcNow.ToString('o')}
+            $diagnosis = @{status='FAILED';reason_code=$code;observed_at=[DateTimeOffset]::UtcNow.ToString('o');
+                failure_line=[int]$_.InvocationInfo.ScriptLineNumber;failure_stack=$_.ScriptStackTrace}
             if ($window -and [WPGuojinNative]::GetForegroundWindow().ToInt64() -eq $window.Current.NativeWindowHandle) {
                 $bounds = $window.Current.BoundingRectangle
                 $image = New-Object Drawing.Bitmap([int]$bounds.Width,[int]$bounds.Height)
