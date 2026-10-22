@@ -105,9 +105,16 @@ class BrokerKlineProvider(KlineProvider):
             tiger_symbol = symbol_to_tiger_ticker(symbol)
 
             project_root = Path(__file__).parent.parent.parent.parent
-            pk_path = project_root / "backend" / "secrets" / "tiger_private_key.pem"
-            if not pk_path.exists():
-                pk_path = Path(__file__).parent.parent.parent / "secrets" / "tiger_private_key.pem"
+            from backend.core.env import normalized_optional_env
+            configured_key = normalized_optional_env("TIGER_PRIVATE_KEY_PATH")
+            if configured_key:
+                # Same absolute/relative semantics as the original Tiger sync
+                # configuration; production credentials live outside code.
+                pk_path = project_root / configured_key
+            else:
+                pk_path = project_root / "backend" / "secrets" / "tiger_private_key.pem"
+                if not pk_path.exists():
+                    pk_path = Path(__file__).parent.parent.parent / "secrets" / "tiger_private_key.pem"
 
             config = TigerOpenClientConfig(sandbox_debug=False)
             config.tiger_id = os.environ.get("TIGER_ID")

@@ -168,3 +168,23 @@ def test_pe_eps_consistency_cannot_assume_adr_or_hk_share_basis():
     assert "EPS_LISTED_UNIT_BASIS_UNVERIFIED" in result["issues"]
     assert result["records"][0]["quality"]=="unknown"
     assert not result["qualification"]["L3"]["allowed"]
+
+
+def test_original_kline_provider_reuses_configured_private_key_without_live_sdk_calls(monkeypatch,tmp_path):
+    from unittest.mock import Mock, patch
+    from backend.services.execution_plan.kline_provider import BrokerKlineProvider
+    private_path=tmp_path/"synthetic-private-key.pem"
+    monkeypatch.setenv("TIGER_PRIVATE_KEY_PATH",str(private_path))
+    monkeypatch.setenv("TIGER_ID","synthetic-id")
+    monkeypatch.setenv("TIGER_ACCOUNT","synthetic-account")
+    sdk=Mock()
+    sdk.get_bars.return_value=pd.DataFrame(dict(symbol=["3690"],time=["2026-10-21"],
+        open=[10],high=[11],low=[9],close=[10],volume=[1000]))
+    with patch("tigeropen.common.util.signature_utils.read_private_key",return_value="synthetic-key") as reader, \
+         patch("tigeropen.tiger_open_config.TigerOpenClientConfig",return_value=SimpleNamespace()), \
+         patch("tigeropen.quote.quote_client.QuoteClient",return_value=sdk):
+        result=BrokerKlineProvider().get_kline("3690:HK","HK")
+    assert result is not None and result.source=="broker"
+    reader.assert_called_once_with(str(private_path))
+    sdk.get_bars.assert_called_once()
+    assert not private_path.exists()  # No credential file was created or read.
