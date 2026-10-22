@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 import json
 import multiprocessing
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 
@@ -237,18 +237,20 @@ def test_bounded_process_cleanup(daily):
 
 def test_parallels_contract_uses_current_user_guest_watchdog_and_no_password(daily,monkeypatch):
     calls=[]
+    launchers=[]
     def fake(argv,timeout):
         calls.append((argv,timeout))
         if 'status' in argv:return b'VM synthetic running'
+        path=Path(daily.config['automation']['shared_root'])/PureWindowsPath(argv[-1]).name
+        launchers.append(path.read_text(encoding='utf-8-sig'))
         return b'{"status":"EXPORTED"}'
     monkeypatch.setattr(daily.module,'bounded',fake)
     auto,profile=daily.module.automation_config(daily.config)
     assert daily.module.export_windows(daily.config,auto,profile,'synthetic',daily.now).name=='synthetic'
     argv,budget=calls[-1]
     assert '--current-user' in argv and budget==640 and '--password' not in argv
-    assert len(argv[-1]) < 28000  # nested -EncodedCommand exceeded Windows 32767 limit
-    import base64
-    launcher=base64.b64decode(argv[-1]).decode('utf-16le')
+    assert '-File' in argv and '-EncodedCommand' not in argv
+    launcher=launchers[0]
     assert 'WaitForExit(610000)' in launcher and '$child.Kill()' in launcher
     assert 'GzipStream' in launcher and 'Remove-Item -LiteralPath $out,$err,$taskfile' in launcher
     script=daily.module.PS_SCRIPT.read_text()

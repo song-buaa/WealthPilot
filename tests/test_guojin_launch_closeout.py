@@ -175,7 +175,8 @@ def test_observed_action_windows_remain_independent_and_source_time_unknown(dail
 
 @pytest.mark.parametrize('timeout',[False,True])
 def test_private_shared_worker_is_hash_bound_and_cleaned(daily,monkeypatch,timeout):
-    import base64, gzip, hashlib, stat
+    import gzip, hashlib, stat
+    from pathlib import PureWindowsPath
     seen=[]
     def fake(argv,timeout):
         if 'status' in argv: return b'VM synthetic running'
@@ -187,7 +188,12 @@ def test_private_shared_worker_is_hash_bound_and_cleaned(daily,monkeypatch,timeo
         assert b'function Click-Observed' in gzip.decompress(payload)
         assert gzip.decompress(payload).count(b'using System;') == 1
         assert b'public static class WPGuojinReadonly' in gzip.decompress(payload)
-        launcher=base64.b64decode(argv[-1]).decode('utf-16le')
+        assert '-File' in argv and '-EncodedCommand' not in argv
+        launcher_path=Path(daily.config['automation']['shared_root'])/PureWindowsPath(argv[-1]).name
+        seen.append(launcher_path)
+        assert stat.S_IMODE(launcher_path.stat().st_mode)==0o600
+        assert launcher_path.read_bytes().startswith(b'\xef\xbb\xbf')
+        launcher=launcher_path.read_text(encoding='utf-8-sig')
         assert hashlib.sha256(payload).hexdigest() in launcher and path.name in launcher
         assert 'ReadAllBytes' in launcher and 'AUTO_EVIDENCE_INVALID' in launcher
         if failure: raise ValueError('AUTO_TIMEOUT')
@@ -199,7 +205,7 @@ def test_private_shared_worker_is_hash_bound_and_cleaned(daily,monkeypatch,timeo
         with pytest.raises(ValueError,match='AUTO_TIMEOUT'):
             daily.module.export_windows(daily.config,auto,profile,'synthetic',daily.now)
     else: daily.module.export_windows(daily.config,auto,profile,'synthetic',daily.now)
-    assert len(seen)==1 and not seen[0].exists()
+    assert len(seen)==2 and all(not p.exists() for p in seen)
 
 
 def test_warning_boundary_uses_detail_total_against_independent_total(env):

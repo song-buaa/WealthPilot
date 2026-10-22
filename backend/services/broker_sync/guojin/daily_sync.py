@@ -246,6 +246,7 @@ def export_windows(config, auto, profile, batch, now):
         transport.flush()
         os.fsync(transport.fileno())
     guest_transport = str(PureWindowsPath(auto["guest_root"])/Path(transport_name).name)
+    launcher_name = None
     try:
         # prlctl timeout alone doesn't cancel a guest process. A guest-side parent
         # owns ONLY this exporter child and kills it after the finite budget; never
@@ -275,11 +276,17 @@ def export_windows(config, auto, profile, batch, now):
      Remove-Item -LiteralPath $out,$err,$taskfile -Force -ErrorAction SilentlyContinue
     }
     '''.replace("TRANSPORT_PATH", guest_transport.replace("'", "''")).replace("TRANSPORT_SHA256", sha(compressed))
-        command = base64.b64encode(launcher.encode("utf-16le")).decode()
-        require(len(command) < 28000, "AUTO_GUI_CONTRACT_UNVERIFIED")  # Windows CreateProcess 32767-char ceiling
+        # Mini's current-user bridge stalls on this long EncodedCommand before
+        # the launcher executes. The identical BOM script runs with -File;
+        # retain the same hash-bound worker, watchdog and private shared path.
+        fd, launcher_name = tempfile.mkstemp(dir=auto["shared_root"], prefix="wp-guojin-launcher-", suffix=".ps1")
+        with os.fdopen(fd, "w", encoding="utf-8-sig") as file:
+            file.write(launcher)
+            file.flush()
+            os.fsync(file.fileno())
+        guest_launcher = str(PureWindowsPath(auto["guest_root"])/Path(launcher_name).name)
         result = bounded([executable, "exec", auto["vm"], "--current-user", "powershell.exe",
-            "-NoProfile", "-NonInteractive", "-EncodedCommand",
-            command], timeout=640)
+            "-NoProfile", "-NonInteractive", "-File", guest_launcher], timeout=640)
         try:
             response = json.loads(result.decode("utf-8-sig"))
         except (ValueError, UnicodeError):
@@ -289,6 +296,8 @@ def export_windows(config, auto, profile, batch, now):
         return Path(auto["shared_root"])/batch
     finally:
         Path(transport_name).unlink(missing_ok=True)
+        if launcher_name is not None:
+            Path(launcher_name).unlink(missing_ok=True)
 
 
 def seal_candidate(config, directory, source, started, finished):

@@ -126,7 +126,7 @@ python backend/scripts/guojin_sync_e2e.py --config /private/native-config.json
 |---|---|---|
 | EXISTING | 原 `native_exports.py` / GuojinSyncService / Adapter / Repository / PositionUpsertService | 三文件解析、人民币金额对账、Owner、旧行订正、claim/fence 和 Last-good 完全复用 |
 | EXISTING | `backend/main.py` 22:00 同步 | 国金旧 MiniQMT 已退出；Tiger/Futu/snowball 不变，不把 GUI 工作塞进 Backend 生命周期 |
-| EXISTING | Mini 既有 Codex 单次任务和 `work/win_ps.py` | 复用 `prlctl exec <VM> --current-user powershell.exe -NoProfile -EncodedCommand`；不新建 scheduler/服务 |
+| EXISTING | Mini 既有 Codex 单次任务和 `work/win_ps.py` | 复用 `prlctl exec <VM> --current-user powershell.exe -NoProfile`；正式启动器使用私有 BOM PS1 的 `-File`，不新建 scheduler/服务 |
 | EXTEND | [daily_sync](../backend/services/broker_sync/guojin/daily_sync.py) / [CLI](../backend/scripts/guojin_daily_sync.py) | 定时/按需共用一次有界执行、私有状态、跨进程锁、重启续接已封存批次 |
 | EXTEND | [Windows 原生适配层](../backend/services/broker_sync/guojin/native_export.ps1) | 当前会话/窗口/账户门、user32 原生输入、来源时间/独立行数/完整查询证据、原生保存、私有截图及哈希 |
 | EXTEND | 原 `load_batch(config, candidate=...)` | 候选验证不切换 ready；通过后同文件系统 fsync + replace 原子切换，再进原 CLI/Executor |
@@ -272,3 +272,10 @@ Linux/macOS CI 的 `-PortableFake` 仅在合成程序集内省略 COM apartment 
 不能证明真实 Windows MTA、原生控件或三文件导出成功。2026-10-22 本轮真实 worker
 验收尚未完成；恢复屏幕共享后须在独立候选目录完成正式 worker 导出与原验证器校验，
 不能用历史辅助脚本成功或这些 Fake 探针替代。
+
+2026-10-22 启动超时复现：10:56:32 至 11:07:13（约 641 秒）触发 Mac 通信
+640 秒上限，Windows 批次目录未创建。普通 `-File`/短 `-EncodedCommand` 查询正常；
+原启动器配合无 GUI 的极简子脚本，以长 `-EncodedCommand` 仍超时，相同内容改为
+私有 UTF-8 BOM PS1 的 `-File` 在 1.84 秒完成。正式入口只改变启动器传递方式，
+保留 worker 哈希、600/610/640 秒上限及自身子进程收尾；不推定具体桥接参数长度上限。
+该对照仅证明启动通信修复依据，真实三文件和 WARNING 候选验收仍须单独通过。
