@@ -185,6 +185,8 @@ def test_private_shared_worker_is_hash_bound_and_cleaned(daily,monkeypatch,timeo
         assert stat.S_IMODE(path.stat().st_mode)==0o600
         payload=path.read_bytes()
         assert b'function Click-Observed' in gzip.decompress(payload)
+        assert gzip.decompress(payload).count(b'using System;') == 1
+        assert b'public static class WPGuojinReadonly' in gzip.decompress(payload)
         launcher=base64.b64decode(argv[-1]).decode('utf-16le')
         assert hashlib.sha256(payload).hexdigest() in launcher and path.name in launcher
         assert 'ReadAllBytes' in launcher and 'AUTO_EVIDENCE_INVALID' in launcher
@@ -211,6 +213,9 @@ def test_verified_native_path_rejects_guessed_layout_and_arbitrary_actions(daily
     observed_profile(daily)
     path=Path(daily.config['automation']['profile']);p=json.loads(path.read_text())
     p.update(native_readonly_path='qnx_verified_readonly_v1',width=3866,height=1774)
+    # Native export prompt is bound to its observed owned body/No button;
+    # the profile must not invent an unobserved top-level window title.
+    p.pop('excel_prompt_title',None);p.pop('excel_no',None)
     for m in p['markets'].values():
         for k in ('open','refresh','export'): m.pop(k,None)
     write_json(path,p)

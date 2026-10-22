@@ -259,6 +259,8 @@ TitleBar 系统菜单刷新/保存及 CVirtualGridCtrl 右键保存；不能在�
 原生属性保留，通过当前 PID/HWND、账户 allowlist、只读树父节点、精确菜单 ID/名称、
 边界及 FromPoint 命中联合核验，不填造控件身份。UIA 原生树/菜单与保存操作在有界 MTA
 线程内执行；超时取消本地后续输入，原 guest watchdog 仍负责进程收尾。
+港股保存后的 owned 提示复用真实证据中的 `1040/Static` 导出成功及打开 Excel 文案，
+只允许 `7/Button/否(N)`；不以泛化“提示”标题接受其他对话框，不为未知窗口伪造名称。
 
 此适配不改变来源 v2 的 UNKNOWN 时间/完整性、不改变 PR #36 双上限 WARNING、
 ready/SyncExecutor 或部分事实仅 Upsert、不清仓的政策。真实三文件导出和候选验证应使用

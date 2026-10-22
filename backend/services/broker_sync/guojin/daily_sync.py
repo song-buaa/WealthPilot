@@ -183,8 +183,8 @@ def automation_config(config):
             or observed_source and value.get("class") == "" and value.get("control_type") == "MenuItem")
             and (not read or nonempty(value.get("pattern")) and "(?<value>" in value["pattern"])
             and (not button or nonempty(value.get("name"))), "AUTO_GUI_CONTRACT_UNVERIFIED")
-    require(all(nonempty(profile.get(k)) for k in ("window_pattern", "account_pattern", "save_title",
-            "excel_prompt_title")) and "(?<account>" in profile["account_pattern"] and
+    require(all(nonempty(profile.get(k)) for k in ("window_pattern", "account_pattern", "save_title"))
+            and (native_path or nonempty(profile.get("excel_prompt_title"))) and "(?<account>" in profile["account_pattern"] and
             all(type(profile.get(k)) is int and 0 < profile[k] <= 10000 for k in ("width", "height")),
             "AUTO_GUI_CONTRACT_UNVERIFIED")
     selector(profile.get("filename"))
@@ -194,7 +194,7 @@ def automation_config(config):
                 and profile.get("ocr_identity") is True, "AUTO_GUI_CONTRACT_UNVERIFIED")
         require(profile.get("stock_save_menu") == {"id":"Item 32793", "class":"", "name":"保存",
                 "control_type":"MenuItem"}, "AUTO_GUI_CONTRACT_UNVERIFIED")
-    for key in ("save_button", "excel_no"):
+    for key in (("save_button",) if native_path else ("save_button", "excel_no")):
         selector(profile.get(key), button=True)
     for key, market in profile["markets"].items():
         require(nonempty(market.get("page_pattern")), "AUTO_GUI_CONTRACT_UNVERIFIED")
@@ -235,8 +235,10 @@ def export_windows(config, auto, profile, batch, now):
         directory=str(PureWindowsPath(auto["guest_root"])/batch),
         deadline=(now.timestamp()+600))
     payload = base64.b64encode(json.dumps(request, ensure_ascii=False).encode()).decode()
-    script = "$WPRequest='"+payload+"'\n"+PS_SCRIPT.read_text().replace(
-        "// NATIVE_READONLY_HELPER", PS_SCRIPT.with_name("native_gui.cs").read_text())
+    original = PS_SCRIPT.read_text()
+    helper = "\n".join(line for line in PS_SCRIPT.with_name("native_gui.cs").read_text().splitlines()
+                       if not (line.startswith("using ") and line in original.splitlines()))
+    script = "$WPRequest='"+payload+"'\n"+original.replace("// NATIVE_READONLY_HELPER", helper)
     compressed = gzip.compress(script.encode("utf-8"), mtime=0)
     fd, transport_name = tempfile.mkstemp(dir=auto["shared_root"], prefix="wp-guojin-worker-", suffix=".gz")
     with os.fdopen(fd, "wb") as transport:

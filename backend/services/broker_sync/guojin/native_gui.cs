@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Automation;
 
@@ -79,6 +80,29 @@ public static class WPGuojinReadonly {
         int count = 0; foreach (var n in Nodes(AutomationElement.FromHandle(new IntPtr(hwnd))))
             if (Tree(n, pid, "资金股票", Branch(market))) count++;
         return count == 1;
+    }); }
+    public static bool DismissExcel(long hwnd, int pid, int width, int height, int dpi, long deadline) { return Mta(() => {
+        Frame(hwnd,pid,width,height,dpi,deadline);
+        var dialogs = new List<AutomationElement>();
+        foreach(var h in WPGuojinNative.VisibleProcessWindows(pid)) {
+            if(WPGuojinNative.WindowOwner(h).ToInt64()!=hwnd) continue;
+            var d=AutomationElement.FromHandle(h);
+            if(Visible(d,pid) && d.Current.ClassName=="#32770") dialogs.Add(d);
+        }
+        if(dialogs.Count==0) return false;
+        var dialog=Unique(dialogs); var buttons=new List<AutomationElement>(); bool evidence=false;
+        foreach(var n in Nodes(dialog)) {
+            if(n.Current.AutomationId=="1040" && n.Current.ClassName=="Static" &&
+               Regex.Replace(n.Current.Name,@"\s","")=="Excel导出成功是否需要直接打开Excel?") evidence=true;
+            if(Visible(n,pid) && n.Current.AutomationId=="7" && n.Current.ClassName=="Button" && n.Current.Name=="否(N)") buttons.Add(n);
+        }
+        if(!evidence) throw new Exception("AUTO_GUI_UNAVAILABLE");
+        var no=Unique(buttons); var handle=new IntPtr(dialog.Current.NativeWindowHandle);
+        WPGuojinNative.SetForegroundWindow(handle);
+        Frame(hwnd,pid,width,height,dpi,deadline);
+        if(WPGuojinNative.WindowOwner(handle).ToInt64()!=hwnd || WPGuojinNative.GetForegroundWindow()!=handle)
+            throw new Exception("AUTO_GUI_UNAVAILABLE");
+        ((InvokePattern)no.GetCurrentPattern(InvokePattern.Pattern)).Invoke(); return true;
     }); }
     public static void Save(long hwnd, int pid, int width, int height, int dpi, long deadline, string path) { Mta(() => {
         Frame(hwnd,pid,width,height,dpi,deadline);

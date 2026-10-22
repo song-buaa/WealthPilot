@@ -391,6 +391,10 @@ public class WPGuojinNative {
             Start-Sleep -Milliseconds 500
             Check-Deadline
             # Only observed Excel-open prompt's exact No button can be dismissed.
+            if ($guiProfile.native_readonly_path) {
+                $null=[WPGuojinReadonly]::DismissExcel($window.Current.NativeWindowHandle,$qnx.Id,
+                    $guiProfile.width,$guiProfile.height,$guiProfile.dpi,$request.deadline)
+            } else {
             $wins = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
                 [System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
             foreach ($w in $wins) {
@@ -401,6 +405,7 @@ public class WPGuojinNative {
                     if ($no.Current.Name -cne $guiProfile.excel_no.name) { throw 'AUTO_GUI_UNAVAILABLE' }
                     $no.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
                 }
+            }
             }
             $state = Controls (Current-Window)
             $size = if (Test-Path -LiteralPath $path) {(Get-Item -LiteralPath $path).Length} else {0}
