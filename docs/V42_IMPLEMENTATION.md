@@ -53,6 +53,8 @@
 
 ## PRD 完成矩阵
 
+以下为初次本地交付评估；远端独立审查发现的实际缺口与修正结论以文末「远端工程验收」为准。不得继续将本表的初评作为全需求完成证明。
+
 | 需求 | 开发状态 / 可复测证据 | 生产限制 |
 |---|---|---|
 | P0-A 来源/时效/冲突 | 已实现：统一证据、Seed/Mock/未知时间拒绝；52周、PE/EPS/币种、季度归属、利润/现金流差异；新官方披露优先 | IR/供应商实际字段与最新财报未在线验收；AV估值时钟未知保持缺证 |
@@ -116,3 +118,56 @@
 | `f95a72d7cf8743a634071189faff1a6e0595542d` | fix(analysis): pass issuer targets and scenarios to original reasoning |
 
 文档收尾提交SHA以当前Git HEAD及最终交付消息为准。所有提交仅在本地；没有push、合并、Tag、生产迁移/部署、券商同步或真实订单准备/提交/修改/撤销。下一步建议：独立授权push/PR后跑原四项CI及review；合并、生产组件安装/切换和真实来源验收分别授权。
+
+
+## 远端工程验收与独立代码审查（2026-10-22）
+
+本阶段用户单独授权push、PR、CI、独立review及必要修复；不授权合并、Tag、生产部署/迁移、券商同步、真实交易准备或订单。本节取代前文“尚无push/PR授权”的历史状态及过度乐观的完成判断。
+
+### 基线与工程事实
+
+- 最新main仍为`2dfc0c43bfb0716e2d90a6a548cf9eb4729cf90b`；是开发分支祖先。初始11个提交线性、无merge。
+- 已验证业务候选`f95a72d7cf8743a634071189faff1a6e0595542d`至文档HEAD`d6775e8b1b85b3cde0ba855f3ca9d62718446ee2`只有本文件42行新增。
+- 任务worktree已提交内容干净，但存在用户未知的未跟踪`docs/acceptance/v42/归档.zip`；未读取/移动/暂存/上传。原工作区不变。不能声称整个目录无未跟踪内容。
+- 已push原开发分支，创建[PR #39](https://github.com/song-buaa/WealthPilot/pull/39)，base为最新main。
+- 初始HEAD的[Quality Gates 39771152237](https://github.com/song-buaa/WealthPilot/actions/runs/39771152237)四项全部成功。审查发现该测试集未覆盖的漏洞，故初始绿色不能代替修复后exact HEAD验收。
+
+### 独立发现及最小修复
+
+由三个独立审查任务分别检查证据/Web、配置情景、MCP边界，再交叉复核修复。不是GitHub人工approval，也不是生产业务验收。
+
+| 优先级 | 原始问题 / 最小修复 | 回归入口 |
+|---|---|---|
+| P1 | Web多标未设置证据、二次比较模型自由输出；现逐腿prepare，最终按同一视图重核并只组合受控报告 | test_v42_multi_policy.py |
+| P1 | MCP错路由/错误/超时保留早期自由模型text；严格按工具匹配route并清除失败流结果 | test_v42_mcp_policy.py |
+| P1 | 组合仅加警告，缺快照或D1 C=true均可能返回精确建议；Web/MCP组合最终仅保留Owner事实、目标假设、L2静态情景 | test_v42_multi_policy.py / test_v42_mcp_policy.py |
+| P1 | 客户端confirmed_by_user自证目标确认，缺目标仍可L3；现目标为request_proposal_unverified，confirmed_stage_targets为空，缺可信确认阻断L3/L4 | test_v42_scenarios.py / test_v42_exit_plan.py |
+| P1 | 组合在最终重评前测算、单标嵌套资格未跟随adapter最终重评；现先重核完整分母/贷款/TTL，再重建同一单标结果及嵌套情景 | test_v42_mcp_policy.py |
+| P1 | Explain保存LLM原reasoning/risk/strategy，且重新读当前持仓/硬编码FX反推股数；现清原文本，Explain只取同快照证券成员及有效报价 | test_v42_evidence.py |
+| P2 | 研究缺出版钟、旧出版钟可被新data_as_of掩盖、抓取钟未来/倒序；现拒绝为valid。无topic不做跨主题替代 | test_v42_evidence.py |
+| P2 | Web最终public_view可能升级原false；全部终检保留原veto。Web组合遗漏正式纪律/默认来源，现复用原loaded规则和来源 | test_v42_multi_policy.py |
+| P2 | 目标加容忍偏离超过正式集中度上限不告警；补目标纪律冲突。原资金守恒公式无新发现 | test_v42_scenarios.py |
+
+MCP实际SDK新增协议测试`pocs/chatgpt_skills/test_v42_protocol.py`覆盖两工具真实schema、target_versions/scenario_legs完整往返及跨快照拒绝，并加入原CI独立SDK步骤。协议可传递不等于确认来源可信。
+
+### 修正后的PRD完成与合并判断
+
+| 需求 | 独立审查结论 | 仍缺事项 |
+|---|---|---|
+| P0-A | 部分实现：来源、时间及冲突降级可离线复测 | FundamentalsData/现有AV构造没有自由现金流字段，利润/FCF冲突目前依赖字典夹具；真实新财报/估值源未验收 |
+| P0-B | 可复算技术证据及缺源降级已实现 | 真实三标日/周线、市场/币种和供应商可用性NOT_RUN |
+| P0-C | issuer/快照/分母及目标假设合同已实现；可信确认未完成 | 当前没有权威阶段目标确认记录；客户端布尔和digest不算确认，不借用交易确认；生产L3因此不可用 |
+| P0-D | 路由降级与多入口最终门槛修复；保留false且不授予L4 | 无可信目标时保守关闭L3；不声称精确减仓能力已可用 |
+| P1-B | 纯情景资金守恒、费用、还贷分母、账户/快照隔离已验证 | 费用、FX、账户划转和贷款事实实际可用性仍需真实业务验收 |
+| P1-A | ExitPlan骨架和调用方显式情景行可用，部分实现 | 常规阶段行未自主选择账户/计算分批金额股数与资金去向；需请求先提供scenario_legs。不能称完整自动形成退出路径 |
+| P1-C | 七层事实/门槛报告及Web/MCP最终限制可用，部分实现 | 当前确定性模板丢弃自由模型专业解释，多标改为逐标报告组合；组合保守报告替代旧自由叙事，是4.1体验收缩，尚无完整专业结论质量验收 |
+
+**判定：工程检查通过与完整4.2需求验收是两件事。当前仍有P0-C/P1-A等实际缺口，不能宣告满足完整功能合并条件。** 本阶段只做安全修复，没有凭空建立第二套确认系统、扩张架构或把合成数据当真实业务验收。需在后续评审明确补齐权威目标确认与完整退出路径；本PR不合并、不部署。
+
+### 验证与剩余边界
+
+- 修复过程中定向证据/情景/ExitPlan/多标/MCP/原分析/Pattern回归反复执行；最终本地结果、完整提交SHA及最终CI见PR工程验收清单和本轮最终交付。修复期间运行的全量日志仅作排错，不冒充代码冻结后验收。
+- 原CI四项为Backend tests、Frontend checks、Offline M5、MCP PoC tests。Windows相关仅Ubuntu pwsh隔离AST/fakes；没有原生Windows runner/真实国金桌面验收，不能标Windows业务PASS。
+- LI/PDD/美团真实业务验收均NOT_RUN。现有三份报告仍仅SYNTHETIC_FIXTURE；本阶段未调用生产professional模型、真实Provider、券商同步、交易prepare/confirm或订单API。
+- decision_engine核心、生产同步实现、订单/Batch、ORM/schema、依赖和前端业务代码不变。报告与组合解释收缩须明确评审，CI不能证明投资判断质量或生产版本。
+- 没有合并main、创建Tag、生产迁移或部署。任务分支保留等待用户决定下一步；不以绿色CI自动推定发布可用。
