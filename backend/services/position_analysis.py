@@ -5,6 +5,19 @@ This module owns no data/provider, model, persistence, order or sync operations.
 from datetime import datetime, timedelta, timezone
 
 
+def prepare_portfolio(plan, executed, *, at=None):
+    """Reuse the same evidence Skill over stored portfolio research, no fetching."""
+    from backend.skills import invoke_skill
+    from backend.services.market_data.evidence import mapping
+    records=[mapping(r) for r in getattr(executed.loaded_data,'research_evidence',[])]
+    symbols=list(dict.fromkeys(r.get('symbol') for r in records if r.get('symbol')))[:30]
+    return [invoke_skill('wp-assess-position-evidence',symbol=symbol,at=at,
+        research=[r for r in records if r.get('symbol')==symbol],
+        events=[r for r in records if r.get('symbol')==symbol and r.get('metadata',{}).get('evidence_kind')=='event'],
+        planner=plan.planner_trace,
+        principles_available=bool(getattr(executed.loaded_data,'retrieved_principles',[]))) for symbol in symbols]
+
+
 def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     from backend.skills import invoke_skill
     from backend.services.instruments.issuers import IDENTITIES
@@ -32,7 +45,7 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     effective_rules=mapping(getattr(loaded,"rules",{}))
     rule_source=getattr(loaded,"rules_provenance",None) or {"basis":"effective_rules_unverified"}
     formal_rules=effective_rules if rule_source.get("basis")=="configured_rule_file" else None
-    context=target_context(asset_view,issuer_id,options.get("target_versions",[]),formal_rules,
+    context=target_context(asset_view or {"portfolio_id":plan.portfolio_id},issuer_id,options.get("target_versions",[]),formal_rules,
         dict(allocation=[t.model_dump(mode="json") for t in get_targets()],
              effective_rules=effective_rules,rule_source=rule_source),at=at)
     context["effective_rules_provenance"]=rule_source
@@ -60,8 +73,78 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
         if not asset_view:
             raise ValueError("FIXED_ASSET_VIEW_REQUIRED")
         assessment["scenarios"]=simulate_exit_scenario(asset_view,options["scenario_legs"],
-            amount_qualified=assessment["qualification"]["L2"]["allowed"],target=context["proposed_stage_targets"])
+            amount_qualified=assessment["qualification"]["L2"]["allowed"],target=context.get("confirmed_stage_targets") or context["proposed_stage_targets"])
+    elif asset_view:
+        from backend.services.exit_candidates import build_candidates
+        assessment["exit_candidates"]=build_candidates(asset_view,issuer_id,
+            context.get("confirmed_stage_targets") or context.get("proposed_stage_targets"),
+            amount_qualified=assessment["qualification"]["L2"]["allowed"])
+        auto_legs=[leg for c in assessment['exit_candidates'] for leg in c['legs']]
+        if any(leg['destination']=='repay_cny_loan' for leg in auto_legs):
+            loan_view=qualification_view(asset_view,auto_legs,at=at)
+            loan_b=loan_view.get('data_quality',{}).get('analysis_eligibility',{}).get('B',{})
+            if not loan_b.get('allowed',False):
+                blocker='NET_WORTH_LOAN_AMOUNT_QUALIFICATION_REQUIRED'
+                for level in ('L2','L3','L4'):
+                    assessment['qualification'][level]['allowed']=False
+                    assessment['qualification'][level]['blockers'].append(blocker)
+                assessment['issues'].append(blocker)
+                assessment['infoNeeded'].append(blocker)
+                assessment['confidence_ceiling']=min(assessment['confidence_ceiling'],.35)
+                for candidate in assessment['exit_candidates']:
+                    for row in candidate['tranches']:
+                        row['amount_cny']=None
+                    if candidate['scenario']:
+                        candidate['scenario']['mode']='illustrative_unqualified'
+                        candidate['scenario']['amount_blockers']=loan_b.get('blockers',[])
     return assessment
+
+
+def native_quantity(assessment, step, *, at):
+    from backend.services.market_data.evidence import number, record
+    from decimal import Decimal, ROUND_FLOOR
+    context=assessment.get("allocation_context",{})
+    group=context.get("company_exposure") or {}
+    member=next((m for m in group.get("members",[]) if m['id']==step['position_id']),{})
+    security=next((r for r in context.get("security_inputs",[]) if r.get('id')==step['position_id']),{})
+    valid=[r for r in assessment['records'] if r['quality']=='valid']
+    levels=assessment['qualification']
+    scenarios=assessment.get('scenarios') or {'mode':step.get('mode','illustrative_unqualified')}
+    quote=next((r["values"] for r in valid if r["kind"]=="quote"),{})
+    from backend.services.market_data.evidence import number
+    price=number(quote.get("current_price"))
+    fx=number(security.get("fx_rate_to_cny"))
+    native_symbol=member.get("security_symbol") or member.get("symbol")
+    market=(native_symbol or "").rsplit(":",1)[-1]
+    quantity=None
+    blockers=[]
+    from backend.services.market_data.evidence import record
+    unit=security.get('trade_unit_evidence') or {}
+    costs=security.get('exit_cost_evidence') or {}
+    checked_at=at
+    unit_ok=(record('trade_unit',unit,at=checked_at,symbol=native_symbol)['quality']=='valid'
+        and unit.get('symbol')==native_symbol and unit.get('currency')==quote.get('currency')
+        and unit.get('account_ref')==step['account_ref']
+        and number(unit.get('quantity_increment')) is not None and number(unit.get('quantity_increment'))>0)
+    if market=='HK' and unit_ok:
+        unit_ok=float(unit['quantity_increment']).is_integer()
+    cost_ok=(record('exit_cost',costs,at=checked_at,symbol=native_symbol)['quality']=='valid'
+        and costs.get('symbol')==native_symbol and costs.get('account_ref')==step['account_ref']
+        and number(costs.get('total_cny'))==step['costs_cny'])
+    if (levels["L3"]["allowed"] and unit_ok and cost_ok and scenarios["mode"]=="qualified_static_scenario" and native_symbol==assessment["symbol"] and market in {'US','HK'}
+            and quote.get("currency")==security.get("original_currency") and price and fx
+            and fx>0 and security.get("fx_quality")=="current"):
+        from decimal import Decimal, ROUND_FLOOR
+        increment=Decimal(str(unit['quantity_increment']))
+        quantity=float(((Decimal(str(step['sale_value_cny']))/Decimal(str(price))/Decimal(str(fx))/increment)
+            .to_integral_value(rounding=ROUND_FLOOR))*increment)
+        held=number(member.get("quantity"))
+        if quantity<=0 or held is None or quantity>held:
+            quantity=None
+            blockers.append("QUANTITY_EXCEEDS_VERIFIED_HOLDING_OR_TOO_SMALL")
+    else:
+        blockers.append("NATIVE_QUOTE_FX_UNIT_COST_OR_L3_UNVERIFIED")
+    return quantity, blockers
 
 
 def exit_plan(assessment, *, at=None):
@@ -95,41 +178,59 @@ def exit_plan(assessment, *, at=None):
             amount_cny=None,quantity=None,account_ref=None,market=None,currency=None,
             funds_destination=None,price_trigger=price_trigger,
             status="directional_research" if not levels["L2"]["allowed"] else "scenario_review_required"))
+    from copy import deepcopy
+    candidates=deepcopy(assessment.get("exit_candidates",[]))
+    for candidate in candidates:
+        allocated={}
+        calculation=candidate.get('scenario')
+        steps=iter(s for s in (calculation or {}).get('steps',[]) if s['issuer_id']==issuer)
+        for row in candidate['tranches']:
+            if row.get('position_id') is None or row.get('status')=='loan_selection_required':
+                continue
+            step=next(steps)
+            row['quantity'],row['quantity_blockers']=native_quantity(assessment,
+                {**step,'mode':calculation['mode']},at=at)
+            held=next((m.get('quantity') for m in group.get('members',[]) if m['id']==row['position_id']),None)
+            if row['quantity'] is not None:
+                if held is None or allocated.get(row['position_id'],0)+row['quantity']>held:
+                    row['quantity']=None
+                    row['quantity_blockers'].append('CUMULATIVE_QUANTITY_EXCEEDS_VERIFIED_HOLDING')
+                else:
+                    allocated[row['position_id']]=allocated.get(row['position_id'],0)+row['quantity']
+            if row['quantity'] is not None:
+                row['quantity_basis']='verified native quantity increment and cost evidence'
+                row['cost_quality']='verified'
+                row['price_trigger']=price_trigger if row['symbol']==assessment['symbol'] else None
+    if candidates:
+        # Alternatives remain distinct; do not sum competing account plans.
+        tranches=candidates[0]["tranches"]
     # User-defined account-specific simulations become clearly labeled review rows,
     # never executable orders, and cannot be promoted when L2 is blocked.
     scenarios=assessment.get("scenarios")
     if scenarios:
+        allocated={}
         members={m["id"]:m for m in group.get("members",[])}
         for step in scenarios["steps"]:
             if step["issuer_id"]!=issuer:
                 continue
             member=members.get(step["position_id"],{})
             security=next((r for r in context.get("security_inputs",[]) if r.get("id")==step["position_id"]),{})
+            quantity,blockers=native_quantity(assessment,step,at=at)
+            if quantity is not None:
+                if allocated.get(step['position_id'],0)+quantity>member.get('quantity',0):
+                    quantity=None
+                    blockers.append('CUMULATIVE_QUANTITY_EXCEEDS_VERIFIED_HOLDING')
+                else:
+                    allocated[step['position_id']]=allocated.get(step['position_id'],0)+quantity
             quote=next((r["values"] for r in valid if r["kind"]=="quote"),{})
-            from backend.services.market_data.evidence import number
-            price=number(quote.get("current_price"))
-            fx=number(security.get("fx_rate_to_cny"))
             native_symbol=member.get("security_symbol") or member.get("symbol")
             market=(native_symbol or "").rsplit(":",1)[-1]
-            quantity=None
-            blockers=[]
-            if (levels["L3"]["allowed"] and scenarios["mode"]=="qualified_static_scenario" and native_symbol==assessment["symbol"] and market=="US"
-                    and quote.get("currency")==security.get("original_currency") and price and fx
-                    and fx>0 and security.get("fx_quality")=="current"):
-                from decimal import Decimal, ROUND_FLOOR
-                quantity=int((Decimal(str(step["sale_value_cny"]))/Decimal(str(price))/Decimal(str(fx))).to_integral_value(rounding=ROUND_FLOOR))
-                held=number(member.get("quantity"))
-                if quantity<=0 or held is None or quantity>held:
-                    quantity=None
-                    blockers.append("QUANTITY_EXCEEDS_VERIFIED_HOLDING_OR_TOO_SMALL")
-            else:
-                blockers.append("NATIVE_QUOTE_FX_UNIT_OR_L3_UNVERIFIED")
             tranches.append(dict(stage="scenario",position_id=step["position_id"],account_ref=step["account_ref"],
                 symbol=native_symbol,
-                condition="仅在本静态情景及请求目标假设仍有效时人工复核；目标确认来源尚未核验",
+                condition="仅在本静态情景、目标确认状态与成本/单位证据仍有效时人工复核",
                 amount_cny=step["sale_value_cny"] if levels["L2"]["allowed"] and scenarios["mode"]=="qualified_static_scenario" else None,
-                quantity=quantity,quantity_basis="whole US listed units; no ADR or cross-market conversion" if quantity else None,
-                quantity_blockers=blockers,market=market,currency=quote.get("currency") if quantity else "CNY",
+                quantity=quantity,quantity_basis="verified native quantity increment; no ADR or cross-market conversion" if quantity else None,
+                quantity_blockers=blockers,market=market,currency={'US':'USD','HK':'HKD'}.get(market),
                 amount_currency="CNY",funds_destination=step["destination"],
                 status=scenarios["mode"],price_trigger=price_trigger if native_symbol==assessment["symbol"] else None))
     # An exit direction has an operating-review milestone before the allocation milestone.
@@ -142,6 +243,7 @@ def exit_plan(assessment, *, at=None):
             stage=targets.get("stage"),version=targets.get("version"),digest=targets.get("digest"),
             confirmation_status=context.get("target_confirmation_status","missing"),basis=targets.get("basis")),
         account_holdings=group.get("members",[]),tranches=tranches,price_trigger=price_trigger,
+        account_alternatives=candidates,
         fundamental_trigger=dict(condition="核验交付/收入/利润率/现金流及竞争变化；未知指标不得填造",
             evidence=[{k:r[k] for k in ("kind","source","source_url","record_id","period","data_as_of")}
                       for r in valid if r["kind"] in {"fundamentals","research","event"}]),
@@ -152,7 +254,7 @@ def exit_plan(assessment, *, at=None):
         review_deadline=deadline,review_deadline_basis="system default seven-day review, not a sale deadline",
         evidence_quality=dict(qualification=levels,issues=assessment["issues"],
             missing=assessment["infoNeeded"],facts=[{k:r[k] for k in ("kind","source","record_id","data_as_of","quality")} for r in valid],
-            assumptions=["请求阶段目标仅为未核验情景假设，未取得可信用户确认，不覆盖正式纪律或授予L3资格。","情景基于固定估值，不预测未来收益。"],
+            assumptions=["目标确认状态："+context.get('target_confirmation_status','missing')+"；不覆盖正式纪律，不等于交易授权。","情景基于固定估值，不预测未来收益。"],
             excluded=[{k:r[k] for k in ("kind","source","data_as_of","quality")} for r in assessment["records"] if r["quality"]!="valid"]),
         order_created=False,execution_authorized=False,manual_trade_preparation_allowed=False)
 
@@ -192,6 +294,8 @@ def report(assessment, plan, decision):
         if content:
             values.append(str(content))
         facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；报告币种 {r['values'].get('report_currency') or '未核验'}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
+    for r in assessment.get('verified_field_records',[]):
+        facts.append(f"- 字段事实 {r.get('field')}：{r.get('values')}；来源 {r['source']}；期间 {r['period']}；数据日 {r['data_as_of']}。")
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")
     technical_lines=[]
@@ -208,18 +312,28 @@ def report(assessment, plan, decision):
     section("④事件催化","\n".join(events) if events else "事件证据不足，需核验正式披露和公告日期。")
     direction={"trim":"减仓研究","exit":"逐步退出研究","hold":"持有并复核","watch":"继续观察",
                "buy_init":"新建仓评估","buy_more":"加仓评估"}.get(decision,"继续观察")
+    confirmed=context.get('target_confirmation_status')=='confirmed'
     lines=[f"原专业链路方向：{direction}（分析推断，不能独立授予交易资格）。",
-        f"未核验的请求目标版本：{targets['version']}，阶段：{targets['stage']}；仅为情景假设，尚无可信用户确认。" if targets else "缺少有效的用户确认目标；系统默认配置不能代表个人目标。"]
+        (f"服务端已确认目标版本：{targets['version']}，阶段：{targets['stage']}；来源 {targets.get('confirmation_source')}，确认时间 {targets.get('confirmed_at')}。" if confirmed else
+        f"未核验的请求目标版本：{targets['version']}，阶段：{targets['stage']}；仅为情景假设，尚无可信用户确认。") if targets else "缺少有效的用户确认目标；系统默认配置不能代表个人目标。"]
     for row in plan["tranches"]:
         line=f"- 阶段 {row['stage']}：{row['condition']}。"
         if row.get("target_weight") is not None:
-            line+=f"假设目标占比 {weight(row['target_weight'])}，并非已确认目标或无条件卖出要求。"
+            line+=f"阶段研究目标占比 {weight(row['target_weight'])}，并非无条件卖出要求。"
         if row.get("amount_cny") is not None:
             line+=f"假设减仓额 {amount(row['amount_cny'])}，账户 {row['account_ref']}，去向 {row['funds_destination']}。"
         lines.append(line)
     if plan["funds_policy"]:
         destination_names={"offshore_fixed_income":"境外固收","repay_cny_loan":"偿还人民币贷款","investment_cash":"投资账户现金"}
-        lines.append("请求假设的资金去向："+"；".join(f"{a} → {destination_names[d]}" for a,d in plan["funds_policy"].items())+"；未核验确认来源。")
+        lines.append(("服务端确认的资金去向：" if confirmed else "请求假设的资金去向：")+"；".join(f"{a} → {destination_names[d]}" for a,d in plan["funds_policy"].items()))
+    for candidate in plan.get('account_alternatives',[]):
+        lines.append(f"\n账户顺序比较 {candidate['preferred_account']}；费用、税费、换汇与最低现金暂按零作示意，真实约束待核验；不推荐自动执行。")
+        if candidate.get('prerequisite_exits'):
+            lines.append("本分支假设其他逐步退出目标先完成，再复核本公司被动集中的变化；这些退出并未实际发生，也不是自动执行要求。")
+        if candidate.get('blockers'):
+            lines.append("方案待核验："+"、".join(candidate['blockers']))
+        for row in candidate['tranches']:
+            lines.append(f"- 阶段 {row['stage']} / {row.get('account_ref')} / {row.get('currency')}：目标 {weight(row.get('target_weight'))}；假设金额 {amount(row.get('amount_cny'))}；去向 {row.get('funds_destination')}；{row['condition']}")
     scenario=assessment.get("scenarios")
     if scenario:
         lines.append("\n静态情景测算（"+("示意、证据资格不足" if scenario["mode"]=="illustrative_unqualified" else "金额资格达标、仍依赖列明假设")+"，不是收益预测或交易指令）：")
