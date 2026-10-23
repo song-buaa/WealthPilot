@@ -403,7 +403,10 @@ def test_explanation_failure_obeys_original_retry_cap(monkeypatch):
     ({'symbol':'VTSAX:US','ticker':'VTSAX','currency':'USD','vehicle_type':'FUND'},None),
     ({'symbol':'IB01:LSE','ticker':'IB01','currency':'USD'},None),
     ({'symbol':'SPY:US','ticker':'SPY','currency':'USD','vehicle_type':'ETF'},'SPY:US'),
+    ({'symbol':'SPY:US','ticker':'SPY','currency':'USD','vehicle_type':'ETF','asset_class':'基金'},'SPY:US'),
     ({'symbol':'600519:SH','ticker':'600519.SH','currency':'CNY','asset_class':'股票'},'600519:SH'),
+    ({'symbol':'600519:SH','ticker':'600519','currency':'CNY','asset_class':'股票'},'600519:SH'),
+    ({'symbol':'000858:SZ','ticker':'000858','currency':'CNY','asset_class':'股票'},'000858:SZ'),
     ({'symbol':'3690:HK','ticker':'3690.HGT','currency':'CNY','asset_class':'股票'},'3690:HK'),
 ])
 def test_canonical_projection_preserves_instrument_and_market_boundaries(position, expected):
@@ -474,3 +477,11 @@ def test_invalid_quarter_observations_do_not_reenter_model_through_prompt_metada
     prompt = prompt_context(a)
     assert 'EXCLUDED_PRIVATE_SENTINEL' not in prompt
     assert 'PUBLICATION_TIME_UNKNOWN' in prompt
+
+
+@pytest.mark.parametrize('symbol', ['3690:HK','600519:SH','000858:SZ','IB01:LSE'])
+def test_canonical_non_us_identity_cannot_become_bare_us_av_request(monkeypatch, symbol):
+    from backend.services.market_data import av_fundamentals_service as av
+    monkeypatch.setattr(av, '_av_get', lambda *args: pytest.fail('unsupported market must not request AV'))
+    av.fetch_fundamentals(symbol)
+    assert av._wp_symbol_to_av_ticker(symbol) is None

@@ -312,4 +312,6 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 
 第二轮独立审查的三项 P2 已收口：完整现金流按自己的季度窗口计算并单列跨端点期间/币种差异（不混合授予资格）；解释合同失败仍服从原 retry_count 上限；只有实际 AV 请求执行限频等待，全部端点缓存命中不等待。新增四项回归及原字段时钟共 65 passed，解释与最终入口复核继续运行。最终 SHA、四项 CI 及完整结果在本修复 PR 的验收清单记录，避免把中途候选冒充最终提交。
 
-最终兼容性收口：canonical 市场投影复用原分类 Owner，基金/现金/非支持市场继续 fail closed，ETF 与原有显式市场覆盖保留；财务冲突仅记录同季度原始直接字段的数值差异，派生项单列 UPSTREAM_FINANCIAL_SOURCE_CONFLICT，未受影响字段仍可解释，L3 冲突阻断不变。Reviewer 保留 hard/soft 分层语义。原季度观察只供确定性冲突核对，不经 field_quality metadata 回流模型提示。末端/时钟/身份/专业解释/Web/MCP/Explain/快照专项共 206 passed；前一候选本地全量 1948 passed、7 skipped，最终提交全部四项远端 Gate（含全量 pytest）以本修复 PR 的完整 SHA 清单为准。
+最终兼容性收口：canonical 市场投影复用原分类 Owner，基金/现金/非支持市场继续 fail closed，ETF 与原有显式市场覆盖保留；财务冲突仅记录同季度原始直接字段的数值差异，派生项单列 UPSTREAM_FINANCIAL_SOURCE_CONFLICT，未受影响字段仍可解释，L3 冲突阻断不变。Reviewer 保留 hard/soft 分层语义。原季度观察只供确定性冲突核对，不经 field_quality metadata 回流模型提示。末端/时钟/身份/专业解释/Web/MCP/Explain/快照专项共 213 passed；前一候选本地全量 1948 passed、7 skipped，最终提交全部四项远端 Gate（含全量 pytest）以本修复 PR 的完整 SHA 清单为准。
+
+最终市场兼容补充：明确 SH/SZ canonical 即使 legacy ticker 裸存也优先复用，`CN` 模糊基金码不猜交易所；已知 ETF 类型优先于泛“基金”标签。AV 服务只映射 US 报表，HK/SH/SZ/LSE 不误用裸代码发出 US AV 请求，原其他行情源与缺源降级不变。

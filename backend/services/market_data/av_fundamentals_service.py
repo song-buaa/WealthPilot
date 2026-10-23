@@ -49,8 +49,11 @@ def get_next_av_key() -> str:
 
 def _wp_symbol_to_av_ticker(wp_symbol: str) -> Optional[str]:
     """LI:US → LI, 0700:HK → None（AV 无港股）。兼容旧格式 LI.US。"""
-    from backend.utils.symbol import symbol_to_av_ticker
-    return symbol_to_av_ticker(wp_symbol)
+    from backend.utils.symbol import parse_symbol, symbol_to_av_ticker
+    # This original adapter implements US company statements only. A trusted
+    # HK/SH/SZ identity can route to other original providers, never a bare AV
+    # US ticker by accident.
+    return symbol_to_av_ticker(wp_symbol) if parse_symbol(wp_symbol)[1] == "US" else None
 
 
 def _av_get(function: str, symbol: str, api_key: str) -> Optional[dict]:

@@ -42,8 +42,9 @@ def position_market_symbol(position) -> str | None:
     vehicle = getattr(position, "vehicle_type", None)
     if (vehicle in {VehicleType.FUND, VehicleType.CASH, VehicleType.BOND,
                     VehicleType.OPTION, VehicleType.FUTURE, VehicleType.WARRANT}
-            or str(getattr(position, "asset_class", "")).upper() in
+            or (str(getattr(position, "asset_class", "")).upper() in
                {"基金", "公募基金", "私募基金", "货币基金", "FUND", "CASH", "现金", "现金等价物"}
+                and vehicle not in {VehicleType.ETF, VehicleType.ETN, VehicleType.REIT})
             or (economic_asset_class_value(position) == "CASH" and vehicle not in {VehicleType.ETF, VehicleType.ETN})):
         return None
     legacy_ticker = getattr(position, "ticker", "") or ""
@@ -55,6 +56,8 @@ def position_market_symbol(position) -> str | None:
             return None
         if market == "HK" and not ticker.isdigit():
             return None
+        if market in {"SH", "SZ"}:
+            return normalize_symbol(ticker, market) if ticker.isdigit() and len(ticker) == 6 else None
         if market not in {"US", "HK"}:
             # This fix adds no new market/provider coverage. In particular a
             # six-digit CN fund identifier must not become an SZ equity.
