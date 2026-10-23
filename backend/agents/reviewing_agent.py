@@ -215,8 +215,10 @@ class ReviewingAgent:
             from backend.services.market_data.output_policy import explanation_projection
             paragraphs, diagnostics = explanation_projection(payload.get("professional_explanation"), assessment)
             vr = validate_decision_output(result=llm_result, intent_type="")
-            out.failed_rules = [failure.rule for failure in vr.failures]
-            out.failure_messages = [failure.message for failure in vr.failures]
+            hard = [failure for failure in vr.failures if failure.severity == "hard"]
+            out.failed_rules = [failure.rule for failure in hard]
+            out.failure_messages = [failure.message for failure in hard]
+            out.warnings.extend(failure.message for failure in vr.failures if failure.severity != "hard")
             if paragraphs != payload.get("professional_explanation", []):
                 out.failed_rules.append("professional_explanation_final_recheck_failed")
             if not paragraphs and diagnostics["usable_record_count"]:

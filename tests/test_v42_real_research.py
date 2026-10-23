@@ -393,3 +393,84 @@ def test_explanation_failure_obeys_original_retry_cap(monkeypatch):
     review = reviewer.run(PlanningOutput(), execution, out, retry_count=3)
     assert review.action == 'fallback' and review.jump_step is None
     assert 'professional_explanation_missing_with_usable_evidence' in review.failed_rules
+
+
+@pytest.mark.parametrize('position,expected', [
+    ({'symbol':'006479:CN','ticker':'006479','currency':'CNY','asset_class':'基金'},None),
+    ({'symbol':'006479:CN','ticker':'006479','currency':'CNY'},None),
+    ({'symbol':'USD:US','ticker':'USD','currency':'USD','vehicle_type':'CASH'},None),
+    ({'symbol':'USD:US','ticker':'USD','currency':'USD','asset_class':'货币'},None),
+    ({'symbol':'VTSAX:US','ticker':'VTSAX','currency':'USD','vehicle_type':'FUND'},None),
+    ({'symbol':'IB01:LSE','ticker':'IB01','currency':'USD'},None),
+    ({'symbol':'SPY:US','ticker':'SPY','currency':'USD','vehicle_type':'ETF'},'SPY:US'),
+    ({'symbol':'600519:SH','ticker':'600519.SH','currency':'CNY','asset_class':'股票'},'600519:SH'),
+    ({'symbol':'3690:HK','ticker':'3690.HGT','currency':'CNY','asset_class':'股票'},'3690:HK'),
+])
+def test_canonical_projection_preserves_instrument_and_market_boundaries(position, expected):
+    from types import SimpleNamespace
+    from backend.utils.symbol import position_market_symbol
+    assert position_market_symbol(SimpleNamespace(**position)) == expected
+
+
+@pytest.mark.parametrize('source_field,direct,dependent,unaffected', [
+    ('totalRevenue','revenue_ttm','revenue_yoy','operating_cash_flow_ttm'),
+    ('operatingCashflow','operating_cash_flow_ttm','free_cash_flow_ttm','revenue_ttm'),
+])
+def test_direct_conflict_and_derived_dependency_do_not_erase_unrelated_facts(source_field, direct, dependent, unaffected):
+    from backend.services.market_data.evidence import assess
+    from tests.test_v42_fundamental_clocks import statements, project, AT
+    income, cash = statements(published=True)
+    for date in ('2025-06-30','2025-03-31','2024-12-31','2024-09-30'):
+        income['quarterlyReports'].append(dict(fiscalDateEnding=date,reportedCurrency='CNY',publicationDate=date,totalRevenue='90',netIncome='9'))
+    for row in cash['quarterlyReports']: row['capitalExpenditures'] = '5'
+    raw, _ = project(income,cash)
+    official = dict(symbol='LI:US',source='official',source_url='https://ir.lixiang.com/frozen-disclosure',
+        record_id='official:frozen',published_at='2026-08-26',data_as_of='2026-08-26',fetched_at=AT.isoformat(),
+        period='2026Q2',text='Frozen official financial disclosure observation.',
+        financial_observations=[dict(source_field=source_field,value=105 if source_field=='totalRevenue' else 25,
+            currency='CNY',fiscal_period_end='2026-06-30',period_basis='quarterly')])
+    result = assess({'fundamentals':raw},research=[official],symbol='LI:US',at=AT)
+    parent = next(r for r in result['records'] if r['kind']=='fundamentals')
+    assert parent['quality'] == 'partial'
+    assert {r['field'] for r in result['source_conflicts']} == {direct}
+    assert parent['field_quality'][direct]['quality'] == 'conflict'
+    assert parent['field_quality'][dependent]['quality'] == 'unknown'
+    assert 'UPSTREAM_FINANCIAL_SOURCE_CONFLICT' in parent['field_quality'][dependent]['issues']
+    assert parent['field_quality'][unaffected]['quality'] == 'valid'
+    assert any(r['field']==unaffected for r in result['verified_field_records'])
+    assert 'FINANCIAL_SOURCE_CONFLICT' in result['qualification']['L3']['blockers']
+
+
+def test_new_review_preserves_soft_validator_semantics(monkeypatch):
+    from backend.agents.contracts import ExecutionOutput, ExpressionOutput, PlanningOutput
+    from backend.agents.reviewing_agent import ReviewingAgent
+    from backend.graph import decision_validator
+    from backend.services.market_data.output_policy import enforce
+    from decision_engine.llm_engine import LLMResult
+    from tests.test_v42_professional_explanation import assessment, paragraph
+    a = assessment(); execution = ExecutionOutput(); execution.position_evidence = a
+    out = ExpressionOutput(llm_result=LLMResult('HOLD',[],[],[]), structured_payload={'professional_explanation':[paragraph()]})
+    enforce(out,a)
+    soft = decision_validator.ValidationFailure('low_confidence_no_info_needed','soft warning','soft')
+    monkeypatch.setattr(decision_validator,'validate_decision_output', lambda **kwargs:
+        decision_validator.ValidationResult(True,[soft],'pass',''))
+    reviewer = ReviewingAgent()
+    monkeypatch.setattr(reviewer,'_run_llm_scoring', lambda *args:pytest.fail('soft warning cannot invoke scoring'))
+    review = reviewer.run(PlanningOutput(),execution,out,retry_count=3)
+    assert review.hard_validation_passed and review.action=='pass' and not review.failed_rules
+    assert 'soft warning' in review.warnings
+
+
+def test_invalid_quarter_observations_do_not_reenter_model_through_prompt_metadata(av_offline):
+    from dataclasses import asdict
+    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.output_policy import prompt_context
+    av, _ = av_offline
+    raw = asdict(av.fetch_fundamentals('LI:US'))
+    for meta in raw['field_provenance'].values():
+        meta['observations'] = [{'fiscalDateEnding':'2026-06-30','totalRevenue':'EXCLUDED_PRIVATE_SENTINEL'}]
+    a = assess({'fundamentals':raw},symbol='LI:US')
+    assert not a['verified_field_records']  # publication still unknown
+    prompt = prompt_context(a)
+    assert 'EXCLUDED_PRIVATE_SENTINEL' not in prompt
+    assert 'PUBLICATION_TIME_UNKNOWN' in prompt

@@ -257,9 +257,10 @@ def financial_source_conflicts(records):
     Net-income labels are intentionally not equated across consolidation bases.
     """
     conflicts = []
-    fields = {"totalRevenue":("revenue_ttm", "revenue_yoy"),
-              "operatingCashflow":("operating_cash_flow_ttm", "free_cash_flow_ttm"),
-              "capitalExpenditures":("capital_expenditures_ttm", "free_cash_flow_ttm")}
+    fields = {"totalRevenue":"revenue_ttm", "operatingCashflow":"operating_cash_flow_ttm",
+              "capitalExpenditures":"capital_expenditures_ttm"}
+    dependents = {"revenue_ttm":["revenue_yoy"], "operating_cash_flow_ttm":["free_cash_flow_ttm"],
+                  "capital_expenditures_ttm":["free_cash_flow_ttm"]}
     for disclosure in records:
         if not disclosure["primary"] or disclosure["quality"] != "valid":
             continue
@@ -282,7 +283,7 @@ def financial_source_conflicts(records):
                 key = observation.get("source_field")
                 if key not in fields or observation.get("period_basis") != "quarterly":
                     continue
-                for field in fields[key]:
+                for field in (fields[key],):
                     meta = mapping(raw_provenance.get(field))
                     for row in meta.get("observations", []):
                         expected, actual = number(observation.get("value")), number(row.get(key))
@@ -308,6 +309,15 @@ def financial_source_conflicts(records):
                             state["issues"].append("FINANCIAL_SOURCE_CONFLICT")
                             parent["values"][field] = None
                         parent["issues"].append("FUNDAMENTALS_"+field.upper()+"_FINANCIAL_SOURCE_CONFLICT")
+                        # A derived metric inherits an upstream quality problem;
+                        # it is not a second direct numerical disagreement.
+                        for dependent in dependents[field]:
+                            derived = parent["field_quality"].get(dependent)
+                            if derived and row["fiscalDateEnding"] in derived["provenance"].get("fiscal_quarter_ends", []):
+                                derived["quality"] = "unknown"
+                                derived["issues"].append("UPSTREAM_FINANCIAL_SOURCE_CONFLICT")
+                                parent["values"][dependent] = None
+                                parent["issues"].append("FUNDAMENTALS_"+dependent.upper()+"_UPSTREAM_FINANCIAL_SOURCE_CONFLICT")
             if any(item["quality"] == "conflict" for item in parent["field_quality"].values()):
                 parent["quality"] = "partial" if any(item["quality"] == "valid" for item in parent["field_quality"].values()) else "conflict"
     return conflicts
@@ -363,7 +373,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                     and older["kind"] in {"research", "fundamentals"}):
                 older["quality"] = "superseded"
                 older["issues"].append("OLDER_RESEARCH_SUPERSEDED_BY_DISCLOSURE")
-    if conflicts:
+    if any(issue != "FINANCIAL_SOURCE_CONFLICT" for issue in conflicts):
         for r in records:
             if r["kind"] in {"quote", "fundamentals"}:
                 r["quality"] = "conflict"

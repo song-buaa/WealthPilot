@@ -38,6 +38,15 @@ def position_market_symbol(position) -> str | None:
     This read projection never rewrites holding keys, account rows or quantities.
     An invalid canonical identity fails closed instead of selecting another market.
     """
+    from backend.services.instruments.classification import VehicleType, economic_asset_class_value
+    vehicle = getattr(position, "vehicle_type", None)
+    if (vehicle in {VehicleType.FUND, VehicleType.CASH, VehicleType.BOND,
+                    VehicleType.OPTION, VehicleType.FUTURE, VehicleType.WARRANT}
+            or str(getattr(position, "asset_class", "")).upper() in
+               {"基金", "公募基金", "私募基金", "货币基金", "FUND", "CASH", "现金", "现金等价物"}
+            or (economic_asset_class_value(position) == "CASH" and vehicle not in {VehicleType.ETF, VehicleType.ETN})):
+        return None
+    legacy_ticker = getattr(position, "ticker", "") or ""
     canonical = getattr(position, "symbol", None)
     if canonical:
         try:
@@ -46,9 +55,13 @@ def position_market_symbol(position) -> str | None:
             return None
         if market == "HK" and not ticker.isdigit():
             return None
+        if market not in {"US", "HK"}:
+            # This fix adds no new market/provider coverage. In particular a
+            # six-digit CN fund identifier must not become an SZ equity.
+            legacy = infer_symbol_from_ticker(legacy_ticker, getattr(position, "currency", None) or "USD")
+            return legacy if legacy == normalize_symbol(ticker, market) else None
         return normalize_symbol(ticker, market)
-    ticker = getattr(position, "ticker", "") or ""
-    return infer_symbol_from_ticker(ticker, getattr(position, "currency", None) or "USD") if ticker else None
+    return infer_symbol_from_ticker(legacy_ticker, getattr(position, "currency", None) or "USD") if legacy_ticker else None
 
 
 # CN 是 broker_sync 层历史遗留的 A 股市场代码, 统一映射到 SH/SZ

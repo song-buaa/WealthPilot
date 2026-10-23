@@ -212,7 +212,16 @@ def render_explanation(paragraphs):
 
 
 def prompt_context(assessment):
-    records = [{k:v for k,v in r.items() if k != "values"} for r in assessment["records"]]
+    # Raw quarter observations are for deterministic source reconciliation, not
+    # model facts. In particular invalid field provenance must not smuggle them
+    # back into the prompt after safe_market removed their values.
+    metadata = ("kind", "symbol", "source", "source_url", "record_id", "published_at",
+                "data_as_of", "fetched_at", "scope", "period", "quality", "is_seed",
+                "is_mock", "is_fallback", "issues")
+    records = [{key:r.get(key) for key in metadata} | {
+        "field_quality":{name:{"quality":state["quality"], "issues":state["issues"]}
+                         for name,state in r.get("field_quality", {}).items()}}
+        for r in assessment["records"]]
     return "\n确定性证据门槛（优先于旧实时行情模板；未知不得补全）："+json.dumps(
         dict(records=records,qualification=assessment["qualification"],issues=assessment["issues"],
              planner=assessment["planner"],confidence_ceiling=assessment["confidence_ceiling"],
