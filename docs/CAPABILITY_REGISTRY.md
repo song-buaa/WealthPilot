@@ -105,3 +105,7 @@ PR #39 收口：[账户候选](../backend/services/exit_candidates.py)无需手�
 
 
 2026-10-23 最小修复：[原 AV adapter](../backend/services/market_data/av_fundamentals_service.py) 独立端点/缓存/时钟，保留收入来源冲突及零 CapEx 阻断；[原 symbol Owner](../backend/utils/symbol.py) 的 position_market_symbol 优先 canonical identity；[原输出 policy](../backend/services/market_data/output_policy.py) 负责技术定性主题、同次候选恢复及无敏感内容诊断，Reviewer 区分新旧合同。未新增 Provider、投研引擎或写权限。脱敏真实来源回归见[冻结夹具](../tests/fixtures/v42_real_research/README.md)及[定向测试](../tests/test_v42_real_research.py)；修复待合并/部署后复验，不宣称三标已通过。
+
+### 生成模型配置与 API 兼容（工程候选）
+
+原 PEER/意图/研报/画像/草稿调用统一复用 [llm_config](../app/llm_config.py)，不另建投研引擎或改变业务 owner。Sol medium（可 high）/Luna none 或 low；旧 GPT-4.1 仅显式 legacy profile，API 错误不切换。严格提取仍用原 Responses schema，其余保留 Chat；Embedding/专用搜索单列。入口矩阵、24 次真实 A/B、性能代价、ARM 锁依赖及未验收项见[升级记录](GPT6_MODEL_UPGRADE.md)，专项见[SDK/资格回归](../tests/test_gpt6_models.py)。

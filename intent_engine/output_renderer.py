@@ -29,6 +29,8 @@ TODO Phase 2: output_section_start 事件推送
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_MAIN, chat_completion
+
 import json
 import traceback
 from typing import Dict, List, Optional
@@ -70,7 +72,7 @@ def render(
 
     try:
         client = get_client()
-        response = client.chat.completions.create(
+        response = chat_completion(client,
             model=MODEL_MAIN,
             max_tokens=_MAX_TOKENS_FINAL,
             timeout=60,

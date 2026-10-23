@@ -31,6 +31,8 @@ TODO Phase 2: 置信度澄清问题生成（0.5~0.74 区间）
 """
 from __future__ import annotations
 
+from app.llm_config import LLMCallError, chat_completion
+
 import json
 import re
 import traceback
@@ -298,7 +300,7 @@ def recognize(
     for attempt in range(3):  # 最多3次（初始1次 + 重试2次，PRD §3.1）
         try:
             client = get_client()
-            response = client.chat.completions.create(
+            response = chat_completion(client,
                 model=MODEL_MINI,
                 max_tokens=512,
                 timeout=10,
@@ -319,6 +321,12 @@ def recognize(
                 pass  # TODO Phase 2: generate clarification question for low-confidence intents
 
             return payload, clarification
+
+        except LLMCallError as e:
+            # Transport retry is owned by the shared adapter; JSON retry below
+            # must not replay access/quota/parameter failures or change models.
+            last_error = e
+            break
 
         except EnvironmentError:
             raise  # 无 API Key，直接向上传递

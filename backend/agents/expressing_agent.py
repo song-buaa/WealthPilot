@@ -4,7 +4,7 @@ ExpressingAgent - PEER 4 Agent 之 Expressing 角色。
 职责（对标 agentUniverse ExpressingAgent）：
 1. 加载意图对应的 prompt 模板
 2. 注入输出规范 Skills（wp-citation-rules）的内容
-3. 调用 LLM（GPT-4.1）生成结构化输出
+3. 调用 LLM（Sol）生成结构化输出
 4. 流式 yield chat_answer 给用户
 5. 返回完整 LLMResult / GenericLLMResult
 
@@ -14,6 +14,8 @@ ExpressingAgent - PEER 4 Agent 之 Expressing 角色。
 - 流式分块由 _emit_text_chunks 处理（与 v2.6 _stream_text 行为一致）
 """
 from __future__ import annotations
+
+from app.llm_config import MODEL_MAIN, chat_completion
 
 import asyncio
 import logging
@@ -559,7 +561,7 @@ class ExpressingAgent:
             from intent_engine._llm_client import get_client, MODEL_MAIN
             client = get_client()
             response = await asyncio.to_thread(
-                lambda: client.chat.completions.create(
+                lambda: chat_completion(client,
                     model=MODEL_MAIN,
                     messages=[
                         {"role": "system", "content": prompt},

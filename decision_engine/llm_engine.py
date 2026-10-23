@@ -3,7 +3,7 @@ LLM 推理模块 (LLM Engine)
 
 职责：将结构化信号 + 规则 + 投研观点送入 LLM，获取最终投资建议。
 
-使用模型：gpt-4.1（由 PRD 指定）
+使用模型：Sol（集中模型配置；显式旧版回滚另行选择）
 
 输出格式（强约束）：
     {
@@ -28,6 +28,8 @@ UI 映射：
 """
 
 from __future__ import annotations
+
+from app.llm_config import MODEL_MAIN, MODEL_LIGHT, chat_completion
 
 import json
 import os
@@ -961,8 +963,8 @@ def reason(
         if total_chars > 30000:
             print(f"[reason] ⚠️ messages 总长 {total_chars} 字符，接近 context 上限", flush=True)
 
-        response = client.chat.completions.create(
-            model="gpt-4.1",
+        response = chat_completion(client,
+            model=MODEL_MAIN,
             max_tokens=4096,
             timeout=60,
             messages=messages,
@@ -1614,8 +1616,8 @@ def chat(
 
     try:
         client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             max_tokens=512,
             timeout=20,
             messages=[{"role": "system", "content": (
@@ -1831,8 +1833,8 @@ def _call_generic_llm(
                         content = content[:300] + "\n…（省略）…\n" + content[-200:]
                     messages.append({"role": turn["role"], "content": content})
         messages.append({"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)})
-        response = client.chat.completions.create(
-            model="gpt-4.1",
+        response = chat_completion(client,
+            model=MODEL_MAIN,
             max_tokens=2048,
             timeout=30,
             messages=messages,
@@ -2010,8 +2012,8 @@ def compare_multi_assets(
 
     try:
         client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             max_tokens=2048,
             timeout=30,
             temperature=0.3,
@@ -2046,8 +2048,8 @@ def respond_not_in_portfolio(user_query: str, asset_name: str) -> str:
     context = f"用户原始问题：{user_query}\n识别到的标的：{asset_name}"
     try:
         client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             max_tokens=512,
             timeout=20,
             messages=[

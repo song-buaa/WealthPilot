@@ -4,6 +4,8 @@ WealthPilot - 全局配置常量
 修改配置只需改此文件，不需要翻业务代码。
 """
 
+from app.llm_config import MODEL_MAIN, MODEL_LIGHT
+
 # ── 分析引擎 ─────────────────────────────────
 # 策略偏离告警阈值（百分点），超过此值才产生告警
 DEVIATION_THRESHOLD: float = 5.0
@@ -13,10 +15,10 @@ HIGH_SEVERITY_THRESHOLD: float = 15.0
 
 # ── AI 模型 ──────────────────────────────────
 # 完整报告使用能力更强的模型
-AI_REPORT_MODEL: str = "gpt-4.1-mini"
+AI_REPORT_MODEL: str = MODEL_MAIN
 
 # 单条告警解读使用轻量模型，节省 token
-AI_ALERT_MODEL: str = "gpt-4.1-nano"
+AI_ALERT_MODEL: str = MODEL_LIGHT
 
 # AI 输出的最大 token 数
 AI_REPORT_MAX_TOKENS: int = 2000
@@ -26,7 +28,7 @@ AI_ALERT_MAX_TOKENS: int = 500
 AI_TEMPERATURE: float = 0.3
 
 # 投研观点模块：AI 解析研报用较强模型，保证结构化质量
-AI_RESEARCH_MODEL: str = "gpt-4.1-mini"
+AI_RESEARCH_MODEL: str = MODEL_LIGHT
 AI_RESEARCH_MAX_TOKENS: int = 2000
 
 # ── UI 展示 ──────────────────────────────────

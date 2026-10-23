@@ -11,6 +11,8 @@ v0.6 改造：
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import json
 import logging
 import os
@@ -228,8 +230,8 @@ def plan_actions(
 
     try:
         client = llm_client or _get_default_client()
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=messages,
             max_tokens=2000,
             temperature=0,

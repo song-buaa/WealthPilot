@@ -3,7 +3,7 @@ sqlalchemy>=2.0.0
 pandas>=2.0.0
 exchange-calendars==4.13.2  # Local session/holiday evidence for asset valuation; no network/calendar service
 TA-Lib>=0.6.5,<0.7        # Pattern canonical indicator authority
-openai>=1.20.0
+openai==2.29.0  # Matches the existing hashed ARM business lock
 pydantic>=2.0.0          # 数据契约（FastAPI / Agents contracts）
 httpx[socks]>=0.24.0
 plotly>=5.20.0

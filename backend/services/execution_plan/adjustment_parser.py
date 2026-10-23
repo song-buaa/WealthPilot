@@ -11,6 +11,8 @@ AI 绝不直接产出触发价/限价/数量——那些永远由规则引擎重
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import json
 import logging
 import os
@@ -54,8 +56,8 @@ def parse_adjustment(user_text: str) -> dict:
             api_key=os.environ.get("WEALTHPILOT_OPENAI_API_KEY"),
             http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(15.0)),
         )
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_text},

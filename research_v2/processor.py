@@ -3,13 +3,15 @@ ViewpointProcessor — 把 RawFact 加工成三层 ViewpointCard。
 
 核心职责:
 1. 根据 source_type 选择 prompt 模板
-2. 调 LLM (gpt-4.1-mini) 生成 narrative + judgment
+2. 调 LLM (Luna（集中模型配置）) 生成 narrative + judgment
 3. 强制 override 三个字段（不管 LLM 输出什么）:
    - is_ai_prefilled = True
    - confidence = low
    - decision_signal.confidence_score = 0.3
 4. Pydantic 校验失败时重试一次
 """
+
+from app.llm_config import MODEL_LIGHT, chat_completion
 
 import json
 import logging
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
 
-_LLM_MODEL = "gpt-4.1-mini"
+_LLM_MODEL = MODEL_LIGHT
 _LLM_MAX_TOKENS = 2000
 _LLM_TIMEOUT = 30
 
@@ -76,7 +78,7 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
         raise EnvironmentError("未配置 WEALTHPILOT_OPENAI_API_KEY 环境变量")
 
     client = openai.OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
+    response = chat_completion(client,
         model=_LLM_MODEL,
         max_tokens=_LLM_MAX_TOKENS,
         timeout=_LLM_TIMEOUT,

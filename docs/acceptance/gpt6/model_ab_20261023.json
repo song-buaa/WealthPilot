@@ -1,0 +1,1864 @@
+{
+  "schema": "wealthpilot.model-ab.v1",
+  "production_acceptance": false,
+  "base_sha": "5437da0ad962ac7dc49c68b589b39a31ee5bc3e4",
+  "fixture_manifest_sha256": "c042d4de3c43e585d845733feb3a3cf2663cbd4ac0f58ec60d9751f93c27755e",
+  "max_requests": 24,
+  "max_usd": 3.0,
+  "rows": [
+    {
+      "symbol": "LI:US",
+      "stage": "planning",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 3056,
+      "output_tokens": 122,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.001418,
+      "status": "completed",
+      "latency_ms": 7268,
+      "contract_valid": false,
+      "json_valid": null
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "planning",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 3055,
+      "output_tokens": 123,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000367,
+      "status": "completed",
+      "correct": true,
+      "latency_ms": 2695,
+      "contract_valid": true,
+      "json_valid": true
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "explanation",
+      "requested_model": "gpt-4.1",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-2025-04-14",
+      "input_tokens": 886,
+      "output_tokens": 225,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.003572,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 1,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 1,
+        "accepted_count": 0,
+        "usable_record_count": 1,
+        "rejected": {
+          "text_not_safe_qualitative": 1
+        }
+      },
+      "professional_explanation": [],
+      "latency_ms": 2875
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "explanation",
+      "requested_model": "gpt-6.1-sol",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6.1-sol",
+      "input_tokens": 885,
+      "output_tokens": 930,
+      "reasoning_tokens": 167,
+      "estimated_usd": 0.01107,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 4,
+      "retained_count": 3,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 4,
+        "accepted_count": 3,
+        "usable_record_count": 1,
+        "rejected": {
+          "text_not_safe_qualitative": 1
+        }
+      },
+      "professional_explanation": [
+        {
+          "topic": "technical_trend",
+          "basis": "inference",
+          "text": "来源数据显示,日线短期均线高于较长周期均线,动量柱转为正向,但趋势动量仍处于负向区域;周线短期均线仍低于较长周期均线,动量也尚未脱离负向区域。据此推论,当前更接近偏弱背景下的短期修复,而非已经确认的趋势反转。日线与周线强弱存在分化,不能仅凭短期改善否定较长周期的下行风险。",
+          "evidence_refs": [
+            "broker:LI:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:LI:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "LI:US"
+            }
+          ]
+        },
+        {
+          "topic": "exit_rationale",
+          "basis": "inference",
+          "text": "若持仓目标偏重控制回撤,且能够接受修复行情中持仓收益减少的代价,逐步降低敞口具有条件性合理性:其依据是较长周期趋势尚弱,而非公司经营恶化已被证实。分阶段调整可以缓和择时误差,但不能保证优于继续持有。由于缺少持仓权重、投资期限和风险承受能力,现阶段只能评价减仓方向的合理性,不能判断适合的减仓规模。",
+          "evidence_refs": [
+            "broker:LI:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:LI:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "LI:US"
+            }
+          ]
+        },
+        {
+          "topic": "risk",
+          "basis": "inference",
+          "text": "来源中的日线成交量接近近期常态,周线成交量低于近期常态,尚不足以显示修复获得持续的量能支持;但这些汇总数据也不能证明存在明确的量价背离。技术证据无法验证营收、盈利、估值或竞争地位,因此不能据此认定公司投资价值下降。若后续趋势转强,当前偏防御的判断可能造成错失上涨机会。",
+          "evidence_refs": [
+            "broker:LI:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:LI:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "LI:US"
+            }
+          ]
+        }
+      ],
+      "latency_ms": 21848
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 343,
+      "output_tokens": 43,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000206,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.6,
+      "latency_ms": 1446
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 342,
+      "output_tokens": 110,
+      "reasoning_tokens": 61,
+      "estimated_usd": 8.9e-05,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.3,
+      "latency_ms": 2318
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "planning",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 3057,
+      "output_tokens": 117,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.00141,
+      "status": "completed",
+      "latency_ms": 1664,
+      "contract_valid": false,
+      "json_valid": null
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "planning",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 3056,
+      "output_tokens": 124,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000368,
+      "status": "completed",
+      "correct": true,
+      "latency_ms": 2593,
+      "contract_valid": true,
+      "json_valid": true
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "explanation",
+      "requested_model": "gpt-4.1",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-2025-04-14",
+      "input_tokens": 886,
+      "output_tokens": 254,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.003804,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 1,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 1,
+        "accepted_count": 0,
+        "usable_record_count": 1,
+        "rejected": {
+          "text_not_safe_qualitative": 1
+        }
+      },
+      "professional_explanation": [],
+      "latency_ms": 2671
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "explanation",
+      "requested_model": "gpt-6.1-sol",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6.1-sol",
+      "input_tokens": 885,
+      "output_tokens": 1039,
+      "reasoning_tokens": 165,
+      "estimated_usd": 0.01216,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 4,
+      "retained_count": 3,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 4,
+        "accepted_count": 3,
+        "usable_record_count": 1,
+        "rejected": {
+          "text_not_safe_qualitative": 1
+        }
+      },
+      "professional_explanation": [
+        {
+          "topic": "technical_trend",
+          "basis": "inference",
+          "text": "来源数据显示,日线短期均线高于中期均线,动量柱转强,但相对强弱仍偏弱;周线短期均线仍低于中期均线,趋势动量也尚未摆脱弱势区域。据此推论,当前更接近弱势背景下的修复,而非已经确认的持续上行趋势。不过,周线动量柱也在改善,说明下行动能可能正在缓和,不能将较长周期偏弱直接等同于价格必然继续下跌。",
+          "evidence_refs": [
+            "broker:PDD:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:PDD:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "PDD:US"
+            }
+          ]
+        },
+        {
+          "topic": "exit_rationale",
+          "basis": "inference",
+          "text": "若持仓目标优先考虑回撤约束,较长周期趋势尚未确认转强,可以构成考虑逐步减仓的技术理由。其逻辑是降低趋势修复失败时的风险暴露,而不是认定公司经营转差。由于短期动量已有改善,过于激进地退出也可能错失后续修复,因此现有证据更支持条件化的风险管理讨论,而非确定性的看空结论。",
+          "evidence_refs": [
+            "broker:PDD:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:PDD:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "PDD:US"
+            }
+          ]
+        },
+        {
+          "topic": "review_condition",
+          "basis": "inference",
+          "text": "减仓倾向的反证条件,是后续较长周期均线关系与动量同步改善,并获得持续量能配合;若出现这种变化,弱势修复的解释应被重新审视。相反,若短期动量改善消退,且此前观察到的支撑区域失守,风险控制理由会增强。这些只是基于当前技术证据提出的复核条件,不代表相关变化已经发生,也不能替代对经营、估值及竞争风险的研究。",
+          "evidence_refs": [
+            "broker:PDD:US:day:2026-10-22"
+          ],
+          "sources": [
+            {
+              "evidence_ref": "broker:PDD:US:day:2026-10-22",
+              "source": "broker",
+              "data_as_of": "2026-10-22",
+              "published_at": null,
+              "source_url": null,
+              "period": "day/week",
+              "kind": "technical",
+              "symbol": "PDD:US"
+            }
+          ]
+        }
+      ],
+      "latency_ms": 26261
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 344,
+      "output_tokens": 47,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000213,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.6,
+      "latency_ms": 1078
+    },
+    {
+      "symbol": "PDD:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 343,
+      "output_tokens": 127,
+      "reasoning_tokens": 74,
+      "estimated_usd": 9.8e-05,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.3,
+      "latency_ms": 2816
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "planning",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 3057,
+      "output_tokens": 112,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.001402,
+      "status": "completed",
+      "correct": true,
+      "latency_ms": 1611,
+      "contract_valid": true,
+      "json_valid": true
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "planning",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 3056,
+      "output_tokens": 124,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000368,
+      "status": "completed",
+      "correct": true,
+      "latency_ms": 5135,
+      "contract_valid": true,
+      "json_valid": true
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "explanation",
+      "requested_model": "gpt-4.1",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-2025-04-14",
+      "input_tokens": 488,
+      "output_tokens": 9,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.001048,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 0,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 0,
+        "accepted_count": 0,
+        "usable_record_count": 0,
+        "rejected": {}
+      },
+      "professional_explanation": [],
+      "latency_ms": 831
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "explanation",
+      "requested_model": "gpt-6.1-sol",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6.1-sol",
+      "input_tokens": 487,
+      "output_tokens": 714,
+      "reasoning_tokens": 160,
+      "estimated_usd": 0.008114,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 0,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 0,
+        "accepted_count": 0,
+        "usable_record_count": 0,
+        "rejected": {}
+      },
+      "professional_explanation": [],
+      "latency_ms": 16993
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "reviewing",
+      "requested_model": "gpt-4.1-mini",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 344,
+      "output_tokens": 45,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.00021,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.6,
+      "latency_ms": 1298
+    },
+    {
+      "symbol": "3690:HK",
+      "stage": "reviewing",
+      "requested_model": "gpt-6-luna",
+      "case": "frozen_real",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 343,
+      "output_tokens": 170,
+      "reasoning_tokens": 122,
+      "estimated_usd": 0.000119,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.3,
+      "latency_ms": 3173
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "planning",
+      "requested_model": "gpt-4.1-mini",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 3056,
+      "output_tokens": 116,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.001408,
+      "status": "completed",
+      "latency_ms": 1895,
+      "contract_valid": false,
+      "json_valid": null
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "planning",
+      "requested_model": "gpt-6-luna",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 3055,
+      "output_tokens": 123,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000367,
+      "status": "completed",
+      "correct": true,
+      "latency_ms": 2130,
+      "contract_valid": true,
+      "json_valid": true
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "explanation",
+      "requested_model": "gpt-4.1",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-2025-04-14",
+      "input_tokens": 487,
+      "output_tokens": 9,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.001046,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 0,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 0,
+        "accepted_count": 0,
+        "usable_record_count": 0,
+        "rejected": {}
+      },
+      "professional_explanation": [],
+      "latency_ms": 827
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "explanation",
+      "requested_model": "gpt-6.1-sol",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6.1-sol",
+      "input_tokens": 486,
+      "output_tokens": 622,
+      "reasoning_tokens": 100,
+      "estimated_usd": 0.007192,
+      "status": "completed",
+      "json_valid": true,
+      "candidate_count": 0,
+      "retained_count": 0,
+      "diagnostics": {
+        "stage": "final_projection",
+        "candidate_count": 0,
+        "accepted_count": 0,
+        "usable_record_count": 0,
+        "rejected": {}
+      },
+      "professional_explanation": [],
+      "latency_ms": 16483
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-4.1-mini",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-4.1-mini-2025-04-14",
+      "input_tokens": 358,
+      "output_tokens": 45,
+      "reasoning_tokens": 0,
+      "estimated_usd": 0.000215,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.0,
+      "latency_ms": 961
+    },
+    {
+      "symbol": "LI:US",
+      "stage": "reviewing",
+      "requested_model": "gpt-6-luna",
+      "case": "no_evidence",
+      "qualification": {
+        "L1": {
+          "allowed": true,
+          "blockers": []
+        },
+        "L2": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE"
+          ]
+        },
+        "L3": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        },
+        "L4": {
+          "allowed": false,
+          "blockers": [
+            "ANALYSIS_CONTEXT_EXPIRED",
+            "ASSET_AMOUNT_QUALIFICATION_REQUIRED",
+            "CAN_PROPOSE_REBALANCE_FALSE",
+            "EVENT_VERIFIED_EVIDENCE_REQUIRED",
+            "FIXED_ASSET_VIEW_REQUIRED",
+            "FUNDAMENTALS_VERIFIED_EVIDENCE_REQUIRED",
+            "ISSUER_DENOMINATOR_UNAVAILABLE",
+            "MANUAL_TRADE_PREPARATION_NOT_AUTHORIZED",
+            "PRINCIPLES_RETRIEVAL_UNAVAILABLE",
+            "QUOTE_VERIFIED_EVIDENCE_REQUIRED",
+            "RESEARCH_VERIFIED_EVIDENCE_REQUIRED",
+            "TECHNICAL_VERIFIED_EVIDENCE_REQUIRED"
+          ]
+        }
+      },
+      "operating_evidence_available": false,
+      "usage_status": "reported",
+      "returned_model": "gpt-6-luna",
+      "input_tokens": 357,
+      "output_tokens": 89,
+      "reasoning_tokens": 34,
+      "estimated_usd": 8e-05,
+      "status": "completed",
+      "json_valid": true,
+      "score": 0.0,
+      "latency_ms": 2708
+    }
+  ],
+  "limitations": [
+    "Frozen AV publication clocks missing: real operating-thesis comparison unavailable.",
+    "Component prompt A/B, not full PEER end-to-end latency or production three-stock UAT.",
+    "Costs use standard uncached rates; failed/unknown usage retains upper reservation."
+  ],
+  "http_attempts": 24,
+  "attempts": [
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.006054
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.001568
+    },
+    {
+      "model": "gpt-4.1",
+      "reserved_usd": 0.024412
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "reserved_usd": 0.090418
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.001415
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.002285
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.006055
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.001568
+    },
+    {
+      "model": "gpt-4.1",
+      "reserved_usd": 0.024414
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "reserved_usd": 0.09042
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.001415
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.002285
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.006055
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.001569
+    },
+    {
+      "model": "gpt-4.1",
+      "reserved_usd": 0.022308
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "reserved_usd": 0.088314
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.001416
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.002285
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.006054
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.001568
+    },
+    {
+      "model": "gpt-4.1",
+      "reserved_usd": 0.022304
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "reserved_usd": 0.08831
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "reserved_usd": 0.001432
+    },
+    {
+      "model": "gpt-6-luna",
+      "reserved_usd": 0.002289
+    }
+  ],
+  "reserved_upper_usd": 0.496215,
+  "status": "COMPLETED_REQUIRES_QUALITATIVE_REVIEW",
+  "measurement_notes": [
+    "Initial runner combined JSON and semantic validation for planning. The recorded boolean is full-contract success, not standalone JSON parse rate. Failed rows have unknown standalone parse/routing status. No additional paid calls were made.",
+    "Reviewer safe samples were minimal statements, not calibrated complete professional answers; threshold-based correctness is withdrawn. Scores are descriptive only.",
+    "Original model raw text and private context were never persisted; only final safe public-evidence projections are included."
+  ]
+}

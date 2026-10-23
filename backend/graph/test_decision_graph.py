@@ -18,7 +18,8 @@ sys.modules["intent_engine.intent_recognizer"] = _mock_intent_engine.intent_reco
 
 # Mock _llm_client 子模块（Planner 用）
 _mock_llm_client = MagicMock()
-_mock_llm_client.MODEL_MAIN = "gpt-4.1"
+_mock_llm_client.MODEL_MAIN = "gpt-6.1-sol"
+_mock_llm_client.MODEL_MINI = "gpt-6-luna"
 sys.modules["intent_engine._llm_client"] = _mock_llm_client
 
 # Mock decision_service 的工具函数

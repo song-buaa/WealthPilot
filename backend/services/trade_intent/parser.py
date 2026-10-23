@@ -5,6 +5,8 @@ broker, contract-resolution, quote, cash-authority, or execution dependency.
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, parse_response
+
 import logging
 import os
 import re
@@ -162,7 +164,7 @@ Rules:
 class OpenAIStructuredTradeIntentProvider:
     """Strict OpenAI structured-output provider, created lazily."""
 
-    def __init__(self, client=None, model: str = "gpt-4.1-mini"):
+    def __init__(self, client=None, model: str = MODEL_LIGHT):
         self._client = client
         self._model = model
 
@@ -195,13 +197,15 @@ class OpenAIStructuredTradeIntentProvider:
             + "\n\nCurrent user message (authoritative for this turn):\n"
             + user_message
         )
-        response = self._client_or_default().responses.parse(
+        response = parse_response(self._client_or_default(),
             model=self._model,
             input=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             text_format=TradeIntentExtraction,
+            reasoning_effort="low",
+            max_tokens=2000,
             timeout=20.0,
         )
         parsed = response.output_parsed

@@ -22,7 +22,9 @@
 
 国金双次任务已启用并加载：适用交易日北京时间11:45和17:30，窗口11:45–12:15、17:30–18:00分别去重。任务加载PASS与自然执行/长期稳定性分开；来源时间、完整性未知仍partial，不由缺失行推断清仓或以来源现金0覆盖Last-good。
 
-**4.2 单标的决策优化：PR #39 已合并；用户提供的生产 SHA 为 `b6b5a17bb589b8e82d1d655880c45f0675cef984`。2026-10-23 首轮 LI、PDD、美团真实投研验收未通过，当前在独立修复分支修通 AV、港股身份与专业解释链路。** 正式目标仍待用户确认，工程检查不代表真实业务验收通过。本轮仅代码修复/隔离测试/PR，不部署、不修改生产数据或配置；范围、来源限制及复验建议见[4.2开发记录](docs/V42_IMPLEMENTATION.md#首轮真实投研验收修复2026-10-23)。原私有 PRD v1.0 及既有权限边界不变。
+**4.2 单标的决策优化：PR #39 已合并；用户提供的生产 SHA 为 `b6b5a17bb589b8e82d1d655880c45f0675cef984`。2026-10-23 首轮 LI、PDD、美团真实投研验收未通过，数据链路修复 PR #40 已 fast-forward 合并 main（`5437da0ad962ac7dc49c68b589b39a31ee5bc3e4`），合并后四项 CI 全绿，尚未部署。** 正式目标仍待用户确认，工程检查不代表真实业务验收通过。本轮仅代码修复/隔离测试/PR，不部署、不修改生产数据或配置；范围、来源限制及复验建议见[4.2开发记录](docs/V42_IMPLEMENTATION.md#首轮真实投研验收修复2026-10-23)。原私有 PRD v1.0 及既有权限边界不变。
+
+模型升级工程候选复用原 PEER，主模型 Sol medium、轻量 Luna none/low；有限真实 A/B 与限制见[升级记录](docs/GPT6_MODEL_UPGRADE.md)。代码候选不代表生产模型已切换。
 
 ## ChatGPT与Web入口
 
@@ -104,7 +106,7 @@ WealthPilot 维护两种明确隔离的本地运行模式：
 - **FastAPI** + **uvicorn**（RESTful API + SSE 流式接口）
 - **SQLAlchemy 2.0**（ORM，SQLite）
 - **Pydantic v2**（数据契约与字段校验）
-- **OpenAI ≥ 1.20**（LLM 调用）
+- **OpenAI 2.29.0**（LLM 调用）
 - **LangGraph**（保留图/工具层依赖；当前决策主路径为 PEER service）
 - **LangChain**（Text Splitter 文档切片）
 - **ChromaDB**（向量库，支持知识库 RAG 语义检索）
@@ -216,7 +218,7 @@ cd frontend && npm install
 ```bash
 cp .env.example .env
 # 编辑 .env，填入：
-#   WEALTHPILOT_OPENAI_API_KEY        — GPT-4.1 系列（核心 LLM）
+#   WEALTHPILOT_OPENAI_API_KEY        — 集中模型配置（Sol/Luna；显式旧版回滚）
 #   TIGER_ID              — 老虎证券持仓同步（可选）
 #   TIGER_PRIVATE_KEY_PATH — 老虎证券私钥路径（可选）
 #   FUTU_HOST / FUTU_PORT — 富途 OpenD 连接配置（可选）

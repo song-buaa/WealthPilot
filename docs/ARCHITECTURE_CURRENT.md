@@ -83,6 +83,8 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 分析 worker 使用 SQLite mode=ro、query_only 和 authorizer，保持进程退出前只读；显式临时分析模式不写 Web 会话或图 checkpoints、不执行交易意图解析。复用既有分析 Python / Provider 配置与知识工作目录，知识索引缺失则降级，不创建第二个 Chroma 数据库。相关实现细节见 [P3/P4/P5 适配记录](WealthPilot_4x_P345_Analysis_Skills.md)。
 
+生成模型配置和 API 适配统一由 [app/llm_config.py](../app/llm_config.py) 维护，原客户端/PEER/Skills 仍为调用入口。正常候选使用 Sol/Luna；显式 legacy profile 才可回滚，Provider 失败不切旧模型。此 owner 仅管理模型请求，不赋予证据资格、可信目标或交易权限。调用矩阵、API/ARM 兼容及有限 A/B 限制见[升级记录](GPT6_MODEL_UPGRADE.md)，工程候选未部署。
+
 ## 5. Web 交易、数据库与任务
 
 普通单标 P2：ChatGPT 明确参数 → 只读 URL → `/#/action?...` → 原 ActionDraftCard / ConfirmOrderDialog → ActionDraft / SymbolStrategy / RiskEngine / OrderManager / BrokerAdapter → 原订单状态/记录。打开链接与预览不是最终交易授权，用户必须在 Web 亲自确认；不得将 Mock 成交当实盘成交。

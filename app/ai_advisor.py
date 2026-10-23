@@ -3,6 +3,8 @@ WealthPilot - AI 投顾解读模块
 调用LLM对分析结果进行自然语言解读
 """
 
+from app.llm_config import chat_completion
+
 import json
 import os
 from typing import List, Optional
@@ -92,7 +94,7 @@ def generate_portfolio_analysis(
 4. **调整建议**（具体的、可操作的建议，比如"建议将权益仓位从70%降至60%，可考虑减持XXX"）"""
 
     try:
-        response = _get_client().chat.completions.create(
+        response = chat_completion(_get_client(),
             model=AI_REPORT_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -174,7 +176,7 @@ def generate_research_card(
 注意：suggested_tags 最多输出 5 个最核心的标签，不要超过 5 个。"""
 
     try:
-        response = _get_client().chat.completions.create(
+        response = chat_completion(_get_client(),
             model=AI_RESEARCH_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -248,7 +250,7 @@ def generate_research_card_full(raw_content: str) -> dict:
 }}"""
 
     try:
-        response = _get_client().chat.completions.create(
+        response = chat_completion(_get_client(),
             model=AI_RESEARCH_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -283,7 +285,7 @@ def generate_alert_explanation(alert: DeviationAlert) -> str:
 偏离: {alert.deviation:+.1f} 个百分点"""
 
     try:
-        response = _get_client().chat.completions.create(
+        response = chat_completion(_get_client(),
             model=AI_ALERT_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},

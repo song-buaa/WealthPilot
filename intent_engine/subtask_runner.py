@@ -32,6 +32,8 @@ Phase 1 数据来源：
 """
 from __future__ import annotations
 
+from app.llm_config import LLMCallError, chat_completion
+
 import json
 import traceback
 from typing import Dict, List, Optional
@@ -109,7 +111,7 @@ def _execute_subtask(
     for attempt in range(2):
         try:
             client = get_client()
-            response = client.chat.completions.create(
+            response = chat_completion(client,
                 model=MODEL_MAIN,
                 max_tokens=_MAX_TOKENS,
                 timeout=15,
@@ -117,6 +119,10 @@ def _execute_subtask(
             )
             content = response.choices[0].message.content.strip()
             return SubtaskResult(subtask=subtask, status="success", content=content)
+
+        except LLMCallError as e:
+            return SubtaskResult(subtask=subtask, status="failed",
+                                 content="该部分分析暂时不可用。", error=str(e))
 
         except EnvironmentError:
             raise

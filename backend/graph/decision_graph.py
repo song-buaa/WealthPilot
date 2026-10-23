@@ -9,6 +9,8 @@ orchestrator_node 做两次调用：
 Planner 失败时降级到规则路由（与 Step 1 逻辑一致）。
 """
 
+from app.llm_config import chat_completion
+
 import logging
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
@@ -247,7 +249,7 @@ def orchestrator_node(state: DecisionState) -> dict:
     planner_trace = {"status":"success", "fallback_type":None, "impact":"routing only; evidence independently qualified"}
     try:
         client = get_client()
-        response = client.chat.completions.create(
+        response = chat_completion(client,
             model=MODEL_MINI,
             messages=[{"role": "user", "content": planner_prompt}],
             temperature=0,

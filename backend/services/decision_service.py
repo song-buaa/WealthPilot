@@ -11,6 +11,8 @@ v3.0 PEER Agents 架构。SSE 流式逻辑在 decision_service_v3.py 中实现�
 
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import asyncio
 import json
 import re
@@ -97,8 +99,8 @@ def generate_conversation_title(first_message: str) -> str:
     try:
         from intent_engine._llm_client import get_client
         client = get_client()
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=[
                 {"role": "system", "content": (
                     "你是一个对话标题生成助手，根据用户的第一条消息，"
@@ -171,8 +173,8 @@ def generate_context_summary(
             content = m["content"][:300]  # 截断超长单条消息
             user_content_parts.append(f"{role_label}：{content}")
 
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=[
                 {"role": "system", "content": _SUMMARY_PROMPT},
                 {"role": "user", "content": "\n".join(user_content_parts)},

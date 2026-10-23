@@ -3,6 +3,8 @@ Profile Service — 用户画像业务逻辑
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_MAIN, MODEL_LIGHT, chat_completion
+
 import json
 import os
 from datetime import datetime, timedelta
@@ -128,8 +130,8 @@ def extract_profile_from_text(user_input: str, existing_fields: dict) -> dict:
             f"用户输入：{user_input}\n\n"
             f"已有字段（不要重复提取）：{json.dumps(existing_fields, ensure_ascii=False)}"
         )
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             max_tokens=512,
             timeout=20,
             messages=[
@@ -200,8 +202,8 @@ def extract_profile_from_images(images: list[str], existing_fields: dict) -> dic
                 "type": "image_url",
                 "image_url": {"url": url, "detail": "high"},
             })
-        response = client.chat.completions.create(
-            model="gpt-4.1",
+        response = chat_completion(client,
+            model=MODEL_MAIN,
             max_tokens=512,
             timeout=30,
             messages=[
@@ -275,8 +277,8 @@ def generate_ai_profile(profile: UserProfile) -> dict:
 
     try:
         client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4.1",
+        response = chat_completion(client,
+            model=MODEL_MAIN,
             max_tokens=256,
             timeout=20,
             messages=[

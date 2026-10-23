@@ -315,3 +315,7 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 最终兼容性收口：canonical 市场投影复用原分类 Owner，基金/现金/非支持市场继续 fail closed，ETF 与原有显式市场覆盖保留；财务冲突仅记录同季度原始直接字段的数值差异，派生项单列 UPSTREAM_FINANCIAL_SOURCE_CONFLICT，未受影响字段仍可解释，L3 冲突阻断不变。Reviewer 保留 hard/soft 分层语义。原季度观察只供确定性冲突核对，不经 field_quality metadata 回流模型提示。末端/时钟/身份/专业解释/Web/MCP/Explain/快照专项共 214 passed；前一候选本地全量 1948 passed、7 skipped，最终提交全部四项远端 Gate（含全量 pytest）以本修复 PR 的完整 SHA 清单为准。
 
 最终市场兼容补充：核验原 quote 币种与 technical 日历仅完整支持 US/HK；SH/SZ canonical 保留在持仓/issuer 中，行情投影明确降级，不以裸 ticker 或 canonical 扩张未支持市场；`CN` 模糊基金码不猜交易所。已知 ETF 类型优先于泛“基金”标签。AV 服务只映射 US 报表，HK/SH/SZ/LSE 不误用裸代码发出 US AV 请求。无报价的快照 currency 保持未知，不再默认 USD；合格技术证据继续保留自己的市场与币种。
+
+## PR #40 代码集成（2026-10-23）
+
+用户授权后已重新 fetch，核对候选 `5437da0ad962ac7dc49c68b589b39a31ee5bc3e4`、main 祖先关系及候选四项 CI，以 `git merge --ff-only` 集成并普通 push main。PR #40 为 MERGED，local main/origin/main/远端 main 同 SHA；[合并后 main CI](https://github.com/song-buaa/WealthPilot/actions/runs/39911140134) 四项全部通过。无生产切换、Tag、配置/数据/目标/券商操作，真实三标验收仍待复验。后续独立模型升级工程候选见[记录](GPT6_MODEL_UPGRADE.md)。

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import json
 import os
 import time
@@ -615,7 +617,7 @@ def load(asset_name: Optional[str], pid: int = default_portfolio_id, user_query:
                 ambiguous_matches = [PositionInfo.from_aggregated(p) for p in agg_ambiguous]
             else:
                 # 第三步：LLM 语义解析（精确/模糊匹配失败时）
-                # 把用户描述 + 持仓列表交给 gpt-4.1-mini，利用模型泛化理解能力匹配
+                # 把用户描述 + 持仓列表交给 Luna（集中模型配置），利用模型泛化理解能力匹配
                 inferred = _resolve_asset_by_llm(agg_positions, asset_name)
                 if inferred:
                     target_position = PositionInfo.from_aggregated(inferred)
@@ -961,7 +963,7 @@ def _resolve_asset_by_llm(positions: list, asset_name: str) -> Optional[object]:
     用 LLM 语义理解做资产名称解析，替代关键词规则匹配。
 
     当 find_target 精确/模糊匹配失败时调用。
-    把用户描述的资产名 + 实际持仓列表送给 gpt-4.1-mini，让模型判断匹配哪个。
+    把用户描述的资产名 + 实际持仓列表送给 Luna（集中模型配置），让模型判断匹配哪个。
 
     优点：
     - 天然理解别名（招行=招商银行）、品类语义（稳健理财≈固收类）
@@ -994,8 +996,8 @@ def _resolve_asset_by_llm(positions: list, asset_name: str) -> Optional[object]:
         )
 
         client = _openai.OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             max_tokens=50,
             timeout=8,
             temperature=0,

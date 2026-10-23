@@ -1,6 +1,8 @@
 """
 银行APP截图解析模块，使用 OpenAI GPT-4o Vision 提取资产金额。
 """
+
+from app.llm_config import MODEL_MAIN, chat_completion
 import os
 import io
 import json
@@ -175,8 +177,8 @@ def _call_vision_api(image_bytes: bytes, prompt: str, max_tokens: int = 1000) ->
         b64 = base64.b64encode(image_bytes).decode()
         mime = "image/png" if image_bytes[:4] == b'\x89PNG' else "image/jpeg"
 
-        resp = client.chat.completions.create(
-            model="gpt-4o",
+        resp = chat_completion(client,
+            model=MODEL_MAIN,
             messages=[{
                 "role": "user",
                 "content": [

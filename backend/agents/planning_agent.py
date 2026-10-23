@@ -15,6 +15,8 @@ PlanningAgent - PEER 4 Agent 之 Planning 角色。
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import json
 import logging
 import os
@@ -219,8 +221,8 @@ def _llm_augment_skills(
 
     try:
         client = openai.OpenAI(api_key=os.getenv("WEALTHPILOT_OPENAI_API_KEY", ""))
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             timeout=10,

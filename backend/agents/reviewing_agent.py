@@ -16,6 +16,8 @@ ReviewingAgent - PEER 4 Agent 之 Reviewing 角色。
 """
 from __future__ import annotations
 
+from app.llm_config import MODEL_LIGHT, chat_completion
+
 import json
 import logging
 import os
@@ -264,7 +266,7 @@ class ReviewingAgent:
     ) -> None:
         """
         调 LLM 给输出打分（0-1）+ 决定 jump_step。
-        使用 gpt-4.1-mini 控制成本。
+        使用 Luna（集中模型配置） 控制成本。
         """
         try:
             import os
@@ -282,8 +284,9 @@ class ReviewingAgent:
                 chat_answer=expression_output.chat_answer[:500],
             )
 
-            response = client.chat.completions.create(
-                model="gpt-4.1-mini",
+            response = chat_completion(client,
+                model=MODEL_LIGHT,
+                reasoning_effort="low",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
                 timeout=15,

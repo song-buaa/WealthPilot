@@ -14,8 +14,7 @@ import openai
 _client: Optional[openai.OpenAI] = None
 
 # PRD §3.1 / §3.4 指定模型（已替换为 OpenAI 对应档位）
-MODEL_MAIN = "gpt-4.1"        # 主力推理：意图识别、Subtask 分析、输出渲染
-MODEL_MINI = "gpt-4.1-mini"   # 轻量任务：澄清问题生成等
+from app.llm_config import MODEL_MAIN, MODEL_LIGHT as MODEL_MINI
 
 
 def get_client() -> openai.OpenAI:

@@ -14,6 +14,8 @@ WealthPilot Tool Layer (v2.6 M2)
 """
 
 from __future__ import annotations
+
+from app.llm_config import MODEL_LIGHT, chat_completion
 from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict
 
@@ -1140,8 +1142,8 @@ def _llm_write_rationale(
             api_key=os.environ.get("WEALTHPILOT_OPENAI_API_KEY"),
             http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(30.0)),
         )
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = chat_completion(client,
+            model=MODEL_LIGHT,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=500,
