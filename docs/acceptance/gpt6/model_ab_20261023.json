@@ -1859,6 +1859,8 @@
   "measurement_notes": [
     "Initial runner combined JSON and semantic validation for planning. The recorded boolean is full-contract success, not standalone JSON parse rate. Failed rows have unknown standalone parse/routing status. No additional paid calls were made.",
     "Reviewer safe samples were minimal statements, not calibrated complete professional answers; threshold-based correctness is withdrawn. Scores are descriptive only.",
-    "Original model raw text and private context were never persisted; only final safe public-evidence projections are included."
-  ]
+    "Original model raw text and private context were never persisted; only final safe public-evidence projections are included.",
+    "Original reservation used standard uncached prices. Conservative 1.25x cache-write margin is also reported; the runner now applies it before future dispatch. No calls were repeated."
+  ],
+  "posthoc_cache_margin_upper_usd": 0.620269
 }

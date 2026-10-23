@@ -29,7 +29,7 @@ UI 映射：
 
 from __future__ import annotations
 
-from app.llm_config import MODEL_MAIN, MODEL_LIGHT, chat_completion
+from app.llm_config import MODEL_MAIN, MODEL_LIGHT, LLMCallError, chat_completion, failure_message
 
 import json
 import os
@@ -1000,6 +1000,9 @@ def reason(
                 raw_output=raw,
             )
 
+    except LLMCallError as e:
+        return _fallback_result(failure_message(e), "HOLD")
+
     except EnvironmentError as e:
         return _fallback_result(str(e), "HOLD")
 
@@ -1627,6 +1630,8 @@ def chat(
             )}] + messages,
         )
         return response.choices[0].message.content.strip()
+    except LLMCallError as e:
+        return failure_message(e)
     except EnvironmentError:
         return "⚙️ 未配置 API Key，无法回复。"
     except Exception as e:
@@ -1847,6 +1852,8 @@ def _call_generic_llm(
             raw_payload=parsed,
             raw_output=raw,
         )
+    except LLMCallError as e:
+        return _fallback_generic(intent_type, failure_message(e))
     except EnvironmentError as e:
         return _fallback_generic(intent_type, str(e))
     except openai.APITimeoutError:

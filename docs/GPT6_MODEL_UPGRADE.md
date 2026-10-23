@@ -69,7 +69,7 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 
 脚本：[gpt6_model_ab.py](../scripts/gpt6_model_ab.py)；原始冻结来源清单：[manifest](../tests/fixtures/v42_real_research/manifest.json)；脱敏结果：[model_ab_20261023.json](acceptance/gpt6/model_ab_20261023.json)。仅同一批公开技术证据和无证据对照，无私人持仓、正式目标、券商调用或数据库写入。
 
-执行 24/24 次 HTTP 请求，无追加调用；最大预算 $3。请求前对所有实际尝试（含 SDK 重试）计数/预留文本输入上界及输出上限；累计保守预留 $0.496215，实际 usage 按标准非缓存价估算 $0.056344。仅官方固定 endpoint、四个指定对照型号、无工具、n=1、`store=false`。评估是组件 Prompt/最终投影对照，不是完整 PEER 端到端或生产验收。
+执行 24/24 次 HTTP 请求，无追加调用；最大预算 $3。请求前对所有实际尝试（含 SDK 重试）计数/预留文本输入上界及输出上限；初次标准价预留 $0.496215；加入缓存写入保守余量后上界 $0.620269（脚本已在发送前使用该余量），实际 usage 按标准非缓存价估算 $0.056344。仅官方固定 endpoint、四个指定对照型号、无工具、n=1、`store=false`。评估是组件 Prompt/最终投影对照，不是完整 PEER 端到端或生产验收。
 
 | 型号 | 次数 | 输入/输出 Token（输出含推理） | 调用耗时中位数 | 估算合计 USD |
 |---|---:|---:|---:|---:|
@@ -94,3 +94,7 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 本地已完成：首轮定向 178 passed；全量 pytest（首轮实现）1987 passed、7 skipped；M5 18/18、公网尝试 0；frontend lint/build；Chromium 35 passed；两个 MCP HTTP 11/9 passed、协议 19 passed。原部署 guards 144 passed、2 skipped，同步/持仓修正 61 passed。新增测量/错误边界补充测试及独立审查见 PR 最新验证记录；最终以候选 exact HEAD 四项 CI 为准，不用阶段测试冒充最终 Gate。
 
 合并/发布分别授权。本分支结束在新 PR 待评审，不自动合并、Tag 或部署。发布前还需审查真实模型时延/成本取舍、原 ARM runtime/Key 权限、自然 Reviewer 校准；获部署授权后与数据修复统一做 LI/PDD/美团真实业务复验，检查原来源缺口、专业解释实际保留、Web/MCP/Explain 一致及超时降级。不激活阶段目标、不重同步券商、不制造订单。
+
+## 独立审查收口
+
+独立只读 AI 工程审查定位 P2：共享适配把 SDK 错误转为 LLMCallError 后，原单标/组合的 SDK 专用 except 未覆盖，落到“未知错误”fallback。已在原 reason/chat/通用组合入口恢复中文安全降级，保留 HOLD/空 payload 及错误状态；新增超时/权限/配额/参数/截断回归，不暴露 Provider 原文或修改资格门槛。另补 A/B 预算缓存写入余量；24 次原始比较不重跑，结果文件保留测量历史。最终修复提交、复审与 CI 证据由 PR #41 最新记录提供。

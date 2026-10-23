@@ -45,6 +45,21 @@ class LLMCallError(RuntimeError):
         super().__init__("LLM_" + kind.upper())
 
 
+def failure_message(error: LLMCallError) -> str:
+    """Preserve the existing user-facing fallback contract, without raw errors."""
+    if error.kind == "timeout":
+        return "系统繁忙，请稍后再试。"
+    if error.kind == "network":
+        return "模型服务连接失败，请稍后再试。"
+    if error.kind in {"authentication", "model_access"}:
+        return "当前专业模型不可用，请核查访问权限。"
+    if error.kind in {"quota", "rate_limit"}:
+        return "模型服务额度或频率受限，请稍后再试。"
+    if error.kind in {"truncated", "empty_output", "refusal", "invalid_output"}:
+        return "推理结果暂不可用，请稍后重试。"
+    return "API 调用失败，请稍后再试。"
+
+
 def error_kind(error: Exception) -> str:
     if isinstance(error, LLMCallError):
         return error.kind

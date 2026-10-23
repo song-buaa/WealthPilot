@@ -43,7 +43,9 @@ class Budget:
         if not output_bound or body.get("tools") or body.get("n", 1) != 1:
             raise RuntimeError("AB_UNBOUNDED_REQUEST")
         rates = PRICES[model]
-        reserve = (input_bound * rates[0] + output_bound * rates[1]) / 1_000_000
+        # New-model cache writes can cost 1.25x uncached input. Apply the
+        # margin to the entire reservation, including unknown failed usage.
+        reserve = 1.25 * (input_bound * rates[0] + output_bound * rates[1]) / 1_000_000
         if len(self.attempts) >= self.calls or self.reserved + reserve > self.dollars:
             raise RuntimeError("AB_BUDGET_EXHAUSTED")
         self.reserved += reserve

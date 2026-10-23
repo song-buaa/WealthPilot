@@ -164,6 +164,24 @@ def test_different_returned_model_cannot_masquerade_as_upgrade():
         chat_completion(client,model=SOL)
 
 
+@pytest.mark.parametrize("kind", ["timeout","model_access","quota","invalid_request","truncated"])
+def test_original_position_and_portfolio_fallbacks_handle_adapter_errors(monkeypatch,kind):
+    from decision_engine import llm_engine as engine
+    from app.llm_config import failure_message
+    def unavailable(*args,**kwargs):
+        raise LLMCallError(kind)
+    monkeypatch.setattr(engine,"_build_payload",lambda *a,**kw:{})
+    monkeypatch.setattr(engine,"build_decision_context",lambda *a,**kw:None)
+    monkeypatch.setattr(engine,"format_context_prompt",lambda *a,**kw:"")
+    monkeypatch.setattr(engine,"_get_client",unavailable)
+    loaded=NS(retrieved_principles=[],raw_portfolio=None)
+    result=engine.reason("fixture",loaded,NS(),NS(),NS())
+    assert result.decision == "HOLD" and result.error == failure_message(LLMCallError(kind))
+    assert "未知错误" not in result.error and "LLM_" not in result.error
+    result=engine._call_generic_llm("PortfolioReview","fixture",{})
+    assert result.raw_payload == {} and result.error == failure_message(LLMCallError(kind))
+
+
 def test_normal_business_calls_have_no_gpt41_literal_or_direct_sdk_bypass():
     import ast
     root = Path(__file__).resolve().parents[1]
