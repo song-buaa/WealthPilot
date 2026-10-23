@@ -252,6 +252,10 @@ def test_protected_bridge_deadline_converges_backend_and_preserves_owner(runtime
             return io.BytesIO(result.content)
         bridge.opener=SimpleNamespace(open=open_request)
         sdk.hang_query=True
+        # Full-suite generation-2 GC can consume this synthetic 120ms
+        # deadline before adapter admission; normalize setup, not the bound.
+        import gc
+        gc.collect()
         started=time.monotonic()
         result=bridge.tradability({'broker':'ibkr','symbol':'IB01:LSE'})
         assert time.monotonic()-started < 1
