@@ -18,12 +18,12 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 
 ## 实际调用矩阵
 
-下表为代码请求点，不把通过同一函数调用的多种意图重复计为独立模型引擎。主=Sol，轻=Luna；旧 profile 的对应角色为 GPT-4.1 / GPT-4.1-mini。
+静态 AST 清单共 28 个业务生成请求点，函数、代码行及模型引用见[机器可核对矩阵](acceptance/gpt6/model_call_matrix.json)。下表为代码请求点，不把通过同一函数调用的多种意图重复计为独立模型引擎。主=Sol，轻=Luna；旧 profile 的对应角色为 GPT-4.1 / GPT-4.1-mini。
 
 | 入口 | 请求点/职责 | 默认角色及 API |
 |---|---|---|
-| decision_engine/llm_engine.py | reason、review_portfolio | 主；Chat |
-| 同上 | chat、analyze_allocation、analyze_performance | 轻；Chat（保留原任务分档） |
+| decision_engine/llm_engine.py | reason；_call_generic_llm（review_portfolio、analyze_allocation、analyze_performance 共用） | 主；Chat（2 个实际请求点） |
+| 同上 | chat、compare_multi_assets、respond_not_in_portfolio | 轻；Chat（3 个实际请求点，保留原任务分档） |
 | intent_engine/intent_recognizer.py | 意图识别，含 Planning 调用 | 轻 none；Chat |
 | intent_engine/subtask_runner.py | 子任务解释 | 主；Chat |
 | intent_engine/output_renderer.py | 结果整合 | 主；Chat |
@@ -35,7 +35,7 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 | backend/services/profile_service.py | 文本画像提取 | 轻 none；Chat |
 | 同上 | 截图提取、画像总结 | 主；Chat |
 | decision_engine/data_loader.py | 资产名称语义匹配 | 轻 none；Chat |
-| backend/graph/tools.py | 原组合调整字段提取 | 轻 none；Chat |
+| backend/graph/tools.py | _llm_write_rationale：原规则触发/计划的理由解释 | 轻 none；Chat |
 | backend/services/action/action_planner.py | 原可编辑行动草稿 | 轻 none；Chat；确认/交易权限不变 |
 | backend/services/execution_plan/adjustment_parser.py | 用户计划修改解析 | 轻 none；Chat |
 | backend/services/trade_intent/parser.py | 原严格 Pydantic 结构化意图 | 轻 low；Responses.parse；不执行交易 |

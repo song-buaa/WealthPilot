@@ -1,0 +1,260 @@
+{
+  "schema": "wealthpilot.llm-call-matrix.v1",
+  "code_sha": "81f9a092ec88c908db8b0a36ed575743fa4f6d49",
+  "scope": "non-test business generation; specialized search/embedding documented separately",
+  "entry_count": 28,
+  "entries": [
+    {
+      "file": "app/ai_advisor.py",
+      "line": 97,
+      "function": "generate_portfolio_analysis",
+      "model_reference": "AI_REPORT_MODEL",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "app/ai_advisor.py",
+      "line": 179,
+      "function": "generate_research_card",
+      "model_reference": "AI_RESEARCH_MODEL",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "app/ai_advisor.py",
+      "line": 253,
+      "function": "generate_research_card_full",
+      "model_reference": "AI_RESEARCH_MODEL",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "app/ai_advisor.py",
+      "line": 288,
+      "function": "generate_alert_explanation",
+      "model_reference": "AI_ALERT_MODEL",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "app/bank_screenshot.py",
+      "line": 180,
+      "function": "_call_vision_api",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/agents/expressing_agent.py",
+      "line": 564,
+      "function": "_express_new_entry",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/agents/planning_agent.py",
+      "line": 224,
+      "function": "_llm_augment_skills",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/agents/reviewing_agent.py",
+      "line": 287,
+      "function": "_run_llm_scoring",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/graph/decision_graph.py",
+      "line": 252,
+      "function": "orchestrator_node",
+      "model_reference": "MODEL_MINI",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/graph/tools.py",
+      "line": 1145,
+      "function": "_llm_write_rationale",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/action/action_planner.py",
+      "line": 233,
+      "function": "plan_actions",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/decision_service.py",
+      "line": 102,
+      "function": "generate_conversation_title",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/decision_service.py",
+      "line": 176,
+      "function": "generate_context_summary",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/execution_plan/adjustment_parser.py",
+      "line": 59,
+      "function": "parse_adjustment",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/profile_service.py",
+      "line": 133,
+      "function": "extract_profile_from_text",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/profile_service.py",
+      "line": 205,
+      "function": "extract_profile_from_images",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/profile_service.py",
+      "line": 280,
+      "function": "generate_ai_profile",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "backend/services/trade_intent/parser.py",
+      "line": 200,
+      "function": "extract",
+      "model_reference": "self._model",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Responses.parse"
+    },
+    {
+      "file": "decision_engine/data_loader.py",
+      "line": 999,
+      "function": "_resolve_asset_by_llm",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "decision_engine/llm_engine.py",
+      "line": 966,
+      "function": "reason",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "decision_engine/llm_engine.py",
+      "line": 1622,
+      "function": "chat",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "decision_engine/llm_engine.py",
+      "line": 1841,
+      "function": "_call_generic_llm",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "decision_engine/llm_engine.py",
+      "line": 2022,
+      "function": "compare_multi_assets",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "decision_engine/llm_engine.py",
+      "line": 2058,
+      "function": "respond_not_in_portfolio",
+      "model_reference": "MODEL_LIGHT",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "intent_engine/intent_recognizer.py",
+      "line": 303,
+      "function": "recognize",
+      "model_reference": "MODEL_MINI",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "intent_engine/output_renderer.py",
+      "line": 75,
+      "function": "render",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "intent_engine/subtask_runner.py",
+      "line": 114,
+      "function": "_execute_subtask",
+      "model_reference": "MODEL_MAIN",
+      "role": "main",
+      "default_model": "gpt-6.1-sol",
+      "api": "Chat Completions"
+    },
+    {
+      "file": "research_v2/processor.py",
+      "line": 81,
+      "function": "_call_llm",
+      "model_reference": "_LLM_MODEL",
+      "role": "light",
+      "default_model": "gpt-6-luna",
+      "api": "Chat Completions"
+    }
+  ]
+}
