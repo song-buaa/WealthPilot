@@ -132,16 +132,6 @@ class ReviewingAgent:
                 )
                 return out
 
-            # The 4.2 explanation contract is deterministic. An old Reviewer
-            # score cannot convert a missing/filtered explanation into success.
-            if any(rule.startswith("professional_explanation_") for rule in out.failed_rules):
-                out.score = 0.0
-                out.action = "retry"
-                out.jump_step = "expressing"
-                out.score_rationale = "professional_explanation_contract_failed"
-                out.mark_completed()
-                return out
-
             # 重试次数已达上限 → fallback
             if retry_count >= 3:
                 out.score = 0.0
@@ -152,6 +142,16 @@ class ReviewingAgent:
                     f"[ReviewingAgent] task={out.task_id} action=fallback "
                     f"(retry limit, failed_rules={out.failed_rules})"
                 )
+                return out
+
+            # The 4.2 explanation contract is deterministic. An old Reviewer
+            # score cannot convert a missing/filtered explanation into success.
+            if any(rule.startswith("professional_explanation_") for rule in out.failed_rules):
+                out.score = 0.0
+                out.action = "retry"
+                out.jump_step = "expressing"
+                out.score_rationale = "professional_explanation_contract_failed"
+                out.mark_completed()
                 return out
 
             # ── Layer 2: LLM 评分 ──

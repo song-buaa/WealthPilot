@@ -91,13 +91,16 @@ def _response_status(function, payload):
     return "available" if isinstance(payload.get("quarterlyReports"), list) and payload["quarterlyReports"] else "missing"
 
 
-def _endpoint(function, ticker, api_key):
+def _endpoint(function, ticker, api_key, *, pace=False):
     # Separate successful endpoint caches. Old aggregate/Seed entries never mask
     # recovery, and failures are retried on the next analysis, not cached for a day.
     key = f"av_fundamentals:v2:{function}:{ticker}"
     cached = get_cached(key)
     if cached is not None:
         return cached["payload"], dict(cached["diagnostic"], cache_hit=True)
+    if pace:
+        import time
+        time.sleep(1.5)  # pace real requests only, never cached observations
     payload = _av_get(function, ticker, api_key)
     status = _response_status(function, payload)
     returned_symbol = (payload.get("Symbol") or payload.get("symbol")) if isinstance(payload, dict) else None
@@ -200,9 +203,12 @@ def statement_metrics(ticker, income, cashflow, *, fetched_at):
     else:
         missing += ["revenue_ttm", "net_income_ttm", "INCOME_QUARTERS_INCOMPLETE_OR_INCONSISTENT"]
     cash = _quarter_window(cashflow)
-    aligned = cash and (not reports or ([r["fiscalDateEnding"] for r in reports] == [r["fiscalDateEnding"] for r in cash]
-               and reports[0]["reportedCurrency"] == cash[0]["reportedCurrency"]))
-    if aligned:
+    if cash:
+        if reports and ([r["fiscalDateEnding"] for r in reports] != [r["fiscalDateEnding"] for r in cash]
+                or reports[0]["reportedCurrency"] != cash[0]["reportedCurrency"]):
+            missing.append("INCOME_CASH_FLOW_PERIOD_OR_CURRENCY_MISMATCH")
+            if reports[0]["reportedCurrency"] != cash[0]["reportedCurrency"]:
+                values["report_currency"] = None  # each field keeps its own currency
         operating = _complete_sum(cash, "operatingCashflow")
         capex = _complete_sum(cash, "capitalExpenditures", nonnegative=True)
         meta = _report_provenance(ticker, "CASH_FLOW", cash, clocks.get("CASH_FLOW"))
@@ -281,13 +287,12 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
     if PUBLIC_DEMO_MODE and not DEMO_ALLOW_MARKET_DATA:
         return _load_seed_fundamentals(ticker)
 
-    import time
     api_key = get_next_av_key()
     endpoints, diagnostics = {}, {}
+    requested = False
     for function in ("OVERVIEW", "INCOME_STATEMENT", "CASH_FLOW"):
-        if endpoints:
-            time.sleep(1.5)  # retain the existing rate pacing
-        endpoints[function], diagnostics[function] = _endpoint(function, ticker, api_key)
+        endpoints[function], diagnostics[function] = _endpoint(function, ticker, api_key, pace=requested)
+        requested = requested or not diagnostics[function]["cache_hit"]
     overview = endpoints["OVERVIEW"] or {}
     income, cashflow = endpoints["INCOME_STATEMENT"], endpoints["CASH_FLOW"]
 

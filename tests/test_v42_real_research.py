@@ -343,3 +343,53 @@ def test_mcp_portfolio_final_boundary_retains_verified_fields_and_rechecks(monke
     assert final['explanationDiagnostics']['generation']['accepted_count'] == 1
     assert final['explanationDiagnostics']['final']['accepted_count'] == (0 if expire_final else 1)
     assert '987654' not in json.dumps(result) and not final['execution_authorized']
+
+
+@pytest.mark.parametrize('different_currency', [False, True])
+def test_each_valid_cash_window_survives_income_window_mismatch(different_currency):
+    from backend.services.market_data.av_fundamentals_service import statement_metrics
+    income = frozen('direct-av-LI-INCOME_STATEMENT.json')['payload']
+    cash = frozen('direct-av-LI-CASH_FLOW.json')['payload']
+    cash['quarterlyReports'] = cash['quarterlyReports'][1:]
+    if different_currency:
+        for row in cash['quarterlyReports']: row['reportedCurrency'] = 'USD'
+    values, provenance, missing = statement_metrics('LI', income, cash, fetched_at='2026-10-23T03:01:00+00:00')
+    assert 'INCOME_CASH_FLOW_PERIOD_OR_CURRENCY_MISMATCH' in missing
+    assert values['operating_cash_flow_ttm'] == sum(float(row['operatingCashflow']) for row in cash['quarterlyReports'][:4])
+    assert values['free_cash_flow_ttm'] == values['operating_cash_flow_ttm']-values['capital_expenditures_ttm']
+    assert provenance['revenue_ttm']['fiscal_period_end'] == '2026-06-30'
+    assert provenance['operating_cash_flow_ttm']['fiscal_period_end'] == '2026-03-31'
+    assert provenance['operating_cash_flow_ttm']['currency'] == ('USD' if different_currency else 'CNY')
+
+
+def test_cached_endpoints_never_sleep_or_refetch(av_offline, monkeypatch):
+    import time
+    av, calls = av_offline
+    cache = {}; sleeps = []
+    monkeypatch.setattr(av, 'get_cached', cache.get)
+    monkeypatch.setattr(av, 'set_cached', lambda key, value, ttl: cache.__setitem__(key,value))
+    monkeypatch.setattr(time, 'sleep', sleeps.append)
+    monkeypatch.setattr(av, '_av_get', lambda function, *args: {'Symbol':'LI'} if function=='OVERVIEW'
+        else frozen(f'direct-av-LI-{function}.json')['payload'])
+    av.fetch_fundamentals('LI:US')
+    assert sleeps == [1.5,1.5]
+    sleeps.clear()
+    monkeypatch.setattr(av, '_av_get', lambda *args: pytest.fail('cache must not refetch'))
+    av.fetch_fundamentals('LI:US')
+    assert not sleeps
+
+
+def test_explanation_failure_obeys_original_retry_cap(monkeypatch):
+    from backend.agents.contracts import ExecutionOutput, ExpressionOutput, PlanningOutput
+    from backend.agents.reviewing_agent import ReviewingAgent
+    from backend.services.market_data.output_policy import enforce
+    from decision_engine.llm_engine import LLMResult
+    from tests.test_v42_professional_explanation import assessment
+    a = assessment(); execution = ExecutionOutput(); execution.position_evidence = a
+    out = ExpressionOutput(llm_result=LLMResult('HOLD', [], [], []))
+    enforce(out,a)
+    reviewer = ReviewingAgent()
+    monkeypatch.setattr(reviewer, '_run_llm_scoring', lambda *args: pytest.fail('no extra model'))
+    review = reviewer.run(PlanningOutput(), execution, out, retry_count=3)
+    assert review.action == 'fallback' and review.jump_step is None
+    assert 'professional_explanation_missing_with_usable_evidence' in review.failed_rules
