@@ -1,0 +1,88 @@
+{
+  "schema": "wealthpilot.offline-observation-validation.v1",
+  "date": "2026-10-23",
+  "base_sha": "529fc4db0dbd4b97217c82c1d9cf46592b16601e",
+  "synthetic": true,
+  "real_business_acceptance": false,
+  "public_provider_or_model_requests": 0,
+  "code_sha256": {
+    "app/llm_config.py": "571df30d71f89c3834dd0a43a7d6324c0b73ef4e9f0c433186aa35de104f4951",
+    "app/llm_observation.py": "27636dba2ea63d4fa0adc365553e3a39c0e002e69da45832cd8de366f5896da2",
+    "backend/agents/planning_agent.py": "43b909d04e575fd1d05dad424c860dd7d270ea8cded7e455b43d06a64d32efec",
+    "backend/agents/executing_agent.py": "b600541ac81e3f7e90d2ca294f4ff7cd1154109ab2177a75f9e5518864e8e83c",
+    "backend/agents/expressing_agent.py": "d314df6847265eea5b5013aedecdadca4f1c37c728281649c0b4aae66fa33e07",
+    "backend/agents/reviewing_agent.py": "f085e238b060b23dceefdc2443157543e7aa4c212b6e0a8084d51db10b7902f4",
+    "backend/services/decision_service.py": "e5374316324a431cd1a63d4a2f5d88ed914b33939777fb7aaebbad6417918a76",
+    "backend/services/decision_service_v3.py": "d916a13fae299a98e8c3b39f51e61bc4f5283a88ab9b89f08efc4e28e13d1351",
+    "backend/services/explain_policy.py": "bdddbf4f516b68f3e97919da747cba973e6736989cd5a7b327138bb82671cb72",
+    "backend/services/snapshot_chat.py": "032596c20322f6f5835186a24899ac43388655f00a414dc3c7ec44cd2cb202c3",
+    "backend/services/trade_intent/parser.py": "eaecd7ee6921524adf77708d97ab9e62a8457630b69edd89a1a58bfb39505f9f",
+    "pocs/chatgpt_skills/analysis.py": "1b1c5c53d4a4f079c76e10ee72084c3a7afce9d56c2f18b7ac31f04906accf50",
+    "pocs/chatgpt_skills/server.py": "47a2ba6fb9885f14eae5a27d9f5bf9d9def313241e08a9f2aa373afa87a47c70",
+    "pocs/chatgpt_skills/worker.py": "a9e239e961b89d63f8beafa9a7f159b673f3d14f3b589191eaa9bbb12fa9b6a5"
+  },
+  "tests": {
+    "targeted": {
+      "passed": 169
+    },
+    "full_pytest": {
+      "passed": 2036,
+      "skipped": 7,
+      "seconds": 555.94
+    },
+    "offline_m5": {
+      "passed": 18,
+      "failed": 0,
+      "public_network_attempts": 0
+    },
+    "mcp_protocol": {
+      "passed": 23
+    },
+    "http_servers": {
+      "passed": [
+        11,
+        9
+      ]
+    },
+    "chromium": {
+      "passed": 35
+    },
+    "frontend": {
+      "lint": "PASS",
+      "build": "PASS"
+    },
+    "deployment_guards": {
+      "passed": 144,
+      "skipped": 2
+    },
+    "engineering_docs": "PASS",
+    "diff_check": "PASS"
+  },
+  "independent_review": {
+    "method": "read-only Codex review-specific entrypoint",
+    "resolved_findings": 7,
+    "closeout_remaining_definite_findings": 0,
+    "closeout_scope": "cost re-projection, raw SDK parse errors, generator context lifetime; prior broad review covers PEER/MCP/Web/Explain privacy and trading",
+    "independent_pytest": "NOT_RUN: readonly sandbox temporary-directory restriction; developer tests listed above ran normally"
+  },
+  "environment_notes": [
+    "MacBook business Python 3.11.13 x86_64, OpenAI2.29.0; not native ARM release validation",
+    "MCP protocol uses separate developer venv with no OpenAI SDK",
+    "Local deployment-guard Git shim only execs existing /usr/bin/arch -arm64 /usr/bin/git; no project/system/Git-config modifications",
+    "Initial M5 SDK-factory compatibility failure fixed and covered; final M5 all passed",
+    "Intermediate pre-review full pytest interrupted after new fixes, excluded from final evidence",
+    "npm install audit reported 11 items (1 low,1 moderate,9 high); frontend lock unchanged, unrelated audit remediation not performed"
+  ],
+  "permissions": {
+    "production_install_or_change": false,
+    "production_model_provider_broker_calls": false,
+    "schema_migration": false,
+    "stage_target_activation": false,
+    "trading_or_sync": false
+  },
+  "go_no_go": {
+    "code": "CANDIDATE_PENDING_PR_CI",
+    "production": "NO-GO: not merged/deployed; isolated complete ARM SDK2.29 environment and real controlled acceptance still required"
+  },
+  "revision_binding": "Exact candidate SHA and GitHub Actions URLs are recorded by the PR and final delivery; this file does not embed its own future commit SHA."
+}

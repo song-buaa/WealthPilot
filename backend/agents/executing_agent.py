@@ -13,6 +13,8 @@ ExecutingAgent - PEER 4 Agent 之 Executing 角色。
 """
 from __future__ import annotations
 
+from app.llm_observation import peer_stage
+
 import json
 import logging
 import os
@@ -67,6 +69,7 @@ class ExecutingAgent:
     def __init__(self):
         pass
 
+    @peer_stage("executing")
     def run(
         self,
         planning_output: PlanningOutput,

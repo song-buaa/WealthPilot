@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import sys
 import uuid
+import time
+from app.llm_observation import observed_result, run_id, safe_metadata, unavailable
 
 
 MAX_OUTPUT = 8 * 1024 * 1024
@@ -36,6 +38,7 @@ def _worker_environment(database_path):
 
 
 async def _invoke_worker(payload):
+    payload = dict(payload, analysis_run_id=run_id(payload.get("analysis_run_id")))
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "pocs.chatgpt_skills.analysis", "--snapshot-chat-worker",
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -47,7 +50,14 @@ async def _invoke_worker(payload):
             raise ValueError("SNAPSHOT_ANALYSIS_UNAVAILABLE")
         result = json.loads(output)
         if not isinstance(result, dict) or result.get("ok") is not True:
-            raise ValueError("SNAPSHOT_ANALYSIS_UNAVAILABLE")
+            error = ValueError("SNAPSHOT_ANALYSIS_UNAVAILABLE")
+            error.llm_observation = safe_metadata(result.get("llm_observation")) if isinstance(result, dict) else None
+            if error.llm_observation and error.llm_observation["analysis_run_id"] != payload["analysis_run_id"]:
+                raise ValueError("ANALYSIS_RUN_ID_MISMATCH")
+            raise error
+        metadata = safe_metadata(result["result"].get("llm_observation"))
+        if metadata and metadata["analysis_run_id"] != payload["analysis_run_id"]:
+            raise ValueError("ANALYSIS_RUN_ID_MISMATCH")
         return result["result"]
     finally:
         if process.returncode is None:
@@ -147,6 +157,8 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
         contract=os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"),
         portfolio_id=portfolio_id, snapshot_id=view["snapshot_id"], message=message,
         conversation_id=conversation_id, options=options or {})
+    payload["analysis_run_id"] = run_id()
+    started = time.monotonic()
     initial = _final_analysis_view(view)
     if initial.get("portfolio_id") != portfolio_id or not initial.get("context_current"):
         yield _sse("error", {"code":"ANALYSIS_CONTEXT_EXPIRED", "message":"固定资产视图无效或已过期，请重新准备。"})
@@ -160,6 +172,9 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
             logger.debug("Snapshot conversation history unavailable", exc_info=True)
             payload["conversation_history"] = []
         result = await _invoke_worker(payload)
+        observation = safe_metadata(result.get("llm_observation"))
+        if observation and observation["analysis_run_id"] != payload["analysis_run_id"]:
+            raise ValueError("ANALYSIS_RUN_ID_MISMATCH")
         if (result.get("snapshot_id") != view["snapshot_id"] or result.get("portfolio_id") != portfolio_id):
             raise ValueError("SNAPSHOT_ANALYSIS_UNAVAILABLE")
         final = _final_analysis_view(view)
@@ -186,7 +201,7 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
             data={"snapshot_id":view["snapshot_id"], "portfolio_id":portfolio_id},
             llm={"chat_answer":answer, "structured_result":projected, "raw_output":"",
                  "reasoning":[], "risk":[], "strategy":[]},
-            analysis_result=projected, actionable=False)
+            analysis_result=projected, actionable=False, llm_observation=observation)
         decision_service._ALLOC_EXPLAIN_STORE[f"{conversation_id}:{decision_id}"] = explain
         from backend.services.explain_policy import remember
         remember(conversation_id, decision_id, portfolio_id=portfolio_id,
@@ -197,7 +212,8 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
             assistant_message_id = await asyncio.to_thread(
                 decision_service.save_conversation_turn, conversation_id, message, answer,
                 intent.get("primary_intent"), None,
-                assistant_metadata={"analysis_snapshot":view["snapshot_id"], "analysis_only":True})
+                assistant_metadata={"analysis_snapshot":view["snapshot_id"], "analysis_only":True,
+                                    **({"llm_observation":observation} if observation else {})})
         except Exception:
             # Match the original best-effort chat persistence contract. The
             # child remains asset-read-only and raw model output is never saved.
@@ -207,11 +223,20 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
         yield _sse("done", dict(decision_id=decision_id, decisionResult=projected,
             analysisSnapshot=view["snapshot_id"], assistant_message_id=assistant_message_id,
             actionable=False, actionable_hint=None,
-            conclusion_level="snapshot_analysis", conclusion_label="固定快照只读分析"))
-    except (OSError, ValueError, KeyError, TypeError, asyncio.TimeoutError):
-        yield _sse("error", {"code":"SNAPSHOT_ANALYSIS_UNAVAILABLE", "message":"固定快照分析未完成，请稍后重试；未创建交易。"})
+            conclusion_level="snapshot_analysis", conclusion_label="固定快照只读分析",
+            llm_observation=observation))
+    except (OSError, ValueError, KeyError, TypeError, asyncio.TimeoutError) as error:
+        observation = safe_metadata(getattr(error, "llm_observation", None))
+        if observation and observation["analysis_run_id"] != payload["analysis_run_id"]:
+            observation = None
+        observation = observation or unavailable(
+            payload["analysis_run_id"], status="timeout" if isinstance(error, TimeoutError) else "failed",
+            elapsed_ms=int((time.monotonic()-started)*1000))
+        yield _sse("error", {"code":"SNAPSHOT_ANALYSIS_UNAVAILABLE", "message":"固定快照分析未完成，请稍后重试；未创建交易。",
+                             "llm_observation":observation})
 
 
+@observed_result
 async def _run_frozen_chat(payload):
     """Child only. All original service reads use the same immutable SQLite."""
     from app.asset_views import load_view, frozen_input
@@ -226,7 +251,7 @@ async def _run_frozen_chat(payload):
     from app.models import Portfolio
     from sqlalchemy import select
     expected = {"database_path", "contract", "portfolio_id", "snapshot_id", "message", "conversation_id", "conversation_history", "options"}
-    if not isinstance(payload, dict) or set(payload) != expected:
+    if not isinstance(payload, dict) or set(payload) - {"analysis_run_id"} != expected:
         raise ValueError("SNAPSHOT_WORKER_REQUEST_INVALID")
     pid = payload["portfolio_id"]
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
@@ -334,6 +359,7 @@ def worker_main():
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             result = asyncio.run(_run_frozen_chat(payload))
         response = {"ok":True, "result":result}
-    except Exception:
-        response = {"ok":False, "error":"SNAPSHOT_ANALYSIS_UNAVAILABLE"}
+    except Exception as error:
+        response = {"ok":False, "error":"SNAPSHOT_ANALYSIS_UNAVAILABLE",
+                    "llm_observation":safe_metadata(getattr(error, "llm_observation", None))}
     sys.stdout.write(json.dumps(response, ensure_ascii=False, default=str))

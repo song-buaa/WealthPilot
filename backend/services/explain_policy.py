@@ -4,6 +4,7 @@ Only server-created metadata lives here. Reads recheck the same owner inputs;
 no model, provider, asset lookup, broker or persistent mutation is performed.
 """
 from copy import deepcopy
+from app.llm_observation import safe_metadata
 from datetime import datetime, timezone
 
 
@@ -105,6 +106,7 @@ def _historical(value, context, at):
             original_decision=None, structured_result=projected),
         generic_llm=dict(chat_answer=message, is_fallback=False, error=None),
         actionable=False, actionable_hint=None,
+        llm_observation=safe_metadata(value.get("llm_observation")),
         analysisFreshness=dict(status="historical", generated_at=context.get("generated_at"),
             checked_at=at.isoformat(), blockers=blockers))
 
@@ -120,6 +122,8 @@ def project(conversation_id, decision_id, value, *, at=None):
     if not _current(context, at):
         return _historical(value, context, at)
     result = deepcopy(value)
+    if "llm_observation" in result:
+        result["llm_observation"] = safe_metadata(result["llm_observation"])
     # Explain's legacy diagnostic arrays are the original unfiltered Loader/RAG
     # objects. They are not current facts and must not bypass the final owner
     # projection, even while the cited professional report is still fresh.

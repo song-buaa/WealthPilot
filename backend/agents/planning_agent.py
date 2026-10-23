@@ -15,6 +15,8 @@ PlanningAgent - PEER 4 Agent 之 Planning 角色。
 """
 from __future__ import annotations
 
+from app.llm_observation import peer_stage
+
 from app.llm_config import MODEL_LIGHT, chat_completion
 
 import json
@@ -270,6 +272,7 @@ class PlanningAgent:
     def __init__(self):
         pass
 
+    @peer_stage("planning")
     def run(
         self,
         user_query: str,

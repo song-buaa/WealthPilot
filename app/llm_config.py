@@ -12,6 +12,7 @@ import time
 
 import openai
 from pydantic import ValidationError
+from app.llm_observation import current
 
 logger = logging.getLogger(__name__)
 SOL = "gpt-6.1-sol"
@@ -67,7 +68,7 @@ def error_kind(error: Exception) -> str:
         return "truncated"
     if isinstance(error, openai.ContentFilterFinishReasonError):
         return "refusal"
-    if isinstance(error, (json.JSONDecodeError, ValidationError)):
+    if isinstance(error, (json.JSONDecodeError, ValidationError, openai.APIResponseValidationError)):
         return "invalid_output"
     if isinstance(error, openai.APITimeoutError):
         return "timeout"
@@ -136,10 +137,26 @@ def _client_options(client):
 
 def _invoke(client, endpoint: str, options: dict):
     started = time.monotonic()
+    trace = current()
+    call = trace.begin(options, endpoint) if trace else None
+    raw = result = error = None
+    kind = None
     try:
         configured = _client_options(client)
-        result = (configured.chat.completions.create(**options) if endpoint == "chat"
-                  else configured.responses.parse(**options))
+        if trace and type(configured).__module__.startswith("openai"):
+            # Public raw-response API preserves SDK retries_taken, even when
+            # schema parsing fails. The SDK still owns its original retry policy.
+            raw = (configured.chat.completions.with_raw_response.create(**options) if endpoint == "chat"
+                   else configured.responses.with_raw_response.parse(**options))
+            try:
+                result = raw.parse()
+            except TypeError:
+                # SDK Responses post-parser can raise TypeError for malformed
+                # output bodies. Only this wire parse boundary is reclassified.
+                raise LLMCallError("invalid_output") from None
+        else:
+            result = (configured.chat.completions.create(**options) if endpoint == "chat"
+                      else configured.responses.parse(**options))
         returned = getattr(result, "model", None)
         requested = options["model"]
         if isinstance(returned, str) and requested in {SOL, LUNA} and not returned.startswith(requested):
@@ -168,16 +185,49 @@ def _invoke(client, endpoint: str, options: dict):
         logger.info("llm_call model=%s endpoint=%s status=completed elapsed_ms=%d",
                     requested, endpoint, int((time.monotonic() - started) * 1000))
         return result
-    except Exception as error:
-        kind = error_kind(error)
+    except Exception as caught:
+        error = caught
+        kind = error_kind(caught)
         logger.warning("llm_call model=%s endpoint=%s status=%s elapsed_ms=%d",
                        options["model"], endpoint, kind, int((time.monotonic() - started) * 1000))
         raise LLMCallError(kind) from None
+    finally:
+        if trace:
+            # A reference estimate is not an invoice: no tools, image inputs,
+            # custom/regional endpoint or unknown service tier is priced here.
+            def non_text(value):
+                if isinstance(value, dict):
+                    return value.get("type") in ("image_url", "input_image", "input_audio") or any(non_text(v) for v in value.values())
+                return isinstance(value, list) and any(non_text(v) for v in value)
+            try:
+                standard = (str(getattr(client, "base_url", "")) == "https://api.openai.com/v1/"
+                            and not any(options.get(key) for key in ("tools", "functions", "web_search_options", "audio", "extra_body"))
+                            and options.get("modalities") in (None, ["text"])
+                            and not non_text(options.get("messages", options.get("input"))))
+                trace.complete(call, result=result, error=error, kind=kind, raw=raw,
+                    options=options, elapsed_ms=int((time.monotonic()-started)*1000), standard_text=standard)
+            except Exception:
+                # Observation failure must not replace a professional result or
+                # its original error; never log the offending metadata/body.
+                trace.invalidate(call)
+
+
+def _observed_options(endpoint, kwargs):
+    try:
+        return request_options(endpoint=endpoint, **kwargs)
+    except LLMCallError as error:
+        trace = current()
+        if trace:
+            call = trace.begin(kwargs, endpoint)
+            trace.complete(call, kind=error.kind)
+            if call is not None and not trace.closed:
+                call.update(status="rejected", sdk_retry_count=0, transport_attempt_count=0)
+        raise
 
 
 def chat_completion(client, **kwargs):
-    return _invoke(client, "chat", request_options(**kwargs))
+    return _invoke(client, "chat", _observed_options("chat", kwargs))
 
 
 def parse_response(client, **kwargs):
-    return _invoke(client, "responses", request_options(endpoint="responses", **kwargs))
+    return _invoke(client, "responses", _observed_options("responses", kwargs))

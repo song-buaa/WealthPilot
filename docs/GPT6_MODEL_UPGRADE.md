@@ -106,3 +106,70 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 最终核验发现原 BusinessClient/worker 只转发 Provider/目标相关白名单，新 profile/effort 不会进入业务进程，且先读财富再分析时可能提前缓存默认模型。已仅扩展五个非交易模型配置键：父进程按原白名单透传、analysis_env_file 在任何业务导入前加载模型策略；Provider Key 仍按原分析范围加载。策略变更须重启获授权 worker，运行中不把新的 profile/effort 与已缓存模型 ID 混用。没有把 Key/券商凭证从父进程直接继承，也没有放开 JSON 中的交易开关。真实子进程先读后分析验证 legacy 回滚与 high/low；独立 MCP SDK 验证父子白名单及交易开关仍 false。生产配置及 worker 未操作。
 
 MCP 配置优先级经独立审查补齐：operator 文件一旦声明任一模型策略键，就作为整套模型策略的唯一来源，清除父进程同组遗留值后按 profile 默认补齐；只含 Provider 配置的旧文件继续沿用父策略。模型字段类型非法显式拒绝，不能被过滤后误当默认。先读后分析子进程回归同时注入冲突父配置，确认 legacy/high 配置不混用。
+
+
+## 发布前最小观测收口（2026-10-23，待合并候选）
+
+PR #41 已按授权 ff-only 合并，main 为 `529fc4db0dbd4b97217c82c1d9cf46592b16601e`，合并后 [四项 CI](https://github.com/song-buaa/WealthPilot/actions/runs/39922300579) 成功。本节分支 `codex/gpt6-safe-metadata` 从该最新 main 开始；只解决观测缺口，不更改模型选择或生产环境。
+
+这是 L2 跨模块返回契约扩展。原 owner：`llm_config` 负责请求，原 PEER 负责编排，MCP/Web 负责隔离传输，Explain 负责最终证据投影。新增 [llm_observation](../app/llm_observation.py) 仅做无 I/O、无 SDK 依赖的有界安全元数据收集/投影；不建数据库表、后台服务、日志系统、Provider 或第二套分析引擎。
+
+### 字段与语义
+
+结果可选 `llm_observation`，版本 `wealthpilot.llm-observation.v1`，scope 为 unified_generation_adapter_only。仅汇总当前 PEER 上下文经统一生成适配器发起的调用；独立后台标题/记忆任务、Embedding、专用公开搜索 Provider 及其他外部数据费用不包含在该合计中，不作为全账户费用账本。内容为：
+
+| 范围 | 字段 | 依据/未知语义 |
+|---|---|---|
+| 分析 | analysis_run_id、status、collection_status、elapsed_ms、call_count、records_truncated | 服务端随机 UUID；不使用账户、conversation、snapshot 或请求文本生成 ID。elapsed_ms 是服务端分析边界耗时，不冒充浏览器/Tunnel 端到端时延 |
+| 单次调用 | call_id、peer_stage、role、endpoint | 原 Planning/Executing/Expressing/Reviewing 装饰器与 ContextVar；线程继承上下文，多标共用同一分析 ID；role 为 main/light，未知为 UNKNOWN |
+| 模型 | requested_model、returned_model、reasoning_effort、returned_reasoning_effort | 前者来自实际适配后参数，后者仅取 Provider 对应字段；Chat 未回传 effort 时返回 UNKNOWN，不把请求配置当 Provider 确认 |
+| Usage | usage_status、input_tokens、output_tokens、reasoning_tokens | 仅 SDK Usage 数值；缺失用 null/UNKNOWN，不填零。推理 Token 已在 output_tokens 内，不重复收费 |
+| 传输 | sdk_retry_count、transport_attempt_count、elapsed_ms、status、error_category | SDK 2.29 raw-response retries_taken / 最终错误请求的 x-stainless-retry-count；一个调用可以有多次传输；JSON 业务重试是新的调用 |
+| 费用 | cost、totals.cost_status、estimated_cost_usd、price_version、price_source、basis、actual_bill | 版本化标准短上下文文本参考估算，实际账单始终 UNKNOWN；价格条件/Usage 不可确认则 UNKNOWN |
+
+计数区分：`call_count` 为适配器调用次数；参数拒绝记录 rejected、传输为 0；未观察到调用时，计数为 0，但 Usage/费用未知。进程失联时 call_count=null、collection_status=UNAVAILABLE，不能声称没有请求。正在运行的线程在分析超时后不再改写已返回记录；in_flight、超出 128 条有界记录等使汇总保持不完整/UNKNOWN。
+
+错误继续沿原 LLMCallError/安全降级：权限、额度、限流、网络、超时、参数、拒答、空输出、截断、型号不符可识别；原已知 MCP 业务/权限错误保持 ToolError，不转换成成功分析。元数据自身采集失败标 observation_unavailable，不替换专业结果或打开交易边界。
+
+### 采集和跨进程链路
+
+1. 原 `run_chat_stream_v3` 外层建立分析上下文；原四 Agent 仅增加阶段标记。`asyncio.to_thread` 继续沿现有路径继承上下文，多次调用共享同一 Collector，不更改 Prompt、Skill、数字/资格或报告。
+2. 原 `app/llm_config.py` 在该上下文内使用 SDK 的 raw-response API，保留原解析及至多一次 SDK 重试。采集只读 Usage、型号与计数；不安装 HTTP 日志 hook，不改共享传输、不修改请求体或把资产发到遥测服务。
+3. MCP 父进程生成 ID，放入**内部** JSON envelope，worker 传入原 analyze；模型策略仍走原五键和 operator 文件，交易开关仍强制只读。AnalysisRequest 不增加调用方 ID、遥测选项或授权字段。父进程核对成功/失败记录 ID，拒绝错配。最终 AnalysisResult 顶层包含安全元数据，独立 SDK 环境不需要 OpenAI 包。
+4. Web snapshot 父进程生成 ID，经原 stdin JSON 到隔离 worker。原私有 stdout/stderr 抑制保留；结果只增加安全字段，原协议仍是一份 JSON。最终 SSE done、Explain 与既有 assistant_metadata 通道复用同一投影。正常 Web 的 done/error 与原 Explain store 也包含该独立字段；历史证据失效时保留安全运行元数据，但原报告仍经过既有历史降级。
+5. 任何原始模型 payload 中的同名字段都不采信。接收边缘仅投影封闭枚举、已知型号格式、UUID 与有界数值，不返回 prompt、原文、Provider ID、异常 body、账户、资产、交易或 Key；未扩展 stderr/stdout 原始日志。
+
+验收方可将返回的 `llm_observation` 单独存为私有 0600 JSON；无需保存完整分析上下文。该候选不自动建立新的持久化日志目录或改变生产日志策略。MCP 调用方可直接读结构化结果，Web 可通过现有 SSE/Explain API 获取；不新增 UI 监控面板。
+
+### 价格版本与限制
+
+冻结版本 `openai-standard-text-reference-2026-10-23-v1`，[官方定价](https://developers.openai.com/api/docs/pricing)：Sol 标准短上下文输入/输出为每百万 Token $2/$10，Luna 为 $0.10/$0.50。只对已确认官方默认 endpoint、default service tier、已知返回型号及不超过 272000 输入 Token 的文本调用提供参考估算。工具/functions、图像/音频、非标准 endpoint/tier、未知 Usage 或型号不符均 UNKNOWN。
+
+参考值明确排除缓存折扣/写入、区域附加及其他计费调整，不能用作发票/实际账户扣费。价格版本不可自动覆盖；将来价格变更需重新核验版本。SDK 重试可能产生无法取得的先前用量：单条记录只覆盖最终尝试，汇总费用在存在重试时为 UNKNOWN，保留 `retry_usage_coverage=final_attempt_only`。未知模型/旧 profile 不套用新模型单价。
+
+[官方推理 Usage](https://developers.openai.com/api/docs/guides/reasoning) 与 [Python SDK 重试](https://developers.openai.com/api/reference/python) 为字段/重试口径参考；实际 raw-response、截断 Usage 和错误请求计数通过本仓库 SDK 2.29 MockTransport 验证。没有新增付费请求或重跑此前 24 次 A/B。
+
+### 回归与审查
+
+[观测专项](../tests/test_llm_observation.py)：Sol medium/Luna none/low、Chat/Responses、跨线程阶段、并发分析隔离、SDK 真实重试/错误、截断/空输出/型号不符、未知 Usage/价格、超时后迟到线程、无敏感信息及不改变专业结果。[Web 隔离回归](../tests/test_v42_snapshot_chat.py) 覆盖固定输入、关联 ID、最终过滤、Explain/历史元数据及超时 UNKNOWN；[独立 MCP 协议](../pocs/chatgpt_skills/test_v42_protocol.py) 覆盖真实子进程 ID、模型 Key/交易隔离、返回 Token 字段、错误合同与客户端伪造字段拒绝。
+
+独立只读审查使用 Codex 审查专用入口；发现并修复：零调用误报零成本、已知 MCP 错误语义、错误记录 ID 错配、原交易意图解析的 Planning 归属和 legacy functions 计价。后续复审补齐了接收端费用重算（拒绝伪造金额）和 SDK raw Responses 格式异常分类，并为跨 yield/跨任务关闭增加上下文隔离回归。首轮 M5 的构造器替换夹具兼容问题已补回归，修复后 18/18、公网尝试 0。最终全量/HTTP/浏览器/四项 CI 与复审结果以本候选交付记录为准。
+
+### Mac mini SDK 部署交接（不执行安装）
+
+以下环境事实来自 2026-10-23 已完成的 Mini **只读预检**，本候选没有重新连接或修改生产：实际业务仍为 b6b5a17，完整 Backend/专业分析环境 OpenAI 3.31.0，只读 business 为 2.29.0；Python 3.11.17 arm64。二者 pip check 通过，不等于可以互换。
+
+| 项目 | 最小要求 |
+|---|---|
+| 完整 Backend / 专业分析环境 | 包含 uvicorn、FastAPI、ib_async、原知识/PEER/市场/调度等完整依赖；现 3.31.0 环境不原地降级、不覆盖、不改 symlink 伪装新环境 |
+| 只读 business 环境 | 原 ARM 2.29 导入与 pip check 已通过，但缺 uvicorn/ib_async 等完整运行依赖；不能拿它替换完整 Backend。只读数据库/进程权限与包安装完整性分别核验 |
+| SDK 约束 | requirements、business/web 哈希锁继续 openai==2.29.0；wheel SHA256 b7c5de513c3286d17c5e29b92c4c98ceaf0d775244ac8159aeb1bddf840eb42a。httpx、pydantic/jiter 等按原对应角色锁验证，不在线解析最新版本替代 |
+| 完整依赖闭包 | 根 requirements 覆盖业务包但包含范围约束，并不是新增的完整哈希锁。新完整环境还须沿原完整 Backend 构建机制留存精确包/ARM wheel 清单并核对 SDK 约束；不能拿只读 business 锁宣称完整依赖已闭环，不能本轮改锁绕过 |
+| 原安装器 | install_release/install-github 目前只构建 mcp/business/可选 web，**不会创建 full-backend**。观测代码不要求修改该安装器，本轮也不改。正式部署方案须补充或复用已存在的独立 full-backend 构建步骤；若只能沿用旧共享环境，则发布继续阻断，需单独评审部署工具扩展，而非临时 pip/换锁 |
+| 新隔离 ARM release 验证 | 精确源码 SHA+四 CI、原生 Python/二进制架构、SDK 2.29/raw-response Chat/Responses 禁网探针、pip check、完整 PEER/知识依赖被动导入（不执行 backend lifespan）、协议字段/私有 stdout 护栏、临时合成库+原回归；生产权限/模型访问及真实 E2E 单独授权后验收 |
+| 组件引用 | Backend、MCP 父脚本及其 analysis_business_python/工作目录/常驻子进程须协调到同一候选；前端 tree 未改，不需要模型观测 UI 切换；不改 global current 而误切 Tunnel，也不动 Gateway/国金/WAL/目标/交易配置 |
+| 恢复 | 留存旧代码/入口/解释器，确认数据库兼容后只恢复这些组件；不恢复/覆盖活动数据库或 WAL，不隐式转旧模型，不同步或创建订单 |
+
+生产 GO/NO-GO：本候选通过工程 Gate 后仅为**观测代码可评审**；尚未合并、未部署，不能宣布生产阻断已解除。仍需完成授权后的独立完整 ARM 2.29 环境与安全切换、Mini Key 新模型访问和 240/270 秒真实端到端验收。LI/PDD/美团仍按原 PR #40 来源冲突/缺失和 L1–L4 条件逐标验收，不激活目标、不要求全部 L3、L4/交易始终禁止。
+
+最终本地候选：定向169、全量2036 passed/7 skipped、M5 18/18（公网0）、独立MCP协议23、HTTP 11/9、浏览器35、frontend lint/build、部署guards144 passed/2 skipped、文档检查及diff检查全部通过。独立最终限定复审无明确P0/P1/P2。机器记录见[观测验收矩阵](acceptance/gpt6/observation_validation_20261023.json)，准确SHA与四项远端CI由本PR绑定；这些是隔离工程证据，不是真实三标业务验收。

@@ -646,6 +646,9 @@ def get_decision_explain(conversation_id: str, decision_id: str) -> Optional[dic
     if result is None:
         return None
     d = _serialize_decision_result(result)
+    from app.llm_observation import safe_metadata
+    if getattr(result, "_llm_observation", None):
+        d["llm_observation"] = safe_metadata(result._llm_observation)
     primary_intent = _PRIMARY_INTENT_CACHE.get(conversation_id)
     if primary_intent and "intent" in d:
         d["intent"]["primary_intent"] = primary_intent

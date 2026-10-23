@@ -8,10 +8,12 @@ import select
 import subprocess
 import sys
 import threading
+import time
 from types import SimpleNamespace
 from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.llm_observation import run_id, safe_metadata, unavailable
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -47,6 +49,8 @@ class BusinessClient:
 
     def call(self, operation, arguments):
         with self.lock:
+            identifier = run_id() if operation in ("analyze_position", "review_portfolio", "analyze_performance") else None
+            started = time.monotonic()
             if self.process is None or self.process.poll() is not None:
                 self.close()
                 env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
@@ -66,18 +70,39 @@ class BusinessClient:
                     stderr=subprocess.DEVNULL, text=True, env=env,
                     cwd=getattr(self.settings, "worker_cwd", None))
             try:
-                self.process.stdin.write(json.dumps({"operation": operation, "arguments": arguments})+"\n")
+                envelope = {"operation": operation, "arguments": arguments}
+                if identifier:
+                    envelope["analysis_run_id"] = identifier
+                self.process.stdin.write(json.dumps(envelope)+"\n")
                 self.process.stdin.flush()
                 if not select.select([self.process.stdout], [], [], 270 if operation in ("analyze_position", "review_portfolio", "analyze_performance") else 45)[0]:
                     raise TimeoutError()
                 response = json.loads(self.process.stdout.readline())
-            except (OSError, ValueError, KeyError, TimeoutError):
+            except (OSError, ValueError, KeyError, TimeoutError) as caught:
                 # A timeout is never a permission to replay a write automatically.
                 self.close()
-                raise ToolError("BUSINESS_OPERATION_UNAVAILABLE") from None
+                error = ToolError("BUSINESS_OPERATION_UNAVAILABLE")
+                if identifier:
+                    error.llm_observation = unavailable(identifier,
+                        status="timeout" if isinstance(caught, TimeoutError) else "failed",
+                        elapsed_ms=int((time.monotonic()-started)*1000))
+                raise error from None
             if not response.get("ok"):
                 code = response.get("error")
-                raise ToolError(code if code in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE")
+                error = ToolError(code if code in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE")
+                metadata = safe_metadata(response.get("llm_observation"))
+                if identifier and metadata and metadata["analysis_run_id"] != identifier:
+                    raise ToolError("ANALYSIS_RUN_ID_MISMATCH")
+                if identifier and metadata and metadata["analysis_run_id"] == identifier:
+                    error.llm_observation = metadata
+                raise error
+            if identifier:
+                metadata = safe_metadata(response["result"].get("llm_observation"))
+                if metadata and metadata["analysis_run_id"] != identifier:
+                    raise ToolError("ANALYSIS_RUN_ID_MISMATCH")
+                response["result"].pop("llm_observation", None)
+                if metadata is not None:
+                    response["result"]["llm_observation"] = metadata
             return response["result"]
 
 
@@ -185,6 +210,17 @@ def create_server(settings):
         with analysis_lock:
             try:
                 return AnalysisResult.model_validate(analysis_client.call(operation, request.model_dump(mode="json")))
+            except ToolError as error:
+                if str(error) in SAFE_ERRORS:
+                    raise  # Preserve original authorization/lookup error contracts.
+                metadata = safe_metadata(getattr(error, "llm_observation", None))
+                if metadata is None:
+                    raise
+                from datetime import datetime, timezone
+                return AnalysisResult(synthetic=bool(getattr(settings, "mock_database", None)), scenario=operation,
+                    status="unavailable", issues=["ANALYSIS_WORKER_UNAVAILABLE"],
+                    queried_at=datetime.now(timezone.utc).isoformat(), conclusion="专业分析未完成；未创建交易。",
+                    llm_observation=metadata)
             finally:
                 analysis_client.close()
 

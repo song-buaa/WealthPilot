@@ -111,3 +111,6 @@ PR #39 收口：[账户候选](../backend/services/exit_candidates.py)无需手�
 原 PEER/意图/研报/画像/草稿调用统一复用 [llm_config](../app/llm_config.py)，不另建投研引擎或改变业务 owner。Sol medium（可 high）/Luna none 或 low；旧 GPT-4.1 仅显式 legacy profile，API 错误不切换。严格提取仍用原 Responses schema，其余保留 Chat；Embedding/专用搜索单列。入口矩阵、24 次真实 A/B、性能代价、ARM 锁依赖及未验收项见[升级记录](GPT6_MODEL_UPGRADE.md)，专项见[SDK/资格回归](../tests/test_gpt6_models.py)。
 
 MCP 模型配置仅由原 [BusinessClient](../pocs/chatgpt_skills/server.py)/[worker](../pocs/chatgpt_skills/worker.py) 的非交易白名单转发，策略在首个业务导入前固定；更改需重启获授权 worker。原 Key 与 broker/只读开关隔离不变。
+
+
+GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../app/llm_observation.py)，原 PEER/线程/worker 用匿名 analysis_run_id 汇总阶段、实际型号、Usage、SDK 重试和版本化参考费用；原 SSE/MCP/Explain 通道传递，隐私抑制和最终证据/交易 owner 不变。无 Schema/日志服务/模型路由扩展。字段、UNKNOWN、SDK 部署交接见[升级记录](GPT6_MODEL_UPGRADE.md#发布前最小观测收口2026-10-23待合并候选)，专项见[观测回归](../tests/test_llm_observation.py)。本项尚待 PR 审查和部署，不把输出 metadata 当真实业务验收。

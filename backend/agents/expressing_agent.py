@@ -15,6 +15,8 @@ ExpressingAgent - PEER 4 Agent 之 Expressing 角色。
 """
 from __future__ import annotations
 
+from app.llm_observation import peer_stage
+
 from app.llm_config import MODEL_MAIN, chat_completion
 
 import asyncio
@@ -316,6 +318,7 @@ class ExpressingAgent:
     def __init__(self):
         self.last_output: Optional[ExpressionOutput] = None
 
+    @peer_stage("expressing")
     async def run_streaming(
         self,
         planning_output: PlanningOutput,

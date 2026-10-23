@@ -15,6 +15,7 @@ MOCK_APPLICATION_ID = 0x57504D4B
 SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DRAFT_NOT_FOUND",
                "REQUEST_ID_CONFLICT", "EXPLICIT_CONFIRMATION_REQUIRED", "PREVIEW_CHANGED_REVIEW_REQUIRED",
                "RISK_CONFIRMATION_REQUIRED", "DRAFT_NOT_PENDING", "DRAFT_CHANGED_REVIEW_REQUIRED", "BROKER_ORDER_STATE_UNAVAILABLE", "ORDER_CURRENCY_MARKET_MISMATCH", "MOCK_TRADE_FIXTURE_NOT_ENABLED"}
+from app.llm_observation import safe_metadata
 from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
@@ -159,7 +160,8 @@ def main():
                         result = asyncio.run(analyze(config["database_path"] if config else path,
                             config["portfolio_id"] if config else args.portfolio_id, operation, a,
                             contract=config.get("database_contract_path") if config else None,
-                            synthetic=args.synthetic_input or config is None, worker_process=True))
+                            synthetic=args.synthetic_input or config is None, worker_process=True,
+                            _analysis_run_id=request.get("analysis_run_id")))
                     elif operation == 'get_instrument_tradability' and (workflow or config):
                         from pocs.chatgpt_skills.reader import read_tradability
                         result=read_tradability(config['database_path'] if config else path,
@@ -210,7 +212,8 @@ def main():
                 response = {"ok": True, "result": result}
             except Exception as error:
                 code = str(error) if str(error) in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE"
-                response = {"ok": False, "error": code}
+                response = {"ok": False, "error": code,
+                            "llm_observation":safe_metadata(getattr(error, "llm_observation", None))}
             print(json.dumps(response, ensure_ascii=False, default=str), flush=True)
     finally:
         if workflow:

@@ -121,6 +121,40 @@ def test_worker_process_environment_and_timeout_cleanup(monkeypatch, tmp_path):
     assert "backend.main" not in " ".join(calls[0][0])
 
 
+def test_observation_crosses_worker_done_explain_and_existing_history_channel(monkeypatch):
+    from app.llm_observation import AnalysisObservation
+    from backend.services import decision_service
+    saved=[]
+    async def invoke(payload):
+        metadata=AnalysisObservation(payload['analysis_run_id']).snapshot('completed')
+        metadata['raw_output']='PRIVATE_RAW_OBSERVATION'
+        return dict(snapshot_id=payload['snapshot_id'],portfolio_id=1,answer='原有证据过滤解释',
+            analysis_result={'actionable':False,'analysisQualification':{'L3':{'allowed':False}}},
+            owner_assessments=[],llm_observation=metadata)
+    monkeypatch.setattr(snapshot_chat,'_invoke_worker',invoke)
+    monkeypatch.setattr(decision_service,'save_conversation_turn',lambda *args,**kwargs:saved.append(kwargs))
+    events=parse(collect(snapshot_chat.stream_snapshot_chat('分析','observed-web',1,view())))
+    done=next(data for kind,data in events if kind=='done')
+    observation=done['llm_observation']
+    assert len(observation['analysis_run_id'])==32
+    assert 'PRIVATE_RAW' not in json.dumps(events)
+    explained=decision_service.get_decision_explain('observed-web',done['decision_id'])
+    assert explained['llm_observation']==observation==saved[0]['assistant_metadata']['llm_observation']
+    assert not done['actionable'] and not done['decisionResult']['analysisQualification']['L3']['allowed']
+    decision_service.clear_session('observed-web')
+
+
+def test_web_timeout_metadata_never_claims_no_model_requests(monkeypatch):
+    async def invoke(payload):raise asyncio.TimeoutError()
+    monkeypatch.setattr(snapshot_chat,'_invoke_worker',invoke)
+    events=parse(collect(snapshot_chat.stream_snapshot_chat('分析','timeout-web',1,view())))
+    error=next(data for kind,data in events if kind=='error')
+    observation=error['llm_observation']
+    assert observation['status']=='timeout' and observation['collection_status']=='UNAVAILABLE'
+    assert observation['call_count'] is None and observation['totals']['estimated_cost_usd'] is None
+    assert not any(kind in {'text','done'} for kind,_ in events)
+
+
 def test_real_frozen_read_isolated_from_newer_live_rows_and_cannot_write(monkeypatch, tmp_path):
     from app import database
     from pocs.chatgpt_skills import analysis
@@ -177,7 +211,9 @@ def test_real_frozen_read_isolated_from_newer_live_rows_and_cannot_write(monkeyp
     monkeypatch.setattr(output_policy, "enforce", enforce)
     payload = dict(database_path=str(live), contract=None, portfolio_id=1, snapshot_id=raw_view["snapshot_id"],
         message="分析持仓", conversation_id="isolated", conversation_history=[{"role":"user", "content":"先前讨论的阶段目标"}], options={})
+    payload['analysis_run_id']='b'*32
     result = asyncio.run(snapshot_chat._run_frozen_chat(payload))
+    assert result['llm_observation']['analysis_run_id']=='b'*32
     assert observed == ["frozen-at-capture"]
     assert result["answer"] == "Filtered original PEER explanation"
     assert "987654" not in json.dumps(result)

@@ -47,6 +47,9 @@ class AnalysisRequest(BaseModel):
         return value
 
 
+from app.llm_observation import observed_result, safe_metadata
+
+
 class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra='forbid')
     schema_version: Literal['wealthpilot.analysis.v1'] = 'wealthpilot.analysis.v1'
@@ -64,6 +67,12 @@ class AnalysisResult(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     order_created: Literal[False] = False
     snapshot_id: str | None = None
+    llm_observation: dict | None = None
+
+    @field_validator("llm_observation")
+    @classmethod
+    def safe_observation(cls, value):
+        return safe_metadata(value)
 
 
 @contextmanager
@@ -207,6 +216,7 @@ def captured_evidence(result, captured, portfolio_id):
     result.limitations.append('Original research may fall back to examples without verified dates; do not present unverified research as live evidence.')
 
 
+@observed_result
 async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None):
     request=AnalysisRequest.model_validate(arguments)
     if request.snapshot_id and asset_view is None:
@@ -276,7 +286,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                     elif kind=='candidates':result.evidence['clarification_candidates']=data.get('items',[])
                     elif kind=='validator_warning':result.issues.append('PROFESSIONAL_REVIEW_WARNING')
             result.conclusion=''.join(text)
-            result.professional_result={k:v for k,v in done.items() if k not in ('rawText','actionable','actionable_hint')}
+            result.professional_result={k:v for k,v in done.items() if k not in ('rawText','actionable','actionable_hint','llm_observation')}
             route,intent=result.intent.get('planner_route'),result.intent.get('primary_intent')
             expected={'analyze_position':{'PositionDecision'},'review_portfolio':{'PortfolioReview','AssetAllocation'},'analyze_performance':{'PerformanceAnalysis'}}[scenario]
             if errors:result.issues.extend('PEER_'+str(e).upper() for e in errors)

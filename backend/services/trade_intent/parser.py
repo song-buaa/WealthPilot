@@ -6,6 +6,7 @@ broker, contract-resolution, quote, cash-authority, or execution dependency.
 from __future__ import annotations
 
 from app.llm_config import MODEL_LIGHT, parse_response
+from app.llm_observation import peer_stage
 
 import logging
 import os
@@ -629,6 +630,7 @@ def _failed_intent(message: str) -> StructuredTradeIntent:
     return intent
 
 
+@peer_stage("planning")
 def parse_trade_intent(
     user_message: str,
     conversation_context: list[dict] | None = None,

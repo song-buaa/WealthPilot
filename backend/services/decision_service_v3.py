@@ -28,6 +28,7 @@ from backend.services.technical_patterns.decision_integration import (
     serialize_pattern_evidence_snapshot,
     target_from_execution_output,
 )
+from app.llm_observation import current
 from backend.services.trade_intent.models import StructuredTradeIntent
 from backend.services.trade_intent.parser import parse_trade_intent
 
@@ -103,7 +104,46 @@ def _trade_intent_event(
     })
 
 
-async def run_chat_stream_v3(
+async def run_chat_stream_v3(*args, **kwargs):
+    """Collect content-free metadata around the unchanged original PEER stream."""
+    from app.llm_observation import AnalysisObservation, bind_run
+    from backend.services import decision_service
+    conversation = args[1] if len(args) > 1 else kwargs.get("conversation_id")
+    trace = current() or AnalysisObservation()
+    owner = current() is None
+    failed = False
+    stream = _run_chat_stream_v3(*args, **kwargs)
+    try:
+        while True:
+            # Context tokens cannot span a yield: callers may interleave streams
+            # or close them from a different task after disconnect.
+            with bind_run(trace):
+                try:
+                    event = await anext(stream)
+                except StopAsyncIteration:
+                    break
+            kind = event.splitlines()[0].removeprefix("event: ")
+            if kind in {"done", "error"}:
+                failed |= kind == "error"
+                data = json.loads(event.splitlines()[1].removeprefix("data: "))
+                metadata = trace.snapshot(("failed" if failed else "completed") if owner else None)
+                data["llm_observation"] = metadata
+                for result in decision_service._DECISION_STORE.get(conversation, {}).values():
+                    if getattr(result, "_analysis_run_id", None) == trace.analysis_run_id:
+                        result._llm_observation = metadata
+                key = f"{conversation}:{data.get('decision_id')}"
+                if key in decision_service._ALLOC_EXPLAIN_STORE:
+                    decision_service._ALLOC_EXPLAIN_STORE[key]["llm_observation"] = metadata
+                event = _sse(kind, data)
+            yield event
+    finally:
+        with bind_run(trace):
+            await stream.aclose()
+        if owner:
+            trace.snapshot("cancelled" if not trace.closed else None)
+
+
+async def _run_chat_stream_v3(
     user_input: str,
     conversation_id: str,
     portfolio_id: int = 1,
@@ -719,6 +759,7 @@ async def _handle_position_multi(
         from backend.services.market_data.evidence import safe_market
         result._position_evidence = executed.position_evidence
         result._market_data = safe_market(executed.market_data, executed.position_evidence)
+        result._analysis_run_id = current().analysis_run_id if current() else None
         _DECISION_STORE.setdefault(conversation_id, {})[result.decision_id] = result
         from backend.services.explain_policy import remember
         remember(conversation_id, result.decision_id, portfolio_id=portfolio_id,
@@ -819,6 +860,7 @@ async def _write_stores_v3(
             if dr._position_evidence:
                 from backend.services.market_data.evidence import safe_market
                 dr._market_data = safe_market(dr._market_data, dr._position_evidence)
+            dr._analysis_run_id = current().analysis_run_id if current() else None
             _DECISION_STORE.setdefault(conversation_id, {})[decision_id] = dr
 
         # ── Portfolio 类 → _ALLOC_EXPLAIN_STORE ──
