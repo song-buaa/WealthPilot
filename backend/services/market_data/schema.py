@@ -165,7 +165,7 @@ class MarketDataBundle:
         result = {
             "currentPrice": q.current_price if q else None,
             "changePct": q.change_pct if q else None,
-            "currency": q.currency if q else "USD",
+            "currency": q.currency if q else None,
             "marketCap": (q.market_cap if q else None) or (f.market_cap if f else None),
             "high52w": (q.high_52w if q else None) or (f.high_52w if f else None),
             "low52w": (q.low_52w if q else None) or (f.low_52w if f else None),

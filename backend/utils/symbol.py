@@ -56,15 +56,14 @@ def position_market_symbol(position) -> str | None:
             return None
         if market == "HK" and not ticker.isdigit():
             return None
-        if market in {"SH", "SZ"}:
-            return normalize_symbol(ticker, market) if ticker.isdigit() and len(ticker) == 6 else None
         if market not in {"US", "HK"}:
-            # This fix adds no new market/provider coverage. In particular a
-            # six-digit CN fund identifier must not become an SZ equity.
-            legacy = infer_symbol_from_ticker(legacy_ticker, getattr(position, "currency", None) or "USD")
-            return legacy if legacy == normalize_symbol(ticker, market) else None
+            # The current quote currency and technical calendar adapters only
+            # support US/HK. Keep other holdings/issuer identities intact, but
+            # do not manufacture market coverage from a canonical identifier.
+            return None
         return normalize_symbol(ticker, market)
-    return infer_symbol_from_ticker(legacy_ticker, getattr(position, "currency", None) or "USD") if legacy_ticker else None
+    inferred = infer_symbol_from_ticker(legacy_ticker, getattr(position, "currency", None) or "USD") if legacy_ticker else None
+    return inferred if inferred and parse_symbol(inferred)[1] in {"US", "HK"} else None
 
 
 # CN 是 broker_sync 层历史遗留的 A 股市场代码, 统一映射到 SH/SZ

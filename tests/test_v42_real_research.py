@@ -404,9 +404,9 @@ def test_explanation_failure_obeys_original_retry_cap(monkeypatch):
     ({'symbol':'IB01:LSE','ticker':'IB01','currency':'USD'},None),
     ({'symbol':'SPY:US','ticker':'SPY','currency':'USD','vehicle_type':'ETF'},'SPY:US'),
     ({'symbol':'SPY:US','ticker':'SPY','currency':'USD','vehicle_type':'ETF','asset_class':'基金'},'SPY:US'),
-    ({'symbol':'600519:SH','ticker':'600519.SH','currency':'CNY','asset_class':'股票'},'600519:SH'),
-    ({'symbol':'600519:SH','ticker':'600519','currency':'CNY','asset_class':'股票'},'600519:SH'),
-    ({'symbol':'000858:SZ','ticker':'000858','currency':'CNY','asset_class':'股票'},'000858:SZ'),
+    ({'symbol':'600519:SH','ticker':'600519.SH','currency':'CNY','asset_class':'股票'},None),
+    ({'symbol':'600519:SH','ticker':'600519','currency':'CNY','asset_class':'股票'},None),
+    ({'symbol':'000858:SZ','ticker':'000858','currency':'CNY','asset_class':'股票'},None),
     ({'symbol':'3690:HK','ticker':'3690.HGT','currency':'CNY','asset_class':'股票'},'3690:HK'),
 ])
 def test_canonical_projection_preserves_instrument_and_market_boundaries(position, expected):
@@ -485,3 +485,13 @@ def test_canonical_non_us_identity_cannot_become_bare_us_av_request(monkeypatch,
     monkeypatch.setattr(av, '_av_get', lambda *args: pytest.fail('unsupported market must not request AV'))
     av.fetch_fundamentals(symbol)
     assert av._wp_symbol_to_av_ticker(symbol) is None
+
+
+def test_missing_quote_cannot_invent_usd_for_hk_technical_context():
+    from backend.services.market_data.schema import MarketDataBundle, QuoteData
+    from tests.test_v42_evidence import trusted_technical
+    bundle = MarketDataBundle(symbol='3690:HK', technical=trusted_technical('3690:HK'))
+    assert bundle.to_snapshot_dict()['currency'] is None
+    assert bundle.technical.series['day']['currency'] == 'HKD'
+    bundle.quote = QuoteData(symbol='3690:HK',currency='HKD',current_price=100)
+    assert bundle.to_snapshot_dict()['currency'] == 'HKD'
