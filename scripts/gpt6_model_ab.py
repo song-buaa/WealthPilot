@@ -29,6 +29,7 @@ class Budget:
         self.calls, self.dollars = calls, dollars
         self.reserved = 0.0
         self.attempts = []
+        self.exhausted = False
 
     def before_send(self, request):
         if request.url.host != "api.openai.com" or request.url.path != "/v1/chat/completions":
@@ -47,6 +48,7 @@ class Budget:
         # margin to the entire reservation, including unknown failed usage.
         reserve = 1.25 * (input_bound * rates[0] + output_bound * rates[1]) / 1_000_000
         if len(self.attempts) >= self.calls or self.reserved + reserve > self.dollars:
+            self.exhausted = True
             raise RuntimeError("AB_BUDGET_EXHAUSTED")
         self.reserved += reserve
         self.attempts.append(dict(model=model, reserved_usd=round(reserve,6)))
@@ -124,7 +126,7 @@ def run_case(client, budget, symbol, stage, model, empty=False):
         except (ValueError,TypeError,KeyError):
             row["json_valid"] = False
     except LLMCallError as error:
-        row.update(status="unavailable",error=error.kind)
+        row.update(status="unavailable",error="budget_exhausted" if budget.exhausted else error.kind)
     row["latency_ms"] = round((time.monotonic()-started)*1000)
     return row
 
@@ -174,6 +176,10 @@ def main():
                         row = run_case(client,budget,symbol,stage,model,empty)
                     report["rows"].append(row);save()
                     print(json.dumps({k:row[k] for k in ("symbol","stage","requested_model","status")}))
+                    if budget.exhausted:
+                        report["status"]="INCOMPLETE_BUDGET_EXHAUSTED";save()
+                        print(json.dumps({k:report[k] for k in ("status","http_attempts","reserved_upper_usd")}))
+                        return
                     if model.startswith("gpt-6") and row.get("error") in {"model_access","authentication","quota","invalid_request"}:
                         blocked = True
                 if blocked and stage == "explanation":
@@ -183,7 +189,9 @@ def main():
             if blocked:
                 report["status"]="BLOCKED_TARGET_ACCESS_OR_COMPATIBILITY";save();break
         else:
-            report["status"]="COMPLETED_REQUIRES_QUALITATIVE_REVIEW";save()
+            report["status"]=("COMPLETED_REQUIRES_QUALITATIVE_REVIEW"
+                if all(row["status"] == "completed" for row in report["rows"])
+                else "INCOMPLETE_PROVIDER_FAILURES");save()
     print(json.dumps({k:report[k] for k in ("status","http_attempts","reserved_upper_usd")}))
 
 

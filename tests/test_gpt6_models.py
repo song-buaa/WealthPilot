@@ -125,6 +125,7 @@ def test_ab_budget_bounds_every_attempt_and_forbids_tools_and_other_endpoints():
     with pytest.raises(RuntimeError,match="AB_BUDGET_EXHAUSTED"):
         budget.before_send(request)
     assert len(budget.attempts) == 1 and budget.reserved <= .01
+    assert budget.exhausted
     with pytest.raises(RuntimeError,match="AB_ENDPOINT_NOT_ALLOWED"):
         Budget().before_send(httpx.Request("POST","https://example.com/v1/chat/completions",json={}))
     with pytest.raises(RuntimeError,match="AB_UNBOUNDED_REQUEST"):
@@ -180,6 +181,35 @@ def test_original_position_and_portfolio_fallbacks_handle_adapter_errors(monkeyp
     assert "未知错误" not in result.error and "LLM_" not in result.error
     result=engine._call_generic_llm("PortfolioReview","fixture",{})
     assert result.raw_payload == {} and result.error == failure_message(LLMCallError(kind))
+
+
+def test_ab_exhaustion_survives_shared_error_sanitization():
+    module=ab_runner()
+    budget=module.Budget(dollars=.000001)
+    def create(**kwargs):
+        budget.before_send(httpx.Request("POST","https://api.openai.com/v1/chat/completions",json=kwargs))
+        raise AssertionError("budget must block dispatch")
+    client=NS(chat=NS(completions=NS(create=create)))
+    row=module.run_case(client,budget,"LI:US","planning",LUNA)
+    assert row["status"] == "unavailable" and row["error"] == "budget_exhausted"
+    assert budget.exhausted and not budget.attempts
+
+
+def test_ab_cli_stops_and_records_incomplete_instead_of_success(monkeypatch,tmp_path):
+    module=ab_runner()
+    output=tmp_path/"budget-report.json"
+    monkeypatch.setenv("WP_MODEL_AB_ALLOW_LIVE","1")
+    monkeypatch.setenv("WEALTHPILOT_OPENAI_API_KEY","offline-only")
+    monkeypatch.setattr("sys.argv",["gpt6_model_ab.py","--live","--output",str(output)])
+    calls=[]
+    def exhausted(client,budget,symbol,stage,model,empty):
+        calls.append(stage);budget.exhausted=True
+        return dict(symbol=symbol,stage=stage,requested_model=model,status="unavailable",error="budget_exhausted")
+    monkeypatch.setattr(module,"run_case",exhausted)
+    module.main()
+    report=json.loads(output.read_text())
+    assert report["status"] == "INCOMPLETE_BUDGET_EXHAUSTED"
+    assert report["http_attempts"] == 0 and len(report["rows"]) == 1 and len(calls) == 1
 
 
 def test_normal_business_calls_have_no_gpt41_literal_or_direct_sdk_bypass():
