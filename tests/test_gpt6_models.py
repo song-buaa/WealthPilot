@@ -212,6 +212,65 @@ def test_ab_cli_stops_and_records_incomplete_instead_of_success(monkeypatch,tmp_
     assert report["http_attempts"] == 0 and len(report["rows"]) == 1 and len(calls) == 1
 
 
+@pytest.mark.parametrize("policy,expected", [
+    ({"WEALTHPILOT_LLM_PROFILE":"legacy-4.1"}, ("gpt-4.1","gpt-4.1-mini",None,None)),
+    ({"WEALTHPILOT_LLM_MAIN_EFFORT":"high","WEALTHPILOT_LLM_LIGHT_EFFORT":"low"}, (SOL,LUNA,"high","low")),
+])
+def test_mcp_worker_policy_precedes_earlier_read_imports_without_trade_permissions(tmp_path,policy,expected):
+    import os
+    import subprocess
+    import sys
+    database=tmp_path/"placeholder.sqlite";database.write_text("")
+    config=tmp_path/"operator-analysis.json"
+    config.write_text(json.dumps(dict(policy,ENABLE_IBKR_LIVE_TRADING="true",BROKER_MODE="live")))
+    # Stub only read/analysis owners. Exercise the real worker argument parsing,
+    # startup, env-file filter, two-operation order and JSON-line transport.
+    code='''
+import sys,types
+def models():
+ from app.config import MODEL_MAIN,MODEL_LIGHT
+ from app.llm_config import request_options
+ import os
+ return dict(models=[MODEL_MAIN,MODEL_LIGHT,request_options(MODEL_MAIN).get("reasoning_effort"),request_options(MODEL_LIGHT).get("reasoning_effort")],live=os.getenv("ENABLE_IBKR_LIVE_TRADING"),broker=os.getenv("BROKER_MODE"))
+reader=types.ModuleType("pocs.poc02_wealth_mcp.reader")
+reader.read_overview=lambda *a,**kw:models()
+sys.modules[reader.__name__]=reader
+analysis=types.ModuleType("pocs.chatgpt_skills.analysis")
+async def analyze(*a,**kw):return models()
+analysis.analyze=analyze
+sys.modules[analysis.__name__]=analysis
+from pocs.chatgpt_skills import worker
+sys.argv=["worker","--frozen-database",sys.argv[1],"--analysis-env-file",sys.argv[2]]
+worker.main()
+'''
+    env={k:os.environ[k] for k in ("PATH","HOME","TMPDIR") if k in os.environ}
+    env.update(PYTHON_DOTENV_DISABLED="1",PUBLIC_DEMO_MODE="true",BROKER_MODE="mock",
+               ENABLE_IBKR_LIVE_TRADING="false",WEALTHPILOT_DB_PATH=str(database))
+    payload='\n'.join(json.dumps(dict(operation=op,arguments={})) for op in ("get_wealth_overview","analyze_position"))+'\n'
+    completed=subprocess.run([sys.executable,"-c",code,str(database),str(config)],input=payload,
+        capture_output=True,text=True,check=True,env=env,cwd=Path(__file__).resolve().parents[1],timeout=30)
+    results=[json.loads(line) for line in completed.stdout.splitlines()]
+    assert len(results)==2 and all(row["ok"] for row in results),results
+    for row in results:
+        assert tuple(row["result"]["models"])==expected
+        assert row["result"]["live"]=="false" and row["result"]["broker"]=="mock"
+
+
+def test_mcp_runtime_key_refresh_cannot_mix_cached_models_with_a_new_profile(monkeypatch,tmp_path):
+    import os
+    from pocs.chatgpt_skills.worker import load_analysis_environment
+    monkeypatch.setenv("WEALTHPILOT_LLM_PROFILE","legacy-4.1")
+    monkeypatch.setenv("WEALTHPILOT_LLM_MAIN_EFFORT","low")
+    monkeypatch.setenv("WEALTHPILOT_OPENAI_API_KEY","before")
+    config=tmp_path/"operator.json"
+    config.write_text(json.dumps({"WEALTHPILOT_LLM_PROFILE":"gpt6", "WEALTHPILOT_LLM_MAIN_EFFORT":"high",
+                                 "WEALTHPILOT_OPENAI_API_KEY":"after"}))
+    load_analysis_environment(config)
+    assert os.environ["WEALTHPILOT_OPENAI_API_KEY"]=="after"
+    assert os.environ["WEALTHPILOT_LLM_PROFILE"]=="legacy-4.1"
+    assert os.environ["WEALTHPILOT_LLM_MAIN_EFFORT"]=="low"
+
+
 def test_normal_business_calls_have_no_gpt41_literal_or_direct_sdk_bypass():
     import ast
     root = Path(__file__).resolve().parents[1]

@@ -22,7 +22,7 @@ from pocs.chatgpt_skills.contracts import TradabilityResult
 from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult, TradeHistoryQuery, TradeHistoryResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
-from pocs.chatgpt_skills.worker import SAFE_ERRORS
+from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
 from pocs.poc02_wealth_mcp import server as overview
 
@@ -50,6 +50,7 @@ class BusinessClient:
             if self.process is None or self.process.poll() is not None:
                 self.close()
                 env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
+                env.update({k:os.environ[k] for k in MODEL_ENV_KEYS if k in os.environ})
                 env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                            ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                            FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")

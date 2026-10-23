@@ -20,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[2]
 BUSINESS = os.environ['WP_BUSINESS_PYTHON']
 
 
+def test_worker_receives_operator_model_policy_without_broker_or_key_inheritance(monkeypatch):
+    import io
+    from types import SimpleNamespace
+    from pocs.chatgpt_skills import server
+    from pocs.chatgpt_skills.worker import MODEL_ENV_KEYS
+    seen={}
+    policy={key:"fixture-policy" for key in MODEL_ENV_KEYS}
+    for key,value in policy.items():monkeypatch.setenv(key,value)
+    monkeypatch.setenv("WEALTHPILOT_OPENAI_API_KEY","PRIVATE_SENTINEL")
+    monkeypatch.setenv("ENABLE_IBKR_LIVE_TRADING","true")
+    child=SimpleNamespace(stdin=io.StringIO(),stdout=io.StringIO('{"ok":true,"result":{"fixture":true}}\n'))
+    def spawn(*args,**kwargs):seen.update(kwargs);return child
+    monkeypatch.setattr(server.subprocess,"Popen",spawn)
+    monkeypatch.setattr(server.select,"select",lambda *args:([child.stdout],[],[]))
+    client=server.BusinessClient(SimpleNamespace(business_python=BUSINESS,portfolio_id=7,
+        real_config=None,mock_database="synthetic-not-opened",analysis_env_file=None))
+    assert client.call("get_wealth_overview",{})=={"fixture":True}
+    assert {key:seen["env"][key] for key in MODEL_ENV_KEYS}==policy
+    assert "WEALTHPILOT_OPENAI_API_KEY" not in seen["env"]
+    assert seen["env"]["ENABLE_IBKR_LIVE_TRADING"]=="false" and seen["env"]["BROKER_MODE"]=="mock"
+
+
 @pytest.fixture
 def endpoint(tmp_path):
     db=tmp_path/'synthetic.db'

@@ -20,6 +20,25 @@ SAFE_ERRORS |= ASSET_ERRORS
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
 SAFE_ERRORS |= HISTORY_ERRORS
 
+# Transport metadata only; importing it must not load a model client in the
+# independent MCP environment. Values come from local operator configuration.
+MODEL_ENV_KEYS = {"WEALTHPILOT_LLM_PROFILE", "WEALTHPILOT_LLM_MAIN_MODEL",
+                  "WEALTHPILOT_LLM_LIGHT_MODEL", "WEALTHPILOT_LLM_MAIN_EFFORT",
+                  "WEALTHPILOT_LLM_LIGHT_EFFORT"}
+
+
+def load_analysis_environment(path, *, model_policy_only=False):
+    values = json.loads(Path(path).read_text())
+    # Model constants are resolved at first business import. A running worker
+    # must not mix cached model IDs with a newly reloaded profile or effort.
+    allowed = MODEL_ENV_KEYS if model_policy_only else {
+        "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
+        "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
+        "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+        "WEALTHPILOT_STAGE_TARGETS_PATH"}
+    os.environ.update({key:value for key,value in values.items()
+                       if key in allowed and isinstance(value,str)})
+
 
 def init_mock(path, portfolio_id):
     # Explicit fixture creation only; never init/migrate a preexisting database.
@@ -74,6 +93,10 @@ def main():
         print(json.dumps({"ok": True, "synthetic": True})); return
     workflow = None
     try:
+        # app.config can be imported by an earlier read operation. Establish
+        # model policy before that first import, not only at analysis time.
+        if args.analysis_env_file:
+            load_analysis_environment(args.analysis_env_file, model_policy_only=True)
         if args.mock_database:
             path = checked_mock(args.mock_database)
             os.environ.update(WEALTHPILOT_DB_PATH=str(path), PUBLIC_DEMO_MODE="true", DEMO_ACCESS_PASSWORD="synthetic-only", BROKER_MODE="mock",
@@ -121,9 +144,7 @@ def main():
                         import asyncio
                         from pocs.chatgpt_skills.analysis import analyze
                         if args.analysis_env_file:
-                            values = json.loads(Path(args.analysis_env_file).read_text())
-                            allowed = {"WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2", "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "WEALTHPILOT_STAGE_TARGETS_PATH"}
-                            os.environ.update({k:v for k,v in values.items() if k in allowed and isinstance(v,str)})
+                            load_analysis_environment(args.analysis_env_file)
                         if config:
                             os.environ["WEALTHPILOT_DB_PATH"] = config["database_path"]
                         result = asyncio.run(analyze(config["database_path"] if config else path,

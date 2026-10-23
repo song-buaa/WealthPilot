@@ -100,3 +100,7 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 独立只读 AI 工程审查定位 P2：共享适配把 SDK 错误转为 LLMCallError 后，原单标/组合的 SDK 专用 except 未覆盖，落到“未知错误”fallback。已在原 reason/chat/通用组合入口恢复中文安全降级，保留 HOLD/空 payload 及错误状态；新增超时/权限/配额/参数/截断回归，不暴露 Provider 原文或修改资格门槛。另补 A/B 预算缓存写入余量；24 次原始比较不重跑，结果文件保留测量历史。最终修复提交、复审与 CI 证据由 PR #41 最新记录提供。
 
 后续独立复审确认业务 fallback 修复有效，并发现评估 CLI 在低预算耗尽时可能将部分运行标为完成。已增加预算耗尽状态透传、立即停止及 INCOMPLETE 标记；Provider 部分失败也不再标比较完成，新增 CLI/适配联动隔离测试。本次已执行的 24 条均成功返回，原比较数据不变，没有新增付费调用。
+
+## MCP 模型配置穿透收口
+
+最终核验发现原 BusinessClient/worker 只转发 Provider/目标相关白名单，新 profile/effort 不会进入业务进程，且先读财富再分析时可能提前缓存默认模型。已仅扩展五个非交易模型配置键：父进程按原白名单透传、analysis_env_file 在任何业务导入前加载模型策略；Provider Key 仍按原分析范围加载。策略变更须重启获授权 worker，运行中不把新的 profile/effort 与已缓存模型 ID 混用。没有把 Key/券商凭证从父进程直接继承，也没有放开 JSON 中的交易开关。真实子进程先读后分析验证 legacy 回滚与 high/low；独立 MCP SDK 验证父子白名单及交易开关仍 false。生产配置及 worker 未操作。
