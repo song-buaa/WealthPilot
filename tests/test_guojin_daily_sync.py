@@ -14,7 +14,7 @@ from tests.test_guojin_native_sync import native_api, env, facts, publish as ori
 
 
 @pytest.fixture(autouse=True)
-def fixed_synthetic_source_clock(monkeypatch, native_api):
+def fixed_synthetic_source_clock(monkeypatch, native_api, request):
     """Keep source fixtures inside a workday regardless of the runner wall clock.
 
     Both the existing ready batch and later GUI receipts use the same clock.
@@ -24,6 +24,12 @@ def fixed_synthetic_source_clock(monkeypatch, native_api):
     from tests import guojin_native_fixtures
     from services.broker_sync.guojin import native_exports
     instant=datetime(2026,10,22,3,44,45,tzinfo=timezone.utc)
+    if request.node.name == "test_original_cli_strict_contract_reuses_committed_batch_after_lost_response":
+        # This case validates through an actual child CLI. Its wall clock is
+        # intentionally not monkeypatched, so the synthetic receipt must be
+        # fresh for both processes rather than expiring the day after this test
+        # was authored. Scheduling/window cases retain the fixed workday above.
+        instant=datetime.now(timezone.utc)-timedelta(seconds=30)
     class SourceClock(datetime):
         @classmethod
         def now(cls, tz=None):
