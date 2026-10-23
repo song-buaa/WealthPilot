@@ -1,0 +1,47 @@
+{
+  "archive_sha256": "c6c2549338dd44171af9739aed686bf4b41cd9461ec2d5f92c88f3987ad5938c",
+  "capture_date": "2026-10-23",
+  "public_source_projection_only": true,
+  "members": {
+    "overview-failure-classification.json": {
+      "source_member_sha256": "4765818fd568c74fcc1b6824f7eecefc214914c8b37d239fefb3c4e76f39c87a",
+      "source_basename": "overview-failure-classification.json"
+    },
+    "meituan-market-symbol-reproduction.json": {
+      "source_member_sha256": "a96827114685e248bb8bd9c6b42768bbbe1910b97e58fcf34198350425db594b",
+      "source_basename": "meituan-market-symbol-reproduction.json"
+    },
+    "hk-technical-completeness.json": {
+      "source_member_sha256": "5eee7d8206e279e1760eec1a7b1997812546b232ca62ae324d6ebfa9b9c4c5c4",
+      "source_basename": "hk-technical-completeness.json"
+    },
+    "direct-av-LI-INCOME_STATEMENT.json": {
+      "source_member_sha256": "3459d90d5e95d3e9c2c212b0b7644e7c2efc672ec1a4e618939cdb411a3a2e0f",
+      "source_basename": "direct-av-LI-INCOME_STATEMENT.json"
+    },
+    "direct-av-LI-CASH_FLOW.json": {
+      "source_member_sha256": "baf2aacdfb38ba85b6dbda2e5155f5e9352762253f834e609c90993c365e00b6",
+      "source_basename": "direct-av-LI-CASH_FLOW.json"
+    },
+    "direct-av-PDD-INCOME_STATEMENT.json": {
+      "source_member_sha256": "a46b1cb9c1110b1a06a8c2a5c944746eee44f18d9c68c6a1b58fea6e761a504f",
+      "source_basename": "direct-av-PDD-INCOME_STATEMENT.json"
+    },
+    "direct-av-PDD-CASH_FLOW.json": {
+      "source_member_sha256": "a9b9ad291df49a267541bb16664d891ac2d5ab60ffffcbc81c4cf053998da62f",
+      "source_basename": "direct-av-PDD-CASH_FLOW.json"
+    },
+    "sources-LI-US.json": {
+      "source_member_sha256": "9ad2cdecbda61cccb0123a6b0d3000bc59745ec1751d78ecb9df6e5939c5b110",
+      "source_basename": "sources-LI-US.json"
+    },
+    "sources-PDD-US.json": {
+      "source_member_sha256": "31bb2a336beba09e9a3db5e37cf52e177747d48b3e9f1044da36252ae4023570",
+      "source_basename": "sources-PDD-US.json"
+    },
+    "sources-3690-HK.json": {
+      "source_member_sha256": "b5bf6bef80c30c499aad65277c19f50bd0b637399fef815d1c7bacea11cb84a4",
+      "source_basename": "sources-3690-HK.json"
+    }
+  }
+}

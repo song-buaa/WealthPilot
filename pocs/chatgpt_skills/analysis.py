@@ -381,11 +381,14 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 analysis_eligibility=(asset_view or {}).get('data_quality', {}).get('analysis_eligibility', {}),
                 can_propose_rebalance=False, execution_authorized=False))
             from backend.services.position_analysis import prepare_portfolio
-            from backend.services.market_data.output_policy import project_explanation, render_explanation
+            from backend.services.market_data.output_policy import _explanations_with_trace, render_explanation
             assessments=prepare_portfolio(captured['plan'],captured['executed']) if captured else []
-            explanation=project_explanation(
-                (captured['expressed'].structured_payload or {}).get('professional_explanation') if captured else [],
-                {'records':[r for a in assessments for r in a['records']]})
+            from backend.agents.contracts import ExpressionOutput
+            expressed = captured['expressed'] if captured else ExpressionOutput()
+            explanation, diagnostics = _explanations_with_trace(expressed,
+                {'records':[r for a in assessments for r in a['records']],
+                 'verified_field_records':[r for a in assessments for r in a.get('verified_field_records', [])]})
+            result.professional_result['analysis_result']['explanationDiagnostics']=diagnostics
             result.professional_result['analysis_result']['professional_explanation']=explanation
             result.professional_result['analysis_result']['exit_candidates']=result.evidence.get('exit_candidates',[])
             result.conclusion+=render_explanation(explanation)

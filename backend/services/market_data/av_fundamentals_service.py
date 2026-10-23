@@ -1,13 +1,14 @@
 """
 Alpha Vantage 财报、现金流 + 分析师数据 adapter。
 输入: WP symbol（如 LI:US / MSFT:US，兼容旧格式 LI.US）
-输出: FundamentalsData（失败时返回 None）
+输出: FundamentalsData（缺失字段为 None，端点状态保留在 provenance）
 """
 import os
 import json
 import logging
 import urllib.request
 import urllib.parse
+import urllib.error
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -48,7 +49,7 @@ def get_next_av_key() -> str:
 
 def _wp_symbol_to_av_ticker(wp_symbol: str) -> Optional[str]:
     """LI:US → LI, 0700:HK → None（AV 无港股）。兼容旧格式 LI.US。"""
-    from utils.symbol import symbol_to_av_ticker
+    from backend.utils.symbol import symbol_to_av_ticker
     return symbol_to_av_ticker(wp_symbol)
 
 
@@ -59,16 +60,56 @@ def _av_get(function: str, symbol: str, api_key: str) -> Optional[dict]:
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             data = json.loads(resp.read())
-        if "Note" in data or "Information" in data:
-            logger.warning(f"AV 频率限制: {function}/{symbol}")
-            return None
-        if "Error Message" in data:
-            logger.warning(f"AV 错误: {data['Error Message']}")
-            return None
         return data
-    except Exception as e:
-        logger.error(f"AV 请求失败 {function}/{symbol}: {e}")
-        return None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"_av_error": "invalid_response"}
+    except urllib.error.HTTPError as exc:
+        return {"_av_error": "rate_limited" if exc.code == 429 else
+                "access_denied" if exc.code in {401, 403} else "provider_error"}
+    except Exception:
+        # Exception strings can contain the credential-bearing request URL.
+        logger.warning("AV transport failure: %s/%s", function, symbol)
+        return {"_av_error": "network_error"}
+
+
+def _response_status(function, payload):
+    if not isinstance(payload, dict) or not payload:
+        return "missing"
+    if payload.get("_av_error") in {"network_error", "invalid_response", "rate_limited", "access_denied", "provider_error"}:
+        return payload["_av_error"]
+    notice = str(payload.get("Information") or payload.get("Note") or "").lower()
+    if notice:
+        if "premium" in notice:
+            return "premium"
+        if any(word in notice for word in ("rate", "frequency", "per day", "per minute", "limit")):
+            return "rate_limited"
+        return "provider_notice"
+    if "Error Message" in payload:
+        return "provider_error"
+    if function == "OVERVIEW":
+        return "available" if payload.get("Symbol") else "missing"
+    return "available" if isinstance(payload.get("quarterlyReports"), list) and payload["quarterlyReports"] else "missing"
+
+
+def _endpoint(function, ticker, api_key):
+    # Separate successful endpoint caches. Old aggregate/Seed entries never mask
+    # recovery, and failures are retried on the next analysis, not cached for a day.
+    key = f"av_fundamentals:v2:{function}:{ticker}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached["payload"], dict(cached["diagnostic"], cache_hit=True)
+    payload = _av_get(function, ticker, api_key)
+    status = _response_status(function, payload)
+    returned_symbol = (payload.get("Symbol") or payload.get("symbol")) if isinstance(payload, dict) else None
+    if status == "available" and returned_symbol and returned_symbol != ticker:
+        status = "symbol_mismatch"
+    diagnostic = dict(status=status, fetched_at=datetime.now(timezone.utc).isoformat(), cache_hit=False)
+    if status == "available":
+        set_cached(key, dict(payload=payload, diagnostic=diagnostic), FUNDAMENTALS_TTL)
+    else:
+        logger.info("AV endpoint unavailable: %s/%s status=%s", function, ticker, status)
+        payload = None
+    return payload, diagnostic
 
 
 def _safe_float(val, default=None) -> Optional[float]:
@@ -129,17 +170,20 @@ def _report_provenance(ticker, function, rows, fetched_at):
         period=rows[0]["fiscalDateEnding"], period_basis="quarterly_ttm",
         currency=rows[0]["reportedCurrency"], data_as_of=rows[0]["fiscalDateEnding"],
         published_at=max(published) if all(isinstance(value, str) and value for value in published) else None,
-        fetched_at=fetched_at, valuation_observed_at=None)
+        fetched_at=fetched_at, valuation_observed_at=None,
+        observations=[{key:row[key] for key in ("fiscalDateEnding", "reportedCurrency", "totalRevenue", "netIncome",
+            "netIncomeFromContinuingOperations", "operatingCashflow", "capitalExpenditures") if key in row} for row in rows])
 
 
 def statement_metrics(ticker, income, cashflow, *, fetched_at):
     """Pure AV projection; never infer missing period, amount or publication."""
     values, provenance, missing = {}, {}, []
+    clocks = fetched_at if isinstance(fetched_at, dict) else {"INCOME_STATEMENT":fetched_at, "CASH_FLOW":fetched_at}
     reports = _quarter_window(income)
     history = _quarter_window(income, 8)
     previous = history[4:] if history else None
     if reports:
-        meta = _report_provenance(ticker, "INCOME_STATEMENT", reports, fetched_at)
+        meta = _report_provenance(ticker, "INCOME_STATEMENT", reports, clocks.get("INCOME_STATEMENT"))
         for source, field in (("totalRevenue", "revenue_ttm"), ("netIncome", "net_income_ttm")):
             value = _complete_sum(reports, source)
             if value is not None:
@@ -156,18 +200,30 @@ def statement_metrics(ticker, income, cashflow, *, fetched_at):
     else:
         missing += ["revenue_ttm", "net_income_ttm", "INCOME_QUARTERS_INCOMPLETE_OR_INCONSISTENT"]
     cash = _quarter_window(cashflow)
-    aligned = (reports and cash and [r["fiscalDateEnding"] for r in reports] == [r["fiscalDateEnding"] for r in cash]
-               and reports[0]["reportedCurrency"] == cash[0]["reportedCurrency"])
+    aligned = cash and (not reports or ([r["fiscalDateEnding"] for r in reports] == [r["fiscalDateEnding"] for r in cash]
+               and reports[0]["reportedCurrency"] == cash[0]["reportedCurrency"]))
     if aligned:
         operating = _complete_sum(cash, "operatingCashflow")
         capex = _complete_sum(cash, "capitalExpenditures", nonnegative=True)
+        meta = _report_provenance(ticker, "CASH_FLOW", cash, clocks.get("CASH_FLOW"))
+        if not reports:
+            values.update(report_currency=meta["currency"], fiscal_period_end=meta["fiscal_period_end"], published_at=meta["published_at"])
+        if operating is not None:
+            values["operating_cash_flow_ttm"] = operating
+            provenance["operating_cash_flow_ttm"] = dict(meta, source_field="operatingCashflow")
         if operating is not None and capex is not None:
-            meta = _report_provenance(ticker, "CASH_FLOW", cash, fetched_at)
-            for field, value, source in (("operating_cash_flow_ttm", operating, "operatingCashflow"),
+            for field, value, source in (
                     ("capital_expenditures_ttm", capex, "capitalExpenditures"),
                     ("free_cash_flow_ttm", operating-capex, "operatingCashflow - capitalExpenditures")):
                 values[field], provenance[field] = value, dict(meta, source_field=source,
                     capex_convention="positive_cash_outflow", computation="sum_four_consecutive_quarters")
+            if capex == 0:
+                # A run of zero vendor values is an observation, not verified
+                # absence of investment. No caller flag can certify it.
+                values.pop("free_cash_flow_ttm", None)
+                provenance.pop("free_cash_flow_ttm", None)
+                provenance["capital_expenditures_ttm"]["verification_issues"] = ["ZERO_CAPEX_UNVERIFIED"]
+                missing.append("ZERO_CAPEX_UNVERIFIED")
         else:
             missing.append("CASH_FLOW_FIELDS_OR_CAPEX_SIGN_UNVERIFIED")
     else:
@@ -219,32 +275,21 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         logger.info(f"AV 不支持: {wp_symbol}，尝试种子兜底")
         return _load_seed_fundamentals(raw_ticker)
 
-    cache_key = f"av_fundamentals:{ticker}"
-    cached = get_cached(cache_key)
-    if cached is not None:
-        return cached
+    # Apply mode isolation BEFORE all caches. Demo Seed is never stored in a
+    # cache consumed by the real provider path.
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE, DEMO_ALLOW_MARKET_DATA
+    if PUBLIC_DEMO_MODE and not DEMO_ALLOW_MARKET_DATA:
+        return _load_seed_fundamentals(ticker)
 
-    # DEMO_ALLOW_MARKET_DATA=false → 跳过 AV API，直接种子
-    try:
-        from backend.core.demo_mode import PUBLIC_DEMO_MODE, DEMO_ALLOW_MARKET_DATA
-        if PUBLIC_DEMO_MODE and not DEMO_ALLOW_MARKET_DATA:
-            seed = _load_seed_fundamentals(ticker)
-            if seed:
-                set_cached(cache_key, seed, FUNDAMENTALS_TTL)
-            return seed
-    except ImportError:
-        pass
-
+    import time
     api_key = get_next_av_key()
-
-    # --- OVERVIEW ---
-    overview = _av_get("OVERVIEW", ticker, api_key)
-    if not overview:
-        logger.info(f"AV OVERVIEW 失败，尝试种子兜底: {ticker}")
-        seed = _load_seed_fundamentals(ticker)
-        if seed:
-            set_cached(cache_key, seed, FUNDAMENTALS_TTL)
-        return seed
+    endpoints, diagnostics = {}, {}
+    for function in ("OVERVIEW", "INCOME_STATEMENT", "CASH_FLOW"):
+        if endpoints:
+            time.sleep(1.5)  # retain the existing rate pacing
+        endpoints[function], diagnostics[function] = _endpoint(function, ticker, api_key)
+    overview = endpoints["OVERVIEW"] or {}
+    income, cashflow = endpoints["INCOME_STATEMENT"], endpoints["CASH_FLOW"]
 
     missing = []
 
@@ -293,16 +338,10 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         strong_buy=sb, buy=b, hold=h, sell=s, strong_sell=ss,
     )
 
-    # --- INCOME_STATEMENT（营收增速）---
-    import time
-    time.sleep(1.5)  # AV 免费版限频
-
-    income = _av_get("INCOME_STATEMENT", ticker, api_key)
-    time.sleep(1.5)
-    cashflow = _av_get("CASH_FLOW", ticker, api_key)
-    fetched_at = datetime.now(timezone.utc).isoformat()
     statement, field_provenance, statement_missing = statement_metrics(
-        ticker, income, cashflow, fetched_at=fetched_at)
+        ticker, income, cashflow,
+        fetched_at={name:item["fetched_at"] for name,item in diagnostics.items()})
+    missing += [f"{name}:{item['status']}" for name,item in diagnostics.items() if item["status"] != "available"]
     missing += statement_missing
     revenue_ttm = statement.get("revenue_ttm")
     net_income_ttm = statement.get("net_income_ttm")
@@ -315,7 +354,7 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
             record_id=f"AV:OVERVIEW:{ticker}", period=overview.get("LatestQuarter"),
             period_basis="valuation" if name in {"pe_ttm", "pe_forward", "peg_ratio", "market_cap", "high_52w", "low_52w", "beta", "analyst"} else "quarterly_ttm",
             currency=overview.get("Currency"), data_as_of=None, published_at=None,
-            valuation_observed_at=None, fetched_at=fetched_at)
+            valuation_observed_at=None, fetched_at=diagnostics["OVERVIEW"]["fetched_at"])
 
     # gross_margin: AV GrossProfitTTM 是绝对值,转百分比
     gross_margin_val = _safe_float(overview.get("GrossProfitTTM"))
@@ -362,12 +401,12 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         data_as_of=None,
         valuation_currency=overview.get("Currency"),
         report_currency=statement.get("report_currency"),
-        provenance=dict(source="alphavantage",source_url="https://www.alphavantage.co/documentation/#company-overview",
-            record_id=f"AV:OVERVIEW:{ticker}",published_at=None,data_as_of=None,
-            fetched_at=datetime.now(timezone.utc).isoformat(),period=overview.get("LatestQuarter"),
-            scope="TTM and valuation; valuation time unverified",is_fallback=False),
+        provenance=dict(source="alphavantage",source_url="https://www.alphavantage.co/documentation/",
+            record_id=f"AV:FUNDAMENTALS:{ticker}",published_at=None,data_as_of=None,
+            endpoints=diagnostics,
+            fetched_at=max(item["fetched_at"] for item in diagnostics.values()),period=statement.get("fiscal_period_end"),
+            scope="independent endpoints; valuation time unverified",is_fallback=False),
         missing_fields=missing,
     )
 
-    set_cached(cache_key, fundamentals, FUNDAMENTALS_TTL)
     return fundamentals

@@ -1,0 +1,68 @@
+{
+  "symbol": "PDD",
+  "function": "CASH_FLOW",
+  "started_at": "2026-10-23T03:00:52.880046+00:00",
+  "finished_at": "2026-10-23T03:00:57.446582+00:00",
+  "category": "statements",
+  "payload": {
+    "symbol": "PDD",
+    "quarterlyReports": [
+      {
+        "fiscalDateEnding": "2026-06-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "27182000000",
+        "operatingCashflow": "25670000000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2026-03-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "24540999000",
+        "operatingCashflow": "16445000000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2025-12-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "24540999000",
+        "operatingCashflow": "24119546000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2025-09-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "29328184000",
+        "operatingCashflow": "45660545000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2025-06-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "30753457000",
+        "operatingCashflow": "21641656000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2025-03-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "14741829000",
+        "operatingCashflow": "15516943000",
+        "capitalExpenditures": "967137000"
+      },
+      {
+        "fiscalDateEnding": "2024-12-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "27446637000",
+        "operatingCashflow": "29547160000",
+        "capitalExpenditures": "0"
+      },
+      {
+        "fiscalDateEnding": "2024-09-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "24980694000",
+        "operatingCashflow": "27522313000",
+        "capitalExpenditures": "0"
+      }
+    ]
+  }
+}

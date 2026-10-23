@@ -53,7 +53,7 @@ def fundamental_field_quality(raw, *, at, symbol=None):
         if raw.get(field) is None:
             continue
         meta = mapping(mapping(raw.get("field_provenance")).get(field))
-        issues = []
+        issues = list(meta.get("verification_issues") or [])
         source = str(meta.get("source") or "unknown").lower()
         clock = meta.get("valuation_observed_at") if field in VALUATION_FIELDS else meta.get("fiscal_period_end")
         observed, fetched, published = stamp(clock), stamp(meta.get("fetched_at")), stamp(meta.get("published_at"))
@@ -249,6 +249,70 @@ def record(kind, value, *, at, symbol=None):
         primary=primary, issues=issues, values=raw, field_quality=field_quality)
 
 
+def financial_source_conflicts(records):
+    """Compare explicit same-quarter/currency statement observations only.
+
+    Consume original stored facts, never narrative KPIs, user claims or fuzzy
+    text extraction. Keep both source observations; do not silently overwrite AV.
+    Net-income labels are intentionally not equated across consolidation bases.
+    """
+    conflicts = []
+    fields = {"totalRevenue":("revenue_ttm", "revenue_yoy"),
+              "operatingCashflow":("operating_cash_flow_ttm", "free_cash_flow_ttm"),
+              "capitalExpenditures":("capital_expenditures_ttm", "free_cash_flow_ttm")}
+    for disclosure in records:
+        if not disclosure["primary"] or disclosure["quality"] != "valid":
+            continue
+        observations = disclosure["values"].get("financial_observations", [])
+        # A card marked unverified is not a numerical authority merely because
+        # its clocks and a whitelisted IR URL pass generic research checks.
+        if disclosure["values"].get("quality") in {"unverified_until_source_checks", "unverified", "unknown", "stale", "conflict", "superseded"}:
+            if observations:
+                disclosure["issues"].append("FINANCIAL_OBSERVATIONS_UNVERIFIED")
+            continue
+        if not isinstance(observations, list):
+            continue
+        for parent in records:
+            if parent["kind"] != "fundamentals" or parent["symbol"] != disclosure["symbol"]:
+                continue
+            raw_provenance = mapping(parent["values"].get("field_provenance"))
+            for observation in observations:
+                if not isinstance(observation, dict):
+                    continue
+                key = observation.get("source_field")
+                if key not in fields or observation.get("period_basis") != "quarterly":
+                    continue
+                for field in fields[key]:
+                    meta = mapping(raw_provenance.get(field))
+                    for row in meta.get("observations", []):
+                        expected, actual = number(observation.get("value")), number(row.get(key))
+                        if (expected is None or actual is None or not observation.get("currency")
+                                or row.get("reportedCurrency") != observation["currency"]
+                                or row.get("fiscalDateEnding") != observation.get("fiscal_period_end")):
+                            continue
+                        # Allow only source precision rounding, not percentage
+                        # tolerance that hides the real LI revenue discrepancy.
+                        tolerance = number(observation.get("rounding_unit"))
+                        tolerance = tolerance/2 if tolerance is not None and 0 < tolerance <= 1000000 else 0
+                        if abs(expected-actual) <= tolerance:
+                            continue
+                        detail = dict(field=field, source_field=key, fiscal_period_end=row["fiscalDateEnding"],
+                            currency=observation["currency"], provider_value=actual, official_value=expected,
+                            provider_record_id=meta.get("record_id"), official_record_id=disclosure["record_id"],
+                            official_source_url=disclosure["source_url"], issue="FINANCIAL_SOURCE_CONFLICT")
+                        if detail not in conflicts:
+                            conflicts.append(detail)
+                        state = parent["field_quality"].get(field)
+                        if state:
+                            state["quality"] = "conflict"
+                            state["issues"].append("FINANCIAL_SOURCE_CONFLICT")
+                            parent["values"][field] = None
+                        parent["issues"].append("FUNDAMENTALS_"+field.upper()+"_FINANCIAL_SOURCE_CONFLICT")
+            if any(item["quality"] == "conflict" for item in parent["field_quality"].values()):
+                parent["quality"] = "partial" if any(item["quality"] == "valid" for item in parent["field_quality"].values()) else "conflict"
+    return conflicts
+
+
 def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
            asset_view=None, planner=None, stored_price=None, principles_available=False):
     at = at or datetime.now(timezone.utc)
@@ -258,6 +322,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
     records += [record("research", r, at=at, symbol=symbol) for r in research]
     records += [record("event", r, at=at, symbol=symbol) for r in events]
+    source_conflicts = financial_source_conflicts(records)
     issues = []
     for kind in ("quote", "fundamentals", "technical", "research", "event"):
         if not any(r["kind"] == kind for r in records):
@@ -266,7 +331,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     if fundamental.get("field_provenance"):
         fundamental = next((row["values"] for row in records if row["kind"] == "fundamentals"), {})
     price = number(quote.get("current_price")) or number(stored_price)
-    conflicts = []
+    conflicts = ["FINANCIAL_SOURCE_CONFLICT"] if source_conflicts else []
     low, high = number(fundamental.get("low_52w")), number(fundamental.get("high_52w"))
     # Stored broker CNY per-unit valuations must NEVER enter this comparison.
     if price and ((low is not None and price < low) or (high is not None and price > high)):
@@ -375,6 +440,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     ceiling = .85 if levels["L3"]["allowed"] else .6 if levels["L2"]["allowed"] else .35
     return dict(schema_version="wealthpilot.position-evidence.v1", as_of=at.isoformat(), symbol=symbol,
         snapshot_id=view.get("snapshot_id"), records=records, verified_field_records=verified_field_records, conflicts=conflicts,
+        source_conflicts=source_conflicts,
         issues=sorted(set(issues)), planner=planner, qualification=levels,
         confidence_ceiling=ceiling, technical_levels=series if "technical" in valid else None,
         infoNeeded=sorted(set(l3)), execution_authorized=False)

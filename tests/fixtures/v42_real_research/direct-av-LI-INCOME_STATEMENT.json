@@ -1,0 +1,68 @@
+{
+  "symbol": "LI",
+  "function": "INCOME_STATEMENT",
+  "started_at": "2026-10-23T03:00:40.425374+00:00",
+  "finished_at": "2026-10-23T03:00:44.609658+00:00",
+  "category": "statements",
+  "payload": {
+    "symbol": "LI",
+    "quarterlyReports": [
+      {
+        "fiscalDateEnding": "2026-06-30",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "25594433485",
+        "netIncome": "-1699370169",
+        "netIncomeFromContinuingOperations": "-1705257000"
+      },
+      {
+        "fiscalDateEnding": "2026-03-31",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "22843908574",
+        "netIncome": "-2275683736",
+        "netIncomeFromContinuingOperations": "-2276032000"
+      },
+      {
+        "fiscalDateEnding": "2025-12-31",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "28378261568",
+        "netIncome": "6429017",
+        "netIncomeFromContinuingOperations": "20243000"
+      },
+      {
+        "fiscalDateEnding": "2025-09-30",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "27404690999",
+        "netIncome": "-625891104",
+        "netIncomeFromContinuingOperations": "-624396000"
+      },
+      {
+        "fiscalDateEnding": "2025-06-30",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "30353214947",
+        "netIncome": "1096464840",
+        "netIncomeFromContinuingOperations": "1096936000"
+      },
+      {
+        "fiscalDateEnding": "2025-03-31",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "25985557957",
+        "netIncome": "651797066",
+        "netIncomeFromContinuingOperations": "646645000"
+      },
+      {
+        "fiscalDateEnding": "2024-12-31",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "44273672000",
+        "netIncome": "3522937000",
+        "netIncomeFromContinuingOperations": "3532694000"
+      },
+      {
+        "fiscalDateEnding": "2024-09-30",
+        "reportedCurrency": "CNY",
+        "totalRevenue": "43181224000",
+        "netIncome": "2834420000",
+        "netIncomeFromContinuingOperations": "2820490000"
+      }
+    ]
+  }
+}

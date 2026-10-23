@@ -273,12 +273,8 @@ class ExecutingAgent:
         # 准备市场数据参数
         wp_symbol = None
         if asset_name and loaded.target_position:
-            tp = loaded.target_position
-            ticker = getattr(tp, "ticker", "") or ""
-            if ticker:
-                from utils.symbol import infer_symbol_from_ticker
-                currency = getattr(tp, "currency", "USD") or "USD"
-                wp_symbol = infer_symbol_from_ticker(ticker, currency)
+            from backend.utils.symbol import position_market_symbol
+            wp_symbol = position_market_symbol(loaded.target_position)
 
         from backend.core.demo_mode import PUBLIC_DEMO_MODE as _DEMO_EA
 

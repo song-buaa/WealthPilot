@@ -119,7 +119,7 @@ class ReviewingAgent:
 
         try:
             # ── Layer 1: 硬校验 ──
-            self._run_hard_validation(out, planning_output, expression_output)
+            self._run_hard_validation(out, planning_output, expression_output, execution_output)
 
             if out.hard_validation_passed:
                 out.score = 1.0
@@ -130,6 +130,16 @@ class ReviewingAgent:
                     f"[ReviewingAgent] task={out.task_id} action=pass "
                     f"(hard validation passed)"
                 )
+                return out
+
+            # The 4.2 explanation contract is deterministic. An old Reviewer
+            # score cannot convert a missing/filtered explanation into success.
+            if any(rule.startswith("professional_explanation_") for rule in out.failed_rules):
+                out.score = 0.0
+                out.action = "retry"
+                out.jump_step = "expressing"
+                out.score_rationale = "professional_explanation_contract_failed"
+                out.mark_completed()
                 return out
 
             # 重试次数已达上限 → fallback
@@ -176,6 +186,7 @@ class ReviewingAgent:
         out: ReviewOutput,
         planning_output: PlanningOutput,
         expression_output: ExpressionOutput,
+        execution_output: ExecutionOutput | None = None,
     ) -> None:
         """
         调用 v2.6 DecisionValidator 做硬校验。
@@ -197,6 +208,23 @@ class ReviewingAgent:
             intent_type = intent.get("primary_intent", "")
         else:
             intent_type = ""
+
+        assessment = getattr(execution_output, "position_evidence", None)
+        payload = expression_output.structured_payload or {}
+        if assessment and "analysisQualification" in payload and "exitPlan" in payload:
+            from backend.services.market_data.output_policy import explanation_projection
+            paragraphs, diagnostics = explanation_projection(payload.get("professional_explanation"), assessment)
+            vr = validate_decision_output(result=llm_result, intent_type="")
+            out.failed_rules = [failure.rule for failure in vr.failures]
+            out.failure_messages = [failure.message for failure in vr.failures]
+            if paragraphs != payload.get("professional_explanation", []):
+                out.failed_rules.append("professional_explanation_final_recheck_failed")
+            if not paragraphs and diagnostics["usable_record_count"]:
+                out.failed_rules.append("professional_explanation_missing_with_usable_evidence")
+            elif not paragraphs:
+                out.warnings.append("professional_explanation_unavailable_no_usable_evidence")
+            out.hard_validation_passed = not out.failed_rules
+            return
 
         try:
             if _use_skill_output_validator():

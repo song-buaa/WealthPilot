@@ -476,6 +476,7 @@ def evidence_records(cards):
             fetched_at=facts.ingested_at.isoformat() if facts.ingested_at else None,
             scope="stored research fact; narrative KPIs not independently verified",period=period,
             topic=raw.get("topic") or event,content=content,
+            financial_observations=raw.get("financial_observations") if isinstance(raw.get("financial_observations"), list) else [],
             metadata={"evidence_kind":"event" if event!="fundamental_snapshot" else "research"},
             quality="unverified_until_source_checks",is_fallback=False))
     return output

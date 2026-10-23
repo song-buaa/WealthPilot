@@ -1,0 +1,12 @@
+{
+  "stored_ticker": "3690.HGT",
+  "stored_canonical_symbol": "3690:HK",
+  "ticker_inference_results": {
+    "USD": null,
+    "CNY": null,
+    "HKD": null
+  },
+  "actual_model_market_data": null,
+  "source_probe_canonical_symbol_returns_Tiger": true,
+  "no_network_in_this_reproduction": true
+}

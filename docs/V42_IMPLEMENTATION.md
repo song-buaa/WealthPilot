@@ -270,3 +270,42 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 交叉独立审查（AI工程review，不是人工approval）覆盖目标授权、账户/资金守恒、FCF口径、专业解释及Web/MCP/Explain。发现并修复Unicode具体股数、Explain过期/原研究与派生信号、组合自动还贷scope、快照追问历史。最终审查无剩余阻断发现。最新专项：A/B/C/D与MCP124 passed；Explain15、快照14及证据28合计57 passed；独立SDK19 passed；Offline M5 18/18、公网尝试0；前端lint/build通过。完整冻结后pytest结果、最终exact-HEAD CI链接和工程合并判断在PR #39最终清单记载。
 
 本轮任何测试修正均只针对隔离夹具：Explain新增测试首轮全局mock在模块首次导入时污染后续测试引用，已收窄；首次snapshot mock不接受新增可选时钟参数已兼容。实现期间混合工作树的1871 passed、后续中止运行均只作排错，不作为最终冻结候选证明。`decision_engine/`、资产/订单ORM、真实同步/订单/Batch、依赖及前端业务代码没有变更。仅保留用户既有未跟踪归档文件，未读取或纳入提交。
+
+## 首轮真实投研验收修复（2026-10-23）
+
+### 范围、基线与来源
+
+用户报告生产已部署 `b6b5a17bb589b8e82d1d655880c45f0675cef984`，首轮 LI/PDD/美团真实验收未通过。重新 fetch 确认该 SHA 为本轮 origin/main，创建干净 worktree 与 `codex/v42-real-research-fixes`。原工作区及用户未跟踪文件（包括 `归档.zip`）不参与修改。本轮风险 L2：跨模块事实/身份/输出合同修复；仅 PR，不合并/部署，不读写生产库/缓存/配置，不同步券商、不激活目标、不调用交易准备或订单，不重复生产付费模型。
+
+依据为用户桌面审阅包，脱敏冻结投影及源成员 SHA256 见[夹具说明](../tests/fixtures/v42_real_research/README.md)。未提交归档、私人模型上下文或资产/账户记录。公开 IR 页面用于核查来源口径，不新增运行时 Provider 或自动写入正式资产。
+
+### 最小修改点与修复对照
+
+| 问题/Owner | 复现及变化 | 仍有的业务限制 |
+|---|---|---|
+| A / 原 AV adapter、cache、Schema | 红测重放真实 Premium，旧代码仅调用 OVERVIEW，直接 Seed 返回。现三个接口各自请求/分类；只有成功端点进独立新命名空间缓存，旧 aggregate/Seed 不遮住恢复；Demo gate 先于缓存。Premium、限流、网络、Provider notice/error、缺失分别标识。缓存命中保留原抓取时钟 | OVERVIEW Premium 权限问题未被代码解除；估值仍未知，不可据此授予 L3 |
+| A / 原 statement_metrics 与证据 Owner | 收入及现金流独立；每字段保留源函数、原季度观察、币种、期间、抓取/披露/估值时钟。OCF 不因 CapEx 缺失消失；四期零 CapEx 标注 ZERO_CAPEX_UNVERIFIED，FCF 缺失 | AV 本轮真实 payload 未给正式披露时间；抓取不能补披露。未建设新的财务 Provider |
+| A / 原 Research Facts → evidence | 原 raw_facts 的可选 financial_observations 透传；同季度/币种/字段与 AV 原观察比较、保留双方、冲突阻断。只消费显式结构化事实，不使用 narrative KPI、请求确认或模糊文本抽数 | 文本研究没有结构化观察时不能假装已自动完成数值冲突核对；需原研究链提供可核验的事实字段 |
+| B / 原 symbol → Executing → Registry | 红测重放已有 canonical `3690:HK` 与 `3690.HGT`/CNY 持仓，旧入口行情调用为空；现在市场投影优先已存 canonical。渠道、账户数量、成本、issuer 聚合不变 | 原 Tiger 日线缺两交易日，日周线仍 insufficient；没有插值或忽略缺口 |
+| C / 原 Expressing → 原模型/解析 → output_policy | 增加技术定性主题及明确候选 JSON 合同；原旧格式解析失败会丢扩展字段，现仅从同次原始返回恢复解释候选，再走原严格过滤。数量、价位、无效引用仍全部拒绝 | 审阅包只保存最终安全投影，原三次生成候选未保存；无法追认当时究竟未生成还是被过滤，不将离线受控响应当真实模型质量验收 |
+| C / 原 policy 与 Reviewer | 阶段/候选数/有效证据数/接受数/分类拒绝原因，不记录原文或资产。初次生成与最终重核分开。新合同缺解释明确失败，不由旧 risk/reasoning 清空误判，也不以评分模型覆盖失败 | 新诊断需经另行授权部署后，才能定位下一轮真实生成质量；不自动重试付费模型 |
+
+### 官方口径调查
+
+[LI 官方二季度披露](https://ir.lixiang.com/zh-hant/news-releases/news-release-details/li-auto-inc-announces-unaudited-second-quarter-2026-financial)发布日期 2026-08-26，原合并报表单位为千元人民币。总收入 25,666,890 千元，即 25,666,890,000 CNY；冻结 AV 同季度 totalRevenue 为 25,594,433,485 CNY，差 72,456,515 CNY，不能解释为表格舍入或汽车销售与总收入的混用。具体供应商换算/重述原因 UNKNOWN，保留冲突，不改写任一数值。
+
+同页合并净亏损 -1,705,257 千元，归普通股股东 -1,704,181 千元；AV 利润表 netIncomeFromContinuingOperations 与前者一致，现金流 netIncome 与后者一致，利润表 netIncome 则不同。不能把这些标签无差别当成同一利润口径。冲突比较不强行归一 netIncome。
+
+[PDD 官方二季度披露](https://investor.pddholdings.com/news-releases/news-release-details/pdd-holdings-announces-second-quarter-2026-unaudited-financial/)确认季度收入/利润及 OCF，不足以验证四期零 CapEx；不能把投资现金流当 CapEx。本轮保留 OCF，零 CapEx 与可信 FCF 继续阻断。美团官方 PDF 取得限制和 Tiger 缺日均未以新源或虚构数据补齐。
+
+### 验证与下一轮业务验收
+
+- 确定性入口修复前：3 个红测（LI/PDD Premium 短路、HGT 丢 canonical）；修复后通过。
+- 新定向回归覆盖真实财务/行情冻结记录、端点分类/缓存恢复/独立时钟、零 CapEx、LI 冲突、原 PEER 同次模型调用与旧解析恢复、经营/技术推论、无证据/数字/引用拒绝、Reviewer 新旧合同隔离。
+- 原全量 pytest、M5、MCP/HTTP、Web/Explain/多标安全门及前端检查结果随最终工程记录补齐。真实模型响应在隔离测试中受控，未对生产重复付费调用。
+- 部署须另行授权。之后以同一可信固定视图复验 LI/PDD/3690，逐次记录新阶段/过滤诊断、引用、来源时钟与最终 Web/MCP/Explain 一致性；核验经营解释价值及无基本面时技术定性价值。不要提前生成新生产快照、激活目标或调用交易接口。
+- L2 仍需固定快照及资产质量，L3 仍需可信目标/行情/基本面/研究/正式风控全套资格；L4/订单边界不变。真实验收仍为未通过，待修复合并、授权部署和后续业务复验。
+
+本轮独立 AI 工程审查（独立 CLI review 会话，非人工 approval）发现并修复：未核验研究卡不能仅凭 IR URL 参与权威数值冲突判断。另补 MCP 组合最终适配的单字段证据传递与最终诊断重核，合法部分财报解释不再在最后入口丢失，证据到期仍删除。
+
+首次全量发现原国金 CLI 合成测试的固定 2026-10-22 时钟已超真实子进程二十四小时时效；相同环境在 clean main `b6b5a17` 单测复现 NATIVE_BATCH_STALE。仅该跨进程测试改用共同的新鲜合成时钟，其他固定工作日/窗口用例及生产时效代码不变。新增 HGT 测试显式固定 Demo 模式，避免其他测试重载模块后误选真实行情路径。

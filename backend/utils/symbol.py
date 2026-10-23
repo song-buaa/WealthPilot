@@ -32,6 +32,25 @@ def position_security_identity(symbol, broker, security_type, valuation_currency
     security = position_security_symbol(symbol, broker, security_type)
     return security, "HKD" if security != symbol and valuation_currency == "CNY" else valuation_currency
 
+def position_market_symbol(position) -> str | None:
+    """Prefer stored security identity over broker channel/valuation currency.
+
+    This read projection never rewrites holding keys, account rows or quantities.
+    An invalid canonical identity fails closed instead of selecting another market.
+    """
+    canonical = getattr(position, "symbol", None)
+    if canonical:
+        try:
+            ticker, market = parse_symbol(canonical)
+        except (ValueError, AttributeError):
+            return None
+        if market == "HK" and not ticker.isdigit():
+            return None
+        return normalize_symbol(ticker, market)
+    ticker = getattr(position, "ticker", "") or ""
+    return infer_symbol_from_ticker(ticker, getattr(position, "currency", None) or "USD") if ticker else None
+
+
 # CN 是 broker_sync 层历史遗留的 A 股市场代码, 统一映射到 SH/SZ
 # 但单独出现 CN 时无法区分 SH/SZ, 需要根据代码规则推断
 _CN_PREFIX_TO_MARKET = {

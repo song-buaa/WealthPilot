@@ -1,0 +1,68 @@
+{
+  "symbol": "LI",
+  "function": "CASH_FLOW",
+  "started_at": "2026-10-23T03:00:44.612883+00:00",
+  "finished_at": "2026-10-23T03:00:48.854258+00:00",
+  "category": "statements",
+  "payload": {
+    "symbol": "LI",
+    "quarterlyReports": [
+      {
+        "fiscalDateEnding": "2026-06-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "-1704181000",
+        "operatingCashflow": "15025000",
+        "capitalExpenditures": "1315790000"
+      },
+      {
+        "fiscalDateEnding": "2026-03-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "-2289531000",
+        "operatingCashflow": "-6090994000",
+        "capitalExpenditures": "1297326000"
+      },
+      {
+        "fiscalDateEnding": "2025-12-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "3386225569",
+        "operatingCashflow": "8680301000",
+        "capitalExpenditures": "2620969000"
+      },
+      {
+        "fiscalDateEnding": "2025-09-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "-624976000",
+        "operatingCashflow": "-7395580000",
+        "capitalExpenditures": "1045905257"
+      },
+      {
+        "fiscalDateEnding": "2025-06-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "1092571000",
+        "operatingCashflow": "-3036219000",
+        "capitalExpenditures": "1635141000"
+      },
+      {
+        "fiscalDateEnding": "2025-03-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "592558000",
+        "operatingCashflow": "-3342386000",
+        "capitalExpenditures": "1712843000"
+      },
+      {
+        "fiscalDateEnding": "2024-12-31",
+        "reportedCurrency": "CNY",
+        "netIncome": "5658081000",
+        "operatingCashflow": "17294228000",
+        "capitalExpenditures": "2656107000"
+      },
+      {
+        "fiscalDateEnding": "2024-09-30",
+        "reportedCurrency": "CNY",
+        "netIncome": "2834420000",
+        "operatingCashflow": "11024642000",
+        "capitalExpenditures": "1972878000"
+      }
+    ]
+  }
+}

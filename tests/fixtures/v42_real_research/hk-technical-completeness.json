@@ -1,0 +1,12 @@
+{
+  "expected_calendar": "XHKG",
+  "source": "Tiger QuoteClient.get_bars",
+  "missing_sessions": [
+    "2026-04-10",
+    "2026-04-13"
+  ],
+  "source_rows": 299,
+  "first": "2025-08-04",
+  "last": "2026-10-22",
+  "no_interpolation": true
+}
