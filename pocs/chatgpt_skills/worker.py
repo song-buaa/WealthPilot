@@ -29,6 +29,15 @@ MODEL_ENV_KEYS = {"WEALTHPILOT_LLM_PROFILE", "WEALTHPILOT_LLM_MAIN_MODEL",
 
 def load_analysis_environment(path, *, model_policy_only=False):
     values = json.loads(Path(path).read_text())
+    if not isinstance(values, dict):
+        raise ValueError("ANALYSIS_CONFIGURATION_INVALID")
+    if model_policy_only and MODEL_ENV_KEYS.intersection(values):
+        if any(not isinstance(values[key],str) for key in MODEL_ENV_KEYS.intersection(values)):
+            raise ValueError("ANALYSIS_MODEL_POLICY_INVALID")
+        # An explicit policy in the operator file is one coherent source.
+        # Profile-only rollback must not inherit stale IDs/effort from a parent.
+        for key in MODEL_ENV_KEYS:
+            os.environ.pop(key,None)
     # Model constants are resolved at first business import. A running worker
     # must not mix cached model IDs with a newly reloaded profile or effort.
     allowed = MODEL_ENV_KEYS if model_policy_only else {

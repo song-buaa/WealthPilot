@@ -245,7 +245,9 @@ worker.main()
 '''
     env={k:os.environ[k] for k in ("PATH","HOME","TMPDIR") if k in os.environ}
     env.update(PYTHON_DOTENV_DISABLED="1",PUBLIC_DEMO_MODE="true",BROKER_MODE="mock",
-               ENABLE_IBKR_LIVE_TRADING="false",WEALTHPILOT_DB_PATH=str(database))
+               ENABLE_IBKR_LIVE_TRADING="false",WEALTHPILOT_DB_PATH=str(database),
+               WEALTHPILOT_LLM_PROFILE="legacy-4.1",WEALTHPILOT_LLM_MAIN_MODEL=SOL,
+               WEALTHPILOT_LLM_LIGHT_MODEL=LUNA,WEALTHPILOT_LLM_MAIN_EFFORT="none")
     payload='\n'.join(json.dumps(dict(operation=op,arguments={})) for op in ("get_wealth_overview","analyze_position"))+'\n'
     completed=subprocess.run([sys.executable,"-c",code,str(database),str(config)],input=payload,
         capture_output=True,text=True,check=True,env=env,cwd=Path(__file__).resolve().parents[1],timeout=30)
@@ -269,6 +271,19 @@ def test_mcp_runtime_key_refresh_cannot_mix_cached_models_with_a_new_profile(mon
     assert os.environ["WEALTHPILOT_OPENAI_API_KEY"]=="after"
     assert os.environ["WEALTHPILOT_LLM_PROFILE"]=="legacy-4.1"
     assert os.environ["WEALTHPILOT_LLM_MAIN_EFFORT"]=="low"
+
+
+def test_provider_only_file_preserves_parent_policy_and_rejects_invalid_policy_types(monkeypatch,tmp_path):
+    import os
+    from pocs.chatgpt_skills.worker import load_analysis_environment
+    monkeypatch.setenv("WEALTHPILOT_LLM_PROFILE","legacy-4.1")
+    config=tmp_path/"operator.json"
+    config.write_text(json.dumps({"WEALTHPILOT_STAGE_TARGETS_PATH":"synthetic-not-opened"}))
+    load_analysis_environment(config,model_policy_only=True)
+    assert os.environ["WEALTHPILOT_LLM_PROFILE"]=="legacy-4.1"
+    config.write_text(json.dumps({"WEALTHPILOT_LLM_PROFILE":123}))
+    with pytest.raises(ValueError,match="ANALYSIS_MODEL_POLICY_INVALID"):
+        load_analysis_environment(config,model_policy_only=True)
 
 
 def test_normal_business_calls_have_no_gpt41_literal_or_direct_sdk_bypass():

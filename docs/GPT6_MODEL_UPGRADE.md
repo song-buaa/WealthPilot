@@ -104,3 +104,5 @@ PR #40 按用户授权以 `git merge --ff-only` 集成；local main、origin/mai
 ## MCP 模型配置穿透收口
 
 最终核验发现原 BusinessClient/worker 只转发 Provider/目标相关白名单，新 profile/effort 不会进入业务进程，且先读财富再分析时可能提前缓存默认模型。已仅扩展五个非交易模型配置键：父进程按原白名单透传、analysis_env_file 在任何业务导入前加载模型策略；Provider Key 仍按原分析范围加载。策略变更须重启获授权 worker，运行中不把新的 profile/effort 与已缓存模型 ID 混用。没有把 Key/券商凭证从父进程直接继承，也没有放开 JSON 中的交易开关。真实子进程先读后分析验证 legacy 回滚与 high/low；独立 MCP SDK 验证父子白名单及交易开关仍 false。生产配置及 worker 未操作。
+
+MCP 配置优先级经独立审查补齐：operator 文件一旦声明任一模型策略键，就作为整套模型策略的唯一来源，清除父进程同组遗留值后按 profile 默认补齐；只含 Provider 配置的旧文件继续沿用父策略。模型字段类型非法显式拒绝，不能被过滤后误当默认。先读后分析子进程回归同时注入冲突父配置，确认 legacy/high 配置不混用。
