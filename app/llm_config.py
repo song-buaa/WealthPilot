@@ -142,6 +142,10 @@ def _invoke(client, endpoint: str, options: dict):
     raw = result = error = None
     kind = None
     try:
+        # The opt-in, dedicated acceptance process may pin billable request
+        # modes. Normal application calls retain their existing contract.
+        from app.llm_acceptance import acceptance_options
+        options = acceptance_options(options)
         configured = _client_options(client)
         if trace and type(configured).__module__.startswith("openai"):
             # Public raw-response API preserves SDK retries_taken, even when

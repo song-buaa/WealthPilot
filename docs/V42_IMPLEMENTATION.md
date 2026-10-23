@@ -319,3 +319,67 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 ## PR #40 代码集成（2026-10-23）
 
 用户授权后已重新 fetch，核对候选 `5437da0ad962ac7dc49c68b589b39a31ee5bc3e4`、main 祖先关系及候选四项 CI，以 `git merge --ff-only` 集成并普通 push main。PR #40 为 MERGED，local main/origin/main/远端 main 同 SHA；[合并后 main CI](https://github.com/song-buaa/WealthPilot/actions/runs/39911140134) 四项全部通过。无生产切换、Tag、配置/数据/目标/券商操作，真实三标验收仍待复验。后续独立模型升级工程候选见[记录](GPT6_MODEL_UPGRADE.md)。
+
+
+## 最终真实验收阻断定点收口（2026-10-23，独立 PR 候选）
+
+用户报告生产38c3faf部署PASS，但完整三标PEER仍BLOCKED、模型请求0次；此为本轮起点，不把新分支当成生产已更新。仅处理来源合格渠道身份的市场投影与一次性验收预算；固定视图只勘探，不写生产、不改TTL、不新建数据平台。
+
+### A：市场读取身份，原事实不变
+
+`position_market_symbol()` 复用原 `position_security_symbol(symbol, broker, security_type)`。参数security_type来自原持仓字段broker_security_type，不是vehicle_type。仅已有guojin + QNX_NATIVE_POSITION + 合法数字HGT/SGT渠道才投影为数字HK身份；支持既有`:HK`及相同受证实来源的无市场后缀形式，不能仅凭名称、CNY或渠道后缀猜测。基金/现金/非US-HK等原拒绝逻辑保留。
+
+经用户授权由生产部署chat执行一次指定记录只读查询，当前渠道symbol实际含`:HK`，此前摘要的裸symbol不作为原始字段真值；完整来源合同已核对。仅查询身份字段，未查询金额、数量、成本或账户号。测试使用相同字段结构的合成记录，生产证据只存私人验收目录。现有证券/issuer投影、聚合分组及原存储symbol/ticker/交易身份不改；原Registry继续做日/周线完整性校验，不补造缺失交易日。
+
+### B：专用真实PEER验收入口
+
+新增[一次性入口](../scripts/v42_peer_acceptance.py)和[发送前预算](../app/llm_acceptance.py)，复用原`analyze`→U1 frozen_input→原PEER，不从MCP/Web触发第二轮。原`llm_config`只有验收guard激活时才显式固定service_tier=default；正常应用请求无变化。PR42事后`llm_observation`保留，与发送前预算分别记录。
+
+- 必须在全新专用进程运行，显式`--allow-paid-acceptance`；SDK固定2.29.0、正常Sol/Luna profile、原operator私有0600配置。不会创建或拷贝Key，不加载其他项目OPENAI_API_KEY，不启动backend lifespan。
+- 同一私有JSON账本及其`.lock`覆盖三标、业务重试、SDK重试、Chat/Responses、同步/异步发送。flock+线程锁、私有属主/模式/硬链接校验、创建串行化、文件与目录fsync。读取同一账本续用，不重置额度；每标只可claim一次，重启不重放已claim的整轮分析。
+- 每次实际HTTP发送前先持久化保守预留，最多24次、总预留不超过USD3；失败、超时、缺Usage不退款。输出上限含推理Token，输入用含schema的UTF-8字节量+固定/消息framing裕量作保守上界；超过128000输入上界拒绝，排除长上下文价格。只允许已知Sol/Luna、明确default tier、纯文本、n=1、非流式、store=false；工具/图像/continuation/background/未知模式与无输出上限一律拒绝。
+- 价格版本`acceptance-standard-text-max-cache-2026-10-23-v1`，依据[官方价格](https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true)，输入采用已知最高12h写缓存单价而非缓存折扣：Sol $5/M、Luna $0.25/M；输出$10/M、$0.50/M。这是保守预留，不是实际账单；不使用事后Usage释放预算，actual_bill始终UNKNOWN。未来执行前须重核该价格合同；未知/已变化合同停止，不沿用旧价格冒充保证。
+- HTTPX每次传输（含SDK重试及重定向）独立拦截，要求当前服务端analysis_run_id已claim且未关闭。原生socket/UDP与子进程审计拒绝未关联发送或新worker；关闭后guard保留至CLI退出，迟到线程不能恢复无预算传输。不是防恶意修改Python源码的沙箱，也不约束其他生产进程；本次验收必须只用该专用入口及同一账本。
+- 另有极窄、非模型AV只读GET白名单（财报/既有日周线/quote函数），不会消费模型次数，不是通用代理；URL/方法/函数/重定向均校验，不记录Key/URL。其他实时行情通道、Embedding/专用付费搜索及未知网络路径拒绝，沿原optional能力降级；不为了完成验收开放未知收费源或券商通道。可用的原缓存仍遵循其原有时效/质量规则。**该限制可能使某标技术证据不足，应如实BLOCKED/降级，不能把它包装成数据齐全。**
+- Worker/父进程私有日志策略不改；专用入口丢弃stdout/stderr和原日志，仅输出安全摘要。账本无Prompt/回答/账户/持仓；私有0600结果文件只保存最终受过滤结论/专业解释及安全观测，不保存完整资产上下文、原始模型回答或Provider响应。COMPLETED仅代表入口完成，不代表投研业务通过；UNKNOWN不能冒充$0。
+
+未来单独授权后的命令模板（本轮不运行）：
+
+```bash
+<完整ARM Python> scripts/v42_peer_acceptance.py \
+  --database <原共享SQLite> --portfolio-id <原portfolio> \
+  --snapshot-id <已核验新鲜固定视图> --contract <原共享库契约> \
+  --operator-env <原私有operator JSON> --ledger <本轮唯一私有账本路径> \
+  --output <全新私有验收结果路径> --allow-paid-acceptance
+```
+
+只在完整依赖/SDK/价格/视图及用户授权均成立后执行；不得改用原MCP/Web另开付费请求来绕过账本。读同一次结果做Web/MCP/Explain合同对照，不重复模型生成。真实生产、三标业务质量、ARM入口运行均未在本轮开发执行。
+
+### C：新鲜固定视图的最小方案（未执行）
+
+| 路径 | 能否保证不调用券商 | 行为与条件 |
+|---|---|---|
+| `frozen_input`/`load_view` | 能，但不能生成新视图 | 原30分钟VIEW_TTL、私有文件属主/权限/哈希均保留。过期即拒绝，不能更新captured_at或复制旧payload重启时钟 |
+| 原公开`prepare_asset_analysis` | 不能预先保证 | 调原AssetAnalysisPreparation.request/run，run对每个enabled broker调用reserve(freshness_seconds=300)。仅最近成功、完整、publication matched、无未收敛成交等满足原复用条件时才不发远端读取；条件变化会创建同步任务。禁止在“不得同步”权限下盲调 |
+| 一次capture-only运维封装 | 底层具备，现有公开入口无该选项 | 若原源事实仍合格，另行授权后可一次性复用create_frozen_copy→原只读capture→原WealthSnapshot载荷/持久化合同；保持原owner/fingerprint/Portfolio/租约校验，不用空owners绕过，不复制旧payload。新增的是实际捕获时间，positions/cash/price/FX/手工事实时间原样保留。本PR不新增此生产写入口/功能 |
+
+先只读检查同一Portfolio所有分母相关来源：last-good publication与持仓匹配、账户覆盖/未收敛成交、原positions_as_of/cash_as_of/account_synced_at、price_as_of/交易日、原FX及手工资产负债复核。上下文过期不证明源事实合格或不合格；本轮只查过指定持仓身份，未获权核查完整源事实，因此当前可否capture-only为UNVERIFIED。
+
+需要新增视图时，即使不读券商也会创建私有SQLite一致性副本/缓存、WealthSnapshot与请求状态，并可能按原TTL/容量规则清理过期缓存副本（不删除历史快照记录或用户归档），属于单独生产写授权；本次未创建。严格限定只能使用现有公开prepare且禁止任何券商读取，则不能保证完成，继续BLOCKED。不得改变300秒精确源门槛、30分钟视图TTL、原近收盘估值/FX/手工事实时效，不把“新视图”当作L3资格。
+
+若事实已过期且必须刷新，单独授权范围至少列明：
+
+| 来源账户范围（账户号仅原私有配置解析） | 原读取/来源 | 本地副作用及授权 |
+|---|---|---|
+| 老虎投资账户：LI/PDD及同账户完整分母 | 原TigerSyncService持仓、原币现金/账户数据只读接口 | 原SnapshotRun/claim与Position/现金/FX/来源质量更新；需明确只读券商查询及本地同步写入 |
+| IBKR投资账户：LI及同账户分母（原snowball映射，须核验当前来源） | 原ReadonlyIBKRClient get_positions/get_account_info，Gateway只读三重护栏 | 同上；不能把Snowball标签猜成真实账户或扩展订单/历史交易查询权限 |
+| 国金投资账户：美团/LI及同账户分母 | 原已发布、验证的本地原生三文件导出批次，现有GuojinSyncService | 本地批次来源/时间验证和发布；若批次旧，Windows终端新导出/调度行为另行授权，不能重写原文件时间或替换批次 |
+| 富途等其余已启用、影响分母的来源（如有） | 仅按现有enabled/owner配置确认，不能忽略物质敞口 | 范围未核实不冒充全账户齐全；不得趁机扩大券商访问 |
+
+调用前列出实际enabled/owner映射（私有、不暴露账号），避开原调度窗口和正在执行任务。刷新源与新视图写入分别明确授权；不触发订单准备、交易、目标激活或纪律修改。行情/财报只读Provider及24次/USD3模型预算也须分别授权，不以开发PR权限代替。
+
+### 工程与业务验收边界
+
+[专项](../tests/test_v42_acceptance_budget.py)覆盖来源正反例、原US/HK/ETF/基金投影、原PEER路由/最终门槛、SDK重试/超时、并发次数/金额、Chat/Responses/异步、另类客户端/重定向/子进程、重启不重置和旧视图0发送。原[PR42观测](../tests/test_llm_observation.py)、[真实来源冻结回归](../tests/test_v42_real_research.py)、U1及权限过滤继续复用。完整测试、独立审查及exact-HEAD四项CI由本PR交付记录绑定；不把合成回归当三标真实验收。
+
+最终是否可实际运行三标仍取决于：本PR合并/授权部署、新鲜合法视图及来源质量确认、完整ARM专用入口验证、已复核价格/授权预算。开发完成不自动解除真实业务BLOCKED。

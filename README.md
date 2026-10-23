@@ -24,7 +24,7 @@
 
 **4.2 单标的决策优化：PR #39 已合并；用户提供的生产 SHA 为 `b6b5a17bb589b8e82d1d655880c45f0675cef984`。2026-10-23 首轮 LI、PDD、美团真实投研验收未通过，数据链路修复 PR #40 已 fast-forward 合并 main（`5437da0ad962ac7dc49c68b589b39a31ee5bc3e4`），合并后四项 CI 全绿，尚未部署。** 正式目标仍待用户确认，工程检查不代表真实业务验收通过。本轮仅代码修复/隔离测试/PR，不部署、不修改生产数据或配置；范围、来源限制及复验建议见[4.2开发记录](docs/V42_IMPLEMENTATION.md#首轮真实投研验收修复2026-10-23)。原私有 PRD v1.0 及既有权限边界不变。
 
-模型升级 PR #41 已合并 main（529fc4d），尚未部署；发布前安全观测收口沿独立候选分支实施。模型升级复用原 PEER，主模型 Sol medium、轻量 Luna none/low；有限真实 A/B 与限制见[升级记录](docs/GPT6_MODEL_UPGRADE.md)。代码候选不代表生产模型已切换。
+模型升级与观测 PR #41/#42 已合并；用户报告生产38c3faf部署PASS，完整三标PEER仍BLOCKED、模型请求0次。主模型Sol medium、轻量Luna none/low沿原PEER；本轮仅沿独立分支修复来源合格的国金渠道市场身份及验收专用预算，固定视图只给执行方案，不操作生产。模型记录见[升级记录](docs/GPT6_MODEL_UPGRADE.md)，最新阻断收口与边界见[4.2记录](docs/V42_IMPLEMENTATION.md#最终真实验收阻断定点收口2026-10-23独立-pr-候选)。
 
 ## ChatGPT与Web入口
 

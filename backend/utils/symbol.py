@@ -49,7 +49,18 @@ def position_market_symbol(position) -> str | None:
         return None
     legacy_ticker = getattr(position, "ticker", "") or ""
     canonical = getattr(position, "symbol", None)
+    if canonical is not None and not isinstance(canonical, str):
+        return None
     if canonical:
+        # Reuse the source-checked security projection. A channel suffix by
+        # itself is not proof; unproven channel identities still fail below.
+        # Some native rows store "3690.HGT" without a market separator. Only
+        # the existing source-proof helper may grant that channel an HK market.
+        projection_input = canonical + ":HK" if re.fullmatch(r"\d{4,5}\.(HGT|SGT)", canonical) else canonical
+        canonical = position_security_symbol(projection_input,
+            getattr(position, "broker", None), getattr(position, "broker_security_type", None))
+        if canonical == projection_input and re.fullmatch(r"\d+\.(HGT|SGT)(?::.*)?", canonical):
+            return None
         try:
             ticker, market = parse_symbol(canonical)
         except (ValueError, AttributeError):
