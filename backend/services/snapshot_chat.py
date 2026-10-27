@@ -73,7 +73,7 @@ def _owner_evidence_current(assessments, portfolio_id, *, at=None):
     partially repairing its numerical plan in the Web process.
     """
     from datetime import datetime, timezone
-    from backend.services.market_data.evidence import record, fundamental_field_quality, technical_verified, stamp
+    from backend.services.market_data.evidence import record, fundamental_field_quality, technical_verified, technical_period_quality, stamp
     from backend.services.stage_targets import resolve_trusted_targets
     if not isinstance(assessments, list):
         return False
@@ -88,6 +88,11 @@ def _owner_evidence_current(assessments, portfolio_id, *, at=None):
                     if checked["quality"] != "valid":
                         return False
                     if kind == "technical" and not technical_verified(values, symbol, at):
+                        return False
+                if kind == "technical" and original.get("period_quality"):
+                    checked_periods=technical_period_quality(values,symbol,at)
+                    if any(state["quality"]=="valid" and checked_periods.get(period,{}).get("quality")!="valid"
+                           for period,state in original["period_quality"].items()):
                         return False
                 if kind == "fundamentals" and original.get("field_quality"):
                     checked_fields = fundamental_field_quality(values, at=at, symbol=symbol)

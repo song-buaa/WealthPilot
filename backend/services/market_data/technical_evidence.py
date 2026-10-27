@@ -61,7 +61,11 @@ def from_bars(symbol, result, *, at=None):
         status = "seed" if synthetic else "valid" if current and complete and len(data)>=35 else "stale" if not current else "insufficient"
         rows = [{"date":str(idx.date()), **{key:float(row[key]) for key in ("open","high","low","close","volume")}}
                 for idx,row in data.iterrows()]
-        series[period] = dict(status=status,symbol=symbol,market=market,currency="HKD" if market=="HK" else "USD",
+        issues = (["SYNTHETIC_SOURCE"] if synthetic else [])
+        if not current: issues.append("STALE_PERIOD")
+        if not complete: issues.append("MISSING_TRADING_SESSIONS")
+        if len(data)<35: issues.append("INSUFFICIENT_BARS")
+        series[period] = dict(status=status,issues=issues,symbol=symbol,market=market,currency="HKD" if market=="HK" else "USD",
             period=period,source=result.source,record_id=f"{result.source}:{symbol}:{period}:{actual}",
             start_at=rows[0]["date"],end_at=rows[-1]["date"],last_trading_at=str(last_session) if current else str(actual),
             bars=rows,parameters=dict(ma=[5,20],rsi=14,macd=[12,26,9],weekly="closed W-FRI OHLCV"),
@@ -79,7 +83,7 @@ def from_bars(symbol, result, *, at=None):
         bars_count=len(frame),source=result.source,series=series,
         provenance=dict(source=result.source,record_id=series["day"]["record_id"],
             data_as_of=str(frame.index[-1].date()),fetched_at=at.isoformat(),period="day/week",
-            scope=symbol,is_seed=synthetic,is_fallback=False))
+            scope=symbol,is_seed=synthetic,is_fallback=False, provider_diagnostics=getattr(result,"diagnostics",{})))
 
 
 def fetch(symbol, bars=300):
@@ -87,16 +91,22 @@ def fetch(symbol, bars=300):
     from backend.services.market_data.cache import get_cached, set_cached
     key = f"position-technical:v2:{symbol}:{bars}"
     cached = get_cached(key)
-    if cached is not None:
-        return cached
+    from backend.services.market_data.av_fundamentals_service import get_next_av_key
+    credential_token = hash(get_next_av_key())
+    if cached is not None and isinstance(cached, tuple) and cached[1] == credential_token:
+        from copy import deepcopy
+        value = deepcopy(cached[0])
+        value.provenance["cache_hit"] = True
+        return value
     try:
         result, degraded = build_kline_registry().resolve(symbol,symbol.rsplit(":",1)[-1],count=bars)
         if result is None:
             return None
         technical = from_bars(symbol,result)
         if technical:
+            technical.provenance["cache_hit"] = False
             technical.provenance["is_fallback"] = bool(degraded)
-            set_cached(key,technical,4*3600)
+            set_cached(key,(technical,credential_token),4*3600)
         return technical
     except (KeyError, ValueError, TypeError, IndexError):
         return None

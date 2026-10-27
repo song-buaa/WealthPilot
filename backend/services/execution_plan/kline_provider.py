@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -33,6 +33,7 @@ class KlineResult:
     latest_price_time: str = ""
     is_realtime: bool = False
     delayed_minutes: Optional[int] = None
+    diagnostics: dict = field(default_factory=dict)
 
 
 class KlineProvider(ABC):
@@ -182,7 +183,7 @@ class AVKlineProvider(KlineProvider):
                 return None
 
             from backend.services.market_data.av_fundamentals_service import (
-                get_next_av_key, AV_BASE,
+                get_next_av_key, AV_BASE, av_identity,
             )
             import json
             import urllib.request
@@ -192,6 +193,9 @@ class AVKlineProvider(KlineProvider):
 
             # 先试 full（252+ 根算 52w），Premium 不可用时 fallback compact（100 根）
             data = None
+            attempts = []
+            from datetime import datetime, timezone
+            self.diagnostics = {"function":"TIME_SERIES_DAILY", "attempts":attempts}
             for outputsize in ("full", "compact"):
                 params = {
                     "function": "TIME_SERIES_DAILY",
@@ -201,16 +205,34 @@ class AVKlineProvider(KlineProvider):
                 }
                 url = AV_BASE + "?" + urllib.parse.urlencode(params)
 
-                with urllib.request.urlopen(url, timeout=20) as resp:
-                    data = json.loads(resp.read())
+                try:
+                    with urllib.request.urlopen(url, timeout=20) as resp:
+                        data = json.loads(resp.read())
+                except Exception as error:
+                    code=getattr(error,"code",None)
+                    status="rate_limited" if code==429 else "access_denied" if code in {401,403} else "invalid_response" if isinstance(error,(ValueError,UnicodeDecodeError)) else "network_error"
+                    attempts.append(dict(function="TIME_SERIES_DAILY",request_mode=outputsize,
+                        **av_identity(api_key),status=status,row_count=0,first_data_date=None,last_data_date=None,
+                        cache_hit=False,fetched_at=datetime.now(timezone.utc).isoformat(),fallback_reason=None))
+                    self._unavailable("AV_"+status.upper())
+                    return None
 
+                series = data.get("Time Series (Daily)", {})
+                dates = sorted(series) if isinstance(series, dict) else []
+                from backend.services.market_data.av_fundamentals_service import _response_status
+                status = "available" if dates else _response_status("OVERVIEW", data)
+                attempt = dict(function="TIME_SERIES_DAILY", request_mode=outputsize,
+                    **av_identity(api_key), status=status, row_count=len(dates),
+                    first_data_date=dates[0] if dates else None, last_data_date=dates[-1] if dates else None,
+                    cache_hit=False, fetched_at=datetime.now(timezone.utc).isoformat(), fallback_reason=None)
+                attempts.append(attempt)
                 if "Note" in data or "Information" in data:
                     msg = data.get("Note", data.get("Information", ""))
                     if "prem" in msg.lower() and outputsize == "full":
                         logger.info("[AVKline] AV full 需要 Premium, fallback compact: %s", av_ticker)
                         data = None
                         import time; time.sleep(1)  # 避免 AV 限频
-                        api_key = get_next_av_key()  # 换 key
+                        attempt["fallback_reason"] = "FULL_PREMIUM_NOTICE"  # same account, explicit degraded route
                         continue
                     logger.warning("[AVKline] AV 频率限制: %s", av_ticker)
                     self._unavailable("AV 返回限频信息")
@@ -221,7 +243,7 @@ class AVKlineProvider(KlineProvider):
                 self._unavailable("AV 未返回数据")
                 return None
             if "Error Message" in data:
-                logger.warning("[AVKline] AV 错误: %s", data["Error Message"])
+                logger.warning("[AVKline] AV provider error: %s", av_ticker)
                 self._unavailable("AV 返回错误")
                 return None
 
@@ -256,11 +278,12 @@ class AVKlineProvider(KlineProvider):
                 period=period,
                 latest_price_time=time_str,
                 is_realtime=False,
+                diagnostics=self.diagnostics,
                 delayed_minutes=15,  # AV 数据有约 15 分钟延迟
             )
         except Exception as e:
-            logger.warning("[AVKline] AV K线获取失败 %s: %s", symbol, e)
-            self._unavailable(f"AV 获取失败：{e}")
+            logger.warning("[AVKline] AV transport failed: %s", type(e).__name__)
+            self._unavailable("AV_TRANSPORT_ERROR")
             return None
 
 

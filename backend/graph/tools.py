@@ -591,9 +591,8 @@ def execute_load_decision_context(
             from sqlalchemy.exc import SQLAlchemyError
             try:
                 with get_session() as session:
-                    loaded.research_evidence=repository.evidence_records([
-                        card for research_symbol in symbols for card in repository.query_cards(
-                            session,symbol=research_symbol,entity_scope=False,top_k=20)])
+                    loaded.research_evidence=[row for research_symbol in symbols
+                        for row in repository.query_evidence_records(session,research_symbol,top_k=20)]
             except (SQLAlchemyError,ValueError):
                 loaded.research_evidence=[]
 

@@ -106,7 +106,12 @@ def test_model_cannot_self_certify_indicators_or_invalid_confidence():
     data=dict(symbol="LI:US",technical=asdict(trusted_technical("LI:US")))
     data["technical"]["series"]["day"]["indicators"]["ma20"]=12345
     assessment=assess(data,at=AT)
-    assert assessment["technical_levels"] is None
+    # Period qualification is independent: corrupt daily indicators cannot
+    # certify that period, while the separately recomputed weekly bars survive.
+    assert set(assessment["technical_levels"]) == {"week"}
+    technical = next(r for r in assessment["records"] if r["kind"] == "technical")
+    assert "INDICATOR_MISMATCH:ma20" in technical["period_quality"]["day"]["issues"]
+    assert not assessment["qualification"]["L3"]["allowed"]
     output=ExpressionOutput(structured_payload={"confidence":float("nan"),"decisionType":["malformed"],
         "estimated_shares":99999,"limitPrice":99999},chat_answer="99999")
     enforce(output,assessment)

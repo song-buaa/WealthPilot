@@ -19,32 +19,41 @@ logger = logging.getLogger(__name__)
 
 AV_BASE = "https://www.alphavantage.co/query"
 
-# ── 多 Key 轮换(v3.4) ────────────────────────────────────────
-import itertools as _itertools
+# One live selection shared by financials, market data and stored-research adapters.
+AV_KEY_NAMES = ("ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY",
+                "AV_API_KEY_1", "AV_API_KEY_2", "AV_API_KEY_3", "AV_API_KEY_4")
+
 
 def _load_av_keys() -> list[str]:
-    """从环境变量加载所有 AV API Key。
+    """Canonical single key, aliases, then first numbered slot; never mix accounts."""
+    for name in AV_KEY_NAMES:
+        key = os.environ.get(name, "").strip()
+        if key:
+            return [key]
+    return ["demo"]
 
-    优先读 AV_API_KEY_1 ~ AV_API_KEY_4(多 key 轮换),
-    fallback 到旧的 ALPHA_VANTAGE_API_KEY(单 key 兼容)。
-    """
-    keys = []
-    for i in range(1, 5):
-        k = os.environ.get(f"AV_API_KEY_{i}")
-        if k:
-            keys.append(k)
-    if not keys:
-        legacy = os.environ.get("ALPHA_VANTAGE_API_KEY")
-        if legacy:
-            keys.append(legacy)
-    return keys or ["demo"]
-
-_AV_KEYS = _load_av_keys()
-_av_key_cycle = _itertools.cycle(_AV_KEYS)
 
 def get_next_av_key() -> str:
-    """Round-Robin 获取下一个 AV API Key。"""
-    return next(_av_key_cycle)
+    """Compatibility name: resolve each call, without implicit cross-account rotation."""
+    return _load_av_keys()[0]
+
+
+def av_identity(api_key):
+    """Safe configuration identity, not a claim that this credential has Premium rights."""
+    for name in AV_KEY_NAMES:
+        if os.environ.get(name, "").strip() == api_key and api_key != "demo":
+            return dict(configuration_slot=name, entitlement_identity="operator-slot:"+name,
+                        entitlement_verified=False)
+    return dict(configuration_slot="UNKNOWN", entitlement_identity="UNKNOWN", entitlement_verified=False)
+
+
+def response_diagnostic(function, payload, api_key, *, mode=None):
+    rows = (payload.get("quarterlyReports") or payload.get("feed") or payload.get("quarterlyEarnings") or []) if isinstance(payload, dict) else []
+    dates = sorted(row.get("fiscalDateEnding") or row.get("time_published") or "" for row in rows if isinstance(row, dict))
+    return dict(function=function, request_mode=mode, **av_identity(api_key),
+        status=_response_status(function, payload), row_count=len(rows),
+        first_data_date=dates[0] if dates else None, last_data_date=dates[-1] if dates else None,
+        fetched_at=datetime.now(timezone.utc).isoformat(), cache_hit=False, fallback_reason=None)
 
 
 def _wp_symbol_to_av_ticker(wp_symbol: str) -> Optional[str]:
@@ -89,8 +98,12 @@ def _response_status(function, payload):
         return "provider_notice"
     if "Error Message" in payload:
         return "provider_error"
-    if function == "OVERVIEW":
+    if function in {"OVERVIEW","COMPANY_OVERVIEW"}:
         return "available" if payload.get("Symbol") else "missing"
+    if function=="NEWS_SENTIMENT":
+        return "available" if isinstance(payload.get("feed"),list) and payload["feed"] else "missing"
+    if function=="EARNINGS":
+        return "available" if payload.get("quarterlyEarnings") else "missing"
     return "available" if isinstance(payload.get("quarterlyReports"), list) and payload["quarterlyReports"] else "missing"
 
 
@@ -99,7 +112,7 @@ def _endpoint(function, ticker, api_key, *, pace=False):
     # recovery, and failures are retried on the next analysis, not cached for a day.
     key = f"av_fundamentals:v2:{function}:{ticker}"
     cached = get_cached(key)
-    if cached is not None:
+    if cached is not None and cached.get("credential_token") == hash(api_key):
         return cached["payload"], dict(cached["diagnostic"], cache_hit=True)
     if pace:
         import time
@@ -109,9 +122,10 @@ def _endpoint(function, ticker, api_key, *, pace=False):
     returned_symbol = (payload.get("Symbol") or payload.get("symbol")) if isinstance(payload, dict) else None
     if status == "available" and returned_symbol and returned_symbol != ticker:
         status = "symbol_mismatch"
-    diagnostic = dict(status=status, fetched_at=datetime.now(timezone.utc).isoformat(), cache_hit=False)
+    diagnostic = response_diagnostic(function, payload, api_key)
+    diagnostic["status"] = status
     if status == "available":
-        set_cached(key, dict(payload=payload, diagnostic=diagnostic), FUNDAMENTALS_TTL)
+        set_cached(key, dict(payload=payload, diagnostic=diagnostic, credential_token=hash(api_key)), FUNDAMENTALS_TTL)
     else:
         logger.info("AV endpoint unavailable: %s/%s status=%s", function, ticker, status)
         payload = None
@@ -168,7 +182,7 @@ def _complete_sum(rows, field, *, nonnegative=False):
 def _report_provenance(ticker, function, rows, fetched_at):
     # Fiscal period is never substituted for disclosure time.
     published = [row.get("published_at") or row.get("publicationDate") for row in rows]
-    return dict(source="alphavantage", source_url="https://www.alphavantage.co/documentation/#" +
+    return dict(unit="currency_units", source="alphavantage", source_url="https://www.alphavantage.co/documentation/#" +
                 ("cash-flow" if function == "CASH_FLOW" else "income-statement"),
         record_id=f"AV:{function}:{ticker}:{rows[0]['fiscalDateEnding']}",
         fiscal_period_start=None, fiscal_period_end=rows[0]["fiscalDateEnding"],
@@ -200,7 +214,8 @@ def statement_metrics(ticker, income, cashflow, *, fetched_at):
             if value is not None and prior not in (None, 0) and previous and previous[0]["reportedCurrency"] == reports[0]["reportedCurrency"]:
                 growth = "revenue_yoy" if source == "totalRevenue" else "net_income_yoy"
                 values[growth] = round((value-prior)/abs(prior)*100, 1)
-                provenance[growth] = dict(meta, scope="TTM year over year", source_field=source)
+                provenance[growth] = dict(meta, scope="TTM year over year", source_field=source,
+                    comparison_observations=_report_provenance(ticker, "INCOME_STATEMENT", previous, clocks.get("INCOME_STATEMENT"))["observations"])
         values.update(report_currency=meta["currency"], fiscal_period_start=meta["fiscal_period_start"],
                       fiscal_period_end=meta["fiscal_period_end"], published_at=meta["published_at"])
     else:
@@ -397,7 +412,7 @@ def fetch_fundamentals(wp_symbol: str) -> Optional[FundamentalsData]:
         revenue_yoy=revenue_yoy,
         net_income_ttm=net_income_ttm,
         net_income_yoy=net_income_yoy,
-        analyst=analyst,
+        analyst=analyst if any(value is not None for value in vars(analyst).values()) else None,
         operating_cash_flow_ttm=statement.get("operating_cash_flow_ttm"),
         capital_expenditures_ttm=statement.get("capital_expenditures_ttm"),
         free_cash_flow_ttm=statement.get("free_cash_flow_ttm"),

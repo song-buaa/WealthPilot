@@ -383,3 +383,62 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 [专项](../tests/test_v42_acceptance_budget.py)覆盖来源正反例、原US/HK/ETF/基金投影、原PEER路由/最终门槛、SDK重试/超时、并发次数/金额、Chat/Responses/异步、另类客户端/重定向/子进程、重启不重置和旧视图0发送。原[PR42观测](../tests/test_llm_observation.py)、[真实来源冻结回归](../tests/test_v42_real_research.py)、U1及权限过滤继续复用。完整测试、独立审查及exact-HEAD四项CI由本PR交付记录绑定；不把合成回归当三标真实验收。
 
 最终是否可实际运行三标仍取决于：本PR合并/授权部署、新鲜合法视图及来源质量确认、完整ARM专用入口验证、已复核价格/授权预算。开发完成不自动解除真实业务BLOCKED。
+
+
+## L1证据链P0/P1修复（2026-10-27，开发候选）
+
+基线bb297bd。用户提供的10月25日LI诊断为Sol成功但42记录全部unknown、0引用/0候选；本轮不追加真实调用，不把合成修复对照当真实研究质量PASS。
+
+### 范围、Owner与实现
+
+| 切片 | 原Owner与最小修改 | 安全边界 |
+|---|---|---|
+| P0-1 配置/诊断 | 原AV adapter的`get_next_av_key`兼容名改为每次解析：ALPHA_VANTAGE_API_KEY → ALPHAVANTAGE_API_KEY → AV_API_KEY → AV_API_KEY_1..4首个非空；三个适配器共用，不隐式跨槽轮换。Worker文件一旦给出AV配置，清理父进程同组遗留值后加载 | 不读/复制4.3 Key；不增加配置系统或生产改动。`entitlement_identity=operator-slot:<变量名>`仅是逻辑配置身份，`entitlement_verified=false`表示该请求路由尚未与已验证订阅身份关联，绝不否定用户已验证的Premium账户 |
+| P0-1 端点与缓存 | Fundamentals/Research成功缓存绑定进程内凭据token，保留原fetched_at；不输出token或Key。KlineResult携带安全attempt诊断：function、full/compact、配置槽、状态、条数、首末日、抓取/缓存、fallback原因；full Premium提示后compact仍用同一凭据 | 不把Key、认证URL、异常原文写入日志。缓存TTL保持原值；换配置不复用另一凭据的成功结果。正常full优先；compact只作为显式降级，不冒充full |
+| P0-2 字段 | 原evidence独立判断财报币种与估值币种；估值冲突只排除相关估值，保留可信经营字段。正利润/负FCF保留两者作为风险事实，L3原阻断仍保留 | 真正官方来源冲突继续阻断对应字段及派生指标，不覆盖原值，不借机放松L3 |
+| P0-2 公告关联 | 原Research事实投影携带结构化official_disclosure；原evidence对每个季度的字段、主体、期间、口径、币种、单位与数值逐项核对，仅匹配齐全时向分析副本加入publication_links及真实披露时间 | 原AV和研究记录不写回。财期不冒充公告日，fetched_at不冒充公告日。一个季度不能给四季度TTM补钟；净利润口径未独立核实时不自动关联 |
+| P1-1 周期 | 原OHLCV/日历/指标重算生成day/week的period_quality与具体拒绝码。原technical_verified仍表示两个周期完整合格；L1可通过verified_period_records使用单独合格日线 | 周线不足不得声称周线或多周期共振；缺日/根数不足/过期/指标不符分别提示。原L3完整技术条件不变，Web/Explain返回后复核有效周期 |
+| P1-2 日期/候选 | 原News抓取保存真实fetched_at，Facts保留ingested_at；evidence_records不再以入库时间充抓取时间。源发布日期仍只取明确原字段。原repository有界检查最多100候选后优先保留合格/官方事实，再截取20 | 不改历史卡，不从URL/文件名猜日期，不把旧事件重新变新，不使用叙事KPI替代源事实；100以外候选仍可能未覆盖，明确保留此边界 |
+
+只在原PEER/Skill/证据/输出owner内扩展。无新Provider、资产/订单Owner、数据库表或Schema；模型、TTL、固定视图、阶段目标、正式纪律、券商同步与订单逻辑均不修改。
+
+### 官方披露关联合同
+
+既有Research Facts可保留独立的官方来源记录和`raw_facts.financial_observations`，本轮增加只读透传`raw_facts.official_disclosure`。这是原事实层字段的最小扩展，不是从叙事自由抽数或用confirmed标志自证。仅接受已保存的公司官方HTTPS域、匹配原issuer的来源，真实published_at/fetched_at与非未来时钟、原record_id，以及逐项定位的财务观察。来源缺失则继续UNKNOWN。
+
+- official_disclosure：`issuer_id`、`source_url`，须与原symbol/官方域/原URL一致。
+- 每项financial_observation：`source_field`、精确`value`、`fiscal_period_end`、`period_basis=quarterly`、`currency`、`unit=currency_units`、明确`unit_scale`（1/1000/1000000）、`accounting_basis`、可复核的`source_locator`。
+- 当前明确映射：totalRevenue/total_revenue、operatingCashflow/operating_cash_flow、capitalExpenditures/positive_capital_cash_outflow。不同净利润归属口径不推定相等。
+- 对收入TTM须四个原季度分别匹配；同比还须前四个季度；FCF须每季度OCF和CapEx分别匹配。转换单位后严格核对数值，不以百分比容差掩盖LI收入差异。
+- 只在副本field_provenance加入每季度`publication_links`，保留官方原URL、record_id、issuer、字段、单位/口径、公告和抓取时间。只取这些已经核对的真实公告时钟；不把最新季度日期无条件套用到全部季度。
+- 已有LI官方收入冲突的冻结回归继续保留。缺结构化源事实或时钟的原卡不会被升级；本轮没有导入或确认任何生产官方财务数据。字段关联合同可用与生产事实已具备是两回事。
+
+### 离线对照与质量评估
+
+采用同一份四季度合成公开财务字段和固定2026-10-25时钟，分别在bb297bd与候选源码运行；不是10月25日原始AV响应重放（该原始文件尚未取得）。
+
+| 场景 | 修复前→后 | 不变的拒绝/限制 |
+|---|---|---|
+| CNY经营字段本身合格 | 5→5字段、6→6引用键 | 不推定USD估值可用 |
+| 无关估值币种冲突 | 0→5字段、0→6引用键 | 冲突估值继续拒绝；引用键数含原记录/字段键，不代表不同来源数 |
+| 正利润/负FCF | 0→5字段、0→6引用键 | 原L3风险/证据条件不放松 |
+| 100个完整交易日日线、周线不足 | 0→1个日线引用，周线继续无引用 | 不宣称周线/多周期共振；L3技术条件仍不满足 |
+| 财务披露日期缺失 | 0→0字段/引用 | 绝不以当前抓取时间补钟 |
+
+专项覆盖所有合法配置变量、动态配置/旧父环境、同Key full/compact、缓存原时钟、敏感响应不泄露、逐季度双来源、主体/口径/单位/币种/日期/数值反例、缺日/指标/Seed/过期、新闻日期、候选选择和原PEER→最终Web/MCP/Explain。原173项相关回归继续作为基线；最终测试与exact-HEAD CI以本PR/私人运行记录为准，不用历史数目代替本轮结果。
+
+研究质量只准备原五维评估：经营变化驱动、盈利/现金转化、竞争反证、估值与投资逻辑、风险/退出/复核条件。同一次原PEER调用，确定性代码给事实数值和来源，Sol给定性因果与条件。没有合格事实不要求强写结论，本轮不大改Prompt或重写PEER。
+
+### Premium已验证与生产路由待核对
+
+用户已确认Premium订阅约USD49.99/月、75请求/分钟。已复用4.3现有S1-B3验收记录：PREMIUM_KEY_CONFIRMED=true，12/12真实响应有效，Daily Adjusted full成功取得多年数据；没有重新验证权益、购买或读取凭据内容。该记录的来源身份为原个人凭据文件，未输出Key片段/指纹。
+
+**账户Premium已确认；4.2生产是否选中相同权限的配置槽、LI的TIME_SERIES_DAILY full/compact结果仍runtime-pending。** 不将Daily Adjusted full历史成功偷换为LI Daily full本次已经成功。
+
+最小只读交接（不在本轮执行）：原operator配置中仅列合法变量名存在性及选中槽、进程加载顺序；由原Owner确认与4.3已验身份的对应关系，绝不交付原配置/Key；已有LI端点诊断的function/mode/status/条数/首末日/cache_hit/原fetched_at/fallback原因；已有官方字段及新闻原日期的脱敏投影。优先查历史文件，缺失记SOURCE_MISSING，不刷新Provider补造历史。
+
+### 下一步LI单次真实质量复验（需单独授权）
+
+合并并经授权部署后，先核对上述最小路由和已有事实，不以PDD/美团、固定视图或L2/L3未完成阻碍L1限定试用。随后只运行一次不带snapshot_id的原LI MCP研究；沿既有受控私有进程、原预算账本与人工授权的剩余额度，预算/计数不重置。读取已保存结果检验：引用是否指向合格字段/周期；若仅日线有效只评价技术限定研究；若经营事实有效，再评价经营/现金流/反证/估值条件的研究价值。分别记录候选/保留、资格、模型/耗时/Token/估算成本；无证据仍安全partial，不用模型补数。
+
+本PR不授权合并、部署、生产配置/数据写入、阶段目标激活、Provider/模型请求、券商操作、新视图或交易。真实8/10质量仍待上述受控复验，工程全绿不代表业务已达到8分。

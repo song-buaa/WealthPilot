@@ -251,3 +251,6 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 4.2 首轮真实投研修复沿原 Owner：AV adapter 的三个端点独立分类/缓存，逐端点抓取时间只作抓取时钟；四季度现金流可独立读取，连续零 CapEx 不产生可信 FCF。原研究 Facts 的可选 `financial_observations`（`source_field/value/currency/fiscal_period_end/period_basis/rounding_unit`）只读传递给证据 Owner，与同期间同币种 AV 原始季度观察比较，不以叙事 KPI 或文本猜测替换财报。冲突双方保留，L3 被阻断。
 
 行情入口复用 [symbol](../backend/utils/symbol.py) 的持仓市场投影，优先 stored canonical symbol，保留账户渠道与估值币种；原 Registry/缺失交易日校验不变。专业解释新增 `technical_trend` 定性主题，只由有效技术证据支持；旧解析失败时只恢复同次模型的解释候选，再由原 policy 重核。`explanationDiagnostics` 只含阶段、数量、分类原因；原文和私人资产上下文不进入诊断。旧 Reviewer 的 reasoning/risk 空字段不再作为新合同的缺解释证据，真实候选缺失仍明确失败；所有最终输出门与交易边界不变。详见[修复记录](V42_IMPLEMENTATION.md#首轮真实投研验收修复2026-10-23)。
+
+
+2026-10-27 L1证据链开发候选仍复用原AV/Research/证据/输出Owner：配置每次解析且不隐式跨账户轮换；财务来源冲突按字段传播，真实盈利/现金流背离保留为风险事实；原事实层可显式关联逐季度官方披露，保留双来源出处，不以公告/抓取时间改写财期。技术L1可引用独立合格周期，原technical_verified保留完整日周含义；Web/Explain重核周期，L3完整门槛不变。新闻抓取与入库时钟分开，既有卡有界优选。无Schema/交易/同步/模型变更，合同与生产待核对项见[实施记录](V42_IMPLEMENTATION.md#l1证据链p0p1修复2026-10-27开发候选)。

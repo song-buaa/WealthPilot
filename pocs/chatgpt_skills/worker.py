@@ -46,6 +46,13 @@ def load_analysis_environment(path, *, model_policy_only=False):
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
         "WEALTHPILOT_STAGE_TARGETS_PATH"}
+    if not model_policy_only:
+        from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES
+        if any(key in values for key in AV_KEY_NAMES):
+            # An operator file's AV configuration is coherent; never inherit an
+            # unrelated parent account into an alias or numbered-slot fallback.
+            for key in AV_KEY_NAMES:
+                os.environ.pop(key, None)
     os.environ.update({key:value for key,value in values.items()
                        if key in allowed and isinstance(value,str)})
 

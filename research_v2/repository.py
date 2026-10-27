@@ -473,10 +473,28 @@ def evidence_records(cards):
         output.append(dict(symbol=facts.primary_symbol or (facts.affected_symbols[0] if len(facts.affected_symbols)==1 else None),
             source=source,source_url=refs[0] if refs else None,record_id=card.card_id,
             published_at=published,data_as_of=raw.get("data_as_of") or published,
-            fetched_at=facts.ingested_at.isoformat() if facts.ingested_at else None,
+            fetched_at=raw.get("fetched_at") or raw.get("retrieved_at"),
+            ingested_at=facts.ingested_at.isoformat() if facts.ingested_at else None,
+            official_disclosure=raw.get("official_disclosure") if isinstance(raw.get("official_disclosure"),dict) else None,
             scope="stored research fact; narrative KPIs not independently verified",period=period,
             topic=raw.get("topic") or event,content=content,
             financial_observations=raw.get("financial_observations") if isinstance(raw.get("financial_observations"), list) else [],
             metadata={"evidence_kind":"event" if event!="fundamental_snapshot" else "research"},
             quality="unverified_until_source_checks",is_fallback=False))
     return output
+
+
+def query_evidence_records(session, symbol, *, top_k=20, at=None):
+    """Bounded read from the original card owner; rank usable facts before old cards.
+
+    No refetch/rewrite. Up to 100 existing candidates, then source qualification,
+    so twenty undated imports do not automatically hide a dated official record.
+    """
+    from backend.services.market_data.evidence import record
+    from datetime import timezone
+    at=at or datetime.now(timezone.utc)
+    rows=evidence_records(query_cards(session,symbol=symbol,entity_scope=False,top_k=max(100,top_k)))
+    def key(row):
+        state=record("research",row,at=at,symbol=symbol)
+        return (state["quality"]!="valid", not state["primary"])
+    return sorted(rows,key=key)[:top_k]

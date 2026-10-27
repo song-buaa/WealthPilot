@@ -99,35 +99,49 @@ _AV_DEFAULT_TTL = 6 * 3600
 
 def _call_av_api(function_name: str, **params) -> dict:
     """调用 Alpha Vantage REST API（带进程内缓存）。"""
-    cache_key = f"av_research:{function_name}:{sorted(params.items())}"
+    from backend.services.market_data.av_fundamentals_service import get_next_av_key, response_diagnostic
+    api_key = get_next_av_key()
+    cache_key = (function_name, str(sorted(params.items())), hash(api_key))
     cached = _AV_RESEARCH_CACHE.get(cache_key)
     if cached:
         data, expires_at = cached
         if _time.time() < expires_at:
-            return data
+            return dict(data, _wp_diagnostic=dict(data.get("_wp_diagnostic", {}), cache_hit=True))
 
-    api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
-    if not api_key:
+    if api_key == "demo":
         raise AdapterQuotaError("未配置 ALPHA_VANTAGE_API_KEY 环境变量")
 
     import requests
     url = "https://www.alphavantage.co/query"
-    params["function"] = function_name
+    request_function="OVERVIEW" if function_name=="COMPANY_OVERVIEW" else function_name
+    params["function"] = request_function
     params["apikey"] = api_key
 
-    resp = requests.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-
-    if "Information" in data and "premium" in data.get("Information", "").lower():
-        raise AdapterQuotaError(f"Alpha Vantage 配额受限: {data['Information']}")
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as cause:
+        code=getattr(getattr(cause,"response",None),"status_code",None)
+        status="rate_limited" if code==429 else "access_denied" if code in {401,403} else "network_error"
+        error=AdapterQuotaError("AV_"+status.upper())
+        error.diagnostic=dict(response_diagnostic(request_function,None,api_key),status=status)
+        raise error from None
+    diagnostic=response_diagnostic(request_function,data,api_key)
+    if diagnostic["status"] in {"premium","rate_limited","provider_error","provider_notice"}:
+        error=AdapterQuotaError("AV_"+diagnostic["status"].upper())
+        error.diagnostic=diagnostic
+        raise error
 
     ttl = _AV_RESEARCH_TTL.get(function_name, _AV_DEFAULT_TTL)
-    _AV_RESEARCH_CACHE[cache_key] = (data, _time.time() + ttl)
+    data = dict(data)
+    data["_wp_diagnostic"] = diagnostic
+    if diagnostic["status"]=="available":
+        _AV_RESEARCH_CACHE[cache_key] = (data, _time.time() + ttl)
     return data
 
 
-_MIN_CALL_INTERVAL = 13.0  # 免费版 5次/分钟 = 12秒/次 + 1秒缓冲
+_MIN_CALL_INTERVAL = 13.0  # Original conservative ingest pacing, not an entitlement claim.
 
 
 class AlphaVantageAdapter(InfoAdapter):
@@ -237,6 +251,8 @@ class AlphaVantageAdapter(InfoAdapter):
                 payload={
                     "title": article.get("title", ""),
                     "time_published": article.get("time_published"),
+                    "fetched_at": data.get("_wp_diagnostic", {}).get("fetched_at"),
+                    "provider_diagnostic": data.get("_wp_diagnostic", {}),
                     "summary": article.get("summary", ""),
                     "source": article.get("source", ""),
                     "topics": [t.get("topic", "") for t in article.get("topics", [])],

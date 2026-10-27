@@ -187,7 +187,8 @@ def test_existing_research_projection_does_not_promote_ingestion_or_llm_kpis():
     facts.raw_facts={"title":"unknown publication"}
     rows=evidence_records([card])
     assert rows[0]["data_as_of"] is None and rows[0]["published_at"] is None
-    assert rows[0]["fetched_at"]==AT.isoformat()
+    assert rows[0]["fetched_at"] is None  # ingestion cannot substitute for retrieval
+    assert rows[0]["ingested_at"]==AT.isoformat()
 
 
 def test_legacy_dataframe_technical_degrades_without_blocking_peer():

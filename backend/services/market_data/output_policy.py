@@ -17,7 +17,7 @@ _TOPIC_LABELS = {"business":"经营变化", "investment_thesis":"投资逻辑", 
 def _evidence_index(assessment):
     """Only the owner's current, usable records can support model inferences."""
     index = {}
-    for record in [*assessment.get("records", []), *assessment.get("verified_field_records", [])]:
+    for record in [*assessment.get("records", []), *assessment.get("verified_field_records", []), *assessment.get("verified_period_records", [])]:
         if (record.get("quality") != "valid" or record.get("is_seed") or record.get("is_mock")
                 or record.get("kind") not in {"fundamentals", "fundamental_field", "research", "event", "technical"}
                 or (assessment.get("symbol") and record.get("symbol") != assessment["symbol"])):
@@ -67,7 +67,7 @@ def explanation_prompt(assessment):
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
         "基本面缺失但技术证据有效时，使用technical_trend解释趋势、动量与量价背离及其局限，"
         "不得由技术走势推导营收或竞争优势。business、competition、investment_thesis须引用经营或研究证据。"
-        "无须为技术解释等待基本面或精确交易资格；只解释证据覆盖的范围。"
+        "无须为技术解释等待基本面或精确交易资格；只解释证据覆盖的范围。只有day证据时不得声称周线或多周期共振。"
         "不要把专业解释仅写进旧rationale/riskPoints/chat_answer：本字段必须在根JSON中独立返回。"
         "结构示例：{\"professional_explanation\":[{\"topic\":\"technical_trend\",\"basis\":\"inference\","
         "\"text\":\"短期修复与较长周期的趋势仍可能分化，需要结合量能持续性复核，不能据此确认经营改善。\","
@@ -138,6 +138,11 @@ def explanation_projection(candidate, assessment):
                 reason = "reference_not_usable"
             elif item["topic"] == "technical_trend" and any(index[ref]["kind"] != "technical" for ref in refs):
                 reason = "topic_evidence_mismatch"
+            elif item["topic"] == "technical_trend" and (
+                    (any(term in text for term in ("周线","周级")) and not any("week" in index[ref].get("values",{}).get("series",{}) for ref in refs))
+                    or (any(term in text for term in ("日线","日级")) and not any("day" in index[ref].get("values",{}).get("series",{}) for ref in refs))
+                    or (any(term in text for term in ("多周期","共振")) and not all(any(period in index[ref].get("values",{}).get("series",{}) for ref in refs) for period in ("day","week")))):
+                reason = "unverified_timeframe"
             elif item["topic"] in {"business", "competition", "investment_thesis"} and all(index[ref]["kind"] == "technical" for ref in refs):
                 reason = "topic_evidence_mismatch"
         if reason:
@@ -150,7 +155,8 @@ def explanation_projection(candidate, assessment):
         sources = [dict(evidence_ref=ref, source=index[ref].get("source"),
             data_as_of=index[ref].get("data_as_of"), published_at=index[ref].get("published_at"),
             source_url=index[ref].get("source_url"), period=index[ref].get("period"),
-            kind=index[ref]["kind"], symbol=index[ref].get("symbol")) for ref in refs]
+            kind=index[ref]["kind"], symbol=index[ref].get("symbol"),
+            publication_links=index[ref].get("publication_links",[])) for ref in refs]
         result.append(dict(topic=item["topic"], basis="inference", text=text,
             evidence_refs=refs, sources=sources))
     if len(candidate) > 12:
