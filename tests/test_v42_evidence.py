@@ -114,7 +114,12 @@ def test_four_independent_qualification_levels(rebalance,amount,expected):
     assert not result["qualification"]["L4"]["allowed"]
 
 
-def test_planner_fallback_is_distinct_from_evidence_failure_and_model_cannot_bypass():
+def test_planner_fallback_is_distinct_from_evidence_failure_and_model_cannot_bypass(monkeypatch):
+    from backend.services import position_analysis
+    original_exit_plan = position_analysis.exit_plan
+    # A wall-clock microsecond containing 999 is not a leaked model price.
+    # Freeze the deterministic report clock and retain the full sentinel check.
+    monkeypatch.setattr(position_analysis, "exit_plan", lambda assessment: original_exit_plan(assessment, at=AT))
     result=assess(symbol="PDD:US",at=AT,planner=dict(status="fallback",fallback_type="JSONDecodeError"))
     out=SimpleNamespace(structured_payload=dict(decisionType="exit",confidence=.99,estimated_shares=999,
         nested=dict(limit_price=999),reason="sell at 999"),chat_answer="Sell 999",raw_text="999",llm_result=None)
