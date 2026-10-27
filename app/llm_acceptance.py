@@ -6,6 +6,7 @@ No prompts, response bodies, account identifiers or credentials enter the ledger
 from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal, ROUND_CEILING
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -68,7 +69,7 @@ class Budget:
     Reservations are committed and fsynced before transport, never refunded on
     failure. Existing ledgers are resumed, never silently reset by a new process.
     """
-    def __init__(self, path, *, max_attempts=24, max_usd="3"):
+    def __init__(self, path, *, max_attempts=24, max_usd="3", existing_only=False):
         if type(max_attempts) is not int or not 1 <= max_attempts <= 24:
             raise AdmissionDenied("LIMIT_INVALID")
         dollars = Decimal(str(max_usd))
@@ -81,6 +82,8 @@ class Budget:
         self.pid = os.getpid()
         self.closed = False
         self.runs = set()
+        if existing_only and not self.path.is_file():
+            raise AdmissionDenied("LEDGER_REQUIRED")
         import fcntl
         # Serialize creation before exposing a completed ledger to another
         # acceptance process. Retain both files; never reset a damaged ledger.
@@ -89,19 +92,25 @@ class Budget:
             fcntl.flock(init_lock, fcntl.LOCK_EX)
             self._private(os.fstat(init_lock.fileno()))
             try:
-                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                if existing_only:
+                    fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+                    os.close(fd)
+                    fd = None
+                else:
+                    fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             except FileExistsError:
                 pass
             else:
-                with os.fdopen(fd, "w") as stream:
-                    json.dump(dict(version=PRICE_VERSION, max_attempts=max_attempts,
-                        max_nanos=self.max_nanos, attempts=[], analyses={}, reserved_nanos=0, denials={}), stream)
-                    stream.flush(); os.fsync(stream.fileno())
-                directory = os.open(self.path.parent, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                if fd is not None:
+                    with os.fdopen(fd, "w") as stream:
+                        json.dump(dict(version=PRICE_VERSION, max_attempts=max_attempts,
+                            max_nanos=self.max_nanos, attempts=[], analyses={}, reserved_nanos=0, denials={}), stream)
+                        stream.flush(); os.fsync(stream.fileno())
+                    directory = os.open(self.path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
         self.snapshot()  # An incomplete/crashed/foreign ledger fails closed.
 
     @staticmethod
@@ -111,27 +120,43 @@ class Budget:
             raise AdmissionDenied("LEDGER_INVALID")
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, expected_sha256=None):
         import fcntl
         with self.lock:
             fd = os.open(self.path, os.O_RDWR | os.O_NOFOLLOW)
-            with os.fdopen(fd, "r+") as stream:
+            with os.fdopen(fd, "r+", encoding="utf-8", newline="") as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX)
                 info = os.fstat(stream.fileno())
                 self._private(info)
                 try:
-                    data = json.load(stream)
-                    assert set(data) == {"version", "max_attempts", "max_nanos", "attempts", "analyses", "reserved_nanos", "denials"}
+                    original = stream.read()
+                    data = json.loads(original)
+                    assert isinstance(data, dict)
+                    keys = {"version", "max_attempts", "max_nanos", "attempts", "analyses", "reserved_nanos", "denials"}
+                    schema = data.get("ledger_schema", 1)
+                    assert type(schema) is int and schema in {1, 2}
+                    assert set(data) == keys | ({"ledger_schema", "li_retest"} if schema == 2 else set())
                     assert data["version"] == PRICE_VERSION
                     assert data["max_attempts"] == self.max_attempts and data["max_nanos"] == self.max_nanos
                     assert type(data["reserved_nanos"]) is int and 0 <= data["reserved_nanos"] <= self.max_nanos
+                    assert isinstance(data["attempts"], list) and isinstance(data["analyses"], dict) and isinstance(data["denials"], dict)
                     assert len(data["attempts"]) <= self.max_attempts
                     assert sum(a["reserved_nanos"] for a in data["attempts"]) == data["reserved_nanos"]
                     assert set(data["analyses"]) <= set(SYMBOLS)
                     assert all(re.fullmatch(r"[0-9a-f]{32}", v) for v in data["analyses"].values())
+                    runs = set(data["analyses"].values())
+                    assert len(runs) == len(data["analyses"])
+                    if schema == 2:
+                        retest = data["li_retest"]
+                        assert set(retest) == {"symbol", "authorization_id", "analysis_run_id", "original_run_id", "authorized_against_sha256"}
+                        assert retest["symbol"] == "LI:US" and retest["original_run_id"] == data["analyses"]["LI:US"]
+                        assert all(re.fullmatch(r"[0-9a-f]{32}", retest[k]) for k in ("authorization_id", "analysis_run_id"))
+                        assert re.fullmatch(r"[0-9a-f]{64}", retest["authorized_against_sha256"])
+                        assert retest["analysis_run_id"] not in runs
+                        runs.add(retest["analysis_run_id"])
                     for a in data["attempts"]:
                         assert set(a) == {"analysis_run_id", "model", "endpoint", "input_token_bound", "output_token_bound", "reserved_nanos"}
-                        assert a["analysis_run_id"] in data["analyses"].values() and a["model"] in PRICES
+                        assert a["analysis_run_id"] in runs and a["model"] in PRICES
                         assert a["endpoint"] in {"chat", "responses"}
                         assert all(type(a[k]) is int and a[k] > 0 for k in ("input_token_bound", "output_token_bound", "reserved_nanos"))
                     assert set(data["denials"]) <= {"RUN_UNASSOCIATED", "ENDPOINT_UNSUPPORTED", "REQUEST_UNBOUNDED",
@@ -139,23 +164,71 @@ class Budget:
                     assert all(type(v) is int and 0 <= v <= 2**31 for v in data["denials"].values())
                 except (ValueError, KeyError, TypeError, AssertionError):
                     raise AdmissionDenied("LEDGER_INVALID") from None
+                if expected_sha256 is not None and hashlib.sha256(original.encode()).hexdigest() != expected_sha256:
+                    raise AdmissionDenied("LEDGER_CHANGED")
+                before = json.dumps(data, sort_keys=True)
                 yield data
-                stream.seek(0); json.dump(data, stream, allow_nan=False)
-                stream.truncate(); stream.flush(); os.fsync(stream.fileno())
+                # Reading/validating old ledgers must not rewrite their bytes.
+                if json.dumps(data, sort_keys=True) != before:
+                    stream.seek(0); json.dump(data, stream, allow_nan=False)
+                    stream.truncate(); stream.flush(); os.fsync(stream.fileno())
 
     def claim(self, symbol, identifier):
         from app.llm_observation import run_id
         if symbol not in SYMBOLS or run_id(identifier) != identifier or os.getpid() != self.pid:
             raise AdmissionDenied("RUN_UNASSOCIATED")
         with self.transaction() as data:
-            if symbol in data["analyses"] or identifier in data["analyses"].values():
+            if (symbol in data["analyses"] or identifier in data["analyses"].values()
+                    or identifier == data.get("li_retest", {}).get("analysis_run_id")):
                 raise AdmissionDenied("ANALYSIS_ALREADY_CLAIMED")
             data["analyses"][symbol] = identifier
         self.runs.add(identifier)
 
+    def claim_retest(self, symbol, identifier, *, authorization_id, expected_ledger_sha256):
+        """Explicit operator admission for exactly one LI revalidation.
+
+        Both IDs and the reviewed original ledger digest are supplied outside
+        model/request options. This does not authorize executing this in Prod.
+        The original flock/inode/fsync remains the only budget state owner.
+        """
+        if (symbol != "LI:US" or os.getpid() != self.pid
+                or not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier)
+                or not isinstance(authorization_id, str) or not re.fullmatch(r"[0-9a-f]{32}", authorization_id)
+                or not isinstance(expected_ledger_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_ledger_sha256)):
+            raise AdmissionDenied("RETEST_NOT_AUTHORIZED")
+        with self.transaction(expected_sha256=expected_ledger_sha256) as data:
+            if "li_retest" in data:
+                raise AdmissionDenied("RETEST_ALREADY_CLAIMED")
+            if "LI:US" not in data["analyses"] or identifier in data["analyses"].values():
+                raise AdmissionDenied("RETEST_NOT_AUTHORIZED")
+            # Keep original history durable before extending the in-place
+            # ledger. Never replace its inode (old flock users may be waiting).
+            # This wrapped artifact is recovery evidence, not another Budget.
+            original = self.path.read_bytes().decode("utf-8")
+            if hashlib.sha256(original.encode()).hexdigest() != expected_ledger_sha256:
+                raise AdmissionDenied("LEDGER_CHANGED")
+            try:
+                fd = os.open(str(self.path) + ".pre-li-retest", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                raise AdmissionDenied("MIGRATION_RECOVERY_REQUIRED") from None
+            with os.fdopen(fd, "w") as backup:
+                json.dump(dict(recovery_only=True, original_ledger_utf8=original,
+                    sha256=expected_ledger_sha256), backup)
+                backup.flush(); os.fsync(backup.fileno())
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            data.update(ledger_schema=2, li_retest=dict(symbol=symbol, authorization_id=authorization_id,
+                analysis_run_id=identifier, original_run_id=data["analyses"]["LI:US"],
+                authorized_against_sha256=expected_ledger_sha256))
+        self.runs.add(identifier)
+
     def snapshot(self):
         with self.transaction() as data:
-            return dict(price_version=PRICE_VERSION, price_source=PRICE_SOURCE,
+            return dict(**({"ledger_schema":2, "li_retest":dict(data["li_retest"])} if "li_retest" in data else {}),
+                price_version=PRICE_VERSION, price_source=PRICE_SOURCE,
                 attempt_count=len(data["attempts"]), max_attempts=self.max_attempts,
                 reserved_usd=str(Decimal(data["reserved_nanos"]) / 10**9),
                 max_usd=str(Decimal(self.max_nanos) / 10**9),
@@ -222,6 +295,11 @@ class Budget:
         inp, out = PRICES[body["model"]]
         reserve = int(((input_bound * inp + cap * out) * 1000).to_integral_value(rounding=ROUND_CEILING))
         with self.transaction() as data:
+            allowed_runs = set(data["analyses"].values())
+            if "li_retest" in data:
+                allowed_runs.add(data["li_retest"]["analysis_run_id"])
+            if trace.analysis_run_id not in allowed_runs:
+                raise AdmissionDenied("RUN_UNASSOCIATED")
             if (len(data["attempts"]) >= self.max_attempts
                     or data["reserved_nanos"] + reserve > self.max_nanos):
                 raise AdmissionDenied("BUDGET_EXHAUSTED")

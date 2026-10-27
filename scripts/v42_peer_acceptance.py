@@ -2,6 +2,7 @@
 
 Requires separate operator authorization to run. --help performs no business IO.
 Uses one existing U1 view and one durable private budget for all three stocks.
+An explicitly authorized LI-only retest instead reuses that ledger without a view.
 """
 from __future__ import annotations
 
@@ -71,17 +72,46 @@ async def run_campaign(database, portfolio_id, snapshot_id, budget, *, contract=
     return results
 
 
+async def run_li_retest(database, portfolio_id, budget, *, identifier, authorization_id,
+                        expected_ledger_sha256, contract=None, synthetic=False):
+    """One separately authorized LI run; never replay the old claim/campaign."""
+    from app.llm_acceptance import AdmissionDenied
+    from app.llm_observation import analysis_run, safe_metadata
+    from pocs.chatgpt_skills.analysis import analyze
+    with analysis_run(identifier) as (trace, owner):
+        if not owner or trace.analysis_run_id != identifier:
+            raise AdmissionDenied("RETEST_NOT_AUTHORIZED")
+        budget.claim_retest("LI:US", identifier, authorization_id=authorization_id,
+            expected_ledger_sha256=expected_ledger_sha256)
+        result = await analyze(database, portfolio_id, "analyze_position",
+            dict(symbol="LI:US", question="复核理想汽车经营、技术趋势和投资逻辑；仅L1研究，披露缺失和冲突，不执行交易。"),
+            contract=contract, synthetic=synthetic, worker_process=True)
+        return [final_record("LI:US", result, safe_metadata(trace.snapshot("completed")))]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", required=True)
     parser.add_argument("--portfolio-id", type=int, required=True)
-    parser.add_argument("--snapshot-id", required=True)
+    parser.add_argument("--snapshot-id")
+    parser.add_argument("--allow-li-retest", action="store_true")
+    parser.add_argument("--li-retest-run-id")
+    parser.add_argument("--li-retest-authorization-id")
+    parser.add_argument("--expected-ledger-sha256")
     parser.add_argument("--contract", required=True)
     parser.add_argument("--operator-env", required=True)
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--allow-paid-acceptance", action="store_true", required=True)
     args = parser.parse_args()
+    retest_fields = (args.li_retest_run_id, args.li_retest_authorization_id, args.expected_ledger_sha256)
+    if args.allow_li_retest:
+        import re
+        if (args.snapshot_id is not None or not all(isinstance(v, str) and re.fullmatch(pattern, v)
+                for v, pattern in zip(retest_fields, (r"[0-9a-f]{32}", r"[0-9a-f]{32}", r"[0-9a-f]{64}")))):
+            parser.error("LI retest requires distinct operator IDs and original ledger digest; no snapshot")
+    elif not args.snapshot_id or any(v is not None for v in retest_fields):
+        parser.error("campaign requires snapshot; retest requires explicit --allow-li-retest")
     for name in ("database", "contract", "operator_env", "ledger", "output"):
         setattr(args, name, os.path.abspath(getattr(args, name)))
     os.chdir(ROOT)
@@ -110,7 +140,7 @@ def main():
     from app.llm_config import model_for, SOL, LUNA
     if (model_for("main"), model_for("light")) != (SOL, LUNA):
         raise SystemExit("ACCEPTANCE_MODEL_UNSUPPORTED")
-    budget = Budget(args.ledger)
+    budget = Budget(args.ledger, existing_only=args.allow_li_retest)
     receipt = {"status":"BLOCKED", "results":[], "actual_bill":"UNKNOWN"}
     # Match the private worker: drop stdout/stderr/logging, not capture StringIO
     # containing private prompts. Never expose provider errors or a traceback.
@@ -118,16 +148,24 @@ def main():
     try:
         with guarded_transport(budget, process_lifetime=True), open(os.devnull, "w") as null:
             with contextlib.redirect_stdout(null), contextlib.redirect_stderr(null):
-                receipt["results"] = asyncio.run(run_campaign(args.database, args.portfolio_id,
-                    args.snapshot_id, budget, contract=args.contract))
-                receipt["status"] = ("COMPLETED" if len(receipt["results"]) == 3
+                if args.allow_li_retest:
+                    receipt["results"] = asyncio.run(run_li_retest(args.database, args.portfolio_id, budget,
+                        identifier=args.li_retest_run_id, authorization_id=args.li_retest_authorization_id,
+                        expected_ledger_sha256=args.expected_ledger_sha256, contract=args.contract))
+                else:
+                    receipt["results"] = asyncio.run(run_campaign(args.database, args.portfolio_id,
+                        args.snapshot_id, budget, contract=args.contract))
+                receipt["status"] = ("COMPLETED" if len(receipt["results"]) == (1 if args.allow_li_retest else 3)
                     and all(r["status"] != "unavailable" for r in receipt["results"]) else "PARTIAL")
     except Exception as error:
         # Safe exact error detail remains available in final observation / ledger;
         # generic failure never dumps an exception containing private context.
         receipt["status"] = "BLOCKED"
         from app.asset_views import ERRORS
-        receipt["error_code"] = str(error) if str(error) in ERRORS else "ACCEPTANCE_ANALYSIS_FAILED"
+        admission = {"ACCEPTANCE_LEDGER_CHANGED", "ACCEPTANCE_RETEST_NOT_AUTHORIZED",
+            "ACCEPTANCE_RETEST_ALREADY_CLAIMED", "ACCEPTANCE_MIGRATION_RECOVERY_REQUIRED",
+            "ACCEPTANCE_LEDGER_INVALID"}
+        receipt["error_code"] = str(error) if str(error) in ERRORS | admission else "ACCEPTANCE_ANALYSIS_FAILED"
     receipt["budget"] = budget.snapshot()
     private_write(output, receipt)
     print(json.dumps(dict(status=receipt["status"], attempt_count=receipt["budget"]["attempt_count"],

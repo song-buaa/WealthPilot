@@ -456,3 +456,16 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 **当前生产调用方未接入独立官方原文核验 owner，默认不传 verifier，因此不会从研究卡自动补齐 AV 公告钟，继续 UNKNOWN。** 本轮不新增 Provider、核验文件库、配置、原文抓取或审批系统。正例只用与卡片分离的冻结源 owner 替身证明严格关联合同；不声称已经核验生产原文，也不把构造一个 verifier 的测试当真实来源认证。将来接入者须先独立核验原文的来源、公告日和可定位财务行，不能直接返回研究卡或 AI 抽取结果；本 PR 不实现或暗中启用该接入。
 
 定点对抗覆盖：自报 URL/日期/匹配数值与各种 verified/quality/hash 标志不提升 AV；独立源缺失、公告日/行值不一致、无公告定位或无原文哈希拒绝；独立源全匹配仍按逐季度规则关联；原独立有效经营字段、日周证据和 L2–L4 拒绝不变。原 LI 真实收入冲突回归保留。最终代码/测试/CI 绑定后续 PR HEAD，不沿用 50be44c 的历史通过结果。
+
+
+## LI 复验账本最小修复（2026-10-27，开发候选）
+
+范围仅为原 app/llm_acceptance.py Budget 与 scripts/v42_peer_acceptance.py 专用验收入口。原 claim 仍保持每标的一次，不修改历史 analyses 中 LI 的 run_id、不替换或重新归属任何 attempts；PEER、模型/价格版本、HTTPX/AV 白名单、证据、资产与交易代码不变。
+
+原 v1 账本照常读取，snapshot 不再无意义重写字节。只有显式 LI 复验登记才在原 flock 与同一 inode 下扩展为 ledger_schema=2，追加唯一 li_retest 记录（symbol=LI:US、独立 analysis_run_id、authorization_id、original_run_id、authorized_against_sha256）。operator 必须另获真实运行授权，明确提供 --allow-paid-acceptance 与 --allow-li-retest、两个不含私人信息的32位十六进制 ID，以及已核对原账本的 SHA256；这些是操作员登记凭据，不从自然语言、模型输出或 analyze options 自动生成授权。普通 claim、其他股票、历史 ID、无授权字段、摘要变化或重复登记拒绝。即使换授权 ID，也不允许第二次复验。
+
+授权复验模式要求 existing_only：账本不存在不创建新预算。仅调用一次原 analyze_position、symbol=LI:US，不传 snapshot_id，不执行 run_campaign。原三标函数只保留其原兼容性，LI 复验分支绝不回到该循环。HTTPX 所有实际发送/重试继续在同一账本预留并 fsync；发送前同时验证持久登记与本进程合法登记，修改 process-local runs 不能创建新 run。24 次和 USD3 是新旧累计上限，绝不另设复验额度或退还预留。
+
+迁移前在原锁内用 O_EXCL/0600 写入并 fsync `<ledger>.pre-li-retest`，包装原始字节和摘要，再 fsync 目录；该文件是 recovery_only 证据，不能被 Budget 当第二账本打开。随后原 inode 内提交扩展状态，保持旧进程的 flock 互斥关系，不能原子替换文件破坏旧等待者的锁。读取器严格验证 v1/v2 Schema、run 绑定、累计和、权限及限额；旧代码读到 v2 会拒绝。中断/损坏一律拒绝发送，不恢复、不覆盖、不重置原账本；残留恢复证据即使主文件未变，也要求人工调查，禁止自动重试迁移。部署后真实迁移/运行及任何恢复均须单独授权，本开发任务未触碰生产账本。
+
+脱敏合成 v1 副本严格复现原7次、预留USD0.5564585：登记后原数据逐项相等，剩余17次/USD2.4435415仍属同一累计预算；MockTransport 验证第25次前拒绝、成本可先耗尽、SDK重试逐次预留；多进程竞争仅一人登记成功。覆盖旧记录、跨标的/缺授权/重复、重启、旧普通claim、迁移中断保留恢复证据和损坏拒绝。该副本不是从生产复制，也不表示已经执行 LI 真实复验。最终测试和 CI 以本 PR 完整 SHA 证据为准。

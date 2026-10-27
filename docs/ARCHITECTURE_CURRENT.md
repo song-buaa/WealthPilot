@@ -83,7 +83,7 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 分析 worker 使用 SQLite mode=ro、query_only 和 authorizer，保持进程退出前只读；显式临时分析模式不写 Web 会话或图 checkpoints、不执行交易意图解析。复用既有分析 Python / Provider 配置与知识工作目录，知识索引缺失则降级，不创建第二个 Chroma 数据库。相关实现细节见 [P3/P4/P5 适配记录](WealthPilot_4x_P345_Analysis_Skills.md)。
 
-生成模型配置和 API 适配统一由 [app/llm_config.py](../app/llm_config.py) 维护，原客户端/PEER/Skills 仍为调用入口。正常候选使用 Sol/Luna；显式 legacy profile 才可回滚，Provider 失败不切旧模型。此 owner 仅管理模型请求，不赋予证据资格、可信目标或交易权限。 [观测元数据](../app/llm_observation.py)只沿原 PEER 与隔离进程收集/投影匿名运行字段，经原 SSE/MCP/Explain 传递；不建表、不开放原文日志、不参与资格或交易判断。调用矩阵、API/ARM 兼容及有限 A/B 限制见[升级记录](GPT6_MODEL_UPGRADE.md)，用户报告38c3faf已部署、真实三标仍BLOCKED。仅验收专用进程复用原PEER和[发送前预算](../app/llm_acceptance.py)，不将其并入生产计费/资格owner；范围与固定视图方案见[4.2记录](V42_IMPLEMENTATION.md#最终真实验收阻断定点收口2026-10-23独立-pr-候选)。
+生成模型配置和 API 适配统一由 [app/llm_config.py](../app/llm_config.py) 维护，原客户端/PEER/Skills 仍为调用入口。正常候选使用 Sol/Luna；显式 legacy profile 才可回滚，Provider 失败不切旧模型。此 owner 仅管理模型请求，不赋予证据资格、可信目标或交易权限。 [观测元数据](../app/llm_observation.py)只沿原 PEER 与隔离进程收集/投影匿名运行字段，经原 SSE/MCP/Explain 传递；不建表、不开放原文日志、不参与资格或交易判断。调用矩阵、API/ARM 兼容及有限 A/B 限制见[升级记录](GPT6_MODEL_UPGRADE.md)，用户报告38c3faf已部署、真实三标仍BLOCKED。仅验收专用进程复用原PEER和[发送前预算](../app/llm_acceptance.py)，不将其并入生产计费/资格owner；原账本可在显式操作员授权和摘要绑定下追加一次LI独立复验，历史claim与累计24次/USD3不变，无snapshot单标入口，不恢复三标循环；范围与固定视图方案见[4.2记录](V42_IMPLEMENTATION.md#最终真实验收阻断定点收口2026-10-23独立-pr-候选)。
 
 ## 5. Web 交易、数据库与任务
 
