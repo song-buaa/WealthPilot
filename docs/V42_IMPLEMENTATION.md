@@ -495,3 +495,39 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 2. 原 stderr 安全事件默认可用；若需私有 JSONL，另经部署授权配置代码外 `--events` 路径，文件 0600、目录 0700。不要开放原始业务日志。失败时恢复原 MCP 启动版本并核对健康，不恢复/改写数据库或账本。
 3. 获得一次真实调用的单独授权后，通过正常 WealthPilot-Prod 仅调用一次：`analyze_position({"request":{"symbol":"LI:US","question":"请基于当前已有合格证据分析理想汽车的经营、技术趋势与风险；证据不足时明确降级。仅研究，不准备交易。"}})`。不传 snapshot_id/run ID，不使用专项 campaign，不自动重试；本开发任务没有执行此调用。
 4. 记录客户端 `is_error` 与业务 status；从私有安全事件取得同一匿名 ID，核对 Worker/PEER/序列化/IPC/Pydantic/返回阶段及原 LLM 元数据。协议失败保留最后已证实阶段、类别、实际退出码；缺观测继续 UNKNOWN。成功也须检查专业解释/证据/降级，不能以事件成功代替研究质量验收。L2–L4/人工交易边界维持原合同。
+
+## 正常 MCP 长研究异步取回（2026-10-27，待合并候选）
+
+### 120 秒与既有证据
+
+已读取 [OpenAI Secure MCP Tunnel 官方 Limits](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)：默认单次绝对期限为120秒，覆盖托管队列到最终响应交付，进度通知不续期。仓库原 [runner](../pocs/poc03_mac_mini/runner.py) 使用官方 tunnel-client HTTP 路径，原 [GitHub 安装器](../pocs/poc03_mac_mini/github_release.py)锁定 v0.0.16；本轮不升级 Tunnel 或修改其配置。已保存的「生产部署」记录显示 PR #46 仅切换 MCP，Tunnel/Gateway保持原状，最新两候选运行分别148.231/164.366秒，均经过Worker/PEER/IPC/Pydantic到mcp_return、partial、4次模型观测且无记录模型错误；第二请求在首个接收约120.6秒后出现。
+
+上述证据与托管单请求期限**高度吻合**，240/270秒内部期限不能解决外层120秒。历史记录没有证明具体客户端请求ID、最终HTTP响应交付/连接器错误码，当前实际Tunnel二进制版本及全部运行配置未在MacBook直接复读，不将它们写成新生产实测；未知不阻挡最小异步适配。没有新真实分析、Provider探针、Tunnel/Gateway操作或配置修改。
+
+### 最小实现及归属
+
+- 原 [server](../pocs/chatgpt_skills/server.py) 增加 `start_position_analysis(request_id, request)` / `get_position_analysis_result(job_id)`，复用原 AnalysisRequest、analysis_call、BusinessClient、Worker、只读SQLite合同及原PEER。没有新增研究引擎/队列/服务/数据库；未修改Worker、PEER/Prompt、模型/Provider、资格、TTL、交易、24/$3账本或PR45历史。
+- [进程内登记](../pocs/chatgpt_skills/position_jobs.py)使用线程、同一分析准入锁及不可预测job_id。start只登记并启动线程，不等待模型；get只读取私有内存，没有Worker/模型/Provider调用。无队列，同一时刻最多一项分析，原同步专业读取同时占用相同准入锁；忙时快速拒绝，避免锁等待再跨120秒。
+- 后台任务单独持有原BusinessClient；HTTP请求/连接结束时原MCP lifespan清理只关闭原共享客户端，不能关闭该任务的Worker。任务自身完成/失败后才按原路径关闭Worker。不是依赖请求内async task、SSE心跳或延长超时。
+- 原匿名analysis_run_id在登记时创建，沿原PR46安全事件/LLM observation贯通并随job返回；不新增原文/资产日志。生产原 `--events` 持久化要求保留。后台任务的原 `mcp_return` 仅表示分析适配器返回，不能证明job结果已被客户端取到；是否可取由get的任务状态及实际返回核对。
+- completed返回嵌套原完整AnalysisResult，包括conclusion、professional_result、evidence、data_quality、scope、limitations及llm_observation；不重写结论或重新授予资格。partial和业务unavailable保留原状态。任务completed仅表示原调用结束，不等于业务成功。IPC/校验/任务异常返回unavailable、结果为空、业务状态UNKNOWN，不伪造报告。
+
+### 幂等、重启与有界保留
+
+单靠纯内存无法记住任意旧ID在上一次进程中是否已付费，因此request_id采用工具说明公布的**进程scope + 稳定随机token**；ChatGPT从当前tools/list获取scope，用户无需手填。同ID同参数始终返回原job；同ID不同参数拒绝。旧scope启动明确unavailable，不能在重启后把旧请求当新分析；查询未知job也只返回unavailable/UNKNOWN，不恢复或重跑。部署/重启后须刷新ChatGPT工具定义；失败或未知任务不得自动换scope/ID重试，新的研究须为用户明确的新请求。
+
+默认64条登记收据、8份运行中或未到期结果、每份完整JSON上限2MiB，完成后保留两小时。get不延长保留期；过期查询不再返回报告，下次start/get时惰性清理完整结果，保留不含报告/问题的指纹收据防重跑。容量满拒绝新任务，不提前逐出未到期报告，也不删除收据来换取再次付费。超大/不可序列化结果明确不可用，不截断成假成功。完整结果仅在本进程私有内存，进程退出后无法恢复；新进程不读取旧结果或自动执行旧任务。
+
+防重复保证针对同一稳定ID的一次PEER执行；不改变原PEER/SDK内部合法重试，也不把模型供应商实际账单说成exactly-once。不同ID代表新请求，工具说明禁止因断线、轮询、超时或未知状态自动换ID、改走同步入口。
+
+### 离线验证与部署后一次 LI 使用
+
+[任务登记回归](../tests/test_position_jobs.py)覆盖快速返回、并发同ID去重、参数冲突、忙/容量、结果完整性、2小时到期、防重启重放、线程失败/IPC异常及存储拒绝；[原MCP协议回归](../pocs/chatgpt_skills/test_v42_protocol.py)使用真实loopback streamable HTTP和Worker.main，只有analyze替换为禁网合成函数：start返回并断开连接后Worker继续，反复get/同IDstart不重跑，最终报告逐字段等于Worker原结果；覆盖partial/unavailable/Worker退出。新服务器实例对旧job/旧scope均拒绝恢复执行。原10项工具（启用prepare时11项）保持，增加两项后为12/13；原资产/prepare/人工确认协议测试继续执行。完整PEER兼容由原全量、M5及四项CI覆盖，无新专项验收工具。
+
+本轮仅PR/CI，**未部署、未调用真实模型/Provider**。合并及部署另行授权后：
+
+1. 仅切换同一候选SHA的MCP代码，沿用原完整业务Python、Worker、配置和安全事件文件；无需Schema/账本迁移，不切换Tunnel/Gateway或模型。刷新ChatGPT工具定义，确认原11项加start/get共13项、原权限边界不变。
+2. 用户在正常ChatGPT明确发起一次「研究LI:US，使用异步start/get，不传snapshot_id，不同步资产、不准备交易」。ChatGPT取当前工具说明中的scope，生成并保留一个稳定request_id，调用 `start_position_analysis`，保存返回job_id/analysis_run_id。
+3. 启动响应若丢失，仅可用完全相同ID/参数查询既有登记；running只按约15秒提示查询同job，不再启动或调用同步analyze_position。每个HTTP调用独立快速完成，原240/270秒专业分析期限不变。
+4. 完成后从 `get_position_analysis_result` 读取原报告，按原queried_at、证据和partial/unavailable展示；不把缓存报告当刷新后的当前事实/交易资格。若当前聊天无法等待，保留job_id，稍后让ChatGPT查询同job即可。
+5. 对照同一匿名ID的实际持久化事件及原模型观测检查确实只执行一个分析任务、报告内容和最终证据过滤；原正常分析失败/进程重启/到期时如实停止，不自动再付费。此一步需单独真实调用授权，尚未执行，不能以离线/CI证明生产可用性或研究质量已验收。

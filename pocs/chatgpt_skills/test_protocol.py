@@ -119,7 +119,7 @@ def test_real_endpoint_preserves_seven_tools_and_adds_readonly_trade_sync_query(
         server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
         async with Client(server,mode='legacy') as client:
             tools=(await client.list_tools()).tools
-            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability'}
+            assert {t.name for t in tools}=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability','start_position_analysis','get_position_analysis_result'}
             assert all(t.annotations.read_only_hint for t in tools)
     asyncio.run(run())
 
@@ -138,7 +138,7 @@ def test_analysis_discovery_and_calls_keep_nonblank_validation_without_regex(mon
         server = create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
         async with Client(server,mode='legacy') as client:
             tools = {t.name:t for t in (await client.list_tools()).tools}
-            assert len(tools) == 10 and all(t.annotations.read_only_hint for t in tools.values())
+            assert len(tools) == 12 and all(t.annotations.read_only_hint for t in tools.values())
             for name in ('review_portfolio','analyze_position','analyze_performance'):
                 schema = tools[name].input_schema
                 # Resolve through JSON Schema, not a handwritten mirror of it.
@@ -191,7 +191,7 @@ def test_discovery_annotations_and_existing_overview_contract(endpoint):
         async with Client(endpoint,mode='legacy',read_timeout_seconds=50) as client:
             tools=(await client.list_tools()).tools
             by_name={t.name:t for t in tools}
-            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability'}
+            assert set(by_name)=={'get_wealth_overview','get_manual_wealth_items','get_investment_details','prepare_trade_confirmation_link','create_trade_draft','get_trade_preview','confirm_trade','get_trade_order_status','analyze_position','review_portfolio','analyze_performance','get_trade_and_sync_status','get_trade_history','get_instrument_tradability','start_position_analysis','get_position_analysis_result'}
             assert by_name['get_trade_and_sync_status'].annotations.read_only_hint
             assert by_name['prepare_trade_confirmation_link'].annotations.read_only_hint
             assert all(tool.meta['securitySchemes'] == [{'type':'noauth'}] for tool in tools)

@@ -385,3 +385,148 @@ def test_only_existing_safe_model_metadata_supplies_failure_stage_statistics():
     assert projected['observed_peer_stages'] == ['planning']
     assert projected['model_error_categories'] == ['timeout']
     assert projected['provider_request_count'] == 'UNKNOWN'
+
+
+@pytest.mark.parametrize('outcome', ['partial', 'unavailable', 'exit'])
+def test_async_position_survives_real_http_disconnect_and_original_worker(monkeypatch, tmp_path, outcome):
+    """Real streamable HTTP + Worker.main + IPC/Pydantic; only analyze is synthetic."""
+    import os
+    import re
+    import socket
+    import subprocess
+    import sys
+    import threading
+    import time
+    from contextlib import contextmanager
+    import uvicorn
+    from pocs.chatgpt_skills import server as module
+    from pocs.chatgpt_skills.analysis import AnalysisResult
+
+    connect = socket.socket.connect
+    def loopback_only(sock, address):
+        if not isinstance(address, tuple) or address[0] not in ('127.0.0.1', 'localhost', '::1'):
+            raise AssertionError('EXTERNAL_NETWORK_FORBIDDEN')
+        return connect(sock, address)
+    monkeypatch.setattr(socket.socket, 'connect', loopback_only)
+    entered, release, expected, database = [tmp_path/name for name in ('entered','release','expected.json','frozen.db')]
+    database.touch()
+    original_spawn = subprocess.Popen
+    children=[]
+    probe='''import asyncio,json,os,socket,sys
+from pathlib import Path
+from pocs.chatgpt_skills import worker,analysis
+from app.llm_observation import observed_result
+socket.socket.connect=lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('NETWORK_FORBIDDEN'))
+@observed_result
+async def frozen(*args,**kwargs):
+ assert not args[3].get('snapshot_id')
+ assert os.getenv('ENABLE_IBKR_LIVE_TRADING')=='false'
+ Path(ENTERED).write_text('entered')
+ print('PRIVATE_WORKER_OUTPUT')
+ while not Path(RELEASE).exists(): await asyncio.sleep(.01)
+ if OUTCOME=='exit': os._exit(7)
+ return dict(synthetic=True,scenario='analyze_position',status=OUTCOME,issues=['SYNTHETIC_ONLY'],
+  queried_at='2026-10-27T00:00:00Z',conclusion='Original frozen professional report',
+  professional_result={'professional_explanation':[{'topic':'risk','text':'Original explanation'}]},
+  evidence={'records':[{'ref':'frozen-fact'}]},data_quality={'L3':False},limitations=['No trades'],scope={'readonly':True})
+async def save(*args,**kwargs):
+ result=await frozen(*args,**kwargs)
+ Path(EXPECTED).write_text(json.dumps(result))
+ return result
+analysis.analyze=save
+sys.argv=['worker','--frozen-database',DATABASE]
+worker.main()
+'''.replace('ENTERED',repr(str(entered))).replace('RELEASE',repr(str(release))).replace('OUTCOME',repr(outcome)).replace('EXPECTED',repr(str(expected))).replace('DATABASE',repr(str(database)))
+    def spawn(command, **kwargs):
+        child=original_spawn([os.environ.get('WP_BUSINESS_PYTHON',sys.executable),'-u','-c',probe],**kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(module.subprocess,'Popen',spawn)
+
+    @contextmanager
+    def http_server():
+        server=create_server(SimpleNamespace(real_config='not-opened',mock_database=None,
+            business_python='replaced-by-isolated-probe',portfolio_id=7,events=str(tmp_path/'events.jsonl')))
+        app=server.streamable_http_app(json_response=True,stateless_http=True)
+        listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(16)
+        config=uvicorn.Config(app,log_level='critical',access_log=False)
+        http=uvicorn.Server(config)
+        thread=threading.Thread(target=http.run,kwargs={'sockets':[listener]},daemon=True);thread.start()
+        for _ in range(200):
+            if http.started:break
+            time.sleep(.01)
+        assert http.started
+        try:yield f'http://127.0.0.1:{listener.getsockname()[1]}/mcp'
+        finally:
+            http.should_exit=True;thread.join(timeout=5);listener.close()
+            assert not thread.is_alive()
+
+    async def run(url):
+        async with Client(url,mode='legacy',read_timeout_seconds=10) as client:
+            tools={tool.name:tool for tool in (await client.list_tools()).tools}
+            scope=re.search(r'pa_[0-9a-f]{32}',tools['start_position_analysis'].description)[0]
+            assert len(tools)==12 and 'Synchronous compatibility' in tools['analyze_position'].description
+            request_id=scope+':li_request_00000001'
+            arguments={'request_id':request_id,'request':{'symbol':'LI:US','question':'PRIVATE_SYNTHETIC_QUESTION'}}
+            before=time.monotonic()
+            start=await client.call_tool('start_position_analysis',arguments)
+            assert not start.is_error,start.content
+            first=start.structured_content
+            assert time.monotonic()-before<2 and first['state']=='running' and first['job_id']
+        # The initiating HTTP connection/session has ended. Its lifespan must not kill the job.
+        for _ in range(300):
+            if entered.exists():break
+            await asyncio.sleep(.01)
+        assert entered.exists() and len(children)==1 and children[0].poll() is None
+        async with Client(url,mode='legacy',read_timeout_seconds=10) as client:
+            for _ in range(3):
+                before=time.monotonic()
+                pending=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
+                assert time.monotonic()-before<1 and pending.structured_content['state']=='running'
+                again=await client.call_tool('start_position_analysis',arguments)
+                assert again.structured_content['job_id']==first['job_id']
+            conflict=await client.call_tool('start_position_analysis',arguments|{'request':{'question':'different'}})
+            assert conflict.structured_content['issue']=='REQUEST_ID_CONFLICT'
+            busy=await client.call_tool('start_position_analysis',arguments|{'request_id':scope+':other_request_00002'})
+            assert busy.structured_content['issue']=='ANALYSIS_BUSY'
+            sync=await client.call_tool('analyze_position',{'request':{'question':'No duplicate sync call'}})
+            assert sync.is_error and 'ANALYSIS_BUSY' in str(sync.content)
+            assert len(children)==1
+            release.write_text('continue')
+            for _ in range(300):
+                final=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
+                if final.structured_content['state']!='running':break
+                await asyncio.sleep(.01)
+            final=final.structured_content
+            assert final['analysis_run_id']==first['analysis_run_id']
+            if outcome=='exit':
+                assert final['state']=='unavailable' and final['result'] is None and final['business_status']=='UNKNOWN'
+            else:
+                assert final['state']=='completed' and final['business_status']==outcome
+                assert final['result']==AnalysisResult.model_validate_json(expected.read_text()).model_dump(mode='json')
+                assert final['result']['llm_observation']['analysis_run_id']==first['analysis_run_id']
+                assert not final['result']['order_created']
+            again=await client.call_tool('start_position_analysis',arguments)
+            assert again.structured_content['job_id']==first['job_id'] and len(children)==1
+            return first,request_id
+    try:
+        with http_server() as url:first,request_id=asyncio.run(run(url))
+        # A fresh server instance models its process-local receipt loss. Old scope cannot start paid work.
+        with http_server() as url:
+            async def restarted():
+                async with Client(url,mode='legacy') as client:
+                    missing=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
+                    assert missing.structured_content['issue']=='JOB_UNKNOWN_OR_PROCESS_RESTARTED'
+                    retry=await client.call_tool('start_position_analysis',{'request_id':request_id,'request':{'question':'old request'}})
+                    assert retry.structured_content['issue']=='REQUEST_SCOPE_UNAVAILABLE'
+            asyncio.run(restarted())
+        assert len(children)==1
+        events=(tmp_path/'events.jsonl').read_text()
+        assert 'PRIVATE' not in events
+        rows=[json.loads(line) for line in events.splitlines()]
+        assert {row['analysis_run_id'] for row in rows}=={first['analysis_run_id']}
+    finally:
+        release.touch()
+        for child in children:
+            if child.poll() is None:child.terminate()
+            child.wait(timeout=5)

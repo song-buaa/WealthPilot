@@ -26,6 +26,7 @@ from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, P
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
+from pocs.chatgpt_skills.position_jobs import PositionJobs, PositionAnalysisJob
 from pocs.poc02_wealth_mcp import server as overview
 from pocs.chatgpt_skills.diagnostics import (ANALYSIS_OPERATIONS, request_run, diagnostic,
     safe_diagnostic, milliseconds)
@@ -195,7 +196,7 @@ def create_server(settings):
         "Use request.analysis_scope=net_worth for net-worth/loan/solvency planning and request.symbol for an explicit single-security scope. "
         "When can_propose_rebalance=false, preserve warnings and do not give precise executable quantities/prices. Eligibility never replaces final Web authorization.") if prepare_config else ""
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
-        instructions=("For professional analysis use analyze_position/review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
+        instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Use the stable boot-scoped request_id described by start; reuse it if the start response is lost. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
                       "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions)
     overview.settings = settings
@@ -272,61 +273,92 @@ def create_server(settings):
         except ValueError as error:
             raise ToolError(str(error)) from None
 
-    def analysis_call(operation, request):
-        identifier, started = run_id(), time.monotonic()
+    def analysis_call(operation, request, *, _client=None, _identifier=None, _reserved=False):
+        if not _reserved and not analysis_lock.acquire(blocking=False):
+            raise ToolError("ANALYSIS_BUSY")
+        worker_client = _client if _client is not None else analysis_client
+        identifier, started = _identifier or run_id(), time.monotonic()
         token = request_run.set(identifier)
         final = diagnostic(identifier, "mcp_received")
         overview.record_analysis_event(settings, final)
         stage = "ipc_receive"
         try:
-            with analysis_lock:
+            try:
+                value = worker_client.call(operation, request.model_dump(mode="json"))
+                stage = "pydantic_validation"
+                overview.record_analysis_event(settings, diagnostic(identifier, stage))
+                result = AnalysisResult.model_validate(value)
+                final = diagnostic(identifier, "mcp_return", status=result.status,
+                    category="business_unavailable" if result.status == "unavailable" else "NONE",
+                    observation=result.llm_observation)
+                return result
+            except ToolError as error:
+                detail = safe_diagnostic(getattr(error, "analysis_diagnostic", None), identifier)
+                final = detail or diagnostic(identifier, stage, category="business_error", protocol=True)
+                # Only an observed business analysis failure may degrade into a business result.
+                # Launch/IPC/JSON/identity failures remain actual MCP errors.
+                metadata = safe_metadata(getattr(error, "llm_observation", None))
+                if (str(error) in SAFE_ERRORS or detail and detail["protocol_is_error"] or
+                        metadata is None):
+                    final["protocol_is_error"] = True
+                    raise
+                from datetime import datetime, timezone
+                result = AnalysisResult(synthetic=bool(getattr(settings, "mock_database", None)), scenario=operation,
+                    status="unavailable", issues=["ANALYSIS_WORKER_UNAVAILABLE"],
+                    queried_at=datetime.now(timezone.utc).isoformat(), conclusion="专业分析未完成；未创建交易。",
+                    llm_observation=metadata)
+                final = diagnostic(identifier, "analyze_peer", category="business_error",
+                    status="unavailable", observation=metadata)
+                return result
+            except ValidationError:
+                final = diagnostic(identifier, stage, category="validation_failed", protocol=True,
+                    observation=value.get("llm_observation") if isinstance(value, dict) else None)
+                raise ToolError("ANALYSIS_RESULT_INVALID") from None
+            except Exception:
+                final = diagnostic(identifier, stage, category="unexpected_error", protocol=True)
+                raise ToolError("BUSINESS_OPERATION_UNAVAILABLE") from None
+            finally:
                 try:
-                    value = analysis_client.call(operation, request.model_dump(mode="json"))
-                    stage = "pydantic_validation"
-                    overview.record_analysis_event(settings, diagnostic(identifier, stage))
-                    result = AnalysisResult.model_validate(value)
-                    final = diagnostic(identifier, "mcp_return", status=result.status,
-                        category="business_unavailable" if result.status == "unavailable" else "NONE",
-                        observation=result.llm_observation)
-                    return result
-                except ToolError as error:
-                    detail = safe_diagnostic(getattr(error, "analysis_diagnostic", None), identifier)
-                    final = detail or diagnostic(identifier, stage, category="business_error", protocol=True)
-                    # Only an observed business analysis failure may degrade into a business result.
-                    # Launch/IPC/JSON/identity failures remain actual MCP errors.
-                    metadata = safe_metadata(getattr(error, "llm_observation", None))
-                    if (str(error) in SAFE_ERRORS or detail and detail["protocol_is_error"] or
-                            metadata is None):
-                        final["protocol_is_error"] = True
-                        raise
-                    from datetime import datetime, timezone
-                    result = AnalysisResult(synthetic=bool(getattr(settings, "mock_database", None)), scenario=operation,
-                        status="unavailable", issues=["ANALYSIS_WORKER_UNAVAILABLE"],
-                        queried_at=datetime.now(timezone.utc).isoformat(), conclusion="专业分析未完成；未创建交易。",
-                        llm_observation=metadata)
-                    final = diagnostic(identifier, "analyze_peer", category="business_error",
-                        status="unavailable", observation=metadata)
-                    return result
-                except ValidationError:
-                    final = diagnostic(identifier, stage, category="validation_failed", protocol=True,
-                        observation=value.get("llm_observation") if isinstance(value, dict) else None)
-                    raise ToolError("ANALYSIS_RESULT_INVALID") from None
+                    worker_client.close()
                 except Exception:
-                    final = diagnostic(identifier, stage, category="unexpected_error", protocol=True)
-                    raise ToolError("BUSINESS_OPERATION_UNAVAILABLE") from None
-                finally:
-                    try:
-                        analysis_client.close()
-                    except Exception:
-                        # Cleanup is diagnostic only; do not replace an already known business/protocol result.
-                        overview.record_analysis_event(settings, diagnostic(identifier, "worker_cleanup",
-                            category="cleanup_failed", elapsed_ms=milliseconds(started)))
+                    # Cleanup is diagnostic only; do not replace an already known business/protocol result.
+                    overview.record_analysis_event(settings, diagnostic(identifier, "worker_cleanup",
+                        category="cleanup_failed", elapsed_ms=milliseconds(started)))
         finally:
             final["elapsed_ms"] = milliseconds(started)
             overview.record_analysis_event(settings, final)
             request_run.reset(token)
+            if not _reserved:
+                analysis_lock.release()
 
-    @server.tool(meta=security_meta, annotations=read, description="Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Pass target_versions and scenario_legs in request; bind each scenario to the same snapshot_id. Client claimed target confirmation is an assumption unless server evidence verifies it. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
+    def execute_position_job(request, identifier):
+        # Never owned/closed by a streamable-HTTP request/session lifespan.
+        return analysis_call("analyze_position", request, _client=BusinessClient(analysis_settings),
+            _identifier=identifier, _reserved=True)
+
+    position_jobs = PositionJobs(execute_position_job, analysis_lock)
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
+        destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+        description=("Preferred single-symbol professional research. Quickly start exactly one original PEER/readonly Worker; no sync, prepare or trades. "
+            f"Use request_id '{position_jobs.scope}:<stable random token of 16-64 letters/digits/_/->'. "
+            "Keep the EXACT full ID and identical request parameters when retrying a lost start response; it returns the existing job, never another analysis. "
+            "Same ID with changed parameters is rejected. A previous process scope is unavailable; never silently replace it with a fresh ID after restart. "
+            "Supply the same original AnalysisRequest (question, optional symbol/history/snapshot). No snapshot is required for normal LI research. "
+            "Save returned job_id and query get_position_analysis_result; do not call sync analyze_position or start again while waiting. "
+            "One analysis at a time; busy/capacity errors do not start work. Results remain private in memory for two hours after completion; restart loses them."))
+    def start_position_analysis(request_id: Annotated[str, Field(min_length=1, max_length=128,
+            pattern=r"^[A-Za-z0-9:_-]+$")], request: AnalysisRequest) -> PositionAnalysisJob:
+        return position_jobs.start(request_id, request)
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
+        destructive_hint=False, idempotent_hint=True, open_world_hint=False),
+        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: return the original full AnalysisResult, including professional_result/conclusion/evidence/quality/limitations, at its original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Process-local private results expire two hours after completion.")
+    def get_position_analysis_result(job_id: Annotated[str, Field(min_length=32, max_length=64,
+            pattern=r"^[A-Za-z0-9_-]+$")]) -> PositionAnalysisJob:
+        return position_jobs.get(job_id)
+
+    @server.tool(meta=security_meta, annotations=read, description="Synchronous compatibility only: for ChatGPT long single-symbol research use start_position_analysis + get_position_analysis_result to avoid the 120-second tunnel deadline. Do not use this as a fallback while a job is running. Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Pass target_versions and scenario_legs in request; bind each scenario to the same snapshot_id. Client claimed target confirmation is an assumption unless server evidence verifies it. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
     def analyze_position(request: AnalysisRequest) -> AnalysisResult:
         return analysis_call("analyze_position", request)
 

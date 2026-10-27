@@ -32,6 +32,8 @@
 
 交易仍复用ActionDraft、Typed Intent、ExecutionBatch和OrderManager；原30秒报价TTL、WhatIf、新鲜原币现金、风险、确认版本/哈希及Web最终人工授权全部保留。UNKNOWN不重发，SYNC_UNVERIFIED不等于交易失败；合约存在、历史成交或WhatIf成功均不能直接证明当前账户可交易。
 
+正常 ChatGPT 单标长研究的候选入口为 `start_position_analysis` → `get_position_analysis_result`：一次启动、复用同一 job_id 取回原 PEER 报告，断线或轮询不会重新分析。原 `analyze_position` 保留同步兼容；不以延长内部超时绕过 Tunnel 的单请求期限。此候选尚未合并/部署，使用、幂等与重启边界见[4.2 异步取回说明](docs/V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+
 ## 当前架构与运行边界
 
 **MacBook = Dev，Mac mini = Prod。** 原完整FastAPI/React、MCP/Tunnel、业务worker与共享SQLite沿用现有分层。同步发布更新当前Position；新U1视图冻结同一版本的Portfolio/Wealth及质量输入；已有视图不被后续同步改写。PEER、Skills及decision_engine原权威不替换。
