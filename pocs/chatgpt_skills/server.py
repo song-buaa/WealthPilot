@@ -13,12 +13,12 @@ from types import SimpleNamespace
 from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from app.llm_observation import run_id, safe_metadata, unavailable
+from app.llm_observation import run_id, safe_metadata
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import Field, ValidationError
 from backend.services.instruments.tradability import TradabilityQuery
 from pocs.chatgpt_skills.contracts import TradabilityResult
 from typing import Annotated
@@ -27,6 +27,8 @@ from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkRe
 from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
 from pocs.poc02_wealth_mcp import server as overview
+from pocs.chatgpt_skills.diagnostics import (ANALYSIS_OPERATIONS, request_run, diagnostic,
+    safe_diagnostic, milliseconds)
 
 
 class BusinessClient:
@@ -49,61 +51,123 @@ class BusinessClient:
 
     def call(self, operation, arguments):
         with self.lock:
-            identifier = run_id() if operation in ("analyze_position", "review_portfolio", "analyze_performance") else None
+            identifier = (request_run.get() or run_id()) if operation in ANALYSIS_OPERATIONS else None
             started = time.monotonic()
-            if self.process is None or self.process.poll() is not None:
-                self.close()
-                env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
-                env.update({k:os.environ[k] for k in MODEL_ENV_KEYS if k in os.environ})
-                env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
-                           ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
-                           FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
-                command = [self.settings.business_python, str(Path(__file__).with_name("worker.py")),
-                           "--portfolio-id", str(self.settings.portfolio_id)]
-                if getattr(self.settings, "analysis_env_file", None):
-                    command += ["--analysis-env-file", self.settings.analysis_env_file]
-                if self.settings.real_config:
-                    command += ["--real-config", self.settings.real_config]
-                if self.settings.mock_database:
-                    command += ["--mock-database", self.settings.mock_database]
-                self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, env=env,
-                    cwd=getattr(self.settings, "worker_cwd", None))
+            stage = "worker_start"
+            def record(value):
+                if identifier:
+                    overview.record_analysis_event(self.settings, value)
+            def fail(category, *, metadata=None, exit_code=None):
+                error = ToolError("ANALYSIS_RUN_ID_MISMATCH" if category == "run_id_mismatch" else "BUSINESS_OPERATION_UNAVAILABLE")
+                if identifier:
+                    error.analysis_diagnostic = diagnostic(identifier, stage, category=category, protocol=True,
+                        elapsed_ms=milliseconds(started), observation=metadata, exit_code=exit_code)
+                    if metadata:
+                        error.llm_observation = metadata
+                return error
             try:
+                if self.process is None or self.process.poll() is not None:
+                    self.close()
+                    record(diagnostic(identifier, stage)) if identifier else None
+                    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
+                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS if k in os.environ})
+                    env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
+                               ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
+                               FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
+                    command = [self.settings.business_python, str(Path(__file__).with_name("worker.py")),
+                               "--portfolio-id", str(self.settings.portfolio_id)]
+                    if getattr(self.settings, "analysis_env_file", None):
+                        command += ["--analysis-env-file", self.settings.analysis_env_file]
+                    if self.settings.real_config:
+                        command += ["--real-config", self.settings.real_config]
+                    if self.settings.mock_database:
+                        command += ["--mock-database", self.settings.mock_database]
+                    self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL, text=True, env=env,
+                        cwd=getattr(self.settings, "worker_cwd", None))
+                stage = "request_send"
                 envelope = {"operation": operation, "arguments": arguments}
                 if identifier:
-                    envelope["analysis_run_id"] = identifier
+                    envelope.update(analysis_run_id=identifier, diagnostic_events=True)
+                record(diagnostic(identifier, stage)) if identifier else None
                 self.process.stdin.write(json.dumps(envelope)+"\n")
                 self.process.stdin.flush()
-                if not select.select([self.process.stdout], [], [], 270 if operation in ("analyze_position", "review_portfolio", "analyze_performance") else 45)[0]:
-                    raise TimeoutError()
-                response = json.loads(self.process.stdout.readline())
-            except (OSError, ValueError, KeyError, TimeoutError) as caught:
-                # A timeout is never a permission to replay a write automatically.
-                self.close()
-                error = ToolError("BUSINESS_OPERATION_UNAVAILABLE")
+                stage = "ipc_wait"
+                record(diagnostic(identifier, stage)) if identifier else None
+                # One absolute deadline, including progress frames; no timeout extension or replay.
+                deadline = time.monotonic() + (270 if identifier else 45)
+                pending = b""
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError()
+                    if b"\n" not in pending:
+                        remaining = max(0, deadline - time.monotonic())
+                        if not select.select([self.process.stdout], [], [], remaining)[0]:
+                            raise TimeoutError()
+                        try:
+                            descriptor = self.process.stdout.fileno()
+                        except (AttributeError, OSError, ValueError):
+                            chunk = self.process.stdout.readline().encode()  # in-memory test stream
+                        else:
+                            chunk = os.read(descriptor, 65536)
+                        if not chunk:
+                            raise EOFError()
+                        pending += chunk
+                        continue
+                    line, pending = pending.split(b"\n", 1)
+                    stage = "ipc_receive"
+                    response = json.loads(line)
+                    if not isinstance(response, dict):
+                        raise TypeError()
+                    if response.get("type") != "analysis_diagnostic":
+                        break
+                    value = safe_diagnostic(response.get("diagnostic"), identifier)
+                    if value is None:
+                        raise fail("run_id_mismatch")
+                    record(value)
+                    stage = "ipc_wait"
+                record(diagnostic(identifier, "ipc_receive")) if identifier else None
+                if type(response.get("ok")) is not bool:
+                    raise TypeError()
+                if not response["ok"]:
+                    code = response.get("error")
+                    error = ToolError(code if isinstance(code, str) and code in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE")
+                    if identifier and code == "WORKER_START_REFUSED":
+                        stage = "worker_start"
+                        raise fail("worker_start_refused", exit_code=self.process.poll())
+                    metadata = safe_metadata(response.get("llm_observation"))
+                    if identifier and metadata and metadata["analysis_run_id"] != identifier:
+                        raise fail("run_id_mismatch")
+                    if identifier:
+                        value = safe_diagnostic(response.get("analysis_diagnostic"), identifier)
+                        if value:
+                            error.analysis_diagnostic = value
+                        if metadata:
+                            error.llm_observation = metadata
+                    raise error
+                result = response["result"]
+                if not isinstance(result, dict):
+                    raise TypeError()
                 if identifier:
-                    error.llm_observation = unavailable(identifier,
-                        status="timeout" if isinstance(caught, TimeoutError) else "failed",
-                        elapsed_ms=int((time.monotonic()-started)*1000))
-                raise error from None
-            if not response.get("ok"):
-                code = response.get("error")
-                error = ToolError(code if code in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE")
-                metadata = safe_metadata(response.get("llm_observation"))
-                if identifier and metadata and metadata["analysis_run_id"] != identifier:
-                    raise ToolError("ANALYSIS_RUN_ID_MISMATCH")
-                if identifier and metadata and metadata["analysis_run_id"] == identifier:
-                    error.llm_observation = metadata
-                raise error
-            if identifier:
-                metadata = safe_metadata(response["result"].get("llm_observation"))
-                if metadata and metadata["analysis_run_id"] != identifier:
-                    raise ToolError("ANALYSIS_RUN_ID_MISMATCH")
-                response["result"].pop("llm_observation", None)
-                if metadata is not None:
-                    response["result"]["llm_observation"] = metadata
-            return response["result"]
+                    metadata = safe_metadata(result.get("llm_observation"))
+                    if metadata and metadata["analysis_run_id"] != identifier:
+                        raise fail("run_id_mismatch")
+                    result.pop("llm_observation", None)
+                    if metadata is not None:
+                        result["llm_observation"] = metadata
+                return result
+            except ToolError:
+                raise
+            except (OSError, ValueError, KeyError, TypeError, TimeoutError, EOFError) as caught:
+                category = ("worker_start_failed" if stage == "worker_start" else
+                    "ipc_timeout" if isinstance(caught, TimeoutError) else
+                    "worker_exited" if isinstance(caught, EOFError) else
+                    "invalid_json" if isinstance(caught, ValueError) else
+                    "invalid_envelope" if isinstance(caught, (TypeError, KeyError)) else "ipc_io")
+                exit_code = self.process.poll() if self.process is not None else None
+                if not identifier:
+                    self.close()  # Preserve non-analysis client cleanup and no-replay policy.
+                raise fail(category, exit_code=exit_code) from None
 
 
 def create_server(settings):
@@ -207,22 +271,58 @@ def create_server(settings):
             raise ToolError(str(error)) from None
 
     def analysis_call(operation, request):
-        with analysis_lock:
-            try:
-                return AnalysisResult.model_validate(analysis_client.call(operation, request.model_dump(mode="json")))
-            except ToolError as error:
-                if str(error) in SAFE_ERRORS:
-                    raise  # Preserve original authorization/lookup error contracts.
-                metadata = safe_metadata(getattr(error, "llm_observation", None))
-                if metadata is None:
-                    raise
-                from datetime import datetime, timezone
-                return AnalysisResult(synthetic=bool(getattr(settings, "mock_database", None)), scenario=operation,
-                    status="unavailable", issues=["ANALYSIS_WORKER_UNAVAILABLE"],
-                    queried_at=datetime.now(timezone.utc).isoformat(), conclusion="专业分析未完成；未创建交易。",
-                    llm_observation=metadata)
-            finally:
-                analysis_client.close()
+        identifier, started = run_id(), time.monotonic()
+        token = request_run.set(identifier)
+        final = diagnostic(identifier, "mcp_received")
+        overview.record_analysis_event(settings, final)
+        stage = "ipc_receive"
+        try:
+            with analysis_lock:
+                try:
+                    value = analysis_client.call(operation, request.model_dump(mode="json"))
+                    stage = "pydantic_validation"
+                    overview.record_analysis_event(settings, diagnostic(identifier, stage))
+                    result = AnalysisResult.model_validate(value)
+                    final = diagnostic(identifier, "mcp_return", status=result.status,
+                        category="business_unavailable" if result.status == "unavailable" else "NONE",
+                        observation=result.llm_observation)
+                    return result
+                except ToolError as error:
+                    detail = safe_diagnostic(getattr(error, "analysis_diagnostic", None), identifier)
+                    final = detail or diagnostic(identifier, stage, category="business_error", protocol=True)
+                    # Only an observed business analysis failure may degrade into a business result.
+                    # Launch/IPC/JSON/identity failures remain actual MCP errors.
+                    metadata = safe_metadata(getattr(error, "llm_observation", None))
+                    if (str(error) in SAFE_ERRORS or detail and detail["protocol_is_error"] or
+                            metadata is None):
+                        final["protocol_is_error"] = True
+                        raise
+                    from datetime import datetime, timezone
+                    result = AnalysisResult(synthetic=bool(getattr(settings, "mock_database", None)), scenario=operation,
+                        status="unavailable", issues=["ANALYSIS_WORKER_UNAVAILABLE"],
+                        queried_at=datetime.now(timezone.utc).isoformat(), conclusion="专业分析未完成；未创建交易。",
+                        llm_observation=metadata)
+                    final = diagnostic(identifier, "analyze_peer", category="business_error",
+                        status="unavailable", observation=metadata)
+                    return result
+                except ValidationError:
+                    final = diagnostic(identifier, stage, category="validation_failed", protocol=True,
+                        observation=value.get("llm_observation") if isinstance(value, dict) else None)
+                    raise ToolError("ANALYSIS_RESULT_INVALID") from None
+                except Exception:
+                    final = diagnostic(identifier, stage, category="unexpected_error", protocol=True)
+                    raise ToolError("BUSINESS_OPERATION_UNAVAILABLE") from None
+                finally:
+                    try:
+                        analysis_client.close()
+                    except Exception:
+                        # Cleanup is diagnostic only; do not replace an already known business/protocol result.
+                        overview.record_analysis_event(settings, diagnostic(identifier, "worker_cleanup",
+                            category="cleanup_failed", elapsed_ms=milliseconds(started)))
+        finally:
+            final["elapsed_ms"] = milliseconds(started)
+            overview.record_analysis_event(settings, final)
+            request_run.reset(token)
 
     @server.tool(meta=security_meta, annotations=read, description="Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Pass target_versions and scenario_legs in request; bind each scenario to the same snapshot_id. Client claimed target confirmation is an assumption unless server evidence verifies it. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
     def analyze_position(request: AnalysisRequest) -> AnalysisResult:
@@ -262,6 +362,7 @@ def create_server(settings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8810)
+    parser.add_argument("--events", help="Optional private metadata-only completion ledger, outside Git")
     parser.add_argument("--business-python", required=True)
     parser.add_argument("--real-config")
     parser.add_argument("--access-evidence")
@@ -273,7 +374,7 @@ def main():
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))
     args = parser.parse_args()
-    args.events = None
+
     overview.validate_real_access(args, parser)
     if not args.real_config and not args.mock_database:
         parser.error("an explicit synthetic fixture or reviewed read configuration is required")

@@ -76,6 +76,32 @@ def get_wealth_overview(currency: Literal["CNY"] = "CNY") -> Overview:
     return validated
 
 
+def record_analysis_event(configuration, value):
+    """Normal analysis stages; stderr/optional existing private JSONL sink only."""
+    import logging
+    from pocs.chatgpt_skills.diagnostics import safe_diagnostic
+    clean = safe_diagnostic(value, value.get("analysis_run_id"))
+    if clean is None:
+        return
+    event = {"time": datetime.now(timezone.utc).isoformat(), "event": "mcp_analysis", **clean}
+    line = json.dumps(event, ensure_ascii=True)
+    # Never use stdout: it belongs to MCP/IPC. No exception strings or payloads.
+    logging.getLogger("wealthpilot.mcp.analysis").warning(line)
+    path = getattr(configuration, "events", None)
+    if path:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                import stat
+                mode = os.fstat(fd).st_mode
+                if stat.S_ISREG(mode) and not mode & 0o077:
+                    os.write(fd, (line + "\n").encode())
+            finally:
+                os.close(fd)
+        except OSError:
+            logging.getLogger("wealthpilot.mcp.analysis").warning("MCP_ANALYSIS_EVENT_SINK_UNAVAILABLE")
+
+
 def validate_real_access(settings, parser):
     if settings.real_config:
         if not settings.access_evidence:

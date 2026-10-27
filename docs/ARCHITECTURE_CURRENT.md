@@ -254,3 +254,5 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 
 2026-10-27 L1证据链开发候选仍复用原AV/Research/证据/输出Owner：配置每次解析且不隐式跨账户轮换；财务来源冲突按字段传播，真实盈利/现金流背离保留为风险事实；原事实层仅在服务端独立原文核验 owner 确认后可关联逐季度官方披露；研究卡自报字段不能认证来源，当前无该 owner 接入时保持 UNKNOWN，保留双来源出处，不以公告/抓取时间改写财期。技术L1可引用独立合格周期，原technical_verified保留完整日周含义；Web/Explain重核周期，L3完整门槛不变。新闻抓取与入库时钟分开，既有卡有界优选。无Schema/交易/同步/模型变更，合同与生产待核对项见[实施记录](V42_IMPLEMENTATION.md#l1证据链p0p1修复2026-10-27开发候选)。
+
+正常 MCP 分析的安全阶段诊断沿原 [server/BusinessClient](../pocs/chatgpt_skills/server.py) → [Worker](../pocs/chatgpt_skills/worker.py) → 原 PEER → IPC/Pydantic 返回，复用匿名 analysis_run_id 与原只读事件入口，区分协议错误与业务 ok/partial/unavailable。安全枚举投影和阶段记录不参与业务资格，不输出原文；未观测的模型/Provider 请求数 UNKNOWN。240/270 秒超时与专项预算 owner 不变；字段、离线覆盖及待授权的一次 LI 验证见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。

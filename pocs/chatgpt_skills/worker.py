@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.append(str(Path(__file__).resolve().parents[2] / "backend"))
@@ -15,7 +16,8 @@ MOCK_APPLICATION_ID = 0x57504D4B
 SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DRAFT_NOT_FOUND",
                "REQUEST_ID_CONFLICT", "EXPLICIT_CONFIRMATION_REQUIRED", "PREVIEW_CHANGED_REVIEW_REQUIRED",
                "RISK_CONFIRMATION_REQUIRED", "DRAFT_NOT_PENDING", "DRAFT_CHANGED_REVIEW_REQUIRED", "BROKER_ORDER_STATE_UNAVAILABLE", "ORDER_CURRENCY_MARKET_MISMATCH", "MOCK_TRADE_FIXTURE_NOT_ENABLED"}
-from app.llm_observation import safe_metadata
+from app.llm_observation import safe_metadata, run_id
+from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
@@ -136,9 +138,21 @@ def main():
             config = dict(database_path=str(Path(args.frozen_database or args.asset_view_source).resolve(strict=True)),
                           portfolio_id=args.portfolio_id, database_contract_path=args.source_contract)
         for line in sys.stdin:
+            identifier, events, phase = None, False, "request_received"
+            started = time.monotonic()
+            channel = sys.stdout
+            def progress(stage):
+                if events:
+                    channel.write(json.dumps({"type": "analysis_diagnostic", "diagnostic":
+                        diagnostic(identifier, stage, elapsed_ms=milliseconds(started))}) + "\n")
+                    channel.flush()
             try:
                 request = json.loads(line)
                 operation, a = request["operation"], request["arguments"]
+                if operation in ANALYSIS_OPERATIONS and request.get("analysis_run_id"):
+                    identifier = run_id(request["analysis_run_id"])
+                    events = request.get("diagnostic_events") is True
+                    progress(phase)
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     if operation == "capture_asset_view" and args.frozen_database:
                         from pocs.chatgpt_skills.asset_view import capture
@@ -158,6 +172,8 @@ def main():
                             config.get("database_contract_path") if config else None)
                         result = frozen_result(view, operation, a)
                     elif operation in ("analyze_position", "review_portfolio", "analyze_performance"):
+                        phase = "analyze_peer"
+                        progress(phase)
                         import asyncio
                         from pocs.chatgpt_skills.analysis import analyze
                         if args.analysis_env_file:
@@ -216,12 +232,24 @@ def main():
                         result = workflow.status(a["draft_id"])
                     else:
                         raise ValueError("UNKNOWN_OPERATION")
+                phase = "result_serialization"
+                progress(phase)
                 response = {"ok": True, "result": result}
+                serialized = json.dumps(response, ensure_ascii=False, default=str)
             except Exception as error:
                 code = str(error) if str(error) in SAFE_ERRORS else "BUSINESS_OPERATION_UNAVAILABLE"
                 response = {"ok": False, "error": code,
                             "llm_observation":safe_metadata(getattr(error, "llm_observation", None))}
-            print(json.dumps(response, ensure_ascii=False, default=str), flush=True)
+                if phase == "result_serialization" and isinstance(result, dict):
+                    response["llm_observation"] = safe_metadata(result.get("llm_observation"))
+                if identifier:
+                    response["analysis_diagnostic"] = diagnostic(identifier, phase,
+                        category="serialization_failed" if phase == "result_serialization" else "business_error",
+                        protocol=phase != "analyze_peer", elapsed_ms=milliseconds(started),
+                        observation=response["llm_observation"])
+                serialized = json.dumps(response, ensure_ascii=False)
+            channel.write(serialized + "\n")
+            channel.flush()
     finally:
         if workflow:
             workflow.close()

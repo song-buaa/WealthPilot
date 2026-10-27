@@ -469,3 +469,29 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 迁移前在原锁内用 O_EXCL/0600 写入并 fsync `<ledger>.pre-li-retest`，包装原始字节和摘要，再 fsync 目录；该文件是 recovery_only 证据，不能被 Budget 当第二账本打开。随后原 inode 内提交扩展状态，保持旧进程的 flock 互斥关系，不能原子替换文件破坏旧等待者的锁。读取器严格验证 v1/v2 Schema、run 绑定、累计和、权限及限额；旧代码读到 v2 会拒绝。中断/损坏一律拒绝发送，不恢复、不覆盖、不重置原账本；残留恢复证据即使主文件未变，也要求人工调查，禁止自动重试迁移。部署后真实迁移/运行及任何恢复均须单独授权，本开发任务未触碰生产账本。
 
 脱敏合成 v1 副本严格复现原7次、预留USD0.5564585：登记后原数据逐项相等，剩余17次/USD2.4435415仍属同一累计预算；MockTransport 验证第25次前拒绝、成本可先耗尽、SDK重试逐次预留；多进程竞争仅一人登记成功。覆盖旧记录、跨标的/缺授权/重复、重启、旧普通claim、迁移中断保留恢复证据和损坏拒绝。该副本不是从生产复制，也不表示已经执行 LI 真实复验。最终测试和 CI 以本 PR 完整 SHA 证据为准。
+
+## 正常 MCP 单标错误诊断（2026-10-27，待合并候选）
+
+范围仅为正常 `analyze_position`（同一适配器上的两项分析读取沿用），不传 snapshot_id，不改 PEER、模型/Provider、240秒分析/270秒 IPC 超时、专项验收账本、数据资格或交易权限。历史两次真实错误的执行位置仍 UNKNOWN；此修复提供下一次运行证据，不能倒推事故根因。
+
+### 最小链路与字段
+
+- 复用服务端匿名 `analysis_run_id`，在正常 MCP 接收时建立，经 ContextVar、内部 Worker 请求及原 `observed_result` 贯通。客户端仍不能提供/伪造此 ID。
+- [BusinessClient/server](../pocs/chatgpt_skills/server.py) 记录接收、启动、发送、IPC、Pydantic 及最终返回；[Worker](../pocs/chatgpt_skills/worker.py) 记录已进入请求、analyze/PEER、结果序列化。阶段表示实际到达/进入，不声称阶段已成功完成。
+- Worker 仅在内部请求 `diagnostic_events=true` 时发送闭合集合进度帧；原单个最终结果帧保持不变。父进程支持拆包/合包，所有进度共用原绝对 IPC 截止时间。没有自动重发。旧内部调用未启用该标志时仍只收到一个最终 JSON 行；MCP/HTTP/SSE 公共 schema 不变。
+- [安全投影](../pocs/chatgpt_skills/diagnostics.py)仅接受枚举/数值/匿名 ID；[原只读事件入口](../pocs/poc02_wealth_mcp/server.py)输出结构化 stderr，另可用原 `--events` 机制写入私有 0600 JSONL。写入失败只报告固定代码，不影响分析结果；不输出 stdout、不建表/服务、不记录问题、模型文本、异常原文、HTTP body、账户、持仓或凭证。
+- 字段：`protocol_is_error`、`business_status`（ok/partial/unavailable/UNKNOWN）、`failure_stage`、`safe_error_category`、`elapsed_ms`、`analysis_run_id`、`stage`；原安全 LLM 元数据确有记录时附 `observed_peer_stages` / `model_error_categories` 闭合枚举，无记录 UNKNOWN。只有实际 `poll()` 获得时才有 `worker_exit_code`。
+- `model_call_count` 只来自同 ID 的原安全 LLM 元数据，scope 为 `unified_generation_adapter_only`，不是 HTTP 尝试总数。无观测为 UNKNOWN；Provider 请求数未建立计数证据，始终 UNKNOWN。已有 PR #42 的型号/Token/重试等元数据不变，不构建第二套费用或请求计数系统。
+- 正常业务 unavailable 保持正常 MCP 返回；启动、IPC 超时/退出、无效 JSON/信封、串 run ID、序列化和 Pydantic 错误保持 MCP `is_error=true`。已观测的 analyze 异常可沿原合同降级为 unavailable。错误事件的 UNKNOWN 不解释为未调用模型。
+- 如 Worker 硬退出/超时，依据同 ID 最后已收到阶段与 IPC 错误定位；未收到的后续阶段、Provider/模型实际执行均不得猜测。最终事件区分业务状态与协议返回，旧 `ok=true` 不再作为业务完成证据。
+
+### 离线验证与权限
+
+专项覆盖正常三种状态、启动拒绝/失败、IPC 超时/退出、无效 JSON/信封、Pydantic、序列化、模型已调用但业务未完成、匿名 ID 串联/防伪、进度不能延长期限、未知统计、私有输出抑制、原读取/Mock 人工确认与无自动重跑；见[正常 MCP 协议测试](../pocs/chatgpt_skills/test_v42_protocol.py)。真实 Worker 测试仅替换 analyze 为合成函数，禁网、不加载生产配置/数据库；原完整 PEER 兼容由全量/离线 M5 回归覆盖。CI 仍执行原四项 Gate，无配置/锁文件修改。
+
+### 合并后部署与一次 LI 验证（未执行）
+
+1. 本次只交付 PR，不自动合并/部署。获授权后 MCP 父进程与其 Worker 必须使用同一已验证 SHA；只切换这条 MCP 代码路径，依赖锁及完整业务 Python 沿用。无需数据库迁移、账本迁移、模型/Provider 配置修改或券商刷新。
+2. 原 stderr 安全事件默认可用；若需私有 JSONL，另经部署授权配置代码外 `--events` 路径，文件 0600、目录 0700。不要开放原始业务日志。失败时恢复原 MCP 启动版本并核对健康，不恢复/改写数据库或账本。
+3. 获得一次真实调用的单独授权后，通过正常 WealthPilot-Prod 仅调用一次：`analyze_position({"request":{"symbol":"LI:US","question":"请基于当前已有合格证据分析理想汽车的经营、技术趋势与风险；证据不足时明确降级。仅研究，不准备交易。"}})`。不传 snapshot_id/run ID，不使用专项 campaign，不自动重试；本开发任务没有执行此调用。
+4. 记录客户端 `is_error` 与业务 status；从私有安全事件取得同一匿名 ID，核对 Worker/PEER/序列化/IPC/Pydantic/返回阶段及原 LLM 元数据。协议失败保留最后已证实阶段、类别、实际退出码；缺观测继续 UNKNOWN。成功也须检查专业解释/证据/降级，不能以事件成功代替研究质量验收。L2–L4/人工交易边界维持原合同。
