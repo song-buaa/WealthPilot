@@ -111,7 +111,8 @@ jobs:
 
   mcp-poc-tests:
     name: MCP PoC tests
-    runs-on: ubuntu-latest
+    # Locked Playwright does not support the rolling ubuntu-latest 26.04 image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       PYTHON_DOTENV_DISABLED: "1"
