@@ -445,3 +445,14 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 
 
 本轮CI环境定点兼容：首个候选0c2c4fa的PR Run 40436379570（Job 121965901536）已通过适配器、部署guards、Tunnel与双HTTP服务，但ubuntu-latest滚动分配到26.04，锁定Playwright报`does not support chromium on ubuntu26.04-x64`，浏览器测试尚未启动。仅将原MCP Job固定为本地锁定版本支持的ubuntu-24.04；不升级/删依赖、不跳浏览器测试、不修改任何Job时限或生产环境，四项Gate保留。最终exact-HEAD CI绑定该CI-only兼容提交，不以失败Run冒充通过。
+
+
+### PR #44 合并前官方来源可信边界定点修复
+
+发现并离线复现：Research 原 raw_facts 可含导入、自报或 AI 候选字段；repository 的 unverified_until_source_checks 先前会被 _official_observations 仅凭官方域、结构和数值匹配升级。官方域名、可填写的 source_locator、AV 数值一致和自报 published_at 并不能独立证明公告日。原 _build_facts_layer 保留 payload，LLM 叙事层与事实层分开，但这不构成原文核验。
+
+最小修复只限制原关联 owner：普通卡仍透传候选及原始时钟以便追溯，不授予官方时钟权威。assess/link_disclosure_clocks 的可选 disclosure_verifier 是受信任服务端代码依赖，按 record_id 查询与卡片独立核验的原文结果，不从研究卡、请求 options 或质量标志加载。只有该独立结果的 symbol/URL/公告/抓取时间、issuer 与逐项观察全部等于候选，且提供原文 SHA256 与公告定位时，才继续执行既有严格域名、主体、季度、口径、币种、单位和数值关联。publication_links 保留原文哈希及公告定位。卡片自报核验标志/哈希/官方 URL 均不能代替这个独立 owner。
+
+**当前生产调用方未接入独立官方原文核验 owner，默认不传 verifier，因此不会从研究卡自动补齐 AV 公告钟，继续 UNKNOWN。** 本轮不新增 Provider、核验文件库、配置、原文抓取或审批系统。正例只用与卡片分离的冻结源 owner 替身证明严格关联合同；不声称已经核验生产原文，也不把构造一个 verifier 的测试当真实来源认证。将来接入者须先独立核验原文的来源、公告日和可定位财务行，不能直接返回研究卡或 AI 抽取结果；本 PR 不实现或暗中启用该接入。
+
+定点对抗覆盖：自报 URL/日期/匹配数值与各种 verified/quality/hash 标志不提升 AV；独立源缺失、公告日/行值不一致、无公告定位或无原文哈希拒绝；独立源全匹配仍按逐季度规则关联；原独立有效经营字段、日周证据和 L2–L4 拒绝不变。原 LI 真实收入冲突回归保留。最终代码/测试/CI 绑定后续 PR HEAD，不沿用 50be44c 的历史通过结果。

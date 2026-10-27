@@ -106,7 +106,7 @@ PR #39 收口：[账户候选](../backend/services/exit_candidates.py)无需手�
 
 2026-10-23 最小修复：[原 AV adapter](../backend/services/market_data/av_fundamentals_service.py) 独立端点/缓存/时钟，保留收入来源冲突及零 CapEx 阻断；[原 symbol Owner](../backend/utils/symbol.py) 的 position_market_symbol 优先 canonical identity；[原输出 policy](../backend/services/market_data/output_policy.py) 负责技术定性主题、同次候选恢复及无敏感内容诊断，Reviewer 区分新旧合同。未新增 Provider、投研引擎或写权限。脱敏真实来源回归见[冻结夹具](../tests/fixtures/v42_real_research/README.md)及[定向测试](../tests/test_v42_real_research.py)；修复待合并/部署后复验，不宣称三标已通过。
 
-2026-10-27 L1证据链候选：原AV resolver统一Worker/Fundamentals/Kline/Research变量与安全诊断；原证据Owner按字段隔离估值冲突、显式逐季度关联官方披露，并按日/周独立提供L1引用，L3仍需完整证据。原Research投影区分抓取/入库时钟并有界优选候选；Web/Explain按周期重核。无新引擎或写权限；[实现/源合同及运行待验项](V42_IMPLEMENTATION.md#l1证据链p0p1修复2026-10-27开发候选)，[新增回归](../tests/test_v42_evidence_quality.py)。
+2026-10-27 L1证据链候选：原AV resolver统一Worker/Fundamentals/Kline/Research变量与安全诊断；原证据Owner按字段隔离估值冲突、显式逐季度关联官方披露，并按日/周独立提供L1引用，L3仍需完整证据。官方时钟关联须独立服务端原文核验，卡片自报URL/日期/匹配值不授信；默认无核验owner不补钟。原Research投影区分抓取/入库时钟并有界优选候选；Web/Explain按周期重核。无新引擎或写权限；[实现/源合同及运行待验项](V42_IMPLEMENTATION.md#l1证据链p0p1修复2026-10-27开发候选)，[新增回归](../tests/test_v42_evidence_quality.py)。
 
 ### 生成模型配置与 API 兼容（工程候选）
 

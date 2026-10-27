@@ -273,7 +273,24 @@ _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"op
                          "capitalExpenditures":"positive_capital_cash_outflow"}
 
 
-def _official_observations(raw, symbol, at):
+def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
+    # Cards/AI extraction are candidates, including their URL/date/hash claims.
+    # Only a server-injected independent source owner can supply authority.
+    # No production verifier is currently wired: absence fails closed.
+    if not callable(disclosure_verifier) or not isinstance(raw.get("record_id"), str) or not raw["record_id"]:
+        return []
+    verified = disclosure_verifier(raw.get("record_id"))
+    if not isinstance(verified, dict) or any(verified.get(key) != raw.get(key) for key in
+            ("record_id", "symbol", "source_url", "published_at", "fetched_at",
+             "official_disclosure", "financial_observations")):
+        return []
+    proof = mapping(verified.get("source_verification"))
+    digest = proof.get("document_sha256")
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or not isinstance(proof.get("publication_locator"), str)
+            or not proof["publication_locator"].strip()):
+        return []
     from backend.services.instruments.issuers import IDENTITIES
     meta=mapping(raw.get("official_disclosure"))
     issuer=IDENTITIES.get((symbol,{"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])))
@@ -302,24 +319,28 @@ def _official_observations(raw, symbol, at):
                 or not math.isfinite(value*scale)):
             continue
         result.append(dict(obs,value=value*scale,unit_scale=1,published_at=raw["published_at"],
+            source_document_sha256=digest, publication_locator=proof["publication_locator"],
             issuer_id=issuer,record_id=raw["record_id"],source_url=raw["source_url"],fetched_at=raw["fetched_at"]))
     return result
 
 
-def link_disclosure_clocks(market, research, at, symbol):
+def link_disclosure_clocks(market, research, at, symbol, *, disclosure_verifier=None):
     """Join existing structured official facts only after exact component matching.
 
     No fetch/write and no fact replacement. Every quarter (and prior-year growth
     component) needs its own matching observation; a latest release is not a TTM clock.
+    disclosure_verifier is a trusted in-process source-owner dependency, never a
+    card/request field. It must resolve independently checked original publication
+    and observations by record ID. Hash/locator claims from a card grant no trust.
+    Without an independently implemented owner, leave it unset (as production does).
     """
     raw=mapping(market.get("fundamentals"))
     observations=[];projected=[]
     for item in research:
         row=mapping(item)
-        official=_official_observations(row,symbol,at) if row.get("symbol")==symbol else []
+        official=_official_observations(row,symbol,at,disclosure_verifier=disclosure_verifier) if row.get("symbol")==symbol else []
         if official:
-            # Numeric authority comes from the structured owner contract above,
-            # never from an arbitrary quality/confirmed flag on an old card.
+            # The independent server source owner, not card structure, grants trust.
             row["quality"]="official_structured_observations"
             row["financial_observations"]=official
             observations.extend(official)
@@ -350,7 +371,8 @@ def link_disclosure_clocks(market, research, at, symbol):
                     and obs["value"]==number(row.get(key))]
                 if not matches: break
                 links.append({name:matches[0][name] for name in ("issuer_id","record_id","source_url",
-                    "published_at","fetched_at","fiscal_period_end","currency","unit","unit_scale","accounting_basis","source_field","source_locator")})
+                    "published_at","fetched_at","fiscal_period_end","currency","unit","unit_scale","accounting_basis","source_field","source_locator",
+                    "source_document_sha256","publication_locator")})
             else: continue
             break
         else:
@@ -436,11 +458,12 @@ def financial_source_conflicts(records):
 
 
 def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
-           asset_view=None, planner=None, stored_price=None, principles_available=False):
+           asset_view=None, planner=None, stored_price=None, principles_available=False,
+           disclosure_verifier=None):
     at = at or datetime.now(timezone.utc)
     market = mapping(market_data)
     symbol = symbol or market.get("symbol")
-    market,research=link_disclosure_clocks(market,list(research),at,symbol)
+    market,research=link_disclosure_clocks(market,list(research),at,symbol,disclosure_verifier=disclosure_verifier)
     records = [record(kind, market[kind], at=at, symbol=symbol)
                for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
     records += [record("research", r, at=at, symbol=symbol) for r in research]

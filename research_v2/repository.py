@@ -448,6 +448,9 @@ def evidence_records(cards):
 
     A card's ingestion/as_of may be fetch time. Only explicit source publication
     or data_as_of fields qualify it; old cards remain traceable but unverified.
+    official_disclosure/financial_observations/publication are untrusted candidates,
+    even if AI/imported payloads claim an official URL or verification flag.
+    This projection never supplies assess()'s independent server source verifier.
     """
     from datetime import datetime, timezone
     output=[]

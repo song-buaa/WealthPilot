@@ -115,23 +115,36 @@ def official_releases(raw):
     return output
 
 
+def verified_source_lookup(releases):
+    # Simulate the independent server source owner, not anything on a card.
+    # The frozen original publication and line observations are pinned separately.
+    import hashlib
+    sources=copy.deepcopy(releases)
+    for source in sources:
+        original=json.dumps({'publication':source['published_at'], 'lines':source['financial_observations']},sort_keys=True).encode()
+        source['source_verification']=dict(document_sha256=hashlib.sha256(original).hexdigest(),
+            publication_locator='frozen original publication header')
+    return {source['record_id']:source for source in sources}.get
+
+
 def test_disclosure_join_requires_all_matching_components_and_leaves_unknown_fields_unknown():
     raw=raw_financial(False);releases=official_releases(raw)
     before=assess({'fundamentals':raw},symbol='LI:US',at=AT)
     assert not before['verified_field_records']
-    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT)
+    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT,disclosure_verifier=verified_source_lookup(releases))
     revenue=next(r for r in a['verified_field_records'] if r['field']=='revenue_ttm')
     assert revenue['values']['revenue_ttm']==raw['revenue_ttm']
     assert not any(r['field']=='net_income_ttm' for r in a['verified_field_records'])
     links=a['records'][0]['field_quality']['revenue_ttm']['provenance']['publication_links']
     assert len(links)==4 and len({r['fiscal_period_end'] for r in links})==4
-    assert not assess({'fundamentals':raw},research=releases[:1],symbol='LI:US',at=AT)['verified_field_records']
+    assert all(len(r['source_document_sha256'])==64 and r['publication_locator'] for r in links)
+    assert not assess({'fundamentals':raw},research=releases[:1],symbol='LI:US',at=AT,disclosure_verifier=verified_source_lookup(releases))['verified_field_records']
     assert raw['field_provenance']['revenue_ttm']['published_at'] is None  # no source mutation
 
 
 @pytest.mark.parametrize('change',['issuer','currency','unit','basis','date','value','url','locator'])
 def test_disclosure_join_rejects_false_matches(change):
-    raw=raw_financial(False);releases=official_releases(raw);r=releases[0];o=r['financial_observations'][0]
+    raw=raw_financial(False);releases=official_releases(raw);verifier=verified_source_lookup(releases);r=releases[0];o=r['financial_observations'][0]
     if change=='issuer':r['official_disclosure']['issuer_id']='MEITUAN'
     elif change=='currency':o['currency']='USD'
     elif change=='unit':o['unit']='shares'
@@ -140,7 +153,7 @@ def test_disclosure_join_rejects_false_matches(change):
     elif change=='value':o['value']='999999'
     elif change=='url':r['source_url']='https://not-lixiang.com/results'
     else:o['source_locator']=''
-    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT)
+    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT,disclosure_verifier=verifier)
     assert not any(x['field']=='revenue_ttm' for x in a['verified_field_records'])
 
 
@@ -203,8 +216,9 @@ def test_qualified_card_is_not_hidden_by_twenty_unusable_old_cards(monkeypatch):
 
 def test_missing_three_observation_rows_cannot_use_one_disclosure_for_TTM():
     raw=raw_financial(False);releases=official_releases(raw)
+    verifier=verified_source_lookup(releases)
     raw['field_provenance']['revenue_ttm']['observations']=raw['field_provenance']['revenue_ttm']['observations'][:1]
-    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT)
+    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT,disclosure_verifier=verifier)
     assert not any(x['field']=='revenue_ttm' for x in a['verified_field_records'])
 
 
@@ -278,3 +292,61 @@ def test_weekly_only_cannot_claim_unverified_daily_or_multi_period_evidence():
     for text in ('日线趋势改善具有持续性，但仍需观察量能和经营变化之间的差异。','多周期共振已经逐渐形成，仍需结合交易量变化复核趋势是否延续。'):
         candidate=dict(topic='technical_trend',basis='inference',text=text,evidence_refs=[ref])
         assert not explanation_projection([candidate],a)[0]
+
+
+@pytest.mark.parametrize("claimed", [{}, {"quality":"valid"}, {"source_verified":True, "verified_by":"user"}, {"source_verification":{"document_sha256":"a"*64,"publication_locator":"header"}}])
+def test_unverified_official_card_cannot_self_certify_disclosure_clock(claimed):
+    from research_v2.repository import evidence_records
+    raw=raw_financial(False);releases=official_releases(raw);rows=[]
+    for release in releases:
+        payload=dict(release,**claimed)
+        facts=NS(primary_symbol='LI:US',affected_symbols=['LI:US'],source_type='manual_import',
+            source_refs=[NS(ref_type='url',ref_value=release['source_url'])],raw_facts=payload,ingested_at=AT)
+        card=NS(card_id=release['record_id'],status='active',facts=facts,narrative=NS(event_type='fundamental_snapshot'))
+        rows.extend(evidence_records([card]))
+    a=assess({'fundamentals':raw},research=rows,symbol='LI:US',at=AT)
+    assert not a['verified_field_records']
+    assert not a['records'][0]['field_quality']['revenue_ttm']['provenance'].get('publication_links')
+    assert a['records'][0]['field_quality']['revenue_ttm']['provenance']['published_at'] is None
+
+
+@pytest.mark.parametrize("change", ["missing", "date", "locator", "hash", "observation"])
+def test_independent_source_verification_must_cover_exact_publication_and_values(change):
+    raw=raw_financial(False);releases=official_releases(raw)
+    original_lookup=verified_source_lookup(releases)
+    source=copy.deepcopy(original_lookup(releases[0]['record_id']))
+    if change=='missing': source=None
+    elif change=='date': source['published_at']='2026-01-01'
+    elif change=='locator': source['source_verification']['publication_locator']=''
+    elif change=='hash': source['source_verification']['document_sha256']='claimed'
+    else: source['financial_observations'][0]['value']=1
+    def verifier(record_id):
+        return source if record_id==releases[0]['record_id'] else original_lookup(record_id)
+    a=assess({'fundamentals':raw},research=releases,symbol='LI:US',at=AT,disclosure_verifier=verifier)
+    assert not a['verified_field_records']
+
+
+def test_unverified_card_rejection_preserves_independent_financials_periods_and_gates():
+    raw=raw_financial();releases=official_releases(raw)
+    market={'fundamentals':raw,'technical':daily_history(300)}
+    baseline=assess(market,symbol='LI:US',at=AT)
+    actual=assess(market,research=releases,symbol='LI:US',at=AT)
+    assert actual['verified_field_records']==baseline['verified_field_records']
+    assert actual['verified_period_records']==baseline['verified_period_records']
+    for level in ('L2','L3','L4'):
+        assert not actual['qualification'][level]['allowed']
+
+
+def test_repository_candidates_join_only_when_independent_source_owner_agrees():
+    from research_v2.repository import evidence_records
+    raw=raw_financial(False);releases=official_releases(raw);rows=[]
+    for release in releases:
+        facts=NS(primary_symbol='LI:US',affected_symbols=['LI:US'],source_type='manual_import',
+            source_refs=[NS(ref_type='url',ref_value=release['source_url'])],raw_facts=release,ingested_at=AT)
+        rows.extend(evidence_records([NS(card_id=release['record_id'],status='active',facts=facts,
+            narrative=NS(event_type='fundamental_snapshot'))]))
+    assert not assess({'fundamentals':raw},research=rows,symbol='LI:US',at=AT)['verified_field_records']
+    verified=assess({'fundamentals':raw},research=rows,symbol='LI:US',at=AT,
+        disclosure_verifier=verified_source_lookup(releases))
+    assert [r['field'] for r in verified['verified_field_records']]==['revenue_ttm']
+    assert all(not verified['qualification'][level]['allowed'] for level in ('L2','L3','L4'))
