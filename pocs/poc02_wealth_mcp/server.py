@@ -90,7 +90,7 @@ def record_analysis_event(configuration, value):
     path = getattr(configuration, "events", None)
     if path:
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), 0o600)
             try:
                 import stat
                 mode = os.fstat(fd).st_mode

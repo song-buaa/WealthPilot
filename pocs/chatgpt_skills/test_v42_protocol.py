@@ -288,12 +288,14 @@ worker.main()
     assert 'PRIVATE' not in path.read_text()
 
 
-def test_progress_frames_cannot_extend_deadline_or_spoof_identity(monkeypatch):
+@pytest.mark.parametrize('final_frame', [False, True])
+def test_progress_and_error_frames_cannot_spoof_identity(monkeypatch, final_frame):
     import io
     from pocs.chatgpt_skills import server as module
     from pocs.chatgpt_skills.diagnostics import diagnostic
     from mcp.server.mcpserver.exceptions import ToolError
-    wire = json.dumps({'type':'analysis_diagnostic','diagnostic':diagnostic('b'*32,'analyze_peer')})+'\n'
+    wire = json.dumps({'ok':False,'error':'BUSINESS_OPERATION_UNAVAILABLE','analysis_diagnostic':diagnostic('b'*32,'analyze_peer')} if final_frame else
+        {'type':'analysis_diagnostic','diagnostic':diagnostic('b'*32,'analyze_peer')})+'\n'
     child = SimpleNamespace(stdin=io.StringIO(),stdout=io.StringIO(wire))
     monkeypatch.setattr(module.subprocess,'Popen',lambda *a,**kw:child)
     monkeypatch.setattr(module.select,'select',lambda *a:([child.stdout],[],[]))

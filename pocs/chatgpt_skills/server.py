@@ -140,6 +140,8 @@ class BusinessClient:
                         raise fail("run_id_mismatch")
                     if identifier:
                         value = safe_diagnostic(response.get("analysis_diagnostic"), identifier)
+                        if "analysis_diagnostic" in response and value is None:
+                            raise fail("run_id_mismatch")
                         if value:
                             error.analysis_diagnostic = value
                         if metadata:
