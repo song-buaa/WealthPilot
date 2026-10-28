@@ -1,0 +1,68 @@
+{
+  "thesis_id": "synthetic-meituan",
+  "security": {
+    "symbol": "3690:HK",
+    "currency": "HKD",
+    "share_class": "Class B",
+    "identity_reference": "fixture://e1/security"
+  },
+  "decision_as_of": "2025-10-01T06:00:00+00:00",
+  "event_at": null,
+  "event_time_gap": "仅合成用户回忆，事件实际发生日期未核实",
+  "event": "合成案例：竞争补贴是否缓和",
+  "causal_chain": [
+    "竞争投入变化",
+    "单位经济性与利润变化（待检验）"
+  ],
+  "expectation_gap": "用户认为恢复较快；未证明市场预期",
+  "time_horizon": "约一年只是用户直觉，不能作为恢复预测",
+  "hypothesis_due_at": "2026-10-01T06:00:00+00:00",
+  "invalidation_conditions": [
+    "竞争持续投入导致利润恢复假设不成立"
+  ],
+  "user_original_judgment": "合成回忆：我直觉一年恢复；无新利好、只是更便宜时想补仓。不是成交记录。",
+  "original_judgment_kind": "USER_RECOLLECTION",
+  "claims": [
+    {
+      "claim_id": "recovery",
+      "text": "利润可能恢复，是待检验假设",
+      "kind": "HYPOTHESIS"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "support",
+      "claim_id": "recovery",
+      "relation": "supports",
+      "kind": "FACT",
+      "description": "合成材料：恢复机制的一项可观察指标改善；不是真实新闻",
+      "source_ref": "fixture://e1/support",
+      "published_at": "2026-10-26T00:00:00+00:00",
+      "known_at": "2026-10-26T00:00:00+00:00",
+      "fetched_at": "2026-10-28T06:00:00+00:00",
+      "time_precision": "INSTANT",
+      "verification": "MANUALLY_CHECKED",
+      "verification_reference": "synthetic-test-source",
+      "gaps": []
+    },
+    {
+      "evidence_id": "counter",
+      "claim_id": "recovery",
+      "relation": "opposes",
+      "kind": "FACT",
+      "description": "合成反证：竞争成本可能长期维持，不能从补贴缓和跳到利润恢复",
+      "source_ref": "fixture://e1/counter",
+      "published_at": "2026-10-26T00:00:00+00:00",
+      "known_at": "2026-10-26T00:00:00+00:00",
+      "fetched_at": "2026-10-28T06:00:00+00:00",
+      "time_precision": "INSTANT",
+      "verification": "MANUALLY_CHECKED",
+      "verification_reference": "synthetic-test-source",
+      "gaps": []
+    }
+  ],
+  "status": "WATCH",
+  "change_reason": "加入反证，保留最初一年预期及原话",
+  "synthetic": true,
+  "user_reflection": "沉没成本不是继续投入理由；预期到期应复核，不能悄悄改成三年"
+}

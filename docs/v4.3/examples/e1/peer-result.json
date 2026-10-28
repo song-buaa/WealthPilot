@@ -1,0 +1,35 @@
+{
+  "schema_version": "wealthpilot.analysis.v1",
+  "synthetic": true,
+  "scenario": "analyze_position",
+  "status": "partial",
+  "issues": [
+    "SYNTHETIC_INPUT",
+    "VALUATION_UNKNOWN"
+  ],
+  "queried_at": "2026-10-28T06:00:00+00:00",
+  "conclusion": "合成原PEER响应：证据不全，继续观察；没有交易。",
+  "professional_result": {
+    "analysis_result": {
+      "decisionType": "watch",
+      "analysisQualification": {
+        "L1": {
+          "allowed": false
+        }
+      }
+    }
+  },
+  "evidence": {
+    "source": "injected fixture; no external request"
+  },
+  "data_quality": {
+    "status": "partial"
+  },
+  "scope": {
+    "symbol": "3690:HK"
+  },
+  "limitations": [
+    "No real research or holdings verified"
+  ],
+  "order_created": false
+}

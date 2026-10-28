@@ -258,3 +258,9 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 正常 MCP 分析的安全阶段诊断沿原 [server/BusinessClient](../pocs/chatgpt_skills/server.py) → [Worker](../pocs/chatgpt_skills/worker.py) → 原 PEER → IPC/Pydantic 返回，复用匿名 analysis_run_id 与原只读事件入口，区分协议错误与业务 ok/partial/unavailable。安全枚举投影和阶段记录不参与业务资格，不输出原文；未观测的模型/Provider 请求数 UNKNOWN。240/270 秒超时与专项预算 owner 不变；字段、离线覆盖及待授权的一次 LI 验证见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
 正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配，优先于同步analyze_position；[进程内登记](../pocs/chatgpt_skills/position_jobs.py)只拥有任务准入/收据/暂存结果，原Worker/PEER仍是研究与证据owner。后台独立BusinessClient与HTTP请求生命周期解耦，get不执行业务/Provider；共享准入锁最多一项分析。boot-scope稳定ID防跨重启重放，结果两小时保留，旧/过期任务UNKNOWN/unavailable，无新数据库/队列/资格/交易权限。原10/11工具不移除，增加start/get后12/13项；120秒官方规则、证据强度、容量/隐私及待授权真实LI使用见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+
+## 4.3 开发边界：E1 研究记录
+
+E1-B0/B1/B2/B3均属WealthPilot 4.3内部阶段。B1独立分支新增 [轻量研究域](../backend/services/investment_thesis/service.py) 和显式私人SQLite，保存不可覆盖假设/证据/复核，不复制Position/账户/订单账本，也不修改业务库schema。专业分析仍为原PEER/AnalysisRequest/AnalysisResult；原MCP任务内存不是E1永久档案。
+
+CLI为显式研究写入口；[可选MCP](../pocs/chatgpt_skills/investment_thesis.py)只查指定scope研究库，没有配置时原工具不变。资产/FX/发行人/已核目标继续原owner；新加仓敞口函数纯计算，缺证未知、无ETF穿透，不同步或交易。当前未合并部署；4.2稳定后再对齐main、定点处理注册/文档冲突及集成回归，按4.3发布流程推进。使用与边界见 [4.3 E1记录](v4.3/E1_B1_IMPLEMENTATION.md)。

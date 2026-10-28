@@ -120,3 +120,9 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 正常 MCP 错误诊断复用 [server](../pocs/chatgpt_skills/server.py)、[Worker](../pocs/chatgpt_skills/worker.py) 与[原只读事件入口](../pocs/poc02_wealth_mcp/server.py)，[闭合投影](../pocs/chatgpt_skills/diagnostics.py)只传匿名 ID、阶段、协议/业务状态、耗时和有证据的模型调用统计；未知为 UNKNOWN。无新工具/数据库/业务计算/付费调用，原 L1–L4/人工交易权限不变。专项见[正常 MCP 协议回归](../pocs/chatgpt_skills/test_v42_protocol.py)；部署与真实验证仍待单独授权，见[4.2说明](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
 正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)仅管理有界进程私有登记/结果。幂等及跨重启scope防付费重放，查询不执行业务；完整原报告保留两小时。无新平台/数据库/模型/Provider/权限，原同步入口兼容、原11工具保留。测试见[登记](../tests/test_position_jobs.py)、[真实隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；生产与真实质量仍待授权验收，见[4.2边界](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+
+### 4.3 内部实施：E1 人工投资假设与复核（独立分支本地 MVP）
+
+Owner：WP [investment_thesis](../backend/services/investment_thesis/service.py)；[store/types](../backend/services/investment_thesis/store.py)、[CLI](../backend/services/investment_thesis/cli.py) 实现显式私人研究库、不可覆盖版本/差异、支持/反对claim、原PEER结果副本与Review持久化。[纯敞口](../backend/services/investment_thesis/exposure.py) 复用U1/发行人和已核阶段目标，缺证未知、ETF不穿透；不维护第二套账户或风险规则。
+
+原MCP显式配置E1库时才增加 [两项只读查询](../pocs/chatgpt_skills/investment_thesis.py)；无配置原工具不变。写入仅CLI，原业务库/worker只读限制不变；没有自动化、券商/订单或新的模型。B0/B1/B2/B3不作为独立产品版本。实现、合成端到端测试、尚未合并/部署及4.2稳定后基线对齐计划见 [4.3开发记录](v4.3/E1_B1_IMPLEMENTATION.md)。

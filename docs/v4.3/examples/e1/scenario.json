@@ -1,0 +1,10 @@
+{
+  "snapshot_id": "asset-view:v1:1",
+  "funding": "INTERNAL_CASH",
+  "investment_value_added_cny": "50000",
+  "external_cash_added_cny": "0",
+  "fees_cny": "0",
+  "assumptions_reference": "SYNTHETIC ONLY: static marks and zero fees, not a user allocation",
+  "hypothetical_limit_weight": "0.12",
+  "hypothetical_limit_reference": "SYNTHETIC TEST CAP, not confirmed personal risk preference"
+}

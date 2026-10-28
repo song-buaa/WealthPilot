@@ -203,6 +203,11 @@ def create_server(settings):
     security_meta = {"securitySchemes": [{"type": "noauth"}]}  # Private Tunnel supplies access control.
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
+    # 4.3 E1 research-only store: opt-in reads; original business DB stays read-only.
+    e1_path = getattr(settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
+    if e1_path:
+        from pocs.chatgpt_skills.investment_thesis import register_read_tools
+        register_read_tools(server, e1_path, settings.portfolio_id, security_meta)
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
     if prepare_config:
         from pocs.chatgpt_skills.prepare import PrepareClient
@@ -404,6 +409,7 @@ def main():
     parser.add_argument("--analysis-business-python", help="Reuse the existing complete Web business Python for PEER dependencies")
     parser.add_argument("--analysis-env-file", help="Existing local runtime JSON; only original analysis provider settings are read")
     parser.add_argument("--prepare-config", help="Opt-in private loopback prepare URL/token-file configuration; seven existing tools stay read-only")
+    parser.add_argument("--e1-db-path", help="4.3 opt-in private research store, readonly; no creation or business writes")
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))

@@ -1,0 +1,25 @@
+{
+  "thesis_id": "synthetic-meituan",
+  "thesis_revision": 2,
+  "review_as_of": "2026-10-28T06:00:00+00:00",
+  "action_intent": "ADD",
+  "requested_verdict": "SUPPORT",
+  "authored_by": "HUMAN_ASSISTANT_COLLABORATION",
+  "rationale": "合成用户希望加仓；系统必须披露无法核对仓位和上限，不直接支持",
+  "evidence_changes": [
+    "新反证counter"
+  ],
+  "evidence_ids": [
+    "support",
+    "counter"
+  ],
+  "supporting_scenario": "竞争缓和且利润恢复仍有可能",
+  "opposing_scenario": "竞争长期化，等待成本增加",
+  "price_and_waiting_cost": "无可靠估值和恢复时间，不造目标价或概率",
+  "price_evidence_ids": [],
+  "invalidation_conditions": [
+    "利润恢复机制缺证或竞争恶化"
+  ],
+  "time_hypothesis_status": "NOT_MET",
+  "next_review_event": "下一次已公布经营数据；只记录，不创建任务"
+}

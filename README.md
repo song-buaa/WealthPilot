@@ -32,7 +32,11 @@
 
 交易仍复用ActionDraft、Typed Intent、ExecutionBatch和OrderManager；原30秒报价TTL、WhatIf、新鲜原币现金、风险、确认版本/哈希及Web最终人工授权全部保留。UNKNOWN不重发，SYNC_UNVERIFIED不等于交易失败；合约存在、历史成交或WhatIf成功均不能直接证明当前账户可交易。
 
-正常 ChatGPT 单标长研究的候选入口为 `start_position_analysis` → `get_position_analysis_result`：一次启动、复用同一 job_id 取回原 PEER 报告，断线或轮询不会重新分析。原 `analyze_position` 保留同步兼容；不以延长内部超时绕过 Tunnel 的单请求期限。此候选尚未合并/部署，使用、幂等与重启边界见[4.2 异步取回说明](docs/V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+正常 ChatGPT 单标长研究的入口为 `start_position_analysis` → `get_position_analysis_result`：一次启动、复用同一 job_id 取回原 PEER 报告，断线或轮询不会重新分析。原 `analyze_position` 保留同步兼容；不以延长内部超时绕过 Tunnel 的单请求期限。异步入口已合入当前代码；本轮未重新核验生产部署或真实案例资格。使用、幂等与重启边界见[4.2 异步取回说明](docs/V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+
+## WealthPilot 4.3 量化策略实现（独立开发）
+
+E1 投资假设与决策复核的 B0/B1/B2/B3 是 **4.3 内部实施阶段**。B1 本地 MVP 提供不可覆盖假设版本、双向证据、人工 Review、条件性直接敞口及 CLI 显式保存/可选只读 MCP 查询；复用原 PEER/U1，不扩交易权限。未合并部署，线上 ChatGPT 不因此获得自动永久保存能力。命令、合成示例和4.2稳定后的集成安排见 [4.3 E1 开发记录](docs/v4.3/E1_B1_IMPLEMENTATION.md)。
 
 ## 当前架构与运行边界
 

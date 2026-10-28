@@ -1,0 +1,51 @@
+{
+  "thesis_id": "synthetic-new-case",
+  "security": {
+    "symbol": "ORCL:US",
+    "currency": "USD",
+    "identity_gap": "合成软件事件，不作真实身份验收"
+  },
+  "decision_as_of": "2025-10-01T06:00:00+00:00",
+  "event_at": null,
+  "event_time_gap": "仅合成用户回忆，事件实际发生日期未核实",
+  "event": "合成新事件：大型软件合同续签结果不确定",
+  "causal_chain": [
+    "续签条件",
+    "收入确认与现金流"
+  ],
+  "expectation_gap": "可能把合同规模误作已实现收入",
+  "time_horizon": "约一年只是用户直觉，不能作为恢复预测",
+  "hypothesis_due_at": "2026-10-01T06:00:00+00:00",
+  "invalidation_conditions": [
+    "竞争持续投入导致利润恢复假设不成立"
+  ],
+  "user_original_judgment": "合成判断：需要核实合同条款，非买卖或成交记录",
+  "original_judgment_kind": "USER_RECOLLECTION",
+  "claims": [
+    {
+      "claim_id": "recovery",
+      "text": "利润可能恢复，是待检验假设",
+      "kind": "HYPOTHESIS"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "support",
+      "claim_id": "recovery",
+      "relation": "supports",
+      "kind": "FACT",
+      "description": "合成材料：恢复机制的一项可观察指标改善；不是真实新闻",
+      "source_ref": "fixture://e1/support",
+      "published_at": "2026-10-26T00:00:00+00:00",
+      "known_at": "2026-10-26T00:00:00+00:00",
+      "fetched_at": "2026-10-28T06:00:00+00:00",
+      "time_precision": "INSTANT",
+      "verification": "MANUALLY_CHECKED",
+      "verification_reference": "synthetic-test-source",
+      "gaps": []
+    }
+  ],
+  "status": "WATCH",
+  "change_reason": "未参与两主案例设计的新合成事件",
+  "synthetic": true
+}
