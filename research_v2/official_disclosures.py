@@ -273,7 +273,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
 
 def parse_original(body, url, fetched_at):
     """Strict original-source parser. No card metadata or AV numbers as input."""
-    if not isinstance(body, bytes) or len(body) > MAX_BYTES or not allowed_url(url):
+    if (not isinstance(body, bytes) or not allowed_url(url)
+            or (urlsplit(url).hostname != 'www.sec.gov' and len(body) > MAX_BYTES)):
         return None
     try:
         text = body.decode('utf-8')

@@ -19,6 +19,7 @@ import ssl
 import socket
 import os
 import logging
+import http.client
 from contextvars import ContextVar
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -28,7 +29,6 @@ from backend.services.instruments.issuers import resolve_sec_issuer
 
 DIRECTORY = 'https://www.sec.gov/files/company_tickers.json'
 FORMS = {'10-K', '10-Q', '20-F', '6-K', '8-K'}
-MAX_BYTES = 16 * 1024 * 1024
 MAX_FILINGS = 4
 # Explicit semantic mappings, not label similarity. Unsupported/custom concepts
 # remain unknown. NetIncomeLoss is parent-attributable and must not silently
@@ -141,15 +141,15 @@ def _fetch(url):
                 if status!=200:
                     _diagnose(url,'http_error',status=status,attempted=True)
                     return None
-                body = response.read(MAX_BYTES + 1)
-        if not body or len(body)>MAX_BYTES:
-            _diagnose(url,'empty_response' if not body else 'body_too_large',attempted=True)
+                body = response.read()
+        if not body:
+            _diagnose(url,'empty_response',attempted=True)
             return None
         _diagnose(url,'available',status=200,attempted=True)
         return body, datetime.now(timezone.utc).isoformat()
     except urllib.error.HTTPError as exc:
         _diagnose(url,'http_403' if exc.code==403 else 'http_error',status=exc.code,attempted=True)
-    except (urllib.error.URLError,OSError) as exc:
+    except (urllib.error.URLError,OSError,http.client.HTTPException) as exc:
         _diagnose(url,_transport_error(exc),attempted=True)
     return None
 
@@ -361,7 +361,7 @@ def parse_filing(source, issuer, filing, *, identity_digest):
     if not source or not allowed_url(filing['full_url']):
         return None
     body, fetched_at = source
-    if not isinstance(body, bytes) or len(body)>MAX_BYTES:
+    if not isinstance(body, bytes):
         return None
     try:
         text = body.decode('utf-8', errors='strict')
@@ -475,7 +475,7 @@ def parse_filing(source, issuer, filing, *, identity_digest):
 
 
 def collect(symbol):
-    """Bounded discovery: cached directory + Submissions + facts + <=4 originals.
+    """Current-cycle discovery: cached directory + Submissions + facts + originals.
 
     No network in demo/mock. Successful original reads retain original fetched_at.
     A failure to resolve/verify never turns a request/card into source authority.
@@ -523,22 +523,41 @@ def collect(symbol):
             _diagnose('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json','invalid_json' if invalid else 'data_missing')
             if invalid:
                 return [], {}.get
-        # Only missing semantic field/scope combinations use original attachments.
-        # Limit to latest four relevant filings, never walk arbitrary source URLs.
-        # Include latest annual/quarterly reports even when monthly foreign
-        # event reports fill the top of Submissions. Remaining slots are events.
-        standards=[f for f in filings if f['form'] in {'10-K','10-Q','20-F'}]
-        events=[f for f in filings if f['form'] in {'6-K','8-K'}]
-        selected=standards[:2]+events[:2]
+        # Submissions metadata cannot distinguish earnings 6-Ks from events.
+        # Search the current reporting cycle newest-first, not the first two
+        # events. Annual reports are a fallback, never a prerequisite for L1.
+        quarters=[f for f in filings if f['form']=='10-Q']
+        annuals=[f for f in filings if f['form'] in {'10-K','20-F'}]
+        events=[f for f in filings if f['form'] in {'6-K','8-K'}
+                and (not annuals or f['filed']>=annuals[0]['filed'])]
+        selected=quarters+events+annuals[:1]
+        filed_by_accession={f['accession']:f['filed'] for f in filings}
         for filing in selected:
+            # Facts retain their independent periods. Older complete quarters
+            # cannot conceal a newer, partially observed quarterly statement.
+            quarterly=[o for r in rows for o in r['financial_observations']
+                       if o['period_basis']=='quarterly']
+            if quarterly:
+                latest=max(o['fiscal_period_end'] for o in quarterly)
+                complete={o['source_field'] for o in quarterly if o['fiscal_period_end']==latest}
+                latest_filed=max(filed_by_accession[r['official_disclosure']['accession']]
+                    for r in rows if any(o['period_basis']=='quarterly' and o['fiscal_period_end']==latest
+                                         for o in r['financial_observations']))
+                if ({'totalRevenue','netIncome','operatingCashflow','capitalExpenditures'}<=complete
+                        and filing['filed']<=latest_filed):
+                    break
             existing = [o for r in rows if r['official_disclosure']['accession'] == filing['accession'] for o in r['financial_observations']]
             fields = {o['source_field'] for o in existing}
             if len(fields) == 4:
                 continue
-            original = _fetch(filing['full_url'])
-            if not original and _access_failed():
-                break
-            record = parse_filing(original, issuer, filing, identity_digest=identity_digest)
+            try:
+                original = _fetch(filing['full_url'])
+                if not original:
+                    continue
+                record = parse_filing(original, issuer, filing, identity_digest=identity_digest)
+            except (ValueError, TypeError, KeyError, UnicodeError, OSError, InvalidOperation, OverflowError):
+                _diagnose(filing['full_url'],'parse_error')
+                continue
             if record and record['financial_observations']:
                 # Keep overlapping source facts too; evidence owner handles actual
                 # conflicts rather than silently selecting whichever matches AV.
