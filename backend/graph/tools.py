@@ -1190,7 +1190,15 @@ TOOL_SCHEMAS = [
 ]
 
 def execute_assess_position_evidence(**kwargs):
-    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.evidence import assess, mapping
+    # Original-source verification is a server dependency, never request/card trust.
+    if mapping(kwargs.get("market_data")).get("fundamentals") is not None:
+        from research_v2.official_disclosures import collect
+        rows, verifier = collect(kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol"),
+                                 kwargs.get("research", ()))
+        if rows:
+            kwargs["research"] = [*kwargs.get("research", ()), *rows]
+            kwargs["disclosure_verifier"] = verifier
     return assess(**kwargs)
 
 

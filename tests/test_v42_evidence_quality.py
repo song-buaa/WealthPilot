@@ -138,7 +138,8 @@ def test_disclosure_join_requires_all_matching_components_and_leaves_unknown_fie
     links=a['records'][0]['field_quality']['revenue_ttm']['provenance']['publication_links']
     assert len(links)==4 and len({r['fiscal_period_end'] for r in links})==4
     assert all(len(r['source_document_sha256'])==64 and r['publication_locator'] for r in links)
-    assert not assess({'fundamentals':raw},research=releases[:1],symbol='LI:US',at=AT,disclosure_verifier=verified_source_lookup(releases))['verified_field_records']
+    partial=assess({'fundamentals':raw},research=releases[:1],symbol='LI:US',at=AT,disclosure_verifier=verified_source_lookup(releases))
+    assert [r['field'] for r in partial['verified_field_records']]==['revenue_quarter']
     assert raw['field_provenance']['revenue_ttm']['published_at'] is None  # no source mutation
 
 
@@ -348,5 +349,5 @@ def test_repository_candidates_join_only_when_independent_source_owner_agrees():
     assert not assess({'fundamentals':raw},research=rows,symbol='LI:US',at=AT)['verified_field_records']
     verified=assess({'fundamentals':raw},research=rows,symbol='LI:US',at=AT,
         disclosure_verifier=verified_source_lookup(releases))
-    assert [r['field'] for r in verified['verified_field_records']]==['revenue_ttm']
+    assert [r['field'] for r in verified['verified_field_records']]==['revenue_ttm','revenue_quarter']
     assert all(not verified['qualification'][level]['allowed'] for level in ('L2','L3','L4'))

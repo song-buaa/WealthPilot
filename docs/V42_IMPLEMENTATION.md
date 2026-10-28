@@ -531,3 +531,17 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 3. 启动响应若丢失，仅可用完全相同ID/参数查询既有登记；running只按约15秒提示查询同job，不再启动或调用同步analyze_position。每个HTTP调用独立快速完成，原240/270秒专业分析期限不变。
 4. 完成后从 `get_position_analysis_result` 读取原报告，按原queried_at、证据和partial/unavailable展示；不把缓存报告当刷新后的当前事实/交易资格。若当前聊天无法等待，保留job_id，稍后让ChatGPT查询同job即可。
 5. 对照同一匿名ID的实际持久化事件及原模型观测检查确实只执行一个分析任务、报告内容和最终证据过滤；原正常分析失败/进程重启/到期时如实停止，不自动再付费。此一步需单独真实调用授权，尚未执行，不能以离线/CI证明生产可用性或研究质量已验收。
+
+### 2026-10-28：L1 官方财务原文资格修复
+
+原断点：AV 季度行缺少正式发布日期；`link_disclosure_clocks` 仅有服务端 verifier 合同，没有生产实现。研究卡自报 URL、日期、数值和 hash 不能代替独立核验。
+
+本次在原 `research_v2` 数据层增加 LI 官方原文验证，接入原 evidence Skill，不修改 PEER、Prompt、模型、MCP、技术数据、资产或交易代码：
+
+- 原发行人 IR 索引优先发现财报，研究卡 URL 仅作候选。仅允许 HTTPS 的 LI IR 新闻详情、SEC Archives 完整 submission；禁止重定向及非白名单路径。最多读取一个索引和四份原文，每份上限 2 MiB、网络 timeout 8 秒；无模型、无凭证、无数据库写入。复用既有内存 cache 与 TTL，命中时保留原 fetched_at。Public Demo/AV_DEV_MOCK 不发请求，专项验收原网络白名单不变。
+- 来源权限来自独立读取的原文字节、SHA256、原文发布日期节点及表格坐标。IR 日期节点必须一致；SEC 使用原 submission 的 COMPANY DATA、CIK 与 URL 交叉验证及 ACCEPTANCE-DATETIME 的**正式申报日**，不冒充 IR 新闻发布时间或盘中时点。季度期末、发布日期、抓取时间各自保留。版式、主体、日期、单位、币种或会计口径不明则 UNKNOWN。
+- 只解析有明确季度列头、季度末、CNY/RMB 和单位的表格单元格。支持 totalRevenue（总收入）、netIncome（合并净利润）、operatingCashflow、capitalExpenditures 的严格标签。归母利润、车辆收入、半年/全年累计、负号不明、重复或歧义单元格不作替代。
+- 独立核实的单季度事实进入 `verified_field_records`（`*_quarter`）与原 `professional_explanation` 上下文。它们不进入完整 fundamentals/L3 资格判断。TTM 仍要求四个季度逐字段、主体、报告币种、单位和数值一致；FCF 要核对八个现金流组件，增长率还需去年四个季度。未改 AV 值，收入/净利润冲突只阻断相关字段及其衍生项，保留独立官方季度事实及有效现金流。
+- 原 Output Policy 继续过滤解释与精确行动，数字由确定性报告输出。无四季来源时 TTM、无明确现金流口径时 FCF、无真实来源日期时公告时间继续 UNKNOWN；不从 fetched_at、文件名或卡片填补。
+
+离线夹具覆盖来源伪报、正文身份、SEC 申报身份、缺失/冲突/未来公告日、单位/币种/季度口径、重复单元格、季度/TTM 区分、字段冲突、缓存时钟、原工具注入、专业解释最终过滤与 L2–L4 不升级。**本轮未获取真实 IR/SEC 原文、未调用 AV 或付费模型；真实 LI 页面的可访问性、当前版式、可确认的实际字段与真实模型解释质量尚待另行授权复验，不宣称生产已获财务资格。** SEC 仅支持具备完整原始申报头且可解析的季度表格；普通 exhibit、XBRL 或 PDF 不猜测补全。

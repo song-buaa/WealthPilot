@@ -270,13 +270,13 @@ def record(kind, value, *, at, symbol=None):
 
 # Explicit statement semantics, not narrative KPIs or a caller's confirmed flag.
 _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"operating_cash_flow",
-                         "capitalExpenditures":"positive_capital_cash_outflow"}
+                         "capitalExpenditures":"positive_capital_cash_outflow", "netIncome":"consolidated_net_income"}
 
 
 def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
     # Cards/AI extraction are candidates, including their URL/date/hash claims.
     # Only a server-injected independent source owner can supply authority.
-    # No production verifier is currently wired: absence fails closed.
+    # Absence of an independently fetched original-source verifier fails closed.
     if not callable(disclosure_verifier) or not isinstance(raw.get("record_id"), str) or not raw["record_id"]:
         return []
     verified = disclosure_verifier(raw.get("record_id"))
@@ -296,9 +296,11 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
     issuer=IDENTITIES.get((symbol,{"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])))
     domain={"LI_AUTO":"lixiang.com","PDD_HOLDINGS":"pddholdings.com","MEITUAN":"meituan.com"}.get(issuer)
     parsed=urlparse(str(raw.get("source_url") or ""))
+    sec_original = (issuer == "LI_AUTO" and parsed.hostname == "www.sec.gov"
+                    and parsed.path.startswith("/Archives/edgar/data/"))
     host=parsed.hostname or ""
     published,fetched=stamp(raw.get("published_at")),stamp(raw.get("fetched_at"))
-    if (parsed.scheme!="https" or parsed.username or parsed.password or not domain or not (host==domain or host.endswith("."+domain))
+    if (parsed.scheme!="https" or parsed.username or parsed.password or not domain or not (host==domain or host.endswith("."+domain) or sec_original)
             or not issuer or meta.get("issuer_id")!=issuer or meta.get("source_url")!=raw.get("source_url")
             or not raw.get("record_id") or not published or not fetched or not published<=fetched<=at
             or any(token in str(raw.get("source","")).lower() for token in ("seed","mock","fixture","synthetic","demo"))
@@ -332,7 +334,7 @@ def link_disclosure_clocks(market, research, at, symbol, *, disclosure_verifier=
     disclosure_verifier is a trusted in-process source-owner dependency, never a
     card/request field. It must resolve independently checked original publication
     and observations by record ID. Hash/locator claims from a card grant no trust.
-    Without an independently implemented owner, leave it unset (as production does).
+    The research owner supplies it only for independently fetched original bytes.
     """
     raw=mapping(market.get("fundamentals"))
     observations=[];projected=[]
@@ -392,9 +394,9 @@ def financial_source_conflicts(records):
     """
     conflicts = []
     fields = {"totalRevenue":"revenue_ttm", "operatingCashflow":"operating_cash_flow_ttm",
-              "capitalExpenditures":"capital_expenditures_ttm"}
+              "capitalExpenditures":"capital_expenditures_ttm", "netIncome":"net_income_ttm"}
     dependents = {"revenue_ttm":["revenue_yoy"], "operating_cash_flow_ttm":["free_cash_flow_ttm"],
-                  "capital_expenditures_ttm":["free_cash_flow_ttm"]}
+                  "capital_expenditures_ttm":["free_cash_flow_ttm"], "net_income_ttm":["net_income_yoy"]}
     for disclosure in records:
         if not disclosure["primary"] or disclosure["quality"] != "valid":
             continue
@@ -463,7 +465,10 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     at = at or datetime.now(timezone.utc)
     market = mapping(market_data)
     symbol = symbol or market.get("symbol")
-    market,research=link_disclosure_clocks(market,list(research),at,symbol,disclosure_verifier=disclosure_verifier)
+    research = list(research)
+    quarter_observations = [obs for item in research if mapping(item).get("symbol") == symbol
+        for obs in _official_observations(mapping(item),symbol,at,disclosure_verifier=disclosure_verifier)]
+    market,research=link_disclosure_clocks(market,research,at,symbol,disclosure_verifier=disclosure_verifier)
     records = [record(kind, market[kind], at=at, symbol=symbol)
                for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
     records += [record("research", r, at=at, symbol=symbol) for r in research]
@@ -588,6 +593,22 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                 period=meta.get("period"), scope=meta.get("period_basis"), currency=meta.get("currency"),
                 fiscal_quarter_ends=meta.get("fiscal_quarter_ends"), publication_links=meta.get("publication_links",[]),
                 values={field:parent["values"][field]}, is_seed=False, is_mock=False, is_fallback=parent["is_fallback"]))
+    # Independently proven quarters support L1, never the full L3 gate above.
+    quarter_fields = {"totalRevenue":"revenue_quarter", "netIncome":"net_income_quarter",
+                      "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter"}
+    for obs in quarter_observations:
+        end = stamp(obs["fiscal_period_end"])
+        if not end or (at-end).total_seconds() > 150*86400:
+            continue
+        field = quarter_fields[obs["source_field"]]
+        verified_field_records.append(dict(kind="fundamental_field", field=field, symbol=symbol,
+            source="official_disclosure", source_url=obs["source_url"],
+            record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"],
+            quality="valid", issues=[], data_as_of=obs["fiscal_period_end"],
+            published_at=obs["published_at"], fetched_at=obs["fetched_at"],
+            period=obs["fiscal_period_end"], scope="quarterly", currency=obs["currency"],
+            publication_links=[obs], values={field:obs["value"], "currency":obs["currency"]},
+            is_seed=False, is_mock=False, is_fallback=False))
     verified_period_records=[]
     for parent in records:
         if parent["kind"]!="technical" or parent["quality"]!="partial":
