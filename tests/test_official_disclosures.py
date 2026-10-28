@@ -218,3 +218,9 @@ def test_verified_quarter_survives_final_shared_policy_without_precise_actions()
 def test_invalid_date_suffix_is_not_accepted_as_ISO_publication():
     body=document().replace(b'</head>',b'<meta property="article:published_time" content="2026-08-15-forged"></head>')
     assert source(body) is None
+
+
+@pytest.mark.parametrize('currency',[b'US$',b'USD',b'HK$',b'$',b'EUR',b'unknown'])
+def test_USD_translation_column_cannot_borrow_global_RMB_unit_header(currency):
+    body=document().replace(b'In thousands', b'RMB in thousands').replace(b'<td>RMB</td>',b'<td>'+currency+b'</td>')
+    assert source(body) is None

@@ -174,8 +174,9 @@ def parse_original(body, url, fetched_at):
                         continue
                     # A column must independently identify ONE quarter end + RMB.
                     dates = re.findall(r'(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}', header)
-                    currency = set(re.findall(r'\b(?:RMB|CNY|USD|US\$|HKD)\b', header))
-                    if len(set(dates)) != 1 or currency not in ({'RMB'}, {'CNY'}):
+                    currency = set(re.findall(r'(?<![A-Za-z])(?:RMB|CNY|USD|US\$|HK\$|HKD|EUR|GBP|JPY|\$)(?![A-Za-z])', header))
+                    explicit_currency = any(r[col].strip().strip('()') in {'RMB', 'CNY'} for r in rows[:ri] if col < len(r))
+                    if not explicit_currency or len(set(dates)) != 1 or currency not in ({'RMB'}, {'CNY'}):
                         continue
                     end = _date(dates[0].replace(',', '') if ',' not in dates[0] else dates[0])
                     if not end:
