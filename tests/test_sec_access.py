@@ -117,3 +117,14 @@ def test_successful_JSON_missing_facts_is_not_reported_as_access_failure(monkeyp
     assert sec.collect('AAPL:US')[0]==[]
     assert [r['category'] for r in sec.source_diagnostics()]==['data_missing']
     _cache.clear()
+
+
+def test_legacy_official_fetch_cannot_bypass_SEC_operator_identity(monkeypatch):
+    from research_v2 import official_disclosures as owner
+    monkeypatch.delenv('WEALTHPILOT_SEC_ORGANIZATION',raising=False)
+    monkeypatch.delenv('WEALTHPILOT_SEC_CONTACT_EMAIL',raising=False)
+    opener=Mock();monkeypatch.setattr(sec.urllib.request,'build_opener',opener)
+    url='https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/0001104659-26-101065.txt'
+    assert owner._fetch(url) is None
+    opener.assert_not_called()
+    assert sec.source_diagnostics()[-1]['category']=='identity_unconfigured'

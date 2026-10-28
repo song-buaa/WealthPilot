@@ -52,6 +52,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _fetch(url):
     if not allowed_url(url, index=True):
         return None
+    if urlsplit(url).hostname=='www.sec.gov':
+        # Legacy entry points cannot bypass the unified SEC operator identity.
+        from research_v2.sec_disclosures import _fetch as fetch_sec
+        return fetch_sec(url)
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; WealthPilot/4.2)', 'Accept': 'text/html,text/plain'})
         with urllib.request.build_opener(_NoRedirect).open(req, timeout=8) as response:
