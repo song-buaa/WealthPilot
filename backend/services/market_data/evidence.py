@@ -375,6 +375,7 @@ def link_disclosure_clocks(market, research, at, symbol, *, disclosure_verifier=
                 links.append({name:matches[0][name] for name in ("issuer_id","record_id","source_url",
                     "published_at","fetched_at","fiscal_period_end","currency","unit","unit_scale","accounting_basis","source_field","source_locator",
                     "source_document_sha256","publication_locator")})
+                links[-1].update({name:matches[0][name] for name in ("reported_value","reported_unit_scale","sign_normalization") if name in matches[0]})
             else: continue
             break
         else:

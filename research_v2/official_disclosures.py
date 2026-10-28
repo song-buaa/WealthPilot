@@ -14,7 +14,7 @@ import urllib.request
 
 from bs4 import BeautifulSoup
 
-IR_INDEX = 'https://ir.lixiang.com/news-releases'
+IR_INDEX = 'https://ir.lixiang.com/news/'
 MAX_BYTES = 2 * 1024 * 1024
 LABELS = {
     'total revenues': ('totalRevenue', 'total_revenue'),
@@ -25,6 +25,7 @@ LABELS = {
     'net (loss)/income': ('netIncome', 'consolidated_net_income'),
     'net cash provided by operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'net cash used in operating activities': ('operatingCashflow', 'operating_cash_flow'),
+    'net cash (used in)/provided by operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'capital expenditures': ('capitalExpenditures', 'positive_capital_cash_outflow'),
 }
 
@@ -35,7 +36,8 @@ def allowed_url(url, *, index=False):
         return (p.scheme == 'https' and not p.username and not p.password and p.port in (None, 443)
             and not p.query and not p.fragment
             and ((p.hostname == 'ir.lixiang.com' and
-                  (p.path.startswith('/news-releases/news-release-details/') or (index and p.path == '/news-releases')))
+                  (re.fullmatch(r'/(?:zh-hans/|zh-hant/)?news-releases/news-release-details/[a-z0-9]+(?:-[a-z0-9]+)*/?', p.path) is not None
+                   or (index and re.fullmatch(r'/(?:zh-hans/|zh-hant/)?news/?', p.path) is not None)))
                  or (p.hostname == 'www.sec.gov' and
                      re.fullmatch(r'/Archives/edgar/data/[0-9]+/[0-9/.-]+\.txt', p.path) is not None)))
     except (ValueError, TypeError):
@@ -51,7 +53,7 @@ def _fetch(url):
     if not allowed_url(url, index=True):
         return None
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'WealthPilot/4.2 private research', 'Accept': 'text/html,text/plain'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; WealthPilot/4.2)', 'Accept': 'text/html,text/plain'})
         with urllib.request.build_opener(_NoRedirect).open(req, timeout=8) as response:
             if response.geturl() != url:
                 return None
@@ -65,7 +67,7 @@ def _fetch(url):
 
 def _date(text):
     text = ' '.join(str(text).split())
-    for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d'):
+    for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d', '%Y年 %m月 %d日'):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
@@ -115,6 +117,29 @@ def _grid(table):
     return result
 
 
+def _amount(text):
+    """Strict statement amount, including paired accounting parentheses."""
+    text = str(text).strip()
+    negative = text.startswith('(') and text.endswith(')')
+    if negative:
+        text = text[1:-1]
+        if text.startswith('-'):
+            return None
+    if not re.fullmatch(r'-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?', text):
+        return None
+    value = Decimal(text.replace(',', ''))
+    return -value if negative else value
+
+
+def _statement_kind(rows):
+    header = ' '.join(' '.join(r) for r in rows[:2]).lower()
+    if 'condensed consolidated statements of comprehensive income' in header:
+        return 'income'
+    if 'condensed consolidated statements of cash flows' in header:
+        return 'cash_flow'
+    return None
+
+
 def parse_original(body, url, fetched_at):
     """Strict original-source parser. No card metadata or AV numbers as input."""
     if not isinstance(body, bytes) or len(body) > MAX_BYTES or not allowed_url(url):
@@ -161,8 +186,12 @@ def parse_original(body, url, fetched_at):
         if published[:10] > fetched.date().isoformat():
             return None
         observations = []
-        for ti, table in enumerate(soup.find_all('table')):
-            rows = _grid(table)
+        tables = [(i, table, _grid(table)) for i, table in enumerate(soup.find_all('table'))]
+        has_statements = any(_statement_kind(rows) for _, _, rows in tables)
+        for ti, table, rows in tables:
+            statement = _statement_kind(rows)
+            if has_statements and not statement:
+                continue  # Rounded summaries/reconciliations cannot override statements.
             context = ' '.join(' '.join(r) for r in rows).lower()
             # Never reinterpret year-to-date/annual numbers as quarters.
             if not re.search(r'three months ended', context):
@@ -179,6 +208,8 @@ def parse_original(body, url, fetched_at):
                 if label not in LABELS:
                     continue
                 key, basis = LABELS[label]
+                if statement and ((statement == 'income') != (key in {'totalRevenue', 'netIncome'})):
+                    continue
                 for col, amount in enumerate(row[1:], 1):
                     header = ' '.join(r[col] for r in rows[:ri] if col < len(r))
                     # Period semantics belong to this column, not a neighboring YTD column.
@@ -196,27 +227,50 @@ def parse_original(body, url, fetched_at):
                             end = datetime.strptime(dates[0].replace(',', ''), '%B %d %Y').date().isoformat()
                         except ValueError:
                             continue
-                    if end[5:] not in {'03-31','06-30','09-30','12-31'} or end > published or not re.fullmatch(r'\(?-?[\d,]+(?:\.\d+)?\)?', amount):
+                    if end[5:] not in {'03-31','06-30','09-30','12-31'} or end > published:
                         continue
-                    value = Decimal(amount.replace(',', '').replace('(', '-').replace(')', ''))
-                    if not value.is_finite():
+                    value = _amount(amount)
+                    if value is None or not value.is_finite():
                         continue
-                    # Negative CapEx/"used" semantics are not silently reinterpreted.
-                    if (key == 'capitalExpenditures' and value < 0) or (label == 'net loss' and value > 0):
+                    reported_value, normalization = value, None
+                    if key == 'capitalExpenditures' and (statement == 'cash_flow' or value < 0):
+                        # Original LI cash-flow table explicitly reconciles OCF +
+                        # negative CapEx = FCF. Never apply abs() to unknown signs.
+                        before = next((r for r in reversed(rows[:ri]) if any(r)), [])
+                        after = next((r for r in rows[ri+1:] if any(r)), [])
+                        same_block = (before and after and LABELS.get(before[0].strip().lower().rstrip(':'), (None,))[0] == 'operatingCashflow'
+                            and after[0].strip().lower() == 'free cash flow (non-gaap)')
+                        ocf = _amount(before[col]) if same_block and col < len(before) else None
+                        fcf = _amount(after[col]) if same_block and col < len(after) else None
+                        if statement != 'cash_flow' or ocf is None or fcf is None or ocf - abs(value) != fcf:
+                            continue
+                        value = abs(value)
+                        normalization = dict(basis='official_cash_flow_reconciliation: OCF - positive_spend = FCF',
+                            reported_operating_cash_flow=float(ocf), reported_free_cash_flow=float(fcf),
+                            reported_unit_scale=scales[0])
+                    if label == 'net loss' and value > 0:
                         continue
                     if label == 'net cash used in operating activities' and value > 0:
                         continue
-                    observations.append(dict(source_field=key, value=float(value), currency='CNY', unit='currency_units',
+                    observations.append(dict(source_field=key, value=float(value), reported_value=float(reported_value),
+                        reported_unit_scale=scales[0], sign_normalization=normalization, currency='CNY', unit='currency_units',
                         unit_scale=scales[0], period_basis='quarterly', fiscal_period_end=end, accounting_basis=basis,
                         source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
-        # Ambiguous duplicate cells cannot certify a value (even if one matches AV).
+        # Identical repetitions in the SAME original are aliases, not another
+        # independent observation. Conflicting cells stay unknown permanently.
         unique = {}
         for obs in observations:
             k = obs['source_field'], obs['fiscal_period_end']
-            if k in unique:
-                unique[k] = None
-            else:
+            if k not in unique:
                 unique[k] = obs
+            elif unique[k] is not None:
+                previous = unique[k]
+                keys = ('currency', 'unit', 'accounting_basis', 'period_basis')
+                if (all(previous[n] == obs[n] for n in keys)
+                        and previous['value'] * previous['unit_scale'] == obs['value'] * obs['unit_scale']):
+                    previous['source_locator'] += '; '+obs['source_locator']
+                else:
+                    unique[k] = None
         observations = [o for o in unique.values() if o is not None]
         if not observations:
             return None
@@ -253,7 +307,8 @@ def collect(symbol, candidates=()):
         soup = BeautifulSoup(page[0], 'html.parser')
         for a in soup.find_all('a', href=True):
             url = urljoin(IR_INDEX, a['href'])
-            if allowed_url(url) and 'financial-results' in url and url not in urls:
+            if (allowed_url(url) and re.fullmatch(r'Li Auto Inc\. (?:Announces|Reports) .*Financial Results',
+                    a.get_text(' ', strip=True), re.I) and url not in urls):
                 urls.append(url)
             if len(urls) == 4:
                 break

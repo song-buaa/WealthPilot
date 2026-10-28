@@ -1,0 +1,19 @@
+{
+  "source_url": "https://ir.lixiang.com/news-releases/news-release-details/li-auto-inc-announces-unaudited-second-quarter-2026-financial",
+  "original_sha256": "525f320ca4d26ef3832c697410113bc15d8a0b34b14f2cb2fc231a9037810ce7",
+  "fetched_at": "2026-10-28T03:09:15.933434+00:00",
+  "fixture_kind": "reduced public original HTML; table spans, headers, units, amounts and publication preserved; no private assets",
+  "extraction": "Retain title, publication node, header rows, supported field rows, and FCF reconciliation; remove scripts, styling and unrelated narrative. Do not change financial cells.",
+  "en": {
+    "path": "en.html",
+    "sha256": "abf5487729e6c4537475350e8aeabd5dc5f0c29d4435ea0a361e3b31d0306d74",
+    "bytes": 9291,
+    "original_sha256": "525f320ca4d26ef3832c697410113bc15d8a0b34b14f2cb2fc231a9037810ce7"
+  },
+  "zh-hans": {
+    "path": "zh-hans.html",
+    "sha256": "a5079efbf7db164e5c909e2be3019fd3af7912de9ef8d1c8863b47d24948a655",
+    "bytes": 9298,
+    "original_sha256": "2f5efe674f7f7cc8bc2169e4d24123185265a9064e19105d084526a3f01bf63c"
+  }
+}
