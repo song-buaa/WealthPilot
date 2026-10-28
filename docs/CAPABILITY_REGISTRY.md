@@ -126,3 +126,5 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 Owner：WP [investment_thesis](../backend/services/investment_thesis/service.py)；[store/types](../backend/services/investment_thesis/store.py)、[CLI](../backend/services/investment_thesis/cli.py) 实现显式私人研究库、不可覆盖版本/差异、支持/反对claim、原PEER结果副本与Review持久化。[纯敞口](../backend/services/investment_thesis/exposure.py) 复用U1/发行人和已核阶段目标，缺证未知、ETF不穿透；不维护第二套账户或风险规则。
 
 原MCP显式配置E1库时才增加 [两项只读查询](../pocs/chatgpt_skills/investment_thesis.py)；无配置原工具不变。写入仅CLI，原业务库/worker只读限制不变；没有自动化、券商/订单或新的模型。B0/B1/B2/B3不作为独立产品版本。实现、合成端到端测试、尚未合并/部署及4.2稳定后基线对齐计划见 [4.3开发记录](v4.3/E1_B1_IMPLEMENTATION.md)。
+
+E1-B2 已用三种真实公开事件完成私人 CLI 记录/版本/Review/本地只读 MCP 重启读回；三份实际原 PEER 报告均 partial，经 CLI 导入仍为未认证副本，不代表买入资格或线上 E1 可用。未定期限的逾期状态保留 UNKNOWN；实际边界、最小修复与测试见 [B2 本地验证](v4.3/E1_B2_VALIDATION.md)。

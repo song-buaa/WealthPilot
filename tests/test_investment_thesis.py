@@ -253,3 +253,17 @@ def test_changed_review_payload_cannot_relaunch_executor(store):
     with pytest.raises(ValueError,match='REQUEST_ID_CONFLICT'):
         record_review(store,raw,'once',executor=execute)
     assert calls==[1]
+
+
+def test_undated_real_recollection_does_not_claim_not_overdue(store):
+    # B2 regression: no known start/date means expiry is UNKNOWN, not False.
+    raw=sample('meituan-v1');raw.update(synthetic=False,hypothesis_due_at=None)
+    store.save(raw,0,'undated-v1')
+    review=sample('meituan-review');review.update(thesis_revision=1,evidence_ids=['support'],
+        action_intent='HOLD',requested_verdict='WATCH',time_hypothesis_status='UNKNOWN',
+        not_run_reason='No historical trading date or due date available')
+    result=record_review(store,review,'undated-review')
+    assert result['waiting_time_hypothesis']['due_at'] is None
+    assert result['waiting_time_hypothesis']['overdue'] is None
+    assert result['waiting_time_hypothesis']['user_reported_status']=='UNKNOWN'
+    assert result['synthetic'] is False and not result['execution_authorized']

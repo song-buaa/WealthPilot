@@ -130,7 +130,7 @@ def record_review(store, raw, request_id, *, analysis=None, view=None, scenario=
         thesis_time_evidence_qualification=[evidence_qualification(e, original_at) for e in thesis.evidence] if original_at else [],
         exposure=exposure, thesis_version_diff=thesis_record["diff"],
         waiting_time_hypothesis=dict(due_at=thesis.hypothesis_due_at.isoformat() if thesis.hypothesis_due_at else None,
-            overdue=bool(thesis.hypothesis_due_at and thesis.hypothesis_due_at < draft.review_as_of),
+            overdue=(thesis.hypothesis_due_at < draft.review_as_of) if thesis.hypothesis_due_at else None,
             user_reported_status=draft.time_hypothesis_status,
             authority="No automatic extension, recovery forecast or sell instruction"),
         not_run_reason=draft.not_run_reason if analysis is None else None,
