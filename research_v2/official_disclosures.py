@@ -151,7 +151,7 @@ def parse_original(body, url, fetched_at):
         if fetched.tzinfo is None:
             return None
         titles = soup.find_all(['h1', 'h2', 'title'])
-        if not any(re.search(r'Li Auto Inc\..*Financial Results', t.get_text(' ', strip=True), re.I) for t in titles):
+        if urlsplit(url).hostname != 'www.sec.gov' and not any(re.search(r'Li Auto Inc\..*Financial Results', t.get_text(' ', strip=True), re.I) for t in titles):
             return None
         if urlsplit(url).hostname == 'www.sec.gov':
             # SEC full submission has independently stamped acceptance and issuer.
@@ -285,7 +285,7 @@ def parse_original(body, url, fetched_at):
         return None
 
 
-def collect(symbol, candidates=()):
+def _collect_li(symbol, candidates=()):
     """Read original research sources only; demo/mock never opens a socket.
 
     At most one discovery page + four originals. Cache retains original fetched_at.
@@ -316,7 +316,7 @@ def collect(symbol, candidates=()):
         if len(urls) == 4:
             break
         url = candidate.get('source_url') if isinstance(candidate, dict) else None
-        if allowed_url(url) and url not in urls:
+        if allowed_url(url) and urlsplit(url).hostname == 'ir.lixiang.com' and url not in urls:
             urls.append(url)
     rows = []
     for url in urls:
@@ -326,4 +326,17 @@ def collect(symbol, candidates=()):
             rows.append(record)
     if rows:
         set_cached('official-disclosures:v1:LI', deepcopy(rows), FUNDAMENTALS_TTL)
+    return rows, {r['record_id']:deepcopy(r) for r in rows}.get
+
+
+def collect(symbol, candidates=()):
+    """Unified research-owner discovery; issuer-specific layouts stay optional.
+
+    SEC accessions are discovered independently of research cards. LI retains its
+    reviewed official IR layout as an additional public source, not a SEC fork.
+    """
+    from research_v2.sec_disclosures import collect as collect_sec
+    sec_rows, _ = collect_sec(symbol)
+    ir_rows, _ = _collect_li(symbol, candidates)
+    rows = [*sec_rows, *ir_rows]
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get

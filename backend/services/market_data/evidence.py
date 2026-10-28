@@ -296,11 +296,30 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
     issuer=IDENTITIES.get((symbol,{"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])))
     domain={"LI_AUTO":"lixiang.com","PDD_HOLDINGS":"pddholdings.com","MEITUAN":"meituan.com"}.get(issuer)
     parsed=urlparse(str(raw.get("source_url") or ""))
+    # Independent source-owner proof carries exact directory + Submissions identity.
+    # This is never populated from a request/card or inferred company name.
+    identity=mapping(proof.get("issuer_identity"))
+    cik=identity.get("cik")
+    sec_source=False
+    if (identity.get("symbol")==symbol and isinstance(cik,str) and len(cik)==10 and cik.isdigit()
+            and int(cik)>0 and identity.get("issuer_type") in {"domestic","foreign_private"}
+            and identity.get("identity_source")=="https://www.sec.gov/files/company_tickers.json"
+            and identity.get("submissions_url")=="https://data.sec.gov/submissions/CIK"+cik+".json"
+            and isinstance(proof.get("identity_document_sha256"),str)
+            and len(proof["identity_document_sha256"])==64):
+        expected=issuer or "SEC_CIK_"+cik
+        from research_v2.sec_disclosures import allowed_url
+        sec_source=(identity.get("issuer_id")==expected and meta.get("cik")==cik
+            and allowed_url(raw.get("source_url"))
+            and ((parsed.hostname=="data.sec.gov" and parsed.path=="/api/xbrl/companyfacts/CIK"+cik+".json")
+                 or (parsed.hostname=="www.sec.gov" and parsed.path.startswith("/Archives/edgar/data/"+str(int(cik))+"/"))))
+        if sec_source: issuer=expected
+    # Preserve the reviewed legacy full-submission LI parser's independent proof.
     sec_original = (issuer == "LI_AUTO" and parsed.hostname == "www.sec.gov"
-                    and parsed.path.startswith("/Archives/edgar/data/"))
+                    and parsed.path.startswith("/Archives/edgar/data/") and not identity)
     host=parsed.hostname or ""
     published,fetched=stamp(raw.get("published_at")),stamp(raw.get("fetched_at"))
-    if (parsed.scheme!="https" or parsed.username or parsed.password or not domain or not (host==domain or host.endswith("."+domain) or sec_original)
+    if (parsed.scheme!="https" or parsed.username or parsed.password or not (sec_source or (domain and (host==domain or host.endswith("."+domain))) or sec_original)
             or not issuer or meta.get("issuer_id")!=issuer or meta.get("source_url")!=raw.get("source_url")
             or not raw.get("record_id") or not published or not fetched or not published<=fetched<=at
             or any(token in str(raw.get("source","")).lower() for token in ("seed","mock","fixture","synthetic","demo"))
@@ -312,8 +331,8 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
         if not isinstance(obs,dict): continue
         key=obs.get("source_field");end=stamp(obs.get("fiscal_period_end"))
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
-        if (key not in _OFFICIAL_FIELD_BASIS or obs.get("accounting_basis")!=_OFFICIAL_FIELD_BASIS[key]
-                or obs.get("period_basis")!="quarterly" or not end or end>published
+        if (key not in _OFFICIAL_FIELD_BASIS or obs.get("accounting_basis") not in {_OFFICIAL_FIELD_BASIS[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
+                or obs.get("period_basis") not in ({"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
                 or obs.get("unit")!="currency_units" or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
@@ -367,11 +386,12 @@ def link_disclosure_clocks(market, research, at, symbol, *, disclosure_verifier=
         links=[]
         for row in rows:
             for key in keys:
-                matches=[obs for obs in observations if obs["source_field"]==key
+                candidates=[obs for obs in observations if obs["source_field"]==key
+                    and obs["period_basis"]=="quarterly" and obs["accounting_basis"]==_OFFICIAL_FIELD_BASIS[key]
                     and obs["fiscal_period_end"]==row.get("fiscalDateEnding")
-                    and obs["currency"]==row.get("reportedCurrency")
-                    and obs["value"]==number(row.get(key))]
-                if not matches: break
+                    and obs["currency"]==row.get("reportedCurrency")]
+                matches=[obs for obs in candidates if obs["value"]==number(row.get(key))]
+                if not matches or len({obs["value"] for obs in candidates})!=1: break
                 links.append({name:matches[0][name] for name in ("issuer_id","record_id","source_url",
                     "published_at","fetched_at","fiscal_period_end","currency","unit","unit_scale","accounting_basis","source_field","source_locator",
                     "source_document_sha256","publication_locator")})
@@ -418,7 +438,8 @@ def financial_source_conflicts(records):
                 if not isinstance(observation, dict):
                     continue
                 key = observation.get("source_field")
-                if key not in fields or observation.get("period_basis") != "quarterly":
+                if (key not in fields or observation.get("period_basis") != "quarterly"
+                        or observation.get("accounting_basis") != _OFFICIAL_FIELD_BASIS[key]):
                     continue
                 for field in (fields[key],):
                     meta = mapping(raw_provenance.get(field))
@@ -599,15 +620,17 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter"}
     for obs in quarter_observations:
         end = stamp(obs["fiscal_period_end"])
-        if not end or (at-end).total_seconds() > 150*86400:
+        if not end or (at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400:
             continue
         field = quarter_fields[obs["source_field"]]
+        if obs["period_basis"]=="annual": field=field.replace("_quarter","_annual")
+        if obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
         verified_field_records.append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],
-            record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"],
+            record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"]+(":"+obs["currency"]+":"+obs["accounting_basis"] if obs.get("fiscal_period_start") else ""),
             quality="valid", issues=[], data_as_of=obs["fiscal_period_end"],
             published_at=obs["published_at"], fetched_at=obs["fetched_at"],
-            period=obs["fiscal_period_end"], scope="quarterly", currency=obs["currency"],
+            period=obs["fiscal_period_end"], scope=obs["period_basis"], currency=obs["currency"],
             publication_links=[obs], values={field:obs["value"], "currency":obs["currency"]},
             is_seed=False, is_mock=False, is_fallback=False))
     verified_period_records=[]

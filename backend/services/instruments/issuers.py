@@ -47,3 +47,45 @@ def exposure(items):
                 unmapped_direct_value_cny=sum(i.get("market_value_cny") or 0 for i in unknown),
                 unmapped_scope="Unknown direct issuers remain undistributed; known CN exposure is a lower bound. Funds are not looked through.",
                 scope="CNY market-value exposure only; native securities/quantities/costs remain separate; no ADR conversion or fund look-through")
+
+
+# Financial-source identity only. This does not expand portfolio aggregation or
+# infer economic region, share classes, positions or trading identities.
+def resolve_sec_issuer(symbol, ticker_directory, submissions):
+    """Exact official ticker -> CIK -> Submissions identity, never name matching.
+
+    Inputs must be read independently by the research source owner from SEC.
+    Duplicate ticker mappings, mismatched CIK/ticker and mixed filing regimes fail
+    closed. Existing portfolio issuer IDs are reused without mutating that owner.
+    """
+    import re
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}:US", symbol):
+        return None
+    ticker = symbol[:-3]
+    if not isinstance(ticker_directory, dict) or not isinstance(submissions, dict):
+        return None
+    matches = [row for row in ticker_directory.values() if isinstance(row, dict) and row.get("ticker") == ticker]
+    if len(matches) != 1:
+        return None
+    try:
+        cik = str(int(matches[0]["cik_str"])).zfill(10)
+        if len(cik) != 10 or int(cik) <= 0 or int(submissions.get("cik")) != int(cik):
+            return None
+    except (ValueError, TypeError, KeyError):
+        return None
+    if (not isinstance(submissions.get("tickers"), list) or ticker not in submissions["tickers"]
+            or not isinstance(submissions.get("name"), str)):
+        return None
+    filings = submissions.get("filings")
+    recent = filings.get("recent") if isinstance(filings,dict) else None
+    if not isinstance(recent,dict) or not isinstance(recent.get("form"),list) or any(not isinstance(f,str) for f in recent["form"]):
+        return None
+    forms = set(recent["form"])
+    domestic = bool(forms & {"10-K", "10-Q"})
+    foreign = bool(forms & {"20-F", "6-K"})
+    if domestic == foreign:
+        return None
+    return dict(symbol=symbol, issuer_id=IDENTITIES.get((symbol, "USD"), "SEC_CIK_"+cik),
+                cik=cik, name=submissions["name"], issuer_type="foreign_private" if foreign else "domestic",
+                identity_source="https://www.sec.gov/files/company_tickers.json",
+                submissions_url="https://data.sec.gov/submissions/CIK"+cik+".json")

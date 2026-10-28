@@ -559,3 +559,7 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 - 当前公告只有三个比较期间，不能替代四个连续季度的 TTM 证明。季度与 TTM 独立资格、错误币种/累计期间/歧义字段/不可信日期的拒绝行为保持。未修改异步 MCP、PEER、模型、资产、交易或专项账本。
 
 本次证明真实公告适配与解析，不等同生产研究复验；公开站点可达性可能波动，403/不可达仍 fail closed，无自动付费重试。
+
+## US financial sources P0.1
+
+The focused follow-up reuses the existing issuer/research/evidence owners for exact SEC ticker/CIK resolution, Submissions discovery, standard CompanyFacts and restricted original filing facts. AV and its TTM calculations remain authoritative inputs; source supplements support qualified L1 facts without changing L2–L4 or trading gates. See [scope, trust boundaries and representative verification limits](V42_US_FINANCIAL_SOURCES.md). Local real SEC API downloads are not claimed successful when blocked by HTTP/TLS access failures.

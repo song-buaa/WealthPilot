@@ -88,6 +88,7 @@ def test_fetch_is_server_owned_bounded_cached_and_preserves_source_clock(monkeyp
         if url==owner.IR_INDEX:return f'<a href="{URL}">result</a>'.encode(),AT.isoformat()
         return document(), AT.isoformat()
     monkeypatch.setattr(owner,'_fetch',fetch)
+    monkeypatch.setattr('research_v2.sec_disclosures.collect',lambda symbol:([], {}.get))
     rows,verifier=collect('LI:US',[dict(source_url=URL,published_at='2099-01-01')])
     assert rows and verifier(rows[0]['record_id'])['published_at']=='2026-08-15'
     again,_=collect('LI:US');assert again==rows and len(calls)==2
