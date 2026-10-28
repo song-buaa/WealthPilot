@@ -96,3 +96,28 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
     assert not any('PRIVATE' in str(d) for d in sec.source_diagnostics())
     before=len(calls)
     assert sec.collect('LI:US')[0]==rows and len(calls)==before
+
+
+def test_complete_companyfacts_quarter_cannot_skip_newer_8K(monkeypatch):
+    from backend.core import demo_mode
+    from backend.services.market_data import cache
+    from tests.test_sec_financial_sources import facts, submissions
+    monkeypatch.setattr(demo_mode,'PUBLIC_DEMO_MODE',False)
+    monkeypatch.delenv('AV_DEV_MOCK',raising=False)
+    monkeypatch.setattr(cache,'_cache',cache.TTLCache())
+    sub=submissions('AAPL')
+    newer=dict(accessionNumber='0001104659-26-200001',form='8-K',filingDate='2026-10-20',
+        reportDate='2026-10-20',primaryDocument='newer.htm',acceptanceDateTime='2026-10-20T12:00:00Z')
+    for key,value in newer.items():sub['filings']['recent'][key].insert(0,value)
+    source,_,_=facts()
+    calls=[]
+    def fetch(url):
+        calls.append(url)
+        if url==sec.DIRECTORY:return json.dumps(directory()).encode(),AT.isoformat()
+        if '/submissions/' in url:return json.dumps(sub).encode(),AT.isoformat()
+        if '/companyfacts/' in url:return source
+        return b'unsupported newer event',AT.isoformat()
+    monkeypatch.setattr(sec,'_fetch',fetch)
+    rows,_=sec.collect('AAPL:US')
+    assert len(calls)==4 and calls[-1].endswith('/0001104659-26-200001.txt')
+    assert {o['source_field'] for r in rows for o in r['financial_observations']}==set(EXPECTED)

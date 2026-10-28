@@ -530,7 +530,7 @@ def collect(symbol):
         annuals=[f for f in filings if f['form'] in {'10-K','20-F'}]
         events=[f for f in filings if f['form'] in {'6-K','8-K'}
                 and (not annuals or f['filed']>=annuals[0]['filed'])]
-        selected=quarters+events+annuals[:1]
+        selected=sorted(quarters+events,key=lambda f:(f['filed'],f['accession']),reverse=True)+annuals[:1]
         filed_by_accession={f['accession']:f['filed'] for f in filings}
         for filing in selected:
             # Facts retain their independent periods. Older complete quarters
