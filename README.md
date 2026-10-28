@@ -38,6 +38,8 @@
 
 E1 投资假设与决策复核的 B0/B1/B2/B3 是 **4.3 内部实施阶段**。B1 本地 MVP 提供不可覆盖假设版本、双向证据、人工 Review、条件性直接敞口及 CLI 显式保存/可选只读 MCP 查询；复用原 PEER/U1，不扩交易权限。未合并部署，线上 ChatGPT 不因此获得自动永久保存能力。命令、合成示例和4.2稳定后的集成安排见 [4.3 E1 开发记录](docs/v4.3/E1_B1_IMPLEMENTATION.md)。
 
+B3-1本地新增默认关闭的 E1 研究预览/确认保存桥接；仅显式私人库+研究写开关才注册，保存前须展示预览并等待本次人类确认。当前生产连接器不变，线上ChatGPT保存仍不可用。日常交互、复用边界及本地复现见 [研究保存说明](docs/v4.3/E1_B31_RESEARCH_SAVE.md)。
+
 ## 当前架构与运行边界
 
 **MacBook = Dev，Mac mini = Prod。** 原完整FastAPI/React、MCP/Tunnel、业务worker与共享SQLite沿用现有分层。同步发布更新当前Position；新U1视图冻结同一版本的Portfolio/Wealth及质量输入；已有视图不被后续同步改写。PEER、Skills及decision_engine原权威不替换。

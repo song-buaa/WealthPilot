@@ -75,6 +75,22 @@ def record_review(store, raw, request_id, *, analysis=None, view=None, scenario=
         except Exception:
             # Never persist raw errors, prompt, credentials or provider failure text.
             analysis, provenance, failure = None, "EXECUTION_FAILED", "ANALYSIS_FAILED_NOT_RETRIED"
+    outcome = review_outcome(store.portfolio_id, thesis_record, draft, analysis, view, scenario,
+                             targets, provenance, failure)
+    return store.finish_review(started, outcome, request_id, fingerprint)
+
+
+def review_outcome(portfolio_id, thesis_record, draft, analysis, view, scenario, targets,
+                   provenance, failure=None):
+    """Pure shared qualification/projection. Never runs PEER, reads targets or writes."""
+    from pocs.chatgpt_skills.analysis import AnalysisResult
+    thesis = ThesisDraft.model_validate(thesis_record["content"])
+    _validate_links(thesis, draft)
+    if analysis is not None:
+        AnalysisResult.model_validate(analysis)
+        canonical(analysis)
+    if scenario is not None:
+        scenario = ExposureScenario.model_validate(scenario).model_dump(mode="json")
     qualifications = [evidence_qualification(e, draft.review_as_of) for e in thesis.evidence]
     eligible = {e["evidence_id"]: e for e in qualifications if e["eligible"]}
     used = [eligible[i] for i in draft.evidence_ids if i in eligible]
@@ -98,12 +114,12 @@ def record_review(store, raw, request_id, *, analysis=None, view=None, scenario=
         if qualification.get("allowed") is not True:
             reasons.append("PROFESSIONAL_QUALIFICATION_UNVERIFIED_OR_VETOED")
         if (view and analysis.get("snapshot_id") != view.get("snapshot_id") or
-                analysis.get("scope", {}).get("portfolio_id", store.portfolio_id) != store.portfolio_id):
+                analysis.get("scope", {}).get("portfolio_id", portfolio_id) != portfolio_id):
             reasons.append("ANALYSIS_SCOPE_OR_SNAPSHOT_MISMATCH")
     if provenance == "USER_SUPPLIED_ANALYSIS_COPY":
         reasons.append("ANALYSIS_COPY_ORIGIN_UNVERIFIED")
     exposure = calculate_exposure(view, thesis.security, scenario,
-                                 portfolio_id=store.portfolio_id, at=draft.review_as_of, confirmed_targets=targets["confirmed"])
+                                 portfolio_id=portfolio_id, at=draft.review_as_of, confirmed_targets=targets["confirmed"])
     if draft.action_intent in {"BUY", "ADD"}:
         if not any(i in eligible for i in draft.price_evidence_ids):
             reasons.append("PRICE_AND_VALUE_EVIDENCE_INSUFFICIENT")
@@ -120,7 +136,7 @@ def record_review(store, raw, request_id, *, analysis=None, view=None, scenario=
         effective = "UNKNOWN"
     # Future-source qualification is distinct at the original thesis and review times.
     original_at = thesis.decision_as_of
-    outcome = dict(state="FAILED" if failure else "COMPLETED", analysis=deepcopy(analysis),
+    return dict(state="FAILED" if failure else "COMPLETED", analysis=deepcopy(analysis),
         analysis_provenance=provenance, analysis_error=failure,
         original_analysis_status=analysis["status"] if analysis else "NOT_RUN",
         synthetic=thesis.synthetic or bool((analysis or {}).get("synthetic")),
@@ -135,7 +151,6 @@ def record_review(store, raw, request_id, *, analysis=None, view=None, scenario=
             authority="No automatic extension, recovery forecast or sell instruction"),
         not_run_reason=draft.not_run_reason if analysis is None else None,
         execution_authorized=False, current_qualification="HISTORICAL_RECORD_NOT_RECHECKED")
-    return store.finish_review(started, outcome, request_id, fingerprint)
 
 
 class OriginalWorker:

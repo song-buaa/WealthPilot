@@ -208,6 +208,13 @@ def create_server(settings):
     if e1_path:
         from pocs.chatgpt_skills.investment_thesis import register_read_tools
         register_read_tools(server, e1_path, settings.portfolio_id, security_meta)
+    e1_writes = getattr(settings, "e1_enable_writes", False) is True
+    if e1_writes:
+        if not e1_path:
+            raise ValueError("E1_EXPLICIT_STORE_REQUIRED_FOR_WRITES")
+        from pocs.chatgpt_skills.investment_thesis import register_write_tools
+        register_write_tools(server, e1_path, settings.portfolio_id, security_meta)
+
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
     if prepare_config:
         from pocs.chatgpt_skills.prepare import PrepareClient
@@ -409,7 +416,8 @@ def main():
     parser.add_argument("--analysis-business-python", help="Reuse the existing complete Web business Python for PEER dependencies")
     parser.add_argument("--analysis-env-file", help="Existing local runtime JSON; only original analysis provider settings are read")
     parser.add_argument("--prepare-config", help="Opt-in private loopback prepare URL/token-file configuration; seven existing tools stay read-only")
-    parser.add_argument("--e1-db-path", help="4.3 opt-in private research store, readonly; no creation or business writes")
+    parser.add_argument("--e1-db-path", help="4.3 opt-in private research store; read-only unless separately enabled, no creation or business writes")
+    parser.add_argument("--e1-enable-writes", action="store_true", help="Separately authorized E1 preview/confirmed research save ONLY; default off; never enables business/trading writes")
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))

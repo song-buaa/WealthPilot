@@ -1,7 +1,7 @@
 """Explicit private SQLite research store; no imports of business DB or providers."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import os
@@ -141,13 +141,13 @@ class ThesisStore:
                 return self._read(row)
         return None
 
-    def save(self, raw, expected_revision, request_id):
+    def save(self, raw, expected_revision, request_id, *, _db=None):
         draft = ThesisDraft.model_validate(raw)
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
             raise ValueError("E1_EXPECTED_REVISION_REQUIRED")
         content = draft.model_dump(mode="json")
         fingerprint = digest(dict(content=content, expected_revision=expected_revision))
-        with self.connection(write=True) as db:
+        with (nullcontext(_db) if _db is not None else self.connection(write=True)) as db:
             prior = self._request(db, request_id, fingerprint, "thesis_versions")
             if prior:
                 return prior
@@ -202,8 +202,8 @@ class ThesisStore:
             return [self._read(r) for r in db.execute("SELECT * FROM thesis_versions WHERE portfolio_id=? AND thesis_id=? ORDER BY revision",
                                                     (self.portfolio_id, thesis_id))]
 
-    def begin_review(self, draft, fingerprint, request_id):
-        with self.connection(write=True) as db:
+    def begin_review(self, draft, fingerprint, request_id, *, _db=None):
+        with (nullcontext(_db) if _db is not None else self.connection(write=True)) as db:
             prior = self._request(db, request_id, fingerprint, "decision_reviews")
             if prior:
                 return prior, False
@@ -220,8 +220,8 @@ class ThesisStore:
             (self.portfolio_id, payload["review_id"], index, payload["thesis_id"], payload["thesis_revision"],
              request_id, fingerprint, canonical(payload), digest(payload)))
 
-    def finish_review(self, started, outcome, request_id, fingerprint):
-        with self.connection(write=True) as db:
+    def finish_review(self, started, outcome, request_id, fingerprint, *, _db=None):
+        with (nullcontext(_db) if _db is not None else self.connection(write=True)) as db:
             existing = db.execute("SELECT * FROM decision_reviews WHERE portfolio_id=? AND review_id=? ORDER BY event_index DESC LIMIT 1",
                                   (self.portfolio_id, started["review_id"])).fetchone()
             if not existing or existing["request_id"] != request_id or existing["fingerprint"] != fingerprint:
