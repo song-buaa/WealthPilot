@@ -1,0 +1,11 @@
+{
+  "source_url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/0001104659-26-101065.txt",
+  "raw_bytes": 520544,
+  "raw_sha256": "9b3170dbdde2e9a37417f4132d619f390ec799569b68e1908fa3824d00528865",
+  "gzip_sha256": "2b85e9b0c7e5c4206bdb59b3b650b090b0f44a575f4e2765c01d7d9a7f8476e4",
+  "archive_origin": "Mac mini outputs/pr48-official-alternatives-20261028/sec_6k.original",
+  "original_network_fetched_at": null,
+  "request_started_at": "2026-10-28T06:04:22.283703+00:00",
+  "fixture_kind": "exact_complete_public_SEC_submission_bytes_gzip_mtime_0",
+  "clock_note": "No historical fetched_at was saved. Offline qualification tests supply an explicitly labelled test processing clock; it is not historical network metadata."
+}

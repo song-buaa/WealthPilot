@@ -14,6 +14,12 @@ import re
 import threading
 import time
 import urllib.request
+import urllib.error
+import ssl
+import socket
+import os
+import logging
+from contextvars import ContextVar
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -42,6 +48,51 @@ CONCEPTS = {
 }
 _request_lock = threading.Lock()
 _last_request = 0.0
+_diagnostics = ContextVar('sec_source_diagnostics', default=())
+_LOG = logging.getLogger(__name__)
+SEC_IDENTITY_KEYS = {'WEALTHPILOT_SEC_ORGANIZATION', 'WEALTHPILOT_SEC_CONTACT_EMAIL'}
+
+
+def request_identity():
+    """Operator-owned identity only; no invented default or email ownership claim."""
+    org=os.getenv('WEALTHPILOT_SEC_ORGANIZATION','').strip()
+    email=os.getenv('WEALTHPILOT_SEC_CONTACT_EMAIL','').strip()
+    if (not 2<=len(org)<=120 or any(ord(c)<32 or ord(c)>126 for c in org)
+            or not re.fullmatch(r'[A-Za-z0-9.!#$%&*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+',email)
+            or len(email)>254 or email.lower().endswith(('.invalid','.example','.test','@example.com','@example.org','@example.net'))
+            or org.lower() in {'example','sample','test','your organization','your company'}):
+        return None
+    return org+' '+email
+
+
+def source_diagnostics():
+    return [dict(row) for row in _diagnostics.get()]
+
+
+def _diagnose(url, category, *, status=None, attempted=False):
+    path=urlsplit(url).path if allowed_url(url) else ''
+    endpoint=('directory' if url==DIRECTORY else 'submissions' if '/submissions/' in path
+              else 'companyfacts' if '/companyfacts/' in path else 'filing' if path else 'rejected')
+    row=dict(endpoint=endpoint,category=category,http_status=status,request_attempted=attempted)
+    _diagnostics.set((*_diagnostics.get(),row)[-20:])
+    # No exception strings, response bodies or operator identity in logs/metadata.
+    _LOG.info('SEC source endpoint=%s category=%s http_status=%s request_attempted=%s',endpoint,category,status,attempted)
+
+
+def _access_failed():
+    rows=_diagnostics.get()
+    return bool(rows and rows[-1]['category'] not in {'available','cache_hit','data_missing'})
+
+
+def _transport_error(exc):
+    reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
+    if isinstance(reason,ssl.SSLError): return 'tls_error'
+    if isinstance(reason,socket.gaierror): return 'dns_error'
+    if isinstance(reason,(TimeoutError,socket.timeout)): return 'timeout'
+    if isinstance(reason,ConnectionError) and any(os.getenv(k) for k in ('HTTPS_PROXY','https_proxy')):
+        return 'proxy_connection_error'
+    return 'network_error'
+
 
 
 def allowed_url(url):
@@ -69,23 +120,38 @@ def _fetch(url):
     """SEC public reads only, max 4/s per process, no retries or redirects."""
     global _last_request
     if not allowed_url(url):
+        _diagnose(url,'url_rejected')
+        return None
+    identity=request_identity()
+    if not identity:
+        _diagnose(url,'identity_unconfigured')
         return None
     try:
         with _request_lock:
             time.sleep(max(0, .25 - (time.monotonic() - _last_request)))
             _last_request = time.monotonic()
             req = urllib.request.Request(url, headers={
-                'User-Agent': 'WealthPilot/4.2 public research https://github.com/song-buaa/WealthPilot',
+                'User-Agent': identity,
                 'Accept': 'application/json,text/html,text/plain'})
             with urllib.request.build_opener(_NoRedirect).open(req, timeout=8) as response:
                 if response.geturl() != url:
+                    _diagnose(url,'redirect_rejected',attempted=True)
+                    return None
+                status=getattr(response,'status',200)
+                if status!=200:
+                    _diagnose(url,'http_error',status=status,attempted=True)
                     return None
                 body = response.read(MAX_BYTES + 1)
-        if not body or len(body) > MAX_BYTES:
+        if not body or len(body)>MAX_BYTES:
+            _diagnose(url,'empty_response' if not body else 'body_too_large',attempted=True)
             return None
+        _diagnose(url,'available',status=200,attempted=True)
         return body, datetime.now(timezone.utc).isoformat()
-    except Exception:
-        return None  # Never retain provider response bodies/error strings.
+    except urllib.error.HTTPError as exc:
+        _diagnose(url,'http_403' if exc.code==403 else 'http_error',status=exc.code,attempted=True)
+    except (urllib.error.URLError,OSError) as exc:
+        _diagnose(url,_transport_error(exc),attempted=True)
+    return None
 
 
 def _json(source):
@@ -187,7 +253,7 @@ def _deduplicate(observations):
 
 
 def _record(issuer, filing, observations, body, url, fetched_at, *, identity_digest):
-    if not observations:
+    if not observations or not isinstance(fetched_at,str):
         return None
     try:
         fetched = datetime.fromisoformat(fetched_at.replace('Z', '+00:00'))
@@ -316,10 +382,50 @@ def parse_filing(source, issuer, filing, *, identity_digest):
         header_clock=datetime.strptime(accepted[1], '%Y%m%d%H%M%S').replace(tzinfo=ZoneInfo('America/New_York'))
         if header_clock != datetime.fromisoformat(filing['published_at'].replace('Z','+00:00')):
             return None
-    observations = []
-    # Context IDs are document-scoped; no cross-exhibit borrowing of clocks/units.
-    for doc_index, document in enumerate(re.findall(r'<DOCUMENT>(.*?)</DOCUMENT>', text, re.S | re.I)):
-        soup = BeautifulSoup(document, 'html.parser')
+    base=f"https://www.sec.gov/Archives/edgar/data/{int(issuer['cik'])}/{filing['accession'].replace('-','')}/"
+    if filing['full_url']!=base+filing['accession']+'.txt' or not filing['primary_url'].startswith(base):
+        return None
+    documents=[]
+    for index,document in enumerate(re.findall(r'<DOCUMENT>(.*?)</DOCUMENT>',text,re.S|re.I)):
+        kind=re.search(r'<TYPE>([^\r\n<]+)',document,re.I)
+        filename=re.search(r'<FILENAME>([^\r\n<]+)',document,re.I)
+        sequence=re.search(r'<SEQUENCE>(\d+)',document,re.I)
+        if not kind or not filename or not sequence:
+            return None
+        kind,filename=kind[1].strip(),filename[1].strip()
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*',filename):
+            return None
+        documents.append((index,kind,filename,int(sequence[1]),document))
+    if len({d[2] for d in documents})!=len(documents) or len({d[3] for d in documents})!=len(documents):
+        return None
+    primary=[d for d in documents if d[1]==filing['form'] and base+d[2]==filing['primary_url'] and d[3]==1]
+    if len(primary)!=1:
+        return None
+    cover=BeautifulSoup(primary[0][4],'html.parser')
+    declared={(a.get('href'),a.get_text(' ',strip=True)) for a in cover.find_all('a',href=True)}
+    observations=[]
+    # Contexts and external statement headings are document-scoped. An exhibit
+    # must be declared by the original primary document with its actual identity.
+    for doc_index,kind,filename,sequence,document in documents:
+        if not filename.lower().endswith(('.htm','.html')):
+            continue
+        is_primary=(kind==filing['form'] and base+filename==filing['primary_url'])
+        is_exhibit=(re.fullmatch(r'EX-99\.\d+',kind) and
+            any(href==filename and re.fullmatch(re.escape(kind[3:]),label) for href,label in declared))
+        if not (is_primary or is_exhibit):
+            continue
+        soup=BeautifulSoup(document,'html.parser')
+        from research_v2.official_disclosures import parse_statement_tables
+        try:
+            table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'))
+        except (ValueError,TypeError,AttributeError,InvalidOperation,OverflowError):
+            return None
+        for obs in table_observations:
+            end=date.fromisoformat(obs['fiscal_period_end'])
+            obs['fiscal_period_start']=end.replace(day=1,month=end.month-2).isoformat()
+            obs.update(document_type=kind,document_filename=filename,document_sequence=sequence)
+            obs['source_locator']=f'DOCUMENT[{doc_index}]/{filename}/'+obs['source_locator']
+            observations.append(obs)
         contexts, units = {}, {}
         for node in soup.find_all(lambda t: t.name.lower().split(':')[-1] == 'context'):
             identifier = node.find(lambda t: t.name.lower().split(':')[-1] == 'identifier')
@@ -361,18 +467,10 @@ def parse_filing(source, issuer, filing, *, identity_digest):
                 observations.append(dict(source_field=field, value=float(value), currency=currency,
                     unit='currency_units', unit_scale=1, period_basis=scope,
                     fiscal_period_start=start, fiscal_period_end=end, accounting_basis=basis,
-                    source_locator=f'DOCUMENT[{doc_index}]/ix:nonFraction[{i}]/{node.get("name")}'))
+                    document_type=kind,document_filename=filename,document_sequence=sequence,
+                    source_locator=f'DOCUMENT[{doc_index}]/{filename}/ix:nonFraction[{i}]/{node.get("name")}'))
             except (ValueError, TypeError, InvalidOperation):
                 continue
-    if not observations and issuer['issuer_id'] == 'LI_AUTO':
-        # Reuse the reviewed real LI statement layout; do not add an issuer-specific
-        # SEC parser. SEC discovery/envelope was independently verified above.
-        from research_v2.official_disclosures import parse_original
-        row = parse_original(body, filing['full_url'], fetched_at)
-        if row:
-            observations = row['financial_observations']
-            for obs in observations:
-                obs['fiscal_period_start'] = date.fromisoformat(obs['fiscal_period_end']).replace(day=1, month=((int(obs['fiscal_period_end'][5:7])-1)//3)*3+1).isoformat()
     return _record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)
 
 
@@ -382,7 +480,7 @@ def collect(symbol):
     No network in demo/mock. Successful original reads retain original fetched_at.
     A failure to resolve/verify never turns a request/card into source authority.
     """
-    import os
+    _diagnostics.set(())
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
     if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
@@ -398,9 +496,11 @@ def collect(symbol):
             set_cached('sec-directory:v1', directory_source, FUNDAMENTALS_TTL)
     directory = _json(directory_source)
     if not directory:
+        if directory_source: _diagnose(DIRECTORY,'invalid_json')
         return [], {}.get
     matches = [r for r in directory.values() if isinstance(r, dict) and r.get('ticker') == symbol[:-3]]
     if len(matches) != 1:
+        _diagnose(DIRECTORY,'identity_unresolved')
         return [], {}.get
     try:
         cik = str(int(matches[0]['cik_str'])).zfill(10)
@@ -410,11 +510,19 @@ def collect(symbol):
         submissions = _json(submissions_source)
         issuer = resolve_sec_issuer(symbol, directory, submissions)
         if not issuer:
+            if submissions_source: _diagnose('https://data.sec.gov/submissions/CIK'+cik+'.json','invalid_json' if submissions is None else 'identity_unresolved')
             return [], {}.get
         filings = discover_filings(issuer, submissions)
         identity_digest = hashlib.sha256(directory_source[0]+submissions_source[0]).hexdigest()
         facts = _fetch('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json')
+        if not facts and _access_failed():
+            return [], {}.get
         rows = parse_companyfacts(facts, issuer, filings, identity_digest=identity_digest)
+        if facts and not rows:
+            invalid=_json(facts) is None
+            _diagnose('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json','invalid_json' if invalid else 'data_missing')
+            if invalid:
+                return [], {}.get
         # Only missing semantic field/scope combinations use original attachments.
         # Limit to latest four relevant filings, never walk arbitrary source URLs.
         # Include latest annual/quarterly reports even when monthly foreign
@@ -428,6 +536,8 @@ def collect(symbol):
             if len(fields) == 4:
                 continue
             original = _fetch(filing['full_url'])
+            if not original and _access_failed():
+                break
             record = parse_filing(original, issuer, filing, identity_digest=identity_digest)
             if record and record['financial_observations']:
                 # Keep overlapping source facts too; evidence owner handles actual

@@ -131,13 +131,140 @@ def _amount(text):
     return -value if negative else value
 
 
-def _statement_kind(rows):
-    header = ' '.join(' '.join(r) for r in rows[:2]).lower()
-    if 'condensed consolidated statements of comprehensive income' in header:
+def _statement_kind(rows, context=''):
+    header=(context+' '+' '.join(' '.join(r) for r in rows[:2])).lower()
+    if 'reconciliation' in header or 'non-gaap results' in header:
+        return None
+    if re.search(r'consolidated statements of (?:comprehensive )?(?:income|operations|profit)',header):
         return 'income'
-    if 'condensed consolidated statements of cash flows' in header:
+    if re.search(r'consolidated statements of cash flows',header):
         return 'cash_flow'
     return None
+
+
+def _table_context(table):
+    """Only adjacent headings/units in this document, never across another table."""
+    text=[]
+    for node in table.previous_siblings:
+        if getattr(node,'name',None)=='table':
+            break
+        if hasattr(node,'get_text'):
+            value=node.get_text(' ',strip=True)
+            if value:
+                text.append(value)
+                if len(text)==4:
+                    break
+    return ' '.join(reversed(text))
+
+
+def _column_header(rows, ri, col):
+    value=' '.join(r[col] for r in rows[:ri] if col<len(r))
+    # Join visibly split year digits, not financial amounts or guessed dates.
+    value=re.sub(r'\b(20\d)\s+(\d)\b',r'\1\2',value)
+    value=re.sub(r'\b(20)\s+(\d{2})\b',r'\1\2',value)
+    return re.sub(r'\s+,\s*',', ',value)
+
+
+def _cell_amount(rows,ri,col):
+    row=rows[ri]
+    value=row[col].strip()
+    def same_group(adjacent):
+        header=_column_header(rows,ri,adjacent)
+        # Empty/punctuation columns may share the broad period heading. They
+        # cannot introduce a different actual date or currency from a neighbor.
+        tokens=re.findall(r'RMB|CNY|USD|US\$|HKD|HK\$|(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}',header)
+        anchor=_column_header(rows,ri,col)
+        return not tokens or all(token in anchor for token in tokens)
+    if value=='(' and col+2<len(row) and same_group(col+1) and same_group(col+2):
+        value+=''.join(row[col+1:col+3]).strip()
+    else:
+        if col and row[col-1].strip()=='(' and same_group(col-1):
+            value='('+value
+        if value.startswith('(') and not value.endswith(')') and col+1<len(row) and row[col+1].strip()==')' and same_group(col+1):
+            value+=')'
+    return _amount(value)
+
+
+def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',)):
+    """Shared explicit statement semantics; no issuer name/ticker/AV input."""
+    observations=[]
+    tables=[(i,t,_grid(t),_table_context(t)) for i,t in enumerate(soup.find_all('table'))]
+    has_statements=any(_statement_kind(rows,context) for _,_,rows,context in tables)
+    for ti,table,rows,context in tables:
+        statement=_statement_kind(rows,context)
+        if (require_statements or has_statements) and not statement:
+            continue
+        if not re.search(r'three months ended',' '.join(' '.join(r) for r in rows),re.I):
+            continue
+        unit_text=(table.get_text(' ',strip=True)+' '+context).lower()
+        scales=[scale for label,scale in [('thousands',1000),('millions',1000000)] if re.search(r'in '+label,unit_text)]
+        if len(scales)!=1:
+            continue
+        # An explicit RMB reporting column takes precedence over convenience USD
+        # translations. A standalone USD statement is supported by SEC, not IR.
+        first_data=next((i for i,r in enumerate(rows) if r and r[0].strip().lower().rstrip(':') in LABELS),len(rows))
+        table_currencies={v.strip().strip('()') for r in rows[:first_data] for v in r}
+        allowed=('CNY',) if {'RMB','CNY'}&table_currencies else currencies
+        for ri,row in enumerate(rows):
+            if not row:
+                continue
+            label=row[0].strip().lower().rstrip(':')
+            if label not in LABELS:
+                continue
+            key,basis=LABELS[label]
+            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome'})):
+                continue
+            for col in range(1,len(row)):
+                header=_column_header(rows,ri,col)
+                if not re.search(r'three months ended',header,re.I) or re.search(r'(six|nine|twelve) months|year ended',header,re.I):
+                    continue
+                dates=re.findall(r'(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}',header)
+                found=set(re.findall(r'(?<![A-Za-z])(?:RMB|CNY|USD|US\$|HK\$|HKD|EUR|GBP|JPY|\$)(?![A-Za-z])',header))
+                mapping={'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}
+                currency=mapping.get(next(iter(found))) if len(found)==1 else None
+                explicit=any(r[col].strip().strip('()') in mapping for r in rows[:ri] if col<len(r))
+                if not explicit or len(set(dates))!=1 or currency not in allowed:
+                    continue
+                end=_date(dates[0])
+                if not end:
+                    try:end=datetime.strptime(dates[0].replace(',',''),'%B %d %Y').date().isoformat()
+                    except ValueError:continue
+                if end[5:] not in {'03-31','06-30','09-30','12-31'} or end>published:
+                    continue
+                value=_cell_amount(rows,ri,col)
+                if value is None or not value.is_finite():
+                    continue
+                reported_value,normalization=value,None
+                if key=='capitalExpenditures' and (statement=='cash_flow' or value<0):
+                    before=next(((j,r) for j,r in reversed(list(enumerate(rows[:ri]))) if any(r)),None)
+                    after=next(((j,r) for j,r in enumerate(rows[ri+1:],ri+1) if any(r)),None)
+                    same=(before and after and LABELS.get(before[1][0].strip().lower().rstrip(':'),(None,))[0]=='operatingCashflow'
+                        and after[1][0].strip().lower()=='free cash flow (non-gaap)')
+                    ocf=_cell_amount(rows,before[0],col) if same and col<len(before[1]) else None
+                    fcf=_cell_amount(rows,after[0],col) if same and col<len(after[1]) else None
+                    if statement!='cash_flow' or ocf is None or fcf is None or ocf-abs(value)!=fcf:
+                        continue
+                    value=abs(value)
+                    normalization=dict(basis='official_cash_flow_reconciliation: OCF - positive_spend = FCF',
+                        reported_operating_cash_flow=float(ocf),reported_free_cash_flow=float(fcf),reported_unit_scale=scales[0])
+                if (label=='net loss' or label=='net cash used in operating activities') and value>0:
+                    continue
+                observations.append(dict(source_field=key,value=float(value),reported_value=float(reported_value),
+                    reported_unit_scale=scales[0],sign_normalization=normalization,currency=currency,unit='currency_units',
+                    unit_scale=scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
+                    source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
+    unique={}
+    for obs in observations:
+        k=obs['source_field'],obs['fiscal_period_end'],obs['currency']
+        if k not in unique:
+            unique[k]=obs
+        elif unique[k] is not None:
+            previous=unique[k]
+            if (all(previous[n]==obs[n] for n in ('unit','accounting_basis','period_basis'))
+                    and previous['value']*previous['unit_scale']==obs['value']*obs['unit_scale']):
+                previous['source_locator']+='; '+obs['source_locator']
+            else:unique[k]=None
+    return [o for o in unique.values() if o is not None]
 
 
 def parse_original(body, url, fetched_at):
@@ -185,93 +312,7 @@ def parse_original(body, url, fetched_at):
             publication_locator = 'original HTML publication header ('+precision+')'
         if published[:10] > fetched.date().isoformat():
             return None
-        observations = []
-        tables = [(i, table, _grid(table)) for i, table in enumerate(soup.find_all('table'))]
-        has_statements = any(_statement_kind(rows) for _, _, rows in tables)
-        for ti, table, rows in tables:
-            statement = _statement_kind(rows)
-            if has_statements and not statement:
-                continue  # Rounded summaries/reconciliations cannot override statements.
-            context = ' '.join(' '.join(r) for r in rows).lower()
-            # Never reinterpret year-to-date/annual numbers as quarters.
-            if not re.search(r'three months ended', context):
-                continue
-            caption = table.find_previous(['p', 'div'])
-            unit_text = (table.get_text(' ', strip=True) + ' ' + (caption.get_text(' ', strip=True) if caption and table not in caption.descendants else '')).lower()
-            scales = [scale for label, scale in [('thousands', 1000), ('millions', 1000000)] if re.search(r'in '+label, unit_text)]
-            if len(scales) != 1:
-                continue
-            for ri, row in enumerate(rows):
-                if not row:
-                    continue
-                label = row[0].strip().lower().rstrip(':')
-                if label not in LABELS:
-                    continue
-                key, basis = LABELS[label]
-                if statement and ((statement == 'income') != (key in {'totalRevenue', 'netIncome'})):
-                    continue
-                for col, amount in enumerate(row[1:], 1):
-                    header = ' '.join(r[col] for r in rows[:ri] if col < len(r))
-                    # Period semantics belong to this column, not a neighboring YTD column.
-                    if not re.search(r'three months ended', header, re.I) or re.search(r'(six|nine|twelve) months|year ended', header, re.I):
-                        continue
-                    # A column must independently identify ONE quarter end + RMB.
-                    dates = re.findall(r'(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}', header)
-                    currency = set(re.findall(r'(?<![A-Za-z])(?:RMB|CNY|USD|US\$|HK\$|HKD|EUR|GBP|JPY|\$)(?![A-Za-z])', header))
-                    explicit_currency = any(r[col].strip().strip('()') in {'RMB', 'CNY'} for r in rows[:ri] if col < len(r))
-                    if not explicit_currency or len(set(dates)) != 1 or currency not in ({'RMB'}, {'CNY'}):
-                        continue
-                    end = _date(dates[0].replace(',', '') if ',' not in dates[0] else dates[0])
-                    if not end:
-                        try:
-                            end = datetime.strptime(dates[0].replace(',', ''), '%B %d %Y').date().isoformat()
-                        except ValueError:
-                            continue
-                    if end[5:] not in {'03-31','06-30','09-30','12-31'} or end > published:
-                        continue
-                    value = _amount(amount)
-                    if value is None or not value.is_finite():
-                        continue
-                    reported_value, normalization = value, None
-                    if key == 'capitalExpenditures' and (statement == 'cash_flow' or value < 0):
-                        # Original LI cash-flow table explicitly reconciles OCF +
-                        # negative CapEx = FCF. Never apply abs() to unknown signs.
-                        before = next((r for r in reversed(rows[:ri]) if any(r)), [])
-                        after = next((r for r in rows[ri+1:] if any(r)), [])
-                        same_block = (before and after and LABELS.get(before[0].strip().lower().rstrip(':'), (None,))[0] == 'operatingCashflow'
-                            and after[0].strip().lower() == 'free cash flow (non-gaap)')
-                        ocf = _amount(before[col]) if same_block and col < len(before) else None
-                        fcf = _amount(after[col]) if same_block and col < len(after) else None
-                        if statement != 'cash_flow' or ocf is None or fcf is None or ocf - abs(value) != fcf:
-                            continue
-                        value = abs(value)
-                        normalization = dict(basis='official_cash_flow_reconciliation: OCF - positive_spend = FCF',
-                            reported_operating_cash_flow=float(ocf), reported_free_cash_flow=float(fcf),
-                            reported_unit_scale=scales[0])
-                    if label == 'net loss' and value > 0:
-                        continue
-                    if label == 'net cash used in operating activities' and value > 0:
-                        continue
-                    observations.append(dict(source_field=key, value=float(value), reported_value=float(reported_value),
-                        reported_unit_scale=scales[0], sign_normalization=normalization, currency='CNY', unit='currency_units',
-                        unit_scale=scales[0], period_basis='quarterly', fiscal_period_end=end, accounting_basis=basis,
-                        source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
-        # Identical repetitions in the SAME original are aliases, not another
-        # independent observation. Conflicting cells stay unknown permanently.
-        unique = {}
-        for obs in observations:
-            k = obs['source_field'], obs['fiscal_period_end']
-            if k not in unique:
-                unique[k] = obs
-            elif unique[k] is not None:
-                previous = unique[k]
-                keys = ('currency', 'unit', 'accounting_basis', 'period_basis')
-                if (all(previous[n] == obs[n] for n in keys)
-                        and previous['value'] * previous['unit_scale'] == obs['value'] * obs['unit_scale']):
-                    previous['source_locator'] += '; '+obs['source_locator']
-                else:
-                    unique[k] = None
-        observations = [o for o in unique.values() if o is not None]
+        observations=parse_statement_tables(soup,published)
         if not observations:
             return None
         digest = hashlib.sha256(body).hexdigest()

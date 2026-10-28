@@ -47,7 +47,7 @@ def load_analysis_environment(path, *, model_policy_only=False):
         "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-        "WEALTHPILOT_STAGE_TARGETS_PATH"}
+        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
     if not model_policy_only:
         from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES
         if any(key in values for key in AV_KEY_NAMES):
@@ -55,6 +55,11 @@ def load_analysis_environment(path, *, model_policy_only=False):
             # unrelated parent account into an alias or numbered-slot fallback.
             for key in AV_KEY_NAMES:
                 os.environ.pop(key, None)
+    if not model_policy_only:
+        from research_v2.sec_disclosures import SEC_IDENTITY_KEYS
+        if SEC_IDENTITY_KEYS.intersection(values):
+            for key in SEC_IDENTITY_KEYS:
+                os.environ.pop(key,None)
     os.environ.update({key:value for key,value in values.items()
                        if key in allowed and isinstance(value,str)})
 

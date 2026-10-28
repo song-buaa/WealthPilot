@@ -1191,15 +1191,26 @@ TOOL_SCHEMAS = [
 
 def execute_assess_position_evidence(**kwargs):
     from backend.services.market_data.evidence import assess, mapping
+    diagnostics=[]
     # Original-source verification is a server dependency, never request/card trust.
     if (kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or "").endswith(":US"):
         from research_v2.official_disclosures import collect
+        from research_v2.sec_disclosures import source_diagnostics
         rows, verifier = collect(kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol"),
                                  kwargs.get("research", ()))
+        diagnostics=source_diagnostics()
         if rows:
             kwargs["research"] = [*kwargs.get("research", ()), *rows]
             kwargs["disclosure_verifier"] = verifier
-    return assess(**kwargs)
+    result=assess(**kwargs)
+    # Existing final evidenceQuality/issues and infoNeeded channels carry safe
+    # source state. No qualification changes, exception text or operator identity.
+    problems={"SEC_SOURCE_"+row["category"].upper() for row in diagnostics if row["category"] not in {"available","cache_hit"}}
+    if problems and not any(r.get("source")=="official_disclosure" for r in result["verified_field_records"]):
+        problems.add("AV_INDEPENDENT_SOURCE_VERIFICATION_UNAVAILABLE")
+    result["issues"]=sorted(set(result["issues"])|problems)
+    result["infoNeeded"]=sorted(set(result["infoNeeded"])|problems)
+    return result
 
 
 TOOL_EXECUTORS = {

@@ -154,7 +154,12 @@ COMPANY DATA:
 COMPANY CONFORMED NAME: {issuer['name']}
 CENTRAL INDEX KEY: {issuer['cik']}
 FILING VALUES:
-</SEC-HEADER><DOCUMENT><TYPE>EX-99.1
+</SEC-HEADER><DOCUMENT><TYPE>{filing['form']}
+<SEQUENCE>1
+<FILENAME>{filing['primary_url'].rsplit('/',1)[-1]}
+<TEXT><html><a href="earnings.htm">99.1</a></html></TEXT></DOCUMENT><DOCUMENT><TYPE>EX-99.1
+<SEQUENCE>2
+<FILENAME>earnings.htm
 <TEXT>{document}</TEXT></DOCUMENT>'''.encode()
 
 
@@ -169,7 +174,7 @@ def test_restricted_original_inline_attachment_recovers_missing_AV_field():
     issuer,filings=identity();doc=inline_document();row=sec.parse_filing((full_submission(issuer,filings[0],doc),AT.isoformat()),issuer,filings[0],identity_digest=DIGEST)
     assert row['financial_observations'][0]['value']==100000000
     result=evaluate([row]);assert result['verified_field_records'][0]['field']=='revenue_quarter'
-    assert 'DOCUMENT[0]' in result['verified_field_records'][0]['publication_links'][0]['source_locator']
+    assert 'DOCUMENT[1]' in result['verified_field_records'][0]['publication_links'][0]['source_locator']
 
 
 @pytest.mark.parametrize('change',['other_issuer','wrong_period','segment','currency','header','accession','no_attachment','unknown_concept','clock'])
@@ -189,7 +194,7 @@ def test_ambiguous_or_unstructured_attachments_remain_unknown(change):
     assert row is None or not row['financial_observations']
 
 
-def test_real_LI_Q2_four_fields_reuse_existing_layout_inside_verified_6K():
+def test_existing_real_IR_layout_composite_contract_inside_synthetic_6K():
     issuer,filings=identity('LI');doc=Path('tests/fixtures/li_official_q2_2026/en.html').read_text()
     # Real SEC exhibit uses ordinary text headings rather than IR h1/title. The
     # SEC envelope supplies identity and filing clock independently of that layout.
