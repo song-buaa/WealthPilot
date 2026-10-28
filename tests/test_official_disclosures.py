@@ -194,10 +194,10 @@ def test_publication_headers_must_agree_and_no_date_is_inferred_from_URL():
     assert parse_original(document(published=''), URL+'/20260815', AT.isoformat()) is None
 
 
-def test_original_release_time_retains_real_day_precision():
+def test_original_release_time_retains_real_timezone_clock():
     row=source(document(published='August 15, 2026 at 4:30 AM EDT'))
-    assert row and row['published_at']=='2026-08-15'
-    assert 'day precision' in row['source_verification']['publication_locator']
+    assert row and row['published_at']=='2026-08-15T04:30:00-04:00'
+    assert 'timezone-aware timestamp' in row['source_verification']['publication_locator']
 
 
 def test_verified_quarter_survives_final_shared_policy_without_precise_actions():
@@ -224,3 +224,21 @@ def test_invalid_date_suffix_is_not_accepted_as_ISO_publication():
 def test_USD_translation_column_cannot_borrow_global_RMB_unit_header(currency):
     body=document().replace(b'In thousands', b'RMB in thousands').replace(b'<td>RMB</td>',b'<td>'+currency+b'</td>')
     assert source(body) is None
+
+
+@pytest.mark.parametrize('value',['2026-10-25T23:00:00Z','October 25, 2026 at 4:30 AM EDT','2026-10-25T01:00:00'])
+def test_same_day_future_or_timezone_unknown_publication_never_qualifies(value):
+    body=document(published=value)
+    assert source(body) is None
+
+
+def test_TTM_uses_latest_real_clock_across_timezones_not_string_order():
+    raw=raw_financial(False);rows=[]
+    for i,q in enumerate(raw['field_provenance']['revenue_ttm']['observations']):
+        clock='2026-08-15T04:00:00-04:00' if i==0 else '2026-08-15T10:00:00+04:00'
+        body=document(end=datetime.fromisoformat(q['fiscalDateEnding']).strftime('%B %d, %Y'),
+            published=clock,revenue='0.1',income='0.01',cash='0.02',capex='0.03')
+        rows.append(source(body))
+    a=evaluate(rows,raw)
+    field=next(r for r in a['verified_field_records'] if r['field']=='revenue_ttm')
+    assert field['published_at']=='2026-08-15T04:00:00-04:00'

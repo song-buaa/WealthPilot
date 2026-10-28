@@ -379,7 +379,7 @@ def link_disclosure_clocks(market, research, at, symbol, *, disclosure_verifier=
             break
         else:
             if len(links)==len(rows)*len(keys):
-                meta["published_at"]=max(link["published_at"] for link in links)
+                meta["published_at"]=max((link["published_at"] for link in links),key=stamp)
                 meta["publication_links"]=links
     if raw: market["fundamentals"]=raw
     return market,projected

@@ -5,7 +5,7 @@ bytes, their publication header and unambiguous statement cells, never AI fields
 Unsupported layouts/periods remain unknown. No persistence or asset operations.
 """
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
 import re
@@ -65,15 +65,29 @@ def _fetch(url):
 
 def _date(text):
     text = ' '.join(str(text).split())
-    dated_time = re.fullmatch(r'([A-Za-z]+ \d{1,2}, \d{4})(?: at)? \d{1,2}:\d{2}(?: [AP]M)? (?:EDT|EST|UTC|GMT)', text)
-    if dated_time:
-        text = dated_time[1]
     for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d'):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
             pass
     return None
+
+
+def _publication(value):
+    """Retain explicit source timezones; day-only sources remain day precision."""
+    value = ' '.join(str(value).split())
+    timed = re.fullmatch(r'([A-Za-z]+ \d{1,2}, \d{4})(?: at)? (\d{1,2}:\d{2})(?: ([AP]M))? (EDT|EST|UTC|GMT)', value)
+    if timed:
+        clock = datetime.strptime(timed[1]+' '+timed[2]+(' '+timed[3] if timed[3] else ''),
+            '%B %d, %Y %I:%M %p' if timed[3] else '%B %d, %Y %H:%M')
+        return clock.replace(tzinfo=timezone(timedelta(hours={'EDT':-4,'EST':-5,'UTC':0,'GMT':0}[timed[4]])))
+    day = _date(value)
+    if day:
+        return day
+    clock = datetime.fromisoformat(value.replace('Z','+00:00'))
+    if clock.tzinfo is None:
+        raise ValueError('PUBLICATION_TIMEZONE_UNKNOWN')
+    return clock
 
 
 def _grid(table):
@@ -131,22 +145,20 @@ def parse_original(body, url, fetched_at):
             published = datetime.strptime(accepted[1][:8], '%Y%m%d').date().isoformat()
             publication_locator = 'SEC-HEADER/ACCEPTANCE-DATETIME (filing day precision)'
         else:
-            dates = []
+            clocks = []
             for node in soup.select('meta[property="article:published_time"], meta[name="date"], time[datetime], .field--name-field-nir-news-date'):
                 value = node.get('content') or node.get('datetime') or node.get_text(' ', strip=True)
-                date = _date(value)
-                if not date:
-                    try:
-                        date = datetime.fromisoformat(value.replace('Z', '+00:00')).date().isoformat()
-                    except (ValueError, TypeError, AttributeError):
-                        return None
-                if not date:
-                    return None
-                dates.append(date)
-            if not dates or len(set(dates)) != 1:
+                clocks.append(_publication(value))
+            days = {clock.date().isoformat() if isinstance(clock, datetime) else clock for clock in clocks}
+            times = [clock for clock in clocks if isinstance(clock, datetime)]
+            if not clocks or len(days) != 1 or (times and len(set(times)) != 1):
                 return None
-            published, publication_locator = dates[0], 'original HTML publication header (day precision)'
-        if published > fetched.date().isoformat():
+            if any(clock > fetched for clock in times):
+                return None
+            published = times[0].isoformat() if times else clocks[0]
+            precision = 'timezone-aware timestamp' if times else 'day precision'
+            publication_locator = 'original HTML publication header ('+precision+')'
+        if published[:10] > fetched.date().isoformat():
             return None
         observations = []
         for ti, table in enumerate(soup.find_all('table')):

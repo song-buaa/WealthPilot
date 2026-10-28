@@ -539,7 +539,7 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 本次在原 `research_v2` 数据层增加 LI 官方原文验证，接入原 evidence Skill，不修改 PEER、Prompt、模型、MCP、技术数据、资产或交易代码：
 
 - 原发行人 IR 索引优先发现财报，研究卡 URL 仅作候选。仅允许 HTTPS 的 LI IR 新闻详情、SEC Archives 完整 submission；禁止重定向及非白名单路径。最多读取一个索引和四份原文，每份上限 2 MiB、网络 timeout 8 秒；无模型、无凭证、无数据库写入。复用既有内存 cache 与 TTL，命中时保留原 fetched_at。Public Demo/AV_DEV_MOCK 不发请求，专项验收原网络白名单不变。
-- 来源权限来自独立读取的原文字节、SHA256、原文发布日期节点及表格坐标。IR 日期节点必须一致；SEC 使用原 submission 的 COMPANY DATA、CIK 与 URL 交叉验证及 ACCEPTANCE-DATETIME 的**正式申报日**，不冒充 IR 新闻发布时间或盘中时点。季度期末、发布日期、抓取时间各自保留。版式、主体、日期、单位、币种或会计口径不明则 UNKNOWN。
+- 来源权限来自独立读取的原文字节、SHA256、原文发布日期节点及表格坐标。IR 发布节点必须一致；明示时区与时分时保留并核验真实时刻，仅有日期时才用日精度；拒绝同日未来时刻和时区不明的时间，TTM 按真实时钟而非字符串排序。SEC 使用原 submission 的 COMPANY DATA、CIK 与 URL 交叉验证及 ACCEPTANCE-DATETIME 的**正式申报日**，不冒充 IR 新闻发布时间或盘中时点。季度期末、发布日期、抓取时间各自保留。版式、主体、日期、单位、币种或会计口径不明则 UNKNOWN。
 - 只解析有明确季度列头、季度末、CNY/RMB 和单位的表格单元格。支持 totalRevenue（总收入）、netIncome（合并净利润）、operatingCashflow、capitalExpenditures 的严格标签。归母利润、车辆收入、半年/全年累计、负号不明、重复或歧义单元格不作替代。
 - 独立核实的单季度事实进入 `verified_field_records`（`*_quarter`）与原 `professional_explanation` 上下文。它们不进入完整 fundamentals/L3 资格判断。TTM 仍要求四个季度逐字段、主体、报告币种、单位和数值一致；FCF 要核对八个现金流组件，增长率还需去年四个季度。未改 AV 值，收入/净利润冲突只阻断相关字段及其衍生项，保留独立官方季度事实及有效现金流。
 - 原 Output Policy 继续过滤解释与精确行动，数字由确定性报告输出。无四季来源时 TTM、无明确现金流口径时 FCF、无真实来源日期时公告时间继续 UNKNOWN；不从 fetched_at、文件名或卡片填补。
