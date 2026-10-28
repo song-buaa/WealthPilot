@@ -439,7 +439,7 @@ def financial_source_conflicts(records):
                     continue
                 key = observation.get("source_field")
                 if (key not in fields or observation.get("period_basis") != "quarterly"
-                        or observation.get("accounting_basis") != _OFFICIAL_FIELD_BASIS[key]):
+                        or observation.get("accounting_basis") not in {None, _OFFICIAL_FIELD_BASIS[key]}):
                     continue
                 for field in (fields[key],):
                     meta = mapping(raw_provenance.get(field))
