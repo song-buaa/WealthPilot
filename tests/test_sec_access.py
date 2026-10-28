@@ -128,3 +128,11 @@ def test_legacy_official_fetch_cannot_bypass_SEC_operator_identity(monkeypatch):
     assert owner._fetch(url) is None
     opener.assert_not_called()
     assert sec.source_diagnostics()[-1]['category']=='identity_unconfigured'
+
+
+def test_removing_SEC_identity_from_operator_file_disables_stale_worker_values(monkeypatch,tmp_path):
+    from pocs.chatgpt_skills.worker import load_analysis_environment
+    identity(monkeypatch)
+    p=tmp_path/'private-config.json';p.write_text('{}')
+    load_analysis_environment(p)
+    assert sec.request_identity() is None

@@ -57,9 +57,10 @@ def load_analysis_environment(path, *, model_policy_only=False):
                 os.environ.pop(key, None)
     if not model_policy_only:
         from research_v2.sec_disclosures import SEC_IDENTITY_KEYS
-        if SEC_IDENTITY_KEYS.intersection(values):
-            for key in SEC_IDENTITY_KEYS:
-                os.environ.pop(key,None)
+        # This operator file owns the SEC identity; removing its keys also
+        # disables a previously loaded identity in a persistent worker.
+        for key in SEC_IDENTITY_KEYS:
+            os.environ.pop(key,None)
     os.environ.update({key:value for key,value in values.items()
                        if key in allowed and isinstance(value,str)})
 
