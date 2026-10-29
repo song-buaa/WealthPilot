@@ -19,6 +19,9 @@ LABELS={
     'revenue_yoy_pct':'季度收入同比','net_income_yoy_pct':'季度合并净利润同比',
     'parent_income_yoy_pct':'季度归母净利润同比','net_margin_pct':'季度合并净利率',
     'operating_margin_pct':'季度营业利润率','cash_conversion':'经营现金流/合并净利润',
+    'net_margin_prior_pct':'可比历史季度合并净利率','operating_margin_prior_pct':'可比历史季度营业利润率',
+    'net_margin_change_pp':'合并净利率同比变化','operating_margin_change_pp':'营业利润率同比变化',
+    'free_cash_flow_quarter':'季度OCF减已核验CapEx',
     'diluted_eps_ttm':'四季度稀释EPS合计','pe_ttm':'基础稀释TTM PE',
     'earnings_yield_pct':'基础TTM盈利收益率','observed_price':'历史收盘观察价格',
     'fx_rate':'财报币/上市币汇率',
@@ -97,10 +100,28 @@ def build(assessment):
         if revenue and n and _same_span(revenue[0],n[0]) and revenue[0]['values']['revenue_quarter']>0:
             add(out,n[0]['values'][numerator]/revenue[0]['values']['revenue_quarter']*100,
                 n[1]+revenue[1],period=latest,unit='percent',details=dict(formula=numerator+'/revenue_quarter*100'))
+            try:prior_end=date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()
+            except ValueError:continue
+            pr=unique('revenue_quarter',prior_end,revenue[0]['currency']);pn=unique(numerator,prior_end,revenue[0]['currency'])
+            if (pr and pn and _same_span(pr[0],pn[0]) and _same_span(revenue[0],pr[0],prior_year=True)
+                    and pr[0].get('accounting_basis')==revenue[0].get('accounting_basis')
+                    and pn[0].get('accounting_basis')==n[0].get('accounting_basis') and pr[0]['values']['revenue_quarter']>0):
+                before=pn[0]['values'][numerator]/pr[0]['values']['revenue_quarter']*100
+                prefix='net_margin' if numerator=='net_income_quarter' else 'operating_margin'
+                prior=add(prefix+'_prior_pct',before,pn[1]+pr[1],period=prior_end,unit='percent')
+                if prior:prior['historical_only']=True
+                add(prefix+'_change_pp',n[0]['values'][numerator]/revenue[0]['values']['revenue_quarter']*100-before,
+                    n[1]+revenue[1]+pn[1]+pr[1],period=latest,unit='percentage_points',details=dict(comparison_period=prior_end,formula='current margin - comparable prior margin'))
     ocf=unique('operating_cash_flow_quarter',latest,income[0]['currency']) if income else None
     if ocf and income and _same_span(ocf[0],income[0]) and income[0]['values']['net_income_quarter']>0:
         add('cash_conversion',ocf[0]['values']['operating_cash_flow_quarter']/income[0]['values']['net_income_quarter'],
             ocf[1]+income[1],period=latest,details=dict(formula='OCF/consolidated net income; negative OCF is retained'))
+    cash=unique('operating_cash_flow_quarter',latest)
+    capex=unique('capital_expenditures_quarter',latest,cash[0]['currency']) if cash else None
+    if cash and capex and _same_span(cash[0],capex[0]) and capex[0]['values']['capital_expenditures_quarter']>0:
+        add('free_cash_flow_quarter',cash[0]['values']['operating_cash_flow_quarter']-capex[0]['values']['capital_expenditures_quarter'],
+            cash[1]+capex[1],period=latest,currency=cash[0]['currency'],unit='currency_units',
+            details=dict(formula='quarter OCF - verified positive CapEx; not all shareholder-distributable cash'))
     # Original AV statement arithmetic also serves SEC-verified components.
     # Missing fields stay None rather than borrowing incompatible net income.
     income_rows=[];cash_rows=[];component_refs={};component_rows={}
@@ -184,10 +205,12 @@ def build(assessment):
             else:rate=None;missing.append('VALUATION_FX_DATE_OR_CURRENCY_UNKNOWN')
         if e>0 and rate:
             pe=price['values']['observed_price']*rate/e
-            add('pe_ttm',pe,[price['record_id'],eps['record_id']]+fxrefs,period=price['period'],unit='multiple',
-                details=dict(formula='listed price * reporting_currency_per_listed_currency / diluted TTM EPS',
-                    financial_end=latest,price_date=price['period'],limitation='historical static ratio, not fair value; share-count changes/splits after the financial periods are unverified'))
-            add('earnings_yield_pct',100/pe,[price['record_id'],eps['record_id']]+fxrefs,period=price['period'],unit='percent')
+            if math.isfinite(pe) and pe>0:
+                add('pe_ttm',pe,[price['record_id'],eps['record_id']]+fxrefs,period=price['period'],unit='multiple',
+                    details=dict(formula='listed price * reporting_currency_per_listed_currency / diluted TTM EPS',
+                        financial_end=latest,price_date=price['period'],limitation='historical static ratio, not fair value; share-count changes/splits after the financial periods are unverified'))
+                add('earnings_yield_pct',100/pe,[price['record_id'],eps['record_id']]+fxrefs,period=price['period'],unit='percent')
+            else:missing.append('PE_COMPUTATION_NONFINITE')
         elif e<=0:missing.append('PE_NOT_APPLICABLE_NONPOSITIVE_EARNINGS')
     missing.extend(['MARKET_CAP_CURRENT_SHARE_COUNT_UNKNOWN','NET_CASH_RESTRICTED_FUNDS_DEBT_ATTRIBUTION_UNKNOWN',
                     'SEGMENT_PROFIT_AND_SHARE_NOT_INFERABLE_FROM_GROUP_ACCOUNTS'])
@@ -207,7 +230,7 @@ def build(assessment):
 def display(row,field):
     value=number(row.get('values',{}).get(field))
     if value is None:return None
-    unit=row.get('unit');suffix='%' if unit=='percent' else '倍' if unit in {'ratio','multiple'} else ''
+    unit=row.get('unit');suffix='%' if unit=='percent' else '个百分点' if unit=='percentage_points' else '倍' if unit in {'ratio','multiple'} else ''
     label=LABELS.get(field,field)
     caveat='；静态估算，股本/拆股变更未核验，非当前精确估值' if field in {'pe_ttm','earnings_yield_pct'} and row.get('source')=='owner_calculation' else ''
     return f"{label}（{row.get('period') or row.get('data_as_of')}，{row.get('currency') or '无币种比率'}）{value:,.4f}{suffix}{caveat}"

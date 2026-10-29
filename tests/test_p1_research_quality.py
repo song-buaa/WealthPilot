@@ -25,6 +25,8 @@ def test_real_original_comparatives_remain_historical_without_granting_L3():
     assert m['net_income_yoy_pct']['values']['net_income_yoy_pct']==pytest.approx(-11.6147493)
     assert m['operating_margin_pct']['values']['operating_margin_pct']==pytest.approx(24.710301)
     assert m['cash_conversion']['values']['cash_conversion']==pytest.approx(.944374954)
+    assert m['net_margin_change_pp']['values']['net_margin_change_pp']<0
+    assert m['operating_margin_change_pp']['values']['operating_margin_change_pp']<0
     assert all(r['historical_only'] and r['period']=='2025-06-30' for r in a['historical_field_records'])
     assert all(r['period']=='2026-06-30' for r in a['verified_field_records'])
     assert not a['qualification']['L3']['allowed'] and not a['qualification']['L4']['allowed']
@@ -236,3 +238,12 @@ def test_operating_loss_sign_is_not_inverted(amount,accepted):
     obs=parse_statement_tables(BeautifulSoup(html,'html.parser'),'2026-08-25',require_statements=True,currencies=('USD',))
     assert bool(obs)==accepted
     if accepted:assert obs[0]['value']==-10
+
+
+def test_LI_quarter_cash_shortfall_uses_real_OCF_and_verified_positive_capex():
+    from tests.test_sec_real_original import parse,AT as LI_AT
+    row=parse();a=assess({},symbol='LI:US',research=[row],at=LI_AT,disclosure_verifier={row['record_id']:row}.get)
+    m=metrics(a)
+    assert m['free_cash_flow_quarter']['values']['free_cash_flow_quarter']==-1300765000
+    assert len(m['free_cash_flow_quarter']['evidence_refs'])==2
+    assert 'cash_conversion' not in m  # loss-denominator ratio is not a quality score
