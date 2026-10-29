@@ -17,6 +17,9 @@ from bs4 import BeautifulSoup
 IR_INDEX = 'https://ir.lixiang.com/news/'
 MAX_BYTES = 2 * 1024 * 1024
 LABELS = {
+    'revenues': ('totalRevenue', 'total_revenue'),
+    'revenue': ('totalRevenue', 'total_revenue'),
+    'net cash generated from operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'total revenues': ('totalRevenue', 'total_revenue'),
     'total revenue': ('totalRevenue', 'total_revenue'),
     'net income': ('netIncome', 'consolidated_net_income'),
@@ -110,7 +113,7 @@ def _grid(table):
             rs, cs = int(cell.get('rowspan', 1)), int(cell.get('colspan', 1))
             if not 1 <= rs <= 30 or not 1 <= cs <= 30:
                 raise ValueError('INVALID_TABLE')
-            value = ' '.join(cell.stripped_strings)
+            value = ' '.join(' '.join(cell.stripped_strings).split())
             for c in range(col, col + cs):
                 row[c] = value
                 for r in range(i + 1, i + rs):
@@ -136,7 +139,7 @@ def _amount(text):
 
 
 def _statement_kind(rows, context=''):
-    header=(context+' '+' '.join(' '.join(r) for r in rows[:2])).lower()
+    header=' '.join((context+' '+' '.join(' '.join(r) for r in rows[:2])).lower().split())
     if 'reconciliation' in header or 'non-gaap results' in header:
         return None
     if re.search(r'consolidated statements of (?:comprehensive )?(?:income|operations|profit)',header):
@@ -153,7 +156,7 @@ def _table_context(table):
         if getattr(node,'name',None)=='table':
             break
         if hasattr(node,'get_text'):
-            value=node.get_text(' ',strip=True)
+            value=' '.join(node.get_text(' ',strip=True).split())
             if value:
                 text.append(value)
                 if len(text)==4:
@@ -189,7 +192,32 @@ def _cell_amount(rows,ri,col):
     return _amount(value)
 
 
-def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',)):
+def _quarterly_cashflow_corroboration(soup):
+    """Resolve a conflicting table column only with explicit same-document proof.
+
+    The statement value remains the exact fact. Narrative precision constrains
+    currency/period selection; it never supplies a replacement value or AV clock.
+    """
+    text=' '.join(soup.get_text(' ',strip=True).split())
+    ends={_date(v) for v in re.findall(r'(?:first|second|third|fourth) quarter ended ((?:March|June|September|December)\s+\d{1,2},?\s+20\d{2})',text,re.I)}
+    if len(ends)!=1 or None in ends:
+        return {}
+    found={}
+    pattern=r'Net cash (?:generated from|provided by) operating activities was\s+(RMB|CNY|US\$|USD|HK\$|HKD)\s*([0-9]+(?:\.[0-9]+)?)\s+(billion|million)\b'
+    for match in re.finditer(pattern,text,re.I):
+        currency={'RMB':'CNY','CNY':'CNY','US$':'USD','USD':'USD','HK$':'HKD','HKD':'HKD'}[match[1].upper()]
+        scale=Decimal(10)**(9 if match[3].lower()=='billion' else 6)
+        amount=Decimal(match[2]);precision=scale*(Decimal(10)**amount.as_tuple().exponent)
+        key=('operatingCashflow',next(iter(ends)),currency)
+        proof=dict(value=amount*scale,precision=precision,source_locator=match[0])
+        if key in found and found[key]!=proof:
+            found[key]=None
+        elif key not in found:
+            found[key]=proof
+    return found
+
+
+def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]
     tables=[(i,t,_grid(t),_table_context(t)) for i,t in enumerate(soup.find_all('table'))]
@@ -257,18 +285,34 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                     reported_unit_scale=scales[0],sign_normalization=normalization,currency=currency,unit='currency_units',
                     unit_scale=scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
                     source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
-    unique={}
+    groups={}
     for obs in observations:
-        k=obs['source_field'],obs['fiscal_period_end'],obs['currency']
-        if k not in unique:
-            unique[k]=obs
-        elif unique[k] is not None:
-            previous=unique[k]
-            if (all(previous[n]==obs[n] for n in ('unit','accounting_basis','period_basis'))
-                    and previous['value']*previous['unit_scale']==obs['value']*obs['unit_scale']):
-                previous['source_locator']+='; '+obs['source_locator']
-            else:unique[k]=None
-    return [o for o in unique.values() if o is not None]
+        groups.setdefault((obs['source_field'],obs['fiscal_period_end'],obs['currency']),[]).append(obs)
+    corroborations=_quarterly_cashflow_corroboration(soup)
+    result=[]
+    for key,rows in groups.items():
+        unique={Decimal(str(o['value']))*Decimal(str(o['unit_scale'])) for o in rows}
+        if len(unique)==1 and len({(o['unit'],o['accounting_basis'],o['period_basis']) for o in rows})==1:
+            row=rows[0]
+            row['source_locator']='; '.join(o['source_locator'] for o in rows)
+            result.append(row)
+            continue
+        proof=corroborations.get(key)
+        matches=[o for o in rows if proof and abs(Decimal(str(o['value']))*Decimal(str(o['unit_scale']))-proof['value']) < proof['precision']/2]
+        resolved={Decimal(str(o['value']))*Decimal(str(o['unit_scale'])) for o in matches}
+        if len(resolved)==1 and len({(o['unit'],o['accounting_basis'],o['period_basis']) for o in matches})==1:
+            row=matches[0]
+            row['source_locator']+='; original narrative: '+proof['source_locator']
+            row['precision_corroboration']=dict(reported_value=float(proof['value']),precision=float(proof['precision']),
+                currency=key[2],period=key[1],source_locator=proof['source_locator'])
+            result.append(row)
+            issue='STATEMENT_COLUMN_AMBIGUITY_CORROBORATED'
+        else:
+            issue='AMBIGUOUS_STATEMENT_COLUMNS'
+        if diagnostics is not None:
+            diagnostics.append(dict(source_field=key[0],period=key[1],currency=key[2],issue=issue,
+                source_locators=[o['source_locator'] for o in rows]))
+    return result
 
 
 def parse_original(body, url, fetched_at):

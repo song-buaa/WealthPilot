@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from app.llm_config import MODEL_LIGHT, chat_completion
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -96,6 +96,10 @@ class DisciplineCheckOutput(BaseModel):
     max_position: float
     position_ratio: float
     rule_details: list[str]
+    rule_provenance: dict = Field(default_factory=dict)
+    personal_discipline_status: str = "UNVERIFIED"
+    weight_basis: str = "historical_stored_security_weight"
+    raw_rule_details: list[str] = Field(default_factory=list)
 
 CHECK_DISCIPLINE_SCHEMA = {
     "name": "check_discipline_rules",
@@ -155,13 +159,18 @@ def execute_check_discipline(
     )
 
     result = rule_engine.check(data, intent)
+    from app.discipline.config import describe_effective_rules, analysis_rule_projection
+    provenance = describe_effective_rules(getattr(data, "full_discipline_rules", None))
+    projected = analysis_rule_projection(result, provenance)
     return DisciplineCheckOutput(
         violation=result.violation,
-        warning=result.warning,
+        warning=projected["warning"],
         current_weight=result.current_weight,
         max_position=result.max_position,
         position_ratio=result.position_ratio,
-        rule_details=result.rule_details or [],
+        rule_details=projected["rule_details"],
+        raw_rule_details=list(result.rule_details or []),
+        rule_provenance=provenance,
     )
 
 
@@ -448,7 +457,10 @@ class GenerateSignalsInput(BaseModel):
 class GenerateSignalsOutput(BaseModel):
     asset_name: str
     position_signal: str        # 偏高 / 合理 / 偏低
-    fundamental_signal: str     # 正面 / 中性 / 负面 / N/A
+    fundamental_signal: str     # UNKNOWN: legacy text keywords are not verified fundamentals
+    raw_fundamental_signal: Optional[str] = None
+    raw_position_signal: Optional[str] = None
+    fundamental_signal_quality: str = "unverified_research_keywords"
     sentiment_signal: str       # 中性
     event_uncertainty: str
     event_direction: str
@@ -505,8 +517,10 @@ def execute_generate_signals(
 
         return GenerateSignalsOutput(
             asset_name=asset_name,
-            position_signal=signal_result.position_signal,
-            fundamental_signal=signal_result.fundamental_signal,
+            position_signal="UNKNOWN（个人纪律未核验；历史持仓参考）",
+            fundamental_signal="UNKNOWN",
+            raw_position_signal=signal_result.position_signal,
+            raw_fundamental_signal=signal_result.fundamental_signal,
             sentiment_signal=signal_result.sentiment_signal,
             event_uncertainty=signal_result.event_signal.uncertainty if signal_result.event_signal else "未知",
             event_direction=signal_result.event_signal.direction if signal_result.event_signal else "未知",
@@ -1192,6 +1206,7 @@ TOOL_SCHEMAS = [
 def execute_assess_position_evidence(**kwargs):
     from backend.services.market_data.evidence import assess, mapping
     diagnostics=[]
+    rows=[]
     # Original-source verification is a server dependency, never request/card trust.
     if (kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or "").endswith(":US"):
         from research_v2.official_disclosures import collect
@@ -1208,6 +1223,12 @@ def execute_assess_position_evidence(**kwargs):
     problems={"SEC_SOURCE_"+row["category"].upper() for row in diagnostics if row["category"] not in {"available","cache_hit"}}
     if problems and not any(r.get("source")=="official_disclosure" for r in result["verified_field_records"]):
         problems.add("AV_INDEPENDENT_SOURCE_VERIFICATION_UNAVAILABLE")
+    for row in rows:
+        for issue in row.get("financial_observation_issues",[]):
+            problems.add("OFFICIAL_FIELD_"+issue['source_field'].upper()+"_"+issue['issue'])
+    symbol=kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or ""
+    if symbol.endswith(":HK") and not result["verified_field_records"]:
+        problems.add("HK_OFFICIAL_FINANCIAL_ADAPTER_UNAVAILABLE")
     result["issues"]=sorted(set(result["issues"])|problems)
     result["infoNeeded"]=sorted(set(result["infoNeeded"])|problems)
     return result

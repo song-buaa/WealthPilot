@@ -278,6 +278,8 @@ def report(assessment, plan, decision):
         +f"\n公司跨账户参考市值 {amount(group.get('market_value_cny'))}；投资资产分母 {amount(context.get('denominator_cny'))}。"
         +f"当前参考占比 {weight(allocation['current'])}；请求假设目标 {weight(allocation['target'])}。"
         +"\n冻结估值不代表实时可交易报价；来源过期时，金额仅作示意。")
+    rule_source=context.get('effective_rules_provenance') or {'basis':'effective_rules_unverified'}
+    text+=f"\n纪律来源：{rule_source.get('basis')}；个人纪律确认版本未核验。历史单证券持仓阈值参考不能替代当前跨账户公司集中度判断。"
     if group.get("members"):
         text+="\n\n| 账户 | 市场证券 | 本账户数量 | 参考人民币市值 |\n|---|---|---:|---:|"
         for m in group["members"]:
@@ -293,9 +295,21 @@ def report(assessment, plan, decision):
         content=r["values"].get("content") or r["values"].get("text")
         if content:
             values.append(str(content))
-        facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；报告币种 {r['values'].get('report_currency') or '未核验'}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
+        field_currencies=sorted({f.get('currency') for f in assessment.get('verified_field_records',[]) if f.get('currency') and str(f.get('record_id','')).startswith(str(r.get('record_id'))+':')})
+        report_currency=r['values'].get('report_currency') or '/'.join(field_currencies) or '未核验'
+        facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；经营财务币种 {report_currency}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
+    # Display equal facts once; all original records/references remain in evidence.
+    import json
+    grouped={}
     for r in assessment.get('verified_field_records',[]):
-        facts.append(f"- 字段事实 {r.get('field')}：{r.get('values')}；来源 {r['source']}；期间 {r['period']}；数据日 {r['data_as_of']}。")
+        key=(r.get('field'),r.get('period'),r.get('currency'),r.get('scope'),
+             json.dumps(r.get('values'),sort_keys=True,default=str))
+        grouped.setdefault(key,[]).append(r)
+    for equal in grouped.values():
+        r=equal[0]
+        scope="年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
+        facts.append(f"- {scope}字段事实 {r.get('field')}：{r.get('values')}；币种 {r.get('currency') or '未核验'}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")
     technical_lines=[]
@@ -306,6 +320,12 @@ def report(assessment, plan, decision):
                 +f"MA5={i['ma5']:.4f}、MA20={i['ma20']:.4f}、RSI14={i['rsi14']:.2f}、MACD={i['macd']:.4f}；"
                 +f"末期量={i['volume']:.0f}，20期均量={i['average_volume20']:.0f}。"
                 +f"20期观测区间 {i['observed_support20']:.4f}—{i['observed_resistance20']:.4f}，仅作研究观察，不是下单限价。")
+    for parent in assessment['records']:
+        if parent.get('kind')!='technical':continue
+        for period,state in parent.get('period_quality',{}).items():
+            missing=state.get('missing_trading_sessions',[])
+            if missing:
+                technical_lines.append(f"- {period} 缺失应交易日期："+"、".join(missing)+"；未取得停牌证明，不能据此忽略缺口。")
     section("③技术趋势与关键位","\n".join(technical_lines) if technical_lines else "TECHNICAL_UNAVAILABLE：技术观察位为空，先补可核验的日线、周线及来源。")
     events=[f"- {r['source']}，披露 {r['published_at']}，期间 {r['period']}；{r['record_id'] or r['source_url']}"
         for r in assessment["records"] if r["quality"]=="valid" and r["kind"]=="event"]
@@ -347,9 +367,16 @@ def report(assessment, plan, decision):
     quality_names={"valid":"可核验","stale":"过期","unknown":"未核验","seed":"Seed","mock":"Mock",
                    "conflict":"冲突","superseded":"已被更新披露取代"}
     sources=["| 类型 | 来源 / 记录 | 数据日期 | 状态 |","|---|---|---|---|"]
+    seen_sources=set()
     for r in assessment["records"]:
+        key=(r['kind'],r['record_id'],r['source_url'],r['data_as_of'],r['quality'])
+        if key in seen_sources:continue
+        seen_sources.add(key)
         ref=f"[{r['source']}]({r['source_url']})" if r['source_url'] else str(r['record_id'] or r['source'])
-        sources.append(f"| {r['kind']} | {ref} | {r['data_as_of'] or '未知'} | {quality_names.get(r['quality'],r['quality'])} |")
+        state=quality_names.get(r['quality'],r['quality'])
+        if r['source']=='official_disclosure' and r['quality']=='stale' and any(f.get('scope')=='annual' and str(f.get('record_id','')).startswith(str(r['record_id'])+':') for f in assessment.get('verified_field_records',[])):
+            state='研究时钟过期；独立年度字段见经营基线'
+        sources.append(f"| {r['kind']} | {ref} | {r['data_as_of'] or '未知'} | {state} |")
     sources.append("\n规划器："+str(assessment['planner'].get('status','unknown'))+"；规划降级与研究缺证分别判断。")
     sources.append("缺口 / 告警："+"、".join(sorted(set(assessment["issues"]+assessment["infoNeeded"]))))
     sources.append("L4未授权；本报告未创建、准备、确认或提交订单。")

@@ -103,7 +103,10 @@ def test_discipline_adapter_via_invoke_skill():
 
     rule_result = discipline_output_to_rule_result(output)
 
-    assert rule_result == deterministic_result
+    # Analysis presentation cannot certify unconfirmed defaults as personal PASS.
+    assert (rule_result.violation,rule_result.current_weight,rule_result.max_position,rule_result.position_ratio)==(deterministic_result.violation,deterministic_result.current_weight,deterministic_result.max_position,deterministic_result.position_ratio)
+    assert '个人纪律未核验' in rule_result.warning
+    assert output.raw_rule_details == deterministic_result.rule_details
 
 
 # ════════════════════════════════════════════════

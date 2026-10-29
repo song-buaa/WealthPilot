@@ -30,6 +30,22 @@ def describe_effective_rules(effective):
             result["basis"]="system_default_fallback"
     return result
 
+def analysis_rule_projection(result, provenance):
+    """Presentation only. Preserve numerical guards, never certify defaults.
+
+    The existing owner records config origin but has no confirmed personal-rule
+    version. File existence or chat instructions cannot fill that missing proof.
+    """
+    basis=provenance.get("basis", "effective_rules_unverified")
+    note=f"个人纪律未核验（{basis}）；以下仅为历史存储持仓的参考阈值校验，不代表当前跨账户公司集中度合规。"
+    details=[]
+    for line in result.rule_details or []:
+        line=line.replace("单一持仓正常", "参考阈值未触发").replace("当前", "历史存储参考")
+        details.append("参考计算："+line)
+    return {"warning":note+(" "+result.warning if result.warning else ""),
+            "rule_details":[note,*details]}
+
+
 # ── v1.4 内置默认值（手册文件缺失时的保底）─────────────────────────────────
 _DEFAULT_RULES: dict = {
     "single_asset_limits": {

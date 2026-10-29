@@ -30,16 +30,27 @@ def from_bars(symbol, result, *, at=None):
             or (frame["low"] > frame[["open","close"]].min(axis=1)).any()
             or (frame["high"] < frame[["open","close"]].max(axis=1)).any()):
         raise ValueError("INVALID_OHLCV")
-    schedule = calendar.schedule.loc[frame.index.min().date():pd.Timestamp(at).date()]
-    schedule = schedule[schedule["close"] <= pd.Timestamp(at)]
+    local_day = pd.Timestamp(at.astimezone(calendar.tz).date())
+    week_start = frame.index.min().to_period("W-FRI").start_time.date()
+    week_end = local_day.to_period("W-FRI").end_time.date()
+    full_schedule = calendar.schedule.loc[week_start:week_end]
+    schedule = full_schedule[full_schedule["close"] <= pd.Timestamp(at)]
     closed_dates = {v.date() for v in schedule.index}
     frame = frame[[v.date() in closed_dates for v in frame.index]]
     if frame.empty:
         return None
+    week_labels = full_schedule.index.to_period("W-FRI").end_time.normalize()
+    week_closes = full_schedule.groupby(week_labels)["close"].max()
+    closed_weeks = week_closes[week_closes <= pd.Timestamp(at)].index
     weekly = frame.resample("W-FRI").agg(dict(open="first",high="max",low="min",close="last",volume="sum")).dropna()
-    local = at.astimezone(calendar.tz)
-    monday = pd.Timestamp(local.date()) - pd.Timedelta(days=local.weekday())
-    weekly = weekly[weekly.index < monday]  # unfinished week never masquerades as closed
+    weekly = weekly[weekly.index.isin(closed_weeks)]
+    # A count-limited daily window may start midweek. It cannot certify that
+    # partial boundary bucket as a complete week; internal gaps are never dropped.
+    if not weekly.empty:
+        first = weekly.index[0]
+        required = full_schedule.loc[(first-pd.Timedelta(days=6)).date():first.date()]
+        if any(v.date() < frame.index[0].date() for v in required.index):
+            weekly = weekly.iloc[1:]
     series = {}
     synthetic = any(x in result.source.lower() for x in ("seed","mock","demo","fixture","synthetic"))
     for period, data in (("day",frame),("week",weekly)):
@@ -49,16 +60,22 @@ def from_bars(symbol, result, *, at=None):
         closes = data["close"]
         macd, signal, hist = _calc_macd(closes)
         actual = data.index[-1].date()
-        expected = schedule if period=="day" else schedule[[v.date() < monday.date() for v in schedule.index]]
-        last_session = expected.index[-1].date() if not expected.empty else None
-        if period=="week":
-            current = last_session is not None and actual == pd.Timestamp(last_session).to_period("W-FRI").end_time.date()
-        else:
+        if period=="day":
+            expected = schedule.loc[frame.index[0].date():]
+            last_session = expected.index[-1].date() if not expected.empty else None
             current = actual == last_session
-        # Missing sessions inside the window are explicit gaps, never interpolated.
-        expected_days = {s.date() for s in schedule.index if frame.index[0].date() <= s.date() <= frame.index[-1].date()}
-        complete = expected_days == {s.date() for s in frame.index}
-        status = "seed" if synthetic else "valid" if current and complete and len(data)>=35 else "stale" if not current else "insufficient"
+            observed = {v.date() for v in frame.index}
+        else:
+            last_week = closed_weeks[-1] if len(closed_weeks) else None
+            expected = full_schedule.loc[(data.index[0]-pd.Timedelta(days=6)).date():last_week.date()] if last_week is not None else full_schedule.iloc[:0]
+            last_session = expected.index[-1].date() if not expected.empty else None
+            current = last_week is not None and data.index[-1] == last_week
+            observed = {v.date() for v in frame.index if not expected.empty and expected.index[0].date() <= v.date() <= expected.index[-1].date()}
+        expected_days = {v.date() for v in expected.index}
+        missing = sorted(str(d) for d in expected_days-observed)
+        complete = expected_days == observed
+        status = ("seed" if synthetic else "stale" if not current else
+                  "insufficient" if len(data)<35 else "incomplete" if not complete else "valid")
         rows = [{"date":str(idx.date()), **{key:float(row[key]) for key in ("open","high","low","close","volume")}}
                 for idx,row in data.iterrows()]
         issues = (["SYNTHETIC_SOURCE"] if synthetic else [])
@@ -68,6 +85,8 @@ def from_bars(symbol, result, *, at=None):
         series[period] = dict(status=status,issues=issues,symbol=symbol,market=market,currency="HKD" if market=="HK" else "USD",
             period=period,source=result.source,record_id=f"{result.source}:{symbol}:{period}:{actual}",
             start_at=rows[0]["date"],end_at=rows[-1]["date"],last_trading_at=str(last_session) if current else str(actual),
+            coverage=dict(calendar=calendar.name, calendar_version=calendars.__version__,
+                missing_trading_sessions=missing,expected_sessions=len(expected_days),observed_sessions=len(observed)),
             bars=rows,parameters=dict(ma=[5,20],rsi=14,macd=[12,26,9],weekly="closed W-FRI OHLCV"),
             indicators=dict(ma5=float(closes.tail(5).mean()),ma20=float(closes.tail(20).mean()),
                 rsi14=_calc_rsi(closes),macd=macd,macd_signal=signal,macd_hist=hist,

@@ -3,7 +3,7 @@ InfoRouter — 按 symbol 市场后缀分发到对应 Adapter。
 
 路由规则:
   :US → AlphaVantageAdapter
-  :HK / :SH / :SZ → v2 不覆盖专属 Adapter，仅 UserUpload 可用
+  :HK / :SH / :SZ → AKShare 新闻/公司概况/历史行情；公司概况不等于正式财务证据
   所有 symbol → UserUpload 始终可用（并列）
 """
 

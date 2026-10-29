@@ -71,3 +71,7 @@ result = call_tool(
 
 - 上游：wp-fetch-holdings + wp-fetch-research + wp-check-discipline（隐式）
 - 下游：wp-reasoning（信号作为 LLM 推理的环境因子）
+
+## 分析语义与来源
+
+旧研究文本关键词只保留为 `raw_fundamental_signal` 诊断，不是经过财务资格验证的结论。`fundamental_signal` 输出 UNKNOWN，经营解释继续由原 Evidence Registry 与 PEER 使用合格事实生成。未核验个人纪律时，历史仓位关键词同样不代表当前公司集中度合规。
