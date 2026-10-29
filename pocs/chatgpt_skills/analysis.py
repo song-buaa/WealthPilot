@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-import time
 import uuid
 from copy import deepcopy
 from app.analysis_runtime import budgeted_analysis, current as runtime_budget
@@ -324,7 +323,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         try:
             budget=runtime_budget()
             if budget and budget.remaining()<=0:raise TimeoutError()
-            async with asyncio.timeout(budget.remaining() if budget else 240):
+            timeout_context=budget.timeout(budget.remaining()) if budget else asyncio.timeout(240)
+            async with timeout_context:
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
                         conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
                             analysis_options=dict(target_versions=[t.model_dump(mode="json") for t in request.target_versions],
@@ -359,7 +359,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             result.issues.append('ANALYSIS_TIMEOUT')
         except asyncio.CancelledError:
             budget=runtime_budget()
-            if not async_l1 or budget is None or time.monotonic()<budget.deadline:raise
+            if not async_l1 or budget is None or not budget.owns_timeout_cancellation():raise
             # The absolute outer deadline can interrupt async-generator cleanup
             # after the inner work timeout. Preserve its already-captured facts.
             result.status='unavailable'

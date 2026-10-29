@@ -423,3 +423,31 @@ def test_abandoned_generation_stops_before_fact_finalization(analysis_db,monkeyp
     monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
     result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
     assert result['status']=='partial' and not result['professional_analysis_complete']
+
+
+@pytest.mark.parametrize('after_own_timeout',[False,True])
+def test_external_cancellation_is_not_relabelled_as_own_deadline(analysis_db,monkeypatch,after_own_timeout):
+    from backend.services import decision_service_v3 as svc
+    receipt=facts()
+    async def stream(*a,**kw):
+        kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
+        if not after_own_timeout:
+            # Wall deadline passed, but neither owned timeout callback fired.
+            current().deadline=time.monotonic()-1
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
+        else:
+            try:await asyncio.sleep(10)
+            finally:
+                try:await asyncio.sleep(.5)
+                except asyncio.CancelledError:
+                    # A separate caller cancellation after the outer deadline.
+                    asyncio.current_task().cancel()
+                    await asyncio.sleep(0)
+        yield
+    monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
+    async def run():
+        with budget_context(Policy(total_seconds=.2)):
+            with pytest.raises(asyncio.CancelledError):
+                await analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True)
+    asyncio.run(run())

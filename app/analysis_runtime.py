@@ -1,5 +1,5 @@
 """Small normal asynchronous-L1 runtime policy; no research/trading authority."""
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
@@ -62,9 +62,28 @@ class Budget:
         self.deadline = min(time.monotonic()+settings.total_seconds, deadline) if deadline is not None else time.monotonic()+settings.total_seconds
         self.finished = threading.Event()
         self.observation = None
+        self.timeout_scopes = []
 
     def remaining(self):
         return max(0, self.deadline-time.monotonic()-self.policy.finalization_seconds)
+
+    @asynccontextmanager
+    async def timeout(self, seconds):
+        scope=asyncio.timeout(seconds)
+        entry=(scope,asyncio.current_task().cancelling())
+        self.timeout_scopes.append(entry)
+        try:
+            async with scope:yield
+        finally:
+            self.timeout_scopes.remove(entry)
+
+    def owns_timeout_cancellation(self):
+        # As in asyncio.Timeout, an additional cancellation belongs to the
+        # caller. Account for nested work/outer deadlines, not elapsed time alone.
+        task=asyncio.current_task()
+        expired=sum(scope.expired() for scope,_ in self.timeout_scopes)
+        baseline=min((count for _,count in self.timeout_scopes),default=0)
+        return task is not None and expired>0 and task.cancelling()==baseline+expired
 
     def before_send(self, request):
         remaining = self.remaining()
@@ -139,7 +158,7 @@ def budgeted_analysis(fn=None, *, on_expired=None):
             if remaining<=0:raise TimeoutError()
             # Includes setup/recursive frozen-input analysis and finalization at
             # every await boundary; the inner work timeout reserves finalization.
-            async with asyncio.timeout(remaining):
+            async with budget.timeout(remaining):
                 result=await fn(*args, **kwargs)
             if time.monotonic()>budget.deadline:
                 if on_expired is None:raise TimeoutError()
