@@ -240,6 +240,12 @@ def _calendar_quarter_start(header,end):
     return d.replace(month=d.month-2,day=1).isoformat()
 
 
+def _column_currency(value):
+    value=re.sub(r'^\((RMB|CNY|USD|US\$|HKD|HK\$)\)(?=\s|$)',r'\1',value.strip(),flags=re.I)
+    match=re.fullmatch(r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
+    return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
+
+
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]
@@ -251,15 +257,15 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
             continue
         if not re.search(r'three months ended',' '.join(' '.join(r) for r in rows),re.I):
             continue
-        unit_text=(table.get_text(' ',strip=True)+' '+context).lower()
+        unit_text=' '.join((table.get_text(' ',strip=True)+' '+context).split()).lower()
         scales=[scale for label,scale in [('thousands',1000),('millions',1000000)] if re.search(r'in '+label,unit_text)]
         if len(scales)!=1:
             continue
         # An explicit RMB reporting column takes precedence over convenience USD
         # translations. A standalone USD statement is supported by SEC, not IR.
         first_data=next((i for i,r in enumerate(rows) if r and r[0].strip().lower().rstrip(':') in LABELS),len(rows))
-        table_currencies={v.strip().strip('()') for r in rows[:first_data] for v in r}
-        allowed=('CNY',) if {'RMB','CNY'}&table_currencies else currencies
+        table_currencies={_column_currency(v) for r in rows[:first_data] for v in r}
+        allowed=('CNY',) if 'CNY' in table_currencies else currencies
         share_group=None
         for ri,row in enumerate(rows):
             if not row:
@@ -269,7 +275,7 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                 share_group=('dilutedEPSOrdinary','diluted_eps_ordinary')
             elif re.fullmatch(r'earnings per ads \(\d+ ordinary shares equals 1 ads\)',label):
                 share_group=('dilutedEPSADS','diluted_eps_ads')
-            elif label.startswith('weighted-average number of ordinary shares outstanding'):
+            elif re.match(r'weighted-average number of (?:ordinary shares outstanding|outstanding ordinary shares)',label):
                 share_group=None
             if label not in LABELS and not (label=='-diluted' and share_group):
                 continue
@@ -282,10 +288,11 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                 if not re.search(r'three months ended',header,re.I) or re.search(r'(six|nine|twelve) months|year ended',header,re.I):
                     continue
                 dates=re.findall(r'(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}',header)
-                found=set(re.findall(r'(?<![A-Za-z])(?:RMB|CNY|USD|US\$|HK\$|HKD|EUR|GBP|JPY|\$)(?![A-Za-z])',header))
-                mapping={'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}
-                currency=mapping.get(next(iter(found))) if len(found)==1 else None
-                explicit=any(r[col].strip().strip('()') in mapping for r in rows[:ri] if col<len(r))
+                # Currency belongs to the explicit column, not the spanning
+                # 'Amounts in RMB and US$' caption repeated by colspan.
+                column_currencies=[_column_currency(r[col]) for r in rows[:ri] if col<len(r) and _column_currency(r[col])]
+                currency=column_currencies[0] if len(set(column_currencies))==1 else None
+                explicit=bool(column_currencies)
                 if not explicit or len(set(dates))!=1 or currency not in allowed:
                     continue
                 end=_date(dates[0])
@@ -321,6 +328,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                     reported_unit_scale=scales[0],sign_normalization=normalization,currency=currency,unit='currency_units',
                     unit_scale=1 if eps else scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
                     fiscal_period_start=start,
+                    reporting_quantum=float(Decimal(10)**reported_value.as_tuple().exponent*(1 if eps else scales[0])),
+                    presentation_basis='as_restated' if re.search(r'\b(?:as restated|restated)\b',header,re.I) else 'as_reported',
                     period_start_basis='explicit three months ended calendar-quarter column header',
                     source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
                 if eps:

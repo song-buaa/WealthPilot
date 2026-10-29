@@ -1,0 +1,45 @@
+{
+  "capture_method": "Official SEC full text/plain documents, browser document.body.innerText UTF-8 serialization; not raw HTTP bytes or synthetic envelopes",
+  "original_network_fetched_at": null,
+  "offline_clock_contract": "Tests explicitly supply an offline processing clock, not a historical network fetch time",
+  "captured_for_task_on": "2026-10-29",
+  "records": [
+    {
+      "file": "0001104659-25-082502.txt.gz",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465925082502/0001104659-25-082502.txt",
+      "bytes": 400458,
+      "sha256": "28ba4755ffd54b8f3d3baeabe1dfb23daf6397fa0296d85771e4ba9307ad1562"
+    },
+    {
+      "file": "0001104659-25-113490.txt.gz",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465925113490/0001104659-25-113490.txt",
+      "bytes": 268385,
+      "sha256": "473fc1d27d81c529922331a8b59135efc555ed0511e3113cb20f7194f8706e68"
+    },
+    {
+      "file": "0001104659-25-113965.txt.gz",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465925113965/0001104659-25-113965.txt",
+      "bytes": 62672,
+      "sha256": "2d32a8b2701b248c296e5fe43b8c7464614ad2fb69dd14b2a51d0f1939eeaf0c"
+    },
+    {
+      "file": "0001104659-26-034813.txt.gz",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926034813/0001104659-26-034813.txt",
+      "bytes": 293067,
+      "sha256": "38eca97fdb5c83488fd5e0a83ecbc1e77e4caa485d4165d9b4161beca51fdc27"
+    },
+    {
+      "file": "0001104659-26-067186.txt.gz",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926067186/0001104659-26-067186.txt",
+      "bytes": 212733,
+      "sha256": "c6532c620c2e89750a6faad8913b829c560ec4203b531c6027d094f87a23c890"
+    }
+  ],
+  "submissions": {
+    "file": "submissions.json.gz",
+    "source_url": "https://data.sec.gov/submissions/CIK0001737806.json",
+    "bytes": 36025,
+    "sha256": "1142b662b51f141fec328f26edb0467590abe37feafd74f4d029e41961d021f3",
+    "capture_method": "browser body text serialization of official JSON, not a raw HTTP-byte claim"
+  }
+}

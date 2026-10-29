@@ -4,6 +4,7 @@ Historical comparison is explicit; these records cannot grant L2-L4 permission.
 No persistence, Provider, shares inference, corporate-action or order calculations.
 """
 from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import math
@@ -79,14 +80,62 @@ def build(assessment):
             values={field:value},currency=currency,unit=unit,evidence_refs=refs,details=details or {},
             historical_only=False,is_seed=False,is_mock=False)
         metrics.append(row);return row
-    def unique(field,end,currency=None):
+    selections=[]
+    def document_keys(row):
+        return {(link.get('record_id'),link.get('source_document_sha256'))
+                for link in row.get('publication_links',[]) if link.get('record_id') and link.get('source_document_sha256')}
+    def quantum(row):
+        values={number(link.get('reporting_quantum')) for link in row.get('publication_links',[])}
+        return next(iter(values)) if len(values)==1 and None not in values and next(iter(values))>0 else None
+    def unique(field,end,currency=None,anchor=None):
         rows=[r for r in source if r.get('field')==field and r.get('scope')=='quarterly'
               and r.get('period')==end and (currency is None or r.get('currency')==currency)]
-        identities={(r.get('currency'),r.get('accounting_basis'),number(r['values'].get(field)),r.get('fiscal_period_start'),r.get('unit'),
-                     r.get('ordinary_shares_per_ads'),r.get('issuer_type')) for r in rows}
-        # Equal source aliases survive in evidence_refs; competing values/bases do not.
-        if len(identities)!=1 or not rows or next(iter(identities))[2] is None:return None
-        return rows[0],list(dict.fromkeys(r['record_id'] for r in rows))
+        identity=lambda r:(r.get('currency'),r.get('accounting_basis'),r.get('fiscal_period_start'),r.get('unit'),
+                           r.get('ordinary_shares_per_ads'),r.get('issuer_type'))
+        # Never reconcile a different unit/basis/span/ADS identity with money tolerance.
+        if not rows or len({identity(r) for r in rows})!=1:return None
+        amounts={number(r['values'].get(field)) for r in rows}
+        if None in amounts:return None
+        paired=[r for r in rows if anchor and document_keys(r)&document_keys(anchor)
+                and _same_span(anchor,r,prior_year=True)]
+        chosen=rows
+        method='exact_alias'
+        if len(amounts)>1:
+            if paired and len({r['values'][field] for r in paired})==1:
+                # A later statement's explicit comparison is its own presentation,
+                # not proof that the earlier original had an identical value.
+                chosen=paired;method='same_disclosure_comparative'
+            else:
+                if any(link.get('presentation_basis')=='as_restated' for r in rows for link in r.get('publication_links',[])):return None
+                if not all(quantum(r) for r in rows):return None
+                finest=min(rows,key=lambda r:quantum(r))
+                exact=Decimal(str(finest['values'][field]))
+                def rounds_to(r):
+                    q=Decimal(str(quantum(r)))
+                    return (exact/q).quantize(Decimal(1),rounding=ROUND_HALF_UP)*q==Decimal(str(r['values'][field]))
+                if not all(rounds_to(r) for r in rows):return None
+                chosen=[r for r in rows if quantum(r)==quantum(finest)];method='explicit_rounding_precision'
+            selected=sorted(chosen,key=lambda r:r['record_id'])[0]
+            q=quantum(selected)
+            variants=[]
+            for r in sorted(rows,key=lambda r:r['record_id']):
+                v=r['values'][field];delta=v-selected['values'][field]
+                rounds=False
+                if q and quantum(r) and q!=quantum(r):
+                    coarse=max(q,quantum(r));fine=selected if q<quantum(r) else r
+                    fine_v=Decimal(str(fine['values'][field]));coarse_v=selected['values'][field] if q==coarse else v
+                    rounds=(fine_v/Decimal(str(coarse))).quantize(Decimal(1),rounding=ROUND_HALF_UP)*Decimal(str(coarse))==Decimal(str(coarse_v))
+                declared=any(link.get('presentation_basis')=='as_restated' for link in selected.get('publication_links',[]))
+                variants.append(dict(evidence_ref=r['record_id'],value=v,difference_from_selected=delta,
+                    reporting_quantum=quantum(r),source_url=r.get('source_url'),
+                    presentation_basis=sorted({link.get('presentation_basis','UNKNOWN') for link in r.get('publication_links',[])}),
+                    relation='identical' if not delta else 'declared_restatement' if declared else 'rounding_compatible' if rounds else 'unexplained_comparative_difference'))
+            note=dict(field=field,period=end,currency=selected.get('currency'),method=method,
+                      selected_ref=selected['record_id'],selected_value=selected['values'][field],variants=variants)
+            if note not in selections:selections.append(note)
+        elif paired:
+            chosen=paired
+        return sorted(chosen,key=lambda r:r['record_id'])[0],list(dict.fromkeys(r['record_id'] for r in chosen))
     current=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
     latest=current[0] if current else None
     for field,growth in [('revenue_quarter','revenue_yoy_pct'),('net_income_quarter','net_income_yoy_pct'),
@@ -99,7 +148,7 @@ def build(assessment):
             end=date.fromisoformat(latest);prior_end=end.replace(year=end.year-1).isoformat()
         except ValueError:
             missing.append(growth+': COMPARABLE_PRIOR_QUARTER_UNKNOWN');continue
-        prior=unique(field,prior_end,cur)
+        prior=unique(field,prior_end,cur,anchor=r)
         if prior and prior[0].get('accounting_basis')==r.get('accounting_basis') and _same_span(r,prior[0],prior_year=True):
             previous=number(prior[0]['values'][field])
             if previous>0:
@@ -116,7 +165,7 @@ def build(assessment):
                 n[1]+revenue[1],period=latest,unit='percent',details=dict(formula=numerator+'/revenue_quarter*100'))
             try:prior_end=date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()
             except ValueError:continue
-            pr=unique('revenue_quarter',prior_end,revenue[0]['currency']);pn=unique(numerator,prior_end,revenue[0]['currency'])
+            pr=unique('revenue_quarter',prior_end,revenue[0]['currency'],anchor=revenue[0]);pn=unique(numerator,prior_end,revenue[0]['currency'],anchor=n[0])
             if (pr and pn and _same_span(pr[0],pn[0]) and _same_span(revenue[0],pr[0],prior_year=True)
                     and pr[0].get('accounting_basis')==revenue[0].get('accounting_basis')
                     and pn[0].get('accounting_basis')==n[0].get('accounting_basis') and pr[0]['values']['revenue_quarter']>0):
@@ -149,8 +198,8 @@ def build(assessment):
         try:prior_end=date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()
         except ValueError:prior_end=None
         for end in (latest,prior_end):
-            rev=unique('revenue_quarter',end);op=unique('operating_income_quarter',end,rev[0]['currency']) if rev else None
-            costs=[unique(f,end,rev[0]['currency']) if rev else None for f in expense_fields]
+            rev=unique('revenue_quarter',end,anchor=revenue[0] if revenue and end!=latest else None);op=unique('operating_income_quarter',end,rev[0]['currency'],anchor=revenue[0] if revenue and end!=latest else None) if rev else None
+            costs=[unique(f,end,rev[0]['currency'],anchor=revenue[0] if revenue and end!=latest else None) if rev else None for f in expense_fields]
             if not (rev and op and all(costs) and rev[0]['values']['revenue_quarter']>0):continue
             if not all(_same_span(rev[0],row[0]) for row in [op,*costs]):continue
             reported=[row[0]['values'][field] for field,row in zip(expense_fields,costs)]
@@ -165,7 +214,7 @@ def build(assessment):
                 expense_ratios[field,end]=(ratio,bridge_refs)
         for field in expense_fields:
             now=expense_ratios.get((field,latest));before=expense_ratios.get((field,prior_end))
-            current=unique(field,latest);prior=unique(field,prior_end)
+            current=unique(field,latest);prior=unique(field,prior_end,anchor=current[0] if current else None)
             if (now and before and current and prior and _same_span(current[0],prior[0],prior_year=True)
                     and current[0]['currency']==prior[0]['currency'] and current[0]['accounting_basis']==prior[0]['accounting_basis']):
                 add(field.replace('_reported_quarter','')+'_burden_change_pp',now[0]-before[0],now[1]+before[1],
@@ -282,7 +331,13 @@ def build(assessment):
                     hypothetical_price=price['values']['observed_price']*earnings_factor*multiple_factor,
                     currency=price['currency'],basis='illustrative earnings x multiple, fixed FX; not forecast/target/order',
                     evidence_refs=[pe['record_id'],price['record_id']]))
-    return dict(records=metrics,limitations=sorted(set(missing)),valuation_sensitivity=sensitivity)
+    used_refs={ref for metric in metrics for ref in metric['evidence_refs']}
+    selections=[note for note in selections if note['selected_ref'] in used_refs]
+    for metric in metrics:
+        relevant=[n for n in selections if n['selected_ref'] in metric['evidence_refs']]
+        if relevant:metric['details']['comparative_selections']=relevant
+    if selections:missing.append('COMPARATIVE_PRESENTATIONS_DIFFER; selected basis and all original values retained, unexplained differences are not certified as rounding')
+    return dict(records=metrics,limitations=sorted(set(missing)),valuation_sensitivity=sensitivity,comparative_selections=selections)
 
 
 def display(row,field):
