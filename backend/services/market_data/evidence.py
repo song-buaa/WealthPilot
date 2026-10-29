@@ -138,7 +138,9 @@ def technical_period_quality(technical, symbol, at):
                 got=number(actual.get("indicators",{}).get(key))
                 if n is None or got is None or not math.isclose(got,n,rel_tol=1e-8,abs_tol=1e-8):
                     issues.append("INDICATOR_MISMATCH:"+key)
-            result[period]=dict(quality="valid" if not issues else "unknown",issues=sorted(set(issues)))
+            result[period]=dict(quality="valid" if not issues else "unknown",issues=sorted(set(issues)),
+                missing_trading_sessions=expected.get("coverage",{}).get("missing_trading_sessions",[]),
+                calendar=expected.get("coverage",{}).get("calendar"))
     except (KeyError,TypeError,ValueError,IndexError,ImportError,AttributeError):
         for item in result.values(): item["issues"]=["INVALID_OR_UNAVAILABLE_OHLCV"]
     return result

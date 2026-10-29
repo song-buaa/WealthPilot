@@ -69,3 +69,23 @@ Final test/CI results are recorded in the PR and private delivery evidence under
 - **Exact real fixture**: Mac mini's existing 520,544-byte Q2 full 6-K, raw SHA256 `9b3170dbdde2e9a37417f4132d619f390ec799569b68e1908fa3824d00528865`, transferred without network refresh and frozen losslessly as gzip. Original bytes, envelope and numerical cells are unchanged. Same-byte baseline comparison: PR49 = 0 observations, follow-up = 12 observations in three actual periods; Q2 has revenue CNY 25,666,890,000, consolidated net income -1,705,257,000, OCF 15,025,000, positive CapEx spend 1,315,790,000. Original reconciliation remains OCF minus spend = FCF -1,300,765,000.
 - **Clock limitation retained**: the archival download did not save network `fetched_at`. The saved `2026-10-28T06:04:22.283703+00:00` is request start only. Historical fetch time stays UNKNOWN; file mtime/request start is not substituted. Offline qualification-contract tests label their frozen processing clock explicitly, and unknown-fetch input remains rejected. These tests prove source parsing and qualification logic, not a recovered historical fetch clock or successful live API route.
 - Remaining runtime prerequisites: configure truthful operator identity in the actual runtime; after separate authorization perform one normal SEC reachability/read check and record actual completion time. A compliant identity does not guarantee that 403/network restrictions disappear. No live SEC, model, AV, broker or production analysis request was made for this development follow-up.
+
+## 第一轮集中质量修正 P0
+
+基线 b386bab10a72ee09253bfa5bf746cb89d130354b；复用现有 Owner，不新建财务、权限、TTM 或验收系统。仅开发/公开只读核查，未调用付费模型、AV或券商，不部署、不改资产或纪律。
+
+| 项目 | 已确认根因与最小修复 | 未恢复/待验证 |
+|---|---|---|
+| PDD 最新季度 | 正式6-K的附件标签为“Exhibit 99.1—Press Release (Earnings Release)”，原规则仅接受纯99.1；表格内部换行及Revenues/generated from operating activities标签也未支持。按精确文件名+附件编号/类型接受描述性标签，归一化空白并增加通用字段标签 | 无此前运行原始响应，不能认定当时实际网络缓存/请求路径；正式原文离线可复现并验证修复 |
+| PDD 字段资格 | 2026 Q2营收112,358,000,000 CNY、合并净利润27,182,000,000 CNY及经营现金流25,670,000,000 CNY恢复原L1字段合同；SEC接受时点来自2026-08-25原始header，不使用2026-08-24 IR日或财期代替。现金流表CNY标头有25,670与3,783（million）歧义，但同一原文明确季度及RMB25.7 billion；仅当原文币种、季度和四舍五入精度唯一支持一个既有精确表值时保留该表值，并记录关联出处 | 不用AV选择冲突列，不将正文四舍五入值作为精确字段；无独立同文支持、期间/币种不一致或多个表值均符合精度时继续UNKNOWN。CapEx未明确披露，零值/FCF不获资格；不补齐TTM的其他季度 |
+| HK 日周线 | 同一完整性布尔值错误地把当前未闭合周的缺口传播给历史周线；窗口首部半周被当完整周；周线关闭只看下周一，未使用实际最后交易日收盘。改为按原calendar的各周期范围校验，分别列出缺失日期；根数不足与覆盖缺口分别标识 | 未取得美团300条原日期，不能确认这些机制是该次失败的全部原因，也不能猜测缺失日或停牌 |
+| HK 正式财务 | AV原生不覆盖HK，AKShare fundamental实际为公司概况；正式披露Owner及字段资格目前覆盖US的季度/年度 | 美团IR有正式PDF报告，但缺官方PDF字段验证与半年累计period合同、经营利润/利润率口径；本轮明确HK_OFFICIAL_FINANCIAL_ADAPTER_UNAVAILABLE，仍允许L1。没有新增HKEX平台或OCR |
+| 默认纪律/信号 | 原40%为缺配置时的默认值；现有来源记录不提供正式个人纪律的可信确认版本。原fundamental_signal只数研究文本关键词，未检查财务。只读Skill呈现未核验状态，保留原值为诊断及原风险数值；报告明确历史单证券比例与当前公司集中度不同 | 不把聊天6%/8%写为正式规则，不创建目标、确认或新规则系统。专业经营解释继续只走原Evidence/PEER |
+
+财务报告按字段/期间/币种/口径整理相同事实的显示，所有原来源与record_id保留在evidence。历史年度字段明确为经营基线，不能冒充最新季度或为全部TTM补公告日；研究卡的90日时钟与独立年度字段的原资格分开说明，不改TTL。
+
+公开来源：[PDD正式6-K](https://www.sec.gov/Archives/edgar/data/1737806/000110465926100534/0001104659-26-100534.txt)、[PDD官方IR](https://pinduoduo.gcs-web.com/news-releases/news-release-details/pdd-holdings-announces-second-quarter-2026-unaudited-financial)、[HKEX 2026交易日及半日市](https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2025/ce_SEHK_CT_075_2025.pdf)、[美团正式报告目录](https://www.meituan.com/en-US/investor/reports)。固定交易日历exchange-calendars 4.13.2与上述2026假期/半日市核对一致，未引入自造日历或忽略真实应交易日期。停牌证据不存在时按真实缺口保留UNKNOWN。当前KlineRegistry的broker实现实际包装Tiger SDK，AV仅支持US；IBKR/Futu不是该Registry的HK历史K线fallback，不能仅凭broker来源标签推断券商。本轮不调用券商或声称可以补齐本次缺口。
+
+PDD夹具为公开SEC text/plain页面的完整浏览器DOM UTF-8表示，包含真实SEC header与两份原文文件，非合成envelope；manifest保留抓取表现形式、长度与哈希。原始HTTP字节哈希及历史网络完成时间UNKNOWN，测试明确使用冻结离线处理时钟，不补造生产时钟。
+
+如下一轮需核实美团真实缺口，最小只读提取为：从已保存的run ddfd5d1c7c2e4e80bae4d147ab914d11结果/私有记录导出technical.source、provenance、series.day的date/OHLCV、day/week的范围/parameters/indicators/资格，不含账户/持仓/成本。若记录不存在即注明，不启动新研究、券商连接、同步或Provider请求。PDD对应run ab08ede8cd09479eb6ddf9d31e672c04也不重新执行。

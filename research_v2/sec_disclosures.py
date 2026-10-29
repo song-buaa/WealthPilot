@@ -404,6 +404,7 @@ def parse_filing(source, issuer, filing, *, identity_digest):
     cover=BeautifulSoup(primary[0][4],'html.parser')
     declared={(a.get('href'),a.get_text(' ',strip=True)) for a in cover.find_all('a',href=True)}
     observations=[]
+    statement_issues=[]
     # Contexts and external statement headings are document-scoped. An exhibit
     # must be declared by the original primary document with its actual identity.
     for doc_index,kind,filename,sequence,document in documents:
@@ -411,13 +412,13 @@ def parse_filing(source, issuer, filing, *, identity_digest):
             continue
         is_primary=(kind==filing['form'] and base+filename==filing['primary_url'])
         is_exhibit=(re.fullmatch(r'EX-99\.\d+',kind) and
-            any(href==filename and re.fullmatch(re.escape(kind[3:]),label) for href,label in declared))
+            any(href==filename and re.fullmatch(r'(?:Exhibit\s+)?'+re.escape(kind[3:])+r'(?:(?:\s+|\s*[-–—:]\s*)[^<>]{1,120})?', ' '.join(label.split()),re.I) for href,label in declared))
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')
         from research_v2.official_disclosures import parse_statement_tables
         try:
-            table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'))
+            table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
         except (ValueError,TypeError,AttributeError,InvalidOperation,OverflowError):
             return None
         for obs in table_observations:
@@ -471,7 +472,10 @@ def parse_filing(source, issuer, filing, *, identity_digest):
                     source_locator=f'DOCUMENT[{doc_index}]/{filename}/ix:nonFraction[{i}]/{node.get("name")}'))
             except (ValueError, TypeError, InvalidOperation):
                 continue
-    return _record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)
+    record=_record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)
+    if record:
+        record['financial_observation_issues']=statement_issues
+    return record
 
 
 def collect(symbol):

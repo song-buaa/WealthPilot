@@ -70,3 +70,7 @@ result = call_tool(
 
 - 上游：wp-fetch-holdings（隐式，rule_engine 内部读持仓）
 - 下游：wp-generate-signals（信号需要 rule_result）/ wp-reasoning（决策考虑纪律状态）
+
+## 分析语义与来源
+
+分析输出保留原数值、violation 和阈值控制；系统默认或仅加载的配置不能获得个人纪律确认资格。warning/rule_details 明确“个人纪律未核验”和历史存储持仓口径，原描述保留在 raw_rule_details 供诊断，不作个人纪律 PASS。此处不创建、确认或修改纪律版本。
