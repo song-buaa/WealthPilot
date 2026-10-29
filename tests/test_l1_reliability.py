@@ -93,11 +93,14 @@ def test_pdd_facts_only_preserves_clocks_and_exact_fields_without_decision():
     kept=facts_only_result(original,at=AT)
     assert kept
     a,rows,text=kept
-    assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'}
-    assert all(r['published_at']=='2026-08-25T07:20:02-04:00' for r in rows)
+    assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_attributable_parent_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'}
+    assert all(r['published_at']=='2026-08-25T07:20:02-04:00' for r in rows if r['kind']=='fundamental_field')
+    assert all(r['published_at'] is None and r['evidence_refs'] for r in rows if r['kind']=='research_metric')  # calculations are not filings
     assert '专业推断未完成' in text and '112358000000' in text
     assert original==before
-    assert facts_only_result(original,at=AT.replace(year=2027)) is None  # no clock rejuvenation
+    later=facts_only_result(original,at=AT.replace(year=2027))
+    assert not later[0]['verified_field_records'] and all(r.get('historical_only') for r in later[1])
+    assert '非当前经营事实' in later[2]  # historical baseline never rejuvenates current clocks
     assert 'HOLD' not in text and 'exitPlan' not in text
 
 
@@ -124,7 +127,7 @@ def test_analyze_keeps_completed_facts_only_not_unreviewed_model_text(analysis_d
     assert 'PRIVATE' not in json.dumps(result) and 'UNREVIEWED' not in result['conclusion']
     assert hashlib.sha256(analysis_db.read_bytes()).hexdigest()==before
     if kind!='no_facts':
-        assert sum(r['kind']=='fundamental_field' for r in result['evidence']['qualified_facts'])==3
+        assert sum(r['kind']=='fundamental_field' for r in result['evidence']['qualified_facts'])==14  # current + explicitly historical original cells
         assert result['professional_result']['analysis_result']['professional_explanation']==[]
         assert result['missing_stages']==(['reviewing'] if kind=='review_timeout' else ['expressing','reviewing'])
         assert 'decisionType' not in result['professional_result']['analysis_result']
@@ -240,7 +243,8 @@ def test_recovery_rechecks_old_qualification_and_cannot_create_new_refs():
     rebuilt,rows,_=facts_only_result(a,at=AT)
     assert not rebuilt['qualification']['L3']['allowed']
     assert 'SNAPSHOT_REQUIRED' in rebuilt['qualification']['L3']['blockers'] or rebuilt['qualification']['L3']['blockers']
-    assert {r['record_id'] for r in rows} <= {r['record_id'] for r in [*a['records'],*a['verified_field_records']]}
+    from backend.services.market_data.output_policy import _evidence_index
+    assert {r['record_id'] for r in rows} <= {r['record_id'] for r in _evidence_index(a).values()}
     # Research and event have different original TTLs. An expired event must
     # never be reclassified into a still-valid 90-day research fact.
     from tests.test_v42_evidence import verified

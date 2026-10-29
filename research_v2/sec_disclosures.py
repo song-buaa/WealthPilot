@@ -38,6 +38,8 @@ CONCEPTS = {
     ('us-gaap', 'Revenues'): ('totalRevenue', 'total_revenue'),
     ('us-gaap', 'SalesRevenueNet'): ('totalRevenue', 'total_revenue'),
     ('us-gaap', 'ProfitLoss'): ('netIncome', 'consolidated_net_income'),
+    ('us-gaap', 'OperatingIncomeLoss'): ('operatingIncome', 'operating_income'),
+    ('us-gaap', 'EarningsPerShareDiluted'): ('dilutedEPSOrdinary', 'diluted_eps_ordinary'),
     ('us-gaap', 'NetIncomeLoss'): ('netIncome', 'net_income_attributable_parent'),
     ('us-gaap', 'NetCashProvidedByUsedInOperatingActivities'): ('operatingCashflow', 'operating_cash_flow'),
     ('us-gaap', 'PaymentsToAcquirePropertyPlantAndEquipment'): ('capitalExpenditures', 'positive_capital_cash_outflow'),
@@ -293,7 +295,10 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest):
         units=definition.get('units') if isinstance(definition,dict) else None
         if not isinstance(units,dict):
             continue
-        for currency, rows in units.items():
+        for original_unit, rows in units.items():
+            currency=original_unit.removesuffix('/shares')
+            if (field=='dilutedEPSOrdinary') != original_unit.endswith('/shares'):
+                continue
             if currency not in {'USD', 'CNY', 'HKD'} or not isinstance(rows, list):
                 continue
             for i, row in enumerate(rows):
@@ -306,15 +311,15 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest):
                     scope=_period(row.get('start'),row.get('end'))
                     if not scope or _day(row['end'])>_day(filing['filed']):
                         continue
-                    if filing['form'] in {'10-Q','10-K','20-F'} and row['end']!=filing['report_date']:
+                    if filing['form'] in {'10-Q','10-K','20-F'} and row['end']>filing['report_date']:
                         continue
                     value=_finite(row.get('val'))
                     if value is None or abs(value)>Decimal('1e20') or (field=='capitalExpenditures' and value<0):
                         continue
                     by_filing.setdefault(filing['accession'],[]).append(dict(source_field=field,value=float(value),
-                        currency=currency,unit='currency_units',unit_scale=1,period_basis=scope,
+                        currency=currency,unit='currency_per_ordinary_share' if field=='dilutedEPSOrdinary' else 'currency_units',unit_scale=1,period_basis=scope,
                         fiscal_period_start=row['start'],fiscal_period_end=row['end'],accounting_basis=basis,
-                        source_locator=f'/facts/{taxonomy}/{concept}/units/{currency}/{i} (accn={filing["accession"]})'))
+                        source_locator=f'/facts/{taxonomy}/{concept}/units/{original_unit.replace("/","~1")}/{i} (accn={filing["accession"]})'))
                 except (ValueError,TypeError,KeyError):
                     continue
     records=[]
@@ -570,7 +575,7 @@ def collect(symbol):
         quarters=[f for f in filings if f['form']=='10-Q']
         annuals=[f for f in filings if f['form'] in {'10-K','20-F'}]
         events=[f for f in filings if f['form'] in {'6-K','8-K'}
-                and (not annuals or f['filed']>=annuals[0]['filed'])]
+                and (_day(filings[0]['filed'])-_day(f['filed'])).days<=550]
         selected=sorted(quarters+events,key=lambda f:(f['filed'],f['accession']),reverse=True)+annuals[:1]
         filed_by_accession={f['accession']:f['filed'] for f in filings}
         for filing in selected:
@@ -578,15 +583,23 @@ def collect(symbol):
             # cannot conceal a newer, partially observed quarterly statement.
             quarterly=[o for r in rows for o in r['financial_observations']
                        if o['period_basis']=='quarterly']
+            if quarterly and filing['form'] in {'10-K','20-F'}:
+                continue  # current/history quarters do not require a large annual original
             if quarterly:
                 latest=max(o['fiscal_period_end'] for o in quarterly)
                 complete={o['source_field'] for o in quarterly if o['fiscal_period_end']==latest}
                 latest_filed=max(filed_by_accession[r['official_disclosure']['accession']]
                     for r in rows if any(o['period_basis']=='quarterly' and o['fiscal_period_end']==latest
                                          for o in r['financial_observations']))
+                periods={o['fiscal_period_end'] for o in quarterly}
                 if ({'totalRevenue','netIncome','operatingCashflow','capitalExpenditures'}<=complete
-                        and filing['filed']<=latest_filed):
+                        and len(periods)>=8 and filing['filed']<=latest_filed):
                     break
+            # Four independent earnings originals plus their comparatives are
+            # sufficient for this minimal research projection. Event-only files
+            # do not consume this existing financial-record bound.
+            if len({r['official_disclosure']['accession'] for r in rows if any(o['period_basis']=='quarterly' for o in r['financial_observations'])})>=MAX_FILINGS:
+                break
             existing = [o for r in rows if r['official_disclosure']['accession'] == filing['accession'] for o in r['financial_observations']]
             fields = {o['source_field'] for o in existing}
             if len(fields) == 4:

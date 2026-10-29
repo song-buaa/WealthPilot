@@ -272,7 +272,9 @@ def record(kind, value, *, at, symbol=None):
 
 # Explicit statement semantics, not narrative KPIs or a caller's confirmed flag.
 _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"operating_cash_flow",
-                         "capitalExpenditures":"positive_capital_cash_outflow", "netIncome":"consolidated_net_income"}
+                         "capitalExpenditures":"positive_capital_cash_outflow", "netIncome":"consolidated_net_income",
+                         "operatingIncome":"operating_income", "parentNetIncome":"net_income_attributable_parent",
+                         "dilutedEPSADS":"diluted_eps_ads", "dilutedEPSOrdinary":"diluted_eps_ordinary"}
 
 
 def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
@@ -335,13 +337,14 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
         if (key not in _OFFICIAL_FIELD_BASIS or obs.get("accounting_basis") not in {_OFFICIAL_FIELD_BASIS[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
                 or obs.get("period_basis") not in ({"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
-                or obs.get("unit")!="currency_units" or scale not in {1,1000,1000000}
+                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
                 or obs.get("currency") not in {"CNY","USD","HKD"} or value is None
                 or not math.isfinite(value*scale)):
             continue
         result.append(dict(obs,value=value*scale,unit_scale=1,published_at=raw["published_at"],
+            issuer_type=identity.get('issuer_type'),
             source_document_sha256=digest, publication_locator=proof["publication_locator"],
             issuer_id=issuer,record_id=raw["record_id"],source_url=raw["source_url"],fetched_at=raw["fetched_at"]))
     return result
@@ -619,20 +622,27 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                 values={field:parent["values"][field]}, is_seed=False, is_mock=False, is_fallback=parent["is_fallback"]))
     # Independently proven quarters support L1, never the full L3 gate above.
     quarter_fields = {"totalRevenue":"revenue_quarter", "netIncome":"net_income_quarter",
-                      "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter"}
+                      "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter",
+                      "operatingIncome":"operating_income_quarter", "parentNetIncome":"net_income_attributable_parent_quarter",
+                      "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
+    historical_field_records=[]
     for obs in quarter_observations:
         end = stamp(obs["fiscal_period_end"])
-        if not end or (at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400:
+        if not end:
             continue
+        historical=(at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400
         field = quarter_fields[obs["source_field"]]
         if obs["period_basis"]=="annual": field=field.replace("_quarter","_annual")
-        if obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
-        verified_field_records.append(dict(kind="fundamental_field", field=field, symbol=symbol,
+        if obs['source_field']=='netIncome' and obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
+        (historical_field_records if historical else verified_field_records).append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],
             record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"]+(":"+obs["currency"]+":"+obs["accounting_basis"] if obs.get("fiscal_period_start") else ""),
             quality="valid", issues=[], data_as_of=obs["fiscal_period_end"],
             published_at=obs["published_at"], fetched_at=obs["fetched_at"],
             period=obs["fiscal_period_end"], scope=obs["period_basis"], currency=obs["currency"],
+            historical_only=historical, accounting_basis=obs['accounting_basis'],unit=obs['unit'],
+            fiscal_period_start=obs.get('fiscal_period_start'),ordinary_shares_per_ads=obs.get('ordinary_shares_per_ads'),
+            issuer_type=obs.get('issuer_type'),
             publication_links=[obs], values={field:obs["value"], "currency":obs["currency"]},
             is_seed=False, is_mock=False, is_fallback=False))
     verified_period_records=[]
@@ -653,7 +663,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         issues.append("PLANNER_"+str(planner.get("status", "unknown")).upper())
     ceiling = .85 if levels["L3"]["allowed"] else .6 if levels["L2"]["allowed"] else .35
     return dict(schema_version="wealthpilot.position-evidence.v1", as_of=at.isoformat(), symbol=symbol,
-        snapshot_id=view.get("snapshot_id"), records=records, verified_field_records=verified_field_records, verified_period_records=verified_period_records, conflicts=conflicts,
+        snapshot_id=view.get("snapshot_id"), records=records, verified_field_records=verified_field_records, historical_field_records=historical_field_records, verified_period_records=verified_period_records, conflicts=conflicts,
         source_conflicts=source_conflicts,
         issues=sorted(set(issues)), planner=planner, qualification=levels,
         confidence_ceiling=ceiling, technical_levels=valid_series or None,

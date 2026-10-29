@@ -371,6 +371,7 @@ def create_server(settings):
             "Keep the EXACT full ID and identical request parameters when retrying a lost start response; it returns the existing job, never another analysis. "
             "Same ID with changed parameters is rejected. A previous process scope is unavailable; never silently replace it with a fresh ID after restart. "
             "Supply the same original AnalysisRequest (question, optional symbol/history/snapshot). No snapshot is required for normal LI research. "
+            "Preserve user's current holding/reduction/exit intent and explicit review date in question/history; optional research_context carries only user research assumptions (objective, review_date, reference_quantity, tranche_fractions, historical_price_bands), never verified holdings or confirmed allocation. Do not invent missing assumptions or ask the user to construct JSON. "
             "Save returned job_id and query get_position_analysis_result; do not call sync analyze_position or start again while waiting. "
             "One analysis at a time; busy/capacity errors do not start work. Results remain private in memory for two hours after completion; restart loses them."))
     def start_position_analysis(request_id: Annotated[str, Field(min_length=1, max_length=128,

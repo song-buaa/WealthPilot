@@ -3,6 +3,29 @@
 This module owns no data/provider, model, persistence, order or sync operations.
 """
 from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Literal
+
+
+class ResearchIntent(BaseModel):
+    """User assumptions only, never holdings/target confirmation or order input."""
+    model_config=ConfigDict(extra='forbid')
+    objective: Literal['hold','reduce','exit','evaluate']='evaluate'
+    review_date: str | None=Field(default=None,pattern=r'^\d{4}-\d{2}-\d{2}$')
+    reference_quantity: float | None=Field(default=None,gt=0,allow_inf_nan=False)
+    tranche_fractions: list[float]=Field(default_factory=list,max_length=8)
+    historical_price_bands: list[tuple[float,float]]=Field(default_factory=list,max_length=8)
+
+    @model_validator(mode='after')
+    def valid_assumptions(self):
+        import math
+        from datetime import date
+        if self.review_date:date.fromisoformat(self.review_date)
+        if any(not math.isfinite(v) or not 0<v<=1 for v in self.tranche_fractions) or sum(self.tranche_fractions)>1+1e-9:
+            raise ValueError('RESEARCH_FRACTIONS_INVALID')
+        if any(not all(math.isfinite(v) for v in pair) or not 0<pair[0]<=pair[1] for pair in self.historical_price_bands):
+            raise ValueError('RESEARCH_OBSERVATION_ASSUMPTION_INVALID')
+        return self
 
 
 def prepare_portfolio(plan, executed, *, at=None):
@@ -52,6 +75,13 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     member_ids={m["id"] for m in (context.get("company_exposure") or {}).get("members",[])}
     context["security_inputs"]=[r for r in rows if r.get("id") in member_ids]
     assessment["allocation_context"]=context
+    assessment['research_intent']=research_intent(options)
+    if assessment['research_intent']['objective']=='evaluate':
+        formal=context.get('confirmed_stage_targets') or {}
+        goal=next((row for row in formal.get('issuers',[]) if row['issuer_id']==issuer_id),{})
+        if goal.get('direction')=='gradual_exit':
+            assessment['research_intent'].update(objective='exit',formal_target_confirmed=True)
+            assessment['research_intent']['sources']['objective']='server_confirmed_stage_target:'+str(formal.get('version'))
     if not context["confirmed_stage_targets"]:
         blockers=["CONFIRMED_STAGE_TARGETS_REQUIRED"]
         if context["proposed_stage_targets"]:
@@ -97,7 +127,79 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
                     if candidate['scenario']:
                         candidate['scenario']['mode']='illustrative_unqualified'
                         candidate['scenario']['amount_blockers']=loan_b.get('blockers',[])
+    from backend.services.market_data.financial_research import build
+    assessment['financial_research']=build(assessment)
     return assessment
+
+
+def research_intent(options):
+    """Use explicit current request before user-only history; no memory/DB writes."""
+    import re
+    provided=options.get('research_context')
+    value=ResearchIntent.model_validate(provided or {}).model_dump()
+    sources={k:'current_request_assumption' for k,v in value.items() if v not in (None,[], 'evaluate')}
+    turns=[('current_request',options.get('research_question',''))]
+    turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
+    for source,text in turns:
+        if not isinstance(text,str):continue
+        if value['objective']=='evaluate':
+            if re.search(r'(?:逐步|长期|全部|分批|决定).{0,8}退出|不再.{0,8}核心|exit all|gradual exit',text,re.I):
+                value['objective']='exit';sources['objective']=source if re.search(r'决定|目标|明确|不再',text) else 'system_interpretation_of_'+source
+            elif re.search(r'减仓|减持|reduce',text,re.I):value['objective']='reduce';sources['objective']=source
+            elif re.search(r'继续持有|长期持有',text):value['objective']='hold';sources['objective']=source
+        if not value['review_date']:
+            matches=re.findall(r'(20\d{2})[-年](\d{1,2})[-月](\d{1,2})(?:日)?(?=.{0,12}(?:复核|复盘|review))',text,re.I)
+            matches+=re.findall(r'(?:复核|复盘|review)[^。\n]{0,10}?(20\d{2})[-年](\d{1,2})[-月](\d{1,2})(?:日)?',text,re.I)
+            matches=list(dict.fromkeys(matches))
+            if len(matches)==1:
+                try:
+                    from datetime import date
+                    value['review_date']=date(*map(int,matches[0])).isoformat();sources['review_date']=source
+                except ValueError:pass
+    return dict(value,sources=sources,confirmation='user_research_assumption_only',
+                holdings_verified=False,formal_target_confirmed=False)
+
+
+def research_plan(assessment, *, at):
+    """Non-executable L1 planning, composed from original technical/financial facts."""
+    from backend.services.market_data.financial_research import build
+    intent=assessment.get('research_intent') or research_intent({})
+    objective=intent['objective'];user_exit=objective in {'exit','reduce'}
+    day=(assessment.get('technical_levels') or {}).get('day')
+    band=None
+    if day:
+        indicators=day['indicators']
+        band=dict(lower=indicators['observed_support20'],upper=indicators['observed_resistance20'],
+            currency=day['currency'],observed_at=day['end_at'],evidence_ref=day['record_id'],
+            basis='observed trailing twenty-session low/high; neither target price nor order limit')
+    fractions=intent['tranche_fractions'] or ([.2,.3,.3,.2] if objective=='exit' else [.25,.25] if objective=='reduce' else [])
+    conditions=[
+        '先复核退出理由与现金需要；不把回本作为唯一等待条件',
+        '反弹后复核量价及估值；经营证据不足时不把反弹解释为基本面改善',
+        '横盘时比较继续等待与退出后的机会成本；盈利假设失效则优先复核',
+        '最迟复核日重新决定剩余方向；不无限期滚动等待历史价格区间']
+    stages=[dict(stage=i+1,fraction_of_reference_position=f,
+        fraction_basis='user_assumption' if intent['tranche_fractions'] else 'illustrative_research_draft',
+        priority=i+1,condition=conditions[min(i,3)],observation_band=band,
+        quantity=None,amount=None,execution_authorized=False) for i,f in enumerate(fractions)]
+    financial=build(assessment)
+    return dict(mode='research_only',non_executable=True,objective=objective,
+        objective_source=intent['sources'].get('objective','system_inference_evaluate'),
+        assumption_context=intent,stages=stages,price_observation=band,
+        historical_bands_review=dict(bands=intent['historical_price_bands'],status='user_assumptions_not_current_price_evidence',
+            conclusion='Only overlap with independently observed technical/valuation evidence may inform review; no mechanical reuse.'),
+        review_deadline=intent['review_date'] or (at+timedelta(days=7)).date().isoformat(),
+        review_deadline_basis=intent['sources'].get('review_date','system_seven_day_review_not_sale_deadline'),
+        fundamental_conditions=['收入与同口径盈利变化是否支持原假设；竞争/监管归因仅为待验证机制',
+            '利润与经营现金流持续背离时复核盈利质量；负现金流不等于会计利润为假',
+            '分部数据缺失时，不用集团利润宣称某分部盈利；以正式披露证实或推翻'],
+        scenarios=[dict(name=name,response=response,price_observation=band) for name,response in [
+            ('rebound','若量价修复且估值/经营证据支持，比较分批退出与等待；反弹不撤销长期目标' if user_exit else '复核经营是否跟上价格修复'),
+            ('sideways','按用户复核期限比较时间成本与替代用途，不无限期等待回本'),
+            ('decline','先验证经营反证与流动性需要；假设失效时加速退出研究，不自动止损下单')]],
+        limitations=financial['limitations']+([] if band else ['PRICE_OBSERVATION_UNKNOWN'])+
+            ['Reference quantities/fractions are assumptions, not verified broker holdings; no order prepared.'],
+        order_created=False,execution_authorized=False)
 
 
 def native_quantity(assessment, step, *, at):
@@ -160,7 +262,6 @@ def exit_plan(assessment, *, at=None):
     if current is None and context.get("denominator_cny"):
         current=group.get("market_value_cny",0)/context["denominator_cny"]
     phases=[target["target_weight"]]+target.get("phases",[]) if target else [None]
-    deadline=(at+timedelta(days=7)).isoformat()
     valid=[r for r in assessment["records"] if r["quality"]=="valid"]
     technical=assessment.get("technical_levels")
     price_trigger=None
@@ -238,7 +339,9 @@ def exit_plan(assessment, *, at=None):
         tranches.insert(0,dict(stage="operating_review",condition="核验新财报及失效条件，优先评估逐步退出",
             amount_cny=None,quantity=None,account_ref=None,market=None,currency=None,
             funds_destination=None,price_trigger=price_trigger,status="research_milestone"))
+    research=research_plan(assessment,at=at)
     return dict(schema_version="wealthpilot.exit-plan.v1",issuer_id=issuer,snapshot_id=assessment["snapshot_id"],
+        research_plan=research,
         target_allocation=dict(current=current,target=target.get("target_weight"),tolerance=target.get("tolerance"),
             stage=targets.get("stage"),version=targets.get("version"),digest=targets.get("digest"),
             confirmation_status=context.get("target_confirmation_status","missing"),basis=targets.get("basis")),
@@ -251,7 +354,7 @@ def exit_plan(assessment, *, at=None):
         fallback_rule=["反弹未出现：在复核期限重新评估配置与机会成本，不无限期等待成本价。",
                        "经营恶化：先验证正式披露与原论据失效，再人工复核退出方向。",
                        "贷款到期或流动性压力：核实余额、期限和可划转条件后优先复核偿债。"],
-        review_deadline=deadline,review_deadline_basis="system default seven-day review, not a sale deadline",
+        review_deadline=research['review_deadline'],review_deadline_basis=research['review_deadline_basis'],
         evidence_quality=dict(qualification=levels,issues=assessment["issues"],
             missing=assessment["infoNeeded"],facts=[{k:r[k] for k in ("kind","source","record_id","data_as_of","quality")} for r in valid],
             assumptions=["目标确认状态："+context.get('target_confirmation_status','missing')+"；不覆盖正式纪律，不等于交易授权。","情景基于固定估值，不预测未来收益。"],
@@ -280,15 +383,23 @@ def fact_sections(assessment):
     # Display equal facts once; all original records/references remain in evidence.
     import json
     grouped={}
-    for r in assessment.get('verified_field_records',[]):
+    for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[]):
         key=(r.get('field'),r.get('period'),r.get('currency'),r.get('scope'),
              json.dumps(r.get('values'),sort_keys=True,default=str))
         grouped.setdefault(key,[]).append(r)
     for equal in grouped.values():
         r=equal[0]
-        scope="年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
         facts.append(f"- {scope}字段事实 {r.get('field')}：{r.get('values')}；币种 {r.get('currency') or '未核验'}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
+    from backend.services.market_data.financial_research import build,display
+    financial=build(assessment)
+    for metric in financial['records']:
+        facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+'；计算口径：'+str(metric['details']))
+    if financial['valuation_sensitivity']:
+        import json
+        facts.append('估值敏感性（盈利/倍数变化为假设，固定FX；非预测、目标价或订单）：'+json.dumps(financial['valuation_sensitivity'],ensure_ascii=False))
+    facts.append('独立缺口（不影响其他合格研究）：'+'；'.join(financial['limitations'])+'。旧观点和Seed不作当前经营事实。')
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")
     technical_lines=[]
@@ -325,7 +436,7 @@ def report(assessment, plan, decision):
         return "未知" if value is None else f"¥{value:,.2f}"
     def weight(value):
         return "未设定" if value is None else f"{value:.1%}"
-    mode="证据达到精确分析门槛，仍须人工复核。" if levels["L3"]["allowed"] else "受限分析：不提供可执行限价或股数。"
+    mode="证据达到精确分析门槛，仍须人工复核。" if levels["L3"]["allowed"] else "L1研究保留所有合格经营/技术事实；执行价量条件未建立，不提供可执行限价或股数。"
     allocation=plan["target_allocation"]
     text=(mode+f"\n固定快照：{plan['snapshot_id'] or '未提供'}；公司：{plan['issuer_id'] or '尚未确认'}。"
         +f"\n公司跨账户参考市值 {amount(group.get('market_value_cny'))}；投资资产分母 {amount(context.get('denominator_cny'))}。"
@@ -352,6 +463,22 @@ def report(assessment, plan, decision):
         if row.get("amount_cny") is not None:
             line+=f"假设减仓额 {amount(row['amount_cny'])}，账户 {row['account_ref']}，去向 {row['funds_destination']}。"
         lines.append(line)
+    research=plan.get('research_plan',{})
+    if research:
+        names={'exit':'逐步退出','reduce':'减仓','hold':'持有复核','evaluate':'评估'}
+        lines.append('L1研究方案（research-only / non-executable，不要求L3，不产生交易授权）：目标 '+names[research['objective']]
+            +'；来源 '+research['objective_source']+'，用户声明不代表实时持仓或正式配置。')
+        for row in research['stages']:
+            lines.append(f"- 研究批次 {row['stage']}，参考持仓比例 {row['fraction_of_reference_position']:.0%}（{row['fraction_basis']}，非当前已核验股数）：{row['condition']}。")
+        band=research.get('price_observation')
+        if band:
+            lines.append(f"价格观察区间 {band['lower']}—{band['upper']} {band['currency']}；截止 {band['observed_at']}，依据 {band['evidence_ref']}；历史窗口高低点，不是目标价或限价。")
+        else:lines.append('价格观察区间UNKNOWN，不编造技术价位。')
+        lines.extend('- '+r['name']+'：'+r['response'] for r in research['scenarios'])
+        lines.extend('- 经营复核：'+condition for condition in research['fundamental_conditions'])
+        if research['assumption_context'].get('reference_quantity'):
+            lines.append('历史参考数量 '+str(research['assumption_context']['reference_quantity'])+' 仅为用户假设；未核验当前券商股数，不用于执行。')
+        lines.append('复核期限：'+research['review_deadline']+'；来源 '+research['review_deadline_basis']+'（不是卖出截止或自动触发）。')
     if plan["funds_policy"]:
         destination_names={"offshore_fixed_income":"境外固收","repay_cny_loan":"偿还人民币贷款","investment_cash":"投资账户现金"}
         lines.append(("服务端确认的资金去向：" if confirmed else "请求假设的资金去向：")+"；".join(f"{a} → {destination_names[d]}" for a,d in plan["funds_policy"].items()))
@@ -372,7 +499,7 @@ def report(assessment, plan, decision):
                 +f"负债 {amount(row['liabilities_cny'])}，净资产 {amount(row['net_assets_cny'])}；假设：{row['assumptions']}。")
     section("⑤多情景减仓建议","\n".join(lines))
     section("⑥失效 / 复核条件","\n".join("- "+r for r in plan["fallback_rule"])
-        +f"\n最迟复核：{plan['review_deadline']}；采用默认七日复核政策，不是必须卖完的日期。")
+        +f"\n最迟复核：{plan['review_deadline']}；依据 {plan['review_deadline_basis']}，不是必须卖完的日期。")
     quality_names={"valid":"可核验","stale":"过期","unknown":"未核验","seed":"Seed","mock":"Mock",
                    "conflict":"冲突","superseded":"已被更新披露取代"}
     sources=["| 类型 | 来源 / 记录 | 数据日期 | 状态 |","|---|---|---|---|"]

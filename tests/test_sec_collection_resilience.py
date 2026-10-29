@@ -85,7 +85,7 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
     monkeypatch.setattr(sec,'parse_filing',parse)
     rows,verifier=sec.collect('LI:US')
     assert calls[12]==q2['full_url']
-    assert len(calls)==(14 if failure=='partial_preserved' else 13)  # Q2 at position ten remains reachable
+    assert len(calls)==13  # quarterly facts survive; annual original is no prerequisite
     assessment=assess({},symbol='LI:US',research=deepcopy(rows),at=AT,disclosure_verifier=verifier)
     fields=assessment['verified_field_records']
     expected_fields=({'revenue_quarter'} if failure=='partial_preserved' else

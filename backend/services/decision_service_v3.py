@@ -405,6 +405,7 @@ async def _run_chat_stream_v3(
 
         if plan_out.route == "position_single":
             from backend.services.position_analysis import prepare
+            analysis_options=dict(analysis_options or {},research_question=user_input,research_history=conversation_history or [])
             exec_out.position_evidence = prepare(plan_out,exec_out,asset_view=analysis_context,options=analysis_options)
             exec_out.invoked_skills.append("wp-assess-position-evidence")
         elif plan_out.route == "portfolio":

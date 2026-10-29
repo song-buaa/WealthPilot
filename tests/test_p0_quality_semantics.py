@@ -42,13 +42,15 @@ def pdd_record(body=None):
 def test_real_PDD_quarter_fields_use_actual_SEC_clock_and_exact_native_cells():
     r=pdd_record();assert r
     rows={o['source_field']:o for o in r['financial_observations'] if o['fiscal_period_end']=='2026-06-30'}
-    assert {k:v['value']*v['unit_scale'] for k,v in rows.items()}=={'totalRevenue':112358000000,'netIncome':27182000000,'operatingCashflow':25670000000}
+    assert {k:rows[k]['value']*rows[k]['unit_scale'] for k in ('totalRevenue','netIncome','operatingCashflow')}=={'totalRevenue':112358000000,'netIncome':27182000000,'operatingCashflow':25670000000}
+    assert rows['operatingIncome']['value']*rows['operatingIncome']['unit_scale']==27764000000
+    assert rows['dilutedEPSADS']['value']==18.45 and rows['dilutedEPSADS']['unit_scale']==1
     assert r['published_at']=='2026-08-25T07:20:02-04:00'  # filing clock, not IR Aug 24 or fiscal end
     assert 'capitalExpenditures' not in rows
     assert rows['operatingCashflow']['precision_corroboration']['reported_value']==25700000000
     assert any(x['source_field']=='operatingCashflow' and x['period']=='2026-06-30' and x['issue']=='STATEMENT_COLUMN_AMBIGUITY_CORROBORATED' for x in r['financial_observation_issues'])
     a=assess({},symbol='PDD:US',research=[r],at=AT,disclosure_verifier={r['record_id']:deepcopy(r)}.get)
-    assert {f['field'] for f in a['verified_field_records']}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'}
+    assert {f['field'] for f in a['verified_field_records']}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_attributable_parent_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'}
     assert a['qualification']['L1']['allowed']
     assert all(not a['qualification'][l]['allowed'] for l in ('L2','L3','L4'))
 
@@ -114,10 +116,10 @@ def test_native_collect_recovers_pdd_without_request_dates_or_manual_fields(monk
         return None
     monkeypatch.setattr(sec,'_fetch',fetch)
     a=execute_assess_position_evidence(symbol='PDD:US',market_data={},research=[],at=AT)
-    assert {f['field'] for f in a['verified_field_records']}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'}
+    assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'} <= {f['field'] for f in a['verified_field_records']}
     assert 'OFFICIAL_FIELD_OPERATINGCASHFLOW_STATEMENT_COLUMN_AMBIGUITY_CORROBORATED' in a['issues']
     assert a['qualification']['L1']['allowed']
-    assert len(calls)==5
+    assert len(calls)==4  # no annual original needed after independent quarters
 
 
 def test_report_deduplicates_display_only_and_labels_annual_basis_currency():
@@ -172,7 +174,7 @@ def test_real_quarter_facts_reach_original_PEER_context_and_final_projection():
     assert all(ref in prompt for ref in refs)
     text=unicodedata.normalize('NFKC','盈利与经营现金流共同反映经营质量，仍需结合回款节奏和竞争投入复核现金转化的可持续性。')
     out=ExpressionOutput(structured_payload={'decisionType':'watch','professional_explanation':[
-        dict(topic='business',basis='inference',text=text,evidence_refs=refs)]})
+        dict(topic='business',basis='inference',text=text,evidence_refs=refs[:3])]})
     enforce(out,a)
     assert out.structured_payload['professional_explanation'][0]['text']==text
     assert text in out.chat_answer
