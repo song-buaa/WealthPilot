@@ -252,7 +252,9 @@ def test_LI_quarter_cash_shortfall_uses_real_OCF_and_verified_positive_capex():
 @pytest.mark.parametrize('question,expected',[
     ('不要减仓，继续持有','hold'),('不要退出，继续持有','hold'),
     ('不再长期持有，决定逐步退出','exit'),('考虑减仓，也可能继续持有','evaluate'),
-    ('不想退出','evaluate')])
+    ('不想退出','evaluate'),('不要再减仓','evaluate'),('不要再减仓，继续持有','hold'),
+    ('Do not reduce my position','evaluate'),("Don't reduce; keep holding",'hold'),
+    ('不要清仓','evaluate'),('Do not sell my position','evaluate')])
 def test_current_negation_and_ambiguity_never_resurrect_old_exit(question,expected):
     intent=research_intent(dict(research_question=question,research_history=[dict(role='user',content='我决定逐步退出')]))
     assert intent['objective']==expected

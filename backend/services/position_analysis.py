@@ -146,13 +146,19 @@ def research_intent(options):
     for source,text in turns:
         if not isinstance(text,str):continue
         if not resolved:
-            negated=r'(?:不要|不想|不应|不打算|暂不|不再|不)(?:继续|逐步|长期|全部|分批)?(?:减仓|减持|退出|持有)'
-            cleaned=re.sub(negated,'',text)
+            affirmative=[];negated_action=False;action_present=False
+            for clause in re.split(r'[,，;；。!！?？\n]|但是|而是|但|\bbut\b|\binstead\b',text,flags=re.I):
+                action=re.search(r'减仓|减持|退出|持有|卖出|清仓|\breduce\b|\bexit\b|\bsell\b|\bhold(?:ing)?\b',clause,re.I)
+                action_present=action_present or bool(action)
+                if action and re.search(r'不|别|无需|避免|暂缓|\bnot\b|don.t|\bnever\b',clause[:action.start()],re.I):
+                    negated_action=True
+                else:affirmative.append(clause)
+            cleaned='，'.join(affirmative)
             choices=[]
             if re.search(r'(?:逐步|长期|全部|分批|决定).{0,8}退出|不再.{0,8}核心|exit all|gradual exit',cleaned,re.I):choices.append('exit')
             if re.search(r'减仓|减持|reduce',cleaned,re.I):choices.append('reduce')
-            if re.search(r'继续持有|长期持有',cleaned):choices.append('hold')
-            if choices or re.search(negated,text):
+            if re.search(r'继续持有|长期持有|\b(?:keep|continue) holding\b',cleaned,re.I):choices.append('hold')
+            if choices or negated_action or action_present:
                 resolved=True
                 strong_exit=re.search(r'(?:长期目标|决定|目标).{0,8}退出',cleaned)
                 value['objective']='exit' if strong_exit else choices[0] if len(choices)==1 else 'evaluate'
