@@ -96,7 +96,10 @@ def build(assessment):
         if not rows or len({identity(r) for r in rows})!=1:return None
         amounts={number(r['values'].get(field)) for r in rows}
         if None in amounts:return None
-        paired=[r for r in rows if anchor and document_keys(r)&document_keys(anchor)
+        anchor_aliases=[r for r in source if anchor and r.get('field')==anchor.get('field') and r.get('period')==anchor.get('period')
+                        and identity(r)==identity(anchor) and r['values'].get(r['field'])==anchor['values'].get(anchor['field'])]
+        anchor_keys=set().union(*(document_keys(r) for r in anchor_aliases))
+        paired=[r for r in rows if anchor and document_keys(r)&anchor_keys
                 and _same_span(anchor,r,prior_year=True)]
         chosen=rows
         method='exact_alias'

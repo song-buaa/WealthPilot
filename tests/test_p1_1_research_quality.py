@@ -232,3 +232,14 @@ def test_context_deduplicates_only_repeated_comparison_metadata_not_facts():
     by_ref={r['evidence_ref']:r for r in records}
     for row in a['verified_field_records']+a['historical_field_records']:
         assert by_ref[row['record_id']]['values']==row['values']
+
+
+def test_equal_current_source_alias_cannot_hide_the_available_paired_comparison():
+    a=combined();current=next(r for r in a['verified_field_records'] if r['field']=='net_income_quarter')
+    alias=deepcopy(current)
+    alias['record_id']='official:sec:0001737806:0001104659-26-100534:'+'0'*64+':net_income_quarter'
+    alias['publication_links'][0].update(record_id='synthetic-independent-current-only',source_document_sha256='0'*64)
+    a['verified_field_records'].append(alias)
+    assert metrics(a)['net_income_yoy_pct']['values']['net_income_yoy_pct']==pytest.approx((27182/30754-1)*100)
+    assert alias['record_id'] in metrics(a)['net_income_yoy_pct']['evidence_refs']
+    assert current['record_id'] in metrics(a)['net_income_yoy_pct']['evidence_refs']
