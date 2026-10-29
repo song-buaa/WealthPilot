@@ -371,6 +371,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             result.professional_analysis_complete=False
             result.issues.append('PROFESSIONAL_STAGE_FAILURE')
         finally:
+            if async_l1 and result.status=='unavailable' and runtime_budget() is not None:
+                runtime_budget().finished.set()  # no abandoned SDK sends during facts finalization
             decision_service.clear_session(conversation)
         if result.status == 'unavailable':
             # Failed/partial streams can already contain model text. Never

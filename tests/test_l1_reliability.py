@@ -401,3 +401,25 @@ def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,mon
     assert result['professional_result']['analysis_result']['mode']=='facts_only'
     assert 'PROFESSIONAL_STAGE_FAILURE' in result['issues']
     assert 'private assembly' not in json.dumps(result)
+
+
+def test_abandoned_generation_stops_before_fact_finalization(analysis_db,monkeypatch):
+    from pocs.chatgpt_skills import analysis
+    from backend.services import decision_service_v3 as svc
+    from backend.services.market_data import output_policy
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return AT
+    monkeypatch.setattr(analysis,'datetime',Clock)
+    receipt=facts();original=output_policy.facts_only_result
+    def finalize(*a,**kw):
+        assert current().finished.is_set()
+        return original(*a,**kw)
+    monkeypatch.setattr(output_policy,'facts_only_result',finalize)
+    async def stream(*a,**kw):
+        kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
+        raise TimeoutError()
+        yield
+    monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
+    result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
+    assert result['status']=='partial' and not result['professional_analysis_complete']
