@@ -1223,15 +1223,16 @@ def execute_assess_position_evidence(**kwargs):
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     import os
     if not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
-        eps=next((r for r in result['verified_field_records'] if r['field']=='diluted_eps_ads_quarter'),None)
-        day=(result.get('technical_levels') or {}).get('day')
         from backend.services.market_data.financial_research import build
-        if eps and day and eps['currency']!=day['currency'] and any(r['field']=='diluted_eps_ttm' for r in build(result)['records']):
+        calculated=build(result)['records']
+        eps=next((r for r in calculated if r['field']=='diluted_eps_ttm'),None)
+        observed=next((r for r in calculated if r['field']=='observed_price'),None)
+        if eps and observed and eps['currency']!=observed['currency']:
             from dataclasses import asdict
             from app.fx_service import fx_service
             try:
-                result['research_fx']=dict(asdict(fx_service.get_quote(day['currency'],eps['currency'],day['end_at'])),
-                    from_currency=day['currency'],to_currency=eps['currency'])
+                result['research_fx']=dict(asdict(fx_service.get_quote(observed['currency'],eps['currency'],observed['period'][:10])),
+                    from_currency=observed['currency'],to_currency=eps['currency'])
             except (ValueError,TypeError,OSError):
                 result['research_fx']={'quality':'unavailable'}
     # Existing final evidenceQuality/issues and infoNeeded channels carry safe

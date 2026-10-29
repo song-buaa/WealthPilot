@@ -243,7 +243,8 @@ def _bound_text(item,index):
 
 def _technical_periods(record):
     if record.get('kind')=='technical':return set(record.get('values',{}).get('series',{}))
-    if record.get('kind')=='research_metric' and record.get('field')=='observed_price':return {'day'}
+    if (record.get('kind')=='research_metric' and record.get('field')=='observed_price'
+            and record.get('details',{}).get('technical_period')=='day'):return {'day'}
     return set()
 
 
@@ -279,7 +280,7 @@ def explanation_projection(candidate, assessment):
                     or (any(term in text for term in ("日线","日级")) and not any("day" in _technical_periods(index[ref]) for ref in refs))
                     or (any(term in text for term in ("多周期","共振")) and not all(any(period in _technical_periods(index[ref]) for ref in refs) for period in ("day","week")))):
                 reason = "unverified_timeframe"
-            elif item["topic"] in {"business", "competition", "investment_thesis"} and all(_technical_periods(index[ref]) for ref in refs):
+            elif item["topic"] in {"business", "competition", "investment_thesis"} and all(_technical_periods(index[ref]) or index[ref].get('field') in {'observed_price','fx_rate'} for ref in refs):
                 reason = "topic_evidence_mismatch"
             elif item['topic']=='competition' and all(index[ref]['kind'] in {'fundamental_field','fundamentals','research_metric'} for ref in refs) and not re.search(r'若|如果|可能|假设|无法|尚无|不能|缺少|未知',text):
                 reason = 'competition_mechanism_not_conditional'

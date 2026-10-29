@@ -166,7 +166,17 @@ def build(assessment):
         close=number(day['bars'][-1].get('close'))
         if close and close>0:
             price=add('observed_price',close,[day['record_id']],period=day['end_at'],currency=day['currency'],unit='price',
-                details=dict(basis='last validated daily close; not live or an order limit'))
+                details=dict(basis='last validated daily close; not live or an order limit',technical_period='day'))
+    if price is None:
+        quote=next((r for r in assessment.get('records',[]) if r.get('kind')=='quote' and r.get('quality')=='valid'
+                    and not r.get('is_seed') and not r.get('is_mock') and r.get('symbol')==symbol),None)
+        amount=number((quote or {}).get('values',{}).get('current_price'))
+        ref=(quote or {}).get('record_id') or (quote or {}).get('source_url')
+        native={'US':'USD','HK':'HKD'}.get((symbol or '').rsplit(':',1)[-1])
+        if quote and amount and amount>0 and ref and stamp(quote.get('data_as_of')) and quote['values'].get('currency')==native and native:
+            price=add('observed_price',amount,[ref],
+                period=quote['data_as_of'],currency=native,unit='price',
+                details=dict(basis='independently qualified quote observation, not a daily series or order limit'))
     # Reuse the existing four-quarter window + summation. Never annualize Q2.
     eps=None
     for field in ('diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'):

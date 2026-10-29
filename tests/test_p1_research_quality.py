@@ -291,3 +291,16 @@ def test_PDD_ordinary_shareholder_income_never_asserts_parent_equivalence():
     assert 'parent_income_yoy_pct' not in metrics(a)
     assert 'ordinary_income_yoy_pct' in metrics(a)
     assert not any(r.get('accounting_basis')=='net_income_attributable_parent' for r in a['verified_field_records'])
+
+
+def test_qualified_quote_can_support_valuation_without_becoming_daily_evidence():
+    a=valuation_case();a['technical_levels']=None
+    a['records'].append(dict(kind='quote',symbol='PDD:US',quality='valid',record_id='synthetic-qualified-quote',
+        data_as_of='2026-10-28',values={'current_price':100.,'currency':'USD'}))
+    m=metrics(a);assert 'pe_ttm' in m
+    p=dict(topic='technical_trend',scope='research_only',basis='inference',
+        text='该日线观察价格为{{n1}}，需要结合量能复核趋势持续性，不表示执行指令。',
+        evidence_refs=[m['observed_price']['record_id']],numbers=[dict(id='n1',evidence_ref=m['observed_price']['record_id'],field='observed_price')])
+    assert not explanation_projection([p],a)[0]
+    a['records'][-1]['values']['currency']=None
+    assert 'pe_ttm' not in metrics(a) and 'revenue_yoy_pct' in metrics(a)
