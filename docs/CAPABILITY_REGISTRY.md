@@ -130,3 +130,5 @@ Owner：WP [investment_thesis](../backend/services/investment_thesis/service.py)
 E1-B2 已用三种真实公开事件完成私人 CLI 记录/版本/Review/本地只读 MCP 重启读回；三份实际原 PEER 报告均 partial，经 CLI 导入仍为未认证副本，不代表买入资格或线上 E1 可用。未定期限的逾期状态保留 UNKNOWN；实际边界、最小修复与测试见 [B2 本地验证](v4.3/E1_B2_VALIDATION.md)。
 
 B3-1新增 [ResearchBridge](../backend/services/investment_thesis/bridge.py) 与原 [MCP适配](../pocs/chatgpt_skills/investment_thesis.py) 的可选预览/明确确认研究保存。显式E1私人库+独立写开关才注册；默认原工具/业务权限不变，当前生产未启用。复用原store事务、CAS/幂等和Review降级，不调用Provider/同步/订单。日常用法、令牌过期/重启及客户端确认责任见 [B3-1记录](v4.3/E1_B31_RESEARCH_SAVE.md)；测试见 [确认/原子性](../tests/test_e1_save_bridge.py) 和 [独立MCP协议](../pocs/chatgpt_skills/test_e1_save_protocol.py)。
+
+E1-I1已核对已集成main并完成独立HTTP进程的合成启停/持久化/发现验证；线上E1工具未在当前连接发现，生产状态未核实、真人保存未执行。当前为LOCAL_PASS、ONLINE_BLOCKED，发布需一次完整授权；目标配置/回滚/真实确认收据要求见 [I1集成计划](v4.3/E1_I1_INTEGRATION.md)，不得据本地通过标线上可用。
