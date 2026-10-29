@@ -1218,6 +1218,23 @@ def execute_assess_position_evidence(**kwargs):
             kwargs["research"] = [*kwargs.get("research", ()), *rows]
             kwargs["disclosure_verifier"] = verifier
     result=assess(**kwargs)
+    # Reuse the original FX authority only when research has verified per-listed
+    # EPS in a different currency. No portfolio/snapshot dependency or DB writes.
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    import os
+    if not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
+        from backend.services.market_data.financial_research import build
+        calculated=build(result)['records']
+        eps=next((r for r in calculated if r['field']=='diluted_eps_ttm'),None)
+        observed=next((r for r in calculated if r['field']=='observed_price'),None)
+        if eps and observed and eps['currency']!=observed['currency']:
+            from dataclasses import asdict
+            from app.fx_service import fx_service
+            try:
+                result['research_fx']=dict(asdict(fx_service.get_quote(observed['currency'],eps['currency'],observed['period'][:10])),
+                    from_currency=observed['currency'],to_currency=eps['currency'])
+            except (ValueError,TypeError,OSError):
+                result['research_fx']={'quality':'unavailable'}
     # Existing final evidenceQuality/issues and infoNeeded channels carry safe
     # source state. No qualification changes, exception text or operator identity.
     problems={"SEC_SOURCE_"+row["category"].upper() for row in diagnostics if row["category"] not in {"available","cache_hit"}}

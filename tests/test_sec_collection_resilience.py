@@ -33,7 +33,7 @@ def test_parser_accepts_original_larger_than_previous_ceiling():
     body=original()+b' '*(16*1024*1024)
     record=sec.parse_filing((body,AT.isoformat()),issuer,filing,identity_digest='a'*64)
     assert {o['source_field']:o['value']*o['unit_scale'] for o in record['financial_observations']
-            if o['fiscal_period_end']=='2026-06-30'}==EXPECTED
+            if o['fiscal_period_end']=='2026-06-30' and o['source_field'] in EXPECTED}==EXPECTED
 
 
 @pytest.mark.parametrize('failure',['network','invalid_original','parse_exception','large_file','partial_preserved'])
@@ -85,12 +85,13 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
     monkeypatch.setattr(sec,'parse_filing',parse)
     rows,verifier=sec.collect('LI:US')
     assert calls[12]==q2['full_url']
-    assert len(calls)==(14 if failure=='partial_preserved' else 13)  # Q2 at position ten remains reachable
+    assert len(calls)==13  # quarterly facts survive; annual original is no prerequisite
     assessment=assess({},symbol='LI:US',research=deepcopy(rows),at=AT,disclosure_verifier=verifier)
     fields=assessment['verified_field_records']
     expected_fields=({'revenue_quarter'} if failure=='partial_preserved' else
                      {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','capital_expenditures_quarter'})
-    assert {f['field'] for f in fields}==expected_fields
+    assert expected_fields <= {f['field'] for f in fields}
+    if failure=='partial_preserved':assert {f['field'] for f in fields}==expected_fields
     assert all(f['period']=='2026-06-30' for f in fields)
     assert all(not assessment['qualification'][level]['allowed'] for level in ('L2','L3','L4'))
     assert not any('PRIVATE' in str(d) for d in sec.source_diagnostics())
@@ -119,5 +120,5 @@ def test_complete_companyfacts_quarter_cannot_skip_newer_8K(monkeypatch):
         return b'unsupported newer event',AT.isoformat()
     monkeypatch.setattr(sec,'_fetch',fetch)
     rows,_=sec.collect('AAPL:US')
-    assert len(calls)==4 and calls[-1].endswith('/0001104659-26-200001.txt')
+    assert len(calls)==5 and calls[3].endswith('/0001104659-26-200001.txt')  # newer event first, then original to supplement missing EPS/expenses
     assert {o['source_field'] for r in rows for o in r['financial_observations']}==set(EXPECTED)

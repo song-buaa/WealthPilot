@@ -30,6 +30,20 @@ LABELS = {
     'net cash used in operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'net cash (used in)/provided by operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'capital expenditures': ('capitalExpenditures', 'positive_capital_cash_outflow'),
+    'operating profit': ('operatingIncome', 'operating_income'),
+    'income from operations': ('operatingIncome', 'operating_income'),
+    'loss from operations': ('operatingIncome', 'operating_income'),
+    'income/(loss) from operations': ('operatingIncome', 'operating_income'),
+    'net income attributable to ordinary shareholders': ('ordinaryNetIncome', 'net_income_available_to_ordinary_shareholders'),
+    'net income attributable to the parent': ('parentNetIncome', 'net_income_attributable_parent'),
+    'costs of revenues': ('costOfRevenueReported', 'cost_of_revenue_as_reported'),
+    'total cost of sales': ('costOfRevenueReported', 'cost_of_revenue_as_reported'),
+    'sales and marketing expenses': ('salesMarketingReported', 'sales_marketing_as_reported'),
+    'general and administrative expenses': ('generalAdminReported', 'general_admin_as_reported'),
+    'research and development expenses': ('researchDevelopmentReported', 'research_development_as_reported'),
+    'income tax expenses': ('incomeTaxReported', 'income_tax_as_reported'),
+    'income tax (expense)/benefit': ('incomeTaxReported', 'income_tax_as_reported'),
+    'selling, general and administrative expenses': ('sellingGeneralAdminReported', 'combined_selling_general_admin_as_reported'),
 }
 
 
@@ -217,6 +231,15 @@ def _quarterly_cashflow_corroboration(soup):
     return found
 
 
+def _calendar_quarter_start(header,end):
+    # A date alone is insufficient. This supported layout explicitly states a
+    # three-calendar-month duration ending at a calendar-quarter boundary.
+    if (not re.search(r'three months ended',header,re.I) or re.search(r'(six|nine|twelve) months|year ended',header,re.I)
+            or end[5:] not in {'03-31','06-30','09-30','12-31'}):return None
+    d=datetime.strptime(end,'%Y-%m-%d').date()
+    return d.replace(month=d.month-2,day=1).isoformat()
+
+
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]
@@ -237,14 +260,22 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
         first_data=next((i for i,r in enumerate(rows) if r and r[0].strip().lower().rstrip(':') in LABELS),len(rows))
         table_currencies={v.strip().strip('()') for r in rows[:first_data] for v in r}
         allowed=('CNY',) if {'RMB','CNY'}&table_currencies else currencies
+        share_group=None
         for ri,row in enumerate(rows):
             if not row:
                 continue
             label=row[0].strip().lower().rstrip(':')
-            if label not in LABELS:
+            if label.startswith('earnings per ordinary share'):
+                share_group=('dilutedEPSOrdinary','diluted_eps_ordinary')
+            elif re.fullmatch(r'earnings per ads \(\d+ ordinary shares equals 1 ads\)',label):
+                share_group=('dilutedEPSADS','diluted_eps_ads')
+            elif label.startswith('weighted-average number of ordinary shares outstanding'):
+                share_group=None
+            if label not in LABELS and not (label=='-diluted' and share_group):
                 continue
-            key,basis=LABELS[label]
-            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome'})):
+            key,basis=share_group if label=='-diluted' else LABELS[label]
+            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary',
+                    'costOfRevenueReported','salesMarketingReported','generalAdminReported','researchDevelopmentReported','incomeTaxReported','sellingGeneralAdminReported'})):
                 continue
             for col in range(1,len(row)):
                 header=_column_header(rows,ri,col)
@@ -263,6 +294,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                     except ValueError:continue
                 if end[5:] not in {'03-31','06-30','09-30','12-31'} or end>published:
                     continue
+                start=_calendar_quarter_start(header,end)
+                if not start:continue
                 value=_cell_amount(rows,ri,col)
                 if value is None or not value.is_finite():
                     continue
@@ -279,12 +312,24 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                     value=abs(value)
                     normalization=dict(basis='official_cash_flow_reconciliation: OCF - positive_spend = FCF',
                         reported_operating_cash_flow=float(ocf),reported_free_cash_flow=float(fcf),reported_unit_scale=scales[0])
-                if (label=='net loss' or label=='net cash used in operating activities') and value>0:
+                if label in {'net loss','net cash used in operating activities','loss from operations'} and value>0:
+                    continue
+                eps=key.startswith('dilutedEPS')
+                if eps and (statement!='income' or 'except for per share data' not in unit_text):
                     continue
                 observations.append(dict(source_field=key,value=float(value),reported_value=float(reported_value),
                     reported_unit_scale=scales[0],sign_normalization=normalization,currency=currency,unit='currency_units',
-                    unit_scale=scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
+                    unit_scale=1 if eps else scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
+                    fiscal_period_start=start,
+                    period_start_basis='explicit three months ended calendar-quarter column header',
                     source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
+                if eps:
+                    observations[-1]['reported_unit_scale']=1
+                    observations[-1]['unit']='currency_per_listed_unit' if key.endswith('ADS') else 'currency_per_ordinary_share'
+                    if key.endswith('ADS'):
+                        group=next((r[0].strip().lower().rstrip(':') for r in reversed(rows[:ri]) if r and r[0].strip().lower().startswith('earnings per ads')), '')
+                        ratio=re.fullmatch(r'earnings per ads \((\d+) ordinary shares equals 1 ads\)',group)
+                        observations[-1]['ordinary_shares_per_ads']=int(ratio[1]) if ratio else None
     groups={}
     for obs in observations:
         groups.setdefault((obs['source_field'],obs['fiscal_period_end'],obs['currency']),[]).append(obs)

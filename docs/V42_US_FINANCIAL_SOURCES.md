@@ -1,5 +1,15 @@
 # WealthPilot 4.2 P0.1 — Unified US financial sources
 
+## P1 专业研究扩展（2026-10-29 开发中）
+
+从main f0be1b1复用原SEC/AV、Evidence、PEER和Output Policy。独立核验的历史季度单列为historical-only引用，不冒充最新事实，不改变现有150/450日当前字段及L2–L4门槛。新增可比季度增长、利润率、现金转化及输入完整时的基础估值，TTM窗口/求和继续复用原AV纯计算函数；不同会计口径、币种、期间或冲突不拼接。披露中明确的ADS diluted EPS保持每ADS单位，不把集团利润或普通股EPS当作上市单位EPS。无法核验股份、换算、FX、净现金时分别UNKNOWN。
+
+普通股股东收益（可能受优先股分配影响）与归母净利润单列，不因PDD本期数字相同而认证为同一口径。只支持明确three months ended且实际日历季度末的表格起点语义；其他财年起止依原XBRL显式上下文，无法匹配则比较UNKNOWN。保留既有零CapEx不认证FCF的产品政策。用户否定减仓/退出或当前有冲突意图时不会恢复旧退出假设；仅传review_date也不会用默认objective覆盖当前问题。
+
+费用接线复用同一Income Statement合同：营业成本、营销、管理、研发、销售管理合并项及所得税项目保留原表正负号、期间和单位，合并费用不拆成个别费用。只有收入+四项负扣减严格等于营业利润且起止期间/币种一致时，才认证正向费用率及同比百分点变化。原有四字段不意味着EPS/费用已经完整，不能据其数量直接跳过原文；最多四份成功季度原文的限制与最多四份CompanyFacts分组分别维护。模型上下文保留全部合格字段与公式，重复的长依赖ID仅在原evidence/最终sources保留，不在每个计算项上下文反复复制。
+
+原Expressing扩展合同允许模型通过结构化数值绑定引用owner计算结果，最终由Output Policy填入带字段标签/期间/币种的数值，不开放任意数字。原ExitPlan增加明确research-only的目标/比例/条件/观察区间/情景及用户复核期限；用户声明不变为实时持仓或服务端正式目标。无新Agent、Schema、财务数据owner、估值平台或记忆库；PR56生命周期、E1、资产及交易不变。开发离线/公开数据证据与内容质量提升分开，8分目标须部署后原生报告评估。
+
 ## Scope and owner boundaries
 
 Baseline: main `41e851bec2b1dc0610adb699b4f70b808df5f5fd` (PR #48).
@@ -20,12 +30,12 @@ Baseline: main `41e851bec2b1dc0610adb699b4f70b808df5f5fd` (PR #48).
 3. Submissions provides accession, form, filing day, acceptance timestamp, report date and primary document. Missing acceptance time retains filing-day precision; fiscal end is never used as publication. Original full submissions must independently match CIK, accession, form and acceptance clock.
 4. CompanyFacts is preferred, selecting entity-wide standard US-GAAP/IFRS concepts by exact accession/form/filing day, duration, actual currency/unit and context. Quarterly and annual values stay distinct. A recent event-only filing cannot crowd out structured financials.
 5. Missing fields can use original full submissions including their attachments. Inline-XBRL requires the same issuer CIK, explicit duration and currency, no dimensional contexts, explicit supported concepts/transformations. Contexts cannot cross exhibits. Existing LI table parsing is reused after SEC envelope verification; no new LI-specific SEC parser.
-6. Reads are HTTPS-only, strict SEC host/path allowlists, no redirects/query parameters/arbitrary card URLs, 8s per read, no fixed SEC byte ceiling, no retries, quarterly/event sources before the latest annual fallback. Event discovery searches the current reporting cycle (after the latest annual filing), not only the first two events; it stops once the latest observed quarter has four fields. An individual original read/parse failure skips that file and preserves independent successful facts. Existing LI IR limits remain unchanged. SEC directory/facts/record caching uses the existing cache owner and TTL; source fetched_at is preserved. Demo/mock never opens the network.
+6. Reads are HTTPS-only, strict SEC host/path allowlists, no redirects/query parameters/arbitrary card URLs, 8s per read, no fixed SEC byte ceiling, no retries, quarterly/event sources before annual fallback. P1 extends event selection to the recent 550-day comparable window, retaining the original four financial-record bound; non-financial events cannot crowd out earnings. Comparative CompanyFacts periods are explicit durations before the actual filing report date, never guessed current periods. Once quarterly facts exist, a large annual original is not prerequisite. An individual original read/parse failure skips that file and preserves independent successful facts. Existing LI IR limits remain unchanged. SEC directory/facts/record caching uses the existing cache owner and TTL; source fetched_at is preserved. Demo/mock never opens the network.
 7. Only server-injected source lookup grants trust. Record/card claims of SEC URL, identity, hash, date or matching AV amounts do not. Evidence carries source/document identity, original hash, source locator, issuer, currency, accounting basis and separate source/fiscal/fetch clocks.
 
 ## Field fusion and degradation
 
-AV remains the standardized input and the sole existing TTM computation path. SEC supplements independently verified raw quarter/annual L1 facts when AV is absent. No SEC-only TTM engine, quarterly subtraction or synthetic Q4 is added.
+AV remains the standardized input and existing TTM arithmetic owner. SEC supplements independently verified raw quarter/annual L1 facts when AV is absent. P1 reuses that same pure four-quarter window/summation over verified source components; no second TTM engine, quarterly subtraction or synthetic Q4 is added. Quarterly diluted EPS is summed only with four consistent currency/listed-unit components; differing ADS ratios block the estimate. A static price/EPS ratio explicitly discloses unverified subsequent share-count/split changes and is not exact current valuation or fair value. Missing FX, shares, debt/restricted-cash attribution and incomplete periods remain separate UNKNOWNs.
 
 For AV fields without publication metadata, the existing linker needs every exact quarterly component (including prior-year comparisons and both OCF/CapEx for FCF), with matching issuer, period, accounting basis, currency, unit and value. Annual observations cannot certify quarterly TTM; any conflicting same-basis source prevents selecting only a matching source. Source amounts are never overwritten. Legacy disclosures lacking an explicit accounting basis keep the existing conservative conflict-warning behavior; that warning cannot grant source/publication qualification. Explicitly different bases are not equated.
 

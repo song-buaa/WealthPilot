@@ -241,6 +241,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 ## 4.2 开发扩展：分析证据资格
 
+P1研究内容沿原Owner扩展：独立核验的旧季度进入历史比较分区，不改变当前字段时钟或交易资格；[纯财务研究投影](../backend/services/market_data/financial_research.py)复用原AV窗口/求和、原FXService和已验证技术价格，按完整起止期间/币种/会计及ADS口径生成变化和静态估值。原Output Policy以字段绑定插入数字，研究段落可讨论非执行性价格观察与退出条件，不能补造数字或发出即时下单指令。原ExitPlan的research_plan与执行价量字段分开：用户意图/历史参考仅为假设，日期优先于默认值；L2–L4公式、E1库及PR56运行机制不变。合同与UNKNOWN见[来源说明](V42_US_FINANCIAL_SOURCES.md#p1-专业研究扩展2026-10-29-开发中)。
+
 原 PEER / invoke_skill 仍是唯一专业链路。新增内部证据Skill在原行情/Pattern收集后评估来源时效和冲突，再由原Expressing限制输出粒度。证据来源时钟与抓取时间分开；原行情Registry产生OHLCV，日/周观测与实际订单限价分开。L1方向、L2静态测算、L3精确建议、L4人工交易准备分别门控；4.2不授予L4或任何订单/同步权限。复用入口见[能力索引](CAPABILITY_REGISTRY.md#42-开发单标证据门槛)，开发/验收记录见[4.2记录](V42_IMPLEMENTATION.md)。
 
 4.2的[组合函数](../backend/services/position_analysis.py)连接原证据Skill、issuer、AllocationService和原研究事实投影，不新增资产/贷款/订单Owner。阶段目标复用本地配置真相源模式，[独立配置服务](../backend/services/stage_targets.py)维护候选/确认/期限/停用；仅服务端显式配置的当前有效记录可满足目标门槛，请求布尔或digest不可自证。正式纪律/默认参数保留原owner。候选尚未激活。

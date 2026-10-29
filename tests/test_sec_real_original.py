@@ -56,8 +56,8 @@ def test_original_hash_before_and_after_parser_and_four_exact_native_fields():
     body=original();before=hashlib.sha256(body).hexdigest();row=parse(body)
     assert row and row['source_verification']['document_sha256']==before
     facts={o['source_field']:o for o in row['financial_observations'] if o['fiscal_period_end']=='2026-06-30'}
-    assert {k:v['value']*v['unit_scale'] for k,v in facts.items()}==EXPECTED
-    assert len(row['financial_observations'])==12  # three actually reported periods
+    assert {k:facts[k]['value']*facts[k]['unit_scale'] for k in EXPECTED}==EXPECTED
+    assert sum(o['source_field'] in EXPECTED for o in row['financial_observations'])==12  # original four in three actual periods
     assert {o['currency'] for o in row['financial_observations']}=={'CNY'}
     assert facts['capitalExpenditures']['reported_value']==-1315790
     assert facts['capitalExpenditures']['sign_normalization']['reported_free_cash_flow']==-1300765
@@ -72,7 +72,7 @@ def test_real_original_four_L1_refs_under_explicit_offline_clock_without_TTM_upg
     row=parse();a=assess({},symbol='LI:US',research=[deepcopy(row)],at=AT,
         disclosure_verifier={row['record_id']:deepcopy(row)}.get)
     fields={r['field']:r for r in a['verified_field_records']}
-    assert set(fields)=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','capital_expenditures_quarter'}
+    assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','capital_expenditures_quarter'} <= set(fields)
     assert all(r['period']=='2026-06-30' and r['currency']=='CNY' for r in fields.values())
     assert 'net_income_quarter' in explanation_prompt(a)
     candidate=dict(topic='business',basis='inference',text='账面亏损与经营现金流偏弱共同提示盈利和现金转化承压，应结合营运资本与产品结构核查改善是否可持续。',
@@ -118,7 +118,7 @@ def test_shared_statement_layout_has_no_LI_identity_precondition():
     from research_v2.official_disclosures import parse_statement_tables
     body=original().decode().replace('Li Auto Inc.','Unrelated Issuer')
     rows=parse_statement_tables(BeautifulSoup(body,'html.parser'),'2026-08-26',require_statements=True,currencies=('CNY','USD'))
-    assert {o['source_field'] for o in rows}==set(EXPECTED)
+    assert set(EXPECTED) <= {o['source_field'] for o in rows}
 
 
 def test_generic_USD_statement_works_for_domestic_issuer_without_LI_branch():
