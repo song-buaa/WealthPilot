@@ -339,7 +339,12 @@ class ReviewMonitorStore:
                         (generated if created else existing).append(value)
                 eligible_for_policy = []
                 for event in parsed:
-                    if event.known_at > as_of or event.published_at > as_of or event.fetched_at > as_of:
+                    # Point-in-time eligibility is the public/known clock.  A
+                    # truthful network acquisition normally completes after a
+                    # scan starts and must not be rewritten or treated as future
+                    # disclosure. FrozenDisclosureEvent still requires
+                    # published_at <= known_at <= fetched_at.
+                    if event.known_at > as_of or event.published_at > as_of:
                         rejected.append({"event_id": event.event_id, "monitor_id": monitor_id,
                                          "reason": "EVENT_FUTURE_AT_SCAN_TIME"})
                         continue
