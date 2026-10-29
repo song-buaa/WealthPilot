@@ -330,7 +330,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
                         conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
                             analysis_options=dict(target_versions=[t.model_dump(mode="json") for t in request.target_versions],
-                                research_context=request.research_context.model_dump(exclude_unset=True) if request.research_context else None,
+                                research_context=request.research_context.model_dump() if request.research_context else None,
                                 scenario_legs=[s.model_dump(mode="json") for s in request.scenario_legs])):
                     event_type,data=event.split('\n',1)
                     data=json.loads(data.split('data: ',1)[1]);kind=event_type.removeprefix('event: ')
@@ -403,7 +403,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             executed, expressed = captured['executed'], captured['expressed']
             executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
                 options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
-                             research_context=request.research_context.model_dump(exclude_unset=True) if request.research_context else None,
+                             research_context=request.research_context.model_dump() if request.research_context else None,
                              research_question=request.question,research_history=[t.model_dump() for t in request.history],
                              scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
             enforce(expressed, executed.position_evidence)

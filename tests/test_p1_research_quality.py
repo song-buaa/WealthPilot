@@ -261,8 +261,12 @@ def test_current_negation_and_ambiguity_never_resurrect_old_exit(question,expect
 def test_review_date_only_does_not_supply_a_default_objective_over_user_question():
     from pocs.chatgpt_skills.analysis import AnalysisRequest
     req=AnalysisRequest(question='我决定逐步退出',research_context={'review_date':'2026-11-20'})
-    intent=research_intent(dict(research_context=req.research_context.model_dump(exclude_unset=True),research_question=req.question))
+    received=AnalysisRequest.model_validate_json(req.model_dump_json())  # actual parent -> child JSON contract
+    intent=research_intent(dict(research_context=received.research_context.model_dump(),research_question=received.question))
     assert intent['objective']=='exit' and intent['review_date']=='2026-11-20'
+    explicit=AnalysisRequest(question=req.question,research_context=dict(review_date='2026-11-20',objective='evaluate'))
+    assert req.model_dump(mode='json')!=explicit.model_dump(mode='json')  # original canonical idempotency fingerprint distinguishes them
+    assert research_intent(dict(research_context=explicit.research_context.model_dump(),research_question=explicit.question))['objective']=='evaluate'
 
 
 def test_supported_calendar_quarter_start_requires_explicit_duration_and_boundary():

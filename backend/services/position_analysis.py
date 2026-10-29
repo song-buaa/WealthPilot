@@ -10,7 +10,7 @@ from typing import Literal
 class ResearchIntent(BaseModel):
     """User assumptions only, never holdings/target confirmation or order input."""
     model_config=ConfigDict(extra='forbid')
-    objective: Literal['hold','reduce','exit','evaluate']='evaluate'
+    objective: Literal['hold','reduce','exit','evaluate'] | None=None
     review_date: str | None=Field(default=None,pattern=r'^\d{4}-\d{2}-\d{2}$')
     reference_quantity: float | None=Field(default=None,gt=0,allow_inf_nan=False)
     tranche_fractions: list[float]=Field(default_factory=list,max_length=8)
@@ -138,7 +138,8 @@ def research_intent(options):
     provided=options.get('research_context')
     value=ResearchIntent.model_validate(provided or {}).model_dump()
     sources={k:'current_request_assumption' for k,v in value.items() if v not in (None,[], 'evaluate')}
-    resolved=bool(provided and 'objective' in provided)
+    resolved=bool(provided and provided.get('objective') is not None)
+    if value['objective'] is None:value['objective']='evaluate'
     if resolved:sources['objective']='current_request_assumption'
     turns=[('current_request',options.get('research_question',''))]
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
