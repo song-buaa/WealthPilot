@@ -1,6 +1,6 @@
 # WealthPilot 4.3｜E1-I1 集成准备与单次发布授权点
 
-2026-10-29。当前为 `LOCAL_PASS / ONLINE_BLOCKED_AWAITING_RELEASE_AUTHORIZATION`，`CHATGPT_ONLINE_SAVE_AVAILABLE=false`，B3-2 `NOT_STARTED`。尚未push/merge/deploy、迁移真实资料或打开生产研究写开关。
+2026-10-29历史发布计划及授权点。该计划随后已按PR #52、目标SHA `9ca719450521fd72d6d8a9cad70f1eefb0d6b810`执行，私人ChatGPT真人预览确认保存及MCP重启读回通过，`CHATGPT_ONLINE_SAVE_AVAILABLE=true`。本文件保留当时发布与回滚步骤，不代表B3-2生产调度已启用；B3-2仍须单独集成/生产授权。
 
 ## 最小差异与证据
 
