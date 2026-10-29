@@ -1,0 +1,15 @@
+[
+  {
+    "event_id": "sec.1737806.000110465926100534.document",
+    "economic_event_id": "sec.1737806.000110465926100534",
+    "event_type": "OFFICIAL_FINANCIAL_FILING",
+    "symbol": "PDD:US",
+    "issuer_id": "PDD_HOLDINGS",
+    "description": "PDD Holdings furnished a Form 6-K containing its 2026 Q2 results.",
+    "source_ref": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926100534/0001104659-26-100534.txt",
+    "source_sha256": "162f5c2578869f4870fe24cc1ecb1518273447f3e21e0ba4ace1dfbd8cdc8b42",
+    "published_at": "2026-08-25T07:20:02-04:00",
+    "known_at": "2026-08-25T07:20:02-04:00",
+    "fetched_at": "2026-10-29T00:00:00+00:00"
+  }
+]

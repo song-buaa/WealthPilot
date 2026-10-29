@@ -263,4 +263,6 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 E1-B0/B1/B2/B3均属WealthPilot 4.3内部阶段。B1独立分支新增 [轻量研究域](../backend/services/investment_thesis/service.py) 和显式私人SQLite，保存不可覆盖假设/证据/复核，不复制Position/账户/订单账本，也不修改业务库schema。专业分析仍为原PEER/AnalysisRequest/AnalysisResult；原MCP任务内存不是E1永久档案。
 
-CLI为显式研究写入口；[可选MCP](../pocs/chatgpt_skills/investment_thesis.py)默认只查指定scope研究库，没有配置时原工具不变。B3-1独立研发另经显式E1私人库与写开关启用 [研究预览/确认桥接](../backend/services/investment_thesis/bridge.py)，仅写原E1研究表，原业务库/资产/交易权限不变；生产配置未启用。资产/FX/发行人/已核目标继续原owner；加仓敞口函数纯计算，缺证未知、无ETF穿透，不同步或交易。当前未合并部署；4.2稳定后再对齐main、定点处理注册/文档冲突及集成回归，按4.3发布流程推进。B1历史见 [4.3 E1记录](v4.3/E1_B1_IMPLEMENTATION.md)，当前本地保存/人类确认责任与限制见 [B3-1](v4.3/E1_B31_RESEARCH_SAVE.md)。
+CLI为显式研究写入口；[可选MCP](../pocs/chatgpt_skills/investment_thesis.py)按固定scope查询私人研究库。B3-1经显式E1私人库与写开关启用 [研究预览/确认桥接](../backend/services/investment_thesis/bridge.py)，仅写原E1研究表；E1-I1已完成私人ChatGPT真人保存及重启读回验收。原业务库/资产/交易权限不变，每条研究记录仍须先预览再由用户当次确认。资产/FX/发行人/已核目标继续原owner；加仓敞口函数纯计算，缺证未知、无ETF穿透，不同步或交易。
+
+B3-2本地候选沿同一私人E1库显式迁移 [监控事件及待办收据](../backend/services/investment_thesis/monitoring.py)，原Thesis/Review表及不可覆盖触发器不变。监控必须绑定当前Thesis revision和已完成Review的`next_review_at`/`next_review_event`；确定性事件键去重，版本推进、取消、关闭、未来/身份不明事件拒绝触发。扫描只读研究记录并追加监控收据，不运行PEER、Provider、账户刷新或订单。现有backend APScheduler尚未接线，ChatGPT主动通知为`NOT_WIRED`，生产持续任务为OFF。B1历史见 [4.3 E1记录](v4.3/E1_B1_IMPLEMENTATION.md)，保存责任见 [B3-1](v4.3/E1_B31_RESEARCH_SAVE.md)，本地监控边界见 [B3-2](v4.3/E1_B32_REVIEW_MONITORING.md)。

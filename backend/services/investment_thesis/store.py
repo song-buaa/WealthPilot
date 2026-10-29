@@ -103,7 +103,7 @@ class ThesisStore:
         db.row_factory = sqlite3.Row
         try:
             if (db.execute("PRAGMA application_id").fetchone()[0] != APP_ID
-                    or db.execute("PRAGMA user_version").fetchone()[0] != 1):
+                    or db.execute("PRAGMA user_version").fetchone()[0] not in {1, 2}):
                 raise ValueError("E1_STORE_SCHEMA_INVALID")
             db.execute("PRAGMA foreign_keys=ON")
             if write:

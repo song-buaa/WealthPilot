@@ -1,6 +1,6 @@
 # WealthPilot 4.3｜E1-B3-1 显式研究保存桥接
 
-2026-10-29。本地独立分支，未推送、未合并、未部署。`CHATGPT_ONLINE_SAVE_AVAILABLE=false`。本阶段只接通研究记录预览/确认保存；不是 B3-2 调度。
+2026-10-29历史实现说明。E1-I1后续已完成私人ChatGPT线上真人保存与重启读回，`CHATGPT_ONLINE_SAVE_AVAILABLE=true`；每条记录仍须展示预览并取得当次明确确认。本文件的本地实现和确认边界继续有效；B3-2调度状态另见 [B3-2](E1_B32_REVIEW_MONITORING.md)。
 
 ## 日常使用契约
 
