@@ -2,7 +2,7 @@
 from contextvars import ContextVar
 import time
 
-from app.llm_observation import run_id, safe_metadata, STAGES as PEER_STAGES, ERRORS as MODEL_ERRORS
+from app.llm_observation import safe_call_timings, safe_stage_timings, run_id, safe_metadata, STAGES as PEER_STAGES, ERRORS as MODEL_ERRORS
 
 ANALYSIS_OPERATIONS = {"analyze_position", "review_portfolio", "analyze_performance"}
 STAGES = {"mcp_received", "worker_start", "request_send", "ipc_wait", "request_received",
@@ -31,6 +31,10 @@ def diagnostic(identifier, stage, *, category="NONE", status="UNKNOWN", protocol
         result["model_call_count"] = meta["call_count"]
         result["observed_peer_stages"] = sorted({c["peer_stage"] for c in meta["calls"] if c["peer_stage"] in PEER_STAGES})
         result["model_error_categories"] = sorted({c["error_category"] for c in meta["calls"] if c["error_category"] in MODEL_ERRORS})
+    if meta:
+        result['model_run_status']=meta['status']
+        result['model_call_timings']=safe_call_timings(meta['calls'])
+        result['peer_stage_timings']=safe_stage_timings(meta.get('stage_timings',[]))
     if type(exit_code) is int:
         result["worker_exit_code"] = exit_code
     return result
@@ -62,6 +66,12 @@ def safe_diagnostic(value, identifier):
         values = value.get(key)
         if isinstance(values, list) and len(values) <= len(allowed) and all(isinstance(v, str) and v in allowed for v in values):
             result[key] = sorted(set(values))
+    if value.get('model_run_status') in {'running','completed','failed','timeout','cancelled'}:
+        result['model_run_status']=value['model_run_status']
+    if isinstance(value.get('model_call_timings'),list):
+        result['model_call_timings']=safe_call_timings(value['model_call_timings'])
+    if isinstance(value.get('peer_stage_timings'),list):
+        result['peer_stage_timings']=safe_stage_timings(value['peer_stage_timings'])
     return result
 
 

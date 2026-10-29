@@ -11,8 +11,10 @@ import os
 import time
 
 import openai
+import httpx
+from app.analysis_runtime import current as runtime_budget, DeadlineReached
 from pydantic import ValidationError
-from app.llm_observation import current
+from app.llm_observation import current, _active_call
 
 logger = logging.getLogger(__name__)
 SOL = "gpt-6.1-sol"
@@ -118,13 +120,29 @@ def request_options(model: str, *, endpoint: str = "chat", **kwargs) -> dict:
         else:
             options.setdefault("max_output_tokens", budget)
             options["reasoning"] = {"effort": effort}
-        options["timeout"] = max(float(options.get("timeout", 0)), 90.0 if main else 20.0)
+        minimum=90.0 if main else 20.0
+        supplied=options.get("timeout")
+        options["timeout"] = (httpx.Timeout(read=max(supplied.read or minimum,minimum),connect=supplied.connect,write=supplied.write,pool=supplied.pool)
+            if isinstance(supplied,httpx.Timeout) else max(float(supplied or 0),minimum))
     else:
         # Explicit rollback / injected test providers keep their old API contract.
         options.pop("reasoning_effort", None)
         if endpoint != "chat" and "max_tokens" in options:
             options["max_output_tokens"] = options.pop("max_tokens")
         options.setdefault("timeout", 60.0)
+    budget = runtime_budget()
+    if budget is not None:
+        remaining = budget.remaining()
+        if budget.finished.is_set() or remaining <= 0:
+            raise LLMCallError("timeout")
+        supplied=options.get("timeout")
+        default=20 if model==LUNA else 60
+        supplied_read=supplied.read if isinstance(supplied,httpx.Timeout) else supplied
+        read = budget.policy.sol_read_seconds if model in {SOL, "gpt-4.1"} else float(supplied_read or default)
+        options["timeout"] = httpx.Timeout(read=min(read, remaining),
+            connect=min(budget.policy.connect_seconds, remaining),
+            pool=min(budget.policy.connect_seconds, remaining),
+            write=min(budget.policy.write_seconds, remaining))
     return options
 
 
@@ -138,7 +156,12 @@ def _client_options(client):
 def _invoke(client, endpoint: str, options: dict):
     started = time.monotonic()
     trace = current()
-    call = trace.begin(options, endpoint) if trace else None
+    call = None
+    try:
+        if trace:call=trace.begin(options, endpoint)
+    except Exception:
+        trace.metadata_unavailable = True  # Never turn missing telemetry into zero calls.
+    call_token = _active_call.set(call)
     raw = result = error = None
     kind = None
     try:
@@ -189,6 +212,9 @@ def _invoke(client, endpoint: str, options: dict):
         logger.info("llm_call model=%s endpoint=%s status=completed elapsed_ms=%d",
                     requested, endpoint, int((time.monotonic() - started) * 1000))
         return result
+    except DeadlineReached:
+        kind = "timeout"
+        raise LLMCallError(kind) from None
     except Exception as caught:
         error = caught
         kind = error_kind(caught)
@@ -196,6 +222,7 @@ def _invoke(client, endpoint: str, options: dict):
                        options["model"], endpoint, kind, int((time.monotonic() - started) * 1000))
         raise LLMCallError(kind) from None
     finally:
+        _active_call.reset(call_token)
         if trace:
             # A reference estimate is not an invoice: no tools, image inputs,
             # custom/regional endpoint or unknown service tier is priced here.
@@ -222,10 +249,13 @@ def _observed_options(endpoint, kwargs):
     except LLMCallError as error:
         trace = current()
         if trace:
-            call = trace.begin(kwargs, endpoint)
-            trace.complete(call, kind=error.kind)
-            if call is not None and not trace.closed:
-                call.update(status="rejected", sdk_retry_count=0, transport_attempt_count=0)
+            try:
+                call = trace.begin(kwargs, endpoint)
+                trace.complete(call, kind=error.kind)
+                if call is not None and not trace.closed:
+                    call.update(status="rejected", sdk_retry_count=0, transport_attempt_count=0)
+            except Exception:
+                trace.metadata_unavailable = True
         raise
 
 

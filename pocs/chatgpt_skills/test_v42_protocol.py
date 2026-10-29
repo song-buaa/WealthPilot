@@ -530,3 +530,123 @@ worker.main()
         for child in children:
             if child.poll() is None:child.terminate()
             child.wait(timeout=5)
+
+
+@pytest.mark.parametrize('late',[False,True])
+def test_single_use_worker_flushes_before_thread_join_and_is_reclaimed(monkeypatch,tmp_path,late):
+    """Real analyze + SDK MockTransport + to_thread + Worker.main + parent cleanup."""
+    import os
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+    from pocs.chatgpt_skills import server as module
+    python=os.environ.get('WP_BUSINESS_PYTHON',sys.executable)
+    db=tmp_path/'readonly.db';sent=tmp_path/'sends';ro=tmp_path/'readonly-check'
+    subprocess.run([python,'-c',
+        'from sqlalchemy import create_engine;from sqlalchemy.orm import Session;'
+        'from app.database import Base;from app.models import Portfolio;'
+        'import backend.services.action.models;import backend.services.portfolio_history.models;'
+        'import services.broker_sync.models;'
+        'e=create_engine("sqlite:///"+__import__("sys").argv[1]);Base.metadata.create_all(e);'
+        's=Session(e);s.add(Portfolio(id=7,name="synthetic"));s.commit();s.close();e.dispose()',str(db)],check=True,
+        env={**os.environ,'PYTHONPATH':str(Path.cwd())+':'+str(Path.cwd()/'backend'),'PYTHON_DOTENV_DISABLED':'1'})
+    probe='''import asyncio,json,os,socket,sys,time
+from pathlib import Path
+from datetime import datetime
+import httpx,openai
+from pocs.chatgpt_skills import worker,analysis
+from backend.services import decision_service_v3 as svc
+from tests.test_l1_reliability import facts,AT
+from app.llm_config import chat_completion,SOL
+from app.database import get_session
+from sqlalchemy import text
+from types import SimpleNamespace as NS
+socket.socket.connect=lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('NETWORK_FORBIDDEN'))
+class Clock(datetime):
+ @classmethod
+ def now(cls,tz=None):return AT
+analysis.datetime=Clock
+receipt=facts()
+def receive(request):
+ with open(SENT,'a') as f:f.write(str(time.monotonic())+'\\n')
+ time.sleep(.35 if LATE else 3)
+ denied=False
+ try:
+  with get_session() as db:db.execute(text("UPDATE portfolios SET name='BAD'"));db.commit()
+ except Exception:denied=True
+ Path(RO).write_text(json.dumps({'denied':denied,'readonly_flag':os.environ.get('WEALTHPILOT_EPHEMERAL_ANALYSIS')}))
+ raise httpx.ReadTimeout('PRIVATE_BODY',request=request)
+client=openai.OpenAI(api_key='synthetic-not-a-key',http_client=httpx.Client(transport=httpx.MockTransport(receive)))
+async def stream(*args,**kw):
+ kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
+ if LATE:
+  import functools
+  task=asyncio.get_running_loop().run_in_executor(None,functools.partial(chat_completion,client,model=SOL,messages=[{'role':'user','content':'PRIVATE_PROMPT'}]))
+ else:
+  task=asyncio.create_task(asyncio.to_thread(chat_completion,client,model=SOL,messages=[{'role':'user','content':'PRIVATE_PROMPT'}]))
+ # Start the injected timeout only after the cold SDK actually enters transport.
+ while not Path(SENT).exists():await asyncio.sleep(.005)
+ async with asyncio.timeout(.08):await task
+ yield svc._sse('done',{})
+svc.run_chat_stream_v3=stream
+sys.argv=['worker','--frozen-database',DATABASE,'--synthetic-input','--portfolio-id','7','--single-analysis']
+worker.main()
+'''.replace('DATABASE',repr(str(db))).replace('SENT',repr(str(sent))).replace('LATE',repr(late)).replace('RO)',repr(str(ro))+')')
+    original=subprocess.Popen;children=[]
+    def spawn(command,**kw):
+        child=original([python,'-u','-c',probe],**kw);children.append(child);return child
+    monkeypatch.setattr(module.subprocess,'Popen',spawn)
+    monkeypatch.setenv('WEALTHPILOT_L1_ANALYSIS_TIMEOUT_SECONDS','20')
+    unrelated=original([python,'-c','import time;time.sleep(20)'])
+    client=BusinessClient(SimpleNamespace(business_python=python,portfolio_id=7,real_config=None,mock_database=None,async_l1=True))
+    before=__import__('hashlib').sha256(db.read_bytes()).hexdigest()
+    try:
+        result=client.call('analyze_position',{'question':'frozen','symbol':'PDD:US'})
+        received=time.monotonic()
+        assert sent.exists(), json.dumps(result.get('llm_observation'))
+        assert result['llm_observation']['call_count']==1
+        assert result['llm_observation']['calls'][0]['transport_attempt_count']==1
+        assert result['status']=='partial' and not result['professional_analysis_complete']
+        assert result['professional_result']['analysis_result']['mode']=='facts_only'
+        assert not result['execution_authorized']
+        assert received-float(sent.read_text().splitlines()[0]) < 1.5
+        frozen=json.dumps(result,sort_keys=True)
+        if late:
+            children[0].wait(timeout=5)
+            assert json.loads(ro.read_text())=={'denied':True,'readonly_flag':'true'}
+            assert sent.read_text().count('\n')==1  # SDK did not retry after terminal receipt
+            assert json.dumps(result,sort_keys=True)==frozen
+        started=time.monotonic();client.close()
+        assert time.monotonic()-started<3 and children[0].poll() is not None
+        assert unrelated.poll() is None
+        assert sent.read_text().count('\n')==1
+        assert __import__('hashlib').sha256(db.read_bytes()).hexdigest()==before
+        assert not any(word in json.dumps(result) for word in ['PRIVATE_PROMPT','PRIVATE_BODY'])
+    finally:
+        client.close();unrelated.terminate();unrelated.wait(timeout=3)
+
+
+def test_single_analysis_serialization_failure_keeps_protocol_stage_and_exits(monkeypatch,tmp_path):
+    import os,subprocess,sys
+    from pocs.chatgpt_skills import server as module
+    python=os.environ.get('WP_BUSINESS_PYTHON',sys.executable)
+    db=tmp_path/'fixture.db';db.touch()
+    probe='''import sys
+from pocs.chatgpt_skills import worker,analysis
+async def broken(*a,**kw):
+ result={};result['cycle']=result;return result
+analysis.analyze=broken
+sys.argv=['worker','--frozen-database',DATABASE,'--single-analysis']
+worker.main()
+'''.replace('DATABASE',repr(str(db)))
+    original=subprocess.Popen
+    monkeypatch.setattr(module.subprocess,'Popen',lambda *a,**kw:original([python,'-u','-c',probe],**kw))
+    client=BusinessClient(SimpleNamespace(business_python=python,portfolio_id=7,real_config=None,mock_database=None,async_l1=True))
+    try:
+        with pytest.raises(Exception) as error:client.call('analyze_position',{'question':'synthetic'})
+        detail=error.value.analysis_diagnostic
+        assert detail['failure_stage']=='result_serialization' and detail['safe_error_category']=='serialization_failed'
+        assert detail['protocol_is_error']
+        client.process.wait(timeout=3)  # error path is single-use too
+    finally:client.close()

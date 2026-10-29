@@ -563,3 +563,27 @@ Web 显式固定快照请求通过[快照适配](../backend/services/snapshot_ch
 ## US financial sources P0.1
 
 The focused follow-up reuses the existing issuer/research/evidence owners for exact SEC ticker/CIK resolution, Submissions discovery, standard CompanyFacts and restricted original filing facts. AV and its TTM calculations remain authoritative inputs; source supplements support qualified L1 facts without changing L2–L4 or trading gates. See [scope, trust boundaries and representative verification limits](V42_US_FINANCIAL_SOURCES.md). Local real SEC API downloads are not claimed successful when blocked by HTTP/TLS access failures.
+
+## 正常异步 L1 可靠性（2026-10-29 开发候选）
+
+范围 L2：只修正常 `start_position_analysis` 的期限协调、已有事实保留及一次性只读 Worker 收尾。复用 PEER、Evidence Registry、统一模型适配、原 IPC/私有 events；不改 decision_engine、Prompt/模型、Provider、UAT账本、资产、正式纪律、目标或4.3 E1研究库/工具。不得把工程验证写成生产研究验收。
+
+| Owner | 最小改动及合同 |
+|---|---|
+| `app/analysis_runtime.py` / 原 `llm_config` | 一个小型运行策略，默认总预算600秒、IPC=总预算+60秒、Sol read180/connect10/pool10/write30秒；从父进程任务执行起点计算（含Worker启动），留最多10秒最终化。只在正常异步L1内绑定，不扩大同步240/270秒或其他工具45秒行为。SDK仍是唯一重试owner（最多一次），每次实际HTTP发送前按同一deadline缩短阶段timeout；终态/期限到后不再发送，不能重跑整轮PEER。 |
+| 原 `decision_service_v3` → `analysis` | 可选内存stage_callback在原Execution/evidence后保存服务端assessment，标记Expression/Review完成状态；原最终result_callback保留。没有新抓取/持久化，也不保存中间模型文字。 |
+| 原 Evidence/Output Policy + `position_analysis` | 对捕获的来源原件收据作纯内存时效重核，复用原assess公式，并与原已合格refs取交集，不能新增资格。复用原确定性事实片段；有合格财务/技术/研究事实时返回facts-only partial，无事实仍unavailable。保留日期、币种、期间、字段/周期资格、出处与UNKNOWN；不把模型失败理解为事实消失。 |
+| 原 BusinessClient/Worker | 正常异步L1使用 `--single-analysis` 子进程；analysis完成后立即序列化/flush最终帧，早于asyncio.run的executor join。父进程收到结果后给该子进程短宽限，再terminate/必要时kill并wait；不影响父MCP、Backend或其他进程。终态flag阻断迟到SDK重试，只读engine/flag维持至退出，不复用该子进程。普通持久读取路径不改。 |
+| 原 `llm_observation` / `--events` | 安全记录阶段相对起止/耗时、有效阶段timeout、endpoint/effort、请求/返回型号、消息数及JSON输入字符/UTF-8字节数、实际发送/SDK重试及错误分类。沿既有closed projection和私有事件文件，不用stdout或仅依赖stderr。不记录Prompt/回答/账户/资产/Key/原始异常。Usage不明仍UNKNOWN。 |
+
+`AnalysisResult`增加 `professional_analysis_complete`、`missing_stages`、`execution_authorized=false`。facts-only的 `professional_result.analysis_result.mode=facts_only`，专业解释为空、只列合格事实引用，不伪造HOLD/退出方案/限价/股数。完整模型与Review结束时继续原专业报告及最终过滤；完成标记不代表研究质量评分、完整数据或交易授权。L1不因缺L2/L3资产资格被新增阻断。
+
+可选运维参数（无需改配置即可用默认）：`WEALTHPILOT_L1_ANALYSIS_TIMEOUT_SECONDS`、`WEALTHPILOT_L1_SOL_READ_TIMEOUT_SECONDS`，均需有限正数；沿现有analysis-env JSON/父子进程白名单传递，文件中显式值优先。IPC由总预算统一导出，不向ChatGPT添加timeout参数。部署时父MCP和业务Worker须同SHA，保留现役E1独立库、工具和启动配置；本轮不安装、不切换生产。
+
+[OpenAI Python文档](https://developers.openai.com/api/reference/python)说明SDK自动重试与阶段timeout；[官方重试说明](https://developers.openai.com/api/docs/guides/rate-limits)区分单次attempt timeout与整个操作deadline。本仓仍锁OpenAI **2.29.0 / HTTPX 0.28.1**，实际行为以锁定SDK的MockTransport测试为准，不沿当前文档升级SDK或依赖。
+
+隔离验收：原PEER虚拟时钟跨250秒对照旧240秒、SDK首超时后成功/失败且无第三次、剩余不足阻断下一发送、终态迟到线程不改结果/不再发送；真实子进程证明最终帧早于慢线程join、只回收该子进程、SQLite写入拒绝。PDD冻结正式字段及LI/HK技术事实保留、未知/过期/冲突不升级、原正常专业结果、MCP幂等/HTTP断连、E1合同与权限回归。专项及最终CI/完整SHA在PR记录，原日志保存在仓外 `/Users/songbin/.codex/outputs/l1-async-reliability-20261029/`。
+
+尚待合并部署后另行授权的真实验收：正常start/get创建一个新PDD L1 job，不复用失败job，不使用UAT/新资产视图/prepare。核对实际Sol型号、阶段和总耗时、Usage/重试、合格引用和专业解释；facts-only只证明降级，不冒充专业解释成功。不为凑成功自动重跑，不执行券商/资产/E1保存/交易。
+
+期限为协作式研究预算：所有await、SDK实际发送（含重试/重定向）及最终发帧前均核对绝对deadline；同步代码晚到不能被当作按时完成的专业报告，转为已有事实的partial，在原IPC交付宽限内返回。不可中断的同步工作仍由660秒父进程IPC上限及有界回收兜底，不另建看门狗平台。一次性子进程绑定同一关闭预算/观测收据，使未继承ContextVar的线程池也不能在终态后再发送；不将该进程绑定用于MCP父进程或普通持久Worker。

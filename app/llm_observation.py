@@ -10,6 +10,8 @@ from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
 import inspect
+import json
+import math
 import re
 import threading
 import time
@@ -29,6 +31,7 @@ ERRORS = {"authentication", "model_access", "quota", "rate_limit", "network", "t
 EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 _run = ContextVar("wealthpilot_analysis_observation", default=None)
 _stage = ContextVar("wealthpilot_peer_stage", default=UNKNOWN)
+_active_call = ContextVar("wealthpilot_active_model_call", default=None)
 
 
 def run_id(value=None):
@@ -85,6 +88,8 @@ class AnalysisObservation:
         self.lock = threading.RLock()
         self.calls = []
         self.count = 0
+        self.stage_timings = []
+        self.metadata_unavailable = False
         self.closed = False
         self.status = "running"
         self.elapsed_ms = None
@@ -106,6 +111,21 @@ class AnalysisObservation:
                 returned_reasoning_effort=UNKNOWN, status="in_flight", error_category=None,
                 elapsed_ms=None, sdk_retry_count=None, transport_attempt_count=None,
                 **usage_metadata(None, endpoint), cost=estimate(model, usage_metadata(None, endpoint), standard_text=False))
+            payload=options.get("messages",options.get("input"))
+            characters=byte_count=None
+            try:
+                encoded=json.dumps(payload,ensure_ascii=False,default=lambda _: "UNKNOWN")
+                characters=len(encoded)
+                byte_count=len(encoded.encode('utf-8'))
+            except (TypeError,ValueError,UnicodeError,RecursionError,OverflowError):
+                pass  # Bad input encoding is not an observation failure or fake zero.
+            call.update(start_offset_ms=max(0,int((time.monotonic()-self.started)*1000)),end_offset_ms=None,
+                message_count=len(payload) if isinstance(payload,list) else 1 if payload is not None else 0,
+                input_character_count=characters,input_byte_count=byte_count)
+            timeout=options.get('timeout')
+            for phase in ('read','connect','write','pool'):
+                value=getattr(timeout,phase,timeout if isinstance(timeout,(int,float)) else None)
+                call['timeout_'+phase+'_ms']=int(value*1000) if isinstance(value,(int,float)) and math.isfinite(value) and value>=0 else None
             self.calls.append(call)
             return call
 
@@ -137,11 +157,14 @@ class AnalysisObservation:
             cost = estimate(call["requested_model"], usage,
                 standard_text=standard_text and field(source, "service_tier") == "default"
                 and returned.startswith(call["requested_model"]) and kind != "model_mismatch")
+            if call.get('transport_attempt_count') is not None:
+                retries=call.get('sdk_retry_count') if call.get('sdk_retry_count') is not None else retries
             call.update(usage, returned_model=returned,
+                end_offset_ms=max(0,int((time.monotonic()-self.started)*1000)),
                 returned_reasoning_effort=effort if isinstance(effort, str) and effort in EFFORTS else UNKNOWN,
                 elapsed_ms=max(0, int(elapsed_ms)), status="completed" if kind is None else "failed",
                 error_category=kind if kind in ERRORS else "provider_error" if kind else None,
-                sdk_retry_count=retries, transport_attempt_count=retries + 1 if retries is not None else None,
+                sdk_retry_count=retries, transport_attempt_count=call.get("transport_attempt_count") if call.get("transport_attempt_count") is not None else retries + 1 if retries is not None else None,
                 cost=cost)
 
     def snapshot(self, status=None):
@@ -150,15 +173,18 @@ class AnalysisObservation:
                 self.closed = True
                 self.status = status if status in {"completed", "failed", "timeout", "cancelled"} else "failed"
                 self.elapsed_ms = max(0, int((time.monotonic() - self.started) * 1000))
+            if self.metadata_unavailable:
+                return unavailable(self.analysis_run_id,status=self.status,
+                    elapsed_ms=self.elapsed_ms if self.closed else int((time.monotonic()-self.started)*1000))
             calls = deepcopy(self.calls)
             complete = len(calls) == self.count and all(c["status"] != "in_flight" for c in calls)
             measured = bool(calls) and complete
             def total(key):
                 return sum(c[key] for c in calls) if measured and all(c[key] is not None for c in calls) else None
             cost_known = measured and all(c["cost"]["estimated_cost_usd"] is not None
-                                          and c["sdk_retry_count"] == 0 for c in calls)
+                                          and c["sdk_retry_count"] == 0 and c["transport_attempt_count"] == 1 for c in calls)
             return dict(schema_version="wealthpilot.llm-observation.v1", analysis_run_id=self.analysis_run_id,
-                scope="unified_generation_adapter_only",
+                scope="unified_generation_adapter_only", stage_timings=deepcopy(self.stage_timings),
                 status=self.status, collection_status="COMPLETE" if complete else "PARTIAL",
                 elapsed_ms=self.elapsed_ms if self.closed else int((time.monotonic()-self.started)*1000),
                 call_count=self.count, records_truncated=len(calls) != self.count, calls=calls,
@@ -169,6 +195,29 @@ class AnalysisObservation:
                     estimated_cost_usd=round(sum(c["cost"]["estimated_cost_usd"] for c in calls), 9) if cost_known else None,
                     actual_bill=UNKNOWN, price_version=PRICE_VERSION,
                     retry_usage_coverage="final_attempt_only"))
+
+    def start_stage(self, name):
+        with self.lock:
+            if self.closed or len(self.stage_timings)>=128:return None
+            row=dict(peer_stage=name,start_offset_ms=max(0,int((time.monotonic()-self.started)*1000)),end_offset_ms=None,elapsed_ms=None)
+            self.stage_timings.append(row)
+            return row
+
+    def end_stage(self, row):
+        with self.lock:
+            if not self.closed and row is not None:
+                row['end_offset_ms']=max(0,int((time.monotonic()-self.started)*1000))
+                row['elapsed_ms']=row['end_offset_ms']-row['start_offset_ms']
+
+    def transport_started(self, call, request):
+        with self.lock:
+            if self.closed or call is None:return
+            call['transport_attempt_count']=(call.get('transport_attempt_count') or 0)+1
+            retry=request.headers.get('x-stainless-retry-count')
+            call['sdk_retry_count']=int(retry) if isinstance(retry,str) and re.fullmatch(r'[0-9]{1,3}',retry) else None
+            for phase,value in (request.extensions.get('timeout') or {}).items():
+                if phase in {'read','connect','write','pool'} and isinstance(value,(int,float)):
+                    call['timeout_'+phase+'_ms']=max(0,int(value*1000))
 
     def invalidate(self, call):
         with self.lock:
@@ -193,7 +242,12 @@ def analysis_run(identifier=None):
 
 
 def current():
-    return _run.get()
+    trace=_run.get()
+    if trace is None:
+        from app.analysis_runtime import process_budget
+        budget=process_budget()
+        trace=budget.observation if budget is not None else None
+    return trace
 
 
 @contextmanager
@@ -238,7 +292,7 @@ def safe_metadata(value):
                 row[key] = model_name(item.get(key))
             kind = item.get("error_category")
             row["error_category"] = kind if isinstance(kind, str) and kind in ERRORS else None
-            for key in ("elapsed_ms", "sdk_retry_count", "transport_attempt_count", "input_tokens", "output_tokens", "reasoning_tokens"):
+            for key in ("elapsed_ms", "sdk_retry_count", "transport_attempt_count", "input_tokens", "output_tokens", "reasoning_tokens", "start_offset_ms", "end_offset_ms", "message_count", "input_character_count", "input_byte_count", "timeout_read_ms", "timeout_connect_ms", "timeout_write_ms", "timeout_pool_ms"):
                 row[key] = counter(item.get(key))
             row["usage_status"] = "KNOWN" if row["input_tokens"] is not None and row["output_tokens"] is not None else UNKNOWN
             # Cost records are local reference estimates, never arbitrary URLs/text.
@@ -251,6 +305,7 @@ def safe_metadata(value):
             clean.append(row)
         trace = AnalysisObservation(identifier)
         trace.calls, trace.count = clean, counter(value.get("call_count"))
+        trace.stage_timings = safe_stage_timings(value.get('stage_timings',[]))
         trace.count = trace.count if trace.count is not None else len(clean)
         trace.closed = True
         trace.status = value.get("status") if value.get("status") in ("completed", "failed", "timeout", "cancelled", "running") else "failed"
@@ -263,6 +318,23 @@ def safe_metadata(value):
         return None
 
 
+def safe_stage_timings(rows):
+    return [dict(peer_stage=row['peer_stage'],**{k:counter(row.get(k)) for k in ('start_offset_ms','end_offset_ms','elapsed_ms')})
+            for row in rows[:128] if isinstance(row,dict) and row.get('peer_stage') in STAGES] if isinstance(rows,list) else []
+
+
+def safe_call_timings(rows):
+    if not isinstance(rows,list):return []
+    return [dict(requested_model=model_name(row.get('requested_model')),returned_model=model_name(row.get('returned_model')),
+        endpoint=row.get('endpoint') if row.get('endpoint') in {'chat','responses'} else UNKNOWN,
+        peer_stage=row.get('peer_stage') if row.get('peer_stage') in STAGES else UNKNOWN,
+        reasoning_effort=row.get('reasoning_effort') if row.get('reasoning_effort') in EFFORTS else UNKNOWN,
+        error_category=row.get('error_category') if row.get('error_category') in ERRORS else None,
+        **{k:counter(row.get(k)) for k in ('start_offset_ms','end_offset_ms','elapsed_ms','message_count',
+            'input_character_count','input_byte_count','timeout_read_ms','timeout_connect_ms','timeout_write_ms',
+            'timeout_pool_ms','sdk_retry_count','transport_attempt_count')}) for row in rows[:128] if isinstance(row,dict)]
+
+
 def peer_stage(name):
     """Instrument original agents without changing their return contracts."""
     if name not in STAGES:
@@ -272,6 +344,8 @@ def peer_stage(name):
             @wraps(fn)
             async def streaming(*args, **kwargs):
                 iterator = fn(*args, **kwargs)
+                trace=current()
+                timing=trace.start_stage(name) if trace else None
                 try:
                     while True:
                         token = _stage.set(name)
@@ -284,14 +358,18 @@ def peer_stage(name):
                         yield chunk
                 finally:
                     await iterator.aclose()
+                    if trace:trace.end_stage(timing)
             return streaming
         @wraps(fn)
         def synchronous(*args, **kwargs):
             token = _stage.set(name)
+            trace=current()
+            timing=trace.start_stage(name) if trace else None
             try:
                 return fn(*args, **kwargs)
             finally:
                 _stage.reset(token)
+                if trace:trace.end_stage(timing)
         return synchronous
     return decorate
 

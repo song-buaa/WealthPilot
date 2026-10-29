@@ -259,32 +259,11 @@ def exit_plan(assessment, *, at=None):
         order_created=False,execution_authorized=False,manual_trade_preparation_allowed=False)
 
 
-def report(assessment, plan, decision):
-    """Seven-layer human report; numerical statements come from verified inputs."""
-    context=assessment.get("allocation_context",{})
-    targets=context.get("confirmed_stage_targets") or context.get("proposed_stage_targets") or {}
-    group=context.get("company_exposure") or {}
-    levels=assessment["qualification"]
+def fact_sections(assessment):
+    """Existing deterministic research sections, shared by full and facts-only reports."""
     sections=[]
-    def section(name,text):
+    def section(name, text):
         sections.append(name+"\n"+text)
-    def amount(value):
-        return "未知" if value is None else f"¥{value:,.2f}"
-    def weight(value):
-        return "未设定" if value is None else f"{value:.1%}"
-    mode="证据达到精确分析门槛，仍须人工复核。" if levels["L3"]["allowed"] else "受限分析：不提供可执行限价或股数。"
-    allocation=plan["target_allocation"]
-    text=(mode+f"\n固定快照：{plan['snapshot_id'] or '未提供'}；公司：{plan['issuer_id'] or '尚未确认'}。"
-        +f"\n公司跨账户参考市值 {amount(group.get('market_value_cny'))}；投资资产分母 {amount(context.get('denominator_cny'))}。"
-        +f"当前参考占比 {weight(allocation['current'])}；请求假设目标 {weight(allocation['target'])}。"
-        +"\n冻结估值不代表实时可交易报价；来源过期时，金额仅作示意。")
-    rule_source=context.get('effective_rules_provenance') or {'basis':'effective_rules_unverified'}
-    text+=f"\n纪律来源：{rule_source.get('basis')}；个人纪律确认版本未核验。历史单证券持仓阈值参考不能替代当前跨账户公司集中度判断。"
-    if group.get("members"):
-        text+="\n\n| 账户 | 市场证券 | 本账户数量 | 参考人民币市值 |\n|---|---|---:|---:|"
-        for m in group["members"]:
-            text+=f"\n| {m.get('account_ref')} | {m.get('security_symbol') or m.get('symbol')} | {m.get('quantity','未知')} | {amount(m.get('market_value_cny'))} |"
-    section("①目标配置 / 当前敞口",text)
     labels={"pe_ttm":"市盈率TTM","eps_ttm":"每股收益TTM","revenue_ttm":"营收TTM",
         "net_income_ttm":"净利润TTM","gross_margin":"毛利率","profit_margin":"净利润率"}
     facts=[]
@@ -330,6 +309,36 @@ def report(assessment, plan, decision):
     events=[f"- {r['source']}，披露 {r['published_at']}，期间 {r['period']}；{r['record_id'] or r['source_url']}"
         for r in assessment["records"] if r["quality"]=="valid" and r["kind"]=="event"]
     section("④事件催化","\n".join(events) if events else "事件证据不足，需核验正式披露和公告日期。")
+    return sections
+
+
+def report(assessment, plan, decision):
+    """Seven-layer human report; numerical statements come from verified inputs."""
+    context=assessment.get("allocation_context",{})
+    targets=context.get("confirmed_stage_targets") or context.get("proposed_stage_targets") or {}
+    group=context.get("company_exposure") or {}
+    levels=assessment["qualification"]
+    sections=[]
+    def section(name,text):
+        sections.append(name+"\n"+text)
+    def amount(value):
+        return "未知" if value is None else f"¥{value:,.2f}"
+    def weight(value):
+        return "未设定" if value is None else f"{value:.1%}"
+    mode="证据达到精确分析门槛，仍须人工复核。" if levels["L3"]["allowed"] else "受限分析：不提供可执行限价或股数。"
+    allocation=plan["target_allocation"]
+    text=(mode+f"\n固定快照：{plan['snapshot_id'] or '未提供'}；公司：{plan['issuer_id'] or '尚未确认'}。"
+        +f"\n公司跨账户参考市值 {amount(group.get('market_value_cny'))}；投资资产分母 {amount(context.get('denominator_cny'))}。"
+        +f"当前参考占比 {weight(allocation['current'])}；请求假设目标 {weight(allocation['target'])}。"
+        +"\n冻结估值不代表实时可交易报价；来源过期时，金额仅作示意。")
+    rule_source=context.get('effective_rules_provenance') or {'basis':'effective_rules_unverified'}
+    text+=f"\n纪律来源：{rule_source.get('basis')}；个人纪律确认版本未核验。历史单证券持仓阈值参考不能替代当前跨账户公司集中度判断。"
+    if group.get("members"):
+        text+="\n\n| 账户 | 市场证券 | 本账户数量 | 参考人民币市值 |\n|---|---|---:|---:|"
+        for m in group["members"]:
+            text+=f"\n| {m.get('account_ref')} | {m.get('security_symbol') or m.get('symbol')} | {m.get('quantity','未知')} | {amount(m.get('market_value_cny'))} |"
+    section("①目标配置 / 当前敞口",text)
+    sections.extend(fact_sections(assessment))
     direction={"trim":"减仓研究","exit":"逐步退出研究","hold":"持有并复核","watch":"继续观察",
                "buy_init":"新建仓评估","buy_more":"加仓评估"}.get(decision,"继续观察")
     confirmed=context.get('target_confirmation_status')=='confirmed'

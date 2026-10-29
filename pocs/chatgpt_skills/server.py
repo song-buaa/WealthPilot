@@ -14,6 +14,7 @@ from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.llm_observation import run_id, safe_metadata
+from app.analysis_runtime import Policy, policy, ENV_KEYS as TIME_ENV_KEYS
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -44,16 +45,25 @@ class BusinessClient:
             except (BrokenPipeError, OSError):
                 pass
             try:
-                self.process.wait(timeout=5)
+                self.process.wait(timeout=Policy().cleanup_grace_seconds if getattr(self.settings, "async_l1", False) else 5)
             except subprocess.TimeoutExpired:
                 self.process.terminate()
-                self.process.wait(timeout=5)
+                if getattr(self.settings, "async_l1", False):
+                    try:
+                        self.process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                        self.process.wait(timeout=2)
+                else:
+                    self.process.wait(timeout=5)
             self.process = None
 
     def call(self, operation, arguments):
         with self.lock:
             identifier = (request_run.get() or run_id()) if operation in ANALYSIS_OPERATIONS else None
             started = time.monotonic()
+            async_l1 = operation == "analyze_position" and getattr(self.settings, "async_l1", False)
+            time_policy = policy(getattr(self.settings, "analysis_env_file", None)) if async_l1 else None
             stage = "worker_start"
             def record(value):
                 if identifier:
@@ -71,12 +81,14 @@ class BusinessClient:
                     self.close()
                     record(diagnostic(identifier, stage)) if identifier else None
                     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
-                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS if k in os.environ})
+                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS if k in os.environ})
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
                     command = [self.settings.business_python, str(Path(__file__).with_name("worker.py")),
                                "--portfolio-id", str(self.settings.portfolio_id)]
+                    if async_l1:
+                        command += ["--single-analysis"]
                     if getattr(self.settings, "analysis_env_file", None):
                         command += ["--analysis-env-file", self.settings.analysis_env_file]
                     if self.settings.real_config:
@@ -88,6 +100,8 @@ class BusinessClient:
                         cwd=getattr(self.settings, "worker_cwd", None))
                 stage = "request_send"
                 envelope = {"operation": operation, "arguments": arguments}
+                if async_l1:
+                    envelope["analysis_deadline_monotonic"] = started + time_policy.total_seconds
                 if identifier:
                     envelope.update(analysis_run_id=identifier, diagnostic_events=True)
                 record(diagnostic(identifier, stage)) if identifier else None
@@ -96,7 +110,7 @@ class BusinessClient:
                 stage = "ipc_wait"
                 record(diagnostic(identifier, stage)) if identifier else None
                 # One absolute deadline, including progress frames; no timeout extension or replay.
-                deadline = time.monotonic() + (270 if identifier else 45)
+                deadline = started + time_policy.ipc_seconds if async_l1 else time.monotonic() + (270 if identifier else 45)
                 pending = b""
                 while True:
                     if time.monotonic() >= deadline:
@@ -345,7 +359,7 @@ def create_server(settings):
 
     def execute_position_job(request, identifier):
         # Never owned/closed by a streamable-HTTP request/session lifespan.
-        return analysis_call("analyze_position", request, _client=BusinessClient(analysis_settings),
+        return analysis_call("analyze_position", request, _client=BusinessClient(SimpleNamespace(**{**vars(analysis_settings), "async_l1":True})),
             _identifier=identifier, _reserved=True)
 
     position_jobs = PositionJobs(execute_position_job, analysis_lock)

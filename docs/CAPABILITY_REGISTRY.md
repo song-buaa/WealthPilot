@@ -140,3 +140,5 @@ PM Review后的单PR、Mac Mini安装、E1 v1→v2迁移、到期实测与最小
 ### 4.2 第一轮质量修正（开发候选）
 
 复用原 [SEC/披露 Owner](../research_v2/sec_disclosures.py)、[表格解析](../research_v2/official_disclosures.py)、[周期证据](../backend/services/market_data/technical_evidence.py)及 [Skill 工具](../backend/graph/tools.py)。通用正式附件标题/断行字段可进入原 Evidence Registry；日周线按各自完整窗口校验，真实缺口给出日期；默认纪律与关键词信号不再声明个人纪律或已验证基本面 PASS。原风控数值、PEER 和交易权限不变。范围与未恢复项见[来源说明](V42_US_FINANCIAL_SOURCES.md#第一轮集中质量修正-p0)。HK 官方财报/半年度合同仍缺失，不将 AKShare 公司概况当作财务；生产实际 K 线缺口须取得原日期集再核验。
+
+正常异步L1可靠性候选：原[PEER阶段回调](../backend/services/decision_service_v3.py)、[分析适配](../pocs/chatgpt_skills/analysis.py)、[一次性Worker](../pocs/chatgpt_skills/worker.py)/[父进程](../pocs/chatgpt_skills/server.py)共用[小型运行期限](../app/analysis_runtime.py)，SDK重试计入同一deadline；已有合格事实按原Evidence/Output Policy纯内存重核并复用确定性报告，模型失败可返回明确facts-only partial。无新队列/数据库/研究引擎/资格或交易权限，原E1与同步入口保留。机制、时间策略、事件计数与生产待验收见[原4.2记录](V42_IMPLEMENTATION.md#正常异步-l1-可靠性2026-10-29-开发候选)；专项见[可靠性回归](../tests/test_l1_reliability.py)和[真实Worker/IPC](../pocs/chatgpt_skills/test_v42_protocol.py)。

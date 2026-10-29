@@ -17,6 +17,7 @@ SAFE_ERRORS = {"PORTFOLIO_NOT_FOUND", "ITEM_NOT_FOUND", "ACCOUNT_NOT_FOUND", "DR
                "REQUEST_ID_CONFLICT", "EXPLICIT_CONFIRMATION_REQUIRED", "PREVIEW_CHANGED_REVIEW_REQUIRED",
                "RISK_CONFIRMATION_REQUIRED", "DRAFT_NOT_PENDING", "DRAFT_CHANGED_REVIEW_REQUIRED", "BROKER_ORDER_STATE_UNAVAILABLE", "ORDER_CURRENCY_MARKET_MISMATCH", "MOCK_TRADE_FIXTURE_NOT_ENABLED"}
 from app.llm_observation import safe_metadata, run_id
+from app.analysis_runtime import policy, budget_context, ENV_KEYS as TIME_ENV_KEYS
 from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
@@ -43,7 +44,7 @@ def load_analysis_environment(path, *, model_policy_only=False):
             os.environ.pop(key,None)
     # Model constants are resolved at first business import. A running worker
     # must not mix cached model IDs with a newly reloaded profile or effort.
-    allowed = MODEL_ENV_KEYS if model_policy_only else {
+    allowed = (MODEL_ENV_KEYS | TIME_ENV_KEYS) if model_policy_only else {
         "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
@@ -61,6 +62,11 @@ def load_analysis_environment(path, *, model_policy_only=False):
         # disables a previously loaded identity in a persistent worker.
         for key in SEC_IDENTITY_KEYS:
             os.environ.pop(key,None)
+    if model_policy_only:
+        for key in TIME_ENV_KEYS.intersection(values):
+            if isinstance(values[key],bool) or not isinstance(values[key],(str,int,float)):
+                raise ValueError("ANALYSIS_TIME_POLICY_INVALID")
+            os.environ[key]=str(values[key])
     os.environ.update({key:value for key,value in values.items()
                        if key in allowed and isinstance(value,str)})
 
@@ -106,6 +112,7 @@ def main():
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--real-config")
     parser.add_argument("--analysis-env-file")
+    parser.add_argument("--single-analysis", action="store_true")
     parser.add_argument("--frozen-database")
     parser.add_argument("--asset-view-source")
     parser.add_argument("--source-contract")
@@ -145,6 +152,7 @@ def main():
                           portfolio_id=args.portfolio_id, database_contract_path=args.source_contract)
         for line in sys.stdin:
             identifier, events, phase = None, False, "request_received"
+            result = None
             started = time.monotonic()
             channel = sys.stdout
             def progress(stage):
@@ -186,11 +194,36 @@ def main():
                             load_analysis_environment(args.analysis_env_file)
                         if config:
                             os.environ["WEALTHPILOT_DB_PATH"] = config["database_path"]
-                        result = asyncio.run(analyze(config["database_path"] if config else path,
-                            config["portfolio_id"] if config else args.portfolio_id, operation, a,
-                            contract=config.get("database_contract_path") if config else None,
-                            synthetic=args.synthetic_input or config is None, worker_process=True,
-                            _analysis_run_id=request.get("analysis_run_id")))
+                        if args.single_analysis and operation != "analyze_position":
+                            raise ValueError("SINGLE_ANALYSIS_OPERATION_INVALID")
+                        async def deliver_analysis():
+                            nonlocal phase, result
+                            scope=(budget_context(deadline=request.get("analysis_deadline_monotonic"),process_scope=True)
+                                   if args.single_analysis else contextlib.nullcontext())
+                            with scope:
+                                value = await analyze(config["database_path"] if config else path,
+                                    config["portfolio_id"] if config else args.portfolio_id, operation, a,
+                                    contract=config.get("database_contract_path") if config else None,
+                                    synthetic=args.synthetic_input or config is None, worker_process=True,
+                                    _analysis_run_id=request.get("analysis_run_id"), async_l1=args.single_analysis,
+                                    deadline_monotonic=request.get("analysis_deadline_monotonic") if args.single_analysis else None)
+                            if args.single_analysis:
+                                result=value
+                                phase="result_serialization"
+                                # Flush before asyncio.run joins slow default-executor threads.
+                                progress("result_serialization")
+                                serialized=json.dumps({"ok": True, "result": value}, ensure_ascii=False, default=str)
+                                deadline=request.get("analysis_deadline_monotonic") or started+policy().total_seconds
+                                if time.monotonic()>deadline and value.get('professional_analysis_complete'):
+                                    from pocs.chatgpt_skills.analysis import deadline_result
+                                    value=deadline_result(value)
+                                    serialized=json.dumps({"ok": True, "result": value}, ensure_ascii=False, default=str)
+                                channel.write(serialized+"\n")
+                                channel.flush()
+                            return value
+                        result = asyncio.run(deliver_analysis())
+                        if args.single_analysis:
+                            return  # never read/reuse a second request in this child
                     elif operation == 'get_instrument_tradability' and (workflow or config):
                         from pocs.chatgpt_skills.reader import read_tradability
                         result=read_tradability(config['database_path'] if config else path,
@@ -256,6 +289,8 @@ def main():
                 serialized = json.dumps(response, ensure_ascii=False)
             channel.write(serialized + "\n")
             channel.flush()
+            if args.single_analysis:
+                return
     finally:
         if workflow:
             workflow.close()

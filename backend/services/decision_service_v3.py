@@ -150,6 +150,7 @@ async def _run_chat_stream_v3(
     conversation_history: Optional[list[dict]] = None,
     *,
     result_callback=None,
+    stage_callback=None,
     analysis_only: bool = False,
     analysis_context: dict | None = None,
     analysis_options: dict | None = None,
@@ -410,6 +411,10 @@ async def _run_chat_stream_v3(
             from backend.services.position_analysis import prepare_portfolio
             exec_out.portfolio_evidence = prepare_portfolio(plan_out,exec_out)
 
+        # Internal memory receipt only. No model text, persistence or extra work.
+        if stage_callback is not None and plan_out.route == "position_single":
+            stage_callback(plan_out, exec_out)
+
         # Execution SKIPPED (general/clarify) → 直接到 Expressing
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
@@ -434,11 +439,17 @@ async def _run_chat_stream_v3(
             })
             return
 
+        if stage_callback is not None and not (expr_out.mode=='fallback' or getattr(expr_out.llm_result,'is_fallback',False)):
+            stage_callback(plan_out, exec_out, stage='expressing_complete')
+
         # ── Stage 4: ReviewingAgent ──
         reviewing = get_reviewing_agent()
         review_out = await asyncio.to_thread(
             reviewing.run, plan_out, exec_out, expr_out, user_input,
         )
+
+        if stage_callback is not None:
+            stage_callback(plan_out, exec_out, stage='reviewing_complete')
 
         if review_out.action == "retry":
             yield _sse("validator_warning", {

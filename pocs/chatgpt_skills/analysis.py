@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import sqlite3
 import uuid
+from copy import deepcopy
+from app.analysis_runtime import budgeted_analysis, current as runtime_budget
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -65,6 +67,9 @@ class AnalysisResult(BaseModel):
     data_quality: dict = Field(default_factory=dict)
     scope: dict = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
+    professional_analysis_complete: bool = False
+    missing_stages: list[str] = Field(default_factory=list)
+    execution_authorized: Literal[False] = False
     order_created: Literal[False] = False
     snapshot_id: str | None = None
     llm_observation: dict | None = None
@@ -216,8 +221,42 @@ def captured_evidence(result, captured, portfolio_id):
     result.limitations.append('Original research may fall back to examples without verified dates; do not present unverified research as live evidence.')
 
 
+def retain_facts(result, assessment, *, asset_view=None, missing_stages=None):
+    from backend.services.market_data.output_policy import facts_only_result
+    retained=facts_only_result(assessment,at=datetime.now(timezone.utc),asset_view=asset_view)
+    if not retained:return False
+    assessment,facts,conclusion=retained
+    result.status='partial'
+    result.conclusion=conclusion
+    result.professional_analysis_complete=False
+    result.missing_stages=missing_stages or ['professional_result']
+    result.evidence['position_evidence']=encode(assessment)
+    result.evidence['qualified_facts']=encode(facts)
+    result.professional_result=dict(analysis_result=dict(mode='facts_only',
+        professional_analysis_complete=False,execution_authorized=False,
+        professional_explanation=[],evidence_refs=[r.get('record_id') or r['source_url'] for r in facts]))
+    result.issues=sorted(set(result.issues+['PROFESSIONAL_INFERENCE_INCOMPLETE']))
+    result.limitations.append('Only qualified source facts survived; professional inference and decision review are incomplete. No investment decision or trade authorization.')
+    return True
+
+
+def deadline_result(value):
+    """Late synchronous completion cannot be accepted as timely professional work."""
+    result=AnalysisResult.model_validate(value)
+    result.status='unavailable'
+    result.conclusion='研究期限已到，专业结果未按时交付；未创建交易。'
+    result.professional_result={}
+    result.professional_analysis_complete=False
+    result.missing_stages=['timely_delivery']
+    result.issues=sorted(set(result.issues+['ANALYSIS_TIMEOUT']))
+    assessment=result.evidence.get('position_evidence')
+    if assessment:retain_facts(result,assessment,missing_stages=['timely_delivery'])
+    return result.model_dump(mode='json')
+
+
 @observed_result
-async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None):
+@budgeted_analysis(on_expired=deadline_result)
+async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
     request=AnalysisRequest.model_validate(arguments)
     if request.snapshot_id and asset_view is None:
         from app.asset_views import load_view, frozen_input, public_view
@@ -226,7 +265,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             return await analyze(fixed_path, portfolio_id, scenario, arguments, synthetic=synthetic,
                                  worker_process=worker_process, asset_view=public_view(view,
                                      symbol=request.symbol if scenario == 'analyze_position' else None,
-                                     analysis_scope=request.analysis_scope))
+                                     analysis_scope=request.analysis_scope),async_l1=async_l1,deadline_monotonic=deadline_monotonic)
     conversation='mcp-analysis-'+uuid.uuid4().hex
     result=AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[],
                           queried_at=datetime.now(timezone.utc).isoformat(),conclusion='')
@@ -249,6 +288,14 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         result.evidence['historical_attribution']=history
         result.limitations.append('Historical attribution is separate from current-holdings book P&L; only broker-imported facts and expressly supported metrics are authoritative. No portfolio TWR/MWR.')
         captured={}
+        stage_receipt={}
+        def capture_stage(plan, executed, stage='evidence_ready'):
+            if scenario=='analyze_position' and plan.route=='position_single' and executed.position_evidence:
+                if stage=='evidence_ready':
+                    stage_receipt.update(assessment=deepcopy(executed.position_evidence),missing=['expressing','reviewing'])
+                elif stage_receipt:
+                    completed={'expressing_complete':'expressing','reviewing_complete':'reviewing'}.get(stage)
+                    stage_receipt['missing']=[s for s in stage_receipt['missing'] if s!=completed]
         def capture(plan,executed,expressed,reviewed):
             captured.update(plan=plan,executed=executed,expressed=expressed,reviewed=reviewed)
         prefix={'analyze_position':'单标的投资决策','review_portfolio':'投资组合与资产配置评估','analyze_performance':'当前持仓收益表现分析'}[scenario]
@@ -272,9 +319,11 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
         text,done,errors=[],{},[]
         result.data_quality=quality(portfolio_id)
         try:
-            async with asyncio.timeout(240):
+            budget=runtime_budget()
+            if budget and budget.remaining()<=0:raise TimeoutError()
+            async with asyncio.timeout(budget.remaining() if budget else 240):
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
-                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,analysis_only=True,analysis_context=asset_view,
+                        conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
                             analysis_options=dict(target_versions=[t.model_dump(mode="json") for t in request.target_versions],
                                 scenario_legs=[s.model_dump(mode="json") for s in request.scenario_legs])):
                     event_type,data=event.split('\n',1)
@@ -300,8 +349,12 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 result.issues.append('PROFESSIONAL_ANALYSIS_UNAVAILABLE')
             else:
                 result.status='ok';captured_evidence(result,captured,portfolio_id)
+                result.professional_analysis_complete = result.status != 'unavailable'
         except TimeoutError:
             result.issues.append('ANALYSIS_TIMEOUT')
+        except Exception:
+            if not async_l1:raise
+            result.issues.append('PROFESSIONAL_STAGE_FAILURE')
         finally:
             decision_service.clear_session(conversation)
         if result.status == 'unavailable':
@@ -321,7 +374,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             asset_view['data_quality']['can_propose_rebalance'] &= original_precision
             if scenario == 'review_portfolio':
                 asset_view = qualification_view(asset_view, request.scenario_legs)
-        if (scenario == 'analyze_position'
+        if (scenario == 'analyze_position' and result.status != 'unavailable'
                 and all(key in captured for key in ('plan', 'executed', 'expressed', 'reviewed'))):
             from backend.services.position_analysis import prepare
             from backend.services.market_data.output_policy import enforce
@@ -403,6 +456,11 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             result.professional_result['analysis_result']['exit_candidates']=result.evidence.get('exit_candidates',[])
             result.conclusion+=render_explanation(explanation)
             result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
+        if result.status=='unavailable':
+            result.professional_analysis_complete=False
+            result.missing_stages=stage_receipt.get('missing',[])
+        if result.status=='unavailable' and async_l1 and scenario=='analyze_position' and stage_receipt:
+            retain_facts(result,stage_receipt['assessment'],asset_view=asset_view,missing_stages=stage_receipt['missing'])
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')
 

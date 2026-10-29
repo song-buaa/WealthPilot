@@ -39,6 +39,88 @@ def _evidence_index(assessment):
     return {key:value for key,value in index.items() if value is not None}
 
 
+def captured_facts(assessment, *, at, asset_view=None):
+    """Recheck a SERVER-owned pre-expression receipt, without fetching sources.
+
+    Previously qualified independent source receipts remain the verifier for
+    these exact frozen bytes/observations. Intersect with the original usable
+    refs: this can remove stale facts, never grant a card or new field authority.
+    """
+    from copy import deepcopy
+    from backend.services.market_data.evidence import assess
+    original=deepcopy(assessment)
+    index=_evidence_index(original)
+    allowed={(r['kind'],r.get('record_id') or r.get('source_url')) for key in ('records','verified_field_records','verified_period_records')
+             for r in original.get(key,[]) if r.get('quality')=='valid' and (r.get('kind') in {'quote','capital_flow'} or r.get('record_id') in index or r.get('source_url') in index)}
+    trusted_ids={link.get('record_id') for row in original.get('verified_field_records',[])
+                 if row.get('source')=='official_disclosure' and row.get('quality')=='valid'
+                 for link in row.get('publication_links',[])}
+    market, research, events, proofs = {}, [], [], {}
+    allowed_periods=set()
+    for row in original.get('records',[]):
+        value=deepcopy(row['values'])
+        if row['kind'] in {'quote','fundamentals','technical'}:
+            market[row['kind']]=value
+        elif row['kind'] in {'research','event'}:
+            (events if row['kind']=='event' else research).append(value)
+            if value.get('record_id') in trusted_ids:
+                proofs[value['record_id']]=value
+        if row['kind']=='technical':
+            for period,state in row.get('period_quality',{}).items():
+                if state.get('quality')=='valid':
+                    ref=value.get('series',{}).get(period,{}).get('record_id')
+                    if ref:
+                        allowed.add(("technical",ref))
+                        allowed_periods.add((period,ref))
+    fresh=assess(market,symbol=original.get('symbol'),research=research,events=events,at=at,
+                 asset_view=asset_view,planner=original.get('planner'),
+                 principles_available='PRINCIPLES_RETRIEVAL_UNAVAILABLE' not in original['qualification']['L3']['blockers'],
+                 disclosure_verifier=proofs.get)
+    # Period authority is explicit, never inherited from an aggregate ref.
+    for row in original.get('verified_period_records',[]):
+        if row.get('quality')=='valid':
+            allowed_periods.update((p,v.get('record_id')) for p,v in row['values'].get('series',{}).items())
+    original['records']=fresh['records']  # retain unknown/excluded source diagnostics too
+    for row in original['records']:
+        if row['quality']=='valid' and (row['kind'],row.get('record_id') or row.get('source_url')) not in allowed:
+            row['quality']='unknown'
+        if row['kind']=='technical' and row['quality']=='valid' and any(
+                (p,v.get('record_id')) not in allowed_periods for p,v in row['values'].get('series',{}).items()):
+            row['quality']='unknown'
+    for key in ('verified_field_records','verified_period_records'):
+        original[key]=[row for row in fresh.get(key,[]) if (row['kind'],row.get('record_id') or row.get('source_url')) in allowed
+                       and row.get('quality')=='valid']
+    # Existing formulas re-evaluate current clocks/context; the original result
+    # is an additional ceiling, not authority to retain a now-expired gate.
+    for level,state in original['qualification'].items():
+        state['allowed'] = state['allowed'] and fresh['qualification'][level]['allowed']
+        state['blockers']=sorted(set(state['blockers']+fresh['qualification'][level]['blockers']))
+    original['as_of']=at.isoformat()
+    original['confidence_ceiling']=min(original['confidence_ceiling'],fresh['confidence_ceiling'])
+    original['issues']=sorted(set(original['issues']+fresh['issues']))
+    original['infoNeeded']=sorted(set(original['infoNeeded']+fresh['infoNeeded']))
+    # Keep per-period series only when the original period was independently
+    # qualified and it remains qualified now. No quotes or trade plan is added.
+    original['technical_levels']={p:v for p,v in (fresh.get('technical_levels') or {}).items()
+                                  if (p,v.get('record_id')) in allowed_periods}
+    facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
+    return original, facts
+
+
+def facts_only_result(assessment, *, at, asset_view=None):
+    """Deterministic facts only; never project incomplete/unreviewed model prose."""
+    from backend.services.position_analysis import fact_sections
+    current, facts=captured_facts(assessment,at=at,asset_view=asset_view)
+    if not facts:
+        return None
+    text='专业推断未完成；以下仅保留已核验来源事实，不包含投资决策或交易建议。\n'
+    text+='\n\n'.join(fact_sections(current))
+    text+='\n\n来源与时钟：\n'+'\n'.join(
+        f"- {r['record_id']}；来源 {r.get('source_url') or r.get('source')}；期间 {r.get('period')}；数据日 {r.get('data_as_of')}；发布 {r.get('published_at') or 'UNKNOWN'}；抓取 {r.get('fetched_at') or 'UNKNOWN'}。"
+        for r in facts)
+    return current, facts, text
+
+
 def explanation_prompt(assessment):
     """Extend the existing PEER call; no additional model or research pipeline."""
     records = []
