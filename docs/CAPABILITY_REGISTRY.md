@@ -137,7 +137,7 @@ B3-2本地候选新增 [ReviewMonitorStore](../backend/services/investment_thesi
 
 PM Review后的单PR、Mac Mini安装、E1 v1→v2迁移、到期实测与最小SEC/通知路径统一见 [E1最终发布计划](v4.3/E1_FINAL_RELEASE_AND_ACCEPTANCE.md)。该计划不代表生产授权，初始自动扫描继续OFF。
 
-N1本地候选新增 [有界SEC自然扫描](../backend/services/investment_thesis/natural_scan.py)：只处理显式opt-in monitor，首次水位不回放，复用原SEC身份/原件核验，源失败隔离且不冒充无事件；schema v2不变。`get_due_investment_reviews`只读返回稳定event key和有界分页，提供at-least-once提醒去重输入，不改变任务或研究记录。生产扫描OFF、通知`NOT_WIRED`、Scheduled task实际连接`NOT_RUN`；测试见 [N1回归](../tests/test_e1_n1_natural_review.py)，边界与一次性发布验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
+N1已发布 [有界SEC自然扫描](../backend/services/investment_thesis/natural_scan.py)：只处理显式opt-in monitor，首次水位不回放，复用原SEC身份/原件核验，源失败隔离且不冒充无事件；schema v2不变。`get_due_investment_reviews`只读返回稳定event key和有界分页，提供at-least-once提醒去重输入，不改变任务或研究记录；Scheduled task私人连接与TEST ONLY提醒已通过，生产扫描仍OFF、WealthPilot通知仍`NOT_WIRED`。真实SEC验收定位到`fetched_at`误作PIT截止；定点修复候选保留真实抓取时钟，仅以SEC acceptance/known clock判断未来信息，尚待发布及自然增量复验。测试见 [N1回归](../tests/test_e1_n1_natural_review.py)，边界与一次性发布验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
 
 ### 4.2 第一轮质量修正（开发候选）
 

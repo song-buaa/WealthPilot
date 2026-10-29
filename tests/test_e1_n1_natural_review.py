@@ -43,10 +43,13 @@ class FrozenSEC:
         self.include_new = False
         self.calls = []
         self.fail_original = False
+        # Reproduces the production ordering: the response completes after the
+        # scan cutoff. fetched_at is evidence acquisition time, not publication.
+        self.fetched_at = "2026-10-29T01:00:00.679722+00:00"
 
     def __call__(self, url):
         self.calls.append(url)
-        fetched = "2026-10-29T01:00:00+00:00"
+        fetched = self.fetched_at
         if url.endswith("company_tickers.json"):
             return json.dumps(directory()).encode(), fetched
         if url.endswith("CIK0001737806.json"):
@@ -88,6 +91,58 @@ def test_first_watermark_new_event_dedup_restart_and_read_page(b32_setup):
     assert hidden["items"] == [] and hidden["unchanged_event_keys"] == [task["event_key"]]
     assert store.history("e1-b32-test-pdd") == before["history"]
     assert store.reviews("e1-b32-test-pdd") == before["reviews"]
+
+
+def test_historical_cutoff_uses_acceptance_not_later_fetch_clock(b32_setup):
+    store, monitor, _, _, before = b32_setup
+    source = FrozenSEC()
+    source.include_new = True
+    source.fetched_at = "2026-10-29T09:28:24.073396+00:00"
+
+    # The current Submissions payload already contains the August filing, but at
+    # this historical cutoff its SEC acceptance is still in the future.  The
+    # later, truthful fetch clock must not make the source unavailable or leak it
+    # into the initial watermark.
+    before_acceptance = NaturalReviewScanner(monitor, fetch=source).run(
+        as_of=datetime.fromisoformat("2026-08-25T10:00:00+00:00"),
+        run_id="historical-before-acceptance")
+    receipt = before_acceptance["monitor_receipts"][0]
+    assert receipt["status"] == "WATERMARK_INITIALIZED"
+    assert receipt["known_accessions"] == ["0001104659-25-050727"]
+    assert receipt["directory_fetched_at"] == source.fetched_at
+    assert before_acceptance["review_scan"]["generated"] == []
+    assert source.calls == [
+        "https://www.sec.gov/files/company_tickers.json",
+        "https://data.sec.gov/submissions/CIK0001737806.json",
+    ]
+
+    # Once the acceptance clock is inside the cutoff, the same source and the
+    # full submission are eligible even though both were fetched later.
+    after_acceptance = NaturalReviewScanner(ReviewMonitorStore(store), fetch=source).run(
+        as_of=datetime.fromisoformat("2026-08-25T12:00:00+00:00"),
+        run_id="historical-after-acceptance")
+    assert after_acceptance["status"] == "OK"
+    assert after_acceptance["monitor_receipts"][0]["new_accessions"] == [ACCESSION]
+    assert len(after_acceptance["review_scan"]["generated"]) == 1
+    assert source.calls[-1] == (
+        "https://www.sec.gov/Archives/edgar/data/1737806/"
+        "000173780626000001/0001737806-26-000001.txt"
+    )
+    assert store.history("e1-b32-test-pdd") == before["history"]
+    assert store.reviews("e1-b32-test-pdd") == before["reviews"]
+
+
+def test_source_receipt_requires_parseable_aware_fetch_clock(b32_setup):
+    _, monitor, _, _, _ = b32_setup
+    payload = json.dumps(directory()).encode()
+    for value in ("not-a-clock", "2026-10-29T01:00:00"):
+        result = NaturalReviewScanner(
+            monitor, fetch=lambda _url, timestamp=value: (payload, timestamp)).run(
+                as_of=datetime.fromisoformat("2026-10-29T01:00:00+00:00"),
+                run_id="bad-fetch-clock-" + ("text" if value == "not-a-clock" else "naive"))
+        assert result["status"] == "PARTIAL_SOURCE_FAILURE"
+        assert result["monitor_receipts"][0]["status"] == "SOURCE_UNAVAILABLE"
+        assert result["monitor_receipts"][0]["issues"] == ["SEC_DIRECTORY_UNAVAILABLE"]
 
 
 def test_source_failure_is_not_no_event_and_retries_original(b32_setup):

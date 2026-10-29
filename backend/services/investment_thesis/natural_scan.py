@@ -51,15 +51,27 @@ class NaturalReviewScanner:
     @staticmethod
     def _proof(source):
         try:
-            return hashlib.sha256(source[0]).hexdigest(), source[1]
+            source_sha = hashlib.sha256(source[0]).hexdigest()
         except (IndexError, TypeError):
             return None, None
-
-    @staticmethod
-    def _available_by(source, as_of):
         try:
             fetched = datetime.fromisoformat(source[1].replace("Z", "+00:00"))
-            return fetched.tzinfo is not None and fetched <= as_of
+            fetched_at = source[1] if fetched.tzinfo is not None and fetched.utcoffset() is not None else None
+            return source_sha, fetched_at
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return source_sha, None
+
+    @staticmethod
+    def _source_receipt_valid(source):
+        """Validate the observed fetch clock without treating it as a PIT cutoff.
+
+        A network response necessarily completes after a scan begins.  Point-in-time
+        eligibility belongs to each filing's SEC acceptance clock; fetched_at is the
+        immutable acquisition clock and must remain truthful.
+        """
+        try:
+            fetched = datetime.fromisoformat(source[1].replace("Z", "+00:00"))
+            return fetched.tzinfo is not None and fetched.utcoffset() is not None
         except (AttributeError, IndexError, TypeError, ValueError):
             return False
 
@@ -95,7 +107,7 @@ class NaturalReviewScanner:
             due = self.monitor.scan(as_of=as_of)
             return self._result(as_of, run_id, "NO_OPTED_IN_MONITORS", due, [])
         directory_source = self._fetch(sec.DIRECTORY)
-        directory = self._json(directory_source) if self._available_by(directory_source, as_of) else None
+        directory = self._json(directory_source) if self._source_receipt_valid(directory_source) else None
         directory_sha, directory_fetched = self._proof(directory_source)
         if directory is None:
             receipts = [self._receipt(policy, as_of, "SOURCE_UNAVAILABLE",
@@ -120,7 +132,7 @@ class NaturalReviewScanner:
             submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
             submissions_source = self._fetch(submissions_url)
             submissions = (self._json(submissions_source)
-                           if self._available_by(submissions_source, as_of) else None)
+                           if self._source_receipt_valid(submissions_source) else None)
             submissions_sha, submissions_fetched = self._proof(submissions_source)
             source_proof = dict(directory_sha=directory_sha, submissions_sha=submissions_sha,
                                 directory_fetched=directory_fetched,
@@ -162,7 +174,7 @@ class NaturalReviewScanner:
                     continue
                 published = datetime.fromisoformat(envelope["published_at"])
                 fetched = datetime.fromisoformat(envelope["fetched_at"])
-                if published > as_of or fetched > as_of:
+                if published > as_of:
                     issues.append("FUTURE_AT_SCAN_TIME:" + filing["accession"])
                     continue
                 economic_id = f"SEC:{cik}:{filing['accession']}"
