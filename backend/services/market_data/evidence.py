@@ -275,6 +275,10 @@ _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"op
                          "capitalExpenditures":"positive_capital_cash_outflow", "netIncome":"consolidated_net_income",
                          "operatingIncome":"operating_income", "parentNetIncome":"net_income_attributable_parent",
                          "ordinaryNetIncome":"net_income_available_to_ordinary_shareholders",
+                         "costOfRevenueReported":"cost_of_revenue_as_reported", "salesMarketingReported":"sales_marketing_as_reported",
+                         "generalAdminReported":"general_admin_as_reported", "researchDevelopmentReported":"research_development_as_reported",
+                         "incomeTaxReported":"income_tax_as_reported",
+                         "sellingGeneralAdminReported":"combined_selling_general_admin_as_reported",
                          "dilutedEPSADS":"diluted_eps_ads", "dilutedEPSOrdinary":"diluted_eps_ordinary"}
 
 
@@ -626,6 +630,10 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter",
                       "operatingIncome":"operating_income_quarter", "parentNetIncome":"net_income_attributable_parent_quarter",
                       "ordinaryNetIncome":"net_income_available_to_ordinary_shareholders_quarter",
+                      "costOfRevenueReported":"cost_of_revenue_reported_quarter", "salesMarketingReported":"sales_marketing_reported_quarter",
+                      "generalAdminReported":"general_admin_reported_quarter", "researchDevelopmentReported":"research_development_reported_quarter",
+                      "incomeTaxReported":"income_tax_reported_quarter",
+                      "sellingGeneralAdminReported":"selling_general_admin_reported_quarter",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
     for obs in quarter_observations:

@@ -378,7 +378,7 @@ def exit_plan(assessment, *, at=None):
         order_created=False,execution_authorized=False,manual_trade_preparation_allowed=False)
 
 
-def fact_sections(assessment):
+def fact_sections(assessment, *, include_scenarios=True):
     """Existing deterministic research sections, shared by full and facts-only reports."""
     sections=[]
     def section(name, text):
@@ -412,7 +412,7 @@ def fact_sections(assessment):
     financial=build(assessment)
     for metric in financial['records']:
         facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+'；计算口径：'+str(metric['details']))
-    if financial['valuation_sensitivity']:
+    if include_scenarios and financial['valuation_sensitivity']:
         import json
         facts.append('估值敏感性（盈利/倍数变化为假设，固定FX；非预测、目标价或订单）：'+json.dumps(financial['valuation_sensitivity'],ensure_ascii=False))
     facts.append('独立缺口（不影响其他合格研究）：'+'；'.join(financial['limitations'])+'。旧观点和Seed不作当前经营事实。')

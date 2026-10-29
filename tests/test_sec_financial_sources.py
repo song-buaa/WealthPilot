@@ -249,14 +249,14 @@ def test_unified_collector_uses_current_API_identity_bounded_reads_and_cache(mon
         if url==sec.DIRECTORY:return json.dumps(directory()).encode(),AT.isoformat()
         if '/submissions/' in url:return json.dumps(submissions()).encode(),AT.isoformat()
         if '/companyfacts/' in url:return src
-        pytest.fail('Complete CompanyFacts should not fetch attachments')
+        return None  # four standard amounts do not certify EPS/expense coverage
     monkeypatch.setattr(sec,'_fetch',fetch)
     from research_v2.official_disclosures import collect
-    rows,verifier=collect('AAPL:US');assert rows and len(calls)==3
+    rows,verifier=collect('AAPL:US');assert rows and len(calls)==4
     assert verifier(rows[0]['record_id'])==rows[0]
-    again,_=collect('AAPL:US');assert again==rows and len(calls)==3
+    again,_=collect('AAPL:US');assert again==rows and len(calls)==4
     monkeypatch.setattr(demo_mode,'PUBLIC_DEMO_MODE',True)
-    assert collect('AAPL:US')[0]==[] and len(calls)==3
+    assert collect('AAPL:US')[0]==[] and len(calls)==4
     _cache.clear()
 
 

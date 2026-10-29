@@ -588,22 +588,20 @@ def collect(symbol):
             if quarterly:
                 latest=max(o['fiscal_period_end'] for o in quarterly)
                 complete={o['source_field'] for o in quarterly if o['fiscal_period_end']==latest}
+                eps_field='dilutedEPSADS' if issuer['issuer_type']=='foreign_private' else 'dilutedEPSOrdinary'
+                eps_periods={o['fiscal_period_end'] for o in quarterly if o['source_field']==eps_field}
                 latest_filed=max(filed_by_accession[r['official_disclosure']['accession']]
                     for r in rows if any(o['period_basis']=='quarterly' and o['fiscal_period_end']==latest
                                          for o in r['financial_observations']))
                 periods={o['fiscal_period_end'] for o in quarterly}
                 if ({'totalRevenue','netIncome','operatingCashflow','capitalExpenditures'}<=complete
-                        and len(periods)>=8 and filing['filed']<=latest_filed):
+                        and len(periods)>=8 and set(sorted(periods,reverse=True)[:4])<=eps_periods and filing['filed']<=latest_filed):
                     break
             # Four independent earnings originals plus their comparatives are
             # sufficient for this minimal research projection. Event-only files
             # do not consume this existing financial-record bound.
-            if len({r['official_disclosure']['accession'] for r in rows if any(o['period_basis']=='quarterly' for o in r['financial_observations'])})>=MAX_FILINGS:
+            if len({r['official_disclosure']['accession'] for r in rows if r.get('source_url','').endswith('.txt') and any(o['period_basis']=='quarterly' for o in r['financial_observations'])})>=MAX_FILINGS:
                 break
-            existing = [o for r in rows if r['official_disclosure']['accession'] == filing['accession'] for o in r['financial_observations']]
-            fields = {o['source_field'] for o in existing}
-            if len(fields) == 4:
-                continue
             try:
                 original = _fetch(filing['full_url'])
                 if not original:

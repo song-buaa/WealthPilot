@@ -50,7 +50,7 @@ def test_real_PDD_quarter_fields_use_actual_SEC_clock_and_exact_native_cells():
     assert rows['operatingCashflow']['precision_corroboration']['reported_value']==25700000000
     assert any(x['source_field']=='operatingCashflow' and x['period']=='2026-06-30' and x['issue']=='STATEMENT_COLUMN_AMBIGUITY_CORROBORATED' for x in r['financial_observation_issues'])
     a=assess({},symbol='PDD:US',research=[r],at=AT,disclosure_verifier={r['record_id']:deepcopy(r)}.get)
-    assert {f['field'] for f in a['verified_field_records']}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_available_to_ordinary_shareholders_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'}
+    assert {f['field'] for f in a['verified_field_records']}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_available_to_ordinary_shareholders_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter','cost_of_revenue_reported_quarter','sales_marketing_reported_quarter','general_admin_reported_quarter','research_development_reported_quarter','income_tax_reported_quarter'}
     assert a['qualification']['L1']['allowed']
     assert all(not a['qualification'][l]['allowed'] for l in ('L2','L3','L4'))
 

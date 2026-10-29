@@ -304,3 +304,50 @@ def test_qualified_quote_can_support_valuation_without_becoming_daily_evidence()
     assert not explanation_projection([p],a)[0]
     a['records'][-1]['values']['currency']=None
     assert 'pe_ttm' not in metrics(a) and 'revenue_yoy_pct' in metrics(a)
+
+
+def test_actual_PDD_expenses_keep_sign_and_reconcile_operating_margin_driver():
+    a=actual_pdd();m=metrics(a)
+    actual={r['field']:r['values'][r['field']] for r in a['verified_field_records']}
+    assert actual['cost_of_revenue_reported_quarter']==-48017000000
+    assert actual['sales_marketing_reported_quarter']==-29668000000
+    assert actual['general_admin_reported_quarter']==-2342000000
+    assert actual['research_development_reported_quarter']==-4567000000
+    assert actual['income_tax_reported_quarter']==-6092000000
+    effects=[m[f+'_burden_change_pp']['values'][f+'_burden_change_pp'] for f in ['cost_of_revenue','sales_marketing','general_admin','research_development']]
+    assert sum(effects)==pytest.approx(-m['operating_margin_change_pp']['values']['operating_margin_change_pp'])
+    assert effects[0]<0 and all(v>0 for v in effects[1:])
+
+
+def test_unreconciled_expense_sign_or_amount_does_not_certify_expense_ratios():
+    a=actual_pdd()
+    expense=next(r for r in a['verified_field_records'] if r['field']=='sales_marketing_reported_quarter')
+    expense['values'][expense['field']]+=1
+    m=metrics(a)
+    assert 'sales_marketing_burden_pct' not in m
+    assert 'revenue_yoy_pct' in m and 'cash_conversion' in m
+
+
+@pytest.mark.parametrize('ident',['n9','n20','n100'])
+def test_numeric_ids_may_be_global_while_bindings_per_paragraph_stay_bounded(ident):
+    a=actual_pdd();p=candidate(a)
+    p['text']=p['text'].replace('{{n1}}','{{'+ident+'}}');p['numbers'][0]['id']=ident
+    assert explanation_projection([p],a)[0]
+
+
+def test_bound_numbers_cannot_smuggle_extra_unverified_advice_fields():
+    a=actual_pdd();p=candidate(a);p['numbers'][0].update(order_quantity=98765,limit_price=888)
+    accepted,_=explanation_projection([p],a)
+    assert accepted and set(accepted[0]['numbers'][0])=={'id','evidence_ref','field'}
+    assert '98765' not in str(accepted) and '888' not in str(accepted)
+
+
+def test_facts_only_recomputes_metric_cache_and_never_renders_hypothetical_prices():
+    from backend.services.market_data.output_policy import facts_only_result
+    a=actual_pdd();a['financial_research']={'records':[{'values':{'pe_ttm':98765}}],
+        'valuation_sensitivity':[{'hypothetical_price':88888}]}
+    current,facts,text=facts_only_result(a,at=AT)
+    assert '98765' not in str(current['financial_research']) and not current['financial_research']['valuation_sensitivity']
+    assert '88888' not in text and '估值敏感性' not in text
+    later=facts_only_result(a,at=AT.replace(year=2027))
+    assert not later[0]['financial_research']['records']  # historical facts do not renew current calculations

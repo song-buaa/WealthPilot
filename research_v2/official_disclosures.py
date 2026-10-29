@@ -33,8 +33,17 @@ LABELS = {
     'operating profit': ('operatingIncome', 'operating_income'),
     'income from operations': ('operatingIncome', 'operating_income'),
     'loss from operations': ('operatingIncome', 'operating_income'),
+    'income/(loss) from operations': ('operatingIncome', 'operating_income'),
     'net income attributable to ordinary shareholders': ('ordinaryNetIncome', 'net_income_available_to_ordinary_shareholders'),
     'net income attributable to the parent': ('parentNetIncome', 'net_income_attributable_parent'),
+    'costs of revenues': ('costOfRevenueReported', 'cost_of_revenue_as_reported'),
+    'total cost of sales': ('costOfRevenueReported', 'cost_of_revenue_as_reported'),
+    'sales and marketing expenses': ('salesMarketingReported', 'sales_marketing_as_reported'),
+    'general and administrative expenses': ('generalAdminReported', 'general_admin_as_reported'),
+    'research and development expenses': ('researchDevelopmentReported', 'research_development_as_reported'),
+    'income tax expenses': ('incomeTaxReported', 'income_tax_as_reported'),
+    'income tax (expense)/benefit': ('incomeTaxReported', 'income_tax_as_reported'),
+    'selling, general and administrative expenses': ('sellingGeneralAdminReported', 'combined_selling_general_admin_as_reported'),
 }
 
 
@@ -265,7 +274,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
             if label not in LABELS and not (label=='-diluted' and share_group):
                 continue
             key,basis=share_group if label=='-diluted' else LABELS[label]
-            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary'})):
+            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary',
+                    'costOfRevenueReported','salesMarketingReported','generalAdminReported','researchDevelopmentReported','incomeTaxReported','sellingGeneralAdminReported'})):
                 continue
             for col in range(1,len(row)):
                 header=_column_header(rows,ri,col)

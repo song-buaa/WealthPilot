@@ -24,10 +24,21 @@ LABELS={
     'net_margin_prior_pct':'可比历史季度合并净利率','operating_margin_prior_pct':'可比历史季度营业利润率',
     'net_margin_change_pp':'合并净利率同比变化','operating_margin_change_pp':'营业利润率同比变化',
     'free_cash_flow_quarter':'季度OCF减已核验CapEx',
+    'cost_of_revenue_reported_quarter':'报表营业成本（保留原符号）',
+    'sales_marketing_reported_quarter':'报表销售营销费用（保留原符号）',
+    'general_admin_reported_quarter':'报表管理费用（保留原符号）',
+    'research_development_reported_quarter':'报表研发费用（保留原符号）',
+    'income_tax_reported_quarter':'报表所得税项目（保留原符号）',
+    'selling_general_admin_reported_quarter':'报表销售及管理合并费用（保留原符号，不分拆）',
     'diluted_eps_ttm':'四季度稀释EPS合计','pe_ttm':'基础稀释TTM PE',
     'earnings_yield_pct':'基础TTM盈利收益率','observed_price':'历史收盘观察价格',
     'fx_rate':'财报币/上市币汇率',
 }
+for _stem,_label in {'cost_of_revenue':'营业成本率','sales_marketing':'销售营销费用率',
+                      'general_admin':'管理费用率','research_development':'研发费用率'}.items():
+    LABELS[_stem+'_burden_pct']=_label
+    LABELS[_stem+'_burden_prior_pct']='历史可比'+_label
+    LABELS[_stem+'_burden_change_pp']=_label+'同比变化'
 
 
 def _span(row):
@@ -129,6 +140,36 @@ def build(assessment):
             details=dict(formula='quarter OCF - verified positive CapEx; not all shareholder-distributable cash'))
     else:
         missing.append('QUARTER_FCF_CAPEX_ZERO_MISSING_OR_PERIOD_UNVERIFIED')
+    # Expense directions are not guessed from a negative cell: only a complete
+    # exact operating-profit bridge certifies deduction magnitudes/ratios.
+    expense_fields=['cost_of_revenue_reported_quarter','sales_marketing_reported_quarter',
+                    'general_admin_reported_quarter','research_development_reported_quarter']
+    expense_ratios={}
+    if latest:
+        try:prior_end=date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()
+        except ValueError:prior_end=None
+        for end in (latest,prior_end):
+            rev=unique('revenue_quarter',end);op=unique('operating_income_quarter',end,rev[0]['currency']) if rev else None
+            costs=[unique(f,end,rev[0]['currency']) if rev else None for f in expense_fields]
+            if not (rev and op and all(costs) and rev[0]['values']['revenue_quarter']>0):continue
+            if not all(_same_span(rev[0],row[0]) for row in [op,*costs]):continue
+            reported=[row[0]['values'][field] for field,row in zip(expense_fields,costs)]
+            if not all(v<=0 for v in reported) or rev[0]['values']['revenue_quarter']+sum(reported)!=op[0]['values']['operating_income_quarter']:continue
+            bridge_refs=rev[1]+op[1]+[ref for row in costs for ref in row[1]]
+            for field,row,value in zip(expense_fields,costs,reported):
+                key=field.replace('_reported_quarter','')+'_burden_pct'
+                ratio=-value/rev[0]['values']['revenue_quarter']*100
+                metric=add(key if end==latest else key.replace('_pct','_prior_pct'),ratio,bridge_refs,period=end,unit='percent',
+                    details=dict(formula='-reported deduction/revenue*100; revenue + four deductions = operating income',reported_signed_value=value))
+                if metric:metric['historical_only']=end!=latest
+                expense_ratios[field,end]=(ratio,bridge_refs)
+        for field in expense_fields:
+            now=expense_ratios.get((field,latest));before=expense_ratios.get((field,prior_end))
+            current=unique(field,latest);prior=unique(field,prior_end)
+            if (now and before and current and prior and _same_span(current[0],prior[0],prior_year=True)
+                    and current[0]['currency']==prior[0]['currency'] and current[0]['accounting_basis']==prior[0]['accounting_basis']):
+                add(field.replace('_reported_quarter','')+'_burden_change_pp',now[0]-before[0],now[1]+before[1],
+                    period=latest,unit='percentage_points',details=dict(comparison_period=prior_end,formula='current expense burden - prior comparable burden'))
     # Original AV statement arithmetic also serves SEC-verified components.
     # Missing fields stay None rather than borrowing incompatible net income.
     income_rows=[];cash_rows=[];component_refs={};component_rows={}
