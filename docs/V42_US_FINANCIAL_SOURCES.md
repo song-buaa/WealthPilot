@@ -89,3 +89,5 @@ Final test/CI results are recorded in the PR and private delivery evidence under
 PDD夹具为公开SEC text/plain页面的完整浏览器DOM UTF-8表示，包含真实SEC header与两份原文文件，非合成envelope；manifest保留抓取表现形式、长度与哈希。原始HTTP字节哈希及历史网络完成时间UNKNOWN，测试明确使用冻结离线处理时钟，不补造生产时钟。
 
 如下一轮需核实美团真实缺口，最小只读提取为：从已保存的run ddfd5d1c7c2e4e80bae4d147ab914d11结果/私有记录导出technical.source、provenance、series.day的date/OHLCV、day/week的范围/parameters/indicators/资格，不含账户/持仓/成本。若记录不存在即注明，不启动新研究、券商连接、同步或Provider请求。PDD对应run ab08ede8cd09479eb6ddf9d31e672c04也不重新执行。
+
+旧冻结LI/PDD周线含窗口首部半周，按当前规则重核时旧周线指标保持拒绝，日线仍合格；使用同一原始日线经原生产入口重算后，日周线均合格。回归不改原始夹具、不沿用错误周线指标；已有缓存若仍含旧聚合，应等待原缓存到期或正常进程更新，不修改生产缓存或事实。

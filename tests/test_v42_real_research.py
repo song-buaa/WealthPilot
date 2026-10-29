@@ -156,10 +156,26 @@ def test_li_official_revenue_conflict_retains_both_observations(av_offline, unve
 
 @pytest.mark.parametrize('symbol,valid', [('LI:US',True),('PDD:US',True),('3690:HK',False)])
 def test_frozen_real_technical_completeness_is_not_relaxed(symbol, valid):
+    from dataclasses import asdict
     from datetime import datetime
     from backend.services.market_data.evidence import assess
     source = frozen('sources-' + symbol.replace(':','-') + '.json')
-    a = assess({'technical':source['technical']}, symbol=symbol, at=datetime.fromisoformat(source['finished_at']))
+    from backend.services.market_data.technical_evidence import from_bars
+    from backend.services.execution_plan.kline_provider import KlineResult
+    import pandas as pd
+    at = datetime.fromisoformat(source['finished_at'])
+    original = source['technical']
+    legacy = assess({'technical':original}, symbol=symbol, at=at)
+    legacy_technical = next(row for row in legacy['records'] if row['kind'] == 'technical')
+    if valid:
+        # Old frozen US series included a partial first week. Do not certify
+        # those old indicators or alter the fixture; the original daily facts
+        # remain valid and the current native producer rebuilds complete weeks.
+        assert legacy_technical['period_quality']['day']['quality'] == 'valid'
+        assert legacy_technical['period_quality']['week']['quality'] == 'unknown'
+        assert 'OHLCV_OR_CALENDAR_MISMATCH' in legacy_technical['period_quality']['week']['issues']
+    rebuilt = from_bars(symbol, KlineResult(pd.DataFrame(original['series']['day']['bars']), original['source']), at=at)
+    a = assess({'technical':asdict(rebuilt)}, symbol=symbol, at=at)
     technical = next(row for row in a['records'] if row['kind'] == 'technical')
     assert (technical['quality'] == 'valid') is valid
     assert a['qualification']['L1']['allowed']
