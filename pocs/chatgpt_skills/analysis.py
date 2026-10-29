@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 import uuid
 from copy import deepcopy
 from app.analysis_runtime import budgeted_analysis, current as runtime_budget
@@ -243,6 +244,8 @@ def retain_facts(result, assessment, *, asset_view=None, missing_stages=None):
 def deadline_result(value):
     """Late synchronous completion cannot be accepted as timely professional work."""
     result=AnalysisResult.model_validate(value)
+    if result.professional_result.get('analysis_result',{}).get('mode')=='facts_only' and 'ANALYSIS_TIMEOUT' in result.issues:
+        return result.model_dump(mode='json')
     result.status='unavailable'
     result.conclusion='研究期限已到，专业结果未按时交付；未创建交易。'
     result.professional_result={}
@@ -351,9 +354,21 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 result.status='ok';captured_evidence(result,captured,portfolio_id)
                 result.professional_analysis_complete = result.status != 'unavailable'
         except TimeoutError:
+            result.status='unavailable'
+            result.professional_analysis_complete=False
+            result.issues.append('ANALYSIS_TIMEOUT')
+        except asyncio.CancelledError:
+            budget=runtime_budget()
+            if not async_l1 or budget is None or time.monotonic()<budget.deadline:raise
+            # The absolute outer deadline can interrupt async-generator cleanup
+            # after the inner work timeout. Preserve its already-captured facts.
+            result.status='unavailable'
+            result.professional_analysis_complete=False
             result.issues.append('ANALYSIS_TIMEOUT')
         except Exception:
             if not async_l1:raise
+            result.status='unavailable'
+            result.professional_analysis_complete=False
             result.issues.append('PROFESSIONAL_STAGE_FAILURE')
         finally:
             decision_service.clear_session(conversation)

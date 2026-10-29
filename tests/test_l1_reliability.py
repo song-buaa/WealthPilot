@@ -360,3 +360,44 @@ def test_valid_SDK_timeout_objects_and_none_are_deadline_clamped():
         timeout=request_options(SOL,timeout=httpx.Timeout(None))['timeout']
         assert timeout.read==180 and timeout.connect==10
     assert isinstance(request_options(SOL,timeout=httpx.Timeout(60))['timeout'],httpx.Timeout)
+
+
+def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db,monkeypatch):
+    from pocs.chatgpt_skills import analysis
+    from backend.services import decision_service_v3 as svc
+    receipt=facts()
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return AT
+    monkeypatch.setattr(analysis,'datetime',Clock)
+    async def stream(*a,**kw):
+        kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
+        try:await asyncio.sleep(10)
+        finally:await asyncio.sleep(.2)  # outer deadline interrupts this cleanup
+        yield
+    monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
+    async def run():
+        with budget_context(Policy(total_seconds=.2)):
+            return await analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True)
+    result=asyncio.run(run())
+    assert result['status']=='partial' and not result['professional_analysis_complete']
+    assert result['professional_result']['analysis_result']['mode']=='facts_only'
+    assert 'ANALYSIS_TIMEOUT' in result['issues']
+    assert result['evidence']['qualified_facts']
+
+
+def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,monkeypatch):
+    from pocs.chatgpt_skills import analysis
+    from backend.services import position_analysis
+    receipt=facts()
+    monkeypatch.setattr(position_analysis,'prepare',lambda *a,**kw:receipt)
+    monkeypatch.setattr(analysis,'captured_evidence',lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('private assembly error')))
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return AT
+    monkeypatch.setattr(analysis,'datetime',Clock)
+    result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
+    assert result['status']=='partial' and not result['professional_analysis_complete']
+    assert result['professional_result']['analysis_result']['mode']=='facts_only'
+    assert 'PROFESSIONAL_STAGE_FAILURE' in result['issues']
+    assert 'private assembly' not in json.dumps(result)
