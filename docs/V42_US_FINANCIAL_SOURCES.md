@@ -4,6 +4,8 @@
 
 从main f0be1b1复用原SEC/AV、Evidence、PEER和Output Policy。独立核验的历史季度单列为historical-only引用，不冒充最新事实，不改变现有150/450日当前字段及L2–L4门槛。新增可比季度增长、利润率、现金转化及输入完整时的基础估值，TTM窗口/求和继续复用原AV纯计算函数；不同会计口径、币种、期间或冲突不拼接。披露中明确的ADS diluted EPS保持每ADS单位，不把集团利润或普通股EPS当作上市单位EPS。无法核验股份、换算、FX、净现金时分别UNKNOWN。
 
+普通股股东收益（可能受优先股分配影响）与归母净利润单列，不因PDD本期数字相同而认证为同一口径。只支持明确three months ended且实际日历季度末的表格起点语义；其他财年起止依原XBRL显式上下文，无法匹配则比较UNKNOWN。保留既有零CapEx不认证FCF的产品政策。用户否定减仓/退出或当前有冲突意图时不会恢复旧退出假设；仅传review_date也不会用默认objective覆盖当前问题。
+
 原Expressing扩展合同允许模型通过结构化数值绑定引用owner计算结果，最终由Output Policy填入带字段标签/期间/币种的数值，不开放任意数字。原ExitPlan增加明确research-only的目标/比例/条件/观察区间/情景及用户复核期限；用户声明不变为实时持仓或服务端正式目标。无新Agent、Schema、财务数据owner、估值平台或记忆库；PR56生命周期、E1、资产及交易不变。开发离线/公开数据证据与内容质量提升分开，8分目标须部署后原生报告评估。
 
 ## Scope and owner boundaries

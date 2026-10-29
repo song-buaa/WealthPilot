@@ -14,10 +14,12 @@ from backend.services.market_data.av_fundamentals_service import _quarter_window
 LABELS={
     'revenue_quarter':'季度收入','net_income_quarter':'季度合并净利润',
     'net_income_attributable_parent_quarter':'季度归母净利润',
+    'net_income_available_to_ordinary_shareholders_quarter':'季度归属于普通股股东的收益',
     'operating_income_quarter':'季度营业利润','operating_cash_flow_quarter':'季度经营现金流',
     'diluted_eps_ads_quarter':'季度稀释每ADS收益','diluted_eps_ordinary_quarter':'季度稀释普通股收益',
     'revenue_yoy_pct':'季度收入同比','net_income_yoy_pct':'季度合并净利润同比',
     'parent_income_yoy_pct':'季度归母净利润同比','net_margin_pct':'季度合并净利率',
+    'ordinary_income_yoy_pct':'季度普通股股东收益同比',
     'operating_margin_pct':'季度营业利润率','cash_conversion':'经营现金流/合并净利润',
     'net_margin_prior_pct':'可比历史季度合并净利率','operating_margin_prior_pct':'可比历史季度营业利润率',
     'net_margin_change_pp':'合并净利率同比变化','operating_margin_change_pp':'营业利润率同比变化',
@@ -77,7 +79,8 @@ def build(assessment):
     current=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
     latest=current[0] if current else None
     for field,growth in [('revenue_quarter','revenue_yoy_pct'),('net_income_quarter','net_income_yoy_pct'),
-                         ('net_income_attributable_parent_quarter','parent_income_yoy_pct')]:
+                         ('net_income_attributable_parent_quarter','parent_income_yoy_pct'),
+                         ('net_income_available_to_ordinary_shareholders_quarter','ordinary_income_yoy_pct')]:
         row=unique(field,latest)
         if not row:missing.append(field+': CURRENT_EXACT_BASIS_UNKNOWN');continue
         r,refs=row;value=number(r['values'][field]);cur=r['currency']
@@ -118,10 +121,14 @@ def build(assessment):
             ocf[1]+income[1],period=latest,details=dict(formula='OCF/consolidated net income; negative OCF is retained'))
     cash=unique('operating_cash_flow_quarter',latest)
     capex=unique('capital_expenditures_quarter',latest,cash[0]['currency']) if cash else None
+    # Product's retained zero-CapEx policy: zero still needs independent absence
+    # semantics, not merely a vendor/statement zero. Do not fabricate FCF from it.
     if cash and capex and _same_span(cash[0],capex[0]) and capex[0]['values']['capital_expenditures_quarter']>0:
         add('free_cash_flow_quarter',cash[0]['values']['operating_cash_flow_quarter']-capex[0]['values']['capital_expenditures_quarter'],
             cash[1]+capex[1],period=latest,currency=cash[0]['currency'],unit='currency_units',
             details=dict(formula='quarter OCF - verified positive CapEx; not all shareholder-distributable cash'))
+    else:
+        missing.append('QUARTER_FCF_CAPEX_ZERO_MISSING_OR_PERIOD_UNVERIFIED')
     # Original AV statement arithmetic also serves SEC-verified components.
     # Missing fields stay None rather than borrowing incompatible net income.
     income_rows=[];cash_rows=[];component_refs={};component_rows={}

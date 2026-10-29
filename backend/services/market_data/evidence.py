@@ -274,6 +274,7 @@ def record(kind, value, *, at, symbol=None):
 _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"operating_cash_flow",
                          "capitalExpenditures":"positive_capital_cash_outflow", "netIncome":"consolidated_net_income",
                          "operatingIncome":"operating_income", "parentNetIncome":"net_income_attributable_parent",
+                         "ordinaryNetIncome":"net_income_available_to_ordinary_shareholders",
                          "dilutedEPSADS":"diluted_eps_ads", "dilutedEPSOrdinary":"diluted_eps_ordinary"}
 
 
@@ -624,6 +625,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     quarter_fields = {"totalRevenue":"revenue_quarter", "netIncome":"net_income_quarter",
                       "operatingCashflow":"operating_cash_flow_quarter", "capitalExpenditures":"capital_expenditures_quarter",
                       "operatingIncome":"operating_income_quarter", "parentNetIncome":"net_income_attributable_parent_quarter",
+                      "ordinaryNetIncome":"net_income_available_to_ordinary_shareholders_quarter",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
     for obs in quarter_observations:

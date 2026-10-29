@@ -33,7 +33,8 @@ LABELS = {
     'operating profit': ('operatingIncome', 'operating_income'),
     'income from operations': ('operatingIncome', 'operating_income'),
     'loss from operations': ('operatingIncome', 'operating_income'),
-    'net income attributable to ordinary shareholders': ('parentNetIncome', 'net_income_attributable_parent'),
+    'net income attributable to ordinary shareholders': ('ordinaryNetIncome', 'net_income_available_to_ordinary_shareholders'),
+    'net income attributable to the parent': ('parentNetIncome', 'net_income_attributable_parent'),
 }
 
 
@@ -221,6 +222,15 @@ def _quarterly_cashflow_corroboration(soup):
     return found
 
 
+def _calendar_quarter_start(header,end):
+    # A date alone is insufficient. This supported layout explicitly states a
+    # three-calendar-month duration ending at a calendar-quarter boundary.
+    if (not re.search(r'three months ended',header,re.I) or re.search(r'(six|nine|twelve) months|year ended',header,re.I)
+            or end[5:] not in {'03-31','06-30','09-30','12-31'}):return None
+    d=datetime.strptime(end,'%Y-%m-%d').date()
+    return d.replace(month=d.month-2,day=1).isoformat()
+
+
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]
@@ -255,7 +265,7 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
             if label not in LABELS and not (label=='-diluted' and share_group):
                 continue
             key,basis=share_group if label=='-diluted' else LABELS[label]
-            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary'})):
+            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary'})):
                 continue
             for col in range(1,len(row)):
                 header=_column_header(rows,ri,col)
@@ -274,6 +284,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                     except ValueError:continue
                 if end[5:] not in {'03-31','06-30','09-30','12-31'} or end>published:
                     continue
+                start=_calendar_quarter_start(header,end)
+                if not start:continue
                 value=_cell_amount(rows,ri,col)
                 if value is None or not value.is_finite():
                     continue
@@ -298,7 +310,7 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                 observations.append(dict(source_field=key,value=float(value),reported_value=float(reported_value),
                     reported_unit_scale=scales[0],sign_normalization=normalization,currency=currency,unit='currency_units',
                     unit_scale=1 if eps else scales[0],period_basis='quarterly',fiscal_period_end=end,accounting_basis=basis,
-                    fiscal_period_start=datetime.strptime(end,'%Y-%m-%d').date().replace(month=int(end[5:7])-2,day=1).isoformat(),
+                    fiscal_period_start=start,
                     period_start_basis='explicit three months ended calendar-quarter column header',
                     source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
                 if eps:

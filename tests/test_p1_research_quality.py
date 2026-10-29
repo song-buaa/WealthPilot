@@ -32,8 +32,8 @@ def test_real_original_comparatives_remain_historical_without_granting_L3():
     assert not a['qualification']['L3']['allowed'] and not a['qualification']['L4']['allowed']
     eps=next(r for r in a['verified_field_records'] if r['field']=='diluted_eps_ads_quarter')
     assert eps['values'][eps['field']]==18.45 and eps['ordinary_shares_per_ads']==4
-    parent=next(r for r in a['verified_field_records'] if r['field']=='net_income_attributable_parent_quarter')
-    assert parent['accounting_basis']=='net_income_attributable_parent'
+    parent=next(r for r in a['verified_field_records'] if r['field']=='net_income_available_to_ordinary_shareholders_quarter')
+    assert parent['accounting_basis']=='net_income_available_to_ordinary_shareholders'
     assert 'pe_ttm' not in m and 'free_cash_flow_ttm' not in m
 
 
@@ -247,3 +247,41 @@ def test_LI_quarter_cash_shortfall_uses_real_OCF_and_verified_positive_capex():
     assert m['free_cash_flow_quarter']['values']['free_cash_flow_quarter']==-1300765000
     assert len(m['free_cash_flow_quarter']['evidence_refs'])==2
     assert 'cash_conversion' not in m  # loss-denominator ratio is not a quality score
+
+
+@pytest.mark.parametrize('question,expected',[
+    ('不要减仓，继续持有','hold'),('不要退出，继续持有','hold'),
+    ('不再长期持有，决定逐步退出','exit'),('考虑减仓，也可能继续持有','evaluate'),
+    ('不想退出','evaluate')])
+def test_current_negation_and_ambiguity_never_resurrect_old_exit(question,expected):
+    intent=research_intent(dict(research_question=question,research_history=[dict(role='user',content='我决定逐步退出')]))
+    assert intent['objective']==expected
+
+
+def test_review_date_only_does_not_supply_a_default_objective_over_user_question():
+    from pocs.chatgpt_skills.analysis import AnalysisRequest
+    req=AnalysisRequest(question='我决定逐步退出',research_context={'review_date':'2026-11-20'})
+    intent=research_intent(dict(research_context=req.research_context.model_dump(exclude_unset=True),research_question=req.question))
+    assert intent['objective']=='exit' and intent['review_date']=='2026-11-20'
+
+
+def test_supported_calendar_quarter_start_requires_explicit_duration_and_boundary():
+    from research_v2.official_disclosures import _calendar_quarter_start
+    assert _calendar_quarter_start('Three months ended June 30, 2026','2026-06-30')=='2026-04-01'
+    assert _calendar_quarter_start('Three months ended September 28, 2026','2026-09-28') is None
+    assert _calendar_quarter_start('Three months ended January 31, 2026','2026-01-31') is None
+    assert _calendar_quarter_start('Year ended June 30, 2026','2026-06-30') is None
+
+
+def test_zero_capex_keeps_retained_unknown_policy_not_false_FCF():
+    from tests.test_sec_real_original import parse,AT as LI_AT
+    row=parse();a=assess({},symbol='LI:US',research=[row],at=LI_AT,disclosure_verifier={row['record_id']:row}.get)
+    next(r for r in a['verified_field_records'] if r['field']=='capital_expenditures_quarter')['values']['capital_expenditures_quarter']=0
+    assert 'free_cash_flow_quarter' not in metrics(a)
+
+
+def test_PDD_ordinary_shareholder_income_never_asserts_parent_equivalence():
+    a=actual_pdd()
+    assert 'parent_income_yoy_pct' not in metrics(a)
+    assert 'ordinary_income_yoy_pct' in metrics(a)
+    assert not any(r.get('accounting_basis')=='net_income_attributable_parent' for r in a['verified_field_records'])

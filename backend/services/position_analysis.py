@@ -76,7 +76,7 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     context["security_inputs"]=[r for r in rows if r.get("id") in member_ids]
     assessment["allocation_context"]=context
     assessment['research_intent']=research_intent(options)
-    if assessment['research_intent']['objective']=='evaluate':
+    if assessment['research_intent']['objective']=='evaluate' and 'objective' not in assessment['research_intent']['sources']:
         formal=context.get('confirmed_stage_targets') or {}
         goal=next((row for row in formal.get('issuers',[]) if row['issuer_id']==issuer_id),{})
         if goal.get('direction')=='gradual_exit':
@@ -138,15 +138,24 @@ def research_intent(options):
     provided=options.get('research_context')
     value=ResearchIntent.model_validate(provided or {}).model_dump()
     sources={k:'current_request_assumption' for k,v in value.items() if v not in (None,[], 'evaluate')}
+    resolved=bool(provided and 'objective' in provided)
+    if resolved:sources['objective']='current_request_assumption'
     turns=[('current_request',options.get('research_question',''))]
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
         if not isinstance(text,str):continue
-        if value['objective']=='evaluate':
-            if re.search(r'(?:逐步|长期|全部|分批|决定).{0,8}退出|不再.{0,8}核心|exit all|gradual exit',text,re.I):
-                value['objective']='exit';sources['objective']=source if re.search(r'决定|目标|明确|不再',text) else 'system_interpretation_of_'+source
-            elif re.search(r'减仓|减持|reduce',text,re.I):value['objective']='reduce';sources['objective']=source
-            elif re.search(r'继续持有|长期持有',text):value['objective']='hold';sources['objective']=source
+        if not resolved:
+            negated=r'(?:不要|不想|不应|不打算|暂不|不再|不)(?:继续|逐步|长期|全部|分批)?(?:减仓|减持|退出|持有)'
+            cleaned=re.sub(negated,'',text)
+            choices=[]
+            if re.search(r'(?:逐步|长期|全部|分批|决定).{0,8}退出|不再.{0,8}核心|exit all|gradual exit',cleaned,re.I):choices.append('exit')
+            if re.search(r'减仓|减持|reduce',cleaned,re.I):choices.append('reduce')
+            if re.search(r'继续持有|长期持有',cleaned):choices.append('hold')
+            if choices or re.search(negated,text):
+                resolved=True
+                strong_exit=re.search(r'(?:长期目标|决定|目标).{0,8}退出',cleaned)
+                value['objective']='exit' if strong_exit else choices[0] if len(choices)==1 else 'evaluate'
+                sources['objective']=source if strong_exit else 'system_interpretation_of_'+source
         if not value['review_date']:
             matches=re.findall(r'(20\d{2})[-年](\d{1,2})[-月](\d{1,2})(?:日)?(?=.{0,12}(?:复核|复盘|review))',text,re.I)
             matches+=re.findall(r'(?:复核|复盘|review)[^。\n]{0,10}?(20\d{2})[-年](\d{1,2})[-月](\d{1,2})(?:日)?',text,re.I)

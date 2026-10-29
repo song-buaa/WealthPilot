@@ -93,7 +93,7 @@ def test_pdd_facts_only_preserves_clocks_and_exact_fields_without_decision():
     kept=facts_only_result(original,at=AT)
     assert kept
     a,rows,text=kept
-    assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_attributable_parent_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'}
+    assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_available_to_ordinary_shareholders_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter'}
     assert all(r['published_at']=='2026-08-25T07:20:02-04:00' for r in rows if r['kind']=='fundamental_field')
     assert all(r['published_at'] is None and r['evidence_refs'] for r in rows if r['kind']=='research_metric')  # calculations are not filings
     assert '专业推断未完成' in text and '112358000000' in text
