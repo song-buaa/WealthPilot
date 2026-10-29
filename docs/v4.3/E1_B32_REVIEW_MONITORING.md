@@ -36,3 +36,5 @@ python -m backend.services.investment_thesis.monitoring_cli --store <e1.db> --po
 定向测试覆盖：未到期/到期、重复扫描、处理后抑制、延期、取消、关闭、版本推进、scope隔离、重启持久去重；正式事件精确匹配、不匹配、未来、缺身份/哈希及同经济事件去重；原Thesis/Review前后完全一致。测试入口：[B3-2](../../tests/test_e1_b32_monitoring.py)、[原E1](../../tests/test_investment_thesis.py)、[保存桥接](../../tests/test_e1_save_bridge.py)。
 
 E1-I1线上TEST ONLY Thesis仍不构成真实投资判断。B2三例PEER仍为partial，真实仓位`CANNOT_QUANTIFY`、个人上限`UNKNOWN`。本轮不迁移B2、不修复这些缺口、不启用自然调度、真实事件拉取或生产提醒。
+
+PM Review后的最终集成、v1→v2迁移、真实到期验收以及SEC/通知最小后续安排见 [E1最终发布计划](E1_FINAL_RELEASE_AND_ACCEPTANCE.md)。

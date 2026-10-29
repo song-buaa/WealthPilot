@@ -135,6 +135,8 @@ E1-I1已于2026-10-29完成私人ChatGPT线上真人预览确认保存、只读�
 
 B3-2本地候选新增 [ReviewMonitorStore](../backend/services/investment_thesis/monitoring.py) 和 [手动CLI](../backend/services/investment_thesis/monitoring_cli.py)：显式迁移同一私人E1库后，绑定当前Thesis revision及已完成Review的复核时间/正式事件条件，生成确定性去重的待办收据。冻结SEC fixture验证发行人、发布时间/可知时间、原件哈希及同一经济事件去重；版本推进、关闭、取消、未来/身份不明事件不触发。扫描不运行PEER/Provider，不写Thesis/Review，不通知或交易。生产调度OFF、主动通知`NOT_WIRED`；测试见 [B3-2回归](../tests/test_e1_b32_monitoring.py)，启用边界见 [B3-2记录](v4.3/E1_B32_REVIEW_MONITORING.md)。
 
+PM Review后的单PR、Mac Mini安装、E1 v1→v2迁移、到期实测与最小SEC/通知路径统一见 [E1最终发布计划](v4.3/E1_FINAL_RELEASE_AND_ACCEPTANCE.md)。该计划不代表生产授权，初始自动扫描继续OFF。
+
 ### 4.2 第一轮质量修正（开发候选）
 
 复用原 [SEC/披露 Owner](../research_v2/sec_disclosures.py)、[表格解析](../research_v2/official_disclosures.py)、[周期证据](../backend/services/market_data/technical_evidence.py)及 [Skill 工具](../backend/graph/tools.py)。通用正式附件标题/断行字段可进入原 Evidence Registry；日周线按各自完整窗口校验，真实缺口给出日期；默认纪律与关键词信号不再声明个人纪律或已验证基本面 PASS。原风控数值、PEER 和交易权限不变。范围与未恢复项见[来源说明](V42_US_FINANCIAL_SOURCES.md#第一轮集中质量修正-p0)。HK 官方财报/半年度合同仍缺失，不将 AKShare 公司概况当作财务；生产实际 K 线缺口须取得原日期集再核验。
