@@ -1,10 +1,11 @@
 """Optional WealthPilot 4.3 E1 read projection; never executes analysis or writes."""
 import sqlite3
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool
 from mcp.types import ToolAnnotations
 from mcp.server.mcpserver.exceptions import ToolError
 
 from backend.services.investment_thesis.store import ThesisStore
+from backend.services.investment_thesis.monitoring import ReviewMonitorStore
 
 
 class ThesisReadResult(BaseModel):
@@ -13,6 +14,21 @@ class ThesisReadResult(BaseModel):
     items: list[dict] = Field(default_factory=list)
     execution_authorized: bool = False
     scope: str = "Private historical research records; not current holdings or trading qualification"
+
+
+class DueReviewQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    as_of: AwareDatetime
+    limit: int = Field(default=20, ge=1, le=50, strict=True)
+    after_event_key: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    known_event_keys: list[str] = Field(default_factory=list, max_length=100)
+
+
+class DueReviewResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    schema_version: str
+    items: list[dict]
+    execution_authorized: bool = False
 
 
 def register_read_tools(server, path, portfolio_id, security_meta):
@@ -40,6 +56,15 @@ def register_read_tools(server, path, portfolio_id, security_meta):
         description="WealthPilot 4.3 E1: read persisted manual reviews, original PEER result copies, restrictions and version differences. A synthetic fixture or pasted copy never becomes current professional verification. RUNNING/FAILED records must not automatically trigger a new paid analysis. No writes, providers, prepare, account refresh or orders; E1 records survive the original job TTL and restart.")
     def get_investment_reviews(thesis_id: str, review_id: str | None = None) -> ThesisReadResult:
         return read(lambda: store.reviews(thesis_id, review_id))
+
+    @server.tool(meta=security_meta, annotations=annotations,
+        description="WealthPilot 4.3 E1: read bounded due/official-event review tasks for the fixed private portfolio scope. Stable event_key values support client-side at-least-once reminder dedup; pass keys already shown in known_event_keys. This tool does not scan SEC, change task state, run PEER, save research, notify, refresh accounts or trade. PENDING and due DEFERRED tasks are reminders to re-read the immutable thesis and request explicit confirmation before any new Review save.")
+    def get_due_investment_reviews(request: DueReviewQuery) -> DueReviewResult:
+        try:
+            result = ReviewMonitorStore(store).due_page(**request.model_dump())
+            return DueReviewResult.model_validate(result)
+        except (ValueError, OSError, sqlite3.Error):
+            raise ToolError("E1_DUE_REVIEWS_UNAVAILABLE") from None
 
 
 class ResearchWriteResult(BaseModel):

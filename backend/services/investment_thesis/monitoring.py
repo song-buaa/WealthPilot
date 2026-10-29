@@ -108,6 +108,34 @@ class TaskTransition(Record):
         return self
 
 
+class SourceScanReceipt(Record):
+    source: Literal["SEC"] = "SEC"
+    status: Literal[
+        "WATERMARK_INITIALIZED", "OK", "NO_NEW_EVENTS", "SOURCE_UNAVAILABLE",
+        "IDENTITY_UNRESOLVED", "PARTIAL_SOURCE_FAILURE",
+    ]
+    as_of: AwareDatetime
+    cik: str | None = Field(default=None, pattern=r"^\d{10}$")
+    directory_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    submissions_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    directory_fetched_at: AwareDatetime | None = None
+    submissions_fetched_at: AwareDatetime | None = None
+    known_accessions: list[str] = Field(default_factory=list, max_length=200)
+    new_accessions: list[str] = Field(default_factory=list, max_length=20)
+    eligible_event_ids: list[str] = Field(default_factory=list, max_length=20)
+    issues: list[str] = Field(default_factory=list, max_length=30)
+    requests_used: int = Field(default=0, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def accession_contract(self):
+        values = [*self.known_accessions, *self.new_accessions]
+        if any(not re.fullmatch(r"\d{10}-\d{2}-\d{6}", value) for value in values):
+            raise ValueError("E1_SEC_ACCESSION_INVALID")
+        if len(set(self.known_accessions)) != len(self.known_accessions):
+            raise ValueError("E1_SEC_WATERMARK_DUPLICATE")
+        return self
+
+
 def _read_payload(row):
     if row is None:
         return None
@@ -142,6 +170,15 @@ class ReviewMonitorStore:
         return _read_payload(db.execute(
             "SELECT * FROM e1_review_task_events WHERE portfolio_id=? AND event_key=? "
             "ORDER BY event_index DESC LIMIT 1", (self.store.portfolio_id, event_key)).fetchone())
+
+    def latest_monitors(self):
+        """Read current monitor policies for this fixed portfolio scope."""
+        with self.store.connection() as db:
+            self._schema(db)
+            rows = db.execute("SELECT m.* FROM e1_monitor_events m WHERE m.portfolio_id=? AND m.event_index=("
+                "SELECT MAX(x.event_index) FROM e1_monitor_events x WHERE x.portfolio_id=m.portfolio_id "
+                "AND x.monitor_id=m.monitor_id) ORDER BY m.monitor_id", (self.store.portfolio_id,)).fetchall()
+            return [_read_payload(row) for row in rows]
 
     @staticmethod
     def _request(db, portfolio_id, request_id, fingerprint, table):
@@ -215,6 +252,33 @@ class ReviewMonitorStore:
             payload = {**current, "state": "CANCELLED", "event_index": current["event_index"] + 1,
                        "changed_at": changed_at.isoformat(), "change_reason": reason,
                        "execution_authorized": False, "notification_status": "NOT_WIRED"}
+            payload.pop("sha256", None)
+            db.execute("INSERT INTO e1_monitor_events VALUES(?,?,?,?,?,?,?)",
+                (self.store.portfolio_id, monitor_id, payload["event_index"], request_id, fingerprint,
+                 canonical(payload), digest(payload)))
+            return {**payload, "sha256": digest(payload)}
+
+    def record_source_scan(self, monitor_id, raw, request_id):
+        """Append one bounded SEC watermark/run receipt without touching research rows."""
+        receipt = SourceScanReceipt.model_validate(raw)
+        if not isinstance(monitor_id, str) or not re.fullmatch(ID, monitor_id):
+            raise ValueError("E1_MONITOR_SOURCE_SCAN_INVALID")
+        with self.store.connection(write=True) as db:
+            self._schema(db)
+            fingerprint = digest({"operation": "SOURCE_SCAN", "monitor_id": monitor_id,
+                                  "receipt": receipt.model_dump(mode="json")})
+            prior = self._request(db, self.store.portfolio_id, request_id, fingerprint, "e1_monitor_events")
+            if prior:
+                return prior
+            current = self._latest_monitor(db, monitor_id)
+            if not current:
+                raise ValueError("E1_MONITOR_NOT_FOUND")
+            if current["state"] != "ACTIVE":
+                raise ValueError("E1_MONITOR_NOT_ACTIVE")
+            payload = {**current, "event_index": current["event_index"] + 1,
+                "source_scan": receipt.model_dump(mode="json"),
+                "changed_at": receipt.as_of.isoformat(),
+                "execution_authorized": False, "notification_status": "NOT_WIRED"}
             payload.pop("sha256", None)
             db.execute("INSERT INTO e1_monitor_events VALUES(?,?,?,?,?,?,?)",
                 (self.store.portfolio_id, monitor_id, payload["event_index"], request_id, fingerprint,
@@ -359,6 +423,28 @@ class ReviewMonitorStore:
             values = [_read_payload(row) for row in rows]
         return [v for v in values if v["state"] == "PENDING"
                 or v["state"] == "DEFERRED" and datetime.fromisoformat(v["defer_until"]) <= as_of]
+
+    def due_page(self, *, as_of, limit=20, after_event_key=None, known_event_keys=()):
+        """Pure read projection for ChatGPT; stable keys support at-least-once reminders."""
+        as_of = _aware(as_of)
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("E1_DUE_LIMIT_INVALID")
+        if after_event_key is not None and not re.fullmatch(r"^[a-f0-9]{64}$", after_event_key):
+            raise ValueError("E1_DUE_CURSOR_INVALID")
+        known = set(known_event_keys)
+        if len(known) > 100 or any(not isinstance(k, str) or not re.fullmatch(r"^[a-f0-9]{64}$", k) for k in known):
+            raise ValueError("E1_DUE_KNOWN_KEYS_INVALID")
+        values = self.actionable(as_of=as_of)
+        values = [v for v in values if after_event_key is None or v["event_key"] > after_event_key]
+        already_seen = [v["event_key"] for v in values if v["event_key"] in known]
+        fresh = [v for v in values if v["event_key"] not in known]
+        page = fresh[:limit]
+        return dict(schema_version="wealthpilot.4.3.e1.due-reviews.v1", as_of=as_of.isoformat(),
+            items=page, next_cursor=page[-1]["event_key"] if len(fresh) > limit and page else None,
+            has_more=len(fresh) > limit, unchanged_event_keys=already_seen[:100],
+            actionable_count=len(values), new_count=len(fresh), notification_status="NOT_WIRED",
+            delivery_semantics="AT_LEAST_ONCE_STABLE_EVENT_KEY",
+            research_records_written=0, analysis_run=False, execution_authorized=False)
 
     def counts(self):
         with self.store.connection() as db:

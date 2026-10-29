@@ -125,7 +125,7 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 
 Owner：WP [investment_thesis](../backend/services/investment_thesis/service.py)；[store/types](../backend/services/investment_thesis/store.py)、[CLI](../backend/services/investment_thesis/cli.py) 实现显式私人研究库、不可覆盖版本/差异、支持/反对claim、原PEER结果副本与Review持久化。[纯敞口](../backend/services/investment_thesis/exposure.py) 复用U1/发行人和已核阶段目标，缺证未知、ETF不穿透；不维护第二套账户或风险规则。
 
-原MCP显式配置E1库时增加 [两项只读查询](../pocs/chatgpt_skills/investment_thesis.py)；独立研究写开关再增加预览/确认保存两项。无配置原工具不变；原业务库/Worker边界不变，没有券商/订单或新的模型。B0/B1/B2/B3不作为独立产品版本。B1实现和合成端到端测试见 [4.3开发记录](v4.3/E1_B1_IMPLEMENTATION.md)。
+原MCP显式配置E1库时增加 Thesis/Review [两项只读查询](../pocs/chatgpt_skills/investment_thesis.py)；N1候选再增加一项只读待复核任务查询。独立研究写开关另增加预览/确认保存两项。无配置原工具不变；原业务库/Worker边界不变，没有券商/订单或新的模型。B0/B1/B2/B3/N1不作为独立产品版本。B1实现和合成端到端测试见 [4.3开发记录](v4.3/E1_B1_IMPLEMENTATION.md)。
 
 E1-B2 已用三种真实公开事件完成私人 CLI 记录/版本/Review/本地只读 MCP 重启读回；三份实际原 PEER 报告均 partial，经 CLI 导入仍为未认证副本，不代表买入资格或线上 E1 可用。未定期限的逾期状态保留 UNKNOWN；实际边界、最小修复与测试见 [B2 本地验证](v4.3/E1_B2_VALIDATION.md)。
 
@@ -136,6 +136,8 @@ E1-I1已于2026-10-29完成私人ChatGPT线上真人预览确认保存、只读�
 B3-2本地候选新增 [ReviewMonitorStore](../backend/services/investment_thesis/monitoring.py) 和 [手动CLI](../backend/services/investment_thesis/monitoring_cli.py)：显式迁移同一私人E1库后，绑定当前Thesis revision及已完成Review的复核时间/正式事件条件，生成确定性去重的待办收据。冻结SEC fixture验证发行人、发布时间/可知时间、原件哈希及同一经济事件去重；版本推进、关闭、取消、未来/身份不明事件不触发。扫描不运行PEER/Provider，不写Thesis/Review，不通知或交易。生产调度OFF、主动通知`NOT_WIRED`；测试见 [B3-2回归](../tests/test_e1_b32_monitoring.py)，启用边界见 [B3-2记录](v4.3/E1_B32_REVIEW_MONITORING.md)。
 
 PM Review后的单PR、Mac Mini安装、E1 v1→v2迁移、到期实测与最小SEC/通知路径统一见 [E1最终发布计划](v4.3/E1_FINAL_RELEASE_AND_ACCEPTANCE.md)。该计划不代表生产授权，初始自动扫描继续OFF。
+
+N1本地候选新增 [有界SEC自然扫描](../backend/services/investment_thesis/natural_scan.py)：只处理显式opt-in monitor，首次水位不回放，复用原SEC身份/原件核验，源失败隔离且不冒充无事件；schema v2不变。`get_due_investment_reviews`只读返回稳定event key和有界分页，提供at-least-once提醒去重输入，不改变任务或研究记录。生产扫描OFF、通知`NOT_WIRED`、Scheduled task实际连接`NOT_RUN`；测试见 [N1回归](../tests/test_e1_n1_natural_review.py)，边界与一次性发布验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
 
 ### 4.2 第一轮质量修正（开发候选）
 

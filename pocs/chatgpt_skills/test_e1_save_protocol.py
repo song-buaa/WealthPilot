@@ -12,6 +12,7 @@ from mcp import Client
 import pytest
 
 from backend.services.investment_thesis.store import ThesisStore
+from backend.services.investment_thesis.monitoring import migrate_monitoring
 from pocs.chatgpt_skills.server import BusinessClient, create_server
 
 EXAMPLES=Path(__file__).resolve().parents[2]/'docs/v4.3/examples/e1'
@@ -24,6 +25,7 @@ def settings(path=None,enabled=False):
 def test_preview_human_confirmation_commit_and_restarted_readback(tmp_path,monkeypatch):
     store=ThesisStore(tmp_path/'private'/'research.db',7);store.init()
     store.save(sample('meituan-v1'),0,'v1');store.save(sample('meituan-v2'),1,'v2')
+    migrate_monitoring(store)
     attempts=[]
     def forbidden(*a,**kw):attempts.append(True);raise AssertionError('E1 attempted business/network')
     monkeypatch.setattr(BusinessClient,'call',forbidden);monkeypatch.setattr(socket.socket,'connect',forbidden)
@@ -40,7 +42,9 @@ def test_preview_human_confirmation_commit_and_restarted_readback(tmp_path,monke
                 schema=json.dumps(tool.input_schema)
                 assert 'database_path' not in schema and 'portfolio_scope' not in schema
             for name,args in [('get_investment_thesis',{'thesis_id':'synthetic-meituan'}),
-                              ('get_investment_reviews',{'thesis_id':'synthetic-meituan'})]:
+                              ('get_investment_reviews',{'thesis_id':'synthetic-meituan'}),
+                              ('get_due_investment_reviews',{'request':{
+                                  'as_of':'2026-10-29T00:00:00+00:00'}})]:
                 assert not (await client.call_tool(name,args)).is_error
             before=hashlib.sha256(store.path.read_bytes()).hexdigest()
             preview=await client.call_tool('preview_e1_record',{'request':req});assert not preview.is_error
@@ -94,7 +98,8 @@ def test_write_switch_is_separate_and_original_contracts_unchanged(tmp_path):
             baseline=(await client.list_tools()).tools
         async with Client(create_server(settings(tmp_path/'missing.db')),mode='legacy') as client:
             readonly=(await client.list_tools()).tools
-        assert {x.name for x in readonly}-{x.name for x in baseline}=={'get_investment_thesis','get_investment_reviews'}
+        assert {x.name for x in readonly}-{x.name for x in baseline}=={
+            'get_investment_thesis','get_investment_reviews','get_due_investment_reviews'}
         async with Client(create_server(settings(tmp_path/'missing.db',True)),mode='legacy') as client:
             enabled=(await client.list_tools()).tools
         assert {x.name for x in enabled}-{x.name for x in readonly}=={'preview_e1_record','commit_e1_record'}
