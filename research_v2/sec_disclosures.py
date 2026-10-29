@@ -478,6 +478,43 @@ def parse_filing(source, issuer, filing, *, identity_digest):
     return record
 
 
+def verify_filing_envelope(source, issuer, filing):
+    """Verify a full-submission envelope without extracting financial facts."""
+    if not source or not isinstance(issuer, dict) or not isinstance(filing, dict):
+        return None
+    if not allowed_url(filing.get('full_url')) or 'T' not in str(filing.get('published_at', '')):
+        return None
+    try:
+        body, fetched_at = source
+        if not isinstance(body, bytes):
+            return None
+        text = body.decode('utf-8', errors='strict')
+        header = re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>', text, re.S | re.I)
+        if not header:
+            return None
+        cik = re.search(r'CENTRAL INDEX KEY:\s*(\d+)', header[1])
+        form = re.search(r'CONFORMED SUBMISSION TYPE:\s*([^\n<]+)', header[1])
+        accession = re.search(r'ACCESSION NUMBER:\s*(\d{10}-\d{2}-\d{6})', header[1])
+        accepted = re.search(r'<ACCEPTANCE-DATETIME>(\d{14})', header[1])
+        header_clock = datetime.strptime(accepted[1], '%Y%m%d%H%M%S').replace(
+            tzinfo=ZoneInfo('America/New_York'))
+        published = datetime.fromisoformat(filing['published_at'].replace('Z', '+00:00'))
+        fetched = datetime.fromisoformat(fetched_at.replace('Z', '+00:00'))
+        base = (f"https://www.sec.gov/Archives/edgar/data/{int(issuer['cik'])}/"
+                f"{filing['accession'].replace('-', '')}/")
+        if (not cik or int(cik[1]) != int(issuer['cik']) or not form
+                or form[1].strip() != filing['form'] or not accession
+                or accession[1] != filing['accession'] or header_clock != published
+                or fetched.tzinfo is None or published > fetched
+                or filing['full_url'] != base + filing['accession'] + '.txt'
+                or not filing['primary_url'].startswith(base)):
+            return None
+        return dict(source_ref=filing['full_url'], source_sha256=hashlib.sha256(body).hexdigest(),
+                    fetched_at=fetched.isoformat(), published_at=published.isoformat())
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, UnicodeError):
+        return None
+
+
 def collect(symbol):
     """Current-cycle discovery: cached directory + Submissions + facts + originals.
 

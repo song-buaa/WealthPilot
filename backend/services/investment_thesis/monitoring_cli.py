@@ -5,6 +5,7 @@ import json
 
 from .contracts import load_json
 from .monitoring import ReviewMonitorStore, migrate_monitoring
+from .natural_scan import NaturalReviewScanner, natural_scan_enabled
 from .store import ThesisStore
 
 
@@ -30,6 +31,9 @@ def parser():
     action.add_argument("--request-id", required=True)
     listing = commands.add_parser("list")
     listing.add_argument("--as-of", type=instant, required=True)
+    natural = commands.add_parser("natural-scan")
+    natural.add_argument("--as-of", type=instant, required=True)
+    natural.add_argument("--run-id", required=True)
     return value
 
 
@@ -47,6 +51,10 @@ def main(argv=None):
                 result = monitor.scan(as_of=args.as_of, events=load_json(args.events) if args.events else [])
             elif args.command == "transition":
                 result = monitor.transition(args.event_key, load_json(args.input), args.request_id)
+            elif args.command == "natural-scan":
+                if not natural_scan_enabled():
+                    raise ValueError("E1_NATURAL_SCAN_DISABLED")
+                result = NaturalReviewScanner(monitor).run(as_of=args.as_of, run_id=args.run_id)
             else:
                 result = monitor.actionable(as_of=args.as_of)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))

@@ -63,8 +63,9 @@ socket.create_connection=deny
     async def first_read():
         async with Client(create_server(settings(path)),mode='legacy') as client:
             tools=(await client.list_tools()).tools
-            own=[t for t in tools if t.name in ('get_investment_thesis','get_investment_reviews')]
-            assert len(own)==2 and all(t.annotations.read_only_hint and t.annotations.idempotent_hint for t in own)
+            own=[t for t in tools if t.name in (
+                'get_investment_thesis','get_investment_reviews','get_due_investment_reviews')]
+            assert len(own)==3 and all(t.annotations.read_only_hint and t.annotations.idempotent_hint for t in own)
             before=hashlib.sha256(path.read_bytes()).hexdigest()
             result=await client.call_tool('get_investment_thesis',{'thesis_id':'synthetic-meituan','revision':2})
             assert not result.is_error,result.content
@@ -113,7 +114,8 @@ def test_no_configuration_keeps_original_tools_and_bad_store_fails_readonly(tmp_
             original=(await client.list_tools()).tools
         async with Client(create_server(settings(tmp_path/'absent'/'new.db')),mode='legacy') as client:
             configured=(await client.list_tools()).tools
-            assert {t.name for t in configured}-{t.name for t in original}=={'get_investment_thesis','get_investment_reviews'}
+            assert {t.name for t in configured}-{t.name for t in original}=={
+                'get_investment_thesis','get_investment_reviews','get_due_investment_reviews'}
             for t in original:
                 unchanged=next(x for x in configured if x.name==t.name)
                 assert unchanged.input_schema==t.input_schema and unchanged.annotations==t.annotations
