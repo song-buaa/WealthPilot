@@ -29,7 +29,7 @@ def request():
 
 
 def identifier(jobs, suffix='test_request_000001'):
-    return jobs.scope + ':' + suffix
+    return suffix
 
 
 def finish(jobs, job_id):
@@ -86,7 +86,7 @@ def test_concurrent_duplicate_registration_is_exactly_one_and_conflict_refuses()
     assert len(calls)==1
 
 
-def test_old_scope_and_unknown_job_after_restart_never_replay():
+def test_unknown_job_after_restart_never_replays():
     calls=[]
     def execute(*args):calls.append(1);return original_result()
     before=PositionJobs(execute,threading.Lock())
@@ -94,8 +94,6 @@ def test_old_scope_and_unknown_job_after_restart_never_replay():
     after=PositionJobs(execute,threading.Lock())
     assert before.scope!=after.scope
     assert after.get(first.job_id).issue=='JOB_UNKNOWN_OR_PROCESS_RESTARTED'
-    assert after.start(identifier(before),request()).issue=='REQUEST_SCOPE_UNAVAILABLE'
-    assert after.start('unscoped_request_001',request()).issue=='REQUEST_SCOPE_UNAVAILABLE'
     assert after.get('unpredictable_unknown_job_00000000000').result is None
     assert len(calls)==1
 
@@ -161,3 +159,22 @@ def test_original_sync_slot_rejects_new_job_without_queueing():
     assert jobs.start(identifier(jobs),request()).issue=='ANALYSIS_BUSY'
     assert not calls and not jobs.requests
     slot.release()
+
+
+@pytest.mark.parametrize('request_id',['client-uuid-1234', 'pa_'+'a'*32+':cached_request_000001'])
+def test_client_ids_and_cached_legacy_scope_start_without_discovery(request_id):
+    calls=[]
+    jobs=PositionJobs(lambda *args:(calls.append(1) or original_result()),threading.Lock())
+    first=jobs.start(request_id,request())
+    assert first.job_id and first.request_scope==jobs.scope
+    finish(jobs,first.job_id)
+    assert jobs.start(request_id,request()).job_id==first.job_id
+    assert jobs.start(request_id,request().model_copy(update={'symbol':'PDD:US'})).issue=='REQUEST_ID_CONFLICT'
+    assert len(calls)==1
+
+
+@pytest.mark.parametrize('request_id',['', 'x'*129, 'private space', '非ASCII', None])
+def test_invalid_ids_match_public_contract_without_launch(request_id):
+    calls=[];jobs=PositionJobs(lambda *a:calls.append(1),threading.Lock())
+    assert jobs.start(request_id,request()).issue=='REQUEST_ID_INVALID'
+    assert not jobs.requests and not calls

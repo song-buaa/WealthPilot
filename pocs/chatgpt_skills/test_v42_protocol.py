@@ -388,7 +388,8 @@ def test_only_existing_safe_model_metadata_supplies_failure_stage_statistics():
 
 
 @pytest.mark.parametrize('outcome', ['partial', 'unavailable', 'exit'])
-def test_async_position_survives_real_http_disconnect_and_original_worker(monkeypatch, tmp_path, outcome):
+@pytest.mark.parametrize('cached_scope', [False, True])
+def test_async_position_survives_real_http_disconnect_and_original_worker(monkeypatch, tmp_path, outcome, cached_scope):
     """Real streamable HTTP + Worker.main + IPC/Pydantic; only analyze is synthetic."""
     import os
     import re
@@ -464,9 +465,12 @@ worker.main()
     async def run(url):
         async with Client(url,mode='legacy',read_timeout_seconds=10) as client:
             tools={tool.name:tool for tool in (await client.list_tools()).tools}
-            scope=re.search(r'pa_[0-9a-f]{32}',tools['start_position_analysis'].description)[0]
+            description=tools['start_position_analysis'].description
+            assert 'No scope prefix' in description and 'Receipts are not persistent' in description
+            assert not re.search(r'pa_[0-9a-f]{32}',description)
+            scope='pa_'+'a'*32  # A cached description from an unrelated previous process.
             assert len(tools)==12 and 'Synchronous compatibility' in tools['analyze_position'].description
-            request_id=scope+':li_request_00000001'
+            request_id=scope+':li_request_00000001' if cached_scope else 'client-unique-request-0001'
             arguments={'request_id':request_id,'request':{'symbol':'LI:US','question':'PRIVATE_SYNTHETIC_QUESTION'}}
             before=time.monotonic()
             start=await client.call_tool('start_position_analysis',arguments)
@@ -511,14 +515,15 @@ worker.main()
             return first,request_id
     try:
         with http_server() as url:first,request_id=asyncio.run(run(url))
-        # A fresh server instance models its process-local receipt loss. Old scope cannot start paid work.
+        # Receipt loss is explicit; querying the old job never launches new work.
         with http_server() as url:
             async def restarted():
                 async with Client(url,mode='legacy') as client:
                     missing=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
                     assert missing.structured_content['issue']=='JOB_UNKNOWN_OR_PROCESS_RESTARTED'
-                    retry=await client.call_tool('start_position_analysis',{'request_id':request_id,'request':{'question':'old request'}})
-                    assert retry.structured_content['issue']=='REQUEST_SCOPE_UNAVAILABLE'
+                    assert missing.structured_content['business_status']=='UNKNOWN'
+                    assert missing.structured_content['result'] is None
+                    assert len(children)==1
             asyncio.run(restarted())
         assert len(children)==1
         events=(tmp_path/'events.jsonl').read_text()

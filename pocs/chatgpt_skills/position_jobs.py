@@ -1,11 +1,13 @@
 """Bounded private process-local receipts/results for the original position analysis.
 
 No queue, persistence, provider client, portfolio writes, or replay after expiry.
-A boot-scoped request ID prevents a retry from becoming new paid work after restart.
+Request IDs are opaque client identifiers, deduplicated only within this process.
+After restart, querying an old job never replays work; receipts are not durable.
 """
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 import secrets
 import threading
 import time
@@ -24,7 +26,7 @@ class PositionAnalysisJob(BaseModel):
     request_scope: str
     state: Literal["running", "completed", "unavailable"]
     business_status: Literal["ok", "partial", "unavailable", "UNKNOWN"] = "UNKNOWN"
-    issue: Literal["REQUEST_SCOPE_UNAVAILABLE", "REQUEST_ID_CONFLICT", "ANALYSIS_BUSY",
+    issue: Literal["REQUEST_SCOPE_UNAVAILABLE", "REQUEST_ID_INVALID", "REQUEST_ID_CONFLICT", "ANALYSIS_BUSY",
         "JOB_CAPACITY_REACHED", "JOB_UNKNOWN_OR_PROCESS_RESTARTED", "RESULT_EXPIRED",
         "JOB_START_FAILED", "ANALYSIS_JOB_FAILED", "RESULT_STORAGE_UNAVAILABLE"] | None = None
     poll_after_seconds: int | None = None
@@ -73,10 +75,9 @@ class PositionJobs:
             poll_after_seconds=15 if row and row.state == "running" else None, result=result)
 
     def start(self, request_id: str, request: AnalysisRequest):
-        # This prefix is advertised by the tool, not supplied as business authority.
-        prefix = self.scope + ":"
-        if not request_id.startswith(prefix) or not 16 <= len(request_id[len(prefix):]) <= 64:
-            return self._response(issue="REQUEST_SCOPE_UNAVAILABLE")
+        # Match the public input contract, without interpreting legacy scope prefixes.
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", request_id):
+            return self._response(issue="REQUEST_ID_INVALID")
         payload = request.model_dump(mode="json")
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
             separators=(",", ":"), allow_nan=False).encode()).hexdigest()

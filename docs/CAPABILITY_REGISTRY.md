@@ -119,7 +119,7 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 
 正常 MCP 错误诊断复用 [server](../pocs/chatgpt_skills/server.py)、[Worker](../pocs/chatgpt_skills/worker.py) 与[原只读事件入口](../pocs/poc02_wealth_mcp/server.py)，[闭合投影](../pocs/chatgpt_skills/diagnostics.py)只传匿名 ID、阶段、协议/业务状态、耗时和有证据的模型调用统计；未知为 UNKNOWN。无新工具/数据库/业务计算/付费调用，原 L1–L4/人工交易权限不变。专项见[正常 MCP 协议回归](../pocs/chatgpt_skills/test_v42_protocol.py)；部署与真实验证仍待单独授权，见[4.2说明](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
-正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)仅管理有界进程私有登记/结果。幂等及跨重启scope防付费重放，查询不执行业务；完整原报告保留两小时。无新平台/数据库/模型/Provider/权限，原同步入口兼容、原11工具保留。测试见[登记](../tests/test_position_jobs.py)、[真实隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；生产与真实质量仍待授权验收，见[4.2边界](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)仅管理有界进程私有登记/结果。客户端唯一ID在进程内幂等，旧scope格式兼容且不作门槛；跨重启不保证去重，未知job查询不执行业务或自动重跑；完整原报告保留两小时。无新平台/数据库/模型/Provider/权限，原同步入口兼容、原11工具保留。测试见[登记](../tests/test_position_jobs.py)、[真实隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；生产与真实质量仍待授权验收，见[4.2边界](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
 
 ### 4.3：E1 人工投资假设、复核与本地待办发现
 
