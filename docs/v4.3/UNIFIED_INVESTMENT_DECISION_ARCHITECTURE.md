@@ -109,6 +109,8 @@ flowchart TB
 
 ## 6. 策略融合与成熟度清单
 
+2026-10-30 S3-A本地研发补充：[内部可执行闭环](S3_A_IMPLEMENTATION.md)复用原Evidence/财务Owner，新增冻结公司池、四底线、五年盈利情景、分档/敏感性与读回复算；未接生产PEER/MCP，不新增Skill或Agent。下表原S3 TARGET是完整策略目标，不能据本地首切片认定ROIC/DCF、全池或实际配置已完成。
+
 Strategy描述机会集、方法、比较基准、时序、成本及验证，而Skill封装可复用问题。下列均不新注册策略Skill。
 
 | 方向 | 已有研究结果/外部证据 | 计算、Skill、PEER与生产状态 | 推荐组合及当前权限 |
