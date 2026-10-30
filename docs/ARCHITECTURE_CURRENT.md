@@ -1,6 +1,6 @@
 # WealthPilot 当前系统架构
 
-> 2026-10-30政策P1/P2本地候选：[统一Owner及迁移边界](v4.3/INVESTMENT_POLICY_P1.md)。用户已批准两份私有Markdown内容；代码提供确定性派生、不可变Bundle和只读契约；[P2](v4.3/INVESTMENT_POLICY_P2.md)接入原Web/PEER/MCP/Allocation，默认LEGACY、合成ACTIVE隔离验证，未部署或真实激活。生产私人配置UNKNOWN；实际资产资格不足继续UNKNOWN。
+> 2026-10-30政策P1/P2本地候选：[统一Owner及迁移边界](v4.3/INVESTMENT_POLICY_P1.md)。用户已批准两份私有Markdown内容；代码提供确定性派生、不可变Bundle和只读契约；[P2](v4.3/INVESTMENT_POLICY_P2.md)接入原Web/PEER/MCP/Allocation，默认LEGACY、合成ACTIVE隔离验证，未部署或真实激活。P3-A已在私人收据取得部分现役政策文件/API事实，不代表所有缓存/schema/索引已核验；[P3-B](v4.3/INVESTMENT_POLICY_P3B.md)提供本地正式审批发布及隔离迁移候选，尚无生产共库运行资格；实际资产资格不足继续UNKNOWN。
 
 > 2026-10-30定向映射：代码基线main `4efcd14f3ff1dccaa69b625c4c7465bf4ca8d943`。本轮只读源码/Skill发现及文档更新，不访问生产。五层目标与真实缺口见[统一架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)，不替换PEER，也不等于Evidence资格L1—L4。以下旧部署时间点是历史证据，不保证今天实时状态。
 
