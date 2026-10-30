@@ -149,6 +149,32 @@ def test_invalid_user_assumptions_and_no_memory_fabrication():
     intent=research_intent({});assert intent['objective']=='evaluate' and intent['reference_quantity'] is None
 
 
+def test_explicit_no_holding_research_does_not_inherit_buy_or_exit_template():
+    from backend.agents.contracts import ExpressionOutput
+    from backend.services.market_data.output_policy import enforce
+    a=actual_pdd()
+    a['research_intent']=research_intent(dict(research_question='我目前未持有这家公司，只研究经营和未来投资条件。'))
+    assert a['research_intent']['no_holding_research']
+    out=ExpressionOutput()
+    out.structured_payload={'decisionType':'buy_init','is_new_entry':True,'professional_explanation':[]}
+    enforce(out,a)
+    plan=out.structured_payload['exitPlan']
+    assert out.structured_payload['decisionType']=='watch'
+    assert out.structured_payload['is_new_entry'] is False
+    assert plan['tranches']==[] and not plan['execution_authorized']
+    assert '未持仓标的研究' in out.chat_answer
+    assert '⑤研究方案与复核条件' in out.chat_answer
+    assert '多情景减仓建议' not in out.chat_answer
+    assert '立即买入' not in out.chat_answer
+
+
+def test_existing_holding_research_keeps_original_plan_projection():
+    a=actual_pdd()
+    a['research_intent']=research_intent(dict(research_question='研究这家公司'))
+    plan=exit_plan(a,at=AT)
+    assert plan['tranches'] and '多情景减仓建议' in report(a,plan,'watch')
+
+
 def test_qualified_daily_band_is_L1_research_not_L3_order_trigger():
     from tests.test_v42_evidence import trusted_technical
     a=assess({'technical':trusted_technical('LI:US')},symbol='LI:US',at=AT)

@@ -22,6 +22,7 @@ LABELS = {
     'net cash generated from operating activities': ('operatingCashflow', 'operating_cash_flow'),
     'total revenues': ('totalRevenue', 'total_revenue'),
     'total revenue': ('totalRevenue', 'total_revenue'),
+    'vehicle sales': ('vehicleSales', 'vehicle_sales'),
     'net income': ('netIncome', 'consolidated_net_income'),
     'net loss': ('netIncome', 'consolidated_net_income'),
     'net income/(loss)': ('netIncome', 'consolidated_net_income'),
@@ -156,7 +157,7 @@ def _statement_kind(rows, context=''):
     header=' '.join((context+' '+' '.join(' '.join(r) for r in rows[:2])).lower().split())
     if 'reconciliation' in header or 'non-gaap results' in header:
         return None
-    if re.search(r'consolidated statements of (?:comprehensive )?(?:income|operations|profit)',header):
+    if re.search(r'consolidated statements of (?:comprehensive )?(?:income|operations|profit|loss)',header):
         return 'income'
     if re.search(r'consolidated statements of cash flows',header):
         return 'cash_flow'
@@ -242,7 +243,11 @@ def _calendar_quarter_start(header,end):
 
 def _column_currency(value):
     value=re.sub(r'^\((RMB|CNY|USD|US\$|HKD|HK\$)\)(?=\s|$)',r'\1',value.strip(),flags=re.I)
-    match=re.fullmatch(r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
+    # Some official statements put the quarter date and reporting currency in
+    # one header cell. Accept only that exact combination, never a caption's
+    # mixed RMB/US$ convenience translation or an amount-bearing data cell.
+    match=re.fullmatch(r'(?:(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}\s+)?'
+                       r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
     return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
 
 
@@ -273,17 +278,68 @@ def parse_vehicle_operating(soup, published):
                     groups=match.groups()
                     raw=next(group for group in groups if group and re.fullmatch(r'[\d,.]+',group))
                     value=Decimal(raw.replace(',',''))
-                    if key=='vehicleSales':value*=Decimal(10)**(9 if groups[1].lower()=='billion' else 6)
+                    quantum=Decimal(10)**value.as_tuple().exponent
+                    if key=='vehicleSales':
+                        scale=Decimal(10)**(9 if groups[1].lower()=='billion' else 6)
+                        value*=scale
+                        quantum*=scale
                     if not value.is_finite() or value<=0 or (key=='vehicleMargin' and value>100):continue
-                    values.setdefault(value,[]).append(match.start())
+                    values.setdefault(value,[]).append((match.start(),quantum))
                 except (InvalidOperation,IndexError,StopIteration,AttributeError):continue
             if len(values)!=1:continue
-            value, offsets=next(iter(values.items()))
+            value, locations=next(iter(values.items()))
+            quantum=min(q for _,q in locations)
             observations.append(dict(source_field=key,value=float(value),currency=currency,unit=unit,
                 unit_scale=1,period_basis='quarterly',fiscal_period_start=f'{year}-{quarter*3-2:02d}-01',fiscal_period_end=end,
-                accounting_basis=basis,source_locator='quarterly operating highlights / '+key+' / '+end+' / text-offset['+str(offsets[0])+']',
+                accounting_basis=basis,source_locator='quarterly operating highlights / '+key+' / '+end+' / text-offset['+str(locations[0][0])+']',
+                reporting_quantum=float(quantum),
                 period_start_basis='explicit quarter in official earnings exhibit'))
-    return observations
+    # Official comparative columns carry historical operating facts even when
+    # the narrative states only the current quarter. Require an explicit period
+    # in the same column and the exact operating label; never infer a period
+    # from the report's headline or a percent-change column.
+    for ti,table in enumerate(soup.find_all('table')):
+        try:rows=_grid(table)
+        except ValueError:continue
+        for ri,row in enumerate(rows):
+            label=row[0].strip().lower() if row else ''
+            if label not in {'total deliveries','vehicle margin'}:continue
+            for col in range(1,len(row)):
+                value=_cell_amount(rows,ri,col)
+                if value is None or value<=0:continue
+                header=_column_header(rows,ri,col)
+                if label=='total deliveries':
+                    quarters=set(re.findall(r'\b(20\d{2})Q([1-4])\b',header,re.I))
+                    if len(quarters)!=1 or value!=value.to_integral_value():continue
+                    year,quarter=next(iter(quarters));quarter=int(quarter)
+                    key,basis,unit='vehicleDeliveries','vehicle_deliveries','vehicles'
+                else:
+                    dates=set(re.findall(r'(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}',header,re.I))
+                    if (len(dates)!=1 or not re.search(r'three months ended',header,re.I)
+                            or col+1>=len(row) or row[col+1].strip()!='%' or value>100):continue
+                    end=_date(next(iter(dates)))
+                    if not end or end[5:] not in {'03-31','06-30','09-30','12-31'}:continue
+                    year=int(end[:4]);quarter=int(end[5:7])//3
+                    key,basis,unit='vehicleMargin','vehicle_margin','percent'
+                end=f'{year}-{quarter*3:02d}-'+('31' if quarter in (1,4) else '30')
+                if end>str(published)[:10]:continue
+                observations.append(dict(source_field=key,value=float(value),currency=None,unit=unit,
+                    unit_scale=1,period_basis='quarterly',fiscal_period_start=f'{year}-{quarter*3-2:02d}-01',
+                    fiscal_period_end=end,accounting_basis=basis,
+                    reporting_quantum=float(Decimal(10)**value.as_tuple().exponent),
+                    source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}',
+                    period_start_basis='explicit quarterly operating comparison column'))
+    grouped={}
+    for obs in observations:
+        grouped.setdefault((obs['source_field'],obs['fiscal_period_end']),[]).append(obs)
+    result=[]
+    for rows in grouped.values():
+        if len({(r['value'],r['currency'],r['unit'],r['accounting_basis']) for r in rows})!=1:
+            continue
+        selected=rows[0]
+        selected['source_locator']='; '.join(r['source_locator'] for r in rows)
+        result.append(selected)
+    return result
 
 
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
@@ -328,7 +384,7 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
             if label not in LABELS and not (label=='-diluted' and share_group):
                 continue
             key,basis=share_group if label=='-diluted' else LABELS[label]
-            if statement and ((statement=='income')!=(key in {'totalRevenue','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary',
+            if statement and ((statement=='income')!=(key in {'totalRevenue','vehicleSales','netIncome','parentNetIncome','ordinaryNetIncome','operatingIncome','dilutedEPSADS','dilutedEPSOrdinary',
                     'costOfRevenueReported','salesMarketingReported','generalAdminReported','researchDevelopmentReported','incomeTaxReported','sellingGeneralAdminReported'})):
                 continue
             for col in range(1,len(row)):
@@ -354,6 +410,8 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
                 value=_cell_amount(rows,ri,col)
                 if value is None or not value.is_finite():
                     continue
+                if key=='vehicleSales' and value<=0:
+                    continue  # Revenue row only; the cost-of-sales subrow has the same label.
                 reported_value,normalization=value,None
                 if key=='capitalExpenditures' and (statement=='cash_flow' or value<0):
                     before=next(((j,r) for j,r in reversed(list(enumerate(rows[:ri]))) if any(r)),None)

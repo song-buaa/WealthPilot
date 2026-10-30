@@ -23,6 +23,7 @@ LABELS={
     'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
     'vehicle_deliveries_qoq_pct':'季度交付量环比','vehicle_margin_change_pp':'汽车业务毛利率同比变化',
     'revenue_yoy_pct':'季度收入同比','net_income_yoy_pct':'季度合并净利润同比',
+    'gross_margin_pct':'季度集团综合毛利率',
     'parent_income_yoy_pct':'季度归母净利润同比','net_margin_pct':'季度合并净利率',
     'ordinary_income_yoy_pct':'季度普通股股东收益同比',
     'operating_margin_pct':'季度营业利润率','cash_conversion':'经营现金流/合并净利润',
@@ -199,6 +200,16 @@ def build(assessment):
         except ValueError:pass
     revenue=unique('revenue_quarter',latest)
     income=unique('net_income_quarter',latest)
+    cost=unique('cost_of_revenue_reported_quarter',latest,revenue[0]['currency']) if revenue else None
+    if (revenue and cost and _same_span(revenue[0],cost[0])
+            and document_keys(revenue[0]) & document_keys(cost[0])):
+        rev=revenue[0]['values']['revenue_quarter']
+        signed_cost=cost[0]['values']['cost_of_revenue_reported_quarter']
+        if rev>0 and signed_cost<0 and 0<=rev+signed_cost<=rev:
+            add('gross_margin_pct',(rev+signed_cost)/rev*100,revenue[1]+cost[1],
+                period=latest,unit='percent',details=dict(
+                    formula='(quarter group revenue + reported signed group cost of sales) / quarter group revenue * 100',
+                    caveat='Group gross margin; not vehicle business gross margin'))
     for numerator,out in [('net_income_quarter','net_margin_pct'),('operating_income_quarter','operating_margin_pct')]:
         n=unique(numerator,latest,revenue[0]['currency']) if revenue else None
         if revenue and n and _same_span(revenue[0],n[0]) and revenue[0]['values']['revenue_quarter']>0:

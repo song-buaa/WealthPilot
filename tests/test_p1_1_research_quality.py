@@ -141,10 +141,11 @@ def test_LI_real_SEC_original_yields_independent_vehicle_operating_evidence():
     row=li_record();a=assess({},symbol='LI:US',research=[row],at=AT,disclosure_verifier={row['record_id']:row}.get)
     facts={r['field']:r for r in a['verified_field_records'] if r['field'].startswith('vehicle_')}
     assert facts['vehicle_deliveries_quarter']['values']['vehicle_deliveries_quarter']==98330
-    assert facts['vehicle_sales_quarter']['values']['vehicle_sales_quarter']==24100000000
+    assert facts['vehicle_sales_quarter']['values']['vehicle_sales_quarter']==24066488000
+    assert facts['vehicle_sales_quarter']['publication_links'][0]['precision_corroboration']['summary_value']==24100000000
     assert facts['vehicle_margin_pct']['values']['vehicle_margin_pct']==9.4
     metric=metrics(a)['vehicle_revenue_per_delivery_approx']
-    assert metric['values']['vehicle_revenue_per_delivery_approx']==pytest.approx(24100000000/98330)
+    assert metric['values']['vehicle_revenue_per_delivery_approx']==pytest.approx(24066488000/98330)
     assert len(metric['evidence_refs'])==2 and 'not a transaction ASP' in metric['details']['caveat']
     assert all(r['source_document_sha256']==row['source_verification']['document_sha256'] for r in
                [f['publication_links'][0] for f in facts.values()])
