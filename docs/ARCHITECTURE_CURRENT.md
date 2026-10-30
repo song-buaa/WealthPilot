@@ -1,5 +1,7 @@
 # WealthPilot 当前系统架构
 
+> 2026-10-30定向映射：代码基线main `4efcd14f3ff1dccaa69b625c4c7465bf4ca8d943`。本轮只读源码/Skill发现及文档更新，不访问生产。五层目标与真实缺口见[统一架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)，不替换PEER，也不等于Evidence资格L1—L4。以下旧部署时间点是历史证据，不保证今天实时状态。
+
 > 2026-10-23：用户报告4.2已部署 `b6b5a17bb589b8e82d1d655880c45f0675cef984`，三标首轮真实投研未通过。本轮仅代码修复，不重新核验或操作生产。以下4.1记录保留为历史证据。
 
 > 2026-10-22：4.1 **RELEASED — 已完成生产交付**。验收生产代码固定`e0df7211f462f07ec0147f40e84f65321d0f6b50`；本次仅文档收口，不变更生产。模块/PR、受控生产Run及持续观察见[4.1结项](releases/v4.1.md)。各批历史开发基线保留在原实现文档，不作为当前发布状态。
@@ -13,7 +15,7 @@
 | ChatGPT Web / iOS | 个人 Pro 的自然语言交互、相关上下文、工具选择、追问、原专业结果的最终组织与呈现。 |
 | Secure MCP Tunnel | 现有个人范围连接，把 ChatGPT 接到 Mini 上的 Streamable HTTP MCP；不是业务计算或交易引擎。 |
 | 生产 MCP | `pocs/chatgpt_skills/server.py`；原七项加U2/B2/B3只读扩展，经原worker/业务owner；可选显式prepare独立鉴权，经受保护loopback调原同步（第13节）。原读取工具不获得隐式写权限；目录名pocs保留，不表示试验部署。 |
-| WealthPilot Core | 完整 `backend/main.py` / `backend/api/` / `backend/services/`、PEER 四 Agent、13 个内部 Skills、数据源、规则/信号、专业 LLM 与报告模板。 |
+| WealthPilot Core | 完整 `backend/main.py` / `backend/api/` / `backend/services/`、PEER四Agent、14份Skill定义（Loader成功发现13项）、数据源、规则/信号、专业 LLM 与报告模板。 |
 | 完整 React Web | `frontend/src/App.tsx` 的 HashRouter，财富、投资账户、消费、投研、决策、投资行动等原页面与可视化；最终人工交易确认。 |
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
 | Mac Mini Prod | 原生 ARM Python / Node、launchd、完整 Web/后端、MCP/Tunnel、生产数据库及原业务服务。数据、配置、凭证、日志和备份位于代码外。 |
@@ -26,13 +28,13 @@ P1–P5 均 DONE：资产负债查询、明确交易预填链接、单标决策�
 ```mermaid
 flowchart TB
   Chat[ChatGPT Web / iOS：交互与最终呈现] --> Tunnel[个人 Secure MCP Tunnel]
-  Tunnel --> MCP[原七项及4.1只读扩展 / 显式prepare独立鉴权]
+  Tunnel --> MCP[原生产读取与分析 / 显式prepare / 可选E1研究工具]
   MCP --> ReadWorker[P1 只读业务 worker]
   MCP --> AnalysisWorker[P3/P4/P5 独立分析 worker]
   MCP --> URL[P2：纯参数校验 / 预填 URL]
   ReadWorker --> Wealth[原 WealthService / PortfolioService]
   AnalysisWorker --> PEER[原 PEER：Planning → Executing → Expressing → Reviewing]
-  PEER --> Skills[13 个内部 Skills / 数据加载 / 规则 / 信号 / 研究 / 专业 LLM]
+  PEER --> Skills[内部Skills及原Service / 数据加载 / 规则 / 信号 / 研究 / 专业 LLM]
   Wealth --> DB[(共享 SQLite WAL)]
   Skills --> DB
   Skills --> Providers[原行情 / 研究 / 知识源，可降级]
@@ -46,11 +48,19 @@ flowchart TB
   API --> Draft[原草稿 / 策略 / 风控 / 人工最终确认]
   Draft --> Broker[原 OrderManager / ExecutionBatch / BrokerAdapter]
   Broker --> Status[原订单状态与交易记录]
+  MCP --> E1Read[E1 Thesis / Review / due只读投影]
+  MCP --> E1Bridge[E1研究预览与本次用户确认保存]
+  E1Read --> E1DB[(独立私人E1库)]
+  E1Bridge --> E1DB
+  Manual[显式opt-in及授权手动扫描] -.-> Monitor[原E1到期与SEC复核发现]
+  Monitor --> E1DB
 ```
 
 ChatGPT 消费原专业结论后再次组织、解释和回答。它没有替代 Expressing 或原专业决策引擎。MCP 分析入口执行一次原专业链路，不复制另一套计算或模型分析；多轮相关历史由 ChatGPT 传入。ChatGPT 自身可能重复调用工具，不能把重复请求误称为同一工具内部只执行一次的保证。
 
 ## 3. 七个生产工具
+
+当前真实配置分支有12项基础工具（原七项、U2/B2/B3三项及异步start/get），可选prepare另增1项；显式E1库增加Thesis/Review/due三项只读，研究写开关增加preview/commit两项，全启用为18项。此为历史验收配置，不是无配置默认工具数。E1可选写只限研究库，MCP不能笼统视为纯只读；real_config在Mock交易写工具注册前返回。
 
 本表保留4.0原七项合同；4.1另有只读`get_trade_and_sync_status`、`get_trade_history`、`get_instrument_tradability`，分别见第14节、B2/B3节及[原server](../pocs/chatgpt_skills/server.py)。可选prepare独立鉴权、允许本地同步写入，原七项读取边界不变，不能把新增工具或工具数当成账户权限证据。
 
@@ -79,7 +89,10 @@ ChatGPT 消费原专业结论后再次组织、解释和回答。它没有替代
 
 Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_stream_v3`。MCP 的薄适配直接调用后者，收集原 SSE 最终文本及 result callback 的结构化结果，不请求本机 FastAPI。原默认 Web API 行为保留。
 
-`skills/wp-*/SKILL.md` 共 13 个内部 Skill（原子、组合、旁路），由 `backend/skills` 加载；它们与七个对外 MCP 工具不是同一层，也没有全部转换成 ChatGPT Skills。原 `decision_engine/`、AllocationService、研究/技术形态证据和原报告模板均复用。
+`skills/wp-*/SKILL.md`有14份；本轮只运行SkillsLoader.discover，成功13项。`wp-action-planner`的YAML frontmatter解析失败，但[Web原端点](../backend/api/action.py)直接调用plan_actions，不依赖Loader；其function_call定义无tool_name也不是通用invoke路径。14项契约、Owner、调用关系和成熟度见[Skill矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#5-全部内部skills能力矩阵)。内部Tool分派表18项与MCP18项不同，wp-fetch-kline等append标记不计入Skill。Planning选中、manifest描述、实际invoke与Service直连分别留证。
+
+
+源码路由补充：`wp-reasoning` Loader只支持general_chat，其他研究由Expressing直接调用原llm_engine；citation_rules_applied不证明SKILL全文动态注入。单标与组合复用原PEER及AllocationService；position_multi逐公司循环并组合，不是已实现的版本化目标池/质量估值排序。业务L1对应政策片段，L2对应Portfolio/U1及数据，L3对应Skills/计算，L4对应综合推理/复核，L5对应E1、原授权执行及历史反馈；PEER/MCP跨层。统一Bundle和完整跨策略池内综合仍为TARGET。
 
 正常异步L1沿原Worker使用一次性进程，统一600秒研究/660秒IPC（可由同一运行策略调整），最终帧在executor join前flush；父进程有界回收该子进程。Expressing前的合格证据由原Owner内存保留，局部推断失败返回明确facts-only partial，不保留未Review模型文字；同步/其他读取及E1不扩展。详见[可靠性合同](V42_IMPLEMENTATION.md#正常异步-l1-可靠性2026-10-29-开发候选)。
 
@@ -272,4 +285,4 @@ CLI为显式研究写入口；[可选MCP](../pocs/chatgpt_skills/investment_thes
 
 B3-2沿同一私人E1库显式迁移 [监控事件及待办收据](../backend/services/investment_thesis/monitoring.py)，原Thesis/Review表及不可覆盖触发器不变。监控必须绑定当前Thesis revision和已完成Review的`next_review_at`/`next_review_event`；确定性事件键去重，版本推进、取消、关闭、未来/身份不明事件拒绝触发。扫描只读研究记录并追加监控收据，不运行PEER、Provider、账户刷新或订单。现有backend APScheduler未接线，生产持续任务为OFF；ChatGPT Scheduled task 已通过私人只读工具完成 TEST ONLY 提醒，但不改变 WealthPilot 自建通知 `NOT_WIRED`。B1历史见 [4.3 E1记录](v4.3/E1_B1_IMPLEMENTATION.md)，保存责任见 [B3-1](v4.3/E1_B31_RESEARCH_SAVE.md)，监控边界见 [B3-2](v4.3/E1_B32_REVIEW_MONITORING.md)。
 
-N1不新增schema或scheduler：[自然扫描](../backend/services/investment_thesis/natural_scan.py)只对显式opt-in的US证券复用原SEC directory/Submissions/full-submission读取，首次建水位不回放，后续用CIK/accession/接受时间/原件哈希确定性去重；源失败追加失败收据并隔离，不能解释为无事件。[MCP适配](../pocs/chatgpt_skills/investment_thesis.py)新增第三项E1只读待办投影，使用稳定event key的at-least-once语义，不改变任务或研究记录。生产自动扫描继续OFF；Scheduled task私人连接和用户TEST ONLY提醒已通过。真实SEC验收发现抓取完成时间被误作PIT截止，本修复候选只以SEC acceptance/known clock判断未来信息并保留真实`fetched_at`，尚待合并、部署和水位后自然新accession复验。实现、限制和一次性上线验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
+N1不新增schema或scheduler：[自然扫描](../backend/services/investment_thesis/natural_scan.py)只对显式opt-in的US证券复用原SEC directory/Submissions/full-submission读取，首次建水位不回放，后续用CIK/accession/接受时间/原件哈希确定性去重；源失败追加失败收据并隔离，不能解释为无事件。[MCP适配](../pocs/chatgpt_skills/investment_thesis.py)新增第三项E1只读待办投影，使用稳定event key的at-least-once语义，不改变任务或研究记录。生产自动扫描继续OFF；Scheduled task私人连接和用户TEST ONLY提醒已通过。真实SEC验收发现抓取完成时间被误作PIT截止，PR59只以SEC acceptance/known clock判断未来信息并保留真实`fetched_at`。2026-10-29本对话已核对生产收据：4e4fdb4ea0831eb079cf96518f91d4397e326e05运行，18工具/E1 v2及既有canonical记录不变，4次SEC HTTP200，首次76 accession，独立进程0新待办，临时monitor取消。水位后真实新accession尚未验证；状态为E1_CORE_RELEASED_N1_NOTIFICATION_PASS_NATURAL_NEW_EVENT_PENDING，不是E1_RELEASED。上述扫描OFF/通知NOT_WIRED为该次验收值，今日状态本轮未重测。旧N1记录的修复待发布段落保留其历史时点，当前证据边界见[统一映射](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#7-生产证据与现状差异)。实现、限制和一次性上线验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。

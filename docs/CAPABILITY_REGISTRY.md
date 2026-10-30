@@ -1,5 +1,22 @@
 # WealthPilot 已有能力索引
 
+## 4.3 五层能力复用补充（2026-10-30）
+
+五层职责、14份Skill逐项矩阵、研究融合与最小Gap统一见[统一投资决策架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)。本节仅索引原Owner，不新建Registry/Runtime。CODE表示源码可用，生产/研究证据分别列出；不因主分支合入而升级策略资格。
+
+| 能力/业务层 | 原Owner及入口 | 成熟度与复用限制 |
+|---|---|---|
+| 正式政策L1 | [philosophy](../backend/services/philosophy_service.py)、[discipline](../backend/services/discipline_service.py)、[config](../app/discipline/config.py)、[knowledge](../knowledge_base/README.md) | CODE：MD/JSON/默认/索引分流；双正式Markdown及受控派生Bundle为TARGET，不是已有有效政策API；私人现役配置UNKNOWN |
+| 共享证据L2 | [U1](../app/asset_views.py)、[Portfolio](../backend/services/portfolio_service.py)、[Evidence](../backend/services/market_data/evidence.py)、[SEC](../research_v2/sec_disclosures.py)、[Repository](../research_v2/repository.py) | CODE/限定历史运行证据；复用身份、币种、来源时点及质量；共享目标池版本引用仍PROPOSED |
+| 可复用分析L3 | [SkillsLoader](../backend/skills/loader.py)、[Tool Layer](../backend/graph/tools.py)、[AllocationService](../backend/services/allocation_service.py)、[financial_research](../backend/services/market_data/financial_research.py) | 14份定义，本轮Loader发现13项；action-planner YAML失败但Web直连服务保留。方法/计算可复用，不把technical signals称为S1/S2策略 |
+| 综合判断L4 | [原PEER](../backend/services/decision_service_v3.py)、[Expressing](../backend/agents/expressing_agent.py)、[Reviewing](../backend/agents/reviewing_agent.py)、[Output Policy](../backend/services/market_data/output_policy.py) | CODE/既有单标组合链路；池内公司与配置两种排序及统一冲突解释为TARGET，不投票或累加相关因子 |
+| E1及复核L2/L3/L5 | [investment_thesis](../backend/services/investment_thesis)、[MCP研究桥接](../pocs/chatgpt_skills/investment_thesis.py) | 核心真人保存/提醒历史验收；PR59首水位实测已通过，水位后自然新事件PENDING；partial/敞口UNKNOWN不升级，历史不覆盖 |
+| 授权执行与复盘L5 | [ActionPlanner](../backend/services/action/action_planner.py)、[RiskEngine](../backend/services/action/risk_engine.py)、[OrderManager](../backend/services/action/order_manager.py)、[Batch](../backend/services/execution_batch/service.py)、[BrokerAdapter](../backend/services/action/brokers/base.py)、[历史域](../backend/services/portfolio_history) | 原实现/限定路径历史验收；建议→具体人工授权→原交易门→成交证据。无新策略执行资格；原当前收益不是TWR |
+| S1/S2及成熟ETF研究 | 仓外冻结S1-C0、S2-F1、S2-G1报告/hash见[研究矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#6-策略融合与成熟度清单) | RESEARCH_ONLY；S1/S2自研已结项不晋升，SPMO产品关注/政策采纳不等于自研动量上线或具体交易许可 |
+| S3/S4/异常偏离候选 | 原[财务计算](../backend/services/market_data/financial_research.py)、[技术证据](../backend/services/market_data/technical_evidence.py)、E1、PEER可供复用 | TARGET：质量估值池内比较；S4为后续协作，弱趋势先复核；均值偏离只作线索。无对应新Skill、完整生产策略或本轮开发授权 |
+
+新增公共契约只补目标池版本、PolicyRef、共享证据/方法引用与综合/执行关联，扩原Agent/Analysis/E1/交易Owner；本轮未实现、未修改Schema或工具。测试入口沿本索引原条目，文档更新不冒称重新完成业务验收。
+
 > 2026-10-22：4.1 RELEASED，B0/U0/U1/U2/D1/B2/B3及国金已生产交付；运行观察与真实数据覆盖不自动视为完整。生产代码及验收见[4.1结项](releases/v4.1.md)。本索引只维护复用入口，流程由[治理文档](PROJECT_GOVERNANCE.md#registry-维护检查)维护。
 
 任务先读 [AGENTS](../AGENTS.md)、[当前架构](ARCHITECTURE_CURRENT.md) 和[治理工作流](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，再按条目检索代码与测试。状态“已有”只证明仓库存在实现；生产验收及数据质量单列。API 前缀以 [main.py](../backend/main.py) 挂载为准。
