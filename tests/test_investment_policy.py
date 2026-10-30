@@ -377,3 +377,26 @@ def test_content_approval_cannot_be_backdated_into_older_bundle(staged):
     store, args, _ = staged
     with pytest.raises(PolicyError, match='PREDATES_CONTENT_APPROVAL'):
         store.stage(**{**args, 'created_at': '2020-01-01T00:00:00Z', 'request_id': 'backdated'})
+
+
+@pytest.mark.parametrize('table', ['policy_bundles', 'policy_events', 'policy_releases'])
+@pytest.mark.parametrize('operation', ['REPLACE', 'INSERT OR REPLACE', 'UPSERT', 'UPDATE', 'DELETE'])
+def test_all_immutable_sql_paths_reject_even_without_recursive_triggers(staged, table, operation):
+    store, args, b = staged
+    validate_approve(store, b)
+    synthetic_release(store, b, 1)
+    with sqlite3.connect(store.path) as db:
+        db.execute('PRAGMA recursive_triggers=OFF')
+        before = list(db.execute(f'SELECT * FROM {table}'))
+        if operation in {'REPLACE', 'INSERT OR REPLACE'}:
+            sql = f'{operation} INTO {table} SELECT * FROM {table}'
+        elif operation == 'UPSERT':
+            sql = f'INSERT INTO {table} SELECT * FROM {table} WHERE 1 ON CONFLICT DO UPDATE SET payload=excluded.payload'
+        elif operation == 'UPDATE':
+            sql = f'UPDATE {table} SET payload=payload'
+        else:
+            sql = f'DELETE FROM {table}'
+        with pytest.raises(sqlite3.IntegrityError, match='POLICY_IMMUTABLE'):
+            db.execute(sql)
+        assert list(db.execute(f'SELECT * FROM {table}')) == before
+    assert store.stage(**args) == b

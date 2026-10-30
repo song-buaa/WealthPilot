@@ -38,6 +38,12 @@ CREATE TABLE policy_releases (
 for _table in ("policy_bundles", "policy_events", "policy_releases"):
     for _operation in ("UPDATE", "DELETE"):
         SCHEMA += f"CREATE TRIGGER {_table}_no_{_operation.lower()} BEFORE {_operation} ON {_table} BEGIN SELECT RAISE(ABORT,'POLICY_IMMUTABLE'); END;\n"
+    _keys = {"policy_bundles": ("version", "bundle_id", "request_id"),
+             "policy_events": ("sequence", "request_id"), "policy_releases": ("sequence",)}[_table]
+    _collision = " OR ".join(f"{key}=NEW.{key}" for key in _keys)
+    # REPLACE deletes bypass DELETE triggers when recursive_triggers is OFF.
+    # Guard every unique key BEFORE the implicit deletion, independent of PRAGMA.
+    SCHEMA += f"CREATE TRIGGER {_table}_no_replace BEFORE INSERT ON {_table} WHEN EXISTS (SELECT 1 FROM {_table} WHERE scope=NEW.scope AND ({_collision})) BEGIN SELECT RAISE(ABORT,'POLICY_IMMUTABLE'); END;\n"
 
 
 def utc_now():
