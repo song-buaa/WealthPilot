@@ -68,6 +68,12 @@ def check_order_risk(
         fx_rate_to_cny: 交易币种对 CNY 汇率（如 USD→CNY = 6.9）
     """
     result = RiskCheckResult()
+    from backend.services.investment_policy.runtime import current, diagnose
+    policy_mode = current().mode
+    if policy_mode != 'LEGACY':
+        policy_result = diagnose(issuer_symbol=symbol)
+        result.warnings.append(RiskWarning('policy', 'warning',
+            '政策专项复核及全组合数据资格需核验；不是自动减仓或交易授权', policy_result))
 
     quantified = portfolio_total_value > 0 and fx_rate_to_cny is not None and fx_rate_to_cny > 0
     if not quantified:
@@ -97,7 +103,7 @@ def check_order_risk(
         # 规则 2: 集中度（卖出降低集中度，不触发警告）
         if side.upper() == "SELL":
             pass  # 卖出降低集中度，跳过此检查
-        elif current_position_value is not None:
+        elif current_position_value is not None and policy_mode == 'LEGACY':
             post_position_value = current_position_value + order_value
             concentration = post_position_value / portfolio_total_value
             if concentration > CONCENTRATION_PCT_THRESHOLD:
@@ -115,7 +121,7 @@ def check_order_risk(
                 ))
 
     # 规则 3: 纪律违反（复用 check_discipline_rules）
-    if discipline_result is not None:
+    if discipline_result is not None and policy_mode == 'LEGACY':
         violation = discipline_result.get("violation", False)
         if violation:
             warning_msg = discipline_result.get("warning", "")
@@ -178,6 +184,9 @@ def portfolio_order_risk(session, *, portfolio_id, symbol, side, quantity, limit
         # Reuse the original rule engine with already loaded Portfolio facts.
         # data_loader.load would also fetch research/market/LLM context and is
         # deliberately not part of an explicit order risk review.
+        from backend.services.investment_policy.runtime import current
+        if current().mode != 'LEGACY':
+            raise ValueError('LEGACY_POLICY_RULE_PROJECTION_DISABLED')
         from dataclasses import asdict
         from decision_engine.data_loader import LoadedData, InvestmentRules, PositionInfo
         from decision_engine.rule_engine import check

@@ -178,6 +178,15 @@ def captured_evidence(result, captured, portfolio_id):
         pattern_evidence=pattern,
         retrieved_principles=encode(loaded.retrieved_principles),retrieved_research_views=encode(loaded.retrieved_research_views),
         invoked_skills=executed.invoked_skills,data_warnings=encode(loaded.data_warnings))
+    policy_context = getattr(loaded, 'policy_context', None)
+    if policy_context:
+        result.evidence['policy_context'] = encode(policy_context)
+        result.scope['policy_reference'] = policy_context.get('policy_reference')
+        if result.status != 'unavailable':
+            result.status = 'partial'
+        result.issues.append('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED')
+        result.data_quality['policy_precision'] = 'CANNOT_QUANTIFY'
+        result.limitations.append('POLICY_CONTEXT_IS_NOT_EXECUTION_AUTHORIZATION; FULL_INVESTABLE_DENOMINATOR_REQUIRES_SEPARATE_QUALIFICATION')
     result.issues.extend(getattr(executed,'position_evidence',{}).get('issues',[]))
     if loaded.data_warnings:
         result.issues.append('DATA_LOADER_WARNINGS')
@@ -185,7 +194,12 @@ def captured_evidence(result, captured, portfolio_id):
         result.status='unavailable';result.issues.append('PROFESSIONAL_MODEL_UNAVAILABLE')
     if not captured['reviewed'].passed:
         result.issues.append('PROFESSIONAL_REVIEW_WARNING')
-    if result.scenario=='review_portfolio':
+    if result.scenario=='review_portfolio' and policy_context:
+        result.evidence['allocation']={'status':'UNKNOWN_FULL_INVESTABLE_DENOMINATOR',
+            'policy_reference':policy_context.get('policy_reference'),'targets':policy_context.get('targets'),
+            'denominator':'qualified full investable assets required; investment-only totals are not substituted'}
+        result.evidence['policy_source_assessments']=encode(getattr(executed,'portfolio_evidence',[]))
+    if result.scenario=='review_portfolio' and not policy_context:
         from backend.services import allocation_service as allocation
         from app.allocation.calculator import build_deviation_snapshot
         snapshot,targets=allocation.get_snapshot(portfolio_id),allocation.get_targets()
@@ -261,6 +275,41 @@ def deadline_result(value):
 @observed_result
 @budgeted_analysis(on_expired=deadline_result)
 async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
+    from backend.services.investment_policy.runtime import current as policy_current, bind as policy_bind
+    from backend.services.investment_policy.parser import PolicyError
+    from backend.services.investment_policy.consumers import finalize_output
+    from types import SimpleNamespace
+    session=policy_current(portfolio_id)
+    with policy_bind(session):
+        try:
+            session.ensure_current()
+            if session.mode=='POLICY_ACTIVE':
+                session.attach_asset_view(asset_view)
+            if session.mode=='POLICY_ACTIVE' and arguments.get('target_versions'):
+                raise PolicyError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
+            result=await _analyze_owned(path,portfolio_id,scenario,arguments,contract=contract,synthetic=synthetic,
+                worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic)
+            session.ensure_current()
+            if session.mode=='POLICY_ACTIVE':
+                from backend.agents.contracts import ExpressionOutput
+                out=ExpressionOutput(structured_payload=result.get('professional_result',{}).get('analysis_result') or {})
+                executed=SimpleNamespace(loaded_data=None,position_evidence=result.get('evidence',{}).get('position_evidence'),
+                    portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
+                finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
+                result.setdefault('evidence',{})['policy_context']=out.structured_payload['policy_context']
+                result.setdefault('scope',{})['policy_reference']=out.structured_payload['policy_reference']
+                if result['status']!='unavailable':
+                    result['status']='partial'
+                    result['conclusion']=out.chat_answer
+                    result['professional_result']={'analysis_result':out.structured_payload}
+                session.ensure_current()
+            return result
+        except PolicyError as exc:
+            return AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[str(exc)],
+                queried_at=datetime.now(timezone.utc).isoformat(),conclusion='政策版本或资格无法核验；未创建交易。').model_dump(mode='json')
+
+
+async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
     request=AnalysisRequest.model_validate(arguments)
     if request.snapshot_id and asset_view is None:
         from app.asset_views import load_view, frozen_input, public_view
@@ -412,7 +461,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             if result.status != 'unavailable':
                 result.conclusion = expressed.chat_answer
                 result.professional_result['analysis_result'] = encode(expressed.structured_payload)
-        if scenario=='review_portfolio':
+        from backend.services.investment_policy.runtime import current as policy_current
+        if scenario=='review_portfolio' and policy_current(portfolio_id).mode=='LEGACY':
             from backend.services.allocation_scenarios import target_context
             from backend.services.allocation_service import get_targets, simulate_exit_scenario
             rule_source=result.evidence.get('effective_rules_provenance',{})
@@ -449,7 +499,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 result.professional_result = {}
                 result.issues = sorted(set(result.issues + ['ANALYSIS_CONTEXT_EXPIRED']))
                 result.conclusion = '分析上下文已到期，请重新准备资产数据；本次结果不可用于精确调仓。'
-        if (scenario == 'review_portfolio' and result.status != 'unavailable'
+        if (scenario == 'review_portfolio' and policy_current(portfolio_id).mode=='LEGACY' and result.status != 'unavailable'
                 and (not asset_view or asset_view['context_current'])):
             # D1 precision is a holdings-quality gate, not L3 research/technical
             # qualification. Missing snapshots and a true D1 C flag must never

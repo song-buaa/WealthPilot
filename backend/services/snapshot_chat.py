@@ -154,6 +154,25 @@ def _projection_current(projected, view, options, portfolio_id, *, amount_scope=
 
 
 async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, options=None):
+    from backend.services.investment_policy.runtime import current,bind
+    session=current(portfolio_id)
+    iterator=_stream_snapshot_chat_owned(message,conversation_id,portfolio_id,view,options=options)
+    try:
+        while True:
+            with bind(session):
+                session.ensure_current()
+                event=await anext(iterator)
+                session.ensure_current()
+            yield event
+    except StopAsyncIteration:
+        return
+    except ValueError:
+        yield _sse('error',{'code':'POLICY_CONTEXT_UNAVAILABLE','message':'政策版本或资格无法核验；未发布分析结果。'})
+    finally:
+        await iterator.aclose()
+
+
+async def _stream_snapshot_chat_owned(message, conversation_id, portfolio_id, view, *, options=None):
     """Parent adapter: only server-selected DB/config paths cross the process edge."""
     from app import database
     from backend.services.decision_service_v3 import _final_analysis_view
@@ -176,7 +195,15 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
         except Exception:
             logger.debug("Snapshot conversation history unavailable", exc_info=True)
             payload["conversation_history"] = []
+        from backend.services.investment_policy.runtime import current as policy_current
+        policy_session=policy_current(portfolio_id)
+        if policy_session.mode=='POLICY_ACTIVE' and (options or {}).get('target_versions'):
+            raise ValueError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
         result = await _invoke_worker(payload)
+        policy_session.ensure_current()
+        if policy_session.mode!='LEGACY' and (result.get('policy_mode')!=policy_session.mode
+                or result.get('policy_reference')!=policy_session.context.get('policy_reference')):
+            raise ValueError('POLICY_VERSION_CONFLICT')
         observation = safe_metadata(result.get("llm_observation"))
         if observation and observation["analysis_run_id"] != payload["analysis_run_id"]:
             raise ValueError("ANALYSIS_RUN_ID_MISMATCH")
@@ -200,6 +227,7 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
             return
         decision_id = "snapshot_" + uuid.uuid4().hex[:16]
         intent = result.get("intent") or {"primary_intent":"PositionDecision"}
+        policy_session.ensure_current()
         # Store only the worker's final projection, never raw model/data objects.
         explain = dict(decision_id=decision_id, conversation_id=conversation_id,
             analysisSnapshot=view["snapshot_id"], intent=intent,
@@ -243,6 +271,31 @@ async def stream_snapshot_chat(message, conversation_id, portfolio_id, view, *, 
 
 @observed_result
 async def _run_frozen_chat(payload):
+    from backend.services.investment_policy.runtime import current,bind
+    from backend.services.investment_policy.parser import PolicyError
+    from backend.services.investment_policy.consumers import finalize_output
+    from backend.agents.contracts import ExpressionOutput
+    from types import SimpleNamespace
+    if not isinstance(payload,dict) or not isinstance(payload.get('portfolio_id'),int) or isinstance(payload.get('portfolio_id'),bool) or payload['portfolio_id']<=0:
+        raise ValueError('SNAPSHOT_WORKER_REQUEST_INVALID')
+    session=current(payload['portfolio_id'])
+    with bind(session):
+        session.ensure_current()
+        if session.mode=='POLICY_ACTIVE' and payload.get('options',{}).get('target_versions'):
+            raise PolicyError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
+        result=await _run_frozen_chat_owned(payload)
+        session.ensure_current()
+        if session.mode=='POLICY_ACTIVE':
+            out=ExpressionOutput(structured_payload=result.get('analysis_result') or {})
+            finalize_output(SimpleNamespace(portfolio_id=session.portfolio_id),
+                SimpleNamespace(loaded_data=None,portfolio_evidence=result.get('owner_assessments',[])),out)
+            result.update(answer=out.chat_answer,analysis_result=out.structured_payload)
+        result.update(policy_mode=session.mode,policy_reference=session.context.get('policy_reference'))
+        session.ensure_current()
+        return result
+
+
+async def _run_frozen_chat_owned(payload):
     """Child only. All original service reads use the same immutable SQLite."""
     from app.asset_views import load_view, frozen_input
     from backend.services.decision_service_v3 import _final_analysis_view
@@ -276,6 +329,10 @@ async def _run_frozen_chat(payload):
         if ScenarioLeg.model_validate(raw).snapshot_id != payload["snapshot_id"]:
             raise ValueError("CROSS_SNAPSHOT_SCENARIO_REJECTED")
     view = load_view(payload["database_path"], pid, payload["snapshot_id"], payload["contract"])
+    from backend.services.investment_policy.runtime import current as policy_current
+    policy_session=policy_current(pid)
+    if policy_session.mode=='POLICY_ACTIVE':
+        policy_session.attach_asset_view(view)
     captured = {}
     text = []
     done = {}

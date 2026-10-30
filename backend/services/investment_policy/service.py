@@ -1,4 +1,4 @@
-"""Read-only unified policy context; intentionally not wired into current callers."""
+"""Read-only unified policy context; consumers opt in through runtime sessions."""
 from __future__ import annotations
 
 import sqlite3
@@ -50,6 +50,6 @@ class PolicyService:
                         "source_hashes": value["source_hashes"], "snapshot": value["snapshot"],
                         "effective_at": release["effective_at"], "release": release,
                         "data_quality": "SOURCE_HASHES_AND_DETERMINISTIC_DERIVATIVE_VERIFIED",
-                        "limitations": ["POLICY_IS_NOT_TRADE_AUTHORIZATION", "PORTFOLIO_DATA_NOT_EVALUATED", "P1_NOT_WIRED_TO_CURRENT_CALLERS"]}
+                        "limitations": ["POLICY_IS_NOT_TRADE_AUTHORIZATION", "PORTFOLIO_DATA_NOT_EVALUATED", "ACTIVATION_RECEIPT_DOES_NOT_VERIFY_PORTFOLIO_DATA"]}
         except (PolicyError, OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
             return {"status": "UNAVAILABLE", "reason": str(exc), "policy_reference": None}

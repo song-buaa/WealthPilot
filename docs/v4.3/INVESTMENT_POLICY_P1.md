@@ -107,3 +107,8 @@ P2才实施上述接线与发布者；本轮到本地审查交付停止，不在
 [定向测试](../../tests/test_investment_policy.py)只含显式合成源，数值与私人政策不同，验证闭合/边界/特殊覆盖/缺源/时点/历史/幂等/私有库/回滚fixture/版本一致性。真实两份正文的hash、实际预算及任务18项场景在仓库外受控目录运行并留收据，不进入Git。
 
 本地完整pytest、独立MCP协议、Offline M5、frontend lint/build及文档checker按[现有治理](../PROJECT_GOVERNANCE.md#6-质量门与当前基线)执行；实际结果在私人交付报告。没有push，远端CI为NOT_RUN。测试合成激活/回滚不代表已批准源文被系统激活，也不代表生产交易行为验收。
+
+
+## P2本地接入补充
+
+[P2消费者接入](INVESTMENT_POLICY_P2.md)沿用本Owner；默认LEGACY、ACTIVE仅合成发布验证，未部署或真实激活。P1独立复核补强SQLite防REPLACE/UPSERT历史覆盖；旧schema缺少约束时只读可用、写入拒绝，不自动迁移原候选库。本页P1当时的“未接入”描述为历史阶段边界，当前本地实现以P2说明为准。
