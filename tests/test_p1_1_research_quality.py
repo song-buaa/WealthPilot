@@ -168,6 +168,11 @@ def test_XPEV_official_excerpt_uses_same_parser_and_keeps_missing_unknown():
     assert parse_vehicle_operating(BeautifulSoup('<p>XPENG Reports Second Quarter 2026 Results. Vehicle margin was 12.1%.</p>','html.parser'),'2026-08-24')==[]
 
 
+def test_non_automotive_company_retains_original_financial_research():
+    a=combined()
+    assert not any('vehicle_' in r['field'] for r in build(a)['records'])
+
+
 def test_normal_collect_discovers_the_four_real_earnings_quarters(monkeypatch):
     from backend.core import demo_mode
     from backend.services.market_data import cache

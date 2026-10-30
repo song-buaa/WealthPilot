@@ -172,7 +172,9 @@ def build(assessment):
         for suffix,prior_end in [('yoy',date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()),
                                  ('qoq',(date.fromisoformat(now[0]['fiscal_period_start'])-timedelta(days=1)).isoformat())]:
             prior=unique(field,prior_end,now[0].get('currency'),anchor=now[0] if suffix=='yoy' else None)
-            if prior and prior[0].get('accounting_basis')==now[0].get('accounting_basis'):
+            if (prior and prior[0].get('accounting_basis')==now[0].get('accounting_basis')
+                    and (suffix!='qoq' or date.fromisoformat(prior[0]['period'])+timedelta(days=1)
+                         == date.fromisoformat(now[0]['fiscal_period_start']))):
                 previous=number(prior[0]['values'][field])
                 if previous and previous>0:
                     add(stem+'_'+suffix+'_pct',(current_value/previous-1)*100,now[1]+prior[1],period=latest,unit='percent',
