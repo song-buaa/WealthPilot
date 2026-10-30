@@ -48,6 +48,21 @@ def _execute(db, statement):
     db.execute(statement)
 
 
+def migration_authorizer(action, a, b, database, source):
+    """Only the reviewed policy DDL phase; inventory is a separate audit phase."""
+    tables = {"policy_bundles", "policy_events", "policy_releases"}
+    triggers = {f"{t}_no_{op}" for t in tables for op in ("update", "delete", "replace")}
+    allowed = False
+    if action == sqlite3.SQLITE_CREATE_TABLE: allowed = a in tables
+    elif action == sqlite3.SQLITE_CREATE_TRIGGER: allowed = a in triggers and b in tables
+    elif action == sqlite3.SQLITE_CREATE_INDEX: allowed = b in tables and a.startswith("sqlite_autoindex_policy_")
+    elif action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE}: allowed = a == "sqlite_master"
+    elif action == sqlite3.SQLITE_READ: allowed = a == "sqlite_master" or a in tables
+    elif action == sqlite3.SQLITE_SELECT: allowed = True
+    elif action == sqlite3.SQLITE_FUNCTION: allowed = b == "raise"
+    return sqlite3.SQLITE_OK if allowed else sqlite3.SQLITE_DENY
+
+
 def install_on_isolated_copy(*, backup, manifest, target, rehearsal_root):
     """Caller explicitly supplies COPY and Backup API manifest; never copies live WAL."""
     backup, target, root = (Path(p).absolute() for p in (backup, target, rehearsal_root))
@@ -75,6 +90,8 @@ def install_on_isolated_copy(*, backup, manifest, target, rehearsal_root):
             raise PolicyError("STANDALONE_BACKUP_REQUIRED")
         if src.execute("PRAGMA integrity_check").fetchall() != [("ok",)] or inventory(src) != manifest["tables"]:
             raise PolicyError("BACKUP_VERIFICATION_FAILED")
+        if src.execute("PRAGMA foreign_key_check").fetchall():
+            raise PolicyError("SOURCE_BACKUP_FOREIGN_KEY_VIOLATIONS")
         source_objects = _objects(src)
     # Derive authoritative object definitions using only an in-memory SQLite DB.
     with closing(sqlite3.connect(":memory:")) as expected:
@@ -92,12 +109,16 @@ def install_on_isolated_copy(*, backup, manifest, target, rehearsal_root):
                 raise PolicyError("OFFLINE_COPY_DIFFERS_FROM_VERIFIED_BACKUP")
             if any(k not in manifest["tables"] and k not in {"policy_bundles", "policy_events", "policy_releases"} for k in before):
                 raise PolicyError("UNEXPECTED_COPY_TABLE")
-            for name, sql in required.items():
-                if name in objects_before:
-                    if " ".join(objects_before[name].split()) != " ".join(sql.split()):
-                        raise PolicyError("INCOMPATIBLE_POLICY_SCHEMA")
-                else:
-                    _execute(db, sql)
+            db.set_authorizer(migration_authorizer)
+            try:
+                for name, sql in required.items():
+                    if name in objects_before:
+                        if " ".join(objects_before[name].split()) != " ".join(sql.split()):
+                            raise PolicyError("INCOMPATIBLE_POLICY_SCHEMA")
+                    else:
+                        _execute(db, sql)
+            finally:
+                db.set_authorizer(None)  # private audit/commit only; never yielded
             after = inventory(db)
             if any(after[k] != v for k,v in before.items()) or any(_objects(db).get(k) != v for k,v in objects_before.items()):
                 raise PolicyError("PREEXISTING_HISTORY_OR_SCHEMA_CHANGED")

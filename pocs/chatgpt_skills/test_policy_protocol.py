@@ -12,6 +12,7 @@ from backend.services.investment_policy.runtime import context
 from backend.services.investment_thesis.store import ThesisStore
 from backend.services.investment_thesis.monitoring import migrate_monitoring
 from tests.test_policy_publisher import formal_portfolio
+from tests.test_policy_colocated import shared,stage
 
 
 def settings(path,prepare_path):
@@ -74,3 +75,32 @@ def test_formal_publisher_receipt_via_actual_readonly_mcp_protocol(formal_portfo
             assert not value['execution_authorized']
     asyncio.run(run())
     assert formal_portfolio[0].path.read_bytes()==before
+
+
+def test_colocated_policy_uses_original_contract_in_real_mcp_protocol(shared,monkeypatch):
+    from backend.services.investment_policy.colocated import CoLocatedPolicyStore
+    from backend.services.investment_policy.formal_publisher import PolicyPublisher
+    from backend.services.investment_policy.store import utc_now
+    from backend.services.investment_policy.contracts import digest
+    from tests.test_policy_publisher import approval,installation
+    store=CoLocatedPolicyStore(*shared[:2]);bundle=stage(store,shared[2])
+    store.transition(scope=bundle['scope'],bundle_id=bundle['bundle_id'],state='VALIDATED',expected_state='DRAFT',request_id='validate',at=utc_now())
+    pub=PolicyPublisher(store,environment='ISOLATED_REHEARSAL')
+    a=approval(store,bundle);a['approved_at']=utc_now();pub.approve(authorization=a,request_id='approve')
+    i=installation(bundle,installed_at=utc_now());a=approval(store,bundle,'ACTIVATE')
+    a.update(approved_at=utc_now(),installation_sha256=digest(i))
+    pub.release(authorization=a,installation=i,request_id='release')
+    monkeypatch.setenv('WEALTHPILOT_POLICY_DB_PATH',str(shared[0]))
+    monkeypatch.setenv('WEALTHPILOT_POLICY_SCOPE',bundle['scope'])
+    monkeypatch.setenv('WEALTHPILOT_POLICY_SHARED_CONTRACT',str(shared[1]))
+    cfg=settings(None,None);cfg.e1_db_path=None;cfg.e1_enable_writes=False;cfg.prepare_config=None
+    def forbidden(*a,**k):raise AssertionError('Policy read called business worker')
+    monkeypatch.setattr(BusinessClient,'call',forbidden)
+    async def run():
+        async with Client(create_server(cfg),mode='legacy') as client:
+            result=await client.call_tool('get_investment_policy_context',{'scope':'full'})
+            assert not result.is_error
+            value=result.structured_content or json.loads(result.content[0].text)
+            assert value['policy_reference']['bundle_sha256']==digest(bundle)
+            assert not value['execution_authorized']
+    asyncio.run(run())

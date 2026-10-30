@@ -66,6 +66,8 @@ class Installation(Contract):
 
 def store_identity(store):
     """Opaque target binding; never disclose a private filesystem path."""
+    if hasattr(store, "publisher_identity"):
+        return store.publisher_identity()
     return digest({"policy_store": str(store.path)})
 
 
