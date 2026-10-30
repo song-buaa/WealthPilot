@@ -223,7 +223,11 @@ def create_server(settings):
             description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. Explain structured thresholds, never redefine them.')
         def get_investment_policy_context(scope: Literal['portfolio','position','risk','full']='portfolio', symbol: str | None = None) -> dict:
             from backend.services.investment_policy.runtime import context
-            return context(settings.portfolio_id,consumer='mcp',view=scope,symbol=symbol)
+            from backend.services.investment_policy.parser import PolicyError
+            try:
+                return context(settings.portfolio_id,consumer='mcp',view=scope,symbol=symbol)
+            except PolicyError:
+                raise ToolError('POLICY_CONTEXT_UNAVAILABLE') from None
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
     # 4.3 E1 research-only store: opt-in reads; original business DB stays read-only.
     e1_path = getattr(settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
