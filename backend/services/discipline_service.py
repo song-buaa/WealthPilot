@@ -48,6 +48,10 @@ def evaluate_trade(text: str, portfolio_id: int) -> dict:
       4. 调用 evaluate_action()
       5. 序列化结果返回
     """
+    from backend.services.investment_policy.runtime import current, diagnose
+    if current(portfolio_id).mode != 'LEGACY':
+        return {'parsed_intent':{'unresolved':True},'evaluation':diagnose(portfolio_id),
+                'execution_authorized':False}
     # 使用聚合后持仓（按标的合并，单标的集中度反映真实暴露）
     from app.utils.position_aggregator import aggregate_investment_positions
     agg_positions, total_assets = aggregate_investment_positions(portfolio_id)
@@ -137,15 +141,22 @@ def evaluate_trade(text: str, portfolio_id: int) -> dict:
 # ── 规则配置 ──────────────────────────────────────────────────────────────────
 
 def get_rules_config() -> dict:
+    from backend.services.investment_policy.runtime import current, context
+    if current().mode != 'LEGACY':
+        return context(consumer='discipline',view='risk')
     return get_rules()
 
 
 def update_rules_config(new_rules: dict) -> dict:
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     save_rules_config(new_rules)
     return get_rules()
 
 
 def reset_rules() -> dict:
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     reset_rules_to_default()
     return get_rules()
 
@@ -154,6 +165,10 @@ def reset_rules() -> dict:
 
 def get_handbook() -> dict:
     """返回当前手册内容及来源"""
+    from backend.services.investment_policy.runtime import current
+    if current().mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import policy_document
+        return policy_document('policy')
     custom = _load_custom_handbook()
     if custom is not None:
         return {"source": "custom", "content": custom}
@@ -162,12 +177,16 @@ def get_handbook() -> dict:
 
 def save_handbook(content: str) -> None:
     """保存用户定制手册"""
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     _CUSTOM_HANDBOOK_FILE.parent.mkdir(parents=True, exist_ok=True)
     _CUSTOM_HANDBOOK_FILE.write_text(content, encoding="utf-8")
 
 
 def reset_handbook() -> dict:
     """删除定制手册，恢复官方版"""
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     if _CUSTOM_HANDBOOK_FILE.exists():
         _CUSTOM_HANDBOOK_FILE.unlink()
     reset_rules_to_default()

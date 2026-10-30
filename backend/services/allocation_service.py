@@ -32,6 +32,10 @@ from app.models import Position
 
 def get_snapshot(portfolio_id: int) -> AllocationSnapshot:
     """获取当前配置快照"""
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import snapshot
+        return snapshot(portfolio_id)
     with get_session() as session:
         positions = (
             session.query(Position)
@@ -47,11 +51,19 @@ def get_targets() -> List[AssetTarget]:
     V1: 返回固定的默认目标（稳健偏进取）。
     后续迭代时可根据用户画像动态生成。
     """
+    from backend.services.investment_policy.runtime import current
+    if current().mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import targets
+        return targets()
     return get_default_targets()
 
 
 def get_deviation(portfolio_id: int) -> DeviationSnapshot:
     """获取偏离度快照"""
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import deviation
+        return deviation(portfolio_id)
     snapshot = get_snapshot(portfolio_id)
     targets = get_targets()
     return build_deviation_snapshot(snapshot, targets)
@@ -66,6 +78,10 @@ def compute_increment_plan(
     计算增量分配方案。
     含纪律校验 + block 级自动修正。
     """
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import conditional_plan
+        return conditional_plan(increment_amount,portfolio_id)
     snapshot = get_snapshot(portfolio_id)
     targets = get_targets()
 
@@ -99,6 +115,10 @@ def compute_initial_plan(
     计算初始配置方案（从零开始）。
     货币类默认只分配到下限。
     """
+    from backend.services.investment_policy.runtime import current
+    if current().mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import conditional_plan
+        return conditional_plan(total_amount)
     targets = get_targets()
     result = calc_initial_allocation(total_amount, targets)
 
@@ -114,6 +134,10 @@ def run_discipline_check(
     proposed_allocations: dict,
 ) -> DisciplineCheckResult:
     """对任意拟议分配执行纪律校验"""
+    from backend.services.investment_policy.runtime import current, diagnose
+    if current(portfolio_id).mode != 'LEGACY':
+        diagnose(portfolio_id)
+        return DisciplineCheckResult(passed=False, violations=[])
     snapshot = get_snapshot(portfolio_id)
     targets = get_targets()
     return check_discipline(proposed_allocations, snapshot, targets)

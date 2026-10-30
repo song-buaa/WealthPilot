@@ -43,6 +43,14 @@ def evaluate_action(
             final_verdict  = BLOCKED / COOLDOWN / PROCEED
     """
 
+    from backend.services.investment_policy.runtime import current, diagnose
+    if current().mode != 'LEGACY':
+        result = diagnose(issuer_symbol=position.symbol,
+            behaviors={'new_consumer_credit_for_equities': None,
+                       'unauthorized_real_trade': None})
+        return EvaluationResult(allowed=False, final_verdict=result['status'],
+            risk=RiskCheckResult(status=result['status'],warnings=[str(result)]),
+            decision=DecisionResult(recommendation='HOLD',reasons=['POLICY_DIAGNOSTIC_NOT_ORDER_AUTHORIZATION']))
     # ── Step 1: Risk Engine ──────────────────────────────
     risk_result = risk_engine.run(portfolio, action)
 

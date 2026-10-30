@@ -11,8 +11,25 @@ from backend.services import discipline_service as svc
 router = APIRouter()
 
 
+@router.get('/policy-context')
+def get_policy_context(view: str = 'portfolio', symbol: str | None = None):
+    from backend.services.investment_policy.runtime import context
+    try:
+        return context(_pid(), consumer='web', view=view, symbol=symbol)
+    except ValueError:
+        raise HTTPException(409, detail='POLICY_CONTEXT_UNAVAILABLE') from None
+
+
 def _pid() -> int:
     return _state.portfolio_id
+
+
+def _editable():
+    from backend.services.investment_policy.runtime import assert_editable
+    try:
+        assert_editable(_pid())
+    except ValueError:
+        raise HTTPException(409,detail='POLICY_BUNDLE_READ_ONLY_USE_CONTROLLED_RELEASE') from None
 
 
 # ── 请求体模型 ────────────────────────────────────────────────────────────────
@@ -53,12 +70,14 @@ def get_rules():
 @router.put("/rules")
 def update_rules(req: UpdateRulesRequest):
     """更新规则配置（持久化到 data/rules_config.json）"""
+    _editable()
     return svc.update_rules_config(req.rules)
 
 
 @router.delete("/rules")
 def reset_rules():
     """重置为内置默认规则（删除 data/rules_config.json）"""
+    _editable()
     return svc.reset_rules()
 
 
@@ -79,6 +98,7 @@ async def upload_handbook(file: UploadFile = File(...)):
     上传定制手册（Markdown 文件）。
     Content-Type: multipart/form-data
     """
+    _editable()
     data = await file.read()
     try:
         content = data.decode("utf-8")
@@ -93,6 +113,7 @@ def save_handbook_json(req: SaveHandbookRequest):
     """
     直接以 JSON body 保存手册内容（前端编辑器场景）。
     """
+    _editable()
     if not req.content.strip():
         raise HTTPException(status_code=422, detail="content 不能为空")
     svc.save_handbook(req.content)
@@ -102,4 +123,5 @@ def save_handbook_json(req: SaveHandbookRequest):
 @router.delete("/handbook")
 def reset_handbook():
     """删除定制手册，恢复官方版本"""
+    _editable()
     return svc.reset_handbook()

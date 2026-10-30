@@ -5,6 +5,7 @@
  * 3. 投资纪律手册（Markdown 查阅）
  */
 import React, { useState, useEffect, useRef } from 'react'
+import InvestmentPolicyBoundary from '@/components/InvestmentPolicyBoundary'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -230,6 +231,10 @@ function computeKPIs(
 
 // ── 主组件 ────────────────────────────────────────────────────
 export default function Discipline() {
+  return <InvestmentPolicyBoundary view="full"><LegacyDiscipline /></InvestmentPolicyBoundary>
+}
+
+function LegacyDiscipline() {
   const [rules,    setRules]    = useState<Record<string, unknown> | null>(null)
   const [handbook, setHandbook] = useState<{ source: string; content: string } | null>(null)
   const [summary,  setSummary]  = useState<PortfolioSummary | null>(null)

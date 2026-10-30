@@ -17,7 +17,7 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 �
 - **No Parallel System**：新增平行交易、持仓、收益服务/模型/流程前，必须在 PR 或现有设计文档中记录无法复用的原因、权威归属、迁移/退出方案，并取得人工明确批准后才实施。不得以新入口需求绕开原确认、风控或券商适配器。
 - PEER 是唯一决策主链路；禁止恢复 `USE_V3_AGENTS` 等双轨开关。不得直接修改 `decision_engine/` 核心引擎；新增能力沿用 Skill + Tool / `invoke_skill()`，不在 ExecutingAgent 堆业务 if-else。不改内部 SKILL.md 的 `type` / `entry_point` / `tool_name` 契约。
 - 五层投资决策架构（政策约束、共享证据、分析Skills、综合决策、授权执行与复盘）是业务职责视图，继续由原PEER跨层编排，不新增Agent Runtime；当前实现与目标缺口分别见[当前架构](docs/ARCHITECTURE_CURRENT.md)和[统一架构](docs/v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)。
-- Skill封装可复用能力及其输入/输出、证据、适用范围与成熟度；Strategy组合能力与研究方法，不直接等于Skill。优先复用原Tool/Service和数据Owner；投资理念、投资纪律、长期资产配置三类政策由用户批准的理念/投资政策两份私有Markdown承载。内容批准不等于系统ACTIVE；[Policy Bundle P1](docs/v4.3/INVESTMENT_POLICY_P1.md)仅为未接入候选，JSON/索引不得成为第三套人工权威，不擅改批准原文或激活政策。
+- Skill封装可复用能力及其输入/输出、证据、适用范围与成熟度；Strategy组合能力与研究方法，不直接等于Skill。优先复用原Tool/Service和数据Owner；投资理念、投资纪律、长期资产配置三类政策由用户批准的理念/投资政策两份私有Markdown承载。内容批准不等于系统ACTIVE；[Policy Bundle P1](docs/v4.3/INVESTMENT_POLICY_P1.md)及[P2消费者接入](docs/v4.3/INVESTMENT_POLICY_P2.md)仍为本地候选（默认LEGACY，ACTIVE仅合成验收），JSON/索引不得成为第三套人工权威，不擅改批准原文或激活政策。
 - 研究结果、工程接通、生产验收及策略获批资格分别留证；未经验证的策略仅作研究参考。综合决策须解释冲突和未知，不能用投票或分数相加替代判断；建议、E1保存确认与具体交易授权分开，执行必须经过原用户确认和风控。
 - 外部依赖 optional：分析缺源应显式降级；交易安全校验缺合约、报价、费用或资金证据时 fail closed。失败不得伪装空账户/空订单/零费用；不得把所有业务失败一律吞掉。
 - **Documentation as Code**：先更新原文档，避免第二份权威说明；Registry 的新增/入口或职责变更/废弃迁移合并检查及无变化豁免统一按[治理规则](docs/PROJECT_GOVERNANCE.md#registry-维护检查)执行。
