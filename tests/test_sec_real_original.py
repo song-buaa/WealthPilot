@@ -58,13 +58,13 @@ def test_original_hash_before_and_after_parser_and_four_exact_native_fields():
     facts={o['source_field']:o for o in row['financial_observations'] if o['fiscal_period_end']=='2026-06-30'}
     assert {k:facts[k]['value']*facts[k]['unit_scale'] for k in EXPECTED}==EXPECTED
     assert sum(o['source_field'] in EXPECTED for o in row['financial_observations'])==12  # original four in three actual periods
-    assert {o['currency'] for o in row['financial_observations']}=={'CNY'}
+    assert {o['currency'] for o in row['financial_observations'] if o['source_field'] in EXPECTED}=={'CNY'}
     assert facts['capitalExpenditures']['reported_value']==-1315790
     assert facts['capitalExpenditures']['sign_normalization']['reported_free_cash_flow']==-1300765
     assert EXPECTED['operatingCashflow']-EXPECTED['capitalExpenditures']==-1300765000
     assert row['published_at']=='2026-08-26T07:57:57-04:00'
     assert all(o['document_type']=='EX-99.1' and o['document_filename']=='tm2624080d1_ex99-1.htm' for o in facts.values())
-    assert all('DOCUMENT[1]' in o['source_locator'] and 'table[' in o['source_locator'] for o in facts.values())
+    assert all('DOCUMENT[1]' in o['source_locator'] and 'table[' in o['source_locator'] for k,o in facts.items() if k in EXPECTED)
     assert hashlib.sha256(body).hexdigest()==before
 
 
@@ -73,7 +73,7 @@ def test_real_original_four_L1_refs_under_explicit_offline_clock_without_TTM_upg
         disclosure_verifier={row['record_id']:deepcopy(row)}.get)
     fields={r['field']:r for r in a['verified_field_records']}
     assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','capital_expenditures_quarter'} <= set(fields)
-    assert all(r['period']=='2026-06-30' and r['currency']=='CNY' for r in fields.values())
+    assert all(r['period']=='2026-06-30' and r['currency']=='CNY' for k,r in fields.items() if k in {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','capital_expenditures_quarter'})
     assert 'net_income_quarter' in explanation_prompt(a)
     candidate=dict(topic='business',basis='inference',text='账面亏损与经营现金流偏弱共同提示盈利和现金转化承压，应结合营运资本与产品结构核查改善是否可持续。',
         evidence_refs=[fields[k]['record_id'] for k in ('net_income_quarter','operating_cash_flow_quarter')])
@@ -108,6 +108,10 @@ def test_real_original_adversarial_mutations_fail_closed(change):
     row=sec.parse_filing((body,OFFLINE_TEST_PROCESSING_CLOCK),i,f,identity_digest='a'*64)
     if change=='capex_sign':
         assert row and not any(o['source_field']=='capitalExpenditures' and o['fiscal_period_end']=='2026-06-30' for o in row['financial_observations'])
+    elif change in {'currency','period','units'}:
+        # The separately labeled operating highlight can remain valid even
+        # when the accounting-statement columns are unusable.
+        assert row is None or not any(o['source_field'] in EXPECTED for o in row['financial_observations'])
     else:assert row is None or not row['financial_observations']
 
 

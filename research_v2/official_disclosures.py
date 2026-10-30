@@ -246,6 +246,46 @@ def _column_currency(value):
     return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
 
 
+def parse_vehicle_operating(soup, published):
+    """Explicit quarterly operating highlights from a verified original exhibit.
+
+    No implicit monthly summation or revenue-recognition assumption. Multiple
+    inconsistent values for the same labeled period are rejected independently.
+    """
+    text=' '.join(soup.stripped_strings)
+    periods={(ordinal.lower(),int(year)) for ordinal,year in re.findall(
+        r'(first|second|third|fourth) quarter of (20\d{2})',text,re.I)}
+    observations=[]
+    for ordinal,year in sorted(periods):
+        quarter={'first':1,'second':2,'third':3,'fourth':4}[ordinal]
+        end=f'{year}-{quarter*3:02d}-'+('31' if quarter in (1,4) else '30')
+        if end>str(published)[:10]:continue
+        phrase=ordinal+r' quarter of '+str(year)
+        specs=(
+          ('vehicleDeliveries','vehicle_deliveries',r'(?:total )?deliveries of vehicles were\s+([\d,]+)\s+for the '+phrase+r'|total deliveries for the '+phrase+r' were\s+([\d,]+)\s+vehicles',None,'vehicles'),
+          ('vehicleSales','vehicle_sales',r'(?:revenues? from vehicle sales|vehicle sales) were\s+RMB\s*([\d,.]+)\s*(billion|million)\s*\(US\$[^)]*\)\s+(?:in|for) the '+phrase, 'CNY','currency_units'),
+          ('vehicleMargin','vehicle_margin',r'vehicle margin(?:\s*\[[^]]+\])?(?:, which is gross profit of vehicle sales as a percentage of vehicle sales revenue,)?\s+was\s+([\d.]+)%\s+(?:in|for) the '+phrase,None,'percent'),
+        )
+        for key,basis,pattern,currency,unit in specs:
+            matches=list(re.finditer(pattern,text,re.I));values={}
+            for match in matches:
+                try:
+                    groups=match.groups()
+                    raw=next(group for group in groups if group and re.fullmatch(r'[\d,.]+',group))
+                    value=Decimal(raw.replace(',',''))
+                    if key=='vehicleSales':value*=Decimal(10)**(9 if groups[1].lower()=='billion' else 6)
+                    if not value.is_finite() or value<=0 or (key=='vehicleMargin' and value>100):continue
+                    values.setdefault(value,[]).append(match.start())
+                except (InvalidOperation,IndexError,StopIteration,AttributeError):continue
+            if len(values)!=1:continue
+            value, offsets=next(iter(values.items()))
+            observations.append(dict(source_field=key,value=float(value),currency=currency,unit=unit,
+                unit_scale=1,period_basis='quarterly',fiscal_period_start=f'{year}-{quarter*3-2:02d}-01',fiscal_period_end=end,
+                accounting_basis=basis,source_locator='quarterly operating highlights / '+key+' / '+end+' / text-offset['+str(offsets[0])+']',
+                period_start_basis='explicit quarter in official earnings exhibit'))
+    return observations
+
+
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]

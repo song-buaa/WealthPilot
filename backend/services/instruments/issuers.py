@@ -6,9 +6,10 @@ EVIDENCE = ["https://ir.lixiang.com/investor-faqs",
 IDENTITIES = {("LI:US", "USD"): "LI_AUTO", ("2015:HK", "HKD"): "LI_AUTO",
               ("02015:HK", "HKD"): "LI_AUTO",
               ("3690:HK", "HKD"): "MEITUAN", ("03690:HK", "HKD"): "MEITUAN",
-              ("PDD:US", "USD"): "PDD_HOLDINGS"}
+              ("PDD:US", "USD"): "PDD_HOLDINGS", ("XPEV:US", "USD"): "XPENG"}
 ISSUERS = {
     "LI_AUTO": ("Li Auto Inc.", "CN", EVIDENCE),
+    "XPENG": ("XPeng Inc.", "CN", ["https://ir.xiaopeng.com/news-events/news-releases", "https://www.sec.gov/Archives/edgar/data/1810997/"]),
     "MEITUAN": ("Meituan", "CN", ["https://www.hkexnews.hk/listedco/listconews/sehk/2024/0429/2024042900115.pdf"]),
     "PDD_HOLDINGS": ("PDD Holdings Inc.", "CN", [
         "https://investor.pddholdings.com/information-investors",

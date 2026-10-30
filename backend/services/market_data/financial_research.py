@@ -18,6 +18,10 @@ LABELS={
     'net_income_available_to_ordinary_shareholders_quarter':'季度归属于普通股股东的收益',
     'operating_income_quarter':'季度营业利润','operating_cash_flow_quarter':'季度经营现金流',
     'diluted_eps_ads_quarter':'季度稀释每ADS收益','diluted_eps_ordinary_quarter':'季度稀释普通股收益',
+    'vehicle_deliveries_quarter':'季度汽车交付量','vehicle_sales_quarter':'季度汽车销售收入',
+    'vehicle_margin_pct':'季度汽车业务毛利率','vehicle_revenue_per_delivery_approx':'季度汽车收入/交付量近似值',
+    'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
+    'vehicle_deliveries_qoq_pct':'季度交付量环比','vehicle_margin_change_pp':'汽车业务毛利率同比变化',
     'revenue_yoy_pct':'季度收入同比','net_income_yoy_pct':'季度合并净利润同比',
     'parent_income_yoy_pct':'季度归母净利润同比','net_margin_pct':'季度合并净利率',
     'ordinary_income_yoy_pct':'季度普通股股东收益同比',
@@ -159,6 +163,38 @@ def build(assessment):
                     details=dict(comparison_period=prior_end,formula='(current/prior - 1)*100'))
             else:missing.append(growth+': PRIOR_NONPOSITIVE; loss/profit crossover is not normal growth')
         else:missing.append(growth+': COMPARABLE_PRIOR_QUARTER_UNKNOWN')
+    # Automotive observations are issuer-neutral and never inferred from group revenue.
+    for field,stem in [('vehicle_deliveries_quarter','vehicle_deliveries'),('vehicle_sales_quarter','vehicle_sales')]:
+        now=unique(field,latest)
+        if not now:continue
+        current_value=number(now[0]['values'][field])
+        if current_value is None or current_value<=0:continue
+        for suffix,prior_end in [('yoy',date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()),
+                                 ('qoq',(date.fromisoformat(now[0]['fiscal_period_start'])-timedelta(days=1)).isoformat())]:
+            prior=unique(field,prior_end,now[0].get('currency'),anchor=now[0] if suffix=='yoy' else None)
+            if prior and prior[0].get('accounting_basis')==now[0].get('accounting_basis'):
+                previous=number(prior[0]['values'][field])
+                if previous and previous>0:
+                    add(stem+'_'+suffix+'_pct',(current_value/previous-1)*100,now[1]+prior[1],period=latest,unit='percent',
+                        details=dict(formula='(current/prior - 1)*100',comparison_period=prior_end))
+    vehicle_sales=unique('vehicle_sales_quarter',latest)
+    deliveries=unique('vehicle_deliveries_quarter',latest)
+    if vehicle_sales and deliveries and _same_span(vehicle_sales[0],deliveries[0]):
+        count=number(deliveries[0]['values']['vehicle_deliveries_quarter'])
+        if count and count>0:
+            add('vehicle_revenue_per_delivery_approx',vehicle_sales[0]['values']['vehicle_sales_quarter']/count,
+                vehicle_sales[1]+deliveries[1],period=latest,currency=vehicle_sales[0]['currency'],unit='currency_per_vehicle',
+                details=dict(formula='quarter vehicle sales revenue / reported quarter deliveries',
+                    caveat='Delivery cohorts need not match revenue recognition; not a transaction ASP or price/mix proof'))
+    margin=unique('vehicle_margin_pct',latest)
+    if margin:
+        try:
+            prior_end=date.fromisoformat(latest).replace(year=date.fromisoformat(latest).year-1).isoformat()
+            before=unique('vehicle_margin_pct',prior_end,anchor=margin[0])
+            if before and _same_span(margin[0],before[0],prior_year=True):
+                add('vehicle_margin_change_pp',margin[0]['values']['vehicle_margin_pct']-before[0]['values']['vehicle_margin_pct'],
+                    margin[1]+before[1],period=latest,unit='percentage_points',details=dict(formula='current vehicle gross margin - prior vehicle gross margin'))
+        except ValueError:pass
     revenue=unique('revenue_quarter',latest)
     income=unique('net_income_quarter',latest)
     for numerator,out in [('net_income_quarter','net_margin_pct'),('operating_income_quarter','operating_margin_pct')]:

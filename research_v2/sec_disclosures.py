@@ -421,9 +421,11 @@ def parse_filing(source, issuer, filing, *, identity_digest):
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')
-        from research_v2.official_disclosures import parse_statement_tables
+        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating
         try:
             table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
+            if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
+                table_observations += parse_vehicle_operating(soup,filing['published_at'])
         except (ValueError,TypeError,AttributeError,InvalidOperation,OverflowError):
             return None
         for obs in table_observations:

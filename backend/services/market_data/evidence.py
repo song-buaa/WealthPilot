@@ -279,6 +279,7 @@ _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"op
                          "generalAdminReported":"general_admin_as_reported", "researchDevelopmentReported":"research_development_as_reported",
                          "incomeTaxReported":"income_tax_as_reported",
                          "sellingGeneralAdminReported":"combined_selling_general_admin_as_reported",
+                         "vehicleDeliveries":"vehicle_deliveries", "vehicleSales":"vehicle_sales", "vehicleMargin":"vehicle_margin",
                          "dilutedEPSADS":"diluted_eps_ads", "dilutedEPSOrdinary":"diluted_eps_ordinary"}
 
 
@@ -303,7 +304,7 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
     from backend.services.instruments.issuers import IDENTITIES
     meta=mapping(raw.get("official_disclosure"))
     issuer=IDENTITIES.get((symbol,{"US":"USD","HK":"HKD"}.get((symbol or "").rsplit(":",1)[-1])))
-    domain={"LI_AUTO":"lixiang.com","PDD_HOLDINGS":"pddholdings.com","MEITUAN":"meituan.com"}.get(issuer)
+    domain={"LI_AUTO":"lixiang.com","PDD_HOLDINGS":"pddholdings.com","XPENG":"xiaopeng.com","MEITUAN":"meituan.com"}.get(issuer)
     parsed=urlparse(str(raw.get("source_url") or ""))
     # Independent source-owner proof carries exact directory + Submissions identity.
     # This is never populated from a request/card or inferred company name.
@@ -342,10 +343,10 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
         if (key not in _OFFICIAL_FIELD_BASIS or obs.get("accounting_basis") not in {_OFFICIAL_FIELD_BASIS[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
                 or obs.get("period_basis") not in ({"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
-                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share"}.get(key,"currency_units") or scale not in {1,1000,1000000}
+                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
-                or obs.get("currency") not in {"CNY","USD","HKD"} or value is None
+                or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin"} else {"CNY","USD","HKD"}) or value is None
                 or not math.isfinite(value*scale)):
             continue
         result.append(dict(obs,value=value*scale,unit_scale=1,published_at=raw["published_at"],
@@ -634,6 +635,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "generalAdminReported":"general_admin_reported_quarter", "researchDevelopmentReported":"research_development_reported_quarter",
                       "incomeTaxReported":"income_tax_reported_quarter",
                       "sellingGeneralAdminReported":"selling_general_admin_reported_quarter",
+                      "vehicleDeliveries":"vehicle_deliveries_quarter", "vehicleSales":"vehicle_sales_quarter", "vehicleMargin":"vehicle_margin_pct",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
     for obs in quarter_observations:
@@ -646,7 +648,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         if obs['source_field']=='netIncome' and obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
         (historical_field_records if historical else verified_field_records).append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],
-            record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"]+(":"+obs["currency"]+":"+obs["accounting_basis"] if obs.get("fiscal_period_start") else ""),
+            record_id=obs["record_id"]+":"+field+":"+obs["fiscal_period_end"]+(":"+str(obs["currency"] or "NON_MONETARY")+":"+obs["accounting_basis"] if obs.get("fiscal_period_start") else ""),
             quality="valid", issues=[], data_as_of=obs["fiscal_period_end"],
             published_at=obs["published_at"], fetched_at=obs["fetched_at"],
             period=obs["fiscal_period_end"], scope=obs["period_basis"], currency=obs["currency"],

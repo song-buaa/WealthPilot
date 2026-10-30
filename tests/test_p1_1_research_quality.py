@@ -137,6 +137,37 @@ def test_LI_original_cash_and_profit_preserved_and_prompt_example_is_bound():
     assert '合法数字绑定示例' in explanation_prompt(a)
 
 
+def test_LI_real_SEC_original_yields_independent_vehicle_operating_evidence():
+    row=li_record();a=assess({},symbol='LI:US',research=[row],at=AT,disclosure_verifier={row['record_id']:row}.get)
+    facts={r['field']:r for r in a['verified_field_records'] if r['field'].startswith('vehicle_')}
+    assert facts['vehicle_deliveries_quarter']['values']['vehicle_deliveries_quarter']==98330
+    assert facts['vehicle_sales_quarter']['values']['vehicle_sales_quarter']==24100000000
+    assert facts['vehicle_margin_pct']['values']['vehicle_margin_pct']==9.4
+    metric=metrics(a)['vehicle_revenue_per_delivery_approx']
+    assert metric['values']['vehicle_revenue_per_delivery_approx']==pytest.approx(24100000000/98330)
+    assert len(metric['evidence_refs'])==2 and 'not a transaction ASP' in metric['details']['caveat']
+    assert all(r['source_document_sha256']==row['source_verification']['document_sha256'] for r in
+               [f['publication_links'][0] for f in facts.values()])
+    assert '实际成交均价' in explanation_prompt(a)
+
+
+def test_XPEV_official_excerpt_uses_same_parser_and_keeps_missing_unknown():
+    from bs4 import BeautifulSoup
+    from research_v2.official_disclosures import parse_vehicle_operating
+    # Verbatim field sentences from the public SEC EX-99.1; this tests the
+    # layout only, not the full-document/identity/clock qualification contract.
+    excerpt='''XPENG Reports Second Quarter 2026 Unaudited Financial Results.
+    Total deliveries of vehicles were 103,295 for the second quarter of 2026.
+    Revenues from vehicle sales were RMB17.05 billion (US$2.51 billion) for the second quarter of 2026.
+    Vehicle margin, which is gross profit of vehicle sales as a percentage of vehicle sales revenue,
+    was 12.1% for the second quarter of 2026.'''
+    rows=parse_vehicle_operating(BeautifulSoup('<p>'+excerpt+'</p>','html.parser'),'2026-08-24')
+    assert {r['source_field']:r['value'] for r in rows}==dict(
+        vehicleDeliveries=103295.,vehicleSales=17050000000.,vehicleMargin=12.1)
+    assert parse_vehicle_operating(BeautifulSoup('<p>'+excerpt+'</p>','html.parser'),'2026-06-01')==[]
+    assert parse_vehicle_operating(BeautifulSoup('<p>XPENG Reports Second Quarter 2026 Results. Vehicle margin was 12.1%.</p>','html.parser'),'2026-08-24')==[]
+
+
 def test_normal_collect_discovers_the_four_real_earnings_quarters(monkeypatch):
     from backend.core import demo_mode
     from backend.services.market_data import cache
