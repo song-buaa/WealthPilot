@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+import zlib
 
 from backend.services.investment_thesis.contracts import canonical
 from backend.services.market_data.evidence import assess, stamp
@@ -126,7 +127,7 @@ def frozen_inputs(root, request):
                 raise ValueError("QUALIFIED_PRICE_RAW_CLOSURE_MISMATCH")
             inputs[symbol] = checked
             files.update(company_files)
-        except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
+        except (ValueError, KeyError, TypeError, OSError, EOFError, zlib.error, json.JSONDecodeError) as error:
             safe = str(error)
             errors[symbol] = (safe if type(error) is ValueError and safe.isupper()
                               and safe.replace("_", "").isalnum() else "FROZEN_COMPANY_SOURCE_OR_QUALIFICATION_REJECTED")
@@ -141,16 +142,23 @@ def make_bundle(root, raw_request):
                    input_failures=failures, method_files=method_hashes(),
                    source_files={name: file_hash(path) for name, path in sorted(files.items())},
                    result=compare(request, assessments))
-    for card in payload["result"]["cards"]:
-        if card["symbol"] in failures:
-            card["source_failure"] = failures[card["symbol"]]
+    _project_source_failures(payload["result"], failures)
     payload["view_hashes"] = view_hashes(payload["result"])
     return dict(artifact_id=digest(payload), payload=payload), files
 
 
+def _project_source_failures(result, failures):
+    """Same frozen failure projection for initial run and historical replay."""
+    for card in result["cards"]:
+        if card["symbol"] in failures:
+            card["source_failure"] = failures[card["symbol"]]
+
+
 def markdown(result):
     lines = ["# S3 公司池质量与估值研究", "", f"决策截止：{result['decision_at']}；方法：{result['method_version']}", "",
-             "公司自身研究；配置优先级 UNKNOWN。情景参数是研发假设，非获批政策或预测事实。", "",
+             "Research Only：质量正向判断路径未完整实现，priority_blockers恒非空，当前优先考虑档不可达。", "",
+             "公司自身研究；配置优先级 UNKNOWN。1–20家仅为输入合同容量，真实验收仅限冻结AAPL/NVDA历史样例。", "",
+             "情景参数、10%要求回报示例、−10%谨慎累计回报下限及并列阈值均为研发参数，不是正式Investment Policy。", "",
              "| 公司 | 四底线 数据/持续性/现金/核心业务 | 分档 | 档内名次 | 基准年化 | 谨慎五年回报 | 条件价值区间 USD | 排序稳定 |", "|---|---|---|---|---|---|---|---|"]
     for card in result["cards"]:
         s = card.get("scenarios", {})
@@ -160,7 +168,8 @@ def markdown(result):
         base = s.get("base", {}).get("annualized_return", "UNKNOWN")
         cautious = s.get("cautious", {}).get("total_return", "UNKNOWN")
         lines.append(f"| {card['symbol']} | {states} | {card['group']} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
-    lines += ["", "回报值为小数（0.10代表10%）。条件价值为股权盈利情景的折现估计，不是完整DCF或客观公允价值。", "",
+    lines += ["", "回报值为小数（0.10代表10%）。条件价值是基于研究情景及要求回报的折现条件价格，不是客观公允价值或完整DCF。", "",
+              "质量证据不足、研发阈值未满足及真实基本面恶化分别表达；当前输出未建立完整基本面恶化结论。", "",
               "五年EPS按整体盈利增长和相对股数变化推演，期末乘假设PE；分红按各年EPS×派息率计算，不再叠加回购收益。分红持有现金不再投资。", "",
               "## 逐公司判断卡", ""]
     for card in result["cards"]:
@@ -247,6 +256,7 @@ def replay(path):
     if p["method_files"] != method_hashes():
         raise ValueError("METHOD_DRIFT_REPLAY_REQUIRES_ORIGINAL_VERSION")
     recalculated = compare(p["request"], p["assessments"])
+    _project_source_failures(recalculated, p.get("input_failures", {}))
     if digest(recalculated) != digest(p["result"]):
         raise ValueError("RECOMPUTATION_DIFFERENCE")
     return dict(artifact_id=bundle["artifact_id"], verified=True, result_sha256=digest(recalculated))

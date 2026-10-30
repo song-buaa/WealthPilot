@@ -3,6 +3,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
 import json
+import subprocess
+import sys
+import zlib
+from pathlib import Path
 
 import pytest
 
@@ -120,6 +124,23 @@ def test_all_failed_companies_remain_visible_and_unranked():
     assert all(c["group"] == "暂不优先" and c["rank"] is None for c in result["cards"])
 
 
+def test_research_scope_and_reason_categories_do_not_claim_fundamental_deterioration():
+    r = request()
+    source = {s: assessment(s) for s in r["companies"]}
+    result = compare(r, source)
+    assert result["maturity"] == "RESEARCH_ONLY"
+    assert result["priority_capability"]["reachable"] is False
+    for c in result["cards"]:
+        assert c["classification_reasons"]["quality_evidence_insufficient"]
+        assert c["classification_reasons"]["fundamental_deterioration"]["status"] == "NOT_ESTABLISHED"
+        assert c["quality"]["positive_quality_path_available"] is False
+    r["companies"]["AAA:US"] = params(".3", "40")
+    c = compare(r, source)["cards"][0]
+    assert not c["classification_reasons"]["research_thresholds_not_met"]
+    assert c["classification_reasons"]["quality_evidence_insufficient"]
+    assert c["group"] == "继续观察"  # Do not remove blockers to manufacture priority.
+
+
 @pytest.mark.parametrize("fault", ["too_many", "nan", "bad_method", "naive_time", "fake_policy"])
 def test_bounded_explicit_research_contract(fault):
     r = request()
@@ -193,3 +214,46 @@ def test_pinned_source_manifest_and_shared_cutoff_required(tmp_path):
     r = request()
     r["source_manifest_sha256"] = hashlib.sha256(b'{}').hexdigest()
     with pytest.raises(KeyError): frozen_inputs(tmp_path, r)
+
+
+def test_partial_source_failure_survives_freeze_and_exact_replay(tmp_path, monkeypatch):
+    from backend.services import quality_valuation_research as service
+    monkeypatch.setattr(service, "frozen_inputs", lambda *_: (
+        {"AAA:US": assessment()}, {"BBB:US": "SOURCE_HASH_MISMATCH"}, {}))
+    b, files = service.make_bundle(tmp_path, request())
+    path = service.save_bundle(tmp_path / "archive", b, files)
+    assert b["payload"]["result"]["cards"][0]["scenarios"]
+    assert b["payload"]["result"]["cards"][1]["source_failure"] == "SOURCE_HASH_MISMATCH"
+    assert service.replay(path / "bundle.json")["verified"]
+
+
+@pytest.mark.parametrize("error", [EOFError, zlib.error])
+def test_corrupt_historical_gzip_is_an_explicit_company_failure(tmp_path, monkeypatch, error):
+    from backend.services import quality_valuation_research as service
+    raw = tmp_path / "bad.gz"
+    raw.write_bytes(b"truncated")
+    meta = {k + "_sha256": "a" * 64 for k in ("assessment", "derived", "sec-records", "bars")}
+    meta.update(price_new_raw_sha256="a" * 64, price_old_raw_sha256="a" * 64,
+                price_new_fetched_at=AT.isoformat())
+    def load(_root, name, _expected=None):
+        if name == "P1_ACCEPTANCE_MANIFEST.json":
+            return dict(decision_at=AT.isoformat(), method_files={}, symbols={s: meta for s in ("AAA", "BBB")})
+        if name.endswith("requests.json"): return []
+        if "receipt" in name: return dict(raw_sha256="a" * 64, finished_at=AT.isoformat())
+        return {}
+    monkeypatch.setattr(service, "_load", load)
+    monkeypatch.setattr(service, "safe_file", lambda *_: raw)
+    monkeypatch.setattr(service, "file_hash", lambda *_: "a" * 64)
+    def corrupt(_): raise error("not exposed")
+    monkeypatch.setattr(service.gzip, "decompress", corrupt)
+    inputs, failures, _ = service.frozen_inputs(tmp_path, request())
+    assert not inputs and set(failures) == {"AAA:US", "BBB:US"}
+    assert all("not exposed" not in x for x in failures.values())
+
+
+def test_optimized_independent_verifier_fails_before_reading_or_claiming_pass(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts/s3_independent_recompute.py"
+    result = subprocess.run([sys.executable, "-O", str(script), str(tmp_path / "not_read.json")],
+                            capture_output=True, text=True)
+    assert result.returncode != 0 and "REQUIRES_ASSERTIONS" in result.stderr
+    assert "PASS" not in result.stdout

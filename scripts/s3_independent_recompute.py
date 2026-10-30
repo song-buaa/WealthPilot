@@ -14,6 +14,8 @@ def canonical(value):
 
 
 def verify(path):
+    if not __debug__:
+        raise RuntimeError("S3_INDEPENDENT_RECOMPUTE_REQUIRES_ASSERTIONS")
     path = Path(path)
     b = json.loads(path.read_text())
     p = b["payload"]

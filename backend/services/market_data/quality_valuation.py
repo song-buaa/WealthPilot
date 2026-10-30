@@ -11,7 +11,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from backend.services.market_data.evidence import stamp
 from backend.services.market_data.financial_research import build
 
-METHOD_VERSION = "s3-a.earnings-scenarios.v1"
+METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
 SCENARIOS = ("cautious", "base", "optimistic")
 GROUPS = ("优先考虑", "继续观察", "暂不优先")
 D = Decimal
@@ -193,6 +193,8 @@ def _quality(rows, metrics):
               and 330 <= (stamp(b["period"]) - stamp(a["period"])).days <= 400]
     core_status = "警示" if any(dec(g["value"]) < 0 for g in growth) else "暂无法判断"
     return dict(
+        evaluation_scope="RESEARCH_ONLY_INCOMPLETE_QUALITY_EVIDENCE",
+        positive_quality_path_available=False,
         floors={
             "data_trust": dict(status="通过" if metrics.get("diluted_eps_ttm") and metrics.get("observed_price") else "暂无法判断",
                                reason="Owner-qualified facts retain provenance; missing EPS or price prevents a complete valuation input chain."),
@@ -277,17 +279,27 @@ def _rank(cards, request):
     """Ordered gates, then return/risk; never add correlated quality scores."""
     for card in cards:
         scenarios = card.get("scenarios", {})
+        blockers = card.get("quality", {}).get("priority_blockers", ["COMPANY_EVIDENCE_UNAVAILABLE"])
+        card["group_scope"] = "RESEARCH_ONLY_NOT_COMPLETE_INVESTMENT_JUDGMENT"
+        card["classification_reasons"] = dict(
+            quality_evidence_insufficient=list(blockers), research_thresholds_not_met=[],
+            fundamental_deterioration=dict(status="NOT_ESTABLISHED",
+                reason="Historical observations and evidence gaps do not establish actual persistent business deterioration."))
         if not scenarios:
-            card.update(group=GROUPS[2], rank=None, rank_reason="No applicable qualified valuation; retain company and missing reasons.")
+            card["classification_reasons"]["research_thresholds_not_met"] = ["VALUATION_NOT_ASSESSABLE"]
+            card.update(group=GROUPS[2], rank=None, rank_reason="Research grouping only: valuation cannot be assessed; this is not a negative fundamental judgment.")
             continue
         base = dec(scenarios["base"]["annualized_return"])
         cautious = dec(scenarios["cautious"]["total_return"])
-        blockers = card["quality"]["priority_blockers"]
         required_return = dec(card["assumptions"]["required_return"])
+        if base < required_return:
+            card["classification_reasons"]["research_thresholds_not_met"].append("BASE_RETURN_BELOW_RESEARCH_REQUIRED_RETURN")
+        if cautious < request.downside_floor:
+            card["classification_reasons"]["research_thresholds_not_met"].append("CAUTIOUS_RETURN_BELOW_RESEARCH_DOWNSIDE_FLOOR")
         if base < required_return or cautious < request.downside_floor:
-            group, reason = GROUPS[2], "Conditional return or cautious downside fails disclosed research thresholds; quality gaps remain visible."
+            group, reason = GROUPS[2], "Research thresholds not met under stated assumptions; quality evidence gaps are separate, and actual fundamental deterioration is not established."
         elif blockers or card.get("high_sensitivity"):
-            group, reason = GROUPS[1], "Unresolved quality evidence blocks priority despite conditional valuation."
+            group, reason = GROUPS[1], "Research observation only: incomplete quality evidence or high sensitivity prevents priority; passing scenario thresholds is not a positive investment judgment."
         else:
             group, reason = GROUPS[0], "All quality gates resolved; base return and cautious downside meet disclosed research thresholds."
         card.update(group=group, rank=None, rank_reason=reason)
@@ -348,6 +360,9 @@ def compare(request, assessments):
                 returns = [dec(v["result"]["annualized_return"]) for v in card["sensitivity"] if v["result"]]
                 card["high_sensitivity"] = bool(returns and max(returns) - min(returns) > D(".05"))
         return dict(schema_version="wealthpilot.s3-a.v1", method_version=METHOD_VERSION,
+                    maturity="RESEARCH_ONLY",
+                    priority_capability=dict(reachable=False,
+                        reason="S3_A_POSITIVE_QUALITY_PATH_NOT_IMPLEMENTED; original priority blockers remain nonempty."),
                     decision_at=request.decision_at.isoformat(), cards=cards,
                     ranking=dict(groups=list(GROUPS), tie_band=str(request.tie_band), downside_floor=str(request.downside_floor),
                                  downside_tie_band=str(request.downside_tie_band),
