@@ -100,6 +100,12 @@ class PolicyStore:
         db.row_factory = sqlite3.Row
         try:
             db.execute("PRAGMA foreign_keys=ON")
+            if write:
+                required = {f"{table}_no_{operation}" for table in ("policy_bundles", "policy_events", "policy_releases")
+                            for operation in ("update", "delete", "replace")}
+                installed = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+                if not required.issubset(installed):
+                    raise PolicyError("POLICY_SCHEMA_UPGRADE_REQUIRED")
             db.execute("BEGIN IMMEDIATE" if write else "PRAGMA query_only=ON")
             yield db
             if write:
