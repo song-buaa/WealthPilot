@@ -122,6 +122,9 @@ def test_all_failed_companies_remain_visible_and_unranked():
     result = compare(request(), {})
     assert len(result["cards"]) == 2
     assert all(c["group"] == "暂不优先" and c["rank"] is None for c in result["cards"])
+    for c in result["cards"]:
+        assert c["classification_reasons"]["research_thresholds_status"] == "NOT_ASSESSABLE"
+        assert not c["classification_reasons"]["research_thresholds_not_met"]
 
 
 def test_research_scope_and_reason_categories_do_not_claim_fundamental_deterioration():
@@ -131,6 +134,7 @@ def test_research_scope_and_reason_categories_do_not_claim_fundamental_deteriora
     assert result["maturity"] == "RESEARCH_ONLY"
     assert result["priority_capability"]["reachable"] is False
     for c in result["cards"]:
+        assert c["classification_reasons"]["research_thresholds_status"] == "ASSESSED"
         assert c["classification_reasons"]["quality_evidence_insufficient"]
         assert c["classification_reasons"]["fundamental_deterioration"]["status"] == "NOT_ESTABLISHED"
         assert c["quality"]["positive_quality_path_available"] is False

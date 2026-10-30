@@ -283,10 +283,10 @@ def _rank(cards, request):
         card["group_scope"] = "RESEARCH_ONLY_NOT_COMPLETE_INVESTMENT_JUDGMENT"
         card["classification_reasons"] = dict(
             quality_evidence_insufficient=list(blockers), research_thresholds_not_met=[],
+            research_thresholds_status="ASSESSED" if scenarios else "NOT_ASSESSABLE",
             fundamental_deterioration=dict(status="NOT_ESTABLISHED",
                 reason="Historical observations and evidence gaps do not establish actual persistent business deterioration."))
         if not scenarios:
-            card["classification_reasons"]["research_thresholds_not_met"] = ["VALUATION_NOT_ASSESSABLE"]
             card.update(group=GROUPS[2], rank=None, rank_reason="Research grouping only: valuation cannot be assessed; this is not a negative fundamental judgment.")
             continue
         base = dec(scenarios["base"]["annualized_return"])
