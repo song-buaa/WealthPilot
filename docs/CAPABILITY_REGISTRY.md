@@ -6,7 +6,7 @@
 
 | 能力/业务层 | 原Owner及入口 | 成熟度与复用限制 |
 |---|---|---|
-| 正式政策L1 | [philosophy](../backend/services/philosophy_service.py)、[discipline](../backend/services/discipline_service.py)、[config](../app/discipline/config.py)、[knowledge](../knowledge_base/README.md) | CODE：MD/JSON/默认/索引分流；投资理念、投资纪律、长期资产配置三类政策由Investment Policy Bundle统一引用与管理版本为TARGET；Markdown、结构化配置及最终权威关系待P0人工审议，不是已有有效政策API；私人现役配置UNKNOWN |
+| 正式政策L1 | 原[philosophy](../backend/services/philosophy_service.py)/[discipline](../backend/services/discipline_service.py)/[config](../app/discipline/config.py)/[knowledge](../knowledge_base/README.md)；P1候选[investment_policy](../backend/services/investment_policy) | 两份私人Markdown内容已批准；[P1](v4.3/INVESTMENT_POLICY_P1.md)提供派生/不可变Bundle/只读PolicyService/迁移探针，未接入原消费者、未部署或ACTIVE；无默认值冒充新版政策，生产私人配置仍UNKNOWN |
 | 共享证据L2 | [U1](../app/asset_views.py)、[Portfolio](../backend/services/portfolio_service.py)、[Evidence](../backend/services/market_data/evidence.py)、[SEC](../research_v2/sec_disclosures.py)、[Repository](../research_v2/repository.py) | CODE/限定历史运行证据；复用身份、币种、来源时点及质量；共享目标池版本引用仍PROPOSED |
 | 可复用分析L3 | [SkillsLoader](../backend/skills/loader.py)、[Tool Layer](../backend/graph/tools.py)、[AllocationService](../backend/services/allocation_service.py)、[financial_research](../backend/services/market_data/financial_research.py) | 14份定义，本轮Loader发现13项；action-planner YAML失败但Web直连服务保留。方法/计算可复用，不把technical signals称为S1/S2策略 |
 | 综合判断L4 | [原PEER](../backend/services/decision_service_v3.py)、[Expressing](../backend/agents/expressing_agent.py)、[Reviewing](../backend/agents/reviewing_agent.py)、[Output Policy](../backend/services/market_data/output_policy.py) | CODE/既有单标组合链路；池内公司与配置两种排序及统一冲突解释为TARGET，不投票或累加相关因子 |

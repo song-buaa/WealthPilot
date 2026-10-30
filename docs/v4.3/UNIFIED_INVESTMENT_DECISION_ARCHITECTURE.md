@@ -2,6 +2,8 @@
 
 2026-10-30｜WealthPilot 4.3｜**READY_FOR_REVIEW / 文档方案，非功能上线**。
 
+后续政策P0内容已批准：三类政策由两份用户维护的私有Markdown承载，定性理念与合并投资政策互补。[P1统一Owner](INVESTMENT_POLICY_P1.md)为本地未激活候选；不代表所有消费者已统一或生产已切换。以下五层/PEER设计保持不变。
+
 ## 1. 定位与证据边界
 
 本文件维护五层长期业务架构、复用映射和最小缺口；当前实现由[当前架构](../ARCHITECTURE_CURRENT.md)维护，能力入口由[原能力索引](../CAPABILITY_REGISTRY.md)维护，流程沿[治理](../PROJECT_GOVERNANCE.md)。不建立第二个Registry或策略Runtime。本轮仅修改文档，基线为实际fetch的main **4efcd14f3ff1dccaa69b625c4c7465bf4ca8d943**。
@@ -58,7 +60,7 @@ flowchart TB
 | [AllocationService](../../backend/services/allocation_service.py) / [defaults](../../app/allocation/defaults.py) | L1消费者及L3计算，供L4使用 | 偏离、初始/增量配置、退出情景 | 旧范围目标不是获批统一政策；正式预算映射未落地 |
 | [Evidence](../../backend/services/market_data/evidence.py) / [financial_research](../../backend/services/market_data/financial_research.py) / [Output Policy](../../backend/services/market_data/output_policy.py) | L2事实/资格与L3计算、L4输出限制 | 来源、财期/单位/币种、现金流及比较/有条件估值 | 不是完整质量模型、ROIC/DCF或池内排序平台；真实来源仍可能partial |
 | [SEC](../../research_v2/sec_disclosures.py) / [Research Repository](../../research_v2/repository.py) / [KlineProvider](../../backend/services/execution_plan/kline_provider.py) / [technical evidence](../../backend/services/market_data/technical_evidence.py) | L2数据Owner及L3观测 | 复用公开披露、原始行情、日周线与确定性字段 | 抓取不等于当时已知；趋势观测不等于已验证动量策略 |
-| [知识库](../../knowledge_base/README.md) / [理念](../../backend/services/philosophy_service.py) / [纪律](../../backend/services/discipline_service.py) / [config](../../app/discipline/config.py) | 现有L1片段及L2知识检索 | MD、JSON/默认、Chroma可重建索引，已有provenance | TARGET：投资理念、投资纪律、长期资产配置三类政策由Investment Policy Bundle统一引用与管理版本；Markdown、结构化配置及最终权威关系待P0人工审议，不自行合并或修改政策；生产私人政策本轮UNKNOWN |
+| [知识库](../../knowledge_base/README.md) / [理念](../../backend/services/philosophy_service.py) / [纪律](../../backend/services/discipline_service.py) / [config](../../app/discipline/config.py) | 现有L1片段及L2知识检索 | MD、JSON/默认、Chroma可重建索引，已有provenance | P0双文档内容已批准；[P1](INVESTMENT_POLICY_P1.md)派生/Bundle/只读Owner为未接入候选，不自行改批准原文或切换现役；生产私人政策仍UNKNOWN |
 | [E1 contracts/store/service](../../backend/services/investment_thesis) / [bridge](../../backend/services/investment_thesis/bridge.py) | L2研究事实、L3事件分析输入、L5版本复核 | Thesis/Review双向证据、不可覆盖版本、CAS及确认保存 | 不是长期政策库；没有统一政策引用字段，历史不能回填当前规则 |
 | [monitoring](../../backend/services/investment_thesis/monitoring.py) / [natural_scan](../../backend/services/investment_thesis/natural_scan.py) | L2事件发现及L5复核反馈 | opt-in、水位、task去重、人工处理 | 事件只触发复核；扫描及主动提醒分别验收，不自动运行PEER |
 | [MCP server](../../pocs/chatgpt_skills/server.py) / [analysis](../../pocs/chatgpt_skills/analysis.py) / [worker](../../pocs/chatgpt_skills/worker.py) | ChatGPT适配，跨L2—L5 | 原start/get及AnalysisResult、固定scope、E1查询和确认保存 | 非第二个分析引擎；真实配置分支不注册Mock交易写工具 |
@@ -154,7 +156,7 @@ E1真人Thesis/Review保存是限定功能生产验收；B2美团/NVDA/META原�
 | 契约片段（建议名称） | 已有基础 | 最小新增/明确项与Owner |
 |---|---|---|
 | AnalysisTaskRef | task_id、question、symbol、scope、history、snapshot_id | 原分析任务增加目标池版本/hash、purpose、decision_as_of、逐公司身份/失败状态；目标池上限由产品契约验证 |
-| PolicyRef | rules_provenance、StageTargets引用 | Investment Policy Bundle引用投资理念、投资纪律、长期资产配置三类政策的版本/hash、批准/生效及完整性；Markdown、结构化配置及最终权威关系待P0人工审议，不预设文档合并或派生关系；未正式落地则UNKNOWN |
+| PolicyRef | rules_provenance、StageTargets引用；P1新增独立PolicyReference候选类型 | 两份已批准Markdown承载三类政策；Bundle引用源hash/派生hash/版本/scope/批准及生效。P1未修改原分析/E1契约，完整接线仍PROPOSED；无ACTIVE发布则NOT_ACTIVE，不回填旧记录 |
 | EvidenceSnapshotRef | U1 ID、Evidence records、research来源/时间 | 共享池内事实冻结引用，报告期/公布/known/fetched、币种单位/股份口径/修订/质量；由原数据Owner负责，不复制金额 |
 | SkillResultRef | selected/invoked/skill_results及SkillMeta.version | 输入引用、方法/参数版本、确定性产物、解释/假设、适用性、证据ID、unknown/不适用和成熟度，区分真实调用与marker |
 | StrategyResearchRef | 外部协议/报告hash | 机会集/方法/时序/费用/基准/验证窗、局限及批准使用范围；跟随结果附件，不新建全局Registry |
@@ -182,7 +184,7 @@ E1预览→保存判断属于独立研究留档路径；不创建订单。未知
 
 | 顺序/缺口 | 最小复用安排 | 验收而非扩项 |
 |---|---|---|
-| 1 L1统一政策 | 待P0人工审议确定Markdown、结构化配置及最终权威关系后，沿原理念/纪律/knowledge Owner落实Investment Policy Bundle，统一引用投资理念、投资纪律、长期资产配置三类政策并管理版本；复用原StageTargets审批经验 | 不自行合并或修改政策；单标/组合读取同Bundle版本/hash，缺政策UNKNOWN；旧规则冲突逐项批准；临时阶段目标不是正式政策，不改正式阈值 |
+| 1 L1统一政策 | P0已批准双文档；P1候选实现源文派生、Bundle和只读Owner，P2才沿原理念/纪律/knowledge消费者统一接线；复用原StageTargets审批经验 | 批准原文不改、结构化与发布审批分开；单标/组合读取同Bundle版本/hash；生产配置UNKNOWN先补证及预演，临时阶段目标不是正式政策 |
 | 2 L2池内共享输入 | 扩展原AnalysisRequest/证据Owner提供目标池引用和共同截止，不复用多标循环为假排名 | 缺源局部失败、PIT/口径可追溯、共享事实不重复取算 |
 | 3 S3最小分析 | 复用financial_research的比较/现金流，补正常化、资本效率、情景回报/敏感性等明确缺口；稳定后才判断是否需新Skill | 先可复算样例与方法适用性，再一次请求比较/解释/版本；不在本轮启动 |
 | 4 L4统一输出 | 扩展原PEER/Expression及Review结果，不增Agent；复用E1版本留痕思路 | 一份综合结果区分公司/配置、冲突不投票，排名与方法版本绑定 |
