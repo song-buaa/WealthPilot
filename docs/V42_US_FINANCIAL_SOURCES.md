@@ -109,3 +109,11 @@ PDD夹具为公开SEC text/plain页面的完整浏览器DOM UTF-8表示，包含
 如下一轮需核实美团真实缺口，最小只读提取为：从已保存的run ddfd5d1c7c2e4e80bae4d147ab914d11结果/私有记录导出technical.source、provenance、series.day的date/OHLCV、day/week的范围/parameters/indicators/资格，不含账户/持仓/成本。若记录不存在即注明，不启动新研究、券商连接、同步或Provider请求。PDD对应run ab08ede8cd09479eb6ddf9d31e672c04也不重新执行。
 
 旧冻结LI/PDD周线含窗口首部半周，按当前规则重核时旧周线指标保持拒绝，日线仍合格；使用同一原始日线经原生产入口重算后，日周线均合格。回归不改原始夹具、不沿用错误周线指标；已有缓存若仍含旧聚合，应等待原缓存到期或正常进程更新，不修改生产缓存或事实。
+
+## AAPL/NVDA 基础估值正向链 P1（2026-10-30 本地候选）
+
+原 SEC Owner 对正式 8-K/EX-99.1 同行分列附件声明继续执行精确身份核验。对美国本土发行人的正式 GAAP 合并损益表，限定解析明确的 `Three Months Ended` 稀释每普通股收益；同件 `Twelve Months Ended` 数值必须与独立 CompanyFacts 年度 EPS 一致。非日历第四财季起点由 CompanyFacts 已核验的前三季末与年度期间共同证明，并保留两份来源引用及资格可知时间；不会从季末机械倒推 90 天，也不会把非 GAAP 摘要表当正式报表。非目标的损坏表格单独留诊断，不能清空同件已合格报表。字段仍经过原 Evidence Registry，TTM 与基础 PE 继续由原 `financial_research.build` 计算。
+
+两份原始 SEC 8-K 的禁网 fixture 分别验证 AAPL 2025-09-27 GAAP 稀释 EPS 1.85 USD/普通股、NVDA 2026-01-25 GAAP 稀释 EPS 1.76 USD/普通股；NVDA 同件非 GAAP 1.62 被排除。原 AV full 历史包加本轮实际抓取的 `TIME_SERIES_DAILY/compact` 只读日线，经重叠校验后由原技术 Evidence 判定 2026-10-29 最后完整交易日有效；`TIME_SERIES_DAILY/full` 的 HTTP 200 `Information` 没有被当作行情。冻结输入、来源哈希、共同决策时间与独立复算均保存在本机私有验收工件；这些是开发侧真实来源正向链，不是生产 PEER 或 S3 策略验收。
+
+基础 PE 是历史价格除以四季 GAAP 稀释 EPS 的静态比率，不是内在价值、目标价或交易授权。原始收盘价与复权价不得混用；现有 `build` 仍不推导股份拆分，也不替代正式公司行动核查。AAPL/NVDA 的历史拆股及所选四季窗口需与官方公司行动资料和原 AV 拆股系数共同核对。生产来源、定时缓存和真实 PEER 仍待独立授权验证。

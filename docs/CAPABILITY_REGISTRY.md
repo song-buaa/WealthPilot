@@ -166,4 +166,6 @@ P1研究内容候选：[原SEC表格/标准事实](../research_v2/sec_disclosure
 
 P1.1定点修复仍复用上述原财务投影/SEC表格/Output Policy：同原文比较列优先且保留原值差异，精度不是任意容差；明确列币种及EPS分组变体、绑定诊断及普通排版支持。无新Owner/Provider/权限，见[原V42记录](V42_IMPLEMENTATION.md#p11-多披露比较与数字解释2026-10-29-开发候选)及[真实多来源回归](../tests/test_p1_1_research_quality.py)。
 
+基础估值正向链 P1 本地候选仍由[SEC原 Owner](../research_v2/sec_disclosures.py)、[正式表格解析](../research_v2/official_disclosures.py)、[Evidence](../backend/services/market_data/evidence.py)和[financial_research](../backend/services/market_data/financial_research.py)共同完成：正式8-K/EX-99.1的GAAP稀释EPS以CompanyFacts年度/前季事实证明非日历Q4期间，原日线Evidence核验价格，原`build`确定性输出四季EPS、历史PE和盈利收益率。AAPL/NVDA真实原文禁网回归及开发侧冻结复算见[来源说明](V42_US_FINANCIAL_SOURCES.md)；不代表生产研究、内在价值或交易资格。
+
 P2汽车经营指标候选沿原[SEC来源](../research_v2/sec_disclosures.py)、[官方表格语义](../research_v2/official_disclosures.py)、[Evidence Registry](../backend/services/market_data/evidence.py)和[financial_research](../backend/services/market_data/financial_research.py)运行，复用[Output Policy](../backend/services/market_data/output_policy.py)最终数字绑定；明确季度交付/汽车收入/车辆毛利率缺源即UNKNOWN，汽车收入/交付量只为近似。LI与XPEV真实完整SEC原文均覆盖离线来源资格回归；XPEV封面同一表格行分列的EX-99.1声明按精确附件身份识别。该回归不代表生产自动发现或真实PEER验收。口径与边界见[4.2实现记录](V42_IMPLEMENTATION.md)。

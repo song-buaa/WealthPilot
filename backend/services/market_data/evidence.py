@@ -349,7 +349,12 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
                 or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin"} else {"CNY","USD","HKD"}) or value is None
                 or not math.isfinite(value*scale)):
             continue
-        result.append(dict(obs,value=value*scale,unit_scale=1,published_at=raw["published_at"],
+        proof_at=stamp(obs.get('proof_available_at')) if obs.get('period_start_source_refs') else None
+        if obs.get('period_start_source_refs') and (not proof_at or proof_at>at):
+            continue
+        qualification_at=max(published,proof_at) if proof_at else published
+        result.append(dict(obs,value=value*scale,unit_scale=1,published_at=qualification_at.isoformat(),
+            original_filing_published_at=raw['published_at'],
             issuer_type=identity.get('issuer_type'),
             source_document_sha256=digest, publication_locator=proof["publication_locator"],
             issuer_id=issuer,record_id=raw["record_id"],source_url=raw["source_url"],fetched_at=raw["fetched_at"]))

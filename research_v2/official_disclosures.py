@@ -289,7 +289,15 @@ def parse_vehicle_operating(soup, published):
 def parse_statement_tables(soup, published, *, require_statements=False, currencies=('CNY',), diagnostics=None):
     """Shared explicit statement semantics; no issuer name/ticker/AV input."""
     observations=[]
-    tables=[(i,t,_grid(t),_table_context(t)) for i,t in enumerate(soup.find_all('table'))]
+    tables=[]
+    for i,t in enumerate(soup.find_all('table')):
+        try:
+            tables.append((i,t,_grid(t),_table_context(t)))
+        except ValueError:
+            # A malformed reconciliation/other table cannot erase an independent
+            # statement in the same verified SEC exhibit.
+            if diagnostics is not None:
+                diagnostics.append(dict(issue='INVALID_TABLE_SKIPPED',source_locator=f'table[{i}]'))
     has_statements=any(_statement_kind(rows,context) for _,_,rows,context in tables)
     for ti,table,rows,context in tables:
         statement=_statement_kind(rows,context)
@@ -406,6 +414,77 @@ def parse_statement_tables(soup, published, *, require_statements=False, currenc
         if diagnostics is not None:
             diagnostics.append(dict(source_field=key[0],period=key[1],currency=key[2],issue=issue,
                 source_locators=[o['source_locator'] for o in rows]))
+    return result
+
+
+def parse_us_gaap_diluted_eps(soup, published, period_context):
+    """Quarterly ordinary-share EPS from an explicit SEC GAAP income statement.
+
+    The SEC owner supplies independently sourced fiscal boundaries and an
+    annual CompanyFacts EPS. A press-release date or a fiscal end alone never
+    supplies the missing start, currency, or GAAP basis.
+    """
+    from bs4 import NavigableString
+    result=[]
+    for ti,table in enumerate(soup.find_all('table')):
+        nearby=[]
+        for node in table.previous_elements:
+            if getattr(node,'name',None)=='table':
+                break
+            if isinstance(node,NavigableString):
+                value=' '.join(str(node).split())
+                if value:
+                    nearby.append(value)
+                    if len(nearby)>=8:
+                        break
+        heading=' '.join(reversed(nearby))
+        if (not re.search(r'\b(?:condensed )?consolidated statements of (?:operations|income)\b',heading,re.I)
+                or not re.search(r'\bexcept\b.{0,70}\bper[ -]?share\b',heading,re.I)
+                or re.search(r'non[ -]?gaap|reconciliation',heading,re.I)):
+            continue
+        try:
+            rows=_grid(table)
+        except ValueError:
+            continue
+        for ri,row in enumerate(rows):
+            label=next((v.strip().lower().rstrip(':') for v in row if v.strip()),'')
+            if label not in {'earnings per share','net income per share'}:
+                continue
+            for di in range(ri+1,min(ri+4,len(rows))):
+                diluted=rows[di]
+                if next((v.strip().lower() for v in diluted if v.strip()),'')!='diluted':
+                    continue
+                candidates={}
+                for col in range(1,len(diluted)):
+                    value=_cell_amount(rows,di,col)
+                    if value is None or col==0 or rows[di][col-1].strip()!='$':
+                        continue
+                    header=_column_header(rows,di,col)
+                    dates=re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2}',header,re.I)
+                    if len(set(dates))!=1:
+                        continue
+                    end=_date(dates[0])
+                    if not end or end not in period_context or end>str(published)[:10]:
+                        continue
+                    period='quarterly' if re.search(r'three months ended',header,re.I) else 'annual' if re.search(r'twelve months ended|year ended',header,re.I) else None
+                    if period:
+                        candidates.setdefault((end,period),[]).append((value,col))
+                for end,context in period_context.items():
+                    quarter=candidates.get((end,'quarterly'),[])
+                    annual=candidates.get((end,'annual'),[])
+                    if (len(quarter)!=1 or len(annual)!=1 or annual[0][0]!=Decimal(str(context['annual_eps']))):
+                        continue
+                    value,col=quarter[0]
+                    result.append(dict(source_field='dilutedEPSOrdinary',value=float(value),currency='USD',
+                        unit='currency_per_ordinary_share',unit_scale=1,period_basis='quarterly',
+                        fiscal_period_start=context['start'],fiscal_period_end=end,
+                        accounting_basis='diluted_eps_ordinary',
+                        period_start_basis='verified prior SEC quarter end plus one day within SEC annual period',
+                        period_start_source_refs=[context['prior_ref'],context['annual_ref']],
+                        proof_available_at=context['proof_available_at'],
+                        annual_eps_corroboration=float(annual[0][0]),
+                        source_locator=f'table[{ti}]/row[{di}]/column[{col}]/GAAP diluted EPS'))
+                break
     return result
 
 
