@@ -6,11 +6,11 @@
 
 | 能力/业务层 | 原Owner及入口 | 成熟度与复用限制 |
 |---|---|---|
-| 正式政策L1 | [philosophy](../backend/services/philosophy_service.py)、[discipline](../backend/services/discipline_service.py)、[config](../app/discipline/config.py)、[knowledge](../knowledge_base/README.md) | CODE：MD/JSON/默认/索引分流；双正式Markdown及受控派生Bundle为TARGET，不是已有有效政策API；私人现役配置UNKNOWN |
+| 正式政策L1 | [philosophy](../backend/services/philosophy_service.py)、[discipline](../backend/services/discipline_service.py)、[config](../app/discipline/config.py)、[knowledge](../knowledge_base/README.md) | CODE：MD/JSON/默认/索引分流；投资理念、投资纪律、长期资产配置三类政策由Investment Policy Bundle统一引用与管理版本为TARGET；Markdown、结构化配置及最终权威关系待P0人工审议，不是已有有效政策API；私人现役配置UNKNOWN |
 | 共享证据L2 | [U1](../app/asset_views.py)、[Portfolio](../backend/services/portfolio_service.py)、[Evidence](../backend/services/market_data/evidence.py)、[SEC](../research_v2/sec_disclosures.py)、[Repository](../research_v2/repository.py) | CODE/限定历史运行证据；复用身份、币种、来源时点及质量；共享目标池版本引用仍PROPOSED |
 | 可复用分析L3 | [SkillsLoader](../backend/skills/loader.py)、[Tool Layer](../backend/graph/tools.py)、[AllocationService](../backend/services/allocation_service.py)、[financial_research](../backend/services/market_data/financial_research.py) | 14份定义，本轮Loader发现13项；action-planner YAML失败但Web直连服务保留。方法/计算可复用，不把technical signals称为S1/S2策略 |
 | 综合判断L4 | [原PEER](../backend/services/decision_service_v3.py)、[Expressing](../backend/agents/expressing_agent.py)、[Reviewing](../backend/agents/reviewing_agent.py)、[Output Policy](../backend/services/market_data/output_policy.py) | CODE/既有单标组合链路；池内公司与配置两种排序及统一冲突解释为TARGET，不投票或累加相关因子 |
-| E1及复核L2/L3/L5 | [investment_thesis](../backend/services/investment_thesis)、[MCP研究桥接](../pocs/chatgpt_skills/investment_thesis.py) | 核心真人保存/提醒历史验收；PR59首水位实测已通过，水位后自然新事件PENDING；partial/敞口UNKNOWN不升级，历史不覆盖 |
+| E1及复核L2/L3/L5 | [investment_thesis](../backend/services/investment_thesis)、[MCP研究桥接](../pocs/chatgpt_skills/investment_thesis.py) | 核心真人保存/提醒历史验收；PR #59已发布并通过首次水位实测，水位后真实自然新事件PENDING；验收时AUTO_SCAN=OFF，本轮未复测生产；partial/敞口UNKNOWN不升级，历史不覆盖 |
 | 授权执行与复盘L5 | [ActionPlanner](../backend/services/action/action_planner.py)、[RiskEngine](../backend/services/action/risk_engine.py)、[OrderManager](../backend/services/action/order_manager.py)、[Batch](../backend/services/execution_batch/service.py)、[BrokerAdapter](../backend/services/action/brokers/base.py)、[历史域](../backend/services/portfolio_history) | 原实现/限定路径历史验收；建议→具体人工授权→原交易门→成交证据。无新策略执行资格；原当前收益不是TWR |
 | S1/S2及成熟ETF研究 | 仓外冻结S1-C0、S2-F1、S2-G1报告/hash见[研究矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#6-策略融合与成熟度清单) | RESEARCH_ONLY；S1/S2自研已结项不晋升，SPMO产品关注/政策采纳不等于自研动量上线或具体交易许可 |
 | S3/S4/异常偏离候选 | 原[财务计算](../backend/services/market_data/financial_research.py)、[技术证据](../backend/services/market_data/technical_evidence.py)、E1、PEER可供复用 | TARGET：质量估值池内比较；S4为后续协作，弱趋势先复核；均值偏离只作线索。无对应新Skill、完整生产策略或本轮开发授权 |
@@ -154,7 +154,7 @@ B3-2本地候选新增 [ReviewMonitorStore](../backend/services/investment_thesi
 
 PM Review后的单PR、Mac Mini安装、E1 v1→v2迁移、到期实测与最小SEC/通知路径统一见 [E1最终发布计划](v4.3/E1_FINAL_RELEASE_AND_ACCEPTANCE.md)。该计划不代表生产授权，初始自动扫描继续OFF。
 
-N1已发布 [有界SEC自然扫描](../backend/services/investment_thesis/natural_scan.py)：只处理显式opt-in monitor，首次水位不回放，复用原SEC身份/原件核验，源失败隔离且不冒充无事件；schema v2不变。`get_due_investment_reviews`只读返回稳定event key和有界分页，提供at-least-once提醒去重输入，不改变任务或研究记录；Scheduled task私人连接与TEST ONLY提醒已通过，生产扫描仍OFF、WealthPilot通知仍`NOT_WIRED`。真实SEC验收定位到`fetched_at`误作PIT截止；定点修复候选保留真实抓取时钟，仅以SEC acceptance/known clock判断未来信息，尚待发布及自然增量复验。测试见 [N1回归](../tests/test_e1_n1_natural_review.py)，边界与一次性发布验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
+N1已发布 [有界SEC自然扫描](../backend/services/investment_thesis/natural_scan.py)：只处理显式opt-in monitor，首次水位不回放，复用原SEC身份/原件核验，源失败隔离且不冒充无事件；schema v2不变。`get_due_investment_reviews`只读返回稳定event key和有界分页，提供at-least-once提醒去重输入，不改变任务或研究记录。PR #59时钟修复已发布：保留真实`fetched_at`，仅以SEC acceptance/known clock判断未来信息。2026-10-29验收收据记录运行SHA `4e4fdb4ea0831eb079cf96518f91d4397e326e05`、SEC实际读取及首次水位通过、跨进程无重复任务；原18项工具、E1 v2及既有canonical记录不变。Scheduled task私人连接与TEST ONLY提醒此前已通过，但水位后真实自然新事件仍待观察，状态为`E1_CORE_RELEASED_N1_NOTIFICATION_PASS_NATURAL_NEW_EVENT_PENDING`，不是`E1_RELEASED`；验收时`AUTO_SCAN=OFF`、WealthPilot通知`NOT_WIRED`，临时monitor已取消，本轮未连接生产复测。当前证据边界见[统一映射](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#7-生产证据与现状差异)；测试见 [N1回归](../tests/test_e1_n1_natural_review.py)，历史发布计划见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
 
 ### 4.2 第一轮质量修正（开发候选）
 
