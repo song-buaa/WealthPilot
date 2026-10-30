@@ -381,7 +381,65 @@ def _declared_exhibit(cover, filename, kind):
     return False
 
 
-def parse_filing(source, issuer, filing, *, identity_digest):
+def _domestic_fiscal_eps_context(rows, issuer):
+    """Prove a fiscal Q4 start using distinct SEC Q3 and annual EPS periods."""
+    if issuer['issuer_type']!='domestic':
+        return {}
+    annuals=[];quarters=[]
+    for record in rows:
+        if record.get('official_disclosure',{}).get('cik')!=issuer['cik']:
+            continue
+        for obs in record.get('financial_observations',[]):
+            if (obs.get('source_field')!='dilutedEPSOrdinary' or obs.get('currency')!='USD'
+                    or obs.get('accounting_basis')!='diluted_eps_ordinary'
+                    or obs.get('unit')!='currency_per_ordinary_share'
+                    or obs.get('unit_scale')!=1):
+                continue
+            item=(obs,record['record_id'])
+            if obs.get('period_basis')=='annual':
+                annuals.append(item)
+            elif obs.get('period_basis')=='quarterly':
+                quarters.append(item)
+    context={};conflicting_ends=set()
+    for annual,annual_ref in annuals:
+        try:
+            end=_day(annual['fiscal_period_end']);year_start=_day(annual['fiscal_period_start'])
+            previous=[(obs,ref) for obs,ref in quarters
+                      if year_start<=_day(obs['fiscal_period_start'])<=_day(obs['fiscal_period_end'])<end]
+            if not previous:
+                continue
+            previous_end=max(_day(obs['fiscal_period_end']) for obs,_ in previous)
+            matches=[(obs,ref) for obs,ref in previous if _day(obs['fiscal_period_end'])==previous_end]
+            start=date.fromordinal(previous_end.toordinal()+1)
+            if (len({(obs['fiscal_period_start'],obs['fiscal_period_end'],Decimal(str(obs['value']))) for obs,_ in matches})!=1
+                    or not 70<=(end-start).days+1<=105 or not year_start<start):
+                continue
+            proof_records=[record for record in rows
+                           if record['record_id'] in {annual_ref,matches[0][1]}]
+            if len(proof_records)!=2:
+                continue
+            proof_times=[datetime.fromisoformat(record['published_at'].replace('Z','+00:00'))
+                         for record in proof_records]
+            if any(value.tzinfo is None for value in proof_times):
+                continue
+            proof_at=max(proof_times)
+            candidate=dict(start=start.isoformat(),annual_eps=annual['value'],
+                           annual_ref=annual_ref,prior_ref=matches[0][1],
+                           proof_available_at=proof_at.astimezone(timezone.utc).isoformat())
+            end_key=end.isoformat()
+            if end_key in conflicting_ends:
+                continue
+            if end_key in context and context[end_key]!=candidate:
+                context.pop(end_key,None)
+                conflicting_ends.add(end_key)
+            else:
+                context[end_key]=candidate
+        except (KeyError,TypeError,ValueError,InvalidOperation):
+            continue
+    return context
+
+
+def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=None):
     """Restricted full-submission envelope and inline XBRL, including exhibits.
 
     Never fetch an attachment named by untrusted HTML. The SEC full submission
@@ -444,16 +502,19 @@ def parse_filing(source, issuer, filing, *, identity_digest):
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')
-        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating
+        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating, parse_us_gaap_diluted_eps
         try:
             table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
+            if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
+                table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
                 table_observations += parse_vehicle_operating(soup,filing['published_at'])
         except (ValueError,TypeError,AttributeError,InvalidOperation,OverflowError):
             return None
         for obs in table_observations:
             end=date.fromisoformat(obs['fiscal_period_end'])
-            obs['fiscal_period_start']=end.replace(day=1,month=end.month-2).isoformat()
+            if not obs.get('fiscal_period_start'):
+                obs['fiscal_period_start']=end.replace(day=1,month=end.month-2).isoformat()
             obs.update(document_type=kind,document_filename=filename,document_sequence=sequence)
             obs['source_locator']=f'DOCUMENT[{doc_index}]/{filename}/'+obs['source_locator']
             observations.append(obs)
@@ -631,7 +692,8 @@ def collect(symbol):
                 original = _fetch(filing['full_url'])
                 if not original:
                     continue
-                record = parse_filing(original, issuer, filing, identity_digest=identity_digest)
+                record = parse_filing(original, issuer, filing, identity_digest=identity_digest,
+                                      fiscal_eps_context=_domestic_fiscal_eps_context(rows,issuer))
             except (ValueError, TypeError, KeyError, UnicodeError, OSError, InvalidOperation, OverflowError):
                 _diagnose(filing['full_url'],'parse_error')
                 continue
