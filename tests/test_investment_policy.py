@@ -400,3 +400,14 @@ def test_all_immutable_sql_paths_reject_even_without_recursive_triggers(staged, 
             db.execute(sql)
         assert list(db.execute(f'SELECT * FROM {table}')) == before
     assert store.stage(**args) == b
+
+
+def test_old_p1_schema_remains_readable_but_cannot_be_written(staged):
+    store, args, bundle = staged
+    with sqlite3.connect(store.path) as db:
+        for table in ('policy_bundles','policy_events','policy_releases'):
+            db.execute(f'DROP TRIGGER {table}_no_replace')
+    assert store.read_bundle(args['scope'],bundle['bundle_id']) == bundle
+    with pytest.raises(PolicyError,match='POLICY_SCHEMA_UPGRADE_REQUIRED'):
+        with store.connection(write=True):
+            pytest.fail('Old schema admitted a write connection')
