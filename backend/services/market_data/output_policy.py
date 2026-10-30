@@ -163,14 +163,25 @@ def explanation_prompt(assessment):
             numeric_fields=numeric_fields,calculation=calculation or None,values=values))
     logger.info("professional_explanation stage=context records=%s kinds=%s", len(records),
                 dict(Counter(row["kind"] for row in records)))
-    sample=next((r for r in records if r.get("numeric_fields") and r.get("kind")=="research_metric" and not set(r["numeric_fields"])&{"observed_price","fx_rate"}),None)
+    sample=next((r for r in records if 'vehicle_margin_pct' in r.get('numeric_fields',{})),None)
+    if sample is None:
+        sample=next((r for r in records if r.get("numeric_fields") and r.get("kind")=="research_metric" and not set(r["numeric_fields"])&{"observed_price","fx_rate"}),None)
     binding_example={}
     if sample:
         field=next(iter(sample["numeric_fields"]))
         binding_example=dict(topic="business",basis="inference",scope="research_only",
             text="可比经营指标为{{n1}}，这提示需要进一步检验盈利变化能否持续；不能仅据单项数据推断竞争优势。",
             evidence_refs=[sample["evidence_ref"]],numbers=[dict(id="n1",evidence_ref=sample["evidence_ref"],field=field)])
-    return ("\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
+    automotive_refs=[dict(evidence_ref=row['evidence_ref'],fields=sorted(set(row['numeric_fields']) &
+        {'vehicle_deliveries_quarter','vehicle_sales_quarter','vehicle_margin_pct','vehicle_revenue_per_delivery_approx',
+         'vehicle_deliveries_yoy_pct','vehicle_sales_yoy_pct','vehicle_deliveries_qoq_pct','vehicle_margin_change_pp'}))
+        for row in records if row['numeric_fields'] and set(row['numeric_fields']) &
+        {'vehicle_deliveries_quarter','vehicle_sales_quarter','vehicle_margin_pct','vehicle_revenue_per_delivery_approx',
+         'vehicle_deliveries_yoy_pct','vehicle_sales_yoy_pct','vehicle_deliveries_qoq_pct','vehicle_margin_change_pp'}]
+    auto_focus=("\n本次有正式汽车经营证据。第一段business先绑定可用的车辆交付、汽车销售收入、车辆毛利率，"
+                "解释其与集团收入/盈利的已证关系及不能证实的原因；若需节省段落，压缩重复的集团财务复述。"
+                "本句不授权自行计算数字。\n" if automotive_refs else "")
+    return (auto_focus+"\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
         "每项包含topic、basis='inference'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
         "risk、exit_rationale、review_condition、technical_trend。用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
@@ -184,6 +195,7 @@ def explanation_prompt(assessment):
         "围绕当前与可比期间的收入、利润率、费用、现金转化说明变化和可能驱动；缺少分部证据时不能推断Temu利润/份额。"
         "若有已核验汽车经营字段，比较交付量、汽车销售收入与车辆业务毛利率；汽车收入/交付量仅是期间近似值，不是实际成交均价。"
         "交付车辆与收入确认车辆可能不属于同一批次；没有车型、定价、成本的原始证据时，价格战或产品结构原因只能标为待验证假设。"
+        "当前已核验的汽车字段及其可绑定引用："+json.dumps(automotive_refs,ensure_ascii=False)+"。若列表非空，至少一段经营解释应绑定其中实际可用字段；不得编造缺失的同比或因果。"
         "已有指标时，经营/盈利解释优先绑定revenue_yoy_pct、net_income_yoy_pct及适用的费用率变化；不能只用净利率代替净利润同比。百分比变化与百分点变化按程序字段区分，缺指标则如实说明。"
         "最多六段；将收入/利润驱动合并，避免重复经营段落挤掉现金质量、估值限制、竞争反证和退出复核条件。现金段应比较经营现金流与利润，不能把OCF直接当FCF。"
         "费用金额保留原表符号；只有勾稽成立的费用率由程序给出，不能把负扣减项当作收益，也不能把所得税费用当作实付税款。"

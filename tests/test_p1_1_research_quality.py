@@ -149,6 +149,8 @@ def test_LI_real_SEC_original_yields_independent_vehicle_operating_evidence():
     assert all(r['source_document_sha256']==row['source_verification']['document_sha256'] for r in
                [f['publication_links'][0] for f in facts.values()])
     assert '实际成交均价' in explanation_prompt(a)
+    assert '当前已核验的汽车字段及其可绑定引用' in explanation_prompt(a)
+    assert facts['vehicle_deliveries_quarter']['record_id'] in explanation_prompt(a)
 
 
 def test_XPEV_official_excerpt_uses_same_parser_and_keeps_missing_unknown():
