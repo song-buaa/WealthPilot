@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 
 from .contracts import PolicyReference
 from .parser import PolicyError
@@ -52,4 +53,9 @@ class PolicyService:
                         "data_quality": "SOURCE_HASHES_AND_DETERMINISTIC_DERIVATIVE_VERIFIED",
                         "limitations": ["POLICY_IS_NOT_TRADE_AUTHORIZATION", "PORTFOLIO_DATA_NOT_EVALUATED", "ACTIVATION_RECEIPT_DOES_NOT_VERIFY_PORTFOLIO_DATA"]}
         except (PolicyError, OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
-            return {"status": "UNAVAILABLE", "reason": str(exc), "policy_reference": None}
+            # Client-visible reasons are bounded codes, never OS paths, SQL text,
+            # malformed private source values or an exception's arbitrary text.
+            reason = str(exc)
+            if not isinstance(exc, PolicyError) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,95}", reason):
+                reason = "POLICY_STORE_UNAVAILABLE" if isinstance(exc, (OSError, sqlite3.Error)) else "POLICY_VALIDATION_FAILED"
+            return {"status": "UNAVAILABLE", "reason": reason, "policy_reference": None}

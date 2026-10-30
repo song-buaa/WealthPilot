@@ -424,3 +424,16 @@ def test_portfolio_retains_both_issuer_reviews_and_special_issuer_exception(acti
         assert all(any(s in row.title and 'HUMAN_REVIEW' in row.title for row in alerts) for s in ['SYN2','SYN3'])
         assert sum('btc.' in row.title for row in alerts)==0
         assert all('policy_reference' in row.description for row in alerts)
+
+
+
+def test_missing_private_store_never_exposes_configured_path(active,monkeypatch):
+    missing=active[2]/'PRIVATE_PATH_SENTINEL.sqlite'
+    monkeypatch.setenv('WEALTHPILOT_POLICY_DB_PATH',str(missing))
+    from backend.services.investment_policy.runtime import resolve
+    value=resolve(7)
+    with pytest.raises(PolicyError,match='^POLICY_CONTEXT_UNAVAILABLE$'):
+        context(7,consumer='mcp')
+    assert value['mode']=='UNAVAILABLE' and value['reason']=='POLICY_STORE_UNAVAILABLE'
+    assert str(active[2]) not in json.dumps(value) and 'PRIVATE_PATH_SENTINEL' not in json.dumps(value)
+    assert not missing.exists()

@@ -64,3 +64,8 @@ P2唯一发布者[publisher.publish_synthetic](../../backend/services/investment
 规则/消费者测试：[P1](../../tests/test_investment_policy.py)、[P2](../../tests/test_policy_integration.py)。浏览器展示隔离：[policy-boundary](../../frontend/tests/e2e/policy-boundary.spec.ts)。独立MCP协议：[P2 protocol](../../pocs/chatgpt_skills/test_policy_protocol.py)，使用真实SDK客户端与合成服务端会话、私有临时SQLite；不是生产ChatGPT或Tunnel验收。四项现有CI保持；新增协议测试纳入原MCP Gate，文档纳入[检查器](../../scripts/check_engineering_docs.py)。每次实际运行结果见私人交付，不用历史测试数量冒充本轮。
 
 P3前必须补齐生产私人理念、custom/official优先级、生效rules_config、缓存、索引资格；核验真实资产Owner完整分母/穿透资格；独立迁移预演、审批/版本收据、兼容备份回滚及exact HEAD四项CI；再取得个人Mac Mini访问、部署和政策激活的明确授权。P2不包含这些授权，也不提供未经批准的真实发布入口。
+
+
+## P3-A集成候选
+
+P1/P2在最新已集成main之上形成独立Draft PR候选，仍未部署或真实激活。受限Web的显式路由目录复用同一只读政策GET处理器，不加载完整Backend或开放纪律写接口，避免默认LEGACY页面查询404。客户端错误仅返回有界原因代码，文件系统异常、SQL或私人原文值不向Web/MCP传播。无真实Publisher、迁移、审批或交易权限扩张；具体PR/CI证据由本轮私人交付保存，不把代码集成视为生产迁移就绪。

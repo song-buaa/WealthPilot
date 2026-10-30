@@ -44,6 +44,13 @@ def test_original_18_tools_plus_one_policy_read_without_business_or_e1_writes(ac
                 value=r.structured_content or json.loads(r.content[0].text)
                 assert value['policy_reference']==context(7)['policy_reference']
                 assert value['synthetic'] is True
+            with monkeypatch.context() as broken:
+                broken.setenv('WEALTHPILOT_POLICY_DB_PATH',str(tmp_path/'PRIVATE_PATH_SENTINEL.sqlite'))
+                missing=await c.call_tool('get_investment_policy_context',{'scope':'full'})
+                assert missing.is_error
+                text=' '.join(block.text for block in missing.content if hasattr(block,'text'))
+                assert 'POLICY_CONTEXT_UNAVAILABLE' in text
+                assert str(tmp_path) not in text and 'PRIVATE_PATH_SENTINEL' not in text
             invalid=await c.call_tool('get_investment_policy_context',{'scope':'../../any-db'})
             assert invalid.is_error
     asyncio.run(run())
