@@ -15,7 +15,7 @@ from .parser import PolicyError
 from .service import PolicyService
 from .store import PolicyStore, clock, utc_now
 
-POLICY_ENV_KEYS = {"WEALTHPILOT_POLICY_DB_PATH", "WEALTHPILOT_POLICY_SCOPE"}
+POLICY_ENV_KEYS = {"WEALTHPILOT_POLICY_DB_PATH", "WEALTHPILOT_POLICY_SCOPE", "WEALTHPILOT_POLICY_SHARED_CONTRACT"}
 _current = ContextVar("wealthpilot_policy_session", default=None)
 
 
@@ -48,11 +48,15 @@ def resolve(portfolio_id):
     path = os.environ.get("WEALTHPILOT_POLICY_DB_PATH")
     scope = os.environ.get("WEALTHPILOT_POLICY_SCOPE")
     if not path:
+        if os.environ.get("WEALTHPILOT_POLICY_SHARED_CONTRACT"):
+            return {"mode":"UNAVAILABLE", "status":"UNAVAILABLE", "policy_reference":None, "reason":"POLICY_DATABASE_BINDING_INCOMPLETE"}
         return {"mode": "LEGACY", "status": "NOT_ACTIVE", "policy_reference": None, "reason": "NO_POLICY_CONFIG"}
     if scope != f"portfolio:{portfolio_id}":
         return {"mode": "UNAVAILABLE", "status": "UNAVAILABLE", "policy_reference": None, "reason": "POLICY_SCOPE_MISMATCH"}
     try:
-        value = PolicyService(PolicyStore(path)).get_active_policy_context(scope)
+        from .colocated import configured_store
+        store = configured_store(path, shared_contract=os.environ.get("WEALTHPILOT_POLICY_SHARED_CONTRACT"))
+        value = PolicyService(store).get_active_policy_context(scope)
     except (ValueError, OSError):
         value = {"status": "UNAVAILABLE", "reason": "POLICY_STORE_UNAVAILABLE", "policy_reference": None}
     value["mode"] = {"ACTIVE": "POLICY_ACTIVE", "NOT_ACTIVE": "LEGACY"}.get(value["status"], "UNAVAILABLE")

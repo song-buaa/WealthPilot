@@ -59,14 +59,20 @@ python -m backend.services.investment_policy.publish_cli \
 
 回滚使用同一release命令，但授权operation必须为ROLLBACK，并绑定原ACTIVE与目标历史版本。CLI只返回收据摘要，不输出完整政策或文件路径；无自动审批/部署/研究/交易动作。
 
-## 6. 明确未完成的生产集成问题
+## 6. R1共库受限连接与真实备份边界
 
-当前PolicyStore仍拒绝WEALTHPILOT_DB_PATH及E1库。隔离业务副本可安装policy表，但**不能据此宣称生产共库运行已就绪**。不通过布尔开关移除拒绝；P3-C前若采用共库，需另经审查的专用连接：固定业务库身份，只允许policy读/append、拒绝业务表及DDL、禁止trigger间接业务写，并完成回归。不能偷偷启用一个新的平行政策权威或擅改生产路径。此缺口及真实备份/Schema缺证均须保留为阻断，而非推定通过。
+R1沿现有[共享库契约](../../app/shared_sqlite.py)增加[CoLocatedPolicyStore](../../backend/services/investment_policy/colocated.py)，继承原PolicyStore的stage/事件/Publisher协议，原Store拒绝业务/E1库的保护不变。显式配置`WEALTHPILOT_POLICY_SHARED_CONTRACT`或CLI的`--shared-contract`选择的是完整受控身份契约，不是布尔绕过；固定path、device/inode、owner/权限、scope和完整Schema指纹，每次连接及SQL前重新核验。
 
-静态RuleEngine缓存及Chroma内存无法安全提取时维持UNKNOWN。P2在ACTIVE隔离旧数值和未版本化索引，不以缓存或Top-k片段替代PolicyService。没有完整可投资分母、FX或外部资产/穿透证明时继续CANNOT_QUANTIFY/UNKNOWN，HUMAN_REVIEW不变订单或硬持仓上限。
+日常连接专用sqlite3且无连接池，不借用ORM/原业务writer连接。预检只读Schema元数据、不读Portfolio/账户行；运行期只有固定scope及精确17条政策SQL模板。SQLite authorizer仅允许政策表读取/追加和九项已核验触发器的规定读取，拒绝业务/E1数据、UPDATE/DELETE、DDL/PRAGMA/ATTACH/视图和非政策trigger间接访问。只提供execute及已取回的政策行，不提供原connection/cursor/authorizer操作。任何权限/身份复检异常污染事务，即使内部捕获并恢复配置仍整体回滚。连接退出后不可重用。
+
+本边界限制SQL能力，不声称隔离任意同用户恶意Python进程。批准的共享契约是原数据库Owner派生运行收据，不是第三份人工政策。分析Worker的WEALTHPILOT_DB_PATH可能指向U1冻结视图，政策仍绑定原共享契约，不能跟随临时分析库重绑定；缺失/错配配置fail closed。
+
+Schema安装仍与日常连接分离：隔离备份校验在DDL前检查源外键；DDL阶段独立authorizer只允许确切政策对象，不能调用运行连接迁移或访问订单。原业务/E1事务与运行配置不变。以后实际生产Schema改变须另行授权，并按原Owner流程更新共享契约指纹；本轮不安装、不重启或激活。
+
+R1真实备份与实际迁移结果以私人收据为准。备份一致性/恢复成功不等于所有外键有效；发现既有外键问题时禁止忽略、删除历史或放宽迁移门禁。静态缓存和Chroma内存不能安全读取则保留UNKNOWN；ACTIVE仍隔离旧数值及未版本化索引，资产资格不足仍UNKNOWN。
 
 ## 7. 验证与后续授权
 
-新增[Publisher回归](../../tests/test_policy_publisher.py)、[迁移/Backup回归](../../tests/test_policy_schema_rehearsal.py)与[实际MCP协议](../../pocs/chatgpt_skills/test_policy_protocol.py)，并保持原全量、M5、前端及E1/交易权限Gate。公开测试只用合成源；真实批准源及冻结生产旧规则在私人脚本中交叉验证，不能代替本轮实时生产备份。
+R1新增[共库权限回归](../../tests/test_policy_colocated.py)。新增[Publisher回归](../../tests/test_policy_publisher.py)、[迁移/Backup回归](../../tests/test_policy_schema_rehearsal.py)与[实际MCP协议](../../pocs/chatgpt_skills/test_policy_protocol.py)，并保持原全量、M5、前端及E1/交易权限Gate。公开测试只用合成源；真实批准源及冻结生产旧规则在私人脚本中交叉验证，不能代替本轮实时生产备份。
 
 本轮只本地提交，不Push/更新远端PR/合并/部署/生产DDL或激活。正式P3-C须先消除存储/备份阻断、验证最终候选远端四CI、独立Review和同版本切换，再分别取得部署与实际政策激活授权。私人P3-C Runbook维护具体设备/路径及回滚收据，不在仓库暴露。

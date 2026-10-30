@@ -140,3 +140,16 @@ def test_incompatible_backup_code_is_not_imported(exported):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     with pytest.raises(ValueError,match='CODE_HASH_MISMATCH'):
         module.load_verified('not_imported',exported['backup'],'0'*64)
+
+
+def test_existing_source_fk_violation_refuses_before_any_target_ddl(exported):
+    # A consistent backup can faithfully preserve an already-invalid legacy FK.
+    source=exported['backup']
+    with closing(sqlite3.connect(source)) as db:
+        db.executescript('CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(parent_id INTEGER REFERENCES parent(id)); INSERT INTO child VALUES(9);')
+        tables=rehearsal.inventory(db)
+    exported['manifest'].update(sha256=hashlib.sha256(source.read_bytes()).hexdigest(),tables=tables)
+    shutil.copyfile(source,exported['target']);before=exported['target'].read_bytes()
+    with pytest.raises(PolicyError,match='SOURCE_BACKUP_FOREIGN_KEY_VIOLATIONS'):
+        rehearsal.install_on_isolated_copy(**exported)
+    assert exported['target'].read_bytes()==before

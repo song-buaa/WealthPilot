@@ -11,6 +11,7 @@ from .store import PolicyStore, utc_now
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True, help="Explicit private isolated candidate SQLite path, outside Git")
+    parser.add_argument("--shared-contract", help="Existing approved shared SQLite identity contract; no schema initialization permission")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init-candidate")
     stage = sub.add_parser("stage")
@@ -27,7 +28,8 @@ def main(argv=None):
         cmd.add_argument("--scope", required=True)
         cmd.add_argument("--bundle-id", required=name == "show")
     args = parser.parse_args(argv)
-    store = PolicyStore(args.db)
+    from .colocated import configured_store
+    store = configured_store(args.db, shared_contract=args.shared_contract)
     if args.command == "init-candidate":
         result = store.init_candidate()
     elif args.command == "stage":

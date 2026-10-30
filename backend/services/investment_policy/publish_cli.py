@@ -31,6 +31,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True)
     parser.add_argument("--environment", required=True, choices=["ISOLATED_REHEARSAL", "PRODUCTION"])
+    parser.add_argument("--shared-contract", help="Reviewed existing shared SQLite identity contract; never a migration flag")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("approve", "release"):
         cmd = sub.add_parser(name)
@@ -42,7 +43,8 @@ def main(argv=None):
     status = sub.add_parser("lifecycle")
     status.add_argument("--scope", required=True)
     args = parser.parse_args(argv)
-    publisher = PolicyPublisher(PolicyStore(args.db), environment=args.environment)
+    from .colocated import configured_store
+    publisher = PolicyPublisher(configured_store(args.db, shared_contract=args.shared_contract), environment=args.environment)
     if args.command == "lifecycle":
         result = publisher.lifecycle(args.scope)
     else:
