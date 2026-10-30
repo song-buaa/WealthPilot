@@ -153,6 +153,49 @@ def test_LI_real_SEC_original_yields_independent_vehicle_operating_evidence():
     assert facts['vehicle_deliveries_quarter']['record_id'] in explanation_prompt(a)
 
 
+def test_LI_automotive_explanation_keeps_bound_drivers_and_rejects_execution():
+    row=li_record();a=assess({},symbol='LI:US',research=[row],at=AT,
+                             disclosure_verifier={row['record_id']:row}.get)
+    facts={r['field']:r for r in a['verified_field_records']}
+    fields=('vehicle_deliveries_quarter','vehicle_sales_quarter','vehicle_margin_pct')
+    refs=[facts[name]['record_id'] for name in fields]
+    candidate=dict(topic='business',basis='inference',scope='research_only',
+        text='本期交付{{n1}}、汽车销售收入{{n2}}及车辆毛利率{{n3}}共同提供经营观察；价格竞争或车型结构变化仍是待核实假设，不能直接推导长期竞争优势。',
+        evidence_refs=refs,numbers=[dict(id=f'n{i}',evidence_ref=ref,field=field)
+                                   for i,(ref,field) in enumerate(zip(refs,fields),1)])
+    accepted,diagnostics=explanation_projection([candidate],a)
+    assert diagnostics['accepted_count']==1
+    assert all(facts[name]['record_id'] in accepted[0]['evidence_refs'] for name in fields)
+    assert '98,330' in accepted[0]['text'] and '9.4' in accepted[0]['text']
+    assert explanation_projection(accepted,a)[0]==accepted  # final Web/MCP recheck
+    for addition in ('立即挂单卖出。','目标价应定为88美元。','按市场价下单买入。'):
+        bad=deepcopy(candidate);bad['text']+=addition
+        assert not explanation_projection([bad],a)[0]
+
+
+def test_automotive_prompt_example_and_research_language_match_output_contract():
+    row=li_record();a=assess({},symbol='LI:US',research=[row],at=AT,
+                             disclosure_verifier={row['record_id']:row}.get)
+    prompt=explanation_prompt(a)
+    assert '"scope":"research_only"' in prompt
+    assert '价格竞争' in prompt and '待核实假设' in prompt
+    assert '不写立即买卖' in prompt
+
+
+def test_LI_development_style_cohort_and_non_ASP_language_is_not_an_order():
+    row=li_record();a=assess({},symbol='LI:US',research=[row],at=AT,
+                             disclosure_verifier={row['record_id']:row}.get)
+    ref=next(r['record_id'] for r in a['verified_field_records'] if r['field']=='vehicle_sales_quarter')
+    item=dict(topic='business',basis='inference',scope='research_only',evidence_refs=[ref],
+              text='交付车辆与收入确认车辆可能并非同一批次；汽车收入除以交付量只是研究近似值，不是实际成交均价，不能据此推断降价。')
+    accepted,_=explanation_projection([item],a)
+    assert accepted and '同一批次' in accepted[0]['text'] and '不是实际成交均价' in accepted[0]['text']
+    assert explanation_projection(accepted,a)[0]==accepted
+    for text in ('本期成交均价可按88元卖出全部持仓。',
+                 '交付车辆不是同一批次，立即卖出并执行下单。'):
+        assert not explanation_projection([dict(item,text=text)],a)[0]
+
+
 def test_XPEV_official_excerpt_uses_same_parser_and_keeps_missing_unknown():
     from bs4 import BeautifulSoup
     from research_v2.official_disclosures import parse_vehicle_operating

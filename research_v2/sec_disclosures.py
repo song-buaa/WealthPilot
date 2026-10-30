@@ -356,6 +356,31 @@ def _standard_concept(node):
     return None
 
 
+def _declared_exhibit(cover, filename, kind):
+    """Accept an exact cover declaration in the link or its own table row."""
+    number = re.escape(kind[3:])
+    for link in cover.find_all('a', href=filename):
+        label = ' '.join(link.get_text(' ', strip=True).split())
+        if re.fullmatch(r'(?:Exhibit\s+)?'+number+r'(?:(?:\s+|\s*[-–—:]\s*)[^<>]{1,120})?', label, re.I):
+            return True
+        row = link.find_parent('tr')
+        if row is None:
+            continue
+        cells = row.find_all(['td', 'th'], recursive=False)
+        link_cells = [cell for cell in cells if link in cell.descendants]
+        # A different row, an ambiguous multi-link row, or a label in the link
+        # cell cannot identify this document as the declared exhibit.
+        if len(link_cells) != 1 or len(row.find_all('a', href=True)) != 1:
+            continue
+        for cell in cells:
+            if cell is link_cells[0]:
+                continue
+            sibling_label = ' '.join(cell.get_text(' ', strip=True).split())
+            if re.fullmatch(r'(?:Exhibit\s+)?'+number, sibling_label, re.I):
+                return True
+    return False
+
+
 def parse_filing(source, issuer, filing, *, identity_digest):
     """Restricted full-submission envelope and inline XBRL, including exhibits.
 
@@ -407,7 +432,6 @@ def parse_filing(source, issuer, filing, *, identity_digest):
     if len(primary)!=1:
         return None
     cover=BeautifulSoup(primary[0][4],'html.parser')
-    declared={(a.get('href'),a.get_text(' ',strip=True)) for a in cover.find_all('a',href=True)}
     observations=[]
     statement_issues=[]
     # Contexts and external statement headings are document-scoped. An exhibit
@@ -416,8 +440,7 @@ def parse_filing(source, issuer, filing, *, identity_digest):
         if not filename.lower().endswith(('.htm','.html')):
             continue
         is_primary=(kind==filing['form'] and base+filename==filing['primary_url'])
-        is_exhibit=(re.fullmatch(r'EX-99\.\d+',kind) and
-            any(href==filename and re.fullmatch(r'(?:Exhibit\s+)?'+re.escape(kind[3:])+r'(?:(?:\s+|\s*[-–—:]\s*)[^<>]{1,120})?', ' '.join(label.split()),re.I) for href,label in declared))
+        is_exhibit=(re.fullmatch(r'EX-99\.\d+',kind) and _declared_exhibit(cover,filename,kind))
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')

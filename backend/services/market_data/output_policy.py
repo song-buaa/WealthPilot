@@ -182,14 +182,14 @@ def explanation_prompt(assessment):
                 "解释其与集团收入/盈利的已证关系及不能证实的原因；若需节省段落，压缩重复的集团财务复述。"
                 "本句不授权自行计算数字。\n" if automotive_refs else "")
     return (auto_focus+"\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
-        "每项包含topic、basis='inference'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
+        "每项包含topic、basis='inference'、scope='research_only'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
         "risk、exit_rationale、review_condition、technical_trend。用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
         "基本面缺失但技术证据有效时，使用technical_trend解释趋势、动量与量价背离及其局限，"
         "不得由技术走势推导营收或竞争优势。business、competition、investment_thesis须引用经营或研究证据。"
         "无须为技术解释等待基本面或精确交易资格；只解释证据覆盖的范围。只有day证据时不得声称周线或多周期共振。"
         "不要把专业解释仅写进旧rationale/riskPoints/chat_answer：本字段必须在根JSON中独立返回。"
-        "结构示例：{\"professional_explanation\":[{\"topic\":\"technical_trend\",\"basis\":\"inference\","
+        "结构示例：{\"professional_explanation\":[{\"topic\":\"technical_trend\",\"basis\":\"inference\",\"scope\":\"research_only\","
         "\"text\":\"短期修复与较长周期的趋势仍可能分化，需要结合量能持续性复核，不能据此确认经营改善。\","
         "\"evidence_refs\":[\"从下列列表复制实际evidence_ref\"]}]}。"
         "围绕当前与可比期间的收入、利润率、费用、现金转化说明变化和可能驱动；缺少分部证据时不能推断Temu利润/份额。"
@@ -201,6 +201,8 @@ def explanation_prompt(assessment):
         "费用金额保留原表符号；只有勾稽成立的费用率由程序给出，不能把负扣减项当作收益，也不能把所得税费用当作实付税款。"
         "检验持有/退出假设、反证与下一次可验证条件，讨论估值与机会成本；不可把价格走势当经营改善。"
         "所有段落设置scope='research_only'；可讨论研究性退出意图和价格观察，不是执行指令。每段引用最多五项。"
+        "汽车经营解释使用研究语言：降价、价格竞争、车型结构和单车成本若无独立来源只作为待核实假设；"
+        "持有或减仓仅讨论复核条件，不写立即买卖、下单、挂单、限价或具体执行数量。"
         "可引用已验证数字，但必须用占位符{{n1}}并提供numbers:[{id:'n1',evidence_ref:'实际ref',field:'numeric_fields中的字段'}]，"
         "服务端会替换成带名称/期间/币种的准确数值；绑定ref也必须列入evidence_refs。不要在text中直接写数字/百分比或自行计算。"
         "每段最多八个numbers绑定；ID使用n1至n999，可跨段连续编号，每个ID只绑定一个字段。"
@@ -242,6 +244,11 @@ def _qualitative_text(value, *, research=False, diagnostic=None):
         if re.search(r'下单|挂单|市价单|限价|立即买|立即卖|马上买|马上卖|执行买|执行卖',re.sub(r'\s+','',text)):return reject('execution_instruction')
         # Permit observation/intent vocabulary without deleting any digits or
         # arbitrary spans. Numeric validation below remains identical.
+        # These exact negated/semantic phrases describe accounting or cohort
+        # limits, not a trade unit or executable price. Keep the original text
+        # for display; only normalize the copy inspected by the lexical gate.
+        text=text.replace('同一批次','同批次')
+        text=re.sub(r'(?:并非|不是|不等于|不能视为)实际成交均价','非实际成交定价',text)
         for term in ('收盘价','开盘价','支撑位','压力位','前高','前低','上沿','下沿','现价','市场价','价格'):
             text=text.replace(term,'研究观察位置')
         for term in ('全部退出','全部持仓','清仓'):
