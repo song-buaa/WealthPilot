@@ -11,6 +11,7 @@ from pocs.chatgpt_skills.server import BusinessClient,create_server
 from backend.services.investment_policy.runtime import context
 from backend.services.investment_thesis.store import ThesisStore
 from backend.services.investment_thesis.monitoring import migrate_monitoring
+from tests.test_policy_publisher import formal_portfolio
 
 
 def settings(path,prepare_path):
@@ -55,3 +56,21 @@ def test_original_18_tools_plus_one_policy_read_without_business_or_e1_writes(ac
             assert invalid.is_error
     asyncio.run(run())
     assert active[0].path.read_bytes()==before_policy and e1.path.read_bytes()==before_e1
+
+
+def test_formal_publisher_receipt_via_actual_readonly_mcp_protocol(formal_portfolio,monkeypatch):
+    cfg=settings(None,None);cfg.e1_db_path=None;cfg.e1_enable_writes=False;cfg.prepare_config=None
+    before=formal_portfolio[0].path.read_bytes()
+    def forbidden(*a,**k):raise AssertionError('Formal policy query invoked PEER/broker')
+    monkeypatch.setattr(BusinessClient,'call',forbidden)
+    async def run():
+        async with Client(create_server(cfg),mode='legacy') as client:
+            result=await client.call_tool('get_investment_policy_context',{'scope':'portfolio'})
+            assert not result.is_error
+            value=result.structured_content or json.loads(result.content[0].text)
+            assert value['policy_reference']==context(7)['policy_reference']
+            assert value['release']['environment']=='ISOLATED_REHEARSAL'
+            assert value['precision']=='UNKNOWN_REQUIRES_QUALIFIED_ASSET_VIEW'
+            assert not value['execution_authorized']
+    asyncio.run(run())
+    assert formal_portfolio[0].path.read_bytes()==before

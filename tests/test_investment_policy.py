@@ -263,7 +263,7 @@ def synthetic_release(store, b, sequence, action='RELEASE', effective_at=AT):
     # Test-only deployment fixture, never offered by P1 CLI/service or run on real policy.
     value = dict(scope='SYNTHETIC', bundle_id=b['bundle_id'], bundle_sha256=digest(b),
                  release_approval_ref='SYNTHETIC_TEST_FIXTURE', action=action,
-                 recorded_at=AT, effective_at=effective_at, deployed_at=AT)
+                 recorded_at=AT, effective_at=effective_at, deployed_at=AT, synthetic=True)
     with store.connection(write=True) as db:
         db.execute('INSERT INTO policy_releases VALUES(?,?,?,?,?)', ('SYNTHETIC', sequence, b['bundle_id'], canonical(value), digest(value)))
 

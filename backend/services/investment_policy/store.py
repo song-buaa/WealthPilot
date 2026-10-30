@@ -173,10 +173,12 @@ class PolicyStore:
             self._append(db, scope, bundle_id, "DRAFT", request_id, created_at, None)
             return value
 
-    def _append(self, db, scope, bundle_id, state, request_id, at, approval_ref):
+    def _append(self, db, scope, bundle_id, state, request_id, at, approval_ref, *, authorization=None):
         seq = db.execute("SELECT coalesce(max(sequence),0)+1 FROM policy_events WHERE scope=?", (scope,)).fetchone()[0]
         value = dict(scope=scope, bundle_id=bundle_id, state=state, request_id=request_id, recorded_at=at,
                      approval_ref=approval_ref, sequence=seq)
+        if authorization is not None:
+            value["authorization"] = authorization
         db.execute("INSERT INTO policy_events VALUES(?,?,?,?,?,?,?)", (scope, seq, bundle_id, state, request_id, canonical(value), digest(value)))
         return value
 

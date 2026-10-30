@@ -1,5 +1,7 @@
 # 投资政策 P2：统一消费者接入（本地候选）
 
+后续[P3-B正式发布者](INVESTMENT_POLICY_P3B.md)补充本地可信操作员审批/安装/发布/回滚收据及隔离副本迁移；以下“P2无真实Publisher”为阶段事实。未部署、未生产激活，不能由本地演练推定生产共库或迁移就绪。
+
 状态：LOCAL_CANDIDATE / PRODUCTION_NOT_ACTIVE。内容批准不等于激活；本页不授权发布、真实政策激活或交易。[P1](INVESTMENT_POLICY_P1.md)保存原文与确定性派生，[统一架构](UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)保持原PEER与数据Owner。本轮不修改两份私人批准原文，不将原文、真实配置或私人派生数据提交Git。
 
 ## 1. 范围及Owner

@@ -34,6 +34,8 @@ class PolicyService:
                     return {"status": "NOT_ACTIVE", "reason": "NO_EFFECTIVE_APPROVED_RELEASE", "policy_reference": None}
                 release = eligible[0]
                 value = self.store._bundle(db, scope, release["bundle_id"])
+                from .formal_publisher import verify_formal_release
+                verify_formal_release(self.store, db, value, release)
                 approvals = [self.store._read(r) for r in db.execute("SELECT * FROM policy_events WHERE scope=? AND bundle_id=?", (scope, value["bundle_id"]))]
                 if not any(e["state"] == "APPROVED" and e["approval_ref"] and clock(e["recorded_at"]) <= clock(release["effective_at"]) for e in approvals):
                     raise PolicyError("STRUCTURED_RELEASE_APPROVAL_MISSING")
