@@ -71,6 +71,7 @@ class AnalysisResult(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     professional_analysis_complete: bool = False
     missing_stages: list[str] = Field(default_factory=list)
+    stage_diagnostics: dict[str, str] = Field(default_factory=dict)
     execution_authorized: Literal[False] = False
     order_created: Literal[False] = False
     snapshot_id: str | None = None
@@ -342,10 +343,14 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
         result.limitations.append('Historical attribution is separate from current-holdings book P&L; only broker-imported facts and expressly supported metrics are authoritative. No portfolio TWR/MWR.')
         captured={}
         stage_receipt={}
+        stage_events=set()
+        stage_completed=set()
         def capture_stage(plan, executed, stage='evidence_ready'):
-            if scenario=='analyze_position' and plan.route=='position_single' and executed.position_evidence:
+            if scenario=='analyze_position' and plan.route=='position_single':
+                stage_completed.add(stage)
                 if stage=='evidence_ready':
-                    stage_receipt.update(assessment=deepcopy(executed.position_evidence),missing=['expressing','reviewing'])
+                    if executed.position_evidence:
+                        stage_receipt.update(assessment=deepcopy(executed.position_evidence),missing=['expressing','reviewing'])
                 elif stage_receipt:
                     completed={'expressing_complete':'expressing','reviewing_complete':'reviewing'}.get(stage)
                     stage_receipt['missing']=[s for s in stage_receipt['missing'] if s!=completed]
@@ -378,12 +383,15 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             async with timeout_context:
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
                         conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
-                            analysis_options=dict(target_versions=[t.model_dump(mode="json") for t in request.target_versions],
+                            analysis_options=dict(single_position_research=scenario=='analyze_position',requested_symbol=request.symbol,
+                                research_question=request.question,
+                                target_versions=[t.model_dump(mode="json") for t in request.target_versions],
                                 research_context=request.research_context.model_dump() if request.research_context else None,
                                 scenario_legs=[s.model_dump(mode="json") for s in request.scenario_legs])):
                     event_type,data=event.split('\n',1)
                     data=json.loads(data.split('data: ',1)[1]);kind=event_type.removeprefix('event: ')
                     if kind=='text':text.append(data.get('delta',''))
+                    elif kind=='stage':stage_events.add(data.get('stage'))
                     elif kind=='intent':result.intent=data
                     elif kind=='done':done=data
                     elif kind=='error':errors.append(data.get('code','ANALYSIS_FAILED'))
@@ -400,6 +408,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 result.issues.append('ANALYSIS_ROUTE_MISMATCH')
                 result.conclusion = '分析路由与请求不符；请明确单一标的或组合范围后重试。'
                 result.professional_result = {}
+                result.missing_stages=['professional_result_qualification']
             elif done.get('conclusion_level')=='aborted' or not captured or not result.conclusion:
                 result.issues.append('PROFESSIONAL_ANALYSIS_UNAVAILABLE')
             else:
@@ -530,9 +539,23 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
         if result.status=='unavailable':
             result.professional_analysis_complete=False
-            result.missing_stages=stage_receipt.get('missing',[])
-        if result.status=='unavailable' and async_l1 and scenario=='analyze_position' and stage_receipt:
+            if not result.missing_stages:
+                result.missing_stages=stage_receipt.get('missing') or (
+                    ['result_delivery'] if captured else
+                    ['stage_receipt_unavailable'] if 'reasoning' in stage_events else
+                    ['executing'] if 'loading' in stage_events else
+                    ['planning'] if 'intent' in stage_events else ['planning_not_started'])
+        if (result.status=='unavailable' and async_l1 and scenario=='analyze_position'
+                and stage_receipt and 'ANALYSIS_ROUTE_MISMATCH' not in result.issues):
             retain_facts(result,stage_receipt['assessment'],asset_view=asset_view,missing_stages=stage_receipt['missing'])
+        if async_l1 and scenario=='analyze_position':
+            result.stage_diagnostics={
+                'planning': 'completed' if result.intent else 'failed' if 'PEER_PLANNING_FAILED' in result.issues else 'started' if 'intent' in stage_events else 'not_started',
+                'executing': 'completed' if 'evidence_ready' in stage_completed or captured else 'failed' if 'PEER_EXECUTION_FAILED' in result.issues else 'started' if 'loading' in stage_events else 'not_started',
+                'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'reasoning' in stage_events else 'not_started',
+                'reviewing': 'completed' if 'reviewing_complete' in stage_completed or captured else 'unknown' if 'expressing_complete' in stage_completed else 'not_started',
+                'professional_result': 'qualified' if result.professional_analysis_complete else 'rejected' if 'ANALYSIS_ROUTE_MISMATCH' in result.issues else 'incomplete',
+            }
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')
 
