@@ -227,7 +227,7 @@ def orchestrator_node(state: DecisionState) -> dict:
 多标的：{multi_assets if multi_assets else "无"}
 
 可选路径：
-- position_single：单标的决策（标的明确的 PositionDecision，包括已持仓的加减仓和非持仓的新建仓评估）
+- position_single：单标的专业研究或决策（标的明确的 PositionDecision，包括已持仓研究、未持仓纯研究与明确建仓评估）
 - position_multi：多标的对比决策
 - clarify：标的不明确（用户说的是模糊指代如"那只股票"），需要展示候选清单让用户选择
 - portfolio：组合级分析（PortfolioReview / AssetAllocation / PerformanceAnalysis）
@@ -237,7 +237,7 @@ def orchestrator_node(state: DecisionState) -> dict:
 - "标的名称是否明确"用于判断用户的描述是否清晰（避免"那只股票"这种模糊指代）
 - "标的是否在持仓中"用于判断是已有持仓决策还是新建仓评估
 - 名称明确 + 在持仓中 → position_single（已持仓的加减仓决策）
-- 名称明确 + 不在持仓中 → position_single（新建仓评估）
+- 名称明确 + 不在持仓中且请求公司研究 → position_single（未持仓研究，不推定买入意图）
 - 名称不明确 → clarify（让用户澄清）
 
 请输出 JSON，格式如下（只输出 JSON，不要有其他文字）：

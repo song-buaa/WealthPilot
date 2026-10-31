@@ -123,6 +123,11 @@ def _resolve_intent_type(planning_output: PlanningOutput) -> str:
     if isinstance(intent, dict):
         pi = intent.get("primary_intent", "")
         if pi:
+            # A single-security execution cannot be narrated as generic
+            # education. The Planning boundary must resolve this conflict
+            # first; otherwise fail closed before any model call.
+            if planning_output.route == "position_single" and pi != "PositionDecision":
+                return "RouteIntentMismatch"
             return pi
 
     sse_handler = planning_output.sse_handler or ""

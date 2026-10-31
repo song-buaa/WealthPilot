@@ -74,7 +74,9 @@ ChatGPT 消费原专业结论后再次组织、解释和回答。它没有替代
 | `get_manual_wealth_items` | 现有手工资产/负债模型，支持类型与条目筛选 | 不返回备注、凭证等不必要字段；金额单位见工具契约 |
 | `get_investment_details` | 原投资持仓/账户归属、数量、市值、盈亏、仓位、来源日期 | 账户为不透明引用，不返回原始券商账户敏感字段；存储持仓不冒充实时账户盘点 |
 | `prepare_trade_confirmation_link` | 规范化明确订单参数，返回原 Web 预填 URL 与摘要 | 纯计算，不连接券商、不写草稿/持仓/订单；缺必要参数须澄清 |
-| `analyze_position` | PositionDecision / position_single；原持仓或新建仓、规则、信号、研究和专业结论 | 只读分析，不能据建议自动下单；不支持/缺数据时澄清或降级 |
+| `analyze_position` | PositionDecision / position_single；原持仓、未持仓纯研究或明确建仓评估，复用规则、信号、研究和专业结论 | 明确单标研究出现 Education / position_single 冲突时仅在标的明确且无需澄清的分析入口对齐专业路由；通用投教仍走 general，其他不一致 fail closed。只读分析不能据建议自动下单；缺数据时澄清或降级 |
+
+正常异步单标结果的 `stage_diagnostics` 只记录 Planning、Executing、Expressing、Reviewing 的安全阶段状态及专业结果资格；`missing_stages` 可标识已完成阶段后的结果资格失败。阶段无回执时保留未观测状态，不将空数组解释为专业分析成功。
 | `review_portfolio` | PortfolioReview / AssetAllocation；原配置快照、目标、偏离和组合结论 | 不混用完整财富与投资持仓分母；无行业证据不推断行业归属 |
 | `analyze_performance` | PerformanceAnalysis / 原 `_build_performance_data`：当前持仓账面盈亏及贡献 | 不编造历史区间、TWR/MWR、已实现交易收益或决策因果归因 |
 
