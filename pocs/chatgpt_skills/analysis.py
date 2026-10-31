@@ -219,7 +219,7 @@ def captured_evidence(result, captured, portfolio_id):
     if loaded.research and not loaded.retrieved_research_views:
         result.issues.append('RESEARCH_PROVENANCE_UNVERIFIED')
     if loaded.is_new_entry:
-        result.limitations.append('Original new-entry buy_init tag identifies the evaluation path, not an unconditional buy instruction; use the actual conclusion and risks.')
+        result.limitations.append('Virtual-security evaluation path does not establish a current holding or purchase intent; use the qualified conclusion and risks.')
     result.limitations.append('Original research may fall back to examples without verified dates; do not present unverified research as live evidence.')
 
 
