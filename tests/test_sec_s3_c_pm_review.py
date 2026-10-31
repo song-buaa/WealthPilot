@@ -178,3 +178,12 @@ def test_cover_context_cannot_bind_a_future_security_identity():
 ])
 def test_class_eps_requires_non_nil_untransformed_decimal_literal(change):
     _,eps=parsed(change=change);assert not eps
+
+
+@pytest.mark.parametrize('concept',['TradingSymbol','Security12bTitle'])
+def test_cover_identity_rejects_unverified_text_transforms(concept):
+    def change(body):
+        needle=('name="dei:'+concept+'" contextRef="cc"').encode()
+        assert needle in body
+        return body.replace(needle,needle+b' xmlns:ixt="http://evil.test" format="ixt:unverified-transform"')
+    _,eps=parsed(change=change);assert not eps
