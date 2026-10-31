@@ -336,3 +336,104 @@ def test_b3_tradability_tool_is_readonly_unknown_without_account_evidence(endpoi
             assert foreign.is_error
         assert hashlib.sha256((tmp_path/'synthetic.db').read_bytes()).hexdigest()==before
     asyncio.run(run())
+
+
+def test_trade_status_real_worker_without_fastapi_or_web_imports(tmp_path):
+    """Physical minimal venv + real MCP/worker path, not a mocked query.
+
+    Copy only seven already-installed runtime distributions into a fresh venv;
+    no pip/network, no system-site-packages, no FastAPI/Starlette installation.
+    Fixture construction uses the normal test interpreter, queries use the
+    isolated minimal interpreter with network/Web imports/RW SQLite prohibited.
+    """
+    build = r'''
+from pathlib import Path
+import importlib.metadata as md
+import shutil, sys, sysconfig, venv, subprocess, json
+folder=Path(sys.argv[1]);venv.EnvBuilder(with_pip=False).create(folder)
+python=folder/('Scripts/python.exe' if sys.platform=='win32' else 'bin/python')
+site=Path(subprocess.check_output([str(python),'-I','-c','import sysconfig; print(sysconfig.get_path("purelib"))'],text=True).strip())
+for name in ('SQLAlchemy','greenlet','pydantic','pydantic-core','annotated-types','typing-extensions','typing-inspection'):
+    dist=md.distribution(name)
+    for rel in dist.files:
+        if '..' in rel.parts or rel.is_absolute():continue
+        source=Path(dist.locate_file(rel));target=site/rel
+        if source.is_file():target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
+(site/'sitecustomize.py').write_text(r"""
+import importlib.abc, socket, sys
+class NoWeb(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if (fullname.split('.')[0] in {'fastapi','starlette'} or fullname=='backend.api' or fullname.startswith('backend.api.')
+            or fullname.startswith('backend.services.action.brokers') or fullname=='backend.services.action.order_manager'):
+            raise AssertionError('READONLY_WORKER_IMPORTED_WEB_API')
+sys.meta_path.insert(0,NoWeb())
+def audit(event,args):
+    if event in {'socket.connect','socket.getaddrinfo'}:raise AssertionError('READONLY_WORKER_NETWORK')
+    if event=='sqlite3.connect' and 'mode=ro' not in str(args[0]):raise AssertionError('READONLY_WORKER_RW_DATABASE')
+sys.addaudithook(audit)
+""")
+print(str(python))
+'''
+    env = {k:os.environ[k] for k in ('PATH','HOME','LANG','TMPDIR') if k in os.environ}
+    env.update(PYTHON_DOTENV_DISABLED='1', PUBLIC_DEMO_MODE='true', BROKER_MODE='mock',
+               DEMO_ALLOW_MARKET_DATA='false', AV_DEV_MOCK='1')
+    built = subprocess.run([BUSINESS, '-c', build, str(tmp_path/'minimal-worker')],
+        env=env, cwd=ROOT, check=True, capture_output=True, text=True)
+    minimal = built.stdout.strip()
+    # Probe with -S (no sitecustomize) to establish actual physical absence,
+    # then use normal interpreter startup for the guarded real worker.
+    probe = "import importlib.util,sys; sys.path.append(sys.argv[1]); assert importlib.util.find_spec('fastapi') is None; assert importlib.util.find_spec('starlette') is None"
+    # Use normal startup for the venv purelib path (3.11 -S reports base prefix).
+    site = subprocess.check_output([minimal, '-I', '-c',
+        'import sysconfig; print(sysconfig.get_path("purelib"))'], env=env, text=True).strip()
+    subprocess.run([minimal, '-I', '-S', '-c', probe, site], env=env, check=True)
+    db = tmp_path/'SYNTHETIC_ONLY.sqlite'
+    env['WEALTHPILOT_DB_PATH'] = str(db)
+    subprocess.run([BUSINESS, str(ROOT/'pocs/chatgpt_skills/worker.py'), '--init-mock', str(db),
+                    '--portfolio-id','7'], env=env, cwd=ROOT, check=True, capture_output=True)
+    seed = r'''
+from app.models import Portfolio, get_session
+from sqlalchemy import text
+import json
+with get_session() as s:
+    s.add(Portfolio(id=8,name='Synthetic other scope'));s.flush()
+    import sys
+    sys.path.append('backend')
+    from services.broker_sync.models import PositionSnapshotRun
+    s.add(PositionSnapshotRun(id=1,portfolio_id=7,broker='snowball',account_id='SYNTHETIC_PRIVATE_ACCOUNT',
+        status='failed',error_message='SDK token=DO_NOT_EXPOSE',context_json='{}'))
+    for pid,oid in [(7,'synthetic-order'),(8,'other-scope-order')]:
+        sid='strategy-'+str(pid)
+        s.execute(text("INSERT INTO symbol_strategies(id,symbol,side,target_quantity,cumulative_filled_quantity,order_type,status,created_at,updated_at) VALUES(:s,'IB01:LSE','BUY',2,2,'LIMIT','completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"),{'s':sid})
+        s.execute(text("INSERT INTO order_records(id,strategy_id,broker_name,portfolio_id,broker_account_id,symbol,side,quantity,filled_quantity,order_type,status,fill_sync_json,created_at) VALUES(:i,:s,'ibkr',:p,'SYNTHETIC_PRIVATE_ACCOUNT','IB01:LSE','BUY',2,2,'LIMIT','filled',:f,CURRENT_TIMESTAMP)"),{'i':oid,'s':sid,'p':pid,'f':json.dumps({'version':1,'last_run_id':1,'target_quantity':2})})
+    s.commit()
+'''
+    seeded = subprocess.run([BUSINESS,'-c',seed], env=env, cwd=ROOT, capture_output=True, text=True)
+    assert seeded.returncode == 0, seeded.stderr[-2000:]
+    config = tmp_path/'synthetic-read-config.json'
+    config.write_text(json.dumps({'database_path':str(db),'portfolio_id':7}));config.chmod(0o600)
+    from types import SimpleNamespace
+    from pocs.chatgpt_skills.server import create_server
+    before = hashlib.sha256(db.read_bytes()).hexdigest()
+    async def run():
+        server = create_server(SimpleNamespace(real_config=str(config),mock_database=None,
+            business_python=minimal,portfolio_id=7,web_base_url=''))
+        async with Client(server,mode='legacy') as client:
+            tools = {t.name:t for t in (await client.list_tools()).tools}
+            assert tools['get_trade_and_sync_status'].annotations.read_only_hint
+            for request in ({}, {'order_id':'synthetic-order'}, {'symbol':'IB01:LSE'}):
+                result = await client.call_tool('get_trade_and_sync_status', {'request':request})
+                assert not result.is_error, result.content
+                value = result.structured_content
+                assert value['schema_version'] == 'wealthpilot.trade-sync.v1'
+                assert len(value['items']) == 1
+                assert value['items'][0]['order_id'] == 'synthetic-order'
+                assert value['items'][0]['asset_sync']['reason_code'] == 'SYNC_SOURCE_FAILED'
+                assert value['items'][0]['actual_commission']['status'] == 'UNKNOWN'
+                assert 'DO_NOT_EXPOSE' not in json.dumps(value) and 'SYNTHETIC_PRIVATE_ACCOUNT' not in json.dumps(value)
+            empty = await client.call_tool('get_trade_and_sync_status', {'request':{'order_id':'other-scope-order'}})
+            assert not empty.is_error and empty.structured_content['items'] == []
+            rejected = await client.call_tool('get_trade_and_sync_status', {'request':{'refresh':True}})
+            assert rejected.is_error
+    asyncio.run(run())
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == before
