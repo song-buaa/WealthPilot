@@ -143,10 +143,19 @@ def research_intent(options):
     if resolved:sources['objective']='current_request_assumption'
     turns=[('current_request',options.get('research_question',''))]
     question=options.get('research_question') or ''
+    buy_words=r'建仓|买入|入场|准备买|\bbuy\b|\bpurchase\b'
+    # A negated buy mention describes research scope, not a request to enter.
+    # Remove only the negated phrase so a later explicit buy still wins.
+    buy_context=re.sub(
+        r'(?:不|没有|无|未|别|暂不|无需|避免)\s*'
+        r'(?:(?:再|打算|考虑|准备|计划|预设|马上|立即|现在|目前|实际|主动|进行|要|想)\s*){0,3}'
+        r'(?:'+buy_words+r')(?:意图|计划|方向)?|'
+        r'\b(?:not|no|never)\s+(?:'+buy_words+r')\b',
+        '',question,flags=re.I) if isinstance(question,str) else ''
     no_holding_research=bool(isinstance(question,str) and re.search(
-        r'不(?:假设|认为)?(?:我|本人|用户)?(?:已|实际|目前|当前)?持有|无持仓|未持有|纯研究|仅(?:作|做)?研究|'
+        r'不(?:假设|认为|预设)?(?:我|本人|用户)?(?:已|实际|目前|当前)?(?:持有|持仓)|没有持仓|无持仓|未持有|纯研究|仅(?:作|做)?研究|'
         r'no\s+(?:current\s+)?(?:position|holdings?)|not\s+(?:currently\s+)?holding', question,re.I)
-        and not re.search(r'建仓|买入|入场|准备买|\bbuy\b|\bpurchase\b',question,re.I))
+        and not re.search(buy_words,buy_context,re.I))
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
         if not isinstance(text,str):continue
