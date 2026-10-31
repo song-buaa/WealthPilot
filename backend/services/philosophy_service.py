@@ -37,6 +37,10 @@ _PLACEHOLDER_MARKER = "[在这里填写]"
 
 def get_philosophy() -> dict:
     """返回投资理念文档内容。文件不存在时返回占位符但不写盘。"""
+    from backend.services.investment_policy.runtime import current
+    if current().mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import policy_document
+        return policy_document('philosophy')
     if _PHILOSOPHY_FILE.exists():
         content = _PHILOSOPHY_FILE.read_text(encoding="utf-8")
         return {"source": "current", "content": content}
@@ -45,6 +49,8 @@ def get_philosophy() -> dict:
 
 def save_philosophy(content: str) -> None:
     """保存投资理念文档。"""
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     _PHILOSOPHY_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PHILOSOPHY_FILE.write_text(content, encoding="utf-8")
     logger.info(f"投资理念文档已保存: {_PHILOSOPHY_FILE}")
@@ -54,6 +60,8 @@ def save_philosophy(content: str) -> None:
 
 def reset_philosophy() -> dict:
     """恢复为占位符内容。覆盖前先备份当前磁盘内容。"""
+    from backend.services.investment_policy.runtime import assert_editable
+    assert_editable()
     _backup_current()
     _PHILOSOPHY_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PHILOSOPHY_FILE.write_text(_PLACEHOLDER, encoding="utf-8")

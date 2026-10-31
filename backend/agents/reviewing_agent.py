@@ -119,6 +119,8 @@ class ReviewingAgent:
         实施时需在 v3 入口（decision_service_v3.py）加 retry 循环 + 超限 fallback HOLD。
         """
         out = ReviewOutput(task_id=planning_output.task_id)
+        from backend.services.investment_policy.runtime import current
+        current(planning_output.portfolio_id).consumer('reviewing')
         out.status = AgentTaskStatus.IN_PROGRESS
         out.retry_count = retry_count
 

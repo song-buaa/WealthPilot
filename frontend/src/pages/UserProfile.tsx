@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm'
 import { profileApi, philosophyApi, type UserProfile as TUserProfile } from '@/lib/api'
 import ProfileForm from '@/components/profile/ProfileForm'
 import ProfileResult from '@/components/profile/ProfileResult'
+import InvestmentPolicyBoundary from '@/components/InvestmentPolicyBoundary'
 
 export default function UserProfile() {
   const [profile, setProfile] = useState<TUserProfile | null>(null)
@@ -89,6 +90,7 @@ export default function UserProfile() {
       }
 
       {/* ── 投资理念板块 ── */}
+      <InvestmentPolicyBoundary view="philosophy">
       <div style={{
         background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
         overflow: 'hidden', marginTop: 20,
@@ -157,6 +159,7 @@ export default function UserProfile() {
           </div>
         )}
       </div>
+      </InvestmentPolicyBoundary>
     </div>
   )
 }

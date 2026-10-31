@@ -1128,9 +1128,9 @@ export interface Alert {
   severity: string       // 'warning' | 'danger' | 'info'
   title: string
   description: string
-  current_value?: number
-  target_value?: number
-  deviation?: number
+  current_value?: number | null
+  target_value?: number | null
+  deviation?: number | null
 }
 
 export interface ImportResult {

@@ -504,6 +504,12 @@ def enforce_portfolio(output, *, asset_view=None, options=None, loaded=None, evi
     Keep owner-calculated context and L2 scenarios. There is no portfolio-wide
     research/quote/target-confirmation qualification for precise orders here.
     """
+    from backend.services.investment_policy.runtime import current as policy_current
+    if policy_current().mode!='LEGACY':
+        from types import SimpleNamespace
+        from backend.services.investment_policy.consumers import finalize_output
+        return finalize_output(SimpleNamespace(portfolio_id=policy_current().portfolio_id),
+            SimpleNamespace(loaded_data=loaded,portfolio_evidence=list(evidence_assessments)),output)
     from backend.services.allocation_scenarios import qualification_view, target_context
     from backend.services.allocation_service import get_targets, simulate_exit_scenario
     from backend.services.market_data.evidence import mapping

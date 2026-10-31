@@ -21,6 +21,7 @@ import { fmtCny, fmtCnySigned, fmtDelta, fmtQty, fmtFx, fmtLeverage } from '@/li
 import { allocationApi } from '@/lib/allocation-api'
 import EmptyState from '@/components/shared/EmptyState'
 import AssetAllocationCard from '@/components/allocation/AssetAllocationCard'
+import InvestmentPolicyBoundary from '@/components/InvestmentPolicyBoundary'
 import DataTip from '@/components/shared/DataTip'
 import { dataManagementBarStyle, dataManagementExportButtonStyle } from '@/components/shared/dataManagementStyles'
 import DonutDistributionCard from '@/components/shared/DonutDistributionCard'
@@ -231,7 +232,8 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Tertiary：杠杆倍数 */}
+        {/* Legacy investment-policy grades never label active policy risk. */}
+        <InvestmentPolicyBoundary view="risk" activeChildren={<div style={{ padding: 20, background: '#fff', borderRadius: 12 }}><div>账面杠杆倍数 {fmtLeverage(levMult)}</div><p>仅为原资产负债事实比值；不沿用旧杠杆风险档位。资金、债务及完整分母资格未核验时为 UNKNOWN。</p></div>}>
         <div data-tip={levGrade.tip} style={{
           background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12,
           padding: '16px 18px', boxShadow: 'var(--shadow-sm)',
@@ -246,11 +248,12 @@ export default function Dashboard() {
             {levGrade.icon} {levGrade.label}
           </div>
         </div>
+      </InvestmentPolicyBoundary>
       </div>
 
       {/* ── 图表区 3fr 2fr ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16, marginBottom: 16 }}>
-        <AssetAllocationCard allocation={bs.allocation} cashRange={cashRange} />
+        <InvestmentPolicyBoundary><AssetAllocationCard allocation={bs.allocation} cashRange={cashRange} /></InvestmentPolicyBoundary>
 
         <PlatformCard platEntries={platEntries} />
       </div>

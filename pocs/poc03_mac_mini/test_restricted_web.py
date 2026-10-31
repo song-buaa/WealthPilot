@@ -62,7 +62,7 @@ def web(shared, monkeypatch):
     return config, directory
 
 
-def test_explicit_route_catalog_and_static_mode(web):
+def test_explicit_route_catalog_and_static_mode(web,monkeypatch):
     config, directory = web
     app = create_app(config, directory, factory=fake_service)
     actual = {(r.path, tuple(sorted(r.methods))) for r in app.routes if hasattr(r, "methods")}
@@ -70,7 +70,7 @@ def test_explicit_route_catalog_and_static_mode(web):
         ("GET", "/api/demo/status"), ("GET", "/api/web/status"),
         *(('GET', '/api/portfolio/' + p) for p in ('summary','positions','liabilities','alerts')),
         ("GET", "/api/wealth/summary"), ("GET", "/api/wealth/items"),
-        ("GET", "/api/allocation/targets"), ("GET", "/api/broker-sync/status"),
+        ("GET", "/api/allocation/targets"), ("GET", "/api/discipline/policy-context"), ("GET", "/api/broker-sync/status"),
         ("POST", "/api/broker-sync/trigger"), ("GET", "/")
     ]}
     with TestClient(app, base_url="http://127.0.0.1:8790") as client:
@@ -78,6 +78,16 @@ def test_explicit_route_catalog_and_static_mode(web):
         assert client.get("/assets/fixture.js").status_code == 200
         assert client.get("/api/web/status").json()["scheduler_enabled"] is False
         assert client.get("/api/demo/status").json()["public_demo_mode"] is False
+        policy=client.get('/api/discipline/policy-context?view=portfolio')
+        assert policy.status_code==200 and policy.json()['status']=='NOT_ACTIVE'
+        assert client.post('/api/discipline/policy-context',json={}).status_code>=400
+        with monkeypatch.context() as broken:
+            missing=Path(config['database_path']).parent/'PRIVATE_PATH_SENTINEL.sqlite'
+            broken.setenv('WEALTHPILOT_POLICY_DB_PATH',str(missing))
+            broken.setenv('WEALTHPILOT_POLICY_SCOPE','portfolio:7')
+            reply=client.get('/api/discipline/policy-context')
+            assert reply.status_code==409 and 'PRIVATE_PATH_SENTINEL' not in reply.text
+            assert not missing.exists()
 
 
 @pytest.mark.parametrize("method,path", [

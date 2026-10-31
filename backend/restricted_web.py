@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app import database, state
 from app.shared_sqlite import verify
 from backend.api import portfolio, wealth, broker_sync
+from backend.api.discipline import get_policy_context
 from backend.services.restricted_sync import SyncExecutor
 
 
@@ -88,6 +89,9 @@ def create_app(config, static_dir, *, factory=None):
         app.add_api_route("/api/portfolio/" + path, handler, methods=["GET"])
     app.add_api_route("/api/wealth/summary", wealth.get_summary, methods=["GET"])
     app.add_api_route("/api/wealth/items", wealth.get_items, methods=["GET"])
+
+    # Same fixed-scope read owner as full Web; no discipline write routes.
+    app.add_api_route("/api/discipline/policy-context", get_policy_context, methods=["GET"])
 
     @app.get("/api/allocation/targets")
     def targets():

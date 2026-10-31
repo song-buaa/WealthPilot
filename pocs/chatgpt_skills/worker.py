@@ -49,6 +49,8 @@ def load_analysis_environment(path, *, model_policy_only=False):
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
         "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
+    from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
+    allowed = allowed | POLICY_ENV_KEYS
     if not model_policy_only:
         from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES
         if any(key in values for key in AV_KEY_NAMES):
@@ -168,7 +170,11 @@ def main():
                     events = request.get("diagnostic_events") is True
                     progress(phase)
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    if operation == "capture_asset_view" and args.frozen_database:
+                    if operation == 'get_investment_policy_context':
+                        from backend.services.investment_policy.runtime import context
+                        result = context(config['portfolio_id'] if config else args.portfolio_id,consumer='mcp',
+                            view=a.get('scope','portfolio'),symbol=a.get('symbol'))
+                    elif operation == "capture_asset_view" and args.frozen_database:
                         from pocs.chatgpt_skills.asset_view import capture
                         import socket
                         previous_connect = socket.socket.connect

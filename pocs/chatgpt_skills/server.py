@@ -82,6 +82,8 @@ class BusinessClient:
                     record(diagnostic(identifier, stage)) if identifier else None
                     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
                     env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS if k in os.environ})
+                    from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
+                    env.update({k:os.environ[k] for k in POLICY_ENV_KEYS if k in os.environ})
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
@@ -216,6 +218,16 @@ def create_server(settings):
     overview.settings = settings
     security_meta = {"securitySchemes": [{"type": "noauth"}]}  # Private Tunnel supplies access control.
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
+    if os.environ.get('WEALTHPILOT_POLICY_DB_PATH'):
+        @server.tool(meta=security_meta,annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=False),
+            description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. Explain structured thresholds, never redefine them.')
+        def get_investment_policy_context(scope: Literal['portfolio','position','risk','full']='portfolio', symbol: str | None = None) -> dict:
+            from backend.services.investment_policy.runtime import context
+            from backend.services.investment_policy.parser import PolicyError
+            try:
+                return context(settings.portfolio_id,consumer='mcp',view=scope,symbol=symbol)
+            except PolicyError:
+                raise ToolError('POLICY_CONTEXT_UNAVAILABLE') from None
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
     # 4.3 E1 research-only store: opt-in reads; original business DB stays read-only.
     e1_path = getattr(settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")

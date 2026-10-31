@@ -6,7 +6,7 @@
 
 | 能力/业务层 | 原Owner及入口 | 成熟度与复用限制 |
 |---|---|---|
-| 正式政策L1 | [philosophy](../backend/services/philosophy_service.py)、[discipline](../backend/services/discipline_service.py)、[config](../app/discipline/config.py)、[knowledge](../knowledge_base/README.md) | CODE：MD/JSON/默认/索引分流；投资理念、投资纪律、长期资产配置三类政策由Investment Policy Bundle统一引用与管理版本为TARGET；Markdown、结构化配置及最终权威关系待P0人工审议，不是已有有效政策API；私人现役配置UNKNOWN |
+| 正式政策L1 | 原[philosophy](../backend/services/philosophy_service.py)/[discipline](../backend/services/discipline_service.py)/[config](../app/discipline/config.py)/[knowledge](../knowledge_base/README.md)；P1候选[investment_policy](../backend/services/investment_policy) | 两份私人Markdown内容已批准；[P1](v4.3/INVESTMENT_POLICY_P1.md)提供派生/不可变Bundle/只读PolicyService/迁移探针，[P2](v4.3/INVESTMENT_POLICY_P2.md)以原runtime/consumers接入Web/Allocation/纪律/PEER及可选只读MCP；默认LEGACY、ACTIVE仅合成验证，未部署或真实ACTIVE；无默认值冒充新版政策；[P3-B](v4.3/INVESTMENT_POLICY_P3B.md)复用同三表补正式Publisher/审批安装收据/版本回滚及隔离副本DDL，本地候选，非生产迁移；[R1共库受限连接](../backend/services/investment_policy/colocated.py)复用原共享契约及authorizer，生产Schema/备份与外键资格仍按独立收据判定 |
 | 共享证据L2 | [U1](../app/asset_views.py)、[Portfolio](../backend/services/portfolio_service.py)、[Evidence](../backend/services/market_data/evidence.py)、[SEC](../research_v2/sec_disclosures.py)、[Repository](../research_v2/repository.py) | CODE/限定历史运行证据；复用身份、币种、来源时点及质量；共享目标池版本引用仍PROPOSED |
 | 可复用分析L3 | [SkillsLoader](../backend/skills/loader.py)、[Tool Layer](../backend/graph/tools.py)、[AllocationService](../backend/services/allocation_service.py)、[financial_research](../backend/services/market_data/financial_research.py) | 14份定义，本轮Loader发现13项；action-planner YAML失败但Web直连服务保留。方法/计算可复用，不把technical signals称为S1/S2策略 |
 | 综合判断L4 | [原PEER](../backend/services/decision_service_v3.py)、[Expressing](../backend/agents/expressing_agent.py)、[Reviewing](../backend/agents/reviewing_agent.py)、[Output Policy](../backend/services/market_data/output_policy.py) | CODE/既有单标组合链路；池内公司与配置两种排序及统一冲突解释为TARGET，不投票或累加相关因子 |
@@ -15,7 +15,7 @@
 | S1/S2及成熟ETF研究 | 仓外冻结S1-C0、S2-F1、S2-G1报告/hash见[研究矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#6-策略融合与成熟度清单) | RESEARCH_ONLY；S1/S2自研已结项不晋升，SPMO产品关注/政策采纳不等于自研动量上线或具体交易许可 |
 | S3-A公司池研究 / S4候选 | [S3计算](../backend/services/market_data/quality_valuation.py)、[冻结适配](../backend/services/quality_valuation_research.py)，复用原财务/Evidence；[内部CLI](../scripts/s3_quality_valuation.py) | S3-A Research Only：正向质量判断未完整实现，优先考虑档当前不可达；四底线、五年盈利情景、分档/并列/敏感性、冻结读回及独立复算；见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。未接生产PEER/MCP/Web，不代表完整DCF或策略验收；S4仍TARGET |
 
-新增公共契约只补目标池版本、PolicyRef、共享证据/方法引用与综合/执行关联，扩原Agent/Analysis/E1/交易Owner；本轮未实现、未修改Schema或工具。测试入口沿本索引原条目，文档更新不冒称重新完成业务验收。
+新增公共契约只补目标池版本、PolicyRef、共享证据/方法引用与综合/执行关联，扩原Agent/Analysis/E1/交易Owner；其中PolicyRef及消费者一致性已有P2本地候选；目标池/跨策略综合及E1正式持久化引用仍待后续。测试入口沿本索引原条目，候选不冒称生产业务验收。
 
 > 2026-10-22：4.1 RELEASED，B0/U0/U1/U2/D1/B2/B3及国金已生产交付；运行观察与真实数据覆盖不自动视为完整。生产代码及验收见[4.1结项](releases/v4.1.md)。本索引只维护复用入口，流程由[治理文档](PROJECT_GOVERNANCE.md#registry-维护检查)维护。
 
