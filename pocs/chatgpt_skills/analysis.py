@@ -554,7 +554,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 'executing': 'completed' if 'evidence_ready' in stage_completed or captured else 'failed' if 'PEER_EXECUTION_FAILED' in result.issues else 'started' if 'loading' in stage_events else 'not_started',
                 'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'reasoning' in stage_events else 'not_started',
                 'reviewing': 'completed' if 'reviewing_complete' in stage_completed or captured else 'unknown' if 'expressing_complete' in stage_completed else 'not_started',
-                'professional_result': 'qualified' if result.professional_analysis_complete else 'rejected' if 'ANALYSIS_ROUTE_MISMATCH' in result.issues else 'incomplete',
+                'professional_result': 'accepted' if result.professional_analysis_complete else 'rejected' if 'ANALYSIS_ROUTE_MISMATCH' in result.issues else 'incomplete',
             }
         if result.status=='ok' and result.issues:result.status='partial'
     return result.model_dump(mode='json')
