@@ -6,7 +6,8 @@ inline-XBRL (or the existing LI table layout); unsupported facts stay unknown.
 No AI extraction, asset writes, TTM calculation, redirect or arbitrary URL input.
 """
 from copy import deepcopy
-from datetime import date, datetime, timezone, time as wall_time
+from datetime import date, datetime, timezone, time as wall_time, timedelta
+from functools import lru_cache
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
@@ -199,6 +200,49 @@ def _day(value):
     return date.fromisoformat(value)
 
 
+@lru_cache(maxsize=32)
+def _sec_holidays(year):
+    # Existing pandas dependency; not the NYSE session calendar. Unexpected SEC
+    # closures are not inferred: an inconsistent official next date is refused.
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+    return frozenset(USFederalHolidayCalendar().holidays(
+        start=f"{year}-01-01", end=f"{year}-12-31").date)
+
+
+def _sec_business_day(day):
+    return day.weekday() < 5 and day not in _sec_holidays(day.year)
+
+
+def _filing_clock(filed, accepted=None):
+    """Official filing date + UTC acceptance, conservative when uncertain."""
+    if not _sec_business_day(filed):
+        return None
+    upper = datetime.combine(filed, datetime.max.time(), ZoneInfo('America/New_York')).isoformat()
+    if accepted is None:
+        return dict(published_at=upper, accepted_at=None,
+                    publication_clock_basis='CONSERVATIVE_FILED_DAY_END_MISSING_ACCEPTANCE')
+    if not isinstance(accepted,str) or not re.fullmatch(
+            r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)',accepted):
+        return None
+    clock = datetime.fromisoformat(accepted.replace('Z','+00:00'))
+    eastern = clock.astimezone(ZoneInfo('America/New_York'))
+    if not _sec_business_day(eastern.date()):
+        return None
+    if eastern.date() == filed:
+        return dict(published_at=clock.isoformat(), accepted_at=clock.isoformat(),
+                    publication_clock_basis='EXACT_SUBMISSIONS_ACCEPTANCE')
+    following = eastern.date()
+    for _ in range(4):
+        following += timedelta(days=1)
+        if _sec_business_day(following):
+            break
+    if (following != filed or not 0 < (filed-eastern.date()).days <= 4
+            or not wall_time(17,30) < eastern.time() < wall_time(22)):
+        return None
+    return dict(published_at=upper, accepted_at=clock.isoformat(),
+                publication_clock_basis='CONSERVATIVE_FILED_DAY_END_LATE_ACCEPTANCE')
+
+
 def discover_filings(issuer, submissions):
     """Only exact accession/path/clock metadata from the resolved CIK."""
     if str(submissions.get('cik', '')).zfill(10) != issuer['cik']:
@@ -232,33 +276,16 @@ def discover_filings(issuer, submissions):
                 continue
             accepted = recent.get('acceptanceDateTime', [])
             accepted = accepted[i] if isinstance(accepted,list) and len(accepted) == len(recent['form']) else None
-            published = filed.isoformat()
-            locator = f'Submissions/filings/recent/filingDate[{i}] (filing day precision)'
-            if accepted:
-                clock = datetime.fromisoformat(accepted.replace('Z', '+00:00'))
-                if clock.tzinfo is None:
-                    continue
-                eastern = clock.astimezone(ZoneInfo('America/New_York'))
-                if eastern.date() == filed:
-                    published = clock.isoformat()
-                    locator = f'Submissions/filings/recent/acceptanceDateTime[{i}]'
-                elif (0 < (filed-eastern.date()).days <= 4 and filed.weekday() < 5
-                      and eastern.weekday() < 5 and wall_time(17,30) < eastern.time() < wall_time(22)):
-                    # SEC accepts many after-17:30 submissions with a later
-                    # official filing date. Do not equate acceptance to public
-                    # dissemination or invent an EDGAR holiday calendar. Trust
-                    # the independently sourced filing date only as a bounded,
-                    # conservative availability interval: qualify AFTER that
-                    # entire NY day. Unusual gaps remain unsupported/unknown.
-                    # https://www.sec.gov/submit-filings/filer-support-resources/how-do-i-guides/determine-status-my-filing
-                    published = datetime.combine(filed, datetime.max.time(), ZoneInfo('America/New_York')).isoformat()
-                    locator = (f'Submissions/filings/recent/filingDate[{i}] '
-                               f'(CONSERVATIVE_FILED_DAY_END_NOT_OBSERVED_PUBLICATION_TIME; '
-                               f'acceptanceDateTime[{i}]={clock.isoformat()})')
-                else:
-                    continue
+            qualification = _filing_clock(filed, accepted)
+            if not qualification:
+                continue
+            published = qualification['published_at']
+            locator = (f'Submissions/filings/recent/acceptanceDateTime[{i}]'
+                       if qualification['publication_clock_basis']=='EXACT_SUBMISSIONS_ACCEPTANCE' else
+                       f'Submissions/filings/recent/filingDate[{i}] '
+                       f"(CONSERVATIVE_FILED_DAY_END_NOT_OBSERVED_PUBLICATION_TIME; acceptanceDateTime[{i}]={qualification['accepted_at']})")
             rows.append(dict(accession=accession, form=form, filed=filed.isoformat(), report_date=report,
-                published_at=published, publication_locator=locator, primary_url=base + document,
+                **qualification, publication_locator=locator, primary_url=base + document,
                 full_url=base + accession + '.txt'))
         except (TypeError, ValueError, IndexError):
             continue
@@ -304,8 +331,12 @@ def _record(issuer, filing, observations, body, url, fetched_at, *, identity_dig
     # Issuer identity does not qualify per-listed-class earnings. In particular,
     # a directory alias must not turn a group's Class A EPS into Class B EPS.
     # A later qualified class bridge can extend this Owner; no conversion here.
-    if issuer.get('issuer_type') == 'domestic' and len(issuer.get('registered_equity_tickers', [])) > 1:
+    registered=issuer.get('registered_tickers',issuer.get('registered_equity_tickers', []))
+    multiple=issuer.get('issuer_type')=='domestic' and len(registered)>1
+    if multiple:
         observations = [o for o in observations if o.get('source_field') != 'dilutedEPSOrdinary']
+        if url==filing.get('full_url'):
+            observations += _direct_listed_class_eps(body,issuer,filing,fetched_at)
     if not observations or not isinstance(fetched_at,str):
         return None
     try:
@@ -318,8 +349,8 @@ def _record(issuer, filing, observations, body, url, fetched_at, *, identity_dig
     except (ValueError, TypeError):
         return None
     digest = hashlib.sha256(body).hexdigest()
-    return dict(symbol=issuer['symbol'], source='official_disclosure', source_url=url,
-        record_id='official:sec:'+issuer['cik']+':'+filing['accession']+':'+digest,
+    result = dict(symbol=issuer['symbol'], source='official_disclosure', source_url=url,
+        record_id='official:sec:'+issuer['cik']+':'+filing['accession']+':'+digest+(':listed:'+issuer['sec_ticker'] if multiple else ''),
         published_at=filing['published_at'], data_as_of=filing['published_at'], fetched_at=fetched_at,
         period=max(o['fiscal_period_end'] for o in observations),
         official_disclosure=dict(issuer_id=issuer['issuer_id'], source_url=url, cik=issuer['cik'],
@@ -328,6 +359,12 @@ def _record(issuer, filing, observations, body, url, fetched_at, *, identity_dig
         content='Independently sourced SEC statement facts; fiscal and filing clocks remain separate.',
         source_verification=dict(document_sha256=digest, publication_locator=filing['publication_locator'],
             issuer_identity=deepcopy(issuer), identity_document_sha256=identity_digest))
+
+
+    if filing.get('publication_clock_basis') not in {None,'EXACT_SUBMISSIONS_ACCEPTANCE'}:
+        result['source_verification'].update(publication_clock_basis=filing['publication_clock_basis'],
+            accepted_at=filing.get('accepted_at'),official_filed_date=filing['filed'])
+    return result
 
 
 def parse_companyfacts(source, issuer, filings, *, identity_digest, quality=False):
@@ -411,6 +448,157 @@ def _standard_concept(node):
     if namespace and re.fullmatch(r'https?://xbrl.ifrs.org/taxonomy/20[0-9]{2}-[0-9]{2}-[0-9]{2}/ifrs-full',namespace):
         return CONCEPTS.get(('ifrs-full',concept))
     return None
+
+
+def _direct_listed_class_eps(body, issuer, filing, fetched_at):
+    """Direct primary-document class EPS only; no class/value conversion.
+
+    Cover DEI binds ticker to a legal stock title and class context. A class-axis
+    EPS must match that member or a standard CommonClassXMember matching the
+    unique cover Class X title. Unsegmented/company-wide EPS is never a bridge.
+    """
+    if issuer.get('issuer_type')!='domestic' or filing.get('form') not in {'10-Q','10-K'}:
+        return []
+    if not verify_filing_envelope((body,fetched_at),issuer,filing):
+        return []
+    documents=[]
+    for i,doc in enumerate(re.findall(r'<DOCUMENT>(.*?)</DOCUMENT>',body.decode('utf-8'),re.S|re.I)):
+        kind=re.search(r'<TYPE>([^\r\n<]+)',doc,re.I)
+        filename=re.search(r'<FILENAME>([^\r\n<]+)',doc,re.I)
+        sequence=re.search(r'<SEQUENCE>(\d+)',doc,re.I)
+        if not kind or not filename or not sequence:
+            return []
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*',filename[1].strip()):return []
+        documents.append((i,kind[1].strip(),filename[1].strip(),int(sequence[1]),doc))
+    if len({r[2] for r in documents})!=len(documents) or len({r[3] for r in documents})!=len(documents):
+        return []
+    target=filing['primary_url'].rsplit('/',1)[-1]
+    primary=[r for r in documents if r[1]==filing['form'] and r[2]==target and r[3]==1]
+    if len(primary)!=1 or not allowed_url(filing['primary_url']) or not target.lower().endswith(('.htm','.html')):
+        return []
+    index,_,_,_,doc=primary[0]
+    soup=BeautifulSoup(doc,'html.parser')
+    def local(node,name):return node.name.lower().split(':')[-1]==name
+    def qname(node,value):
+        if not isinstance(value,str) or ':' not in value:return None
+        prefix,name=value.split(':',1)
+        return _namespace(node,prefix),name
+    def gaap(q):return bool(q and re.fullmatch(r'https?://fasb.org/us-gaap/20\d{2}',q[0] or ''))
+    def dei(q):return bool(q and re.fullmatch(r'https?://xbrl.sec.gov/dei/20\d{2}(?:q[1-4])?',q[0] or ''))
+    def inline(node):
+        name=qname(node,node.name)
+        return bool(name and name[0] in {'http://www.xbrl.org/2013/inlineXBRL','http://www.xbrl.org/2008/inlineXBRL'})
+    def invalid_nil(node):
+        return any(qname(node,key)!=('http://www.w3.org/2001/XMLSchema-instance','nil')
+                   or value not in {'false','0'}
+                   for key,value in node.attrs.items() if key.split(':')[-1]=='nil')
+    def xchild(parent,name):
+        if parent is None:return None
+        nodes=parent.find_all(lambda t:local(t,name),recursive=False)
+        return nodes[0] if len(nodes)==1 and qname(nodes[0],nodes[0].name)==('http://www.xbrl.org/2003/instance',name) else None
+    contexts={}
+    for node in soup.find_all(lambda t:local(t,'context')):
+        key=node.get('id')
+        if not isinstance(key,str) or not key:continue
+        if key in contexts:contexts[key]=None;continue
+        contexts[key]=None
+        if qname(node,node.name)!=('http://www.xbrl.org/2003/instance','context'):continue
+        entity=xchild(node,'entity');identifier=xchild(entity,'identifier')
+        segment=xchild(entity,'segment');period=xchild(node,'period')
+        members=segment.find_all(recursive=False) if segment else []
+        if (not identifier or identifier.find(recursive=False) or not period
+                or identifier.get('scheme') not in {'http://www.sec.gov/CIK','https://www.sec.gov/CIK'}
+                or not re.fullmatch(r'0*'+str(int(issuer['cik'])),identifier.get_text(strip=True))
+                or node.find(lambda t:local(t,'scenario') or local(t,'typedmember'))
+                or len(members)!=1
+                or qname(members[0],members[0].name)!=('http://xbrl.org/2006/xbrldi','explicitmember')):continue
+        axis=qname(members[0],members[0].get('dimension'))
+        member=qname(members[0],members[0].get_text(strip=True))
+        if not gaap(axis) or axis[1]!='StatementClassOfStockAxis' or not member or not member[0]:continue
+        start=xchild(period,'startdate');end=xchild(period,'enddate');instant=xchild(period,'instant')
+        children=period.find_all(recursive=False)
+        if not ((start and end and not instant and len(children)==2) or (instant and not start and not end and len(children)==1)):continue
+        try:
+            start_value=start.get_text(strip=True) if start else None
+            end_value=(end or instant).get_text(strip=True)
+            if start_value and _day(start_value)>_day(end_value):continue
+            if _day(end_value)>_day(filing['filed']):continue
+        except (TypeError,ValueError):continue
+        contexts[key]=dict(member=member,start=start_value,end=end_value)
+    symbols,titles={},{}
+    for node in soup.find_all(lambda t:t.name.lower()=='ix:nonnumeric'):
+        concept=qname(node,node.get('name'));ctx=node.get('contextref')
+        if not inline(node) or not dei(concept) or not contexts.get(ctx) or invalid_nil(node):continue
+        value=' '.join(node.get_text(' ',strip=True).split())
+        if concept[1]=='TradingSymbol':symbols.setdefault(ctx,set()).add(value)
+        elif concept[1]=='Security12bTitle':titles.setdefault(ctx,set()).add(value)
+    bindings=[]
+    for ctx,names in symbols.items():
+        if len(names)!=1 or len(titles.get(ctx,set()))!=1:continue
+        ticker=next(iter(names));title=next(iter(titles[ctx]));context=contexts[ctx]
+        try:
+            if not _day(filing['report_date'])<=_day(context['end'])<=_day(filing['filed']):continue
+        except (TypeError,ValueError):continue
+        if re.search(r'\b(?:preferred|preference|depositary|depository|ADS|ADR|notes?|bonds?|warrants?|units?|debentures?|convertible)\b',title,re.I):continue
+        # This is a source title restriction, not an inference from a ticker.
+        match=re.fullmatch(r'(?:Class\s+([A-Z0-9]+)\s+)?(?:Common|Capital)\s+(?:Stock|Shares)(?:\s*,.*)?',title,re.I)
+        if not match or ticker not in issuer.get('registered_tickers',issuer.get('registered_equity_tickers',[])):continue
+        label=match[1].upper() if match[1] else None
+        standard=re.fullmatch(r'CommonClass([A-Z0-9]+)Member',context['member'][1]) if gaap(context['member']) else None
+        if gaap(context['member']) and not standard and context['member'][1]!='CommonStockMember':continue
+        if standard and standard[1]!=label:continue
+        bindings.append(dict(ticker=ticker,label=label,member=context['member'],context=ctx,title=title))
+    listed=issuer.get('sec_ticker')
+    candidates=[b for b in bindings if b['ticker']==listed]
+    if len({(b['label'],b['member'],b['title']) for b in candidates})!=1:return []
+    binding=candidates[0]
+    # A class label/member cannot be bound to conflicting listed securities.
+    if any(b['ticker']!=listed and (b['member']==binding['member'] or (binding['label'] and b['label']==binding['label'])) for b in bindings):return []
+    units={}
+    for node in soup.find_all(lambda t:local(t,'unit')):
+        key=node.get('id')
+        if not isinstance(key,str) or not key:continue
+        if key in units:units[key]=False;continue
+        divide=xchild(node,'divide')
+        numerator=xchild(divide,'unitnumerator');denominator=xchild(divide,'unitdenominator')
+        n=xchild(numerator,'measure');d=xchild(denominator,'measure')
+        units[key]=bool(qname(node,node.name)==('http://www.xbrl.org/2003/instance','unit')
+            and divide and len(node.find_all(recursive=False))==1
+            and len(divide.find_all(recursive=False))==2 and n and d
+            and len(numerator.find_all(recursive=False))==len(denominator.find_all(recursive=False))==1
+            and not n.find(recursive=False) and not d.find(recursive=False)
+            and qname(n,n.get_text(strip=True))==('http://www.xbrl.org/2003/iso4217','USD')
+            and qname(d,d.get_text(strip=True))==('http://www.xbrl.org/2003/instance','shares'))
+    observations=[]
+    for i,node in enumerate(soup.find_all(lambda t:t.name.lower()=='ix:nonfraction')):
+        concept=qname(node,node.get('name'));context=contexts.get(node.get('contextref'))
+        if (not inline(node) or not gaap(concept) or concept[1]!='EarningsPerShareDiluted' or not context
+                or not units.get(node.get('unitref')) or invalid_nil(node)
+                or node.get('format') is not None
+                or node.get('scale','0')!='0' or node.get('sign') not in {None,'-'}):continue
+        member=context['member'];standard=re.fullmatch(r'CommonClass([A-Z0-9]+)Member',member[1]) if gaap(member) else None
+        if member!=binding['member'] and not (standard and binding['label']==standard[1]):continue
+        try:
+            start,end=context['start'],context['end'];scope=_period(start,end)
+            if not scope or _day(end)>_day(filing['report_date']):continue
+            literal=node.get_text().strip()
+            if not re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)',literal):continue
+            value=_finite(literal)
+            if value is None or abs(value)>Decimal('1e6'):continue
+            if node.get('sign')=='-':
+                if value<0:continue
+                value=-value
+        except (ValueError,TypeError,KeyError):continue
+        locator=f'DOCUMENT[{index}]/{target}/ix:nonFraction[{i}]/{node.get("name")}'
+        observations.append(dict(source_field='dilutedEPSOrdinary',value=float(value),currency='USD',
+            unit='currency_per_ordinary_share',unit_scale=1,period_basis=scope,fiscal_period_start=start,
+            fiscal_period_end=end,accounting_basis='diluted_eps_ordinary',document_type=filing['form'],
+            document_filename=target,document_sequence=1,source_locator=locator,
+            listed_class_proof=dict(basis='DIRECT_OFFICIAL_CLASS_EPS_NOT_CONVERSION',ticker=listed,
+                symbol=issuer['symbol'],class_label=binding['label'],cover_member=list(binding['member']),
+                earnings_member=list(member),cover_context=binding['context'],earnings_context=node.get('contextref'),
+                unit=node.get('unitref'),security_title=binding['title'],document_sha256=hashlib.sha256(body).hexdigest())))
+    return observations
 
 
 def _declared_exhibit(cover, filename, kind):
@@ -512,21 +700,8 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
         text = body.decode('utf-8', errors='strict')
     except UnicodeError:
         return None
-    header = re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>', text, re.S | re.I)
-    if not header:
+    if not _header_clock_matches(text, issuer, filing):
         return None
-    cik = re.search(r'CENTRAL INDEX KEY:\s*(\d+)', header[1])
-    form = re.search(r'CONFORMED SUBMISSION TYPE:\s*([^\n<]+)', header[1])
-    accession = re.search(r'ACCESSION NUMBER:\s*(\d{10}-\d{2}-\d{6})', header[1])
-    accepted = re.search(r'<ACCEPTANCE-DATETIME>(\d{14})', header[1])
-    if (not cik or int(cik[1]) != int(issuer['cik']) or not form or form[1].strip() != filing['form']
-            or not accession or accession[1] != filing['accession'] or not accepted
-            or accepted[1][:8] != filing['filed'].replace('-', '')):
-        return None
-    if 'T' in filing['published_at']:
-        header_clock=datetime.strptime(accepted[1], '%Y%m%d%H%M%S').replace(tzinfo=ZoneInfo('America/New_York'))
-        if header_clock != datetime.fromisoformat(filing['published_at'].replace('Z','+00:00')):
-            return None
     base=f"https://www.sec.gov/Archives/edgar/data/{int(issuer['cik'])}/{filing['accession'].replace('-','')}/"
     if filing['full_url']!=base+filing['accession']+'.txt' or not filing['primary_url'].startswith(base):
         return None
@@ -649,6 +824,58 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
     return record
 
 
+def _header_clock_matches(text, issuer, filing):
+    """Corroborate real header acceptance separately from qualification bound."""
+    try:
+        header = re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>', text, re.S | re.I)
+        if not header:
+            return False
+        cik = re.search(r'CENTRAL INDEX KEY:\s*(\d+)', header[1])
+        form = re.search(r'CONFORMED SUBMISSION TYPE:\s*([^\n<]+)', header[1])
+        accession = re.search(r'ACCESSION NUMBER:\s*(\d{10}-\d{2}-\d{6})', header[1])
+        accepted = re.search(r'<ACCEPTANCE-DATETIME>(\d{14})', header[1])
+        filed_header = re.search(r'FILED AS OF DATE:\s*(\d{8})', header[1])
+        if (not cik or int(cik[1])!=int(issuer['cik']) or not form or form[1].strip()!=filing['form']
+                or not accession or accession[1]!=filing['accession'] or not accepted):
+            return False
+        header_clock = datetime.strptime(accepted[1],'%Y%m%d%H%M%S').replace(tzinfo=ZoneInfo('America/New_York'))
+        # Round-trip rejects nonexistent NY local times, not merely an offset.
+        if header_clock.astimezone(timezone.utc).astimezone(ZoneInfo('America/New_York')) != header_clock:
+            return False
+        filed = _day(filing['filed'])
+        candidate = _filing_clock(filed,header_clock.astimezone(timezone.utc).isoformat())
+        if not candidate:
+            return False
+        basis = filing.get('publication_clock_basis','EXACT_SUBMISSIONS_ACCEPTANCE')
+        if basis not in {'EXACT_SUBMISSIONS_ACCEPTANCE','CONSERVATIVE_FILED_DAY_END_MISSING_ACCEPTANCE','CONSERVATIVE_FILED_DAY_END_LATE_ACCEPTANCE'}:
+            return False
+        if basis=='CONSERVATIVE_FILED_DAY_END_LATE_ACCEPTANCE' and (candidate['publication_clock_basis']!=basis or not filing.get('accepted_at')):
+            return False
+        if basis=='CONSERVATIVE_FILED_DAY_END_MISSING_ACCEPTANCE' and filing.get('accepted_at') is not None:
+            return False
+        if basis != 'EXACT_SUBMISSIONS_ACCEPTANCE':
+            if not filed_header or filed_header[1]!=filed.strftime('%Y%m%d'):
+                return False
+            expected = datetime.combine(filed,datetime.max.time(),ZoneInfo('America/New_York'))
+        else:
+            # Legacy exact same-day fixtures omit FILED AS OF DATE. When the
+            # official header supplies it, it must still agree independently.
+            if header_clock.astimezone(ZoneInfo('America/New_York')).date()!=filed:
+                return False
+            if filed_header and filed_header[1]!=filed.strftime('%Y%m%d'):
+                return False
+            expected = header_clock
+        if accepted_meta := filing.get('accepted_at'):
+            metadata_clock = _filing_clock(filed,accepted_meta)
+            if not metadata_clock or metadata_clock['accepted_at'] != candidate['accepted_at']:
+                return False
+        elif basis == 'EXACT_SUBMISSIONS_ACCEPTANCE' and header_clock != datetime.fromisoformat(filing['published_at'].replace('Z','+00:00')):
+            return False
+        return expected == datetime.fromisoformat(filing['published_at'].replace('Z','+00:00'))
+    except (KeyError,TypeError,ValueError,IndexError,AttributeError):
+        return False
+
+
 def verify_filing_envelope(source, issuer, filing):
     """Verify a full-submission envelope without extracting financial facts."""
     if not source or not isinstance(issuer, dict) or not isinstance(filing, dict):
@@ -660,23 +887,13 @@ def verify_filing_envelope(source, issuer, filing):
         if not isinstance(body, bytes):
             return None
         text = body.decode('utf-8', errors='strict')
-        header = re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>', text, re.S | re.I)
-        if not header:
+        if not _header_clock_matches(text,issuer,filing):
             return None
-        cik = re.search(r'CENTRAL INDEX KEY:\s*(\d+)', header[1])
-        form = re.search(r'CONFORMED SUBMISSION TYPE:\s*([^\n<]+)', header[1])
-        accession = re.search(r'ACCESSION NUMBER:\s*(\d{10}-\d{2}-\d{6})', header[1])
-        accepted = re.search(r'<ACCEPTANCE-DATETIME>(\d{14})', header[1])
-        header_clock = datetime.strptime(accepted[1], '%Y%m%d%H%M%S').replace(
-            tzinfo=ZoneInfo('America/New_York'))
         published = datetime.fromisoformat(filing['published_at'].replace('Z', '+00:00'))
         fetched = datetime.fromisoformat(fetched_at.replace('Z', '+00:00'))
         base = (f"https://www.sec.gov/Archives/edgar/data/{int(issuer['cik'])}/"
                 f"{filing['accession'].replace('-', '')}/")
-        if (not cik or int(cik[1]) != int(issuer['cik']) or not form
-                or form[1].strip() != filing['form'] or not accession
-                or accession[1] != filing['accession'] or header_clock != published
-                or fetched.tzinfo is None or published > fetched
+        if (fetched.tzinfo is None or published.tzinfo is None or published > fetched
                 or filing['full_url'] != base + filing['accession'] + '.txt'
                 or not filing['primary_url'].startswith(base)):
             return None
@@ -697,7 +914,7 @@ def collect(symbol):
     from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
     if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
         return [], {}.get
-    cache_key = 'sec-disclosures:v1:'+symbol
+    cache_key = 'sec-disclosures:v2-listed-eps:'+symbol
     cached = get_cached(cache_key)
     if cached is not None:
         return deepcopy(cached), {r['record_id']:deepcopy(r) for r in cached}.get

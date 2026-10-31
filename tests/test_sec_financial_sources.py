@@ -367,7 +367,8 @@ def test_source_owner_does_not_promote_multiclass_eps_to_listed_unit():
         accn=filings[0]['accession'],form='10-Q',filed='2026-08-26',start='2026-04-01',end='2026-06-30',val=2)]})
     source=(json.dumps(payload).encode(),source[1])
     assert any(o['source_field']=='dilutedEPSOrdinary' for r in sec.parse_companyfacts(source,issuer,filings,identity_digest=DIGEST) for o in r['financial_observations'])
-    issuer['registered_equity_tickers']=['AAA-A','AAA-B']
+    issuer['registered_tickers']=['AAPL','BBB']
+    issuer['registered_equity_tickers']=issuer['registered_tickers']
     rows=sec.parse_companyfacts(source,issuer,filings,identity_digest=DIGEST)
     assert rows and any(o['source_field']=='totalRevenue' for r in rows for o in r['financial_observations'])
     assert not any(o['source_field']=='dilutedEPSOrdinary' for r in rows for o in r['financial_observations'])

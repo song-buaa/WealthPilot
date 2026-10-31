@@ -362,6 +362,9 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
             issuer_type=identity.get('issuer_type'),
             source_document_sha256=digest, publication_locator=proof["publication_locator"],
             issuer_id=issuer,record_id=raw["record_id"],source_url=raw["source_url"],fetched_at=raw["fetched_at"]))
+        if proof.get("publication_clock_basis"):
+            result[-1].update(publication_clock_basis=proof["publication_clock_basis"],
+                accepted_at=proof.get("accepted_at"),official_filed_date=proof.get("official_filed_date"))
     return result
 
 

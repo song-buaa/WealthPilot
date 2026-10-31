@@ -113,7 +113,7 @@ def verify(path):
         source = (path.parent / "sources" / relative).resolve()
         assert (path.parent / "sources").resolve() in source.parents, "unsafe source path"
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, "raw source hash"
-    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1"}:
+    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}:
         for c in p['result']['cards']:
             a=p['assessments'].get(c['symbol'],{})
             scope=a.get('quality_scope',{});identity=a.get('method_identity',{})
@@ -153,7 +153,7 @@ def verify(path):
                 assert c['comparison_status']=='COMPARABLE'
     checked = 0
     quality_periods = 0
-    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1"}
+    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}
     if is_c or p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
         for card in p["result"]["cards"]:
             if card.get("quality", {}).get("financial_inputs"):

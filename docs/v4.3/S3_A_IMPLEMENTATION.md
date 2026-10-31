@@ -150,3 +150,13 @@ Review同时补充已使用余额的非负与总分一致性资格：原financia
 开发子进程私有身份校验与五次限定SEC原件读取成功；身份值不入报告/Git。S3-C方法显式升为`s3-c.method-applicability.v1.1`：原SEC Owner增加晚间接受/后续官方filed的保守资格边界，见[来源说明](../V42_US_FINANCIAL_SOURCES.md#sec晚间接受与官方filing-dates3-c限定补源)。原五年估值、S3-B质量规则、敏感性与阈值不变；已有v1工件保留，用原3d52789源码回放，不覆盖旧方法哈希。
 
 新增来源必须用晚于实际fetch的共同截止。原AAPL/NVDA价格在更晚截止可能失去Owner资格，此时估值与排名保持UNKNOWN/暂不可比，不移动旧价格时间或付费补价。其原截止的完整历史回放独立保留。TSLA仅合并集团GAAP及经营观察，缺少分部、偿债/现金桥、合格价格/假设时保留UNKNOWN；BRK.B实际SIC6331不进入普通筛查/盈利倍数，类股经济权利/经营盈利桥及替代估值仍未取得资格。无须强行完成四家公司估值或排序。
+
+### S3-C PM定向审查及集成候选
+
+风险L2，最新集成基线5571087，保留已批准dc7a91e及旧工件；集成分支重放原四项提交，不重写已批准历史。PM授权Push/Draft PR、独立Review及受保护main集成；未授权部署、生产MCP、券商/持仓/投资政策或付费研究。
+
+定向审查仅扩原SEC Owner：真实accepted_at与保守published资格上界分开；正式原文分别核验SEC-HEADER ACCEPTANCE-DATETIME及FILED AS OF DATE。UTC/工作日守卫覆盖同日、跨日和缺接受时间路径；缺失采用日末上界。复用现有pandas联邦假日表，不用NYSE日历；临时关闭等无法证实的日期不推断，继续拒绝，不新建SEC时间系统。
+
+真实Alphabet封面证明注册列表含普通股及存托优先股，故新增中性registered_tickers，旧registered_equity_tickers只兼容旧合同，不宣称其证券类型。CompanyFacts泛化EPS继续拒绝；原Owner只从同一已核验正式主文件的DEI ticker/股票标题、唯一类股轴及USD/shares直接事实恢复目标类别EPS。真实GOOG/GOOGL值有差异，不能同额或ticker特判放行；输入资格flag不可信，记录出口重新验证原件，类别投影记录ID含ticker。此为来源适配，不是新财务/TTM引擎；S3自身仍不消费未适配的多注册证券EPS，不强行产生GOOG估值。
+
+方法升为`s3-c.method-applicability.v1.2`；旧v1/v1.1工件用原源码回放，五年估值公式/阈值、S3-B质量规则不变。真实原始回归材料只存仓外交付，仓库只加合成边界测试和来源定位，禁止真实身份/Token/runtime-env进入Git。当前四公司无同一时点合格回报仍不排名；原AAPL/NVDA截止单独复算。旧L1 200ms差异保留，不因新一轮PASS声称根因已修复。
