@@ -105,7 +105,9 @@ def test_native_collect_recovers_pdd_without_request_dates_or_manual_fields(monk
     sub=dict(cik=meta['cik'],name='PDD Holdings Inc.',tickers=['PDD'],filings=dict(recent=dict(
         accessionNumber=[acc,'0001104659-25-000001'],form=['6-K','20-F'],
         filingDate=['2026-08-25','2025-04-01'],reportDate=['2026-08-25','2024-12-31'],
-        primaryDocument=['tm2623874d1_6k.htm','annual.htm'],acceptanceDateTime=[original['published_at'],'2025-04-01T12:00:00Z'])))
+        primaryDocument=['tm2623874d1_6k.htm','annual.htm'],acceptanceDateTime=[
+            datetime.fromisoformat(original['published_at']).astimezone(timezone.utc).isoformat(),
+            '2025-04-01T12:00:00Z'])))
     calls=[]
     def fetch(url):
         calls.append(url)
