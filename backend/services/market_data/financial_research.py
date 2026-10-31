@@ -22,7 +22,8 @@ LABELS={
     'vehicle_margin_pct':'季度汽车业务毛利率','vehicle_revenue_per_delivery_approx':'季度汽车收入/交付量近似值',
     'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
     'vehicle_deliveries_qoq_pct':'季度交付量环比','vehicle_margin_change_pp':'汽车业务毛利率同比变化',
-    'revenue_yoy_pct':'季度收入同比','net_income_yoy_pct':'季度合并净利润同比',
+    'revenue_yoy_pct':'季度收入同比','revenue_qoq_pct':'季度收入环比',
+    'net_income_yoy_pct':'季度合并净利润同比',
     'gross_margin_pct':'季度集团综合毛利率',
     'parent_income_yoy_pct':'季度归母净利润同比','net_margin_pct':'季度合并净利率',
     'ordinary_income_yoy_pct':'季度普通股股东收益同比',
@@ -200,6 +201,17 @@ def build(assessment):
         except ValueError:pass
     revenue=unique('revenue_quarter',latest)
     income=unique('net_income_quarter',latest)
+    if revenue:
+        previous_end=(date.fromisoformat(revenue[0]['fiscal_period_start'])-timedelta(days=1)).isoformat()
+        previous=unique('revenue_quarter',previous_end,revenue[0]['currency'])
+        if (previous and previous[0].get('accounting_basis')==revenue[0].get('accounting_basis')
+                and date.fromisoformat(previous[0]['period'])+timedelta(days=1)
+                ==date.fromisoformat(revenue[0]['fiscal_period_start'])
+                and previous[0]['values']['revenue_quarter']>0):
+            add('revenue_qoq_pct',(revenue[0]['values']['revenue_quarter']/previous[0]['values']['revenue_quarter']-1)*100,
+                revenue[1]+previous[1],period=latest,unit='percent',
+                details=dict(formula='(current quarter group revenue / immediately prior quarter group revenue - 1)*100',
+                             comparison_period=previous_end))
     cost=unique('cost_of_revenue_reported_quarter',latest,revenue[0]['currency']) if revenue else None
     if (revenue and cost and _same_span(revenue[0],cost[0])
             and document_keys(revenue[0]) & document_keys(cost[0])):

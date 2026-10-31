@@ -96,6 +96,8 @@ def test_real_original_group_financial_bridge_and_comparative_columns_reach_peer
     metrics = {r['field']: r for r in build(a)['records']}
     assert metrics['revenue_yoy_pct']['values']['revenue_yoy_pct'] == pytest.approx(
         (19743593 / 18274405 - 1) * 100)
+    assert metrics['revenue_qoq_pct']['values']['revenue_qoq_pct'] == pytest.approx(
+        (19743593 / 13033781 - 1) * 100)
     assert metrics['vehicle_sales_yoy_pct']['values']['vehicle_sales_yoy_pct'] == pytest.approx(
         (17046476 / 16883696 - 1) * 100)
     assert metrics['vehicle_sales_qoq_pct']['values']['vehicle_sales_qoq_pct'] == pytest.approx(
@@ -106,7 +108,7 @@ def test_real_original_group_financial_bridge_and_comparative_columns_reach_peer
     assert 'pe_ttm' not in metrics
     a['financial_research'] = build(a)
     prompt = explanation_prompt(a)
-    for name in ('revenue_quarter', 'operating_income_quarter', 'net_income_quarter',
+    for name in ('revenue_quarter', 'revenue_qoq_pct', 'operating_income_quarter', 'net_income_quarter',
                  'vehicle_sales_yoy_pct', 'vehicle_margin_change_pp', 'gross_margin_pct'):
         assert name in prompt
     refs = [metrics[name]['record_id'] for name in
