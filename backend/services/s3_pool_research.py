@@ -180,6 +180,11 @@ def frozen_assessments(root, request):
     for symbol in request.companies:
         try:
             entry=manifest['companies'][symbol]
+            # A failed identity endpoint must retain its specific Owner
+            # diagnostics rather than erase this company from the pool.
+            pending=assess({},symbol=symbol,at=request.decision_at)
+            pending['capture_diagnostics']=_capture_diagnostics(entry)
+            assessments[symbol]=pending
             directory=source(entry['directory'],sec.DIRECTORY);sub=source(entry['submissions'])
             issuer,scope,identity=identity_projection(symbol,directory,sub)
             if entry['submissions']['url']!=issuer['submissions_url']:raise ValueError('ISSUER_SOURCE_URL_REJECTED')
@@ -260,6 +265,8 @@ def _make_bundle(root,raw_request):
     assessments,failures,prices,files=frozen_assessments(root,request)
     result,resolved=compare_pool(request,assessments,prices)
     archive._project_source_failures(result,failures)
+    for item in result['not_comparable']:
+        if item['symbol'] in failures:item['source_failure']=failures[item['symbol']]
     methods=tuple(archive.METHOD_FILES)+('backend/services/s3_method_research.py',
         'backend/services/market_data/method_applicability.py','research_v2/sec_identity.py',
         'backend/services/s3_pool_research.py','backend/services/execution_plan/kline_provider.py')
@@ -278,5 +285,7 @@ def replay(path):
         if archive.file_hash(archive.ROOT/n)!=h:raise ValueError('METHOD_DRIFT_REPLAY_REQUIRES_ORIGINAL_VERSION')
     result,resolved=compare_pool(p['request'],p['assessments'],p['price_qualification'])
     archive._project_source_failures(result,p['input_failures'])
+    for item in result['not_comparable']:
+        if item['symbol'] in p['input_failures']:item['source_failure']=p['input_failures'][item['symbol']]
     if archive.digest(result)!=archive.digest(p['result']):raise ValueError('RECOMPUTATION_DIFFERENCE')
     return dict(artifact_id=bundle['artifact_id'],verified=True,result_sha256=archive.digest(result))

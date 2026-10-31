@@ -164,3 +164,21 @@ def test_malformed_context_fails_only_one_company(field):
     result,_=compare_pool(r,a,p)
     assert result['comparable_count']==1 and len(result['cards'])==2
     assert next(c for c in result['cards'] if c['symbol']=='AAA:US')['rank'] is None
+
+
+def test_source_http_failure_retains_specific_owner_diagnostic_and_other_company(tmp_path):
+    from backend.services.s3_pool_research import PoolRequest,frozen_assessments
+    import hashlib
+    manifest={'schema_version':'s3-d.sources.v1','companies':{'AAA:US':{
+        'directory':{'status':'FAILED','diagnostics':[{'category':'http_403','http_status':403,'request_attempted':True}]}}},'requests':[]}
+    path=tmp_path/'manifest.json';path.write_text(json.dumps(manifest))
+    r,a,p=pool();r['source_manifest_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    frozen,failures,prices,_=frozen_assessments(tmp_path,PoolRequest.model_validate(r))
+    assert failures['AAA:US']=='SOURCE_UNAVAILABLE'
+    assert frozen['AAA:US']['capture_diagnostics']['missing_sources'][0]['diagnostics'][0]['category']=='http_403'
+    frozen['BBB:US']=a['BBB:US'];prices['BBB:US']=p['BBB:US']
+    result,_=compare_pool(r,frozen,prices)
+    assert result['comparable_count']==1 and len(result['cards'])==2
+    bad=next(c for c in result['cards'] if c['symbol']=='AAA:US')
+    assert not bad['scenarios'] and bad['rank'] is None
+    assert bad['capture_diagnostics']['missing_sources'][0]['diagnostics'][0]['http_status']==403
