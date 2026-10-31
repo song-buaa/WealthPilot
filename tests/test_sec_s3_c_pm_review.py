@@ -187,3 +187,33 @@ def test_cover_identity_rejects_unverified_text_transforms(concept):
         assert needle in body
         return body.replace(needle,needle+b' xmlns:ixt="http://evil.test" format="ixt:unverified-transform"')
     _,eps=parsed(change=change);assert not eps
+
+
+@pytest.mark.parametrize('concept',['TradingSymbol','Security12bTitle'])
+@pytest.mark.parametrize('attribute',['continuedAt="next"','escape="true"'])
+def test_cover_identity_requires_complete_plain_text(concept,attribute):
+    def change(body):
+        needle=('name="dei:'+concept+'" contextRef="cc"').encode()
+        return body.replace(needle,needle+b' '+attribute.encode()).replace(b'</body>',b'<ix:continuation id="next">Preferred Stock</ix:continuation></body>')
+    _,eps=parsed(change=change);assert not eps
+
+
+@pytest.mark.parametrize('concept,text',[('TradingSymbol','CCC'),('Security12bTitle','Class C Capital Stock, par value 1')])
+@pytest.mark.parametrize('tag',['span','ix:exclude'])
+def test_cover_identity_rejects_nested_or_excluded_text(concept,text,tag):
+    def change(body):
+        needle=('name="dei:'+concept+'" contextRef="cc">'+text+'</ix:nonNumeric>').encode()
+        replacement=('name="dei:'+concept+'" contextRef="cc"><'+tag+'>'+text+'</'+tag+'></ix:nonNumeric>').encode()
+        assert needle in body
+        return body.replace(needle,replacement)
+    _,eps=parsed(change=change);assert not eps
+
+
+@pytest.mark.parametrize('change',[
+    lambda b:b.replace(b'>5</ix:nonFraction>',b'>5<ix:exclude>0</ix:exclude></ix:nonFraction>'),
+    lambda b:b.replace(b'>5</ix:nonFraction>',b'><span>5</span></ix:nonFraction>'),
+    lambda b:b.replace(b'contextRef="qc" unitRef="eps"',b'contextRef="qc" unitRef="eps" continuedAt="next"'),
+    lambda b:b.replace(b'contextRef="qc" unitRef="eps"',b'contextRef="qc" unitRef="eps" escape="true"'),
+])
+def test_class_eps_rejects_unsupported_inline_modifiers(change):
+    _,eps=parsed(change=change);assert not eps

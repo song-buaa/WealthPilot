@@ -492,6 +492,10 @@ def _direct_listed_class_eps(body, issuer, filing, fetched_at):
         return any(qname(node,key)!=('http://www.w3.org/2001/XMLSchema-instance','nil')
                    or value not in {'false','0'}
                    for key,value in node.attrs.items() if key.split(':')[-1]=='nil')
+    def plain_inline(node):
+        # This adapter does not implement continuation, exclusion or escaping.
+        # Never treat a partial display string as legal identity or numeric fact.
+        return not node.find() and not any(key in node.attrs for key in ('format','continuedat','escape'))
     def xchild(parent,name):
         if parent is None:return None
         nodes=parent.find_all(lambda t:local(t,name),recursive=False)
@@ -529,7 +533,7 @@ def _direct_listed_class_eps(body, issuer, filing, fetched_at):
     for node in soup.find_all(lambda t:t.name.lower()=='ix:nonnumeric'):
         concept=qname(node,node.get('name'));ctx=node.get('contextref')
         if (not inline(node) or not dei(concept) or not contexts.get(ctx)
-                or invalid_nil(node) or node.get('format') is not None):continue
+                or invalid_nil(node) or not plain_inline(node)):continue
         value=' '.join(node.get_text(' ',strip=True).split())
         if concept[1]=='TradingSymbol':symbols.setdefault(ctx,set()).add(value)
         elif concept[1]=='Security12bTitle':titles.setdefault(ctx,set()).add(value)
@@ -575,7 +579,7 @@ def _direct_listed_class_eps(body, issuer, filing, fetched_at):
         concept=qname(node,node.get('name'));context=contexts.get(node.get('contextref'))
         if (not inline(node) or not gaap(concept) or concept[1]!='EarningsPerShareDiluted' or not context
                 or not units.get(node.get('unitref')) or invalid_nil(node)
-                or node.get('format') is not None
+                or not plain_inline(node)
                 or node.get('scale','0')!='0' or node.get('sign') not in {None,'-'}):continue
         member=context['member'];standard=re.fullmatch(r'CommonClass([A-Z0-9]+)Member',member[1]) if gaap(member) else None
         if member!=binding['member'] and not (standard and binding['label']==standard[1]):continue

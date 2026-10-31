@@ -142,6 +142,8 @@ Issuer Owner新增中性`registered_tickers`；旧`registered_equity_tickers`仅
 
 DEI TradingSymbol与Security12bTitle、同CIK类股context须共同绑定目标；标题仅接受Common/Capital Stock等限定普通股类型，排除存托/优先股/票据。只允许单一标准股票类别轴、标准GAAP稀释EPS及USD/shares除法单位；ticker不特判、数值相等不构成桥、不做A/B比率换算。跨QName仅允许唯一合法Class X标题与标准CommonClassXMember；其他自定义成员只能与正式封面成员完全相同。公司整体无维度EPS不能借给某一类别，封面仅一项普通股也不能证明不存在未上市类别。新增直接类别路径逐层核验XBRL命名空间、期间及封面身份时钟，拒绝nil或伪命名空间标记；当前只支持无format转换的普通十进制字面量，其他格式保留缺证，不扩大旧普通单类别解析器的能力声明。
 
+新增直接类别路径的DEI身份和EPS均仅接受完整纯文本；continuedAt、escape、format或子标签（含ix:exclude）均不支持并拒绝，避免把部分显示文本当作证券类型或数值证明。这不是通用iXBRL转换/续接解析器。
+
 记录出口丢弃传入EPS资格flag，并从同原件/真实SEC-HEADER重新提取类别事实。多注册证券记录引用含ticker，避免GOOG/GOOGL共享原件SHA而事实投影混淆；单注册证券原记录ID不变。Source缓存键升级避免旧无类别投影沿用。正式原文分别核验`accepted_at`与官方FILED AS OF DATE，保守published上界不再冒充真实header接受时刻；相同验证用于parse_filing及verify_filing_envelope。
 
 真实Alphabet回归证明：合并EPS与A/C类EPS并不恒相同；GOOG/GOOGL按各自官方直接事实恢复，存托优先股GOOGM/N不接收普通股EPS。该回归仅为来源资格，不宣称完整TTM、实时PE或S3估值。BRK.A/B的CompanyFacts无归属EPS继续拒绝；S3金融模型不适用仍生效。原始材料与数值在私人交付，不提交Git或公开PR。
