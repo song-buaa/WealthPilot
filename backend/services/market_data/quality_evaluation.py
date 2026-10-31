@@ -7,7 +7,7 @@ from decimal import Decimal as D
 from backend.services.market_data.evidence import stamp
 from backend.services.market_data.financial_research import build_quality
 
-RULE_VERSION = 's3-b.us-gaap-nonfinancial-quality.v1'
+RULE_VERSION = 's3-b.us-gaap-nonfinancial-quality.v1.1'
 
 
 def evaluate(assessment, legacy):
@@ -43,7 +43,8 @@ def evaluate(assessment, legacy):
     floor('financial_sustainability','暂无法判断','Missing, conflicting, stale or unmatched balance/liquidity/current-debt evidence.')
     if usable and all(balance_rows) and debt_value is not None and cash and debt_consistent:
         a,l,e,ca,cl,c,cr,nd = map(val,balance_rows)
-        balance_ok = a>0 and l>=0 and ca>=0 and cl>=0 and c>=0 and cr>=c and nd>=0 and abs(a-l-e)<=D(1)
+        balance_ok = (a>0 and l>=0 and 0<=c<=ca<=a and 0<=debt_value<=cl<=l and c<=cr<=a
+                      and 0<=nd<=l-cl and abs(a-l-e)<=D(1))
         if balance_ok:
             if ca>=cl and c>=debt_value and val(cash['cfo'])>0:
                 floor('financial_sustainability','通过','Observed balance reconciles; current assets cover current liabilities, cash excluding restricted cash covers disclosed current debt, and same-end CFO is positive. No claim of no going-concern/refinancing risk.',balance_rows+debt_refs+[cash['cfo']])
@@ -103,7 +104,16 @@ def evaluate(assessment, legacy):
         if row['status']!='通过':blockers.append(key.upper()+'_'+('UNKNOWN' if row['status']=='暂无法判断' else 'WARNING'))
     blockers+=major
     catalog={r['record_id']:{k:r.get(k) for k in ('field','values','scope','period','fiscal_period_start','currency','unit','accounting_basis','published_at','fetched_at','publication_links')} for r in assessment.get('quality_field_records',[])}
-    legacy.update(evaluation_scope='RESEARCH_ONLY_US_GAAP_NONFINANCIAL_OBSERVED_WINDOW',
+    liquidity_screen = dict(status='UNKNOWN')
+    if usable and not inputs['conflicts'] and b.get('current_assets') and b.get('current_liabilities'):
+        ca, cl = val(b['current_assets']), val(b['current_liabilities'])
+        liquidity_screen = dict(status='OBSERVATION_NOT_COMPREHENSIVE_FINANCIAL_STRENGTH',
+            period=inputs['period'], currency='USD', unit='currency_units',
+            current_assets=str(ca), current_liabilities=str(cl), buffer=str(ca-cl),
+            current_ratio=str(ca/cl) if cl>0 else None,
+            threshold='current_assets >= current_liabilities (buffer >= 0); other sustainability gates remain separate',
+            evidence_refs=sorted(set(b['current_assets']['evidence_refs']+b['current_liabilities']['evidence_refs'])))
+    legacy.update(liquidity_screen=liquidity_screen, evaluation_scope='RESEARCH_ONLY_US_GAAP_NONFINANCIAL_OBSERVED_WINDOW',
         positive_quality_path_available=True, rule_version=RULE_VERSION, floors=floors,
         status='OBSERVED_RULES_PASSED' if not blockers else 'WARNING' if warnings or major else 'PARTIAL_UNKNOWN',
         evidence_catalog=legacy['evidence_catalog']|catalog, financial_inputs=inputs,

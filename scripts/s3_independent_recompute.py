@@ -14,7 +14,7 @@ def canonical(value):
 
 
 
-def verify_quality(card, assessment):
+def verify_quality(card, assessment, strict_balance=False):
     """Independent financial arithmetic and evidence-bound floor checks.
 
     SEC authenticity/semantic qualification remains the original Owner's remit.
@@ -66,7 +66,10 @@ def verify_quality(card, assessment):
             consistent=not debt or not b.get('current_long_term_debt') or d(debt)>=d(b['current_long_term_debt'])
             if debt and b.get('current_long_term_debt') and b.get('commercial_paper'):
                 consistent=consistent and d(debt)==d(b['current_long_term_debt'])+d(b['commercial_paper'])
-            if consistent and a>0 and l>=0 and ca>=0 and cl>=0 and c>=0 and cr>=c and nd>=0 and abs(a-l-e)<=1:
+            coherent=(a>0 and l>=0 and ca>=0 and cl>=0 and c>=0 and cr>=c and nd>=0 and abs(a-l-e)<=1)
+            if strict_balance:
+                coherent=coherent and 0<=c<=ca<=a and 0<=due<=cl<=l and cr<=a and nd<=l-cl
+            if consistent and coherent:
                 expected['financial_sustainability']='通过' if ca>=cl and c>=due and d(cash['cfo'])>0 else '警示'
                 if ca<cl and c<due and d(cash['cfo'])<0:major.append('CONFIRMED_CURRENT_LIQUIDITY_SHORTFALL_AND_NEGATIVE_CFO')
         if cash:
@@ -112,10 +115,10 @@ def verify(path):
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, "raw source hash"
     checked = 0
     quality_periods = 0
-    if p["result"]["method_version"] == "s3-b.quality-evidence.v1":
+    if p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
         for card in p["result"]["cards"]:
             if card.get("quality"):
-                quality_periods += verify_quality(card, p["assessments"][card["symbol"]])
+                quality_periods += verify_quality(card, p["assessments"][card["symbol"]], p['result']['method_version']=='s3-b.quality-evidence.v1.1')
     with localcontext() as context:
         context.prec = 40
         for card in p["result"]["cards"]:
@@ -166,9 +169,30 @@ def verify(path):
                 good = Decimal(c["scenarios"]["base"]["annualized_return"]) >= Decimal(c["assumptions"]["required_return"])
                 downside = Decimal(c["scenarios"]["cautious"]["total_return"]) >= Decimal(str(p["request"].get("downside_floor", "-.1")))
                 robust=bool(c.get('sensitivity')) and all(v.get('result') and Decimal(v['result']['annualized_return'])>=Decimal(v['required_return']) for v in c.get('sensitivity',[]))
-                is_b=p['result']['method_version']=='s3-b.quality-evidence.v1'
+                method=p['result']['method_version']
+                is_b=method in {'s3-b.quality-evidence.v1','s3-b.quality-evidence.v1.1'}
+                complete=True
+                if method=='s3-b.quality-evidence.v1.1':
+                    expected={(f,Decimal(x)) for f,offsets in [('earnings_growth',('-.02','.02')),('terminal_pe',('-.2','.2')),
+                        ('annual_share_change',('-.01','.01')),('required_return',('-.02','.02'))] for x in offsets}
+                    variants=c.get('sensitivity',[]);keys=[];computed=set();returns=[]
+                    for v in variants:
+                        key=(v['parameter'],Decimal(v['delta']));keys.append(key)
+                        if v.get('result') and isinstance(v.get('parameters'),dict):
+                            value=Decimal(v['result']['annualized_return']);rate=Decimal(v['required_return'])
+                            if value.is_finite() and rate.is_finite() and rate>0:
+                                computed.add(key);returns.append(value)
+                    complete=len(keys)==8 and len(set(keys))==8 and set(keys)==expected and computed==expected
+                    robust=complete and robust
+                    span=max(returns)-min(returns) if returns else None
+                    assert c['sensitivity_complete']==complete, 'sensitivity completeness differs'
+                    assert c['sensitivity_threshold_robust']==robust, 'single-factor threshold qualification differs'
+                    assert c['high_sensitivity']==bool(span is not None and span>Decimal('.05'))
+                    assert (c['sensitivity_span'] is None)==(span is None)
+                    if span is not None:assert Decimal(c['sensitivity_span'])==span
+                    assert c['sensitivity_qualification']['computed_count']==len(computed & expected)
                 expected_group = ("暂不优先" if not good or not downside or (is_b and c['quality']['major_risks']) else "继续观察"
-                                  if c["quality"]["priority_blockers"] or (c["high_sensitivity"] and not (is_b and robust)) else "优先考虑")
+                                  if c["quality"]["priority_blockers"] or not complete or (c["high_sensitivity"] and not (is_b and robust)) else "优先考虑")
                 assert c["group"] == expected_group
                 if expected_group == group:
                     ordered.append(c)

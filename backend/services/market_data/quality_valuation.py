@@ -11,11 +11,17 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from backend.services.market_data.evidence import stamp
 from backend.services.market_data.financial_research import build
 
-METHOD_VERSION = "s3-b.quality-evidence.v1"
+METHOD_VERSION = "s3-b.quality-evidence.v1.1"
 VALUATION_METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
 SCENARIOS = ("cautious", "base", "optimistic")
 GROUPS = ("优先考虑", "继续观察", "暂不优先")
 D = Decimal
+SENSITIVITY_OFFSETS = (
+    ("earnings_growth", (D("-.02"), D(".02"))),
+    ("terminal_pe", (D("-.2"), D(".2"))),
+    ("annual_share_change", (D("-.01"), D(".01"))),
+    ("required_return", (D("-.02"), D(".02"))),
+)
 
 
 class Contract(BaseModel):
@@ -251,10 +257,7 @@ def company(assessment, assumptions, decision_at):
     card["valuation_status"] = "CONDITIONAL_RESEARCH"
     card["formula"] = "EPS[t]=EPS0*(1+aggregate_earnings_growth)^t/(1+share_change)^t; dividend[t]=EPS[t]*payout; terminal=EPS[5]*PE; value=sum(dividend[t]/(1+r)^t)+terminal/(1+r)^5; CAGR=((terminal+cash_dividends)/price)^(1/5)-1"
     card["scenarios"] = {name: scenario(e, p, getattr(assumptions, name), assumptions.required_return) for name in SCENARIOS}
-    for field, offsets in (("earnings_growth", (D("-.02"), D(".02"))),
-                           ("terminal_pe", (D("-.2"), D(".2"))),
-                           ("annual_share_change", (D("-.01"), D(".01"))),
-                           ("required_return", (D("-.02"), D(".02")))):
+    for field, offsets in SENSITIVITY_OFFSETS:
         for delta in offsets:
             params = assumptions.base.model_dump()
             rate = assumptions.required_return
@@ -272,14 +275,57 @@ def company(assessment, assumptions, decision_at):
                                             required_return=str(rate), result=value))
     values = [dec(v["conditional_value"]) for v in card["scenarios"].values()]
     card["conditional_value_range"] = [text(min(values)), text(max(values))]
-    returns = [dec(v["result"]["annualized_return"]) for v in card["sensitivity"] if v["result"]]
-    card["high_sensitivity"] = bool(returns and max(returns) - min(returns) > D(".05"))
+    _sensitivity_qualification(card)
     return card
+
+
+
+def _sensitivity_qualification(card):
+    """Eight distinct required cases, independent of observed return dispersion.
+
+    This screens base-scenario one-factor annualized returns only. The cautious
+    five-year cumulative-return gate is separate; this is not full downside risk.
+    """
+    expected = {(field, delta) for field, offsets in SENSITIVITY_OFFSETS for delta in offsets}
+    variants = card.get('sensitivity', [])
+    seen, valid, returns = set(), set(), []
+    well_formed = isinstance(variants, list) and len(variants) == len(expected)
+    robust = True
+    for variant in variants if isinstance(variants, list) else []:
+        try:
+            key = (variant['parameter'], dec(variant['delta']))
+            if key not in expected or key in seen:
+                well_formed = False
+            seen.add(key)
+            result = variant.get('result')
+            if not isinstance(result, dict) or not isinstance(variant.get('parameters'), dict):
+                continue
+            value, required = dec(result['annualized_return']), dec(variant['required_return'])
+            if required <= 0:
+                continue
+            valid.add(key)
+            returns.append(value)
+            robust = robust and value >= required
+        except (ValueError, KeyError, TypeError, ArithmeticError):
+            well_formed = False
+    complete = well_formed and valid == expected
+    span = max(returns) - min(returns) if returns else None
+    card['sensitivity_complete'] = complete
+    card['sensitivity_span'] = text(span) if span is not None else None
+    card['high_sensitivity'] = bool(span is not None and span > D('.05'))
+    card['sensitivity_threshold_robust'] = bool(complete and robust)
+    card['sensitivity_qualification'] = dict(
+        status='COMPLETE' if complete else 'INCOMPLETE' if card.get('scenarios') else 'NOT_ASSESSABLE',
+        required_count=len(expected), computed_count=len(valid & expected),
+        missing_cases=[dict(parameter=f, delta=str(d)) for f, d in sorted(expected-valid)],
+        case_set_valid=well_formed,
+        scope='BASE_SCENARIO_ONE_FACTOR_RETURN_THRESHOLD_ONLY_NOT_FULL_DOWNSIDE_ROBUSTNESS')
 
 
 def _rank(cards, request):
     """Ordered gates, then return/risk; never add correlated quality scores."""
     for card in cards:
+        _sensitivity_qualification(card)
         scenarios = card.get("scenarios", {})
         blockers = card.get("quality", {}).get("priority_blockers", ["COMPANY_EVIDENCE_UNAVAILABLE"])
         card["group_scope"] = "RESEARCH_ONLY_NOT_COMPLETE_INVESTMENT_JUDGMENT"
@@ -301,17 +347,15 @@ def _rank(cards, request):
         if cautious < request.downside_floor:
             card["classification_reasons"]["research_thresholds_not_met"].append("CAUTIOUS_RETURN_BELOW_RESEARCH_DOWNSIDE_FLOOR")
         major_risks = card.get('quality',{}).get('major_risks',[])
-        variants = card.get('sensitivity', [])
-        robust = bool(variants) and all(v.get('result') and dec(v['result']['annualized_return'])>=dec(v['required_return']) for v in variants)
-        card['sensitivity_threshold_robust'] = robust
+        robust = card['sensitivity_threshold_robust']
         if major_risks:
             group, reason = GROUPS[2], "Confirmed major quality risk blocks priority irrespective of valuation returns."
         elif base < required_return or cautious < request.downside_floor:
             group, reason = GROUPS[2], "Research thresholds not met under stated assumptions; quality evidence gaps are separate, and actual fundamental deterioration is not established."
-        elif blockers or (card.get("high_sensitivity") and not robust):
-            group, reason = GROUPS[1], "Research observation only: quality evidence gap/warning or sensitivity threshold crossing prevents priority; passing scenario thresholds is not a positive investment judgment."
+        elif blockers or not card["sensitivity_complete"] or (card.get("high_sensitivity") and not robust):
+            group, reason = GROUPS[1], "Research observation only: quality evidence gap/warning, incomplete required sensitivities or base-scenario one-factor threshold crossing prevents priority; passing scenario thresholds is not a positive investment judgment."
         else:
-            group, reason = GROUPS[0], "All evidence-bound quality gates pass; return/downside thresholds pass and high-dispersion sensitivities remain above required return. Research Only, not investment authorization."
+            group, reason = GROUPS[0], "All evidence-bound quality gates pass; return/downside thresholds pass and all eight required single-factor cases are computable and high-dispersion base-scenario returns remain above required return (not full downside-risk robustness). Research Only, not investment authorization."
         card.update(group=group, rank=None, rank_reason=reason)
     for group in GROUPS:
         ordered = sorted((c for c in cards if c["group"] == group and c.get("scenarios")),
@@ -366,9 +410,7 @@ def compare(request, assessments):
                                         parameter=variant["parameter"], delta=variant["delta"], after=after))
         for card in cards:
             card["ranking_unstable"] = bool(changes)
-            if card.get("sensitivity"):
-                returns = [dec(v["result"]["annualized_return"]) for v in card["sensitivity"] if v["result"]]
-                card["high_sensitivity"] = bool(returns and max(returns) - min(returns) > D(".05"))
+            _sensitivity_qualification(card)
         return dict(schema_version="wealthpilot.s3-b.v1", method_version=METHOD_VERSION, valuation_method_version=VALUATION_METHOD_VERSION,
                     maturity="RESEARCH_ONLY",
                     priority_capability=dict(reachable=True,

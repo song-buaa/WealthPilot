@@ -199,3 +199,104 @@ def test_current_debt_total_conflicting_with_disclosed_components_is_unknown():
     c=card(a)
     assert c['quality']['floors']['financial_sustainability']['status']=='暂无法判断'
     assert c['group']!='优先考虑'
+
+
+def test_missing_required_sensitivity_cannot_promote_when_remaining_span_is_low():
+    r=request();p=params('0','.01');p['required_return']='.01'
+    for name in ('cautious','base','optimistic'):p[name]['dividend_payout']='1'
+    r['companies']={'AAA:US':p};a=quality_assessment()
+    for row in a['verified_field_records']+a['historical_field_records']:
+        row['values']['diluted_eps_ordinary_quarter']=10
+    c=compare(r,{'AAA:US':a})['cards'][0]
+    assert not c['high_sensitivity'] and not c['sensitivity_threshold_robust']
+    assert c['sensitivity_qualification']['computed_count']==7
+    assert not c['sensitivity_complete'] and c['group']=='继续观察'
+    assert c['sensitivity_span'] is not None
+    assert c['sensitivity_qualification']['missing_cases']==[dict(parameter='required_return',delta='-0.02')]
+
+
+@pytest.mark.parametrize('fault',['empty','removed','none_result','duplicate','extra','wrong_delta'])
+def test_sensitivity_set_is_an_independent_required_qualification(fault):
+    from backend.services.market_data.quality_valuation import _rank,ResearchRequest
+    c=card()
+    assert c['group']=='优先考虑' and c['sensitivity_complete']
+    if fault=='empty':c['sensitivity']=[]
+    elif fault=='removed':c['sensitivity'].pop()
+    elif fault=='none_result':c['sensitivity'][0]['result']=None
+    elif fault=='duplicate':c['sensitivity'][0]=deepcopy(c['sensitivity'][1])
+    elif fault=='extra':c['sensitivity'].append(deepcopy(c['sensitivity'][0]))
+    else:c['sensitivity'][0]['delta']='-.03'
+    # Low span must not neutralize missing/duplicate necessary scenarios.
+    for v in c['sensitivity']:
+        if v['result']:v['result']['annualized_return']='.2'
+    _rank([c],ResearchRequest.model_validate(request()))
+    assert c['group']=='继续观察'
+    assert not c['sensitivity_complete'] and not c['sensitivity_threshold_robust']
+    assert not c['high_sensitivity']
+
+
+@pytest.mark.parametrize('span,high',[('.05',False),('.05000001',True)])
+def test_complete_single_factor_threshold_boundary_keeps_original_span_cutoff(span,high):
+    from backend.services.market_data.quality_valuation import _rank,ResearchRequest
+    c=card()
+    for v in c['sensitivity']:v['result']['annualized_return']=v['required_return']
+    # Set a uniform >= rate baseline then place the last result at the boundary.
+    for v in c['sensitivity']:v['result']['annualized_return']='.2'
+    c['sensitivity'][-1]['result']['annualized_return']=str(Decimal('.2')+Decimal(span))
+    _rank([c],ResearchRequest.model_validate(request()))
+    assert c['high_sensitivity'] is high
+    assert c['sensitivity_complete'] and c['sensitivity_threshold_robust']
+    assert c['group']=='优先考虑'
+
+
+def test_complete_but_one_threshold_fails_and_cautious_downside_is_still_independent():
+    from backend.services.market_data.quality_valuation import _rank,ResearchRequest
+    c=card();r=ResearchRequest.model_validate(request())
+    for v in c['sensitivity']:v['result']['annualized_return']='.2'
+    c['sensitivity'][0]['result']['annualized_return']='.09999999'
+    _rank([c],r)
+    assert c['sensitivity_complete'] and c['high_sensitivity']
+    assert not c['sensitivity_threshold_robust'] and c['group']=='继续观察'
+    for v in c['sensitivity']:v['result']['annualized_return']=v['required_return']
+    _rank([c],r)
+    assert c['sensitivity_complete'] and c['sensitivity_threshold_robust']
+    c['scenarios']['cautious']['total_return']='-.10000001'
+    _rank([c],r)
+    assert c['group']=='暂不优先'
+    assert 'CAUTIOUS_RETURN_BELOW_RESEARCH_DOWNSIDE_FLOOR' in c['classification_reasons']['research_thresholds_not_met']
+    assert c['sensitivity_qualification']['scope']=='BASE_SCENARIO_ONE_FACTOR_RETURN_THRESHOLD_ONLY_NOT_FULL_DOWNSIDE_ROBUSTNESS'
+
+
+@pytest.mark.parametrize('field,value',[('current_debt',-50),('current_assets',5000),('cash',501),('current_liabilities',500),('noncurrent_debt',201)])
+def test_impossible_balance_or_negative_debt_never_clears_quality_blockers(field,value):
+    a=quality_assessment()
+    for r in a['quality_field_records']:
+        if r['field']==field:r['values'][field]=value
+    c=card(a)
+    assert c['quality']['floors']['financial_sustainability']['status']=='暂无法判断'
+    assert c['quality']['priority_blockers'] and c['group']!='优先考虑'
+
+
+def test_liquidity_report_discloses_observed_buffer_and_threshold():
+    q=card()['quality'];s=q['liquidity_screen']
+    assert Decimal(s['buffer'])==300 and Decimal(s['current_ratio'])==Decimal('2.5')
+    assert 'buffer >= 0' in s['threshold']
+
+
+def test_independent_verifier_rejects_incomplete_sensitivity_promotion(tmp_path):
+    import runpy
+    from pathlib import Path
+    from backend.services.quality_valuation_research import digest,save_bundle,view_hashes,method_hashes
+    verify=runpy.run_path(str(Path(__file__).resolve().parents[1]/'scripts/s3_independent_recompute.py'))['verify']
+    r=request();p=params('0','.01');p['required_return']='.01'
+    for name in ('cautious','base','optimistic'):p[name]['dividend_payout']='1'
+    r['companies']={'AAA:US':p};a=quality_assessment()
+    for row in a['verified_field_records']+a['historical_field_records']:row['values']['diluted_eps_ordinary_quarter']=10
+    payload=dict(request=r,assessments={'AAA:US':a},method_files=method_hashes(),source_files={},result=compare(r,{'AAA:US':a}))
+    payload['view_hashes']=view_hashes(payload['result'])
+    b=dict(payload=payload,artifact_id=digest(payload));path=save_bundle(tmp_path/'good',b,{})
+    assert verify(path/'bundle.json')['calculations_and_base_ranks']=='PASS'
+    altered=deepcopy(payload);c=altered['result']['cards'][0];c['group']='优先考虑';c['sensitivity_complete']=True
+    altered['view_hashes']=view_hashes(altered['result'])
+    path=save_bundle(tmp_path/'bad',dict(payload=altered,artifact_id=digest(altered)),{})
+    with pytest.raises(AssertionError,match='sensitivity completeness differs'):verify(path/'bundle.json')
