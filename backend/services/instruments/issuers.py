@@ -52,6 +52,15 @@ def exposure(items):
 
 # Financial-source identity only. This does not expand portfolio aggregation or
 # infer economic region, share classes, positions or trading identities.
+def sec_ticker_matches(symbol, ticker_directory):
+    """Only exact official ticker or unambiguous dot-to-hyphen class spelling."""
+    import re
+    if not isinstance(symbol,str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}:US",symbol) or not isinstance(ticker_directory,dict):
+        return []
+    ticker=symbol[:-3]
+    return [r for r in ticker_directory.values() if isinstance(r,dict) and r.get('ticker') in {ticker,ticker.replace('.', '-')}]
+
+
 def resolve_sec_issuer(symbol, ticker_directory, submissions):
     """Exact official ticker -> CIK -> Submissions identity, never name matching.
 
@@ -65,9 +74,10 @@ def resolve_sec_issuer(symbol, ticker_directory, submissions):
     ticker = symbol[:-3]
     if not isinstance(ticker_directory, dict) or not isinstance(submissions, dict):
         return None
-    matches = [row for row in ticker_directory.values() if isinstance(row, dict) and row.get("ticker") == ticker]
+    matches = sec_ticker_matches(symbol, ticker_directory)
     if len(matches) != 1:
         return None
+    ticker = matches[0]["ticker"]
     try:
         cik = str(int(matches[0]["cik_str"])).zfill(10)
         if len(cik) != 10 or int(cik) <= 0 or int(submissions.get("cik")) != int(cik):

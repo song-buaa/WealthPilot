@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
-from backend.services.instruments.issuers import resolve_sec_issuer
+from backend.services.instruments.issuers import resolve_sec_issuer, sec_ticker_matches
 
 DIRECTORY = 'https://www.sec.gov/files/company_tickers.json'
 FORMS = {'10-K', '10-Q', '20-F', '6-K', '8-K'}
@@ -688,7 +688,7 @@ def collect(symbol):
     if not directory:
         if directory_source: _diagnose(DIRECTORY,'invalid_json')
         return [], {}.get
-    matches = [r for r in directory.values() if isinstance(r, dict) and r.get('ticker') == symbol[:-3]]
+    matches = sec_ticker_matches(symbol, directory)
     if len(matches) != 1:
         _diagnose(DIRECTORY,'identity_unresolved')
         return [], {}.get
