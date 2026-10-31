@@ -54,10 +54,12 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
         'primaryDocument':['annual.htm',q2['primary_url'].rsplit('/',1)[1],'event.htm'],
         'acceptanceDateTime':['2026-10-27T12:00:00Z',q2['published_at'],'2026-08-25T12:00:00Z']}))
     recent=sub['filings']['recent']
-    for n in range(8):
+    # Eight valid synthetic business-day events preserve the collector-order
+    # scenario; weekend filings are deliberately rejected by the SEC clock.
+    for n,day in enumerate((28,25,24,23,22,21,18,17)):
         additions=dict(accessionNumber=f'0001104659-26-2000{n:02}',form='6-K',
-            filingDate=f'2026-09-{28-n:02}',reportDate=f'2026-09-{28-n:02}',
-            primaryDocument=f'event{n}.htm',acceptanceDateTime=f'2026-09-{28-n:02}T12:00:00Z')
+            filingDate=f'2026-09-{day:02}',reportDate=f'2026-09-{day:02}',
+            primaryDocument=f'event{n}.htm',acceptanceDateTime=f'2026-09-{day:02}T12:00:00Z')
         for key,value in additions.items():recent[key].insert(n+1,value)
     calls=[]
     def fetch(url):
