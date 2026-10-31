@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import sqlite3
 import shutil
+import socket
+import stat
 import sys
 import tempfile
 import uuid
@@ -20,10 +22,84 @@ import uuid
 from common import ROOT, digest, private_dir, private_json, require, safe_cli, write_json
 
 
-def read_connection(path):
-    conn = sqlite3.connect(Path(path).resolve(strict=True).as_uri() + "?mode=ro", uri=True)
-    conn.execute("PRAGMA query_only=ON")
-    return conn
+def _closed_source_binding(path):
+    """Filesystem checks only: never open SQLite, checkpoint or touch sidecars."""
+    path = Path(path).absolute()
+    require(path.resolve(strict=True) == path and not any(p.is_symlink() for p in (path, *path.parents)),
+            "CLOSED_SOURCE_SYMLINK_REFUSED")
+    for suffix in ("-wal", "-shm", "-journal"):
+        p = Path(str(path)+suffix)
+        require(not p.exists() and not p.is_symlink(), "CLOSED_SOURCE_SIDECAR_PRESENT")
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                and before.st_uid == os.getuid() and before.st_mode & 0o077 == 0,
+                "CLOSED_SOURCE_PRIVATE_FILE_REQUIRED")
+        header = stream.read(100)
+        require(header[:16] == b"SQLite format 3\x00" and header[18:20] == b"\x02\x02",
+                "CLOSED_SOURCE_WAL_HEADER_REQUIRED")
+        stream.seek(0)
+        sha = hashlib.file_digest(stream, "sha256").hexdigest()
+        after = os.fstat(stream.fileno())
+    def identity(info):
+        return [info.st_dev, info.st_ino, info.st_uid, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_nlink]
+    require(identity(before) == identity(after) == identity(path.lstat()), "CLOSED_SOURCE_CHANGED")
+    for suffix in ("-wal", "-shm", "-journal"):
+        p = Path(str(path)+suffix)
+        require(not p.exists() and not p.is_symlink(), "CLOSED_SOURCE_SIDECAR_PRESENT")
+    return {"path": str(path), "identity": identity(after), "sha256": sha}
+
+
+def closed_source_evidence(path, *, closure_evidence_ref, all_clients_stopped=False,
+                           automatic_restart_disabled=False, no_unmerged_wal=False):
+    """Operator attests actual closure; absence of files alone is NOT proof.
+
+    The caller must keep all clients stopped and their restart mechanisms disabled
+    throughout probe/backup. This is not a process controller or authentication.
+    """
+    require(all_clients_stopped is True and automatic_restart_disabled is True
+            and no_unmerged_wal is True and isinstance(closure_evidence_ref, str)
+            and bool(closure_evidence_ref.strip()), "CLOSED_SOURCE_CLOSURE_EVIDENCE_REQUIRED")
+    return {"schema": "poc03.closed-sqlite-source.v1", "host": socket.gethostname(),
+            "all_clients_stopped": True, "automatic_restart_disabled": True, "no_unmerged_wal": True,
+            "closure_evidence_ref": closure_evidence_ref, "source": _closed_source_binding(path)}
+
+
+def verify_closed_source(path, evidence):
+    require(isinstance(evidence, dict) and evidence.get("schema") == "poc03.closed-sqlite-source.v1"
+            and evidence.get("host") == socket.gethostname()
+            and evidence.get("all_clients_stopped") is True
+            and evidence.get("automatic_restart_disabled") is True
+            and evidence.get("no_unmerged_wal") is True
+            and isinstance(evidence.get("closure_evidence_ref"), str)
+            and bool(evidence["closure_evidence_ref"].strip()), "CLOSED_SOURCE_CLOSURE_EVIDENCE_REQUIRED")
+    require(_closed_source_binding(path) == evidence.get("source"), "CLOSED_SOURCE_BINDING_MISMATCH")
+
+
+class _ClosedReadConnection(sqlite3.Connection):
+    def close(self):
+        try:
+            super().close()
+        finally:
+            verify_closed_source(self.closed_path, self.closed_evidence)
+
+
+def read_connection(path, *, closed_source=None):
+    if closed_source is None:
+        # Original live-WAL/default behavior, never retry with immutable on error.
+        conn = sqlite3.connect(Path(path).resolve(strict=True).as_uri() + "?mode=ro", uri=True)
+    else:
+        verify_closed_source(path, closed_source)
+        conn = sqlite3.connect(Path(path).absolute().as_uri()+"?mode=ro&immutable=1", uri=True,
+                               factory=_ClosedReadConnection)
+        conn.closed_path, conn.closed_evidence = path, closed_source
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def inventory(conn):
@@ -40,7 +116,7 @@ def inventory(conn):
     return result
 
 
-def backup(source, destination):
+def backup(source, destination, *, closed_source=None):
     destination = Path(destination).absolute()
     private_dir(destination.parent)
     require(not destination.exists(), "BACKUP_DESTINATION_EXISTS")
@@ -49,17 +125,27 @@ def backup(source, destination):
     os.close(fd)
     temporary = Path(name)
     try:
-        with closing(read_connection(source)) as read:
+        # Do not add kwargs to existing callers' monkeypatched/default readers.
+        reader = read_connection(source) if closed_source is None else read_connection(source, closed_source=closed_source)
+        with closing(reader) as read:
             read.execute("BEGIN")
+            if closed_source is not None:
+                require(read.execute("PRAGMA integrity_check").fetchall() == [("ok",)], "SOURCE_INTEGRITY_FAILED")
+                source_fk = read.execute("PRAGMA foreign_key_check").fetchall()
             source_inventory = inventory(read)  # pins the source snapshot, including committed WAL.
             with closing(sqlite3.connect(temporary)) as write:
                 read.backup(write)
                 write.execute("PRAGMA journal_mode=DELETE")
                 require(write.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "BACKUP_INTEGRITY_FAILED")
                 require(inventory(write) == source_inventory, "BACKUP_CONTENT_MISMATCH")
+                if closed_source is not None:
+                    require(write.execute("PRAGMA foreign_key_check").fetchall() == source_fk,
+                            "BACKUP_FOREIGN_KEY_MISMATCH")
             read.rollback()
         with temporary.open("rb") as data:
             os.fsync(data.fileno())
+        if closed_source is not None:
+            verify_closed_source(source, closed_source)  # before publishing any backup/manifest
         # Exclusive link prevents silently replacing an existing destination.
         os.link(temporary, destination)
         os.chmod(destination, 0o600)

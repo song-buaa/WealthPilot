@@ -25,6 +25,10 @@ P3-C3-A本地候选；**本轮无生产修改授权**。下一次由原Mac mini 
 
 ## 3. Schema最小操作说明
 
+**封闭WAL备份兼容**：默认源连接仍为`mode=ro`，失败不自动回退。若全部客户端已关闭、自动重生已禁止，且确认没有未合并WAL，可由原操作员在同一停写窗口调用原`snapshot.closed_source_evidence`，显式提供`all_clients_stopped=True`、`automatic_restart_disabled=True`、`no_unmerged_wal=True`及真实`closure_evidence_ref`，将返回证据保存为私人0600文件。证据绑定规范路径、device/inode/uid、大小/时间和完整SHA；仅无任何`-wal/-shm/-journal`（包括空文件/悬空链接）的WAL头数据库合格。证据是操作员关闭证明，不是“没看到sidecar就自动证明封闭”。
+
+仅在原备份探针命令追加`--closed-source-evidence "$PRIVATE_CLOSED_SOURCE_RECEIPT"`。probe与实际Backup API使用同一证据及`mode=ro&immutable=1`；源写/网络禁止沙箱不变，操作前后及发布备份收据前复核源身份/Hash/sidecar。源状态未知或变化即拒绝，不checkpoint、不创建/删除源辅助文件。普通活跃WAL不传此参数，保留原提交WAL快照读取和manifest格式。官方语义见[SQLite immutable](https://www.sqlite.org/uri.html#uriimmutable)及[只读WAL](https://www.sqlite.org/wal.html#read_only_databases)；immutable会跳过锁/变化检测，必须维持操作员停写与禁止重生，不能用于忽略实际WAL。
+
 变量由原个人Mac mini操作员从实际运行配置核实。备份、授权、计划及收据只在0700私人目录/0600单链接文件。工具不加载dotenv、业务lifespan、Provider或启动服务。
 
 ```sh

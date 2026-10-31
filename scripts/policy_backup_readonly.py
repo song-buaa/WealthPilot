@@ -55,18 +55,35 @@ def run(args):
     code=Path(args.snapshot_code).resolve(strict=True)
     load_verified('common',code.parent/'common.py',args.common_sha)
     snapshot=load_verified('snapshot',code,args.snapshot_sha)
+    closed_path = getattr(args, 'closed_source_evidence', None)
+    closed = None
+    if closed_path:
+        # Explicit operator closure evidence only, never a CANTOPEN fallback.
+        if Path(args.source).absolute() != source:
+            raise ValueError('CLOSED_SOURCE_CANONICAL_PATH_REQUIRED')
+        artifact = Path(closed_path).absolute()
+        if (any(p.is_symlink() for p in (artifact, *artifact.parents))
+                or artifact.stat().st_uid != os.getuid() or artifact.stat().st_nlink != 1
+                or stat.S_IMODE(artifact.stat().st_mode) != 0o600):
+            raise ValueError('PRIVATE_CLOSED_SOURCE_EVIDENCE_REQUIRED')
+        closed=json.loads(artifact.read_text())
+        snapshot.verify_closed_source(source,closed)
     receipt={'observed_at':datetime.now(timezone.utc).isoformat(), 'host':socket.gethostname(),
         'source_identity':{'path':str(source),'inode':source.stat().st_ino,'bytes':source.stat().st_size,
                            'uid':source.stat().st_uid,'mode':oct(stat.S_IMODE(source.stat().st_mode))},
         'source_mode':'mode=ro/query_only', 'backup_mechanism':'EXISTING_POC03_SQLITE_BACKUP_API',
         'production_migration_executed':False, 'business_imports':False}
+    if closed is not None:
+        receipt['source_mode']='mode=ro/immutable=1/query_only/EXPLICIT_VERIFIED_CLOSED_SOURCE'
+        receipt['closed_source_evidence']=closed
     receipt['source_sidecars']={suffix:{'bytes':p.stat().st_size,'uid':p.stat().st_uid,
         'mode':oct(stat.S_IMODE(p.stat().st_mode))} for suffix in ('-wal','-shm')
         if (p:=Path(str(source)+suffix)).exists()}
     # Metadata probe pins one snapshot; backup() independently pins its own.
     # Concurrent legitimate writes may occur; never claim cross-DB atomicity.
     args.phase='OPEN_READONLY_SOURCE'
-    with closing(snapshot.read_connection(source)) as db:
+    reader = snapshot.read_connection(source) if closed is None else snapshot.read_connection(source,closed_source=closed)
+    with closing(reader) as db:
         args.phase='SCHEMA_SELECT_IN_READ_TRANSACTION'
         db.execute('BEGIN')
         receipt['schema']=db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
@@ -76,11 +93,14 @@ def run(args):
         receipt['schema_probe_inventory']=snapshot.inventory(db)
         db.rollback()
     args.phase='EXISTING_BACKUP_API'
-    manifest=snapshot.backup(source,destination)
+    manifest=snapshot.backup(source,destination) if closed is None else snapshot.backup(source,destination,closed_source=closed)
     args.phase='VERIFY_CLOSED_BACKUP'
     snapshot.verify(destination,manifest)
     with closing(snapshot.read_connection(destination)) as db:
         receipt['backup_foreign_key_check']=db.execute('PRAGMA foreign_key_check').fetchall()
+    if closed is not None:
+        snapshot.verify_closed_source(source,closed)
+        receipt['source_identity_and_content_unchanged']=True
     receipt.update(status='VERIFIED_CONSISTENT_BACKUP',backup_sha256=manifest['sha256'],
         backup_bytes=destination.stat().st_size,backup_manifest=manifest,
         cross_database_atomic_snapshot='NOT_CLAIMED', source_write_guard='REQUIRED_EXTERNAL_OS_SANDBOX')
@@ -95,6 +115,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for key in ('source','destination','snapshot-code','snapshot-sha','common-sha','expected-host'):
         parser.add_argument('--'+key,required=True)
+    parser.add_argument('--closed-source-evidence', help='Private explicit closure/identity receipt; never automatic')
     args=parser.parse_args()
     try:print(json.dumps(run(args),ensure_ascii=False))
     except Exception as exc:
