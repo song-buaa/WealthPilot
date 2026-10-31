@@ -1,5 +1,6 @@
 """Offline native collect regression, reusing the hash-verified public 6-K."""
 from copy import deepcopy
+from datetime import datetime, timezone
 import io
 import json
 from unittest.mock import Mock
@@ -52,7 +53,10 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
         'filingDate':['2026-10-27',q2['filed'],'2026-08-25'],
         'reportDate':['2025-12-31','2026-06-30','2026-08-25'],
         'primaryDocument':['annual.htm',q2['primary_url'].rsplit('/',1)[1],'event.htm'],
-        'acceptanceDateTime':['2026-10-27T12:00:00Z',q2['published_at'],'2026-08-25T12:00:00Z']}))
+        # Submissions supplies UTC; the original helper retains New York time.
+        'acceptanceDateTime':['2026-10-27T12:00:00Z',
+            datetime.fromisoformat(q2['published_at']).astimezone(timezone.utc).isoformat(),
+            '2026-08-25T12:00:00Z']}))
     recent=sub['filings']['recent']
     # Eight valid synthetic business-day events preserve the collector-order
     # scenario; weekend filings are deliberately rejected by the SEC clock.

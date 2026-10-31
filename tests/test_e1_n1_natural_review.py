@@ -28,11 +28,11 @@ def submissions(*, include_new):
     rows = [dict(accessionNumber="0001104659-25-050727", form="20-F",
                  filingDate="2025-04-25", reportDate="2024-12-31",
                  primaryDocument="pdd-20241231x20f.htm",
-                 acceptanceDateTime="2025-04-25T16:00:00-04:00")]
+                 acceptanceDateTime="2025-04-25T20:00:00Z")]
     if include_new:
         rows.insert(0, dict(accessionNumber=ACCESSION, form="20-F", filingDate="2026-08-25",
                            reportDate="2025-12-31", primaryDocument="pdd-2026.htm",
-                           acceptanceDateTime="2026-08-25T07:20:02-04:00"))
+                           acceptanceDateTime="2026-08-25T11:20:02Z"))
     recent = {key: [row[key] for row in rows] for key in rows[0]}
     return {"cik": 1737806, "name": "PDD Holdings Inc.", "tickers": ["PDD"],
             "filings": {"recent": recent}}
