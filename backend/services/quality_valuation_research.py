@@ -195,10 +195,10 @@ def _project_source_failures(result, failures):
 
 def markdown(result):
     lines = ["# S3 公司池质量与估值研究", "", f"决策截止：{result['decision_at']}；方法：{result['method_version']}", "",
-             "Research Only：四底线按版本化财务/经营证据规则逐项判断；正向路径可达，UNKNOWN或警示仍保留对应blocker，重大风险不可由回报抵消。", "",
-             "公司自身研究；配置优先级 UNKNOWN。1–20家仅为输入合同容量，真实验收仅限冻结AAPL/NVDA历史样例。", "",
+             "Research Only：四底线PASS仅限US GAAP非金融企业有限观察窗口筛查；UNKNOWN或警示仍保留对应blocker，重大风险不可由回报抵消。", "",
+             "研发三档不是正式投资建议；同档名次不代表实际配置优先级，配置层 UNKNOWN。1–20家仅为输入合同容量，真实验收仅限冻结AAPL/NVDA历史样例。", "",
              "情景参数、10%要求回报示例、−10%谨慎累计回报下限及并列阈值均为研发参数，不是正式Investment Policy。", "",
-             "| 公司 | 四底线 数据/持续性/现金/核心业务 | 分档 | 档内名次 | 基准年化 | 谨慎五年回报 | 条件价值区间 USD | 排序稳定 |", "|---|---|---|---|---|---|---|---|"]
+             "| 公司 | 四底线 数据/持续性/现金/核心业务 | 分档 | 档内名次 | 基准年化 | 谨慎五年回报 | 条件价值区间 USD | 敏感性完整性/跨度 | 排序稳定 |", "|---|---|---|---|---|---|---|---|---|"]
     for card in result["cards"]:
         s = card.get("scenarios", {})
         floors = card.get("quality", {}).get("floors", {})
@@ -206,13 +206,18 @@ def markdown(result):
             "data_trust", "financial_sustainability", "profit_cash_support", "core_business_change") if k in floors) or "暂无法判断"
         base = s.get("base", {}).get("annualized_return", "UNKNOWN")
         cautious = s.get("cautious", {}).get("total_return", "UNKNOWN")
-        lines.append(f"| {card['symbol']} | {states} | {card['group']} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
+        lines.append(f"| {card['symbol']} | {states} | {card['group']} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {card.get('sensitivity_qualification', {}).get('status', 'NOT_ASSESSABLE')} {card.get('sensitivity_qualification', {}).get('computed_count', 0)}/8 / {card.get('sensitivity_span')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
     lines += ["", "回报值为小数（0.10代表10%）。条件价值是基于研究情景及要求回报的折现条件价格，不是客观公允价值或完整DCF。", "",
               "质量证据不足、一般警示、研发阈值未满足与已证实的经营恶化分别表达。通过仅限观察窗口，不保证长期竞争优势或无持续经营风险。", "",
               "五年EPS按整体盈利增长和相对股数变化推演，期末乘假设PE；分红按各年EPS×派息率计算，不再叠加回购收益。分红持有现金不再投资。", "",
+              "敏感性独立完整性要求八项全部可计算；稳健性仅验证基准情景单因素回报门槛，不是全面下行风险。谨慎五年累计回报门槛独立生效；原5pp跨度和排序变化继续显示。", "",
+              "NVDA现金支撑警示不等于已确认盈利恶化；精确PP&E CapEx/FCF继续UNKNOWN。ROE不年化、不跨不同期间排名；ROIC和正常化未知。", "",
               "## 逐公司判断卡", ""]
     for card in result["cards"]:
-        lines += [f"### {card['symbol']}", "", card["rank_reason"], "",
+        screen = card.get('quality', {}).get('liquidity_screen', {})
+        liquidity = (f"流动资产 {screen['current_assets']} / 流动负债 {screen['current_liabilities']} USD；缓冲 {screen['buffer']} USD；筛查阈值：{screen['threshold']}。这是有限筛查，不代表全面财务稳健性。"
+                     if screen.get('status') != 'UNKNOWN' and 'buffer' in screen else "流动性缓冲 UNKNOWN。")
+        lines += [f"### {card['symbol']}", "", card["rank_reason"], "", liquidity, "",
                   "```json", json.dumps(card, ensure_ascii=False, sort_keys=True, indent=2), "```", ""]
     return "\n".join(lines)
 

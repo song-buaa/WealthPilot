@@ -426,7 +426,8 @@ def build_quality(assessment):
                 ((row.get('scope')=='quarterly' and 70<=days<=105) or (row.get('scope')=='annual' and 350<=days<=380)
                  or (row.get('scope')=='year_to_date' and 105<days<350)))
         value = number(row.get('values', {}).get(field))
-        if not valid or value is None:
+        nonnegative = field in instants - {'equity'} or field in {'capex','productive_asset_payments','sbc','repurchases','diluted_shares'}
+        if not valid or value is None or (nonnegative and value < 0):
             rejected.append(row.get('record_id', 'UNKNOWN'))
             continue
         key = (field, row.get('fiscal_period_start'), row['period'], row['scope'])
