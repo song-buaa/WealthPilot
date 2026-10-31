@@ -182,3 +182,17 @@ def test_source_http_failure_retains_specific_owner_diagnostic_and_other_company
     bad=next(c for c in result['cards'] if c['symbol']=='AAA:US')
     assert not bad['scenarios'] and bad['rank'] is None
     assert bad['capture_diagnostics']['missing_sources'][0]['diagnostics'][0]['http_status']==403
+
+
+@pytest.mark.parametrize('clock',['2026-10-30','2026-10-30T00:00:00','2027-01-01T00:00:00Z'])
+def test_acquisition_requires_precise_aware_nonfuture_clock(tmp_path,clock):
+    from backend.services.s3_pool_research import PoolRequest,frozen_assessments
+    import hashlib
+    raw=tmp_path/'directory.json';raw.write_text('{}')
+    manifest={'schema_version':'s3-d.sources.v1','companies':{'AAA:US':{'directory':{
+        'url':'https://www.sec.gov/files/company_tickers.json','path':'directory.json',
+        'sha256':hashlib.sha256(raw.read_bytes()).hexdigest(),'fetched_at':clock}}},'requests':[]}
+    path=tmp_path/'manifest.json';path.write_text(json.dumps(manifest))
+    r,_,_=pool(('AAA:US',));r['source_manifest_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    _,failures,prices,_=frozen_assessments(tmp_path,PoolRequest.model_validate(r))
+    assert failures['AAA:US']=='SOURCE_HASH_OR_CLOCK_REJECTED' and prices['AAA:US']['status']=='UNKNOWN'

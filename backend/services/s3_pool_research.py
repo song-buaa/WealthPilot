@@ -165,8 +165,9 @@ def frozen_assessments(root, request):
     files={'inputs/manifest.json':archive.safe_file(root,'manifest.json')};assessments={};failures={};prices={}
     def source(entry, expected_url=None):
         if not isinstance(entry,dict) or not entry.get('path'):raise ValueError('SOURCE_UNAVAILABLE')
-        path=archive.safe_file(root,entry['path']);at=stamp(entry.get('fetched_at'))
-        if archive.file_hash(path)!=entry.get('sha256') or not at or at>request.decision_at:
+        path=archive.safe_file(root,entry['path']);clock=entry.get('fetched_at');at=stamp(clock)
+        if (archive.file_hash(path)!=entry.get('sha256') or not isinstance(clock,str) or len(clock)<=10
+                or not at or at>request.decision_at):
             raise ValueError('SOURCE_HASH_OR_CLOCK_REJECTED')
         if expected_url and entry.get('url')!=expected_url:raise ValueError('SOURCE_URL_REJECTED')
         files['inputs/'+entry['path']]=path
