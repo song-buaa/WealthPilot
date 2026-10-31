@@ -336,17 +336,21 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
             or raw.get("is_seed") or raw.get("is_mock")
             or raw.get("quality") in {"seed","mock","stale","conflict","superseded"}):
         return []
+    from research_v2.sec_disclosures import QUALITY_CONCEPTS, QUALITY_INSTANT
+    quality_basis = dict(QUALITY_CONCEPTS.values())
     result=[]
     for obs in raw.get("financial_observations",[]) if isinstance(raw.get("financial_observations"),list) else []:
         if not isinstance(obs,dict): continue
         key=obs.get("source_field");end=stamp(obs.get("fiscal_period_end"))
+        if key in quality_basis and (not sec_source or identity.get("issuer_type")!="domestic"):
+            continue
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
-        if (key not in _OFFICIAL_FIELD_BASIS or obs.get("accounting_basis") not in {_OFFICIAL_FIELD_BASIS[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
-                or obs.get("period_basis") not in ({"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
-                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent"}.get(key,"currency_units") or scale not in {1,1000,1000000}
+        if (key not in (_OFFICIAL_FIELD_BASIS | quality_basis) or obs.get("accounting_basis") not in {(_OFFICIAL_FIELD_BASIS | quality_basis)[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
+                or obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
+                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent","quality_shares":"shares","quality_diluted_shares":"shares"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
-                or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin"} else {"CNY","USD","HKD"}) or value is None
+                or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin","quality_shares","quality_diluted_shares"} else {"CNY","USD","HKD"}) or value is None
                 or not math.isfinite(value*scale)):
             continue
         proof_at=stamp(obs.get('proof_available_at')) if obs.get('period_start_source_refs') else None
@@ -505,7 +509,8 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     symbol = symbol or market.get("symbol")
     research = list(research)
     quarter_observations = [obs for item in research if mapping(item).get("symbol") == symbol
-        for obs in _official_observations(mapping(item),symbol,at,disclosure_verifier=disclosure_verifier)]
+        for obs in _official_observations(mapping(item),symbol,at,disclosure_verifier=disclosure_verifier)
+        if obs["source_field"] in _OFFICIAL_FIELD_BASIS]
     market,research=link_disclosure_clocks(market,research,at,symbol,disclosure_verifier=disclosure_verifier)
     records = [record(kind, market[kind], at=at, symbol=symbol)
                for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
@@ -717,3 +722,34 @@ def safe_market(market_data, assessment):
         elif not any(r["quality"] == "valid" for r in records):
             setattr(result, kind, None)
     return result
+
+
+def assess_quality_facts(research, *, symbol, at, disclosure_verifier):
+    """Opt-in quality evidence; no L2-L4, no base quarterly/TTM qualification change."""
+    from research_v2.sec_disclosures import QUALITY_CONCEPTS, QUALITY_INSTANT
+    bases = dict(QUALITY_CONCEPTS.values())
+    rows = []
+    for raw in research:
+        if mapping(raw).get("symbol") != symbol:
+            continue
+        for obs in _official_observations(mapping(raw), symbol, at, disclosure_verifier=disclosure_verifier):
+            key = obs["source_field"]
+            if key not in bases:
+                continue
+            start, end = stamp(obs.get("fiscal_period_start")), stamp(obs["fiscal_period_end"])
+            scope = obs["period_basis"]
+            if key in QUALITY_INSTANT:
+                if start is not None or scope != "instant": continue
+            elif not start or not end or start >= end:
+                continue
+            else:
+                days = (end-start).days+1
+                if not ((scope=="quarterly" and 70<=days<=105) or (scope=="annual" and 350<=days<=380)
+                        or (scope=="year_to_date" and 105<days<350)): continue
+            rows.append(dict(kind="quality_financial_field", record_id=obs["record_id"]+":"+key+":"+str(obs.get("fiscal_period_start"))+":"+obs["fiscal_period_end"],
+                symbol=symbol, field=key.removeprefix("quality_"), values={key.removeprefix("quality_"):obs["value"]},
+                quality="valid", scope=scope, period=obs["fiscal_period_end"], fiscal_period_start=obs.get("fiscal_period_start"),
+                currency=obs["currency"], unit=obs["unit"], accounting_basis=obs["accounting_basis"],
+                published_at=obs["published_at"], fetched_at=obs["fetched_at"], publication_links=[obs],
+                is_seed=False, is_mock=False))
+    return rows

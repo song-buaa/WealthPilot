@@ -48,6 +48,42 @@ CONCEPTS = {
     ('ifrs-full', 'CashFlowsFromUsedInOperatingActivities'): ('operatingCashflow', 'operating_cash_flow'),
     ('ifrs-full', 'PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'): ('capitalExpenditures', 'positive_capital_cash_outflow'),
 }
+# Explicit opt-in quality facts, owned by this same SEC adapter. Base collection
+# stays unchanged; instant/YTD observations never masquerade as quarter facts.
+QUALITY_CONCEPTS = {
+    ('us-gaap', 'CashAndCashEquivalentsAtCarryingValue'): ('quality_cash', 'cash_and_equivalents'),
+    ('us-gaap', 'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'): ('quality_cash_including_restricted', 'cash_including_restricted'),
+    ('us-gaap', 'Assets'): ('quality_assets', 'assets'),
+    ('us-gaap', 'Liabilities'): ('quality_liabilities', 'liabilities'),
+    ('us-gaap', 'AssetsCurrent'): ('quality_current_assets', 'current_assets'),
+    ('us-gaap', 'LiabilitiesCurrent'): ('quality_current_liabilities', 'current_liabilities'),
+    ('us-gaap', 'StockholdersEquity'): ('quality_equity', 'parent_equity'),
+    ('us-gaap', 'LongTermDebtCurrent'): ('quality_current_long_term_debt', 'current_long_term_debt'),
+    ('us-gaap', 'LongTermDebtNoncurrent'): ('quality_noncurrent_debt', 'noncurrent_debt'),
+    ('us-gaap', 'DebtCurrent'): ('quality_current_debt', 'current_debt'),
+    ('us-gaap', 'CommercialPaper'): ('quality_commercial_paper', 'commercial_paper'),
+    ('us-gaap', 'OperatingLeaseLiability'): ('quality_operating_lease_liability', 'operating_lease_liability'),
+    ('us-gaap', 'FinanceLeaseLiability'): ('quality_finance_lease_liability', 'finance_lease_liability'),
+    ('us-gaap', 'CommonStockSharesOutstanding'): ('quality_shares', 'ordinary_shares'),
+    ('us-gaap', 'WeightedAverageNumberOfDilutedSharesOutstanding'): ('quality_diluted_shares', 'weighted_diluted_shares'),
+    ('us-gaap', 'ShareBasedCompensation'): ('quality_sbc', 'share_based_compensation'),
+    ('us-gaap', 'PaymentsForRepurchaseOfCommonStock'): ('quality_repurchases', 'positive_repurchase_cash_outflow'),
+    ('us-gaap', 'NetIncomeLoss'): ('quality_net_income', 'net_income_attributable_parent'),
+    ('us-gaap', 'OperatingIncomeLoss'): ('quality_operating_income', 'operating_income'),
+    ('us-gaap', 'RevenueFromContractWithCustomerExcludingAssessedTax'): ('quality_revenue', 'total_revenue'),
+    ('us-gaap', 'Revenues'): ('quality_revenue', 'total_revenue'),
+    ('us-gaap', 'SalesRevenueNet'): ('quality_revenue', 'total_revenue'),
+    ('us-gaap', 'NetCashProvidedByUsedInOperatingActivities'): ('quality_cfo', 'operating_cash_flow'),
+    ('us-gaap', 'PaymentsToAcquirePropertyPlantAndEquipment'): ('quality_capex', 'positive_capital_cash_outflow'),
+    ('us-gaap', 'PaymentsToAcquireProductiveAssets'): ('quality_productive_asset_payments', 'positive_productive_asset_cash_outflow'),
+    ('us-gaap', 'IncreaseDecreaseInAccountsReceivable'): ('quality_receivables_change', 'increase_decrease_receivables_as_reported'),
+    ('us-gaap', 'IncreaseDecreaseInInventories'): ('quality_inventory_change', 'increase_decrease_inventory_as_reported'),
+    ('us-gaap', 'IncreaseDecreaseInAccountsPayable'): ('quality_payables_change', 'increase_decrease_payables_as_reported'),
+    ('us-gaap', 'IncomeTaxExpenseBenefit'): ('quality_tax', 'income_tax_expense'),
+    ('us-gaap', 'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest'): ('quality_pretax_income', 'pretax_income'),
+}
+QUALITY_INSTANT = {'quality_finance_lease_liability', 'quality_operating_lease_liability', 'quality_current_debt', 'quality_current_assets', 'quality_current_long_term_debt', 'quality_shares', 'quality_cash_including_restricted', 'quality_commercial_paper', 'quality_noncurrent_debt', 'quality_equity', 'quality_cash', 'quality_current_liabilities', 'quality_assets', 'quality_liabilities'}
+
 _request_lock = threading.Lock()
 _last_request = 0.0
 _diagnostics = ContextVar('sec_source_diagnostics', default=())
@@ -279,7 +315,7 @@ def _record(issuer, filing, observations, body, url, fetched_at, *, identity_dig
             issuer_identity=deepcopy(issuer), identity_document_sha256=identity_digest))
 
 
-def parse_companyfacts(source, issuer, filings, *, identity_digest):
+def parse_companyfacts(source, issuer, filings, *, identity_digest, quality=False):
     """Select actual duration/currency/accession facts, no fiscal-frame guesses."""
     data = _json(source)
     if not data or str(data.get('cik', '')).zfill(10) != issuer['cik']:
@@ -289,7 +325,7 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest):
         return []
     by_accession={f['accession']:f for f in filings}
     by_filing={}
-    for (taxonomy, concept), (field, basis) in CONCEPTS.items():
+    for (taxonomy, concept), (field, basis) in (QUALITY_CONCEPTS if quality else CONCEPTS).items():
         concepts=all_facts.get(taxonomy)
         definition=concepts.get(concept) if isinstance(concepts,dict) else None
         units=definition.get('units') if isinstance(definition,dict) else None
@@ -297,9 +333,11 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest):
             continue
         for original_unit, rows in units.items():
             currency=original_unit.removesuffix('/shares')
-            if (field=='dilutedEPSOrdinary') != original_unit.endswith('/shares'):
+            if quality and original_unit != ('shares' if field in {'quality_shares','quality_diluted_shares'} else 'USD'):
                 continue
-            if currency not in {'USD', 'CNY', 'HKD'} or not isinstance(rows, list):
+            if not quality and (field=='dilutedEPSOrdinary') != original_unit.endswith('/shares'):
+                continue
+            if (currency not in {'USD', 'CNY', 'HKD'} and not (quality and original_unit=='shares')) or not isinstance(rows, list):
                 continue
             for i, row in enumerate(rows):
                 if not isinstance(row,dict):
@@ -308,17 +346,21 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest):
                     filing=by_accession.get(row.get('accn'))
                     if not filing or row.get('form')!=filing['form'] or row.get('filed')!=filing['filed']:
                         continue
-                    scope=_period(row.get('start'),row.get('end'))
+                    scope=_period(row.get('start'),row.get('end')) if row.get('start') else None
+                    if quality and field in QUALITY_INSTANT and not row.get('start'):
+                        scope='instant'
+                    elif quality and row.get('start') and not scope and 105 < (_day(row['end'])-_day(row['start'])).days < 350:
+                        scope='year_to_date'
                     if not scope or _day(row['end'])>_day(filing['filed']):
                         continue
                     if filing['form'] in {'10-Q','10-K','20-F'} and row['end']>filing['report_date']:
                         continue
                     value=_finite(row.get('val'))
-                    if value is None or abs(value)>Decimal('1e20') or (field=='capitalExpenditures' and value<0):
+                    if value is None or abs(value)>Decimal('1e20') or (field in {'capitalExpenditures','quality_capex','quality_productive_asset_payments','quality_sbc','quality_repurchases'} and value<0):
                         continue
                     by_filing.setdefault(filing['accession'],[]).append(dict(source_field=field,value=float(value),
-                        currency=currency,unit='currency_per_ordinary_share' if field=='dilutedEPSOrdinary' else 'currency_units',unit_scale=1,period_basis=scope,
-                        fiscal_period_start=row['start'],fiscal_period_end=row['end'],accounting_basis=basis,
+                        currency=None if original_unit=='shares' else currency,unit='shares' if original_unit=='shares' else 'currency_per_ordinary_share' if field=='dilutedEPSOrdinary' else 'currency_units',unit_scale=1,period_basis=scope,
+                        fiscal_period_start=row.get('start'),fiscal_period_end=row['end'],accounting_basis=basis,
                         source_locator=f'/facts/{taxonomy}/{concept}/units/{original_unit.replace("/","~1")}/{i} (accn={filing["accession"]})'))
                 except (ValueError,TypeError,KeyError):
                     continue
