@@ -32,6 +32,8 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 �
 - 生产账户数据只在用户授权的私人范围处理；不上传完整持仓/交易数据到 Git、公开报告或未经授权的外部服务。不得提交 `.env*`、数据库、备份、私钥、Token、完整账户号及本地配置；不 force add ignored 文件。
 - push/PR、合并、Tag/Release、部署分别授权。用户已明确授权的操作不重复询问；没有授权时先完成可审查准备。要求“仅 PR”的任务在 PR/CI 交付后停止。
 
+SEC 开发采集先按[开发配置入口](docs/dev_setup.md#sec-官方来源开发配置)检查 `scripts/sec_dev.py status`。MacBook标准私有文件为 `~/.config/wealthpilot/sec-identity.json`（0700目录/0600文件），不与Mini共享；缺失时由操作者在本机Terminal一次初始化，不反复要求在聊天提供真实字段。仅显式子进程加载，不改生产配置或原Owner安全规则。
+
 ## 提交与交付
 
 - 沟通直接、结构清楚，说明结论、证据、影响和可简化方案；以产品体验与长期可维护性判断取舍，避免为短期省事引入过度设计。

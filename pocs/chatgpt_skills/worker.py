@@ -31,7 +31,15 @@ MODEL_ENV_KEYS = {"WEALTHPILOT_LLM_PROFILE", "WEALTHPILOT_LLM_MAIN_MODEL",
                   "WEALTHPILOT_LLM_LIGHT_EFFORT"}
 
 
-def load_analysis_environment(path, *, model_policy_only=False):
+def load_analysis_environment(path, *, model_policy_only=False, sec_identity_only=False):
+    if sec_identity_only:
+        if model_policy_only:raise ValueError("SEC_IDENTITY_LOAD_MODE_CONFLICT")
+        from research_v2.sec_identity import SEC_IDENTITY_KEYS, private_identity
+        state,identity=private_identity(path)
+        if state!='PRESENT':raise ValueError('SEC_DEV_IDENTITY_'+state)
+        for key in SEC_IDENTITY_KEYS:os.environ.pop(key,None)
+        os.environ.update(identity)
+        return
     values = json.loads(Path(path).read_text())
     if not isinstance(values, dict):
         raise ValueError("ANALYSIS_CONFIGURATION_INVALID")
