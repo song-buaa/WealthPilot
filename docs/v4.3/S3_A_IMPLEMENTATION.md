@@ -123,3 +123,12 @@ Review同时补充已使用余额的非负与总分一致性资格：原financia
 报告显示实际流动资产、流动负债、缓冲与`buffer >= 0`阈值及来源，不把很小的正缓冲写成全面财务稳健性。AAPL/NVDA仍是历史有限US GAAP非金融窗口筛查。NVDA现金警示不等于确认盈利恶化，精确PP&E CapEx/FCF仍UNKNOWN；ROE不年化且不跨不同期间排名，ROIC与正常化仍UNKNOWN。研发三档不是正式建议，同档名次不是实际配置优先级。
 
 风险L2、仅原分支修复与受保护Git集成；原SEC opt-in、TTM/EPS、五年估值公式、10%示例要求回报、−10%谨慎累计下限及并列阈值不变。无生产部署、MCP注册、政策、E1/PEER或交易变更；S3-C只交接最小Owner缺口，不在本轮实现。
+
+
+## S3-C 本地实施方案（2026-10-31）
+
+风险L2，基线ba271d683474abd75cb805ae47eb5066376be8ac。只扩展来源驱动的方法适用性与不可比表达，不重做SEC/Evidence/财务计算/PEER，不接政策/账户/执行。原Issuer Owner最小补充SEC注册ticker到规范类股写法的精确映射与上市类别来源；实体解析不授予每股类别换算资格。
+
+复用P1/S3-B冻结输入、SEC parse_companyfacts/parse_filing、Evidence.assess/assess_quality_facts和financial_research；新增官方来源仍由原Owner限定读取、身份/原件/时钟核验。金融/保险不能使用普通非金融筛查或直接GAAP EPS目标价；替代经营盈利/分部方法输入不齐则明确缺口，不实现第二估值引擎。
+
+适用性分APPLICABLE、NOT_APPLICABLE、INSUFFICIENT_EVIDENCE，并与计算资格/五年USD上市股权现金回报可比性分开。暂不可比公司保留研究卡、group/rank为空，不能自动放入暂不优先或视为基本面恶化。原AAPL/NVDA数值/质量门禁、八项敏感性与谨慎门槛保留；历史工件用各自原方法回放。首验可缺估值，真实来源不足不以合成数字替代。完整Gate、四家公司实际冻结与独立复算在仓外交付留证；仅本地Commit，不Push/Merge/Deploy。
