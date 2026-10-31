@@ -1,5 +1,7 @@
 # 投资政策 P3-B：正式发布者与隔离迁移预演
 
+P3-C3-A新增显式生产Schema安装准备入口及原Owner契约切换，详见[独立安装Runbook](POLICY_SCHEMA_INSTALL_RUNBOOK.md)。此为本地候选；历史隔离迁移API仍不可用于生产，安装不创建Bundle或激活政策，生产安装仍须独立授权。
+
 状态：**LOCAL_CANDIDATE / NOT_DEPLOYED / PRODUCTION_NOT_ACTIVE**。P3-B/R1/R2为P3-A的后继；P3-C1现将其与最新已集成main合入同一Draft PR #65，等待独立合并授权。生产Schema/一致性备份/真实副本预演的实际状态单独记录在私人报告，不能由合成测试或本页推定通过。部署、内容批准、结构化审批、正式激活和具体交易授权相互独立。
 
 ## 1. 复用与最小实现
