@@ -108,6 +108,19 @@ async def run_chat_stream_v3(*args, **kwargs):
     """Collect content-free metadata around the unchanged original PEER stream."""
     from app.llm_observation import AnalysisObservation, bind_run
     from backend.services import decision_service
+    from backend.services.investment_policy.runtime import current as policy_current, bind as bind_policy
+    from backend.services.investment_policy.parser import PolicyError
+    pid = args[2] if len(args)>2 else kwargs.get('portfolio_id',1)
+    policy_session = policy_current(pid)
+    if policy_session.mode=='POLICY_ACTIVE':
+        policy_session.attach_asset_view(kwargs.get('analysis_context'))
+    import os
+    guarded = policy_session.mode != 'LEGACY' or bool(os.environ.get('WEALTHPILOT_POLICY_DB_PATH'))
+    pending, buffered = [], []
+    final_policy_text = None
+    callback = kwargs.get('result_callback')
+    if guarded and callback:
+        kwargs['result_callback'] = lambda *values: pending.append(values)
     conversation = args[1] if len(args) > 1 else kwargs.get("conversation_id")
     trace = current() or AnalysisObservation()
     owner = current() is None
@@ -117,12 +130,16 @@ async def run_chat_stream_v3(*args, **kwargs):
         while True:
             # Context tokens cannot span a yield: callers may interleave streams
             # or close them from a different task after disconnect.
-            with bind_run(trace):
+            with bind_run(trace), bind_policy(policy_session):
+                policy_session.ensure_current()
                 try:
                     event = await anext(stream)
                 except StopAsyncIteration:
                     break
             kind = event.splitlines()[0].removeprefix("event: ")
+            if kind=='policy_final_text':
+                final_policy_text=json.loads(event.splitlines()[1].removeprefix('data: '))['text']
+                continue
             if kind in {"done", "error"}:
                 failed |= kind == "error"
                 data = json.loads(event.splitlines()[1].removeprefix("data: "))
@@ -135,9 +152,29 @@ async def run_chat_stream_v3(*args, **kwargs):
                 if key in decision_service._ALLOC_EXPLAIN_STORE:
                     decision_service._ALLOC_EXPLAIN_STORE[key]["llm_observation"] = metadata
                 event = _sse(kind, data)
-            yield event
+            if guarded:
+                buffered.append(event)
+            else:
+                yield event
+        if guarded:
+            policy_session.ensure_current()
+            if callback:
+                for values in pending:
+                    callback(*values)
+            emitted=False
+            for event in buffered:
+                kind=event.splitlines()[0].removeprefix('event: ')
+                if policy_session.mode=='POLICY_ACTIVE' and kind=='text':
+                    continue
+                if policy_session.mode=='POLICY_ACTIVE' and kind=='done' and not emitted:
+                    yield _sse('text',{'delta':final_policy_text or '当前证据不足，无法形成可核验的政策判断；不提供精确操作数量。'})
+                    emitted=True
+                yield event
+    except PolicyError as exc:
+        failed = True
+        yield _sse('error', {'error':str(exc), 'policy_status':'UNAVAILABLE', 'execution_authorized':False})
     finally:
-        with bind_run(trace):
+        with bind_run(trace), bind_policy(policy_session):
             await stream.aclose()
         if owner:
             trace.snapshot("cancelled" if not trace.closed else None)
@@ -483,6 +520,11 @@ async def _run_chat_stream_v3(
                 yield _sse("text", {"delta": chunk})
 
         # Optional in-process result adapter; Web SSE behavior stays unchanged.
+        from backend.services.investment_policy.consumers import finalize_output
+        finalize_output(plan_out, exec_out, expr_out)
+        from backend.services.investment_policy.runtime import current as policy_current
+        if policy_current(portfolio_id).mode=='POLICY_ACTIVE':
+            yield _sse('policy_final_text',{'text':expr_out.chat_answer})
         if result_callback is not None:
             result_callback(plan_out, exec_out, expr_out, review_out)
 
@@ -763,6 +805,9 @@ async def _handle_position_multi(
             structured_payload=result.llm.structured_result,
         )
         enforce(final_output, executed.position_evidence)
+        from backend.services.investment_policy.consumers import finalize_output
+        finalize_output(single_plan, executed, final_output)
+        result.llm = final_output.llm_result
         reports.append(f"**{name}**\n\n{final_output.chat_answer}")
         qualifications.append(dict(asset=name,
             qualification=executed.position_evidence["qualification"],
@@ -778,6 +823,9 @@ async def _handle_position_multi(
             assessments=[executed.position_evidence], projected=final_output.structured_payload,
             asset_view=final_view, options=analysis_options)
     answer = "\n\n---\n\n".join(reports) if reports else "未能成功分析任何标的，建议您逐个标的单独询问。"
+    from backend.services.investment_policy.runtime import current as policy_current
+    if policy_current(portfolio_id).mode=='POLICY_ACTIVE':
+        yield _sse('policy_final_text',{'text':answer})
 
     # 流式发送
     async for chunk in _emit_text_chunks(answer):

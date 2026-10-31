@@ -341,6 +341,8 @@ class ExpressingAgent:
 
         try:
             intent_type = _resolve_intent_type(planning_output)
+            from backend.services.investment_policy.runtime import prompt
+            user_query += prompt(planning_output.portfolio_id)
             out.prompt_template_id = self._intent_to_template_id(intent_type)
             out.citation_rules_applied = ["wp-citation-rules"]
 

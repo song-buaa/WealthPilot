@@ -93,8 +93,8 @@ class DisciplineCheckOutput(BaseModel):
     violation: bool
     warning: Optional[str]
     current_weight: float
-    max_position: float
-    position_ratio: float
+    max_position: Optional[float]
+    position_ratio: Optional[float]
     rule_details: list[str]
     rule_provenance: dict = Field(default_factory=dict)
     personal_discipline_status: str = "UNVERIFIED"
@@ -144,6 +144,10 @@ def execute_check_discipline(
     portfolio_id: int = 1,
     action_type: str = "HOLD",
 ) -> DisciplineCheckOutput:
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode != 'LEGACY':
+        from backend.services.investment_policy.consumers import discipline_tool
+        return discipline_tool(asset_name, portfolio_id)
     from decision_engine import data_loader, rule_engine
     from decision_engine.types import IntentResult
 
@@ -498,6 +502,11 @@ def execute_generate_signals(
     action_type: str = "持有评估",
 ) -> GenerateSignalsOutput:
     """生成 4 维度市场信号。内部组装 LoadedData + IntentResult + RuleResult。"""
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode != 'LEGACY':
+        current(portfolio_id).consumer('peer')
+        return GenerateSignalsOutput(asset_name=asset_name, position_signal='UNKNOWN_POLICY_DIAGNOSTIC',
+            fundamental_signal='UNKNOWN', sentiment_signal='UNKNOWN',event_uncertainty='UNKNOWN',event_direction='UNKNOWN')
     try:
         from decision_engine import data_loader, rule_engine, signal_engine
         from decision_engine.types import IntentResult
@@ -593,8 +602,12 @@ def execute_load_decision_context(
             user_query=user_query,
         )
 
+        from backend.services.investment_policy.runtime import sanitize_loaded
+        loaded = sanitize_loaded(loaded, portfolio_id)
+
         from app.discipline.config import describe_effective_rules
-        loaded.rules_provenance=describe_effective_rules(getattr(loaded,"full_discipline_rules",None))
+        if not getattr(loaded,'policy_context',None):
+            loaded.rules_provenance=describe_effective_rules(getattr(loaded,"full_discipline_rules",None))
         # Preserve the original read contract while carrying source records to
         # the evidence Skill. No provider refresh, card write or narrative KPI.
         symbol=getattr(getattr(loaded,"target_position",None),"symbol",None)
@@ -903,6 +916,10 @@ def execute_retrieve_principles(
     top_k: int = 5,
 ) -> dict:
     """v3.6: wp-retrieve-principles Tool — 从知识库检索用户原则类知识。"""
+    from backend.services.investment_policy.runtime import current, context
+    if current().mode != 'LEGACY':
+        return {'chunks':[], 'total_retrieved':0, 'policy_context':context(view='philosophy',consumer='peer'),
+                'warning':'UNVERSIONED_INDEX_NOT_A_FORMAL_RULE_SOURCE'}
     import logging as _rp_log
     _rp_logger = _rp_log.getLogger("tools.retrieve_principles")
 

@@ -96,6 +96,12 @@ def get_liabilities(portfolio_id: int) -> dict:
 
 def get_alerts(portfolio_id: int) -> dict:
     """偏差预警列表"""
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode!='LEGACY':
+        from dataclasses import asdict
+        from backend.services.investment_policy.consumers import portfolio_alerts
+        items=[asdict(row) for row in portfolio_alerts(portfolio_id)]
+        return {'items':items,'count':len(items)}
     bs = analyze_portfolio(portfolio_id)
     if bs is None:
         return {"items": [], "count": 0}

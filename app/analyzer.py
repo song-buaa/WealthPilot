@@ -51,9 +51,9 @@ class DeviationAlert:
     severity: str         # 高 / 中 / 低
     title: str
     description: str
-    current_value: float
-    target_value: float
-    deviation: float      # 偏离度 (百分点)
+    current_value: Optional[float]
+    target_value: Optional[float]
+    deviation: Optional[float]      # 偏离度 (百分点)
 
 
 def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
@@ -129,6 +129,10 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
 
 def check_deviations(portfolio_id: int, balance_sheet: BalanceSheet) -> List[DeviationAlert]:
     """检查策略偏离和风险暴露，生成告警列表"""
+    from backend.services.investment_policy.runtime import current
+    if current(portfolio_id).mode!='LEGACY':
+        from backend.services.investment_policy.consumers import portfolio_alerts
+        return portfolio_alerts(portfolio_id)
     session = get_session()
     alerts = []
 

@@ -1,5 +1,7 @@
 # WealthPilot 当前系统架构
 
+> 2026-10-30政策P1/P2本地候选：[统一Owner及迁移边界](v4.3/INVESTMENT_POLICY_P1.md)。用户已批准两份私有Markdown内容；代码提供确定性派生、不可变Bundle和只读契约；[P2](v4.3/INVESTMENT_POLICY_P2.md)接入原Web/PEER/MCP/Allocation，默认LEGACY、合成ACTIVE隔离验证，未部署或真实激活。P3-A已在私人收据取得部分现役政策文件/API事实，不代表所有缓存/schema/索引已核验；[P3-B](v4.3/INVESTMENT_POLICY_P3B.md)提供本地正式审批发布及隔离迁移候选，R1已补专用共库权限适配但尚未生产启用，真实备份及外键资格仍须独立判定；实际资产资格不足继续UNKNOWN。
+
 > 2026-10-30定向映射：代码基线main `4efcd14f3ff1dccaa69b625c4c7465bf4ca8d943`。本轮只读源码/Skill发现及文档更新，不访问生产。五层目标与真实缺口见[统一架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)，不替换PEER，也不等于Evidence资格L1—L4。以下旧部署时间点是历史证据，不保证今天实时状态。
 
 > 2026-10-23：用户报告4.2已部署 `b6b5a17bb589b8e82d1d655880c45f0675cef984`，三标首轮真实投研未通过。本轮仅代码修复，不重新核验或操作生产。以下4.1记录保留为历史证据。
@@ -92,7 +94,7 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 `skills/wp-*/SKILL.md`有14份；本轮只运行SkillsLoader.discover，成功13项。`wp-action-planner`的YAML frontmatter解析失败，但[Web原端点](../backend/api/action.py)直接调用plan_actions，不依赖Loader；其function_call定义无tool_name也不是通用invoke路径。14项契约、Owner、调用关系和成熟度见[Skill矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#5-全部内部skills能力矩阵)。内部Tool分派表18项与MCP18项不同，wp-fetch-kline等append标记不计入Skill。Planning选中、manifest描述、实际invoke与Service直连分别留证。
 
 
-源码路由补充：`wp-reasoning` Loader只支持general_chat，其他研究由Expressing直接调用原llm_engine；citation_rules_applied不证明SKILL全文动态注入。单标与组合复用原PEER及AllocationService；position_multi逐公司循环并组合，不是已实现的版本化目标池/质量估值排序。业务L1对应政策片段，L2对应Portfolio/U1及数据，L3对应Skills/计算，L4对应综合推理/复核，L5对应E1、原授权执行及历史反馈；PEER/MCP跨层。统一Bundle和完整跨策略池内综合仍为TARGET。
+源码路由补充：`wp-reasoning` Loader只支持general_chat，其他研究由Expressing直接调用原llm_engine；citation_rules_applied不证明SKILL全文动态注入。单标与组合复用原PEER及AllocationService；position_multi逐公司循环并组合，不是已实现的版本化目标池/质量估值排序。业务L1对应政策片段，L2对应Portfolio/U1及数据，L3对应Skills/计算，L4对应综合推理/复核，L5对应E1、原授权执行及历史反馈；PEER/MCP跨层。统一Bundle已有P1/P2本地候选，未生产激活；完整跨策略池内综合仍为TARGET。
 
 正常异步L1沿原Worker使用一次性进程，统一600秒研究/660秒IPC（可由同一运行策略调整），最终帧在executor join前flush；父进程有界回收该子进程。Expressing前的合格证据由原Owner内存保留，局部推断失败返回明确facts-only partial，不保留未Review模型文字；同步/其他读取及E1不扩展。详见[可靠性合同](V42_IMPLEMENTATION.md#正常异步-l1-可靠性2026-10-29-开发候选)。
 

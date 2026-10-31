@@ -18,6 +18,7 @@ from app.llm_observation import peer_stage
 import json
 import logging
 import os
+import contextvars
 from typing import Optional
 
 from backend.agents.contracts import (
@@ -365,12 +366,12 @@ class ExecutingAgent:
         technical = None
 
         with ThreadPoolExecutor(max_workers=6) as executor:
-            fut_discipline = executor.submit(_task_discipline)
-            fut_signals = executor.submit(_task_signals)
-            fut_quote = executor.submit(_task_quote)
-            fut_capital_flow = executor.submit(_task_capital_flow)
-            fut_fundamentals = executor.submit(_task_fundamentals)
-            fut_kline = executor.submit(_task_kline)
+            fut_discipline = executor.submit(contextvars.copy_context().run, _task_discipline)
+            fut_signals = executor.submit(contextvars.copy_context().run, _task_signals)
+            fut_quote = executor.submit(contextvars.copy_context().run, _task_quote)
+            fut_capital_flow = executor.submit(contextvars.copy_context().run, _task_capital_flow)
+            fut_fundamentals = executor.submit(contextvars.copy_context().run, _task_fundamentals)
+            fut_kline = executor.submit(contextvars.copy_context().run, _task_kline)
 
             # 收集结果（每个任务独立异常处理）
             try:
@@ -426,7 +427,8 @@ class ExecutingAgent:
 
         # 仓位口径一致性检查
         if (loaded.target_position is not None
-                and not getattr(loaded.target_position, "is_virtual", False)):
+                and not getattr(loaded.target_position, "is_virtual", False)
+                and not getattr(loaded, 'policy_context', None)):
             tp_weight = loaded.target_position.weight
             rule_weight = rule_result.current_weight
             if abs(tp_weight - rule_weight) > 0.005:
