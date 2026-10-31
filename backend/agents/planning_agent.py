@@ -116,19 +116,38 @@ def align_explicit_single_research(
     asset = (intent.get("asset") or requested_symbol) if intent else None
     # With an explicit symbol, a different asset invented by the Planner must
     # not be promoted into a professional result for the requested security.
-    ticker = requested_symbol.split(":", 1)[0].upper() if requested_symbol else ""
     matches_request = False
     if isinstance(asset, str):
-        mentioned = asset.casefold() in research_question.casefold()
-        matches_request = (mentioned if not requested_symbol else
-                           asset.upper() in {requested_symbol.upper(), ticker} or mentioned)
+        if requested_symbol:
+            from backend.utils.symbol import infer_symbol_from_ticker, normalize_symbol, parse_symbol
+
+            def security_identity(value: str) -> str | None:
+                # The shared parser owns canonical market symbols. NASDAQ is an
+                # explicit US venue spelling, not a company-name inference.
+                venue = re.fullmatch(r"NASDAQ:([A-Z]{1,5})", value.strip(), re.I)
+                if venue:
+                    return normalize_symbol(venue[1].upper(), "US")
+                try:
+                    ticker, market = parse_symbol(value)
+                except ValueError:
+                    # Reuse the existing bare-US-ticker projection; company
+                    # names and unsupported aliases remain unconfirmed.
+                    return infer_symbol_from_ticker(value.strip().upper(), "USD")
+                return normalize_symbol(ticker.upper(), market)
+
+            requested_identity = security_identity(requested_symbol)
+            asset_identity = security_identity(asset)
+            matches_request = bool(requested_identity and asset_identity == requested_identity)
+        else:
+            matches_request = asset.casefold() in research_question.casefold()
     if not ((requested_symbol or research_cue) and intent and plan.route == "position_single"
             and intent.get("primary_intent") == "Education"
             and asset and matches_request and not plan.multi_assets
             and not plan.needs_clarification
             and isinstance(confidence, (int, float)) and confidence >= 0.75):
         return
-    plan.intent = {**intent, "primary_intent": "PositionDecision", "asset": asset}
+    plan.intent = {**intent, "primary_intent": "PositionDecision",
+                   "asset": requested_identity if requested_symbol else asset}
     plan.planner_trace = {**(plan.planner_trace or {}),
                           "intent_alignment": "explicit_single_research",
                           "original_primary_intent": "Education"}

@@ -74,6 +74,32 @@ def test_explicit_symbol_does_not_promote_another_company():
     assert value.intent["primary_intent"] == "Education"
 
 
+@pytest.mark.parametrize("requested,asset", [
+    ("XPEV", "XPEV"), ("XPEV:US", "XPEV"),
+    ("XPEV:US", "XPEV:US"), ("XPEV:US", "NASDAQ:XPEV"),
+])
+def test_verified_xpev_spellings_keep_requested_report_identity(requested, asset):
+    value = plan(asset=asset)
+    align_explicit_single_research(value, requested, "研究 XPEV 的经营")
+    assert value.intent["primary_intent"] == "PositionDecision"
+    assert value.intent["asset"] == "XPEV:US"
+
+
+def test_comparison_mention_cannot_authorize_wrong_planner_asset():
+    value = plan(asset="LI")
+    align_explicit_single_research(value, "XPEV:US", "研究 XPEV 的经营，并与 LI 比较")
+    assert value.intent["primary_intent"] == "Education"
+    assert value.intent["asset"] == "LI"
+    assert _resolve_intent_type(value) == "RouteIntentMismatch"
+
+
+def test_unverified_chinese_company_alias_remains_unaligned():
+    value = plan(asset="小鹏汽车")
+    align_explicit_single_research(value, "XPEV:US", "只研究小鹏汽车财务")
+    assert value.intent["primary_intent"] == "Education"
+    assert _resolve_intent_type(value) == "RouteIntentMismatch"
+
+
 def test_explicit_symbol_supplies_missing_planner_asset():
     value = plan(asset=None)
     align_explicit_single_research(value, "XPEV:US", "仅研究小鹏汽车财务")
@@ -94,7 +120,13 @@ def test_existing_position_decision_intents_remain_unchanged(asset, question):
     assert _resolve_intent_type(value) == "PositionDecision"
 
 
-def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, peer, monkeypatch):
+@pytest.mark.parametrize("planner_asset,question,accepted", [
+    ("XPEV", "我没有持仓，也没有买入意图，只研究小鹏汽车经营与财务。", True),
+    ("NASDAQ:XPEV", "我没有持仓，也没有买入意图，只研究小鹏汽车经营与财务。", True),
+    ("LI", "研究 XPEV 的经营，并与 LI 比较。", False),
+])
+def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, peer, monkeypatch,
+                                                                    planner_asset, question, accepted):
     """Reproduce Education + position_single, then traverse the original PEER adapter."""
     from backend.agents.planning_agent import PlanningAgent
     from decision_engine import data_loader
@@ -115,7 +147,7 @@ def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, 
         AssertionError("Education general chat must not run for XPEV research")))
 
     def wrong_intent(self, question, conversation, pid, history, positions):
-        value = plan()
+        value = plan(asset=planner_asset)
         value.portfolio_id = pid
         return value
 
@@ -132,9 +164,17 @@ def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, 
         choices=[NS(message=NS(content=json.dumps({"chat_answer": "研究公司经营与风险。",
             "professional_explanation": []}, ensure_ascii=False)))]))
     result = asyncio.run(analyze(analysis_db, 7, "analyze_position", {
-        "question": "我没有持仓，也没有买入意图，只研究小鹏汽车经营与财务。",
+        "question": question,
         "symbol": "XPEV:US"}, synthetic=True, async_l1=True))
+    if not accepted:
+        assert result["status"] == "unavailable"
+        assert result["intent"]["asset"] == "LI"
+        assert "PEER_EXPRESSION_FAILED" in result["issues"]
+        assert result["professional_result"] == {}
+        assert result["execution_authorized"] is False and result["order_created"] is False
+        return
     assert result["intent"]["primary_intent"] == "PositionDecision"
+    assert result["intent"]["asset"] == "XPEV:US"
     assert result["intent"]["planner_route"] == "position_single"
     assert "ANALYSIS_ROUTE_MISMATCH" not in result["issues"]
     assert result["professional_analysis_complete"] is True
