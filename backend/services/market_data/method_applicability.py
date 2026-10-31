@@ -5,7 +5,7 @@ Only the existing earnings model is implemented. Other methods stay uncomputed.
 """
 from backend.services.market_data.evidence import stamp
 
-VERSION = 's3-c.method-applicability.v1'
+VERSION = 's3-c.method-applicability.v1.1'
 APPLICABLE = 'APPLICABLE'
 NOT_APPLICABLE = 'NOT_APPLICABLE'
 INSUFFICIENT = 'INSUFFICIENT_EVIDENCE'

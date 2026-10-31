@@ -91,18 +91,16 @@ def compare_methods(raw_request, assessments):
 
 def identity_projection(symbol, directory_source, submissions_source):
     """Owner identity with exact registry class references, not share conversion."""
-    from backend.services.instruments.issuers import resolve_sec_issuer, sec_ticker_matches
+    from backend.services.instruments.issuers import resolve_sec_issuer
     directory, submissions = json.loads(directory_source[0]), json.loads(submissions_source[0])
     issuer = resolve_sec_issuer(symbol, directory, submissions)
     if not issuer:
         raise ValueError('OFFICIAL_ISSUER_IDENTITY_UNRESOLVED')
-    registered = sorted(r['ticker'] for r in directory.values() if isinstance(r, dict)
-                        and str(r.get('cik_str', '')).zfill(10) == issuer['cik'])
     scope = dict(issuer_type=issuer['issuer_type'], sic=submissions.get('sic'),
                  source_url=issuer['submissions_url'], source_document_sha256=hashlib.sha256(submissions_source[0]).hexdigest(),
                  fetched_at=submissions_source[1])
-    identity = dict(symbol=symbol, cik=issuer['cik'], sec_ticker=sec_ticker_matches(symbol, directory)[0]['ticker'],
-                    registered_equity_tickers=registered, submissions_tickers=submissions['tickers'],
+    identity = dict(symbol=symbol, cik=issuer['cik'], sec_ticker=issuer['sec_ticker'],
+                    registered_equity_tickers=issuer['registered_equity_tickers'], submissions_tickers=submissions['tickers'],
                     directory_sha256=hashlib.sha256(directory_source[0]).hexdigest(),
                     submissions_sha256=scope['source_document_sha256'])
     return issuer, scope, identity
