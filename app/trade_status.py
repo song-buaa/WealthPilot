@@ -6,7 +6,7 @@ from app.fill_sync import decode, orders, sync_state, lease_expired, MAX_REFRESH
 
 
 def query(db, portfolio_id, *, order_id=None, batch_id=None, symbol=None, limit=10, synthetic=False):
-    from backend.api.broker_sync import safe_sync_reason
+    from app.sync_status import safe_sync_reason
     # Python's SQLite legacy transaction mode does not BEGIN for SELECT.
     # The API and MCP must compare order/proof/publication in one read view.
     if not db.connection().connection.driver_connection.in_transaction:

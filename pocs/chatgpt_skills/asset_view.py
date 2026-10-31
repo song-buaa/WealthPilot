@@ -28,7 +28,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
     from app.database import get_session
     from app.models import Position
     from services.broker_sync.models import PositionSnapshotRun
-    from backend.api.broker_sync import _public_quality, public_sync_attempt
+    from app.sync_status import _public_quality, public_sync_attempt
     from services.broker_sync.repository import publication_status
     with readonly_business_database(path):
         overview = read_overview(path, portfolio_id)
