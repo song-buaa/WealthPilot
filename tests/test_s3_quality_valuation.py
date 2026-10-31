@@ -132,12 +132,12 @@ def test_research_scope_and_reason_categories_do_not_claim_fundamental_deteriora
     source = {s: assessment(s) for s in r["companies"]}
     result = compare(r, source)
     assert result["maturity"] == "RESEARCH_ONLY"
-    assert result["priority_capability"]["reachable"] is False
+    assert result["priority_capability"]["reachable"] is True
     for c in result["cards"]:
         assert c["classification_reasons"]["research_thresholds_status"] == "ASSESSED"
         assert c["classification_reasons"]["quality_evidence_insufficient"]
         assert c["classification_reasons"]["fundamental_deterioration"]["status"] == "NOT_ESTABLISHED"
-        assert c["quality"]["positive_quality_path_available"] is False
+        assert c["quality"]["positive_quality_path_available"] is True
     r["companies"]["AAA:US"] = params(".3", "40")
     c = compare(r, source)["cards"][0]
     assert not c["classification_reasons"]["research_thresholds_not_met"]
@@ -171,7 +171,8 @@ def test_immutable_save_reread_replay_diff_and_separate_independent_verifier(tmp
     assert save_bundle(tmp_path, b, {}) == path
     assert read_bundle(path / "bundle.json") == b
     assert replay(path / "bundle.json")["verified"]
-    from scripts.s3_independent_recompute import verify
+    import runpy
+    verify = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/s3_independent_recompute.py"))["verify"]
     assert verify(path / "bundle.json")["calculations_and_base_ranks"] == "PASS"
     changed = deepcopy(b)
     p = changed["payload"]

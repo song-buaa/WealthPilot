@@ -104,7 +104,7 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 ### S3-A 本地公司池研究
 
-[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；源码与本地真实冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
+[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；S3-B本地候选在原SEC parse_companyfacts中显式opt-in瞬时/YTD语义，原Evidence以独立来源证明投影quality事实，原financial_research.build_quality做期间对齐和现金/平均权益算术，[有限质量规则](../backend/services/market_data/quality_evaluation.py)只解释原Owner输出。原默认采集、季度/TTM与交易资格不变。源码与本地真实冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
 
 ## 5. Web 交易、数据库与任务
 
