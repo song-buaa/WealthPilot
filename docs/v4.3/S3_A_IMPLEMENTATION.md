@@ -160,3 +160,23 @@ Review同时补充已使用余额的非负与总分一致性资格：原financia
 真实Alphabet封面证明注册列表含普通股及存托优先股，故新增中性registered_tickers，旧registered_equity_tickers只兼容旧合同，不宣称其证券类型。CompanyFacts泛化EPS继续拒绝；原Owner只从同一已核验正式主文件的DEI ticker/股票标题、唯一类股轴及USD/shares直接事实恢复目标类别EPS。真实GOOG/GOOGL值有差异，不能同额或ticker特判放行；输入资格flag不可信，记录出口重新验证原件，类别投影记录ID含ticker。此为来源适配，不是新财务/TTM引擎；S3自身仍不消费未适配的多注册证券EPS，不强行产生GOOG估值。
 
 方法升为`s3-c.method-applicability.v1.2`；旧v1/v1.1工件用原源码回放，五年估值公式/阈值、S3-B质量规则不变。真实原始回归材料只存仓外交付，仓库只加合成边界测试和来源定位，禁止真实身份/Token/runtime-env进入Git。当前四公司无同一时点合格回报仍不排名；原AAPL/NVDA截止单独复算。旧L1 200ms差异保留，不因新一轮PASS声称根因已修复。
+
+## S3-D 本地实施方案（2026-10-31）
+
+风险L2；基线`f232697873d7a8572f55bcb1a22ce11b4aaf3d49`。目标是在实际抓取完成后的共同决策时点，使至少两家真实公司具备合格来源、显式五年研究假设、条件回报及分档排序。非目标：生产政策、持仓/订单、PEER编排、新行情/财务引擎及BRK完整估值；本轮仅本地提交，不Push/Merge/Deploy。
+
+Price由原AVKlineProvider/technical_evidence/Evidence负责，SEC由原私有身份入口与SEC/Evidence负责，TTM/确定性计算仍归financial_research。复用S3-B门禁、S3-C适用性、原archive与独立复算器。最小增量是原内部CLI的显式采集/冻结适配、带证据引用和不确定性的假设合同、同点重核与版本差异表达，不复制解析/TTM。已有冻结财务原件优先复用并重新资格化；不得移动抓取时钟。真实数据失败逐公司诊断，合成反例只用于边界测试。
+
+验收覆盖真实两家以上可比、TSLA假设可变更、BRK拒绝、部分失败、质量与敏感性门禁、确定性及历史A/B/C回放，执行治理规定完整本地Gate。原始证据与工件在仓外`~/.codex/outputs/s3-d-real-pool-20261031`，身份与API凭证不入Git或报告。
+
+### S3-D 内部入口与事实边界
+
+`pool --symbols AAPL NVDA TSLA BRK.B --purpose ... --sources <冻结原始目录> --archive <研究目录>`会在真实运行时选择共同decision_at，逐公司经原Owner核验，生成透明候选参数并比较冻结。新采集显式改用`--capture-root <新目录>`；可给`--reuse-sources`保留既有原件的真实时钟，仅取缺项。SEC调用通过`scripts/sec_dev.py run -- ...`，AV仅使用既有环境或显式`--av-env-file`中原Owner允许的键，不载入其他配置。采集直接使用AVKlineProvider与SEC _fetch，不调broker registry/LLM/业务数据库。
+
+`recalculate <bundle.json> --assumptions <覆盖文件> --pool-version ... --archive ...`先验证原冻结版本，再以同一源文件/决策截止重核并替换显式参数。覆盖文件须同时提供完整companies及assumption_context，不将旧自动参数理由冒充新研究结论。原read/replay/diff沿用；命令返回可比数量。1–20家为合同容量，真实通过范围以收据为准。
+
+候选参数方法`s3-d.transparent-candidates.v1`：以最多两个合格历史季度收入同比均值为盈利增长研究锚点，基准限于−10%至25%，谨慎减8pp、乐观加10pp；不宣称收入等于盈利或未来增长。三情景相对股数变化+1%/0/−0.5%，期末PE15/20/30，未来分红建模为0仅表示保守省略未核实分配；不能解释成公司不派息。统一10%要求回报仍是研发标尺，原−10%谨慎门槛、5pp敏感性、并列规则不变。所有未来参数均为RESEARCH_ASSUMPTION；历史观察快照与原质量结果严格相等；管理层指引NOT_USED，证据仅作背景时显式标注，不能证明倍数/股份/分红假设。
+
+S3-D固定34位Decimal上下文与原估值Owner一致，避免初步质量观察与最终计算继承不同调用方精度。新方法`s3-d.real-pool.v1`单列，原S3-A/B/C不改算法；历史工件以原Git源码回放，独立标准库核验新增原始收盘/拆股/参数链。原始DAILY与复权价格不混用；以SPLITS历史事件审核选定EPS期间内的类股可比性，存在拆股则保留UNKNOWN等待原Owner桥，不自行换算。该历史feed不保证所有公司行动覆盖。
+
+实际TSLA材料若未提供Owner可解析的Q4 EPS，不能以全年减前三季或非GAAP数替代；仍保留可检查、可修改的五年候选参数及缺口，不捏造回报。金融保险方法不适用不会因为正EPS或有价格被纳入普通估值。未来参数与GAAP事实、正常化UNKNOWN及质量警示均分开。

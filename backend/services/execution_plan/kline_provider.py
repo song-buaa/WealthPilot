@@ -160,6 +160,52 @@ class BrokerKlineProvider(KlineProvider):
 # 实现 2: AVKlineProvider（Alpha Vantage TIME_SERIES_DAILY）
 # ═══════════════════════════════════════════════════════════════
 
+def decode_av_daily(payload, symbol, *, count=260, diagnostics=None, strict_identity=False, period='day'):
+    """Shared raw DAILY decoder; strict frozen-research identity is opt-in."""
+    from backend.utils.symbol import symbol_to_av_ticker
+    if not isinstance(payload, dict):raise ValueError('AV_DAILY_INVALID_PAYLOAD')
+    if strict_identity:
+        from datetime import date
+        series=payload.get('Time Series (Daily)')
+        if not isinstance(series,dict) or not series or any(not isinstance(r,dict) for r in series.values()):
+            raise ValueError('AV_DAILY_INVALID_SERIES')
+        for day,row in series.items():
+            if date.fromisoformat(day).isoformat()!=day or any('adjusted' in k.lower() for k in row):
+                raise ValueError('AV_DAILY_DATE_OR_PRICE_BASIS_REJECTED')
+        meta = payload.get('Meta Data', {})
+        if (not isinstance(meta,dict) or meta.get('2. Symbol') != symbol_to_av_ticker(symbol)
+                or meta.get('5. Time Zone') not in {'US/Eastern', 'America/New_York'}
+                or meta.get('3. Last Refreshed') != max(payload.get('Time Series (Daily)', {}), default=None)):
+            raise ValueError('AV_DAILY_IDENTITY_OR_CLOCK_MISMATCH')
+        if any(isinstance(v,bool) for row in payload['Time Series (Daily)'].values() for v in row.values()):
+            raise ValueError('AV_DAILY_BOOLEAN_NOT_FINANCIAL_NUMBER')
+    rows = [dict(date=day, **{k: float(values[source]) for k,source in
+        [('open','1. open'),('high','2. high'),('low','3. low'),('close','4. close'),('volume','5. volume')]})
+        for day,values in sorted(payload.get('Time Series (Daily)', {}).items())]
+    if not rows:
+        raise ValueError('AV_DAILY_MISSING')
+    frame = pd.DataFrame(rows).tail(count).reset_index(drop=True)
+    return KlineResult(frame, 'av', period=period, latest_price_time=frame['date'].iloc[-1] if len(frame) else '',
+                       diagnostics=diagnostics or {}, delayed_minutes=15)
+
+
+def decode_av_splits(payload, symbol):
+    """Qualified vendor historical split observations; never infer a conversion."""
+    from backend.utils.symbol import symbol_to_av_ticker
+    from datetime import date
+    from decimal import Decimal
+    if not isinstance(payload,dict) or payload.get('symbol') != symbol_to_av_ticker(symbol) or not isinstance(payload.get('data'), list):
+        raise ValueError('AV_SPLITS_IDENTITY_OR_SOURCE_MISSING')
+    result = []
+    for row in payload['data']:
+        day = date.fromisoformat(row['effective_date']).isoformat()
+        factor = Decimal(str(row['split_factor']))
+        if not factor.is_finite() or factor <= 0 or any(x['effective_date']==day for x in result):
+            raise ValueError('AV_SPLITS_INVALID_OR_CONFLICTING')
+        result.append(dict(effective_date=day, split_factor=str(factor)))
+    return sorted(result, key=lambda x: x['effective_date'])
+
+
 class AVKlineProvider(KlineProvider):
     """Alpha Vantage TIME_SERIES_DAILY, outputsize=full。"""
     name = "av"
@@ -253,34 +299,11 @@ class AVKlineProvider(KlineProvider):
                 self._unavailable("AV 响应缺少日线字段")
                 return None
 
-            ts = data[ts_key]
-            rows = []
-            for date_str, vals in sorted(ts.items()):
-                rows.append({
-                    "date": date_str,
-                    "open": float(vals["1. open"]),
-                    "high": float(vals["2. high"]),
-                    "low": float(vals["3. low"]),
-                    "close": float(vals["4. close"]),
-                    "volume": float(vals["5. volume"]),
-                })
-
-            if not rows:
+            if not data[ts_key]:
                 self._unavailable("AV 日线为空")
                 return None
+            return decode_av_daily(data, symbol, count=count, diagnostics=self.diagnostics, period=period)
 
-            df = pd.DataFrame(rows).tail(count).reset_index(drop=True)
-            time_str = df["date"].iloc[-1] if len(df) > 0 else ""
-
-            return KlineResult(
-                bars=df,
-                source="av",
-                period=period,
-                latest_price_time=time_str,
-                is_realtime=False,
-                diagnostics=self.diagnostics,
-                delayed_minutes=15,  # AV 数据有约 15 分钟延迟
-            )
         except Exception as e:
             logger.warning("[AVKline] AV transport failed: %s", type(e).__name__)
             self._unavailable("AV_TRANSPORT_ERROR")

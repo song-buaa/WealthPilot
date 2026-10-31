@@ -98,6 +98,60 @@ def verify_quality(card, assessment, strict_balance=False):
     return len(i['cash_periods'])
 
 
+def verify_pool_inputs(path, payload):
+    """Independent raw-price/split/assumption closure; no business imports."""
+    from datetime import datetime
+    p=payload
+    root=path.parent/'sources'/'inputs'
+    manifest_raw=(root/'manifest.json').read_bytes()
+    assert hashlib.sha256(manifest_raw).hexdigest()==p['request']['source_manifest_sha256']
+    manifest=json.loads(manifest_raw)
+    cutoff=datetime.fromisoformat(p['request']['decision_at'])
+    for card in p['result']['cards']:
+        symbol=card['symbol'];assessment=p['assessments'].get(symbol,{})
+        if card.get('assumptions') and card['method_applicability']['earnings_model']['status']=='APPLICABLE':
+            notes=card['assumption_context']
+            assert notes==p['request']['assumption_context'][symbol]
+            assert notes['management_guidance']['status']=='NOT_USED'
+            assert notes['facts']==card['quality']['operating_observations'][-2:]
+            refs={r['record_id'] for r in assessment['quality_field_records']}
+            for field in ['earnings_growth','annual_share_change','terminal_pe','dividend_payout','required_return']:
+                note=notes['parameters'][field]
+                assert note['kind']=='RESEARCH_ASSUMPTION' and note['evidence_refs']
+                assert set(note['evidence_refs'])<=refs
+        if card['comparison_status']!='COMPARABLE':
+            assert card['rank'] is None and not card['scenarios']
+            continue
+        qualification=card['price_qualification'];assert qualification['status']=='QUALIFIED_RAW_LISTED_CLOSE'
+        entry=manifest['companies'][symbol];raw={}
+        for kind,function in [('price','TIME_SERIES_DAILY'),('splits','SPLITS')]:
+            receipt=entry[kind];file=(root/receipt['path']).resolve()
+            assert root.resolve() in file.parents
+            data=file.read_bytes();assert hashlib.sha256(data).hexdigest()==receipt['sha256']
+            assert receipt['url']=='https://www.alphavantage.co/query'
+            assert receipt['function']==function and receipt['symbol']==symbol
+            assert datetime.fromisoformat(receipt['fetched_at'])<=cutoff
+            raw[kind]=json.loads(data)
+        daily=raw['price'];series=daily['Time Series (Daily)'];meta=daily['Meta Data']
+        assert meta['2. Symbol']==symbol[:-3] and meta['3. Last Refreshed']==max(series)
+        assert meta['5. Time Zone'] in {'US/Eastern','America/New_York'}
+        price=card['cross_checks']['observed_price'];end=price['period']
+        assert end==max(series) and Decimal(series[end]['4. close'])==Decimal(str(price['values']['observed_price']))
+        for row in series.values():
+            assert not any('adjusted' in field.lower() for field in row)
+            o,h,l,c,v=[Decimal(row[k]) for k in ['1. open','2. high','3. low','4. close','5. volume']]
+            assert all(x.is_finite() for x in [o,h,l,c,v]) and min(o,h,l,c)>0 and v>=0
+            assert l<=min(o,c) and h>=max(o,c)
+        eps=card['cross_checks']['diluted_eps_ttm']
+        selected=[r for r in assessment['verified_field_records']+assessment['historical_field_records'] if r['record_id'] in eps['evidence_refs']]
+        begin=min(r['fiscal_period_start'] for r in selected)
+        assert qualification['eps_interval_start']==begin
+        splits=raw['splits'];assert splits['symbol']==symbol[:-3] and isinstance(splits['data'],list)
+        assert not any(begin<=e['effective_date']<=end and Decimal(e['split_factor'])!=1 for e in splits['data'])
+        assert card['assumptions']==p['request']['companies'][symbol]
+    assert p['result']['comparable_count']==sum(c['comparison_status']=='COMPARABLE' for c in p['result']['cards'])
+
+
 def verify(path):
     if not __debug__:
         raise RuntimeError("S3_INDEPENDENT_RECOMPUTE_REQUIRES_ASSERTIONS")
@@ -113,7 +167,9 @@ def verify(path):
         source = (path.parent / "sources" / relative).resolve()
         assert (path.parent / "sources").resolve() in source.parents, "unsafe source path"
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, "raw source hash"
-    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}:
+    if p['result']['method_version']=='s3-d.real-pool.v1':
+        verify_pool_inputs(path,p)
+    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1"}:
         for c in p['result']['cards']:
             a=p['assessments'].get(c['symbol'],{})
             scope=a.get('quality_scope',{});identity=a.get('method_identity',{})
@@ -153,7 +209,7 @@ def verify(path):
                 assert c['comparison_status']=='COMPARABLE'
     checked = 0
     quality_periods = 0
-    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}
+    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1"}
     if is_c or p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
         for card in p["result"]["cards"]:
             if card.get("quality", {}).get("financial_inputs"):
