@@ -39,3 +39,24 @@ npm run build
 ## 启动本地 UI
 
 先确认临时 DB、Demo/Mock、外部 Provider 关闭；Demo 需按原[Seed loader](../backend/services/demo_seed_loader.py)准备固定 Seed。启动命令见 [README](../README.md#3-启动开发应用)。非 Demo `backend.main` 会启动同步调度、OrderPoller、孤儿扫描和触发评估，不能用来做无副作用检查。不要复制这些 Dev 命令去替换 Mini 的 launchd 配置；生产安装/切换须单独授权。
+
+
+## SEC 官方来源开发配置
+
+MacBook和Mac Mini各自使用独立私有配置，不共享文件系统。生产Worker继续通过原 `load_analysis_environment()` 允许名单从其私有analysis-env加载；内容批准不代表Dev自动可访问Mini配置。本地直接CLI的标准文件是 `~/.config/wealthpilot/sec-identity.json`，目录0700、文件0600、归当前用户、拒绝符号链接，仅含两个JSON字符串字段 `WEALTHPILOT_SEC_ORGANIZATION` 与 `WEALTHPILOT_SEC_CONTACT_EMAIL`。不写示例身份，不提交真实值/私钥/Token/完整环境文件。
+
+新电脑先执行（项目Python3.11）：
+
+```sh
+python scripts/sec_dev.py status
+python scripts/sec_dev.py configure
+python scripts/sec_dev.py run -- python your_authorized_sec_collection.py
+```
+
+`configure`在本机Terminal隐藏输入真实组织名和联系邮箱，独占创建文件，不覆盖既有配置。不得把真实信息粘贴聊天。`status`只显示PRESENT/MISSING/INVALID及路径；不是邮箱所有权证明。新Codex先检查此入口与状态，PRESENT就复用，MISSING/INVALID给本地初始化/修复方案，不重复询问同一字段。
+
+标准库包装器只向这次明确选择的开发子进程注入两个字段，并禁dotenv；不改全局shell、launchd、Mini或其他配置。原 `request_identity()` 的格式/占位符拒绝、SEC白名单、4次/秒、超时与禁止重定向不变。原Worker可显式调用 `load_analysis_environment(path, sec_identity_only=True)`复用同一窄加载器；未指定此模式的生产加载语义不变。
+
+若仅Mini存在有效身份，只能在获授权且已核实的个人连接中安全传递这两个字段，不复制完整runtime-env或使用公司SSH身份；个人连接不可用则保留本地Terminal初始化方案，不虚构身份。不为本任务调整生产服务。
+
+诊断须区分：MISSING/INVALID或 `identity_unconfigured` 表示本地配置不满足、请求未发送；HTTP403表示服务器拒绝；proxy_connection_error/dns_error/tls_error/timeout为传输层；HTTP200后data_missing/解析缺字段才是具体来源资格缺口。HTTP200不等于财务事实合格，更不获得交易/生产权限。不要用网络失败泛称系统没有SEC能力。

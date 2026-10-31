@@ -88,19 +88,12 @@ _request_lock = threading.Lock()
 _last_request = 0.0
 _diagnostics = ContextVar('sec_source_diagnostics', default=())
 _LOG = logging.getLogger(__name__)
-SEC_IDENTITY_KEYS = {'WEALTHPILOT_SEC_ORGANIZATION', 'WEALTHPILOT_SEC_CONTACT_EMAIL'}
+from research_v2.sec_identity import SEC_IDENTITY_KEYS, identity_string
 
 
 def request_identity():
     """Operator-owned identity only; no invented default or email ownership claim."""
-    org=os.getenv('WEALTHPILOT_SEC_ORGANIZATION','').strip()
-    email=os.getenv('WEALTHPILOT_SEC_CONTACT_EMAIL','').strip()
-    if (not 2<=len(org)<=120 or any(ord(c)<32 or ord(c)>126 for c in org)
-            or not re.fullmatch(r'[A-Za-z0-9.!#$%&*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+',email)
-            or len(email)>254 or email.lower().endswith(('.invalid','.example','.test','@example.com','@example.org','@example.net'))
-            or org.lower() in {'example','sample','test','your organization','your company'}):
-        return None
-    return org+' '+email
+    return identity_string({key:os.getenv(key,'') for key in SEC_IDENTITY_KEYS})
 
 
 def source_diagnostics():
