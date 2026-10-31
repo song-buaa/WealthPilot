@@ -22,6 +22,7 @@ from app.llm_config import MODEL_LIGHT, chat_completion
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 from backend.agents.contracts import PlanningOutput, AgentTaskStatus
@@ -98,6 +99,59 @@ _SKILL_BUNDLES_BY_ROUTE = LEGACY_SELECTED_SKILLS_BY_ROUTE
 def _select_skills_for_route(route: str) -> list[str]:
     """根据路由决策选择 Skill 组合（静态映射，99% 场景）。"""
     return LEGACY_SELECTED_SKILLS_BY_ROUTE.get(route, [])
+
+
+def align_explicit_single_research(
+    plan: PlanningOutput, requested_symbol: str | None, research_question: str = ""
+) -> None:
+    """Resolve the narrow Education/position_single conflict for an explicit MCP study.
+
+    The route and a named security must already be present. This does not turn
+    general education, unclear assets, or multi-symbol requests into research.
+    It changes only the expression contract, never evidence or trade authority.
+    """
+    intent = plan.intent if isinstance(plan.intent, dict) else None
+    research_cue = bool(re.search(r"研究|公司经营|投资逻辑|财报|财务表现|基本面|现金流|竞争格局|估值", research_question))
+    confidence = intent.get("confidence") if intent else None
+    asset = (intent.get("asset") or requested_symbol) if intent else None
+    # With an explicit symbol, a different asset invented by the Planner must
+    # not be promoted into a professional result for the requested security.
+    matches_request = False
+    if isinstance(asset, str):
+        if requested_symbol:
+            from backend.utils.symbol import infer_symbol_from_ticker, normalize_symbol, parse_symbol
+
+            def security_identity(value: str) -> str | None:
+                # The shared parser owns canonical market symbols. NASDAQ is an
+                # explicit US venue spelling, not a company-name inference.
+                venue = re.fullmatch(r"NASDAQ:([A-Z]{1,5})", value.strip(), re.I)
+                if venue:
+                    return normalize_symbol(venue[1].upper(), "US")
+                try:
+                    ticker, market = parse_symbol(value)
+                except ValueError:
+                    # Reuse the existing bare-US-ticker projection; company
+                    # names and unsupported aliases remain unconfirmed.
+                    return infer_symbol_from_ticker(value.strip().upper(), "USD")
+                return normalize_symbol(ticker.upper(), market)
+
+            requested_identity = security_identity(requested_symbol)
+            asset_identity = security_identity(asset)
+            matches_request = bool(requested_identity and asset_identity == requested_identity)
+        else:
+            matches_request = asset.casefold() in research_question.casefold()
+    if not ((requested_symbol or research_cue) and intent and plan.route == "position_single"
+            and intent.get("primary_intent") == "Education"
+            and asset and matches_request and not plan.multi_assets
+            and not plan.needs_clarification
+            and isinstance(confidence, (int, float)) and confidence >= 0.75):
+        return
+    plan.intent = {**intent, "primary_intent": "PositionDecision",
+                   "asset": requested_identity if requested_symbol else asset}
+    plan.planner_trace = {**(plan.planner_trace or {}),
+                          "intent_alignment": "explicit_single_research",
+                          "original_primary_intent": "Education"}
+    plan.rationale = (plan.rationale or "") + " | 明确单标研究：单标 route 与专业表达意图对齐"
 
 
 # ════════════════════════════════════════════════

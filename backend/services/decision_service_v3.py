@@ -288,6 +288,11 @@ async def _run_chat_stream_v3(
                 logger.warning(f"[v3] planning_failed save_conversation_turn 失败: {e}")
             return
 
+        if analysis_only and analysis_options and analysis_options.get("single_position_research"):
+            from backend.agents.planning_agent import align_explicit_single_research
+            align_explicit_single_research(plan_out, analysis_options.get("requested_symbol"),
+                                           analysis_options.get("research_question", ""))
+
         # yield intent 事件（兼容 v2.6 协议）
         intent = plan_out.intent or {}
         if isinstance(intent, dict):
