@@ -132,3 +132,15 @@ Review同时补充已使用余额的非负与总分一致性资格：原financia
 复用P1/S3-B冻结输入、SEC parse_companyfacts/parse_filing、Evidence.assess/assess_quality_facts和financial_research；新增官方来源仍由原Owner限定读取、身份/原件/时钟核验。金融/保险不能使用普通非金融筛查或直接GAAP EPS目标价；替代经营盈利/分部方法输入不齐则明确缺口，不实现第二估值引擎。
 
 适用性分APPLICABLE、NOT_APPLICABLE、INSUFFICIENT_EVIDENCE，并与计算资格/五年USD上市股权现金回报可比性分开。暂不可比公司保留研究卡、group/rank为空，不能自动放入暂不优先或视为基本面恶化。原AAPL/NVDA数值/质量门禁、八项敏感性与谨慎门槛保留；历史工件用各自原方法回放。首验可缺估值，真实来源不足不以合成数字替代。完整Gate、四家公司实际冻结与独立复算在仓外交付留证；仅本地Commit，不Push/Merge/Deploy。
+
+### S3-C 方法与内部入口
+
+新增薄适配 `backend/services/s3_method_research.py`，复用原 `compare` 的质量门禁、五年公式、八项敏感性、谨慎门槛及档内排名；没有新增估值引擎。来源驱动规则 `s3-c.method-applicability.v1` 将有限质量筛查、盈利模型适用性、输入资格及回报可比性分开。默认原S3-A/B入口不切换方法；新入口须显式 `--method-applicability`，新工件不能冒用旧方法哈希。
+
+`python scripts/s3_quality_valuation.py run --method-applicability --request REQUEST.json --p1-root P1_ROOT --official-root OFFICIAL_ROOT --archive ARCHIVE`。补充原始SEC资料由显式 `scripts/sec_dev.py run -- python scripts/s3_capture_sec.py --output NEW_ROOT TSLA:US BRK.B:US` 限定捕获，仍调用原Owner的身份、URL、限速、重定向与错误诊断；不获取价格/模型/持仓。`official_manifest_sha256`必须固定manifest，包含URL、原件路径、SHA和真实fetch时钟；HTTP200仅原件可读，不是财务资格。没有新来源时可省略official-root，缺失公司仍留卡并标UNKNOWN，不能宣称真实首验通过。
+
+新共同截止不得早于P1固定时钟；原数据在后续截止重新经Evidence审核，原发布时间/fetch时钟保留，不通过移动时钟修复缺证。金融保险SIC6000–6999不进入普通质量/GAAP盈利倍数计算；经营盈利、投资资产、保险浮存金及分部/类股桥不齐时，替代方法保留INSUFFICIENT_EVIDENCE。公用事业/范围外及外资口径也不能自动套用有限非金融规则。SEC目录与Submissions共同解析点号/连字符类股身份；这不授予EPS换算资格。多上市类别缺少合格每股桥不能进入盈利倍数比较。
+
+无方法/输入/假设的企业 `comparison_status=NOT_COMPARABLE`、`group/rank=null`，不是第四档投资意见，也不等于“基本面差”。普通企业可保留质量观察但不虚构情景。可比较回报仅限现有五年USD上市股权、现金分红不再投资的条件研究口径。未来其他方法须另有可复算输入和同口径回报合同，本轮没有实现替代估值。未正常化GAAP、分部/长期竞争优势和远期预期仍需单独证据，不把模型参数当成事实。
+
+最新main的XPEV Owner变更影响旧P1整文件哈希；适配仅接受精确已验收PR66 `official_disclosures.py` 哈希，原字段重核仍须一致，不广泛放行未知历史版本。旧工件读回不变，完整回放用其原源码；新方法独立标准库复算验证适用性、质量算术、情景及排名。实际来源验收、方法矩阵、兼容性与测试收据在仓外交付，不以合成规则测试冒充TSLA/BRK.B真实验收。
