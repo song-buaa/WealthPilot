@@ -36,6 +36,7 @@ METHOD_FILES = (
 # Exact previously accepted P1 Owner versions. The pinned historical manifest is
 # retained as a receipt; current Owner requalification is still compared below.
 P1_OWNER_HASHES = {
+    'research_v2/official_disclosures.py':'27e9200ca875e4afd583b57989c5b76e153e2ede5beba2aafeacda387ddddb72',
     'backend/services/market_data/evidence.py':'7a1605f39e26655930e9ad7324abb36636926f42bc24f1b770869c52b0cadc79',
     'backend/services/market_data/financial_research.py':'b785e84ed28b72f9ae0fb6528867505fb3d35f4ac5f30f89b02067ad4051bba4',
     'research_v2/sec_disclosures.py':'20dc9cb60d1c86aa78ecf6f8540101a76509a5a4888b1dcd0985c4ccf98f63ae',
@@ -196,7 +197,7 @@ def _project_source_failures(result, failures):
 def markdown(result):
     lines = ["# S3 公司池质量与估值研究", "", f"决策截止：{result['decision_at']}；方法：{result['method_version']}", "",
              "Research Only：四底线PASS仅限US GAAP非金融企业有限观察窗口筛查；UNKNOWN或警示仍保留对应blocker，重大风险不可由回报抵消。", "",
-             "研发三档不是正式投资建议；同档名次不代表实际配置优先级，配置层 UNKNOWN。1–20家仅为输入合同容量，真实验收仅限冻结AAPL/NVDA历史样例。", "",
+             "研发三档不是正式投资建议；同档名次不代表实际配置优先级，配置层 UNKNOWN。1–20家仅为输入合同容量，真实验收范围以随附来源资格与逐公司工件为准；不可比不等于基本面差。", "",
              "情景参数、10%要求回报示例、−10%谨慎累计回报下限及并列阈值均为研发参数，不是正式Investment Policy。", "",
              "| 公司 | 四底线 数据/持续性/现金/核心业务 | 分档 | 档内名次 | 基准年化 | 谨慎五年回报 | 条件价值区间 USD | 敏感性完整性/跨度 | 排序稳定 |", "|---|---|---|---|---|---|---|---|---|"]
     for card in result["cards"]:
@@ -206,7 +207,7 @@ def markdown(result):
             "data_trust", "financial_sustainability", "profit_cash_support", "core_business_change") if k in floors) or "暂无法判断"
         base = s.get("base", {}).get("annualized_return", "UNKNOWN")
         cautious = s.get("cautious", {}).get("total_return", "UNKNOWN")
-        lines.append(f"| {card['symbol']} | {states} | {card['group']} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {card.get('sensitivity_qualification', {}).get('status', 'NOT_ASSESSABLE')} {card.get('sensitivity_qualification', {}).get('computed_count', 0)}/8 / {card.get('sensitivity_span')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
+        lines.append(f"| {card['symbol']} | {states} | {card['group'] or '暂不可比'} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {card.get('sensitivity_qualification', {}).get('status', 'NOT_ASSESSABLE')} {card.get('sensitivity_qualification', {}).get('computed_count', 0)}/8 / {card.get('sensitivity_span')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
     lines += ["", "回报值为小数（0.10代表10%）。条件价值是基于研究情景及要求回报的折现条件价格，不是客观公允价值或完整DCF。", "",
               "质量证据不足、一般警示、研发阈值未满足与已证实的经营恶化分别表达。通过仅限观察窗口，不保证长期竞争优势或无持续经营风险。", "",
               "五年EPS按整体盈利增长和相对股数变化推演，期末乘假设PE；分红按各年EPS×派息率计算，不再叠加回购收益。分红持有现金不再投资。", "",

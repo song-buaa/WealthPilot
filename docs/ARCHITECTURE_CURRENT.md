@@ -1,5 +1,7 @@
 # WealthPilot 当前系统架构
 
+> 2026-10-31 P3-C3-A：用户报告生产`5571087ac4ab41978e7019c7ccbbc42b197d15c2`已完成LEGACY兼容部署及原18工具验收，政策表仍不存在；本轮未连接生产独立重测。[显式Schema安装器](../backend/services/investment_policy/schema_install.py)为本地候选，复用原共享Owner及政策DDL，事务安装后原子更新契约指纹，不创建Bundle或激活。后续采用[一次连续上线Runbook](v4.3/POLICY_SCHEMA_INSTALL_RUNBOOK.md)，Stage/Validate后集中一次用户确认再连续审批/激活，不新增部署平台。
+
 > 2026-10-30政策P1/P2本地候选：[统一Owner及迁移边界](v4.3/INVESTMENT_POLICY_P1.md)。用户已批准两份私有Markdown内容；代码提供确定性派生、不可变Bundle和只读契约；[P2](v4.3/INVESTMENT_POLICY_P2.md)接入原Web/PEER/MCP/Allocation，默认LEGACY、合成ACTIVE隔离验证，未部署或真实激活。P3-A已在私人收据取得部分现役政策文件/API事实，不代表所有缓存/schema/索引已核验；[P3-B](v4.3/INVESTMENT_POLICY_P3B.md)提供本地正式审批发布及隔离迁移候选，R1已补专用共库权限适配但尚未生产启用，真实备份及外键资格仍须独立判定；实际资产资格不足继续UNKNOWN。
 
 > 2026-10-30定向映射：代码基线main `4efcd14f3ff1dccaa69b625c4c7465bf4ca8d943`。本轮只读源码/Skill发现及文档更新，不访问生产。五层目标与真实缺口见[统一架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)，不替换PEER，也不等于Evidence资格L1—L4。以下旧部署时间点是历史证据，不保证今天实时状态。
@@ -104,9 +106,9 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 生成模型配置和 API 适配统一由 [app/llm_config.py](../app/llm_config.py) 维护，原客户端/PEER/Skills 仍为调用入口。正常候选使用 Sol/Luna；显式 legacy profile 才可回滚，Provider 失败不切旧模型。此 owner 仅管理模型请求，不赋予证据资格、可信目标或交易权限。 [观测元数据](../app/llm_observation.py)只沿原 PEER 与隔离进程收集/投影匿名运行字段，经原 SSE/MCP/Explain 传递；不建表、不开放原文日志、不参与资格或交易判断。调用矩阵、API/ARM 兼容及有限 A/B 限制见[升级记录](GPT6_MODEL_UPGRADE.md)，用户报告38c3faf已部署、真实三标仍BLOCKED。仅验收专用进程复用原PEER和[发送前预算](../app/llm_acceptance.py)，不将其并入生产计费/资格owner；原账本可在显式操作员授权和摘要绑定下追加一次LI独立复验，历史claim与累计24次/USD3不变，无snapshot单标入口，不恢复三标循环；范围与固定视图方案见[4.2记录](V42_IMPLEMENTATION.md#最终真实验收阻断定点收口2026-10-23独立-pr-候选)。
 
-### S3-A 本地公司池研究
+### S3 公司池 Research Only
 
-[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；S3-B本地候选在原SEC parse_companyfacts中显式opt-in瞬时/YTD语义，原Evidence以独立来源证明投影quality事实，原financial_research.build_quality做期间对齐和现金/平均权益算术，[有限质量规则](../backend/services/market_data/quality_evaluation.py)只解释原Owner输出。原默认采集、季度/TTM与交易资格不变。源码与本地真实冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
+[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；S3-B本地候选在原SEC parse_companyfacts中显式opt-in瞬时/YTD语义，原Evidence以独立来源证明投影quality事实，原financial_research.build_quality做期间对齐和现金/平均权益算术，[有限质量规则](../backend/services/market_data/quality_evaluation.py)只解释原Owner输出。采集入口与季度/TTM算术仍为原Owner；S3-C沿原SEC收口UTC/工作日/晚间资格上界及直接目标类别EPS，不把注册证券数量或同额EPS当作股份换算证明。正式原文核验真实accepted与官方filed，S3不复制解析/时钟/股份规则。交易资格不变；源码及冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
 
 ## 5. Web 交易、数据库与任务
 

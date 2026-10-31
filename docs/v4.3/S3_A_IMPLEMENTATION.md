@@ -123,3 +123,40 @@ Review同时补充已使用余额的非负与总分一致性资格：原financia
 报告显示实际流动资产、流动负债、缓冲与`buffer >= 0`阈值及来源，不把很小的正缓冲写成全面财务稳健性。AAPL/NVDA仍是历史有限US GAAP非金融窗口筛查。NVDA现金警示不等于确认盈利恶化，精确PP&E CapEx/FCF仍UNKNOWN；ROE不年化且不跨不同期间排名，ROIC与正常化仍UNKNOWN。研发三档不是正式建议，同档名次不是实际配置优先级。
 
 风险L2、仅原分支修复与受保护Git集成；原SEC opt-in、TTM/EPS、五年估值公式、10%示例要求回报、−10%谨慎累计下限及并列阈值不变。无生产部署、MCP注册、政策、E1/PEER或交易变更；S3-C只交接最小Owner缺口，不在本轮实现。
+
+
+## S3-C 本地实施方案（2026-10-31）
+
+风险L2，基线ba271d683474abd75cb805ae47eb5066376be8ac。只扩展来源驱动的方法适用性与不可比表达，不重做SEC/Evidence/财务计算/PEER，不接政策/账户/执行。原Issuer Owner最小补充SEC注册ticker到规范类股写法的精确映射与上市类别来源；实体解析不授予每股类别换算资格。
+
+复用P1/S3-B冻结输入、SEC parse_companyfacts/parse_filing、Evidence.assess/assess_quality_facts和financial_research；新增官方来源仍由原Owner限定读取、身份/原件/时钟核验。金融/保险不能使用普通非金融筛查或直接GAAP EPS目标价；替代经营盈利/分部方法输入不齐则明确缺口，不实现第二估值引擎。
+
+适用性分APPLICABLE、NOT_APPLICABLE、INSUFFICIENT_EVIDENCE，并与计算资格/五年USD上市股权现金回报可比性分开。暂不可比公司保留研究卡、group/rank为空，不能自动放入暂不优先或视为基本面恶化。原AAPL/NVDA数值/质量门禁、八项敏感性与谨慎门槛保留；历史工件用各自原方法回放。首验可缺估值，真实来源不足不以合成数字替代。完整Gate、四家公司实际冻结与独立复算在仓外交付留证；仅本地Commit，不Push/Merge/Deploy。
+
+### S3-C 方法与内部入口
+
+新增薄适配 `backend/services/s3_method_research.py`，复用原 `compare` 的质量门禁、五年公式、八项敏感性、谨慎门槛及档内排名；没有新增估值引擎。来源驱动规则 `s3-c.method-applicability.v1` 将有限质量筛查、盈利模型适用性、输入资格及回报可比性分开。默认原S3-A/B入口不切换方法；新入口须显式 `--method-applicability`，新工件不能冒用旧方法哈希。
+
+`python scripts/s3_quality_valuation.py run --method-applicability --request REQUEST.json --p1-root P1_ROOT --official-root OFFICIAL_ROOT --archive ARCHIVE`。补充原始SEC资料由显式 `scripts/sec_dev.py run -- python scripts/s3_capture_sec.py --output NEW_ROOT TSLA:US BRK.B:US` 限定捕获，仍调用原Owner的身份、URL、限速、重定向与错误诊断；不获取价格/模型/持仓。`official_manifest_sha256`必须固定manifest，包含URL、原件路径、SHA和真实fetch时钟；HTTP200仅原件可读，不是财务资格。没有新来源时可省略official-root，缺失公司仍留卡并标UNKNOWN，不能宣称真实首验通过。
+
+新共同截止不得早于P1固定时钟；原数据在后续截止重新经Evidence审核，原发布时间/fetch时钟保留，不通过移动时钟修复缺证。金融保险SIC6000–6999不进入普通质量/GAAP盈利倍数计算；经营盈利、投资资产、保险浮存金及分部/类股桥不齐时，替代方法保留INSUFFICIENT_EVIDENCE。公用事业/范围外及外资口径也不能自动套用有限非金融规则。SEC目录与Submissions共同解析点号/连字符类股身份；这不授予EPS换算资格。多上市类别缺少合格每股桥不能进入盈利倍数比较。
+
+无方法/输入/假设的企业 `comparison_status=NOT_COMPARABLE`、`group/rank=null`，不是第四档投资意见，也不等于“基本面差”。普通企业可保留质量观察但不虚构情景。可比较回报仅限现有五年USD上市股权、现金分红不再投资的条件研究口径。未来其他方法须另有可复算输入和同口径回报合同，本轮没有实现替代估值。未正常化GAAP、分部/长期竞争优势和远期预期仍需单独证据，不把模型参数当成事实。
+
+最新main的XPEV Owner变更影响旧P1整文件哈希；适配仅接受精确已验收PR66 `official_disclosures.py` 哈希，原字段重核仍须一致，不广泛放行未知历史版本。旧工件读回不变，完整回放用其原源码；新方法独立标准库复算验证适用性、质量算术、情景及排名。实际来源验收、方法矩阵、兼容性与测试收据在仓外交付，不以合成规则测试冒充TSLA/BRK.B真实验收。
+
+### S3-C实际补源续验（SEC私有配置已初始化）
+
+开发子进程私有身份校验与五次限定SEC原件读取成功；身份值不入报告/Git。S3-C方法显式升为`s3-c.method-applicability.v1.1`：原SEC Owner增加晚间接受/后续官方filed的保守资格边界，见[来源说明](../V42_US_FINANCIAL_SOURCES.md#sec晚间接受与官方filing-dates3-c限定补源)。原五年估值、S3-B质量规则、敏感性与阈值不变；已有v1工件保留，用原3d52789源码回放，不覆盖旧方法哈希。
+
+新增来源必须用晚于实际fetch的共同截止。原AAPL/NVDA价格在更晚截止可能失去Owner资格，此时估值与排名保持UNKNOWN/暂不可比，不移动旧价格时间或付费补价。其原截止的完整历史回放独立保留。TSLA仅合并集团GAAP及经营观察，缺少分部、偿债/现金桥、合格价格/假设时保留UNKNOWN；BRK.B实际SIC6331不进入普通筛查/盈利倍数，类股经济权利/经营盈利桥及替代估值仍未取得资格。无须强行完成四家公司估值或排序。
+
+### S3-C PM定向审查及集成候选
+
+风险L2，最新集成基线5571087，保留已批准dc7a91e及旧工件；集成分支重放原四项提交，不重写已批准历史。PM授权Push/Draft PR、独立Review及受保护main集成；未授权部署、生产MCP、券商/持仓/投资政策或付费研究。
+
+定向审查仅扩原SEC Owner：真实accepted_at与保守published资格上界分开；正式原文分别核验SEC-HEADER ACCEPTANCE-DATETIME及FILED AS OF DATE。UTC/工作日守卫覆盖同日、跨日和缺接受时间路径；缺失采用日末上界。复用现有pandas联邦假日表，不用NYSE日历；临时关闭等无法证实的日期不推断，继续拒绝，不新建SEC时间系统。
+
+真实Alphabet封面证明注册列表含普通股及存托优先股，故新增中性registered_tickers，旧registered_equity_tickers只兼容旧合同，不宣称其证券类型。CompanyFacts泛化EPS继续拒绝；原Owner只从同一已核验正式主文件的DEI ticker/股票标题、唯一类股轴及USD/shares直接事实恢复目标类别EPS。真实GOOG/GOOGL值有差异，不能同额或ticker特判放行；输入资格flag不可信，记录出口重新验证原件，类别投影记录ID含ticker。此为来源适配，不是新财务/TTM引擎；S3自身仍不消费未适配的多注册证券EPS，不强行产生GOOG估值。
+
+方法升为`s3-c.method-applicability.v1.2`；旧v1/v1.1工件用原源码回放，五年估值公式/阈值、S3-B质量规则不变。真实原始回归材料只存仓外交付，仓库只加合成边界测试和来源定位，禁止真实身份/Token/runtime-env进入Git。当前四公司无同一时点合格回报仍不排名；原AAPL/NVDA截止单独复算。旧L1 200ms差异保留，不因新一轮PASS声称根因已修复。

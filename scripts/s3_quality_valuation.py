@@ -15,6 +15,8 @@ def main():
     run.add_argument("--request", type=Path, required=True)
     run.add_argument("--p1-root", type=Path, required=True)
     run.add_argument("--archive", type=Path, required=True)
+    run.add_argument("--method-applicability", action="store_true")
+    run.add_argument("--official-root", type=Path)
     for action in ("read", "replay"):
         item = sub.add_parser(action)
         item.add_argument("bundle", type=Path)
@@ -31,14 +33,24 @@ def main():
     socket.create_connection = deny
     from backend.services.quality_valuation_research import make_bundle, save_bundle, read_bundle, replay, difference
     if args.command == "run":
-        bundle, files = make_bundle(args.p1_root, json.loads(args.request.read_text()))
+        if args.method_applicability:
+            from backend.services.s3_method_research import make_bundle as method_bundle
+            bundle, files = method_bundle(args.p1_root, json.loads(args.request.read_text()), args.official_root)
+        else:
+            if args.official_root:
+                parser.error('--official-root requires --method-applicability')
+            bundle, files = make_bundle(args.p1_root, json.loads(args.request.read_text()))
         path = save_bundle(args.archive, bundle, files)
         result = dict(artifact_id=bundle["artifact_id"], bundle=str(path / "bundle.json"),
                       report=str(path / "comparison.md"), status=bundle["payload"]["result"]["status"])
     elif args.command == "read":
         result = read_bundle(args.bundle)["payload"]["result"]
     elif args.command == "replay":
-        result = replay(args.bundle)
+        if read_bundle(args.bundle)['payload']['result']['method_version'].startswith('s3-c.'):
+            from backend.services.s3_method_research import replay as method_replay
+            result = method_replay(args.bundle)
+        else:
+            result = replay(args.bundle)
     else:
         result = difference(args.old, args.new)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))

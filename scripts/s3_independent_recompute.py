@@ -113,12 +113,51 @@ def verify(path):
         source = (path.parent / "sources" / relative).resolve()
         assert (path.parent / "sources").resolve() in source.parents, "unsafe source path"
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, "raw source hash"
+    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}:
+        for c in p['result']['cards']:
+            a=p['assessments'].get(c['symbol'],{})
+            scope=a.get('quality_scope',{});identity=a.get('method_identity',{})
+            app=c['method_applicability']
+            try: sic=int(scope['sic'])
+            except (ValueError,KeyError,TypeError): sic=None
+            from datetime import datetime
+            at=datetime.fromisoformat(a['as_of']) if a.get('as_of') else None
+            fetched=datetime.fromisoformat(scope['fetched_at']) if scope.get('fetched_at') else None
+            valid=bool(at and fetched and fetched<=at and scope.get('source_document_sha256')
+                and scope.get('source_url','').startswith('https://data.sec.gov/submissions/CIK') and sic is not None)
+            expected_quality='INSUFFICIENT_EVIDENCE';expected_model='INSUFFICIENT_EVIDENCE'
+            if valid:
+                if scope.get('issuer_type')!='domestic':expected_quality='NOT_APPLICABLE'
+                elif 6000<=sic<=6999:expected_quality=expected_model='NOT_APPLICABLE'
+                elif not 1000<=sic<=8999 or 4900<=sic<=4999:expected_quality='NOT_APPLICABLE'
+                else:
+                    expected_quality='APPLICABLE'
+                    if (identity.get('symbol')==a.get('symbol') and identity.get('registered_equity_tickers')==[identity.get('sec_ticker')]
+                        and identity.get('sec_ticker') in identity.get('submissions_tickers',[])
+                        and identity.get('directory_sha256') and identity.get('submissions_sha256')==scope['source_document_sha256']):
+                        expected_model='APPLICABLE'
+            assert app['quality_screen']['status']==expected_quality, 'quality applicability differs'
+            assert app['earnings_model']['status']==expected_model, 'earnings applicability differs'
+            if expected_quality!='APPLICABLE':
+                assert not c['scenarios'] and c['group'] is None
+                assert not c.get('quality',{}).get('financial_inputs'), 'ineligible firm entered ordinary screen'
+            if c.get('scenarios'):
+                from datetime import datetime
+                assert 1000<=sic<=8999 and not 4900<=sic<=4999 and not 6000<=sic<=6999
+                assert scope['issuer_type']=='domestic'
+                assert datetime.fromisoformat(scope['fetched_at'])<=datetime.fromisoformat(a['as_of'])
+                assert app['earnings_model']['status']=='APPLICABLE'
+                assert identity['registered_equity_tickers']==[identity['sec_ticker']]
+                assert identity['symbol']==c['symbol'] and identity['sec_ticker'] in identity['submissions_tickers']
+                assert identity['submissions_sha256']==scope['source_document_sha256']
+                assert c['comparison_status']=='COMPARABLE'
     checked = 0
     quality_periods = 0
-    if p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
+    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2"}
+    if is_c or p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
         for card in p["result"]["cards"]:
-            if card.get("quality"):
-                quality_periods += verify_quality(card, p["assessments"][card["symbol"]], p['result']['method_version']=='s3-b.quality-evidence.v1.1')
+            if card.get("quality", {}).get("financial_inputs"):
+                quality_periods += verify_quality(card, p["assessments"][card["symbol"]], is_c or p['result']['method_version']=='s3-b.quality-evidence.v1.1')
     with localcontext() as context:
         context.prec = 40
         for card in p["result"]["cards"]:
@@ -164,15 +203,16 @@ def verify(path):
             ordered = []
             for c in p["result"]["cards"]:
                 if not c.get("scenarios"):
-                    assert c["group"] == "暂不优先" and c["rank"] is None
+                    assert c["group"] == (None if is_c else "暂不优先") and c["rank"] is None
+                    if is_c: assert c["comparison_status"] == "NOT_COMPARABLE"
                     continue
                 good = Decimal(c["scenarios"]["base"]["annualized_return"]) >= Decimal(c["assumptions"]["required_return"])
                 downside = Decimal(c["scenarios"]["cautious"]["total_return"]) >= Decimal(str(p["request"].get("downside_floor", "-.1")))
                 robust=bool(c.get('sensitivity')) and all(v.get('result') and Decimal(v['result']['annualized_return'])>=Decimal(v['required_return']) for v in c.get('sensitivity',[]))
                 method=p['result']['method_version']
-                is_b=method in {'s3-b.quality-evidence.v1','s3-b.quality-evidence.v1.1'}
+                is_b=is_c or method in {'s3-b.quality-evidence.v1','s3-b.quality-evidence.v1.1'}
                 complete=True
-                if method=='s3-b.quality-evidence.v1.1':
+                if is_c or method=='s3-b.quality-evidence.v1.1':
                     expected={(f,Decimal(x)) for f,offsets in [('earnings_growth',('-.02','.02')),('terminal_pe',('-.2','.2')),
                         ('annual_share_change',('-.01','.01')),('required_return',('-.02','.02'))] for x in offsets}
                     variants=c.get('sensitivity',[]);keys=[];computed=set();returns=[]

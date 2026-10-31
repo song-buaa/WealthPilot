@@ -127,3 +127,23 @@ PDD夹具为公开SEC text/plain页面的完整浏览器DOM UTF-8表示，包含
 两份原始 SEC 8-K 的禁网 fixture 分别验证 AAPL 2025-09-27 GAAP 稀释 EPS 1.85 USD/普通股、NVDA 2026-01-25 GAAP 稀释 EPS 1.76 USD/普通股；NVDA 同件非 GAAP 1.62 被排除。原 AV full 历史包加本轮实际抓取的 `TIME_SERIES_DAILY/compact` 只读日线，经重叠校验后由原技术 Evidence 判定 2026-10-29 最后完整交易日有效；`TIME_SERIES_DAILY/full` 的 HTTP 200 `Information` 没有被当作行情。冻结输入、来源哈希、共同决策时间与独立复算均保存在本机私有验收工件；这些是开发侧真实来源正向链，不是生产 PEER 或 S3 策略验收。
 
 基础 PE 是历史价格除以四季 GAAP 稀释 EPS 的静态比率，不是内在价值、目标价或交易授权。原始收盘价与复权价不得混用；现有 `build` 仍不推导股份拆分，也不替代正式公司行动核查。AAPL/NVDA 的历史拆股及所选四季窗口需与官方公司行动资料和原 AV 拆股系数共同核对。生产来源、定时缓存和真实 PEER 仍待独立授权验证。
+
+### SEC晚间接受与官方filing date（S3-C限定补源）
+
+`sec_disclosures.discover_filings` 保留正常同纽约日期的原路径。多数17:30后接受的申报可获得下一营业日filing date，不能要求acceptance纽约日期恒等于filed日期，也不能将接受时间自动当成已公开时间；依据见[SEC原说明](https://www.sec.gov/submit-filings/filer-support-resources/how-do-i-guides/determine-status-my-filing)。
+
+PM收口后，原Owner仅接受UTC/Z的接受时间；所有分支检查周末及既有pandas联邦假日表。同日有效申报保留原时刻；晚间17:30后/22:00前只在官方filed与下一已知联邦工作日一致、且自然日差不超过4天时资格化。缺接受时间也保留官方filed日末上界。临时SEC关闭等未覆盖例外不猜测，日期不匹配继续UNKNOWN；这不是完整EDGAR日历。晚间分支取整个纽约filed日结束作为**保守资格上界，并非观察到的公开时刻**。源locator保留原accepted及此含义；在上界之前抓取的原件不授予此项资格。更长差距、逆序、周末filed、无时区及不合时段仍UNKNOWN/拒绝。不改变财务期间、单位、来源或TTM计算，且不绕过Evidence的fetch时钟。
+
+真实TSLA 2026-Q3 Submissions的accepted为2026-10-22T00:12:41Z（纽约10月21日晚），filed为10月22日；旧同日守卫过滤当前申报，只剩2022历史事实并触发过期和拆股冲突。修正沿原Owner读取同批CompanyFacts，不重抓、不复制财务解析器；真实数值、缺证及冻结收据单独在本地交付，不等于完整质量或生产验收。
+
+### S3-C PM收口：直接目标类别EPS而非全局多证券删除
+
+Issuer Owner新增中性`registered_tickers`；旧`registered_equity_tickers`仅保留兼容名，不证明普通股类型。SEC目录同CIK证券可能同时含普通股、存托优先股或其他证券，不能按ticker数量断言多普通股类别。原v1.1全拦截在本轮定点收窄：默认拒绝多个注册证券下未归属的CompanyFacts泛化EPS；可从同一经验证10-Q/10-K主文件恢复**直接目标类别EPS**。
+
+DEI TradingSymbol与Security12bTitle、同CIK类股context须共同绑定目标；标题仅接受Common/Capital Stock等限定普通股类型，排除存托/优先股/票据。只允许单一标准股票类别轴、标准GAAP稀释EPS及USD/shares除法单位；ticker不特判、数值相等不构成桥、不做A/B比率换算。跨QName仅允许唯一合法Class X标题与标准CommonClassXMember；其他自定义成员只能与正式封面成员完全相同。公司整体无维度EPS不能借给某一类别，封面仅一项普通股也不能证明不存在未上市类别。新增直接类别路径逐层核验XBRL命名空间、期间及封面身份时钟，拒绝nil或伪命名空间标记；当前只支持无format转换的普通十进制字面量，其他格式保留缺证，不扩大旧普通单类别解析器的能力声明。
+
+新增直接类别路径的DEI身份和EPS均仅接受完整纯文本；continuedAt、escape、format或子标签（含ix:exclude）均不支持并拒绝，避免把部分显示文本当作证券类型或数值证明。这不是通用iXBRL转换/续接解析器。
+
+记录出口丢弃传入EPS资格flag，并从同原件/真实SEC-HEADER重新提取类别事实。多注册证券记录引用含ticker，避免GOOG/GOOGL共享原件SHA而事实投影混淆；单注册证券原记录ID不变。Source缓存键升级避免旧无类别投影沿用。正式原文分别核验`accepted_at`与官方FILED AS OF DATE，保守published上界不再冒充真实header接受时刻；相同验证用于parse_filing及verify_filing_envelope。
+
+真实Alphabet回归证明：合并EPS与A/C类EPS并不恒相同；GOOG/GOOGL按各自官方直接事实恢复，存托优先股GOOGM/N不接收普通股EPS。该回归仅为来源资格，不宣称完整TTM、实时PE或S3估值。BRK.A/B的CompanyFacts无归属EPS继续拒绝；S3金融模型不适用仍生效。原始材料与数值在私人交付，不提交Git或公开PR。
