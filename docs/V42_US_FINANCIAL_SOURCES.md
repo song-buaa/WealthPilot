@@ -127,3 +127,13 @@ PDD夹具为公开SEC text/plain页面的完整浏览器DOM UTF-8表示，包含
 两份原始 SEC 8-K 的禁网 fixture 分别验证 AAPL 2025-09-27 GAAP 稀释 EPS 1.85 USD/普通股、NVDA 2026-01-25 GAAP 稀释 EPS 1.76 USD/普通股；NVDA 同件非 GAAP 1.62 被排除。原 AV full 历史包加本轮实际抓取的 `TIME_SERIES_DAILY/compact` 只读日线，经重叠校验后由原技术 Evidence 判定 2026-10-29 最后完整交易日有效；`TIME_SERIES_DAILY/full` 的 HTTP 200 `Information` 没有被当作行情。冻结输入、来源哈希、共同决策时间与独立复算均保存在本机私有验收工件；这些是开发侧真实来源正向链，不是生产 PEER 或 S3 策略验收。
 
 基础 PE 是历史价格除以四季 GAAP 稀释 EPS 的静态比率，不是内在价值、目标价或交易授权。原始收盘价与复权价不得混用；现有 `build` 仍不推导股份拆分，也不替代正式公司行动核查。AAPL/NVDA 的历史拆股及所选四季窗口需与官方公司行动资料和原 AV 拆股系数共同核对。生产来源、定时缓存和真实 PEER 仍待独立授权验证。
+
+### SEC晚间接受与官方filing date（S3-C限定补源）
+
+`sec_disclosures.discover_filings` 保留正常同纽约日期的原路径。多数17:30后接受的申报可获得下一营业日filing date，不能要求acceptance纽约日期恒等于filed日期，也不能将接受时间自动当成已公开时间；依据见[SEC原说明](https://www.sec.gov/submit-filings/filer-support-resources/how-do-i-guides/determine-status-my-filing)。
+
+原Owner仅对两个官方字段提供的限定组合增加保守资格：接受时刻有时区、纽约工作日17:30后/22:00前，官方filed为后续工作日且自然日差不超过4天。这里不推算SEC节假日或断言精确下一营业日；直接保留官方filed，取其整个纽约日结束作为**保守资格上界，并非观察到的公开时刻**。源locator保留原accepted及此含义；在上界之前抓取的原件不授予此项资格。更长差距、逆序、周末filed、无时区及不合时段仍UNKNOWN/拒绝。不改变财务期间、单位、来源或TTM计算，且不绕过Evidence的fetch时钟。
+
+真实TSLA 2026-Q3 Submissions的accepted为2026-10-22T00:12:41Z（纽约10月21日晚），filed为10月22日；旧同日守卫过滤当前申报，只剩2022历史事实并触发过期和拆股冲突。修正沿原Owner读取同批CompanyFacts，不重抓、不复制财务解析器；真实数值、缺证及冻结收据单独在本地交付，不等于完整质量或生产验收。
+
+同轮Issuer Owner将SEC注册ticker及同CIK上市类别交给来源适配；点号/连字符身份解析不授予每股经济转换。对多注册上市类别、尚无合格EPS类别桥的domestic issuer，原SEC `_record`统一拒绝投影`dilutedEPSOrdinary`（CompanyFacts和正式附件两条来源均覆盖），保留其余合并财务事实，不能将A类每股盈利默认为B类上市单位。S3只适配Owner元数据，不维护第二份类股解析规则。单类别与外资原路径不变；未来精确每类EPS须由原Owner补源，不推算换股比例。

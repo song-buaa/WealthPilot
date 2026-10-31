@@ -96,7 +96,11 @@ def resolve_sec_issuer(symbol, ticker_directory, submissions):
     foreign = bool(forms & {"20-F", "6-K"})
     if domestic == foreign:
         return None
+    registered = sorted({row['ticker'] for row in ticker_directory.values()
+                         if isinstance(row, dict) and isinstance(row.get('ticker'), str)
+                         and str(row.get('cik_str', '')).zfill(10) == cik})
     return dict(symbol=symbol, issuer_id=IDENTITIES.get((symbol, "USD"), "SEC_CIK_"+cik),
                 cik=cik, name=submissions["name"], issuer_type="foreign_private" if foreign else "domestic",
+                sec_ticker=ticker, registered_equity_tickers=registered,
                 identity_source="https://www.sec.gov/files/company_tickers.json",
                 submissions_url="https://data.sec.gov/submissions/CIK"+cik+".json")

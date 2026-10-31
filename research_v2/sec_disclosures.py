@@ -6,7 +6,7 @@ inline-XBRL (or the existing LI table layout); unsupported facts stay unknown.
 No AI extraction, asset writes, TTM calculation, redirect or arbitrary URL input.
 """
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, time as wall_time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
@@ -236,10 +236,27 @@ def discover_filings(issuer, submissions):
             locator = f'Submissions/filings/recent/filingDate[{i}] (filing day precision)'
             if accepted:
                 clock = datetime.fromisoformat(accepted.replace('Z', '+00:00'))
-                if clock.tzinfo is None or clock.astimezone(ZoneInfo('America/New_York')).date() != filed:
+                if clock.tzinfo is None:
                     continue
-                published = clock.isoformat()
-                locator = f'Submissions/filings/recent/acceptanceDateTime[{i}]'
+                eastern = clock.astimezone(ZoneInfo('America/New_York'))
+                if eastern.date() == filed:
+                    published = clock.isoformat()
+                    locator = f'Submissions/filings/recent/acceptanceDateTime[{i}]'
+                elif (0 < (filed-eastern.date()).days <= 4 and filed.weekday() < 5
+                      and eastern.weekday() < 5 and wall_time(17,30) < eastern.time() < wall_time(22)):
+                    # SEC accepts many after-17:30 submissions with a later
+                    # official filing date. Do not equate acceptance to public
+                    # dissemination or invent an EDGAR holiday calendar. Trust
+                    # the independently sourced filing date only as a bounded,
+                    # conservative availability interval: qualify AFTER that
+                    # entire NY day. Unusual gaps remain unsupported/unknown.
+                    # https://www.sec.gov/submit-filings/filer-support-resources/how-do-i-guides/determine-status-my-filing
+                    published = datetime.combine(filed, datetime.max.time(), ZoneInfo('America/New_York')).isoformat()
+                    locator = (f'Submissions/filings/recent/filingDate[{i}] '
+                               f'(CONSERVATIVE_FILED_DAY_END_NOT_OBSERVED_PUBLICATION_TIME; '
+                               f'acceptanceDateTime[{i}]={clock.isoformat()})')
+                else:
+                    continue
             rows.append(dict(accession=accession, form=form, filed=filed.isoformat(), report_date=report,
                 published_at=published, publication_locator=locator, primary_url=base + document,
                 full_url=base + accession + '.txt'))
@@ -284,6 +301,11 @@ def _deduplicate(observations):
 
 
 def _record(issuer, filing, observations, body, url, fetched_at, *, identity_digest):
+    # Issuer identity does not qualify per-listed-class earnings. In particular,
+    # a directory alias must not turn a group's Class A EPS into Class B EPS.
+    # A later qualified class bridge can extend this Owner; no conversion here.
+    if issuer.get('issuer_type') == 'domestic' and len(issuer.get('registered_equity_tickers', [])) > 1:
+        observations = [o for o in observations if o.get('source_field') != 'dilutedEPSOrdinary']
     if not observations or not isinstance(fetched_at,str):
         return None
     try:

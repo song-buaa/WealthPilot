@@ -329,3 +329,48 @@ def test_inline_concept_namespace_cannot_self_claim_a_standard_prefix():
     issuer,filings=identity()
     doc=inline_document().replace('http://fasb.org/us-gaap/2026','https://untrusted.test/us-gaap')
     assert sec.parse_filing((full_submission(issuer,filings[0],doc),AT.isoformat()),issuer,filings[0],identity_digest=DIGEST) is None
+
+
+def test_late_acceptance_uses_conservative_official_filing_day_not_acceptance():
+    s=submissions();s['filings']['recent']['acceptanceDateTime']=['2026-08-25T22:00:00Z']
+    rows=sec.discover_filings(identity()[0],s)
+    assert len(rows)==1
+    assert rows[0]['published_at']=='2026-08-26T23:59:59.999999-04:00'
+    assert 'CONSERVATIVE_FILED_DAY_END_NOT_OBSERVED_PUBLICATION_TIME' in rows[0]['publication_locator']
+    assert '2026-08-25T22:00:00+00:00' in rows[0]['publication_locator']
+    # The original Owner must not qualify this conservative interval before
+    # its upper bound, even if a source body was observable earlier that day.
+    assert sec._record(identity()[0],rows[0],[{'fiscal_period_end':'2026-06-30'}],b'synthetic',
+        'https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json',
+        '2026-08-26T18:00:00+00:00',identity_digest=DIGEST) is None
+
+
+@pytest.mark.parametrize('accepted',['2026-08-25T21:30:00Z','2026-08-25T20:00:00Z',
+    '2026-08-26T02:00:00Z','2026-08-27T15:00:00Z','2026-08-20T22:00:00Z','2026-08-25T22:00:00'])
+def test_invalid_filing_clock_stays_rejected(accepted):
+    s=submissions();s['filings']['recent']['acceptanceDateTime']=[accepted]
+    assert sec.discover_filings(identity()[0],s)==[]
+
+
+def test_late_acceptance_seconds_boundary_and_weekend_filing_rejection():
+    s=submissions();s['filings']['recent']['acceptanceDateTime']=['2026-08-25T21:30:01Z']
+    assert len(sec.discover_filings(identity()[0],s))==1
+    s['filings']['recent']['acceptanceDateTime']=['2026-08-28T22:00:00Z']
+    s['filings']['recent']['filingDate']=['2026-08-29']
+    assert sec.discover_filings(identity()[0],s)==[]
+
+
+def test_source_owner_does_not_promote_multiclass_eps_to_listed_unit():
+    source,issuer,filings=facts()
+    payload=json.loads(source[0])
+    payload['facts']['us-gaap']['EarningsPerShareDiluted']=dict(units={'USD/shares':[dict(
+        accn=filings[0]['accession'],form='10-Q',filed='2026-08-26',start='2026-04-01',end='2026-06-30',val=2)]})
+    source=(json.dumps(payload).encode(),source[1])
+    assert any(o['source_field']=='dilutedEPSOrdinary' for r in sec.parse_companyfacts(source,issuer,filings,identity_digest=DIGEST) for o in r['financial_observations'])
+    issuer['registered_equity_tickers']=['AAA-A','AAA-B']
+    rows=sec.parse_companyfacts(source,issuer,filings,identity_digest=DIGEST)
+    assert rows and any(o['source_field']=='totalRevenue' for r in rows for o in r['financial_observations'])
+    assert not any(o['source_field']=='dilutedEPSOrdinary' for r in rows for o in r['financial_observations'])
+    # The same centralized record gate protects original filing projections.
+    assert sec._record(issuer,filings[0],[dict(source_field='dilutedEPSOrdinary',fiscal_period_end='2026-06-30')],
+        b'synthetic','https://www.sec.gov/synthetic',AT.isoformat(),identity_digest=DIGEST) is None
