@@ -1,6 +1,6 @@
 # 投资政策 P3-B：正式发布者与隔离迁移预演
 
-状态：**LOCAL_CANDIDATE / NOT_DEPLOYED / PRODUCTION_NOT_ACTIVE**。本阶段依赖未合并的P3-A候选，不更改其Draft PR。生产Schema/一致性备份/真实副本预演的实际状态单独记录在私人报告，不能由合成测试或本页推定通过。部署、内容批准、结构化审批、正式激活和具体交易授权相互独立。
+状态：**LOCAL_CANDIDATE / NOT_DEPLOYED / PRODUCTION_NOT_ACTIVE**。P3-B/R1/R2为P3-A的后继；P3-C1现将其与最新已集成main合入同一Draft PR #65，等待独立合并授权。生产Schema/一致性备份/真实副本预演的实际状态单独记录在私人报告，不能由合成测试或本页推定通过。部署、内容批准、结构化审批、正式激活和具体交易授权相互独立。
 
 ## 1. 复用与最小实现
 
@@ -75,9 +75,9 @@ R1真实备份与实际迁移结果以私人收据为准。备份一致性/恢�
 
 R1新增[共库权限回归](../../tests/test_policy_colocated.py)。新增[Publisher回归](../../tests/test_policy_publisher.py)、[迁移/Backup回归](../../tests/test_policy_schema_rehearsal.py)与[实际MCP协议](../../pocs/chatgpt_skills/test_policy_protocol.py)，并保持原全量、M5、前端及E1/交易权限Gate。公开测试只用合成源；真实批准源及冻结生产旧规则在私人脚本中交叉验证，不能代替本轮实时生产备份。
 
-本轮只本地提交，不Push/更新远端PR/合并/部署/生产DDL或激活。正式P3-C须先消除存储/备份阻断、验证最终候选远端四CI、独立Review和同版本切换，再分别取得部署与实际政策激活授权。私人P3-C Runbook维护具体设备/路径及回滚收据，不在仓库暴露。
+P3-B/R1/R2阶段只本地提交；P3-C1只授权Push/更新Draft PR及远端CI，不合并、部署、生产DDL或激活。后续须核对最终候选远端四CI、独立Review和同版本切换，再分别取得部署与实际政策激活授权。私人P3-C Runbook维护具体设备/路径及回滚收据，不在仓库暴露。
 
-## 7. R2真实备份副本验收边界（2026-10-31）
+## 8. R2真实备份副本验收边界（2026-10-31）
 
 R2在用户针对唯一历史孤儿及其V2迁移标记例外分别确认后，完成一行受控生产研究数据清理。删除前后均使用原SQLite Backup API及源写禁止保护取得私人一致性备份；事务要求目标完整行Hash、唯一外键异常、备份与事务起点摘要一致、影响恰好一行，删除后核对全部非目标表、Schema及E1。V2卡片和历史文字迁移标记保留；该标记不再指向现役V1行，原行保留在私人备份及恢复证据中。一次性操作脚本与原记录不进入仓库，不新增常驻修复服务。
 
@@ -86,3 +86,39 @@ R2在用户针对唯一历史孤儿及其V2迁移标记例外分别确认后，�
 本轮没有业务源码修复；R1安全边界和权限测试保持不变。生产仍无政策三表/正式PolicyRelease，不迁移或激活政策、不部署/重启、不修改E1、不执行订单。后续P3-C须重新对齐已集成main、复测并取得生产迁移/安装/激活的明确授权，不能将真实副本验收当作生产政策迁移成功。原孤儿的完整备份已在隔离目录恢复验证；不得自动把带缺失父引用的原行插回生产、关闭外键或用旧库覆盖新合法历史。
 
 R2本轮政策定向152、E1/交易安全136、共享库/部署只读保护146、独立MCP协议59、Offline M5 18/18及21份文档检查均通过；最终独立Review Critical 0 / Important 0。`P3B_READY_FOR_P3C_REVIEW=YES`仅表示可交P3-C审议，不是生产迁移或激活许可。本轮未改业务源码，未重跑完整pytest和前端lint/build，不复用R1全量数量冒充本轮结果。
+
+
+## 9. P3-C1最终集成与五个生产关口（准备，不执行）
+
+P3-C1保留P1→P2→P3-A→P3-B→R1→R2全部祖先，与实际fetch的main合并，不移植未合并旁支。原18项MCP工具的条件注册保持不变；显式配置政策库时另外注册只读`get_investment_policy_context`，不会提供政策写工具。私人原文、配置、备份及R2一次性删除脚本不进入Git，也不属于部署初始化任务。能力Owner/接口无新增；复用原PolicyService、PEER、Web、MCP和共享SQLite。
+
+[部署边界回归](../../tests/test_policy_installation_boundary.py)验证：未配置政策路径的六消费者只读查询为NOT_ACTIVE/LEGACY，不打开政策DB、不执行DDL/Publisher；提前指向没有政策Schema的共享库为UNAVAILABLE且不创建对象；缺失政策文件不自动创建。原[Publisher测试](../../tests/test_policy_publisher.py)验证APPROVED但无有效发布仍NOT_ACTIVE，真实源不可用合成入口绕过批准。损坏/错scope/旧引用均拒绝降为旧规则后继续确定性建议。
+
+```mermaid
+flowchart LR
+  Main[最新已集成main + P1至R2] --> Draft[单个Draft PR / exact HEAD四CI]
+  Draft --> Merge[关口1：人工授权Merge]
+  Merge --> Code[关口2：原install-github安装与受控切换 / LEGACY]
+  Code --> Schema[关口3：单独授权政策DDL与Owner契约升级]
+  Schema --> Bundle[关口4：原文Hash + stage/validate + 独立结构化审批]
+  Bundle --> Active[关口5：确切Bundle/安装收据的ACTIVATE授权]
+  Active --> Consumers[Web / Backend / PEER / Allocation / discipline / MCP同PolicyReference]
+```
+
+| 关口 | 必须证据和Owner | 成功后仍禁止自动进行 |
+|---|---|---|
+| 1 Merge | exact HEAD四CI、独立Review、最新main祖先、人工明确Merge授权；原受保护流程 | 不自动部署/生产读写 |
+| 2 LEGACY兼容部署 | 另获部署授权；原Mini操作员核对每组件现役SHA/启动参数/私人Skills包装器、Tunnel、解释器、scope；完整main SHA必须经install-github核验同SHA四CI；新的一致性备份与入口/配置回退收据 | 不填政策环境变量，不运行policy CLI、DDL、Publisher或R2清理；政策仍NOT_ACTIVE/LEGACY |
+| 3 Schema | 另获迁移授权；新FK0/integrity备份/恢复；原共享Owner固定file identity/scope，审查完整三表九trigger DDL、单事务authorizer和故障回滚；对账原业务/E1行与Schema | 不激活，不把schema_rehearsal的隔离路径校验当生产迁移入口；不关闭外键 |
+| 4 Bundle | 私人两份批准原字节Hash；policy CLI在固定共库契约stage/validate；独立APPROVE_STRUCTURED授权，精确Bundle/structured SHA、scope及DB身份 | 无ACTIVATE收据仍NOT_ACTIVE；不将原文批准或模拟审批当正式生效 |
+| 5 ACTIVE | 另获确切ACTIVATE授权；安装收据完整code SHA/时间及六消费者Bundle Hash；CAS当前sequence/ACTIVE Hash；所有消费者准备切换同一引用 | 不扩大资产/券商/交易权限，不自动保存E1或执行PEER/订单 |
+
+Schema改变与共享契约指纹更新是关口3的同一次受控切换：先保存旧契约与新DDL计划，协调所有现役共享库读写进程，防止旧进程在新Schema下继续操作；按原Owner验证新完整Schema后以受控原子替换升级私人契约并重新校验相关组件。当前仓库提供隔离迁移预演而非可直接对生产执行的通用迁移CLI；关口3必须明确实际操作脚本、源写授权及契约切换/故障恢复，不能使用日常PolicyStore连接执行DDL。缺少这些前置时保持LEGACY，不影响关口2兼容安装准备。
+
+关口2运行收据逐组件核对，不能只看GitHub main或一项健康：install-github的github-install/manifest、组件当前启动路径及进程cwd/命令、依赖解释器、Web dist构建来源/Hash（完整Web可独立安装）、Backend源码SHA、MCP现役包装器导入路径均须绑定最终SHA。现有受限Web状态可报告revision，但不能把该测试入口部署成现役Full Web，或把MCP固定协议版本当应用SHA。P3-C1不访问生产，因此最新现役各组件SHA仍待获部署授权后的定点预检。
+
+LEGACY安装时保持现有政策env未配置；若误配一个尚无policy表的共享库，代码将UNAVAILABLE，必须恢复已批准配置并验收，而不是自动安装Schema或混用旧值。正式ACTIVE以后禁止通过unset路径回旧纪律；异常先停止精确建议/写入入口，在独立ROLLBACK授权与兼容安装收据下追加历史。Publisher批准文件只是可信操作员保存的授权证明，不提供人类认证；须保留真实用户原始授权引用。
+
+代码回退只恢复已核验兼容的原组件/配置/入口，不替换业务或E1数据库。政策回滚使用`publish_cli release`且operation=ROLLBACK、目标须曾正式发布，绑定当前sequence/ACTIVE SHA、目标Bundle和新安装收据；不得重放旧request_id换内容或用旧备份抹除后续合法历史。代码发布、DDL、结构化批准与ACTIVATE没有一键自动链。
+
+P3-C1最终状态以本轮私人报告、最终PR HEAD及GitHub四CI收据为准；本页说明准备边界，不宣称已安装、激活或真实ChatGPT业务验收通过。P3-C2/C3、真实Provider调用/成本和部署分别等待明确授权。
