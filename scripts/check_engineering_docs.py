@@ -23,6 +23,7 @@ DOCUMENTS = (
     "docs/v4.3/INVESTMENT_POLICY_P1.md",
     "docs/v4.3/INVESTMENT_POLICY_P2.md",
     "docs/v4.3/INVESTMENT_POLICY_P3B.md",
+    "docs/v4.3/POLICY_SCHEMA_INSTALL_RUNBOOK.md",
     "docs/B0_IMPLEMENTATION.md",
     "docs/B0_PRODUCTION_RUNBOOK.md",
     "docs/U0_IMPLEMENTATION.md",
