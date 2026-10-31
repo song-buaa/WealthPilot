@@ -142,6 +142,20 @@ def research_intent(options):
     if value['objective'] is None:value['objective']='evaluate'
     if resolved:sources['objective']='current_request_assumption'
     turns=[('current_request',options.get('research_question',''))]
+    question=options.get('research_question') or ''
+    buy_words=r'建仓|买入|入场|准备买|\bbuy\b|\bpurchase\b'
+    # A negated buy mention describes research scope, not a request to enter.
+    # Remove only the negated phrase so a later explicit buy still wins.
+    buy_context=re.sub(
+        r'(?:不|没有|无|未|别|暂不|无需|避免)\s*'
+        r'(?:(?:再|打算|考虑|准备|计划|预设|马上|立即|现在|目前|实际|主动|进行|要|想)\s*){0,3}'
+        r'(?:'+buy_words+r')(?:意图|计划|方向)?|'
+        r'\b(?:not|no|never)\s+(?:'+buy_words+r')\b',
+        '',question,flags=re.I) if isinstance(question,str) else ''
+    no_holding_research=bool(isinstance(question,str) and re.search(
+        r'不(?:假设|认为|预设)?(?:我|本人|用户)?(?:已|实际|目前|当前)?(?:持有|持仓)|没有持仓|无持仓|未持有|纯研究|仅(?:作|做)?研究|'
+        r'no\s+(?:current\s+)?(?:position|holdings?)|not\s+(?:currently\s+)?holding', question,re.I)
+        and not re.search(buy_words,buy_context,re.I))
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
         if not isinstance(text,str):continue
@@ -172,7 +186,8 @@ def research_intent(options):
                     from datetime import date
                     value['review_date']=date(*map(int,matches[0])).isoformat();sources['review_date']=source
                 except ValueError:pass
-    return dict(value,sources=sources,confirmation='user_research_assumption_only',
+    return dict(value,sources=sources,no_holding_research=no_holding_research,
+                confirmation='user_research_assumption_only',
                 holdings_verified=False,formal_target_confirmed=False)
 
 
@@ -211,8 +226,8 @@ def research_plan(assessment, *, at):
             '分部数据缺失时，不用集团利润宣称某分部盈利；以正式披露证实或推翻'],
         scenarios=[dict(name=name,response=response,price_observation=band) for name,response in [
             ('rebound','若量价修复且估值/经营证据支持，比较分批退出与等待；反弹不撤销长期目标' if user_exit else '复核经营是否跟上价格修复'),
-            ('sideways','按用户复核期限比较时间成本与替代用途，不无限期等待回本'),
-            ('decline','先验证经营反证与流动性需要；假设失效时加速退出研究，不自动止损下单')]],
+            ('sideways','比较继续观察的机会成本与替代用途，不把历史成本价作为研究依据' if intent['no_holding_research'] else '按用户复核期限比较时间成本与替代用途，不无限期等待回本'),
+            ('decline','核查经营反证与估值风险，决定是否继续跟踪；不推断已有持仓' if intent['no_holding_research'] else '先验证经营反证与流动性需要；假设失效时加速退出研究，不自动止损下单')]],
         limitations=financial['limitations']+([] if band else ['PRICE_OBSERVATION_UNKNOWN'])+
             ['Reference quantities/fractions are assumptions, not verified broker holdings; no order prepared.'],
         order_created=False,execution_authorized=False)
@@ -356,6 +371,17 @@ def exit_plan(assessment, *, at=None):
             amount_cny=None,quantity=None,account_ref=None,market=None,currency=None,
             funds_destination=None,price_trigger=price_trigger,status="research_milestone"))
     research=research_plan(assessment,at=at)
+    if (research['assumption_context']['no_holding_research']
+            and research['objective']=='evaluate' and not group.get('members')):
+        tranches=[]
+        candidates=[]
+        fallback_rule=['经营恶化：核验正式披露、竞争变化及投资论据，再决定是否继续跟踪。',
+                       '估值或技术证据不足：保留UNKNOWN，不把观察区间当买卖价。',
+                       '复核期限：重新比较长期投资条件与风险，不推断已持仓或交易授权。']
+    else:
+        fallback_rule=["反弹未出现：在复核期限重新评估配置与机会成本，不无限期等待成本价。",
+                       "经营恶化：先验证正式披露与原论据失效，再人工复核退出方向。",
+                       "贷款到期或流动性压力：核实余额、期限和可划转条件后优先复核偿债。"]
     return dict(schema_version="wealthpilot.exit-plan.v1",issuer_id=issuer,snapshot_id=assessment["snapshot_id"],
         research_plan=research,
         target_allocation=dict(current=current,target=target.get("target_weight"),tolerance=target.get("tolerance"),
@@ -367,9 +393,7 @@ def exit_plan(assessment, *, at=None):
             evidence=[{k:r[k] for k in ("kind","source","source_url","record_id","period","data_as_of")}
                       for r in valid if r["kind"] in {"fundamentals","research","event"}]),
         funds_policy=targets.get("funding_policy",{}),
-        fallback_rule=["反弹未出现：在复核期限重新评估配置与机会成本，不无限期等待成本价。",
-                       "经营恶化：先验证正式披露与原论据失效，再人工复核退出方向。",
-                       "贷款到期或流动性压力：核实余额、期限和可划转条件后优先复核偿债。"],
+        fallback_rule=fallback_rule,
         review_deadline=research['review_deadline'],review_deadline_basis=research['review_deadline_basis'],
         evidence_quality=dict(qualification=levels,issues=assessment["issues"],
             missing=assessment["infoNeeded"],facts=[{k:r[k] for k in ("kind","source","record_id","data_as_of","quality")} for r in valid],
@@ -468,6 +492,9 @@ def report(assessment, plan, decision):
     sections.extend(fact_sections(assessment))
     direction={"trim":"减仓研究","exit":"逐步退出研究","hold":"持有并复核","watch":"继续观察",
                "buy_init":"新建仓评估","buy_more":"加仓评估"}.get(decision,"继续观察")
+    no_holding_research=(plan.get('research_plan',{}).get('assumption_context',{}).get('no_holding_research')
+                         and not group.get('members'))
+    if no_holding_research: direction='未持仓标的研究（继续观察）'
     confirmed=context.get('target_confirmation_status')=='confirmed'
     lines=[f"原专业链路方向：{direction}（分析推断，不能独立授予交易资格）。",
         (f"服务端已确认目标版本：{targets['version']}，阶段：{targets['stage']}；来源 {targets.get('confirmation_source')}，确认时间 {targets.get('confirmed_at')}。" if confirmed else
@@ -513,9 +540,10 @@ def report(assessment, plan, decision):
             lines.append(f"- {row['issuer_id']} / {row['account_ref']}：假设卖出 {amount(row['sale_value_cny'])}，"
                 +f"投资分母 {amount(row['investment_assets_cny'])}，固收占比 {weight(row['fixed_income_weight'])}，"
                 +f"负债 {amount(row['liabilities_cny'])}，净资产 {amount(row['net_assets_cny'])}；假设：{row['assumptions']}。")
-    section("⑤多情景减仓建议","\n".join(lines))
+    section("⑤研究方案与复核条件" if no_holding_research else "⑤多情景减仓建议","\n".join(lines))
     section("⑥失效 / 复核条件","\n".join("- "+r for r in plan["fallback_rule"])
-        +f"\n最迟复核：{plan['review_deadline']}；依据 {plan['review_deadline_basis']}，不是必须卖完的日期。")
+        +f"\n最迟复核：{plan['review_deadline']}；依据 {plan['review_deadline_basis']}，"
+        +("不是交易截止日期。" if no_holding_research else "不是必须卖完的日期。"))
     quality_names={"valid":"可核验","stale":"过期","unknown":"未核验","seed":"Seed","mock":"Mock",
                    "conflict":"冲突","superseded":"已被更新披露取代"}
     sources=["| 类型 | 来源 / 记录 | 数据日期 | 状态 |","|---|---|---|---|"]

@@ -149,6 +149,72 @@ def test_invalid_user_assumptions_and_no_memory_fabrication():
     intent=research_intent({});assert intent['objective']=='evaluate' and intent['reference_quantity'] is None
 
 
+@pytest.mark.parametrize('question',[
+    '我目前未持有这家公司，只研究经营和未来投资条件。',
+    '我没有持仓，也没有买入意图，只做公司研究。',
+    '不预设我持有，也不预设买入、卖出或减仓方向。',
+    '不预设持仓，不预设买入，只研究公司的长期价值。',
+    '目前未持有，暂不考虑买入，只研究公司经营。',
+    '我没有持仓，也没有买入意图；只研究经营。',
+])
+def test_explicit_no_holding_research_does_not_inherit_buy_or_exit_template(question):
+    from backend.agents.contracts import ExpressionOutput
+    from backend.services.market_data.output_policy import enforce
+    a=actual_pdd()
+    a['research_intent']=research_intent(dict(research_question=question))
+    assert a['research_intent']['no_holding_research']
+    assert a['research_intent']['objective']=='evaluate'
+    out=ExpressionOutput()
+    out.structured_payload={'decisionType':'buy_init','is_new_entry':True,'professional_explanation':[]}
+    enforce(out,a)
+    plan=out.structured_payload['exitPlan']
+    assert out.structured_payload['decisionType']=='watch'
+    assert out.structured_payload['is_new_entry'] is False
+    assert plan['research_plan']['objective']=='evaluate'
+    assert plan['tranches']==[] and plan['account_alternatives']==[]
+    assert not plan['execution_authorized']
+    assert '未持仓标的研究' in out.chat_answer
+    assert '⑤研究方案与复核条件' in out.chat_answer
+    assert '多情景减仓建议' not in out.chat_answer
+    assert '立即买入' not in out.chat_answer
+
+
+@pytest.mark.parametrize('question',[
+    '我没有持仓，但计划买入，请评估建仓条件。',
+    '我未持有，也没有买入意图过；现在明确准备买入。',
+])
+def test_explicit_buy_after_no_holding_keeps_new_entry_route(question):
+    from backend.agents.contracts import ExpressionOutput
+    from backend.services.market_data.output_policy import enforce
+    a=actual_pdd()
+    a['research_intent']=research_intent(dict(research_question=question))
+    assert not a['research_intent']['no_holding_research']
+    out=ExpressionOutput()
+    out.structured_payload={'decisionType':'buy_init','is_new_entry':True,'professional_explanation':[]}
+    enforce(out,a)
+    assert out.structured_payload['decisionType']=='buy_init'
+    assert out.structured_payload['is_new_entry'] is True
+    assert not out.structured_payload['exitPlan']['execution_authorized']
+    assert '新建仓评估' in out.chat_answer
+    assert '未持仓标的研究' not in out.chat_answer
+
+
+@pytest.mark.parametrize('question,objective',[
+    ('我持有这家公司，决定减仓。','reduce'),
+    ('我持有这家公司，决定长期退出。','exit'),
+])
+def test_holding_reduce_and_exit_research_keep_original_route(question,objective):
+    intent=research_intent(dict(research_question=question))
+    assert not intent['no_holding_research'] and intent['objective']==objective
+
+
+def test_existing_holding_research_keeps_original_plan_projection():
+    a=actual_pdd()
+    a['research_intent']=research_intent(dict(research_question='研究这家公司'))
+    plan=exit_plan(a,at=AT)
+    assert plan['tranches'] and '多情景减仓建议' in report(a,plan,'watch')
+
+
 def test_qualified_daily_band_is_L1_research_not_L3_order_trigger():
     from tests.test_v42_evidence import trusted_technical
     a=assess({'technical':trusted_technical('LI:US')},symbol='LI:US',at=AT)

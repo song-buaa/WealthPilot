@@ -459,8 +459,13 @@ def enforce(output, assessment):
     decision = payload.get("decisionType", "hold")
     if not isinstance(decision,str) or decision not in {"hold","trim","exit","buy_init","buy_more","watch"}:
         decision = "watch"
+    intent=assessment.get('research_intent') or {}
+    pure_research=(intent.get('no_holding_research') and intent.get('objective')=='evaluate'
+            and not (assessment.get('allocation_context',{}).get('company_exposure') or {}).get('members'))
+    if pure_research:
+        decision='watch'  # The virtual new-entry route is not an explicit buy request.
     payload = dict(decisionType=decision,recommendedAction="人工复核下述结构化分析计划",
-                   is_new_entry=payload.get("is_new_entry") is True)
+                   is_new_entry=payload.get("is_new_entry") is True and not pure_research)
     from backend.services.position_analysis import exit_plan, report
     plan=exit_plan(assessment)
     output.chat_answer=report(assessment,plan,decision)

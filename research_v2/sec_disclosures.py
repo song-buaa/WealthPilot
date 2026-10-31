@@ -7,7 +7,7 @@ No AI extraction, asset writes, TTM calculation, redirect or arbitrary URL input
 """
 from copy import deepcopy
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
 import re
@@ -550,7 +550,30 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
-                table_observations += parse_vehicle_operating(soup,filing['published_at'])
+                operating = parse_vehicle_operating(soup,filing['published_at'])
+                for summary in operating:
+                    if summary['source_field'] != 'vehicleSales':
+                        table_observations.append(summary)
+                        continue
+                    exact = [row for row in table_observations if row['source_field'] == 'vehicleSales'
+                             and row['fiscal_period_start'] == summary['fiscal_period_start']
+                             and row['fiscal_period_end'] == summary['fiscal_period_end']
+                             and row['currency'] == summary['currency']
+                             and row['accounting_basis'] == summary['accounting_basis']]
+                    if len(exact) != 1:
+                        table_observations.append(summary)
+                        continue
+                    row = exact[0]
+                    q = Decimal(str(summary['reporting_quantum']))
+                    reported = Decimal(str(row['value'])) * Decimal(str(row['unit_scale']))
+                    if (reported / q).quantize(Decimal(1), rounding=ROUND_HALF_UP) * q != Decimal(str(summary['value'])):
+                        table_observations.append(summary)  # Real disagreement remains visible to Evidence.
+                        continue
+                    row['precision_corroboration'] = dict(summary_value=summary['value'],
+                        summary_quantum=summary['reporting_quantum'],
+                        summary_locator=summary['source_locator'],
+                        relation='same_exhibit_rounded_summary')
+                    row['source_locator'] += '; ' + summary['source_locator']
         except (ValueError,TypeError,AttributeError,InvalidOperation,OverflowError):
             return None
         for obs in table_observations:
