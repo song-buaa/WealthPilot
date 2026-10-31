@@ -528,7 +528,8 @@ def _direct_listed_class_eps(body, issuer, filing, fetched_at):
     symbols,titles={},{}
     for node in soup.find_all(lambda t:t.name.lower()=='ix:nonnumeric'):
         concept=qname(node,node.get('name'));ctx=node.get('contextref')
-        if not inline(node) or not dei(concept) or not contexts.get(ctx) or invalid_nil(node):continue
+        if (not inline(node) or not dei(concept) or not contexts.get(ctx)
+                or invalid_nil(node) or node.get('format') is not None):continue
         value=' '.join(node.get_text(' ',strip=True).split())
         if concept[1]=='TradingSymbol':symbols.setdefault(ctx,set()).add(value)
         elif concept[1]=='Security12bTitle':titles.setdefault(ctx,set()).add(value)
