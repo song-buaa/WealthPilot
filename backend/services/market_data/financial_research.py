@@ -388,3 +388,124 @@ def display(row,field):
     label=LABELS.get(field,field)
     caveat='；静态估算，股本/拆股变更未核验，非当前精确估值' if field in {'pe_ttm','earnings_yield_pct'} and row.get('source')=='owner_calculation' else ''
     return f"{label}（{row.get('period') or row.get('data_as_of')}，{row.get('currency') or '无币种比率'}）{value:,.4f}{suffix}{caveat}"
+
+
+QUALITY_INPUT_VERSION = 'financial-quality-inputs.v1'
+
+
+def build_quality(assessment):
+    """Opt-in GAAP quality projection from Registry-qualified facts.
+
+    No new parser, TTM or source-trust owner. Instant balances and YTD durations
+    stay distinct; conflicting aliases never become a selected point estimate.
+    """
+    from decimal import localcontext
+    from research_v2.sec_disclosures import QUALITY_CONCEPTS, QUALITY_INSTANT
+    bases = {k.removeprefix('quality_'): v for k, v in QUALITY_CONCEPTS.values()}
+    instants = {k.removeprefix('quality_') for k in QUALITY_INSTANT}
+    at = stamp(assessment.get('as_of'))
+    entries, rejected, conflicts = {}, [], []
+    for row in assessment.get('quality_field_records', []):
+        field = row.get('field')
+        start, end = stamp(row.get('fiscal_period_start')), stamp(row.get('period'))
+        links = row.get('publication_links', [])
+        valid = (at and field in bases and row.get('quality')=='valid'
+            and row.get('symbol')==assessment.get('symbol') and not row.get('is_seed') and not row.get('is_mock')
+            and row.get('accounting_basis')==bases.get(field)
+            and row.get('currency')==(None if field in {'shares','diluted_shares'} else 'USD')
+            and row.get('unit')==('shares' if field in {'shares','diluted_shares'} else 'currency_units')
+            and end and end<=at and links)
+        if valid:
+            valid = all(stamp(row.get(k)) and end<=stamp(row[k])<=at for k in ('published_at','fetched_at'))
+            valid = valid and all(link.get('source_document_sha256') and link.get('source_url')
+                and all(stamp(link.get(k)) and end<=stamp(link[k])<=at for k in ('published_at','fetched_at')) for link in links)
+        if valid:
+            days = (end-start).days+1 if start else None
+            valid = (field in instants and not start and row.get('scope')=='instant') or (
+                field not in instants and start and start<end and
+                ((row.get('scope')=='quarterly' and 70<=days<=105) or (row.get('scope')=='annual' and 350<=days<=380)
+                 or (row.get('scope')=='year_to_date' and 105<days<350)))
+        value = number(row.get('values', {}).get(field))
+        if not valid or value is None:
+            rejected.append(row.get('record_id', 'UNKNOWN'))
+            continue
+        key = (field, row.get('fiscal_period_start'), row['period'], row['scope'])
+        entries.setdefault(key, []).append(row)
+    index = {}
+    for key, aliases in sorted(entries.items(), key=str):
+        values = {Decimal(str(r['values'][key[0]])) for r in aliases}
+        if len(values)!=1:
+            conflicts.append(list(key)); continue
+        index[key] = dict(field=key[0], start=key[1], period=key[2], scope=key[3],
+            value=format(next(iter(values)), 'f'), evidence_refs=sorted({r['record_id'] for r in aliases}))
+    def get(field, start, end, scope): return index.get((field, start, end, scope))
+    def amount(row): return Decimal(row['value'])
+    def calculated(value, rows, formula):
+        return dict(value=format(value.quantize(Decimal('.00000001')), 'f'),
+                    evidence_refs=sorted({ref for r in rows for ref in r['evidence_refs']}), formula=formula)
+    with localcontext() as context:
+        context.prec = 34
+        current_ends = sorted({k[2] for k in index if k[0]=='assets' and k[3]=='instant'})
+        end = current_ends[-1] if current_ends else None
+        balance = {field: get(field, None, end, 'instant') for field in instants}
+        cash_periods = []
+        for key, cfo in sorted(index.items(), key=str):
+            if key[0]!='cfo': continue
+            _, start, finish, scope = key
+            fields = {f:get(f,start,finish,scope) for f in ('net_income','operating_income','revenue','capex',
+                      'productive_asset_payments','sbc','repurchases','receivables_change','inventory_change','payables_change','diluted_shares')}
+            item = dict(start=start, period=finish, scope=scope, cfo=cfo, **fields)
+            income, capex, sbc = fields['net_income'], fields['capex'], fields['sbc']
+            if income and amount(income)>0:
+                item['cash_conversion'] = calculated(amount(cfo)/amount(income), [cfo,income], 'CFO / same-period parent GAAP net income')
+            if capex and amount(capex)>=0:
+                item['fcf'] = calculated(amount(cfo)-amount(capex),[cfo,capex], 'CFO - positive PP&E cash outflow; not distributable cash')
+                if sbc and amount(sbc)>=0:
+                    item['fcf_less_sbc_sensitivity'] = calculated(amount(cfo)-amount(capex)-amount(sbc),[cfo,capex,sbc],
+                        'FCF - SBC sensitivity, not GAAP cash or a normalized earnings adjustment')
+            if fields['productive_asset_payments']:
+                item['cash_after_productive_assets'] = calculated(amount(cfo)-amount(fields['productive_asset_payments']),
+                    [cfo,fields['productive_asset_payments']], 'CFO - broader productive-assets outflow; NOT PP&E-only FCF')
+            cash_periods.append(item)
+        cash_periods.sort(key=lambda r:(r['period'], r['start']))
+        latest_cash = next((r for r in reversed(cash_periods) if r['period']==end), None)
+        # Continuous independent quarters, no annual/YTD mixing or overlaps.
+        quarters=[]
+        for key, revenue in sorted(index.items(), key=str):
+            if key[0]!='revenue' or key[3]!='quarterly': continue
+            operating = get('operating_income',key[1],key[2],'quarterly')
+            if operating and amount(revenue)>0:
+                quarters.append(dict(start=key[1], period=key[2], revenue=revenue, operating_income=operating,
+                    margin=calculated(amount(operating)/amount(revenue),[operating,revenue], 'same-period operating income / revenue')))
+        quarters.sort(key=lambda r:r['period'])
+        if latest_cash and latest_cash.get('diluted_shares'):
+            prior = next((r for r in cash_periods if r['scope']==latest_cash['scope'] and r.get('diluted_shares')
+                and 350<=(stamp(latest_cash['period'])-stamp(r['period'])).days<=380
+                and abs((stamp(latest_cash['period'])-stamp(latest_cash['start'])).days-(stamp(r['period'])-stamp(r['start'])).days)<=7), None)
+            if prior and amount(prior['diluted_shares'])>0:
+                latest_cash['diluted_share_change_yoy'] = calculated(amount(latest_cash['diluted_shares'])/amount(prior['diluted_shares'])-1,
+                    [latest_cash['diluted_shares'],prior['diluted_shares']], 'same-length weighted diluted shares YoY; not actual net issuance or buyback return')
+        # An explicit period return on average equity; YTD is never annualized.
+        roe=dict(status='UNKNOWN', reason='Matching opening/closing parent equity and income unavailable.')
+        if latest_cash and latest_cash['net_income'] and balance.get('equity'):
+            opening=next((r for k,r in index.items() if k[0]=='equity' and k[3]=='instant'
+                          and (stamp(latest_cash['start'])-stamp(k[2])).days==1), None)
+            closing=balance['equity']
+            if opening and amount(opening)>0 and amount(closing)>0:
+                average=(amount(opening)+amount(closing))/2
+                roe=dict(status='CALCULATED_GAAP_PERIOD_NOT_CROSS_COMPANY_RANK', start=latest_cash['start'], period=end,
+                    scope=latest_cash['scope'], average_equity=calculated(average,[opening,closing],'(opening + closing parent equity) / 2'),
+                    ratio=calculated(amount(latest_cash['net_income'])/average,[opening,closing,latest_cash['net_income']],
+                        'same-period parent net income / average parent equity; NOT annualized'),
+                    limitations=['Buybacks reduce equity and can elevate ROE; not operating efficiency alone.',
+                                 'Period length differs across issuers; no cross-company ROE ranking.'])
+        return dict(version=QUALITY_INPUT_VERSION, period=end,
+            fresh=bool(at and end and 0<=(at-stamp(end)).days<=150),
+            facts=list(index.values()), balance=balance, cash_periods=cash_periods, latest_cash=latest_cash,
+            quarters=quarters, rejected_refs=sorted(rejected), conflicts=conflicts,
+            capital_efficiency=dict(roe=roe, roic=dict(status='UNKNOWN',
+                reason='Average operating invested capital/NOPAT scope, lease classes and R&D capitalization not closed; no proxy ROIC ranking.',
+                input_qualification={f:('AVAILABLE_CLOSING_ONLY' if balance.get(f) else 'UNKNOWN') for f in ('cash','equity','noncurrent_debt','current_debt','operating_lease_liability','finance_lease_liability')},
+                nopat='UNKNOWN_TAX_AND_OPERATING_SCOPE_NOT_NORMALIZED', rnd_treatment='EXPENSED_GAAP_NOT_CAPITALIZED')),
+            normalization=dict(status='UNKNOWN', adjustments=[],
+                reason='GAAP retained. Working-capital changes are observations, not a complete cash bridge; no verified one-off normalization.'))

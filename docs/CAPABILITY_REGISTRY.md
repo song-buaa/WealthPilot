@@ -13,7 +13,7 @@
 | E1及复核L2/L3/L5 | [investment_thesis](../backend/services/investment_thesis)、[MCP研究桥接](../pocs/chatgpt_skills/investment_thesis.py) | 核心真人保存/提醒历史验收；PR #59已发布并通过首次水位实测，水位后真实自然新事件PENDING；验收时AUTO_SCAN=OFF，本轮未复测生产；partial/敞口UNKNOWN不升级，历史不覆盖 |
 | 授权执行与复盘L5 | [ActionPlanner](../backend/services/action/action_planner.py)、[RiskEngine](../backend/services/action/risk_engine.py)、[OrderManager](../backend/services/action/order_manager.py)、[Batch](../backend/services/execution_batch/service.py)、[BrokerAdapter](../backend/services/action/brokers/base.py)、[历史域](../backend/services/portfolio_history) | 原实现/限定路径历史验收；建议→具体人工授权→原交易门→成交证据。无新策略执行资格；原当前收益不是TWR |
 | S1/S2及成熟ETF研究 | 仓外冻结S1-C0、S2-F1、S2-G1报告/hash见[研究矩阵](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#6-策略融合与成熟度清单) | RESEARCH_ONLY；S1/S2自研已结项不晋升，SPMO产品关注/政策采纳不等于自研动量上线或具体交易许可 |
-| S3-A公司池研究 / S4候选 | [S3计算](../backend/services/market_data/quality_valuation.py)、[冻结适配](../backend/services/quality_valuation_research.py)，复用原财务/Evidence；[内部CLI](../scripts/s3_quality_valuation.py) | S3-A Research Only：正向质量判断未完整实现，优先考虑档当前不可达；四底线、五年盈利情景、分档/并列/敏感性、冻结读回及独立复算；见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。未接生产PEER/MCP/Web，不代表完整DCF或策略验收；S4仍TARGET |
+| S3-A公司池研究 / S4候选 | [S3计算](../backend/services/market_data/quality_valuation.py)、[冻结适配](../backend/services/quality_valuation_research.py)，复用原财务/Evidence；[内部CLI](../scripts/s3_quality_valuation.py) | S3-A已集成Research Only；S3-B本地候选沿同一Owner补充US GAAP瞬时/YTD证据与有限非金融企业正向质量规则，逐项解除/保留blocker、平均权益期间ROE，ROIC/正常化仍UNKNOWN；四底线、原五年盈利情景、分档/并列/敏感性、冻结读回及独立复算；见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。未接生产PEER/MCP/Web，不代表完整DCF或策略验收；S4仍TARGET |
 
 新增公共契约只补目标池版本、PolicyRef、共享证据/方法引用与综合/执行关联，扩原Agent/Analysis/E1/交易Owner；其中PolicyRef及消费者一致性已有P2本地候选；目标池/跨策略综合及E1正式持久化引用仍待后续。测试入口沿本索引原条目，候选不冒称生产业务验收。
 

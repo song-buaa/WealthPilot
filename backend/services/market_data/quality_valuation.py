@@ -11,7 +11,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from backend.services.market_data.evidence import stamp
 from backend.services.market_data.financial_research import build
 
-METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
+METHOD_VERSION = "s3-b.quality-evidence.v1"
+VALUATION_METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
 SCENARIOS = ("cautious", "base", "optimistic")
 GROUPS = ("优先考虑", "继续观察", "暂不优先")
 D = Decimal
@@ -225,7 +226,8 @@ def company(assessment, assumptions, decision_at):
     rows = _facts(assessment, at)
     derived = build(assessment)  # Original owner performs all TTM/EPS/price arithmetic.
     metrics = {r["field"]: r for r in derived["records"]}
-    quality = _quality(rows, metrics)
+    from backend.services.market_data.quality_evaluation import evaluate
+    quality = evaluate(assessment, _quality(rows, metrics))
     card = dict(symbol=assessment["symbol"], status="partial", quality=quality,
                 cross_checks={k: metrics.get(k) for k in ("diluted_eps_ttm", "observed_price", "pe_ttm", "earnings_yield_pct")},
                 assumptions=assumptions.model_dump(mode="json"), scenarios={}, sensitivity=[],
@@ -282,10 +284,12 @@ def _rank(cards, request):
         blockers = card.get("quality", {}).get("priority_blockers", ["COMPANY_EVIDENCE_UNAVAILABLE"])
         card["group_scope"] = "RESEARCH_ONLY_NOT_COMPLETE_INVESTMENT_JUDGMENT"
         card["classification_reasons"] = dict(
-            quality_evidence_insufficient=list(blockers), research_thresholds_not_met=[],
+            quality_evidence_insufficient=[b for b in blockers if b.endswith("UNKNOWN") or b=="COMPANY_EVIDENCE_UNAVAILABLE"], research_thresholds_not_met=[],
             research_thresholds_status="ASSESSED" if scenarios else "NOT_ASSESSABLE",
-            fundamental_deterioration=dict(status="NOT_ESTABLISHED",
-                reason="Historical observations and evidence gaps do not establish actual persistent business deterioration."))
+            quality_warnings=list(card.get('quality',{}).get('warnings',[])),
+            major_quality_risks=list(card.get('quality',{}).get('major_risks',[])),
+            fundamental_deterioration=card.get('quality',{}).get('fundamental_deterioration',dict(status="NOT_ESTABLISHED",
+                reason="Insufficient evidence to establish fundamental deterioration.")))
         if not scenarios:
             card.update(group=GROUPS[2], rank=None, rank_reason="Research grouping only: valuation cannot be assessed; this is not a negative fundamental judgment.")
             continue
@@ -296,12 +300,18 @@ def _rank(cards, request):
             card["classification_reasons"]["research_thresholds_not_met"].append("BASE_RETURN_BELOW_RESEARCH_REQUIRED_RETURN")
         if cautious < request.downside_floor:
             card["classification_reasons"]["research_thresholds_not_met"].append("CAUTIOUS_RETURN_BELOW_RESEARCH_DOWNSIDE_FLOOR")
-        if base < required_return or cautious < request.downside_floor:
+        major_risks = card.get('quality',{}).get('major_risks',[])
+        variants = card.get('sensitivity', [])
+        robust = bool(variants) and all(v.get('result') and dec(v['result']['annualized_return'])>=dec(v['required_return']) for v in variants)
+        card['sensitivity_threshold_robust'] = robust
+        if major_risks:
+            group, reason = GROUPS[2], "Confirmed major quality risk blocks priority irrespective of valuation returns."
+        elif base < required_return or cautious < request.downside_floor:
             group, reason = GROUPS[2], "Research thresholds not met under stated assumptions; quality evidence gaps are separate, and actual fundamental deterioration is not established."
-        elif blockers or card.get("high_sensitivity"):
-            group, reason = GROUPS[1], "Research observation only: incomplete quality evidence or high sensitivity prevents priority; passing scenario thresholds is not a positive investment judgment."
+        elif blockers or (card.get("high_sensitivity") and not robust):
+            group, reason = GROUPS[1], "Research observation only: quality evidence gap/warning or sensitivity threshold crossing prevents priority; passing scenario thresholds is not a positive investment judgment."
         else:
-            group, reason = GROUPS[0], "All quality gates resolved; base return and cautious downside meet disclosed research thresholds."
+            group, reason = GROUPS[0], "All evidence-bound quality gates pass; return/downside thresholds pass and high-dispersion sensitivities remain above required return. Research Only, not investment authorization."
         card.update(group=group, rank=None, rank_reason=reason)
     for group in GROUPS:
         ordered = sorted((c for c in cards if c["group"] == group and c.get("scenarios")),
@@ -359,10 +369,10 @@ def compare(request, assessments):
             if card.get("sensitivity"):
                 returns = [dec(v["result"]["annualized_return"]) for v in card["sensitivity"] if v["result"]]
                 card["high_sensitivity"] = bool(returns and max(returns) - min(returns) > D(".05"))
-        return dict(schema_version="wealthpilot.s3-a.v1", method_version=METHOD_VERSION,
+        return dict(schema_version="wealthpilot.s3-b.v1", method_version=METHOD_VERSION, valuation_method_version=VALUATION_METHOD_VERSION,
                     maturity="RESEARCH_ONLY",
-                    priority_capability=dict(reachable=False,
-                        reason="S3_A_POSITIVE_QUALITY_PATH_NOT_IMPLEMENTED; original priority blockers remain nonempty."),
+                    priority_capability=dict(reachable=True,
+                        reason="Evidence-bound US GAAP nonfinancial quality rules; UNKNOWN/warnings/major risks block priority."),
                     decision_at=request.decision_at.isoformat(), cards=cards,
                     ranking=dict(groups=list(GROUPS), tie_band=str(request.tie_band), downside_floor=str(request.downside_floor),
                                  downside_tie_band=str(request.downside_tie_band),

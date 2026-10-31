@@ -20,15 +20,26 @@ from backend.services.market_data.quality_valuation import ResearchRequest, comp
 ROOT = Path(__file__).resolve().parents[2]
 METHOD_FILES = (
     "backend/services/market_data/quality_valuation.py",
+    "backend/services/market_data/quality_evaluation.py",
     "backend/services/quality_valuation_research.py",
     "backend/services/market_data/evidence.py",
     "backend/services/market_data/financial_research.py",
     "backend/services/market_data/av_fundamentals_service.py",
     "backend/services/market_data/technical_evidence.py",
     "research_v2/sec_disclosures.py", "research_v2/official_disclosures.py",
+    "backend/services/instruments/issuers.py",
     "backend/services/investment_thesis/contracts.py",
     "scripts/s3_independent_recompute.py",
 )
+
+
+# Exact previously accepted P1 Owner versions. The pinned historical manifest is
+# retained as a receipt; current Owner requalification is still compared below.
+P1_OWNER_HASHES = {
+    'backend/services/market_data/evidence.py':'7a1605f39e26655930e9ad7324abb36636926f42bc24f1b770869c52b0cadc79',
+    'backend/services/market_data/financial_research.py':'b785e84ed28b72f9ae0fb6528867505fb3d35f4ac5f30f89b02067ad4051bba4',
+    'research_v2/sec_disclosures.py':'20dc9cb60d1c86aa78ecf6f8540101a76509a5a4888b1dcd0985c4ccf98f63ae',
+}
 
 
 def digest(value):
@@ -70,7 +81,7 @@ def frozen_inputs(root, request):
     if stamp(manifest["decision_at"]) != request.decision_at:
         raise ValueError("P1_SHARED_DECISION_CLOCK_MISMATCH")
     for name, expected in manifest["method_files"].items():
-        if name not in METHOD_FILES or file_hash(ROOT / name) != expected:
+        if name not in METHOD_FILES or (file_hash(ROOT / name) != expected and P1_OWNER_HASHES.get(name) != expected):
             raise ValueError("P1_OWNER_METHOD_VERSION_MISMATCH")
     requests = _load(root, "SEC_ONLY_HANDOFF/requests.json")
     files = {"p1/P1_ACCEPTANCE_MANIFEST.json": safe_file(root, "P1_ACCEPTANCE_MANIFEST.json"),
@@ -125,6 +136,34 @@ def frozen_inputs(root, request):
             if (not day.get("bars") or float(day["bars"][-1]["close"]) != float(close)
                     or day["end_at"] != meta["price_observed_date"] or day["currency"] != "USD"):
                 raise ValueError("QUALIFIED_PRICE_RAW_CLOSURE_MISMATCH")
+            # Explicit opt-in quality projection from the same frozen raw SEC
+            # materials via original identity/parser/Registry Owners, no fetching.
+            from research_v2.sec_disclosures import DIRECTORY, discover_filings, parse_companyfacts
+            from backend.services.instruments.issuers import resolve_sec_issuer
+            from backend.services.market_data.evidence import assess_quality_facts
+            raw = {item['url']: item for item in requests if (item.get('symbol')==symbol or item.get('url')==DIRECTORY) and 'path' in item}
+            def source(url):
+                item = raw[url]
+                path = safe_file(Path(root)/'SEC_ONLY_HANDOFF',item['path'])
+                if file_hash(path)!=item['sha256'] or not stamp(item.get('fetched_at')) or stamp(item['fetched_at'])>request.decision_at:
+                    raise ValueError('QUALITY_RAW_HASH_OR_CLOCK_MISMATCH')
+                company_files['sec/'+item['path']] = path
+                return path.read_bytes(), item['fetched_at']
+            directory = source(DIRECTORY)
+            cik = next(row['source_verification']['issuer_identity']['cik'] for row in source_records.values()
+                       if row.get('source_verification',{}).get('issuer_identity'))
+            submissions = source('https://data.sec.gov/submissions/CIK'+cik+'.json')
+            issuer = resolve_sec_issuer(symbol,json.loads(directory[0]),json.loads(submissions[0]))
+            if not issuer or issuer['issuer_type']!='domestic':
+                raise ValueError('QUALITY_US_GAAP_DOMESTIC_SCOPE_REQUIRED')
+            filings = discover_filings(issuer,json.loads(submissions[0]))
+            quality_records = parse_companyfacts(source('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json'),
+                issuer,filings,identity_digest=hashlib.sha256(directory[0]+submissions[0]).hexdigest(),quality=True)
+            quality_by_id = {r['record_id']:r for r in quality_records}
+            checked['quality_scope'] = dict(issuer_type=issuer['issuer_type'], sic=json.loads(submissions[0]).get('sic'),
+                source_url=issuer['submissions_url'], source_document_sha256=hashlib.sha256(submissions[0]).hexdigest(), fetched_at=submissions[1])
+            checked['quality_field_records'] = assess_quality_facts(quality_records, symbol=symbol,
+                at=request.decision_at, disclosure_verifier=quality_by_id.get)
             inputs[symbol] = checked
             files.update(company_files)
         except (ValueError, KeyError, TypeError, OSError, EOFError, zlib.error, json.JSONDecodeError) as error:
@@ -156,7 +195,7 @@ def _project_source_failures(result, failures):
 
 def markdown(result):
     lines = ["# S3 公司池质量与估值研究", "", f"决策截止：{result['decision_at']}；方法：{result['method_version']}", "",
-             "Research Only：质量正向判断路径未完整实现，priority_blockers恒非空，当前优先考虑档不可达。", "",
+             "Research Only：四底线按版本化财务/经营证据规则逐项判断；正向路径可达，UNKNOWN或警示仍保留对应blocker，重大风险不可由回报抵消。", "",
              "公司自身研究；配置优先级 UNKNOWN。1–20家仅为输入合同容量，真实验收仅限冻结AAPL/NVDA历史样例。", "",
              "情景参数、10%要求回报示例、−10%谨慎累计回报下限及并列阈值均为研发参数，不是正式Investment Policy。", "",
              "| 公司 | 四底线 数据/持续性/现金/核心业务 | 分档 | 档内名次 | 基准年化 | 谨慎五年回报 | 条件价值区间 USD | 排序稳定 |", "|---|---|---|---|---|---|---|---|"]
@@ -169,7 +208,7 @@ def markdown(result):
         cautious = s.get("cautious", {}).get("total_return", "UNKNOWN")
         lines.append(f"| {card['symbol']} | {states} | {card['group']} | {card['rank']} | {base} | {cautious} | {card.get('conditional_value_range', 'UNKNOWN')} | {'稳定' if not card['ranking_unstable'] else '排序不稳'} |")
     lines += ["", "回报值为小数（0.10代表10%）。条件价值是基于研究情景及要求回报的折现条件价格，不是客观公允价值或完整DCF。", "",
-              "质量证据不足、研发阈值未满足及真实基本面恶化分别表达；当前输出未建立完整基本面恶化结论。", "",
+              "质量证据不足、一般警示、研发阈值未满足与已证实的经营恶化分别表达。通过仅限观察窗口，不保证长期竞争优势或无持续经营风险。", "",
               "五年EPS按整体盈利增长和相对股数变化推演，期末乘假设PE；分红按各年EPS×派息率计算，不再叠加回购收益。分红持有现金不再投资。", "",
               "## 逐公司判断卡", ""]
     for card in result["cards"]:
