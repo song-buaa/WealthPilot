@@ -341,7 +341,7 @@ def test_b3_tradability_tool_is_readonly_unknown_without_account_evidence(endpoi
 def test_trade_status_real_worker_without_fastapi_or_web_imports(tmp_path):
     """Physical minimal venv + real MCP/worker path, not a mocked query.
 
-    Copy only seven already-installed runtime distributions into a fresh venv;
+    Copy only six already-installed runtime distributions into a fresh venv;
     no pip/network, no system-site-packages, no FastAPI/Starlette installation.
     Fixture construction uses the normal test interpreter, queries use the
     isolated minimal interpreter with network/Web imports/RW SQLite prohibited.
@@ -353,7 +353,8 @@ import shutil, sys, sysconfig, venv, subprocess, json
 folder=Path(sys.argv[1]);venv.EnvBuilder(with_pip=False).create(folder)
 python=folder/('Scripts/python.exe' if sys.platform=='win32' else 'bin/python')
 site=Path(subprocess.check_output([str(python),'-I','-c','import sysconfig; print(sysconfig.get_path("purelib"))'],text=True).strip())
-for name in ('SQLAlchemy','greenlet','pydantic','pydantic-core','annotated-types','typing-extensions','typing-inspection'):
+# The synchronous read path does not require SQLAlchemy's optional greenlet.
+for name in ('SQLAlchemy','pydantic','pydantic-core','annotated-types','typing-extensions','typing-inspection'):
     dist=md.distribution(name)
     for rel in dist.files:
         if '..' in rel.parts or rel.is_absolute():continue
@@ -378,11 +379,12 @@ print(str(python))
     env.update(PYTHON_DOTENV_DISABLED='1', PUBLIC_DEMO_MODE='true', BROKER_MODE='mock',
                DEMO_ALLOW_MARKET_DATA='false', AV_DEV_MOCK='1')
     built = subprocess.run([BUSINESS, '-c', build, str(tmp_path/'minimal-worker')],
-        env=env, cwd=ROOT, check=True, capture_output=True, text=True)
+        env=env, cwd=ROOT, capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr[-2000:]
     minimal = built.stdout.strip()
     # Probe with -S (no sitecustomize) to establish actual physical absence,
     # then use normal interpreter startup for the guarded real worker.
-    probe = "import importlib.util,sys; sys.path.append(sys.argv[1]); assert importlib.util.find_spec('fastapi') is None; assert importlib.util.find_spec('starlette') is None"
+    probe = "import importlib.util,sys; sys.path.append(sys.argv[1]); assert importlib.util.find_spec('fastapi') is None; assert importlib.util.find_spec('starlette') is None; assert importlib.util.find_spec('greenlet') is None"
     # Use normal startup for the venv purelib path (3.11 -S reports base prefix).
     site = subprocess.check_output([minimal, '-I', '-c',
         'import sysconfig; print(sysconfig.get_path("purelib"))'], env=env, text=True).strip()
