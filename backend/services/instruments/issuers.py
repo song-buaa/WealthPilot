@@ -101,6 +101,7 @@ def resolve_sec_issuer(symbol, ticker_directory, submissions):
                          and str(row.get('cik_str', '')).zfill(10) == cik})
     return dict(symbol=symbol, issuer_id=IDENTITIES.get((symbol, "USD"), "SEC_CIK_"+cik),
                 cik=cik, name=submissions["name"], issuer_type="foreign_private" if foreign else "domestic",
-                sec_ticker=ticker, registered_equity_tickers=registered,
+                sec_ticker=ticker, registered_tickers=registered,
+                registered_equity_tickers=registered,  # Legacy key: not a security-type proof.
                 identity_source="https://www.sec.gov/files/company_tickers.json",
                 submissions_url="https://data.sec.gov/submissions/CIK"+cik+".json")

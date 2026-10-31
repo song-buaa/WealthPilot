@@ -5,7 +5,7 @@ Only the existing earnings model is implemented. Other methods stay uncomputed.
 """
 from backend.services.market_data.evidence import stamp
 
-VERSION = 's3-c.method-applicability.v1.1'
+VERSION = 's3-c.method-applicability.v1.2'
 APPLICABLE = 'APPLICABLE'
 NOT_APPLICABLE = 'NOT_APPLICABLE'
 INSUFFICIENT = 'INSUFFICIENT_EVIDENCE'
@@ -46,16 +46,16 @@ def applicability(assessment):
         result['quality_screen'] = state(NOT_APPLICABLE, 'OUTSIDE_BOUNDED_NONFINANCIAL_SCOPE')
         return result
     result['quality_screen'] = state(APPLICABLE, 'DOMESTIC_NONFINANCIAL_SIC_OBSERVED_WINDOW_ONLY')
-    classes = identity.get('registered_equity_tickers', [])
+    classes = identity.get('registered_tickers',identity.get('registered_equity_tickers', []))
     if (identity.get('symbol') != assessment.get('symbol') or identity.get('sec_ticker') not in classes
             or identity.get('sec_ticker') not in identity.get('submissions_tickers', [])
             or not identity.get('directory_sha256') or not identity.get('submissions_sha256')
             or identity.get('submissions_sha256') != scope['source_document_sha256']):
         return result
-    # Multiple official listed common classes require a separate, qualified
-    # earnings-per-class bridge. A legal conversion ratio alone is insufficient.
+    # The SEC directory lists securities, not proven common classes. Multiple
+    # registrations need a consumer class adapter; no inference from their count.
     if len(classes) != 1:
-        result['earnings_model'] = state(INSUFFICIENT, 'MULTIPLE_LISTED_CLASSES_REQUIRE_QUALIFIED_EPS_BRIDGE')
+        result['earnings_model'] = state(INSUFFICIENT, 'MULTIPLE_REGISTERED_SECURITIES_REQUIRE_QUALIFIED_EPS_ADAPTER')
     else:
         result['earnings_model'] = state(APPLICABLE, 'POSITIVE_GAAP_LISTED_EPS_MODEL_CONDITIONAL_ON_INPUTS_NOT_FORECAST_FACT')
     return result

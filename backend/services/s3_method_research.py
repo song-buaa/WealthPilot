@@ -100,7 +100,8 @@ def identity_projection(symbol, directory_source, submissions_source):
                  source_url=issuer['submissions_url'], source_document_sha256=hashlib.sha256(submissions_source[0]).hexdigest(),
                  fetched_at=submissions_source[1])
     identity = dict(symbol=symbol, cik=issuer['cik'], sec_ticker=issuer['sec_ticker'],
-                    registered_equity_tickers=issuer['registered_equity_tickers'], submissions_tickers=submissions['tickers'],
+                    registered_tickers=issuer['registered_tickers'],
+                    registered_equity_tickers=issuer['registered_tickers'], submissions_tickers=submissions['tickers'],
                     directory_sha256=hashlib.sha256(directory_source[0]).hexdigest(),
                     submissions_sha256=scope['source_document_sha256'])
     return issuer, scope, identity
