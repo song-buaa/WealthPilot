@@ -26,6 +26,7 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 �
 
 风险工作流和质量矩阵以[治理文档](docs/PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)为唯一详细规则：L0 文档、L1 局部修复、L2 跨模块/口径、L3 生产/交易/迁移。简单 Bug 不需要独立架构评审；不能据此豁免原有代码 Gate。
 
+- **个人 Mini 连接**：只使用原生 SSH + Tailscale 的 `wealthpilot-poc03-mini` 和本人密码建立的限时 ControlMaster；先 `ssh -O check wealthpilot-poc03-mini`，有效则直接复用，过期只由本人在 Terminal 续期。**禁止 WealthPilot 使用公司的 `sshm` Skill、公司 SSH Agent 或公司公钥**；不探索替代认证。现有 `MacBook-MacMini-SSH-SOP.md` 的定位与边界见[个人 Mac Mini 连接](docs/PROJECT_GOVERNANCE.md#个人-mac-mini-连接)。
 - MacBook = Dev，Mac Mini = Prod。开发/测试使用临时 SQLite、显式禁用 dotenv、Mock broker 和冻结/禁用外部 Provider，不借用生产库、凭证、Tunnel 或配置。不要为审计/测试启动完整生产 backend；lifespan 会启动原调度和订单任务。
 - 生产只读调查、真实 Provider/付费调用、同步写入、服务安装/重启/切换、备份恢复分别按任务授权；代码/文档 PR 不包含这些授权。未获授权仅做离线准备。
 - 券商连接不等于交易授权。IBKR 默认 Gateway Read-Only API、`IBKR_READ_ONLY_MODE=true`、`ENABLE_IBKR_LIVE_TRADING=false`；禁止未经逐次明确授权的 place/submit/cancel/modify/replace 及等价 mutation。最终人工确认必须保留在原 Web，打开预填链接或 Mock 成交不是实盘验收。

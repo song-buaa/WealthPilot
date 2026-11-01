@@ -13,6 +13,14 @@
 - **Mac Mini Prod / Private Full Mode**：代码与用户本地 DB、配置、凭证、日志、备份分离；真实 Provider、只读调查、同步写入、安装/启停/切换与恢复按当前任务分别授权。生产不直接修改业务代码，修复回 Dev / PR。
 - 非 Demo 完整 backend 的 lifespan 包含原调度/同步、孤儿扫描、订单轮询与触发评估；审计/测试不能为图方便启动它。CI 或文档发布均不暗含生产启停授权。
 
+### 个人 Mac Mini 连接
+
+WealthPilot 是个人项目；个人生产 Mini 只沿既有 **Tailscale + macOS 原生 SSH + 本人交互密码建立 ControlMaster** 连接。固定 alias `wealthpilot-poc03-mini`，目标 `songbin@100.97.137.119:22`，ControlPath `~/.ssh/wpmini-poc03/c.sock`，空闲保留15分钟。先执行 `ssh -O check wealthpilot-poc03-mini`；有效则复用，过期只由本人在 MacBook Terminal 按 SOP 续期，Codex 不索取密码或尝试替代身份。
+
+**禁止在 WealthPilot 使用公司的 `sshm` Skill、公司 SSH Agent 或公司公钥。** 严格主机校验及原 SOP 固定指纹继续生效；主机记录缺失不等于密码问题，不关闭校验、不接受新指纹、不擅改 SSH/生产配置。连接成功不扩大当前任务的生产权限。
+
+唯一详细操作指南是现有本机 `MacBook-MacMini-SSH-SOP.md`，当前迁移位置：`/Users/songbin/Developer/_archives/2026-11-01/Documents/Codex/2026-10-30/task/MacBook-MacMini-SSH-SOP.md`。旧 Documents 路径只作追溯；文件再次迁移时按文件名在已验证 Developer 根下定位，不重建旧入口。本节只维护规范和指针，不复制连接指南或保存凭证。
+
 ## 3. 分支与提交策略
 
 - `main` 是唯一长期集成分支。新任务 fetch 后从最新 `origin/main` 建短期 `codex/<topic>` 分支；继续已有 PR 时复用其分支并核对 base，不创建重复 PR。
