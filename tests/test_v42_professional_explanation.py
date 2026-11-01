@@ -274,8 +274,121 @@ def test_original_new_entry_small_json_retains_only_cited_explanation(monkeypatc
             out, plan, executed, "研究是否适合建仓", [])]
     chunks = asyncio.run(collect())
     assert len(captured) == 1
-    assert "professional_explanation" in captured[0]["messages"][0]["content"]
+    assert "professional_explanation" in captured[0]["messages"][1]["content"]
     assert TEXT in "".join(chunks) and TEXT in out.chat_answer
     assert "987654" not in str(out)
     assert out.structured_payload["decisionType"] == "buy_init"
     assert not out.actionable
+
+
+def test_real_xpev_filing_reaches_pure_research_prompt_once_with_completion_headroom(monkeypatch):
+    import asyncio
+    import json
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from backend.agents.contracts import ExecutionOutput, ExpressionOutput
+    from backend.agents.expressing_agent import ExpressingAgent
+    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.output_policy import prompt_context
+    from intent_engine import _llm_client
+    from tests.test_xpev_sec_real_original import parse
+
+    row = parse()  # Frozen, hash-checked 2026 Q2 SEC 6-K original.
+    evidence = assess({}, symbol="XPEV:US", research=[row],
+        at=datetime(2026, 10, 30, 12, tzinfo=timezone.utc),
+        disclosure_verifier={row["record_id"]: row}.get)
+    evidence["research_intent"] = dict(no_holding_research=True, objective="evaluate")
+    loaded = SimpleNamespace(target_position=SimpleNamespace(name="XPeng", ticker="XPEV"),
+        av_fundamentals=None, total_assets=0, full_discipline_rules=None)
+    executed = ExecutionOutput(loaded_data=loaded)
+    executed.position_evidence = evidence
+    calls = []
+    def create(**options):
+        calls.append(options)
+        answer = json.dumps({"chat_answer": "研究经营证据。", "professional_explanation": []})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=answer))])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(_llm_client, "get_client", lambda: client)
+    output = ExpressionOutput()
+    question = "没有持仓，也没有买入意图，只研究小鹏汽车经营。"
+    async def run():
+        return [part async for part in ExpressingAgent()._express_new_entry(
+            output, executed, question + prompt_context(evidence))]
+    asyncio.run(run())
+    assert len(calls) == 1
+    assert calls[0]["max_completion_tokens"] == 32768
+    assert calls[0]["reasoning_effort"] == "high"
+    system, user = (message["content"] for message in calls[0]["messages"])
+    assert "建仓价区间" not in system and "单标专业投研" in system
+    assert user.count("专业解释附加契约") == 1
+    assert "revenue_quarter" in user and "vehicle_sales_quarter" in user
+    assert output.prompt_template_id == "single_security_research"
+    assert output.structured_payload["decisionType"] == "watch"
+    assert output.structured_payload["is_new_entry"] is False
+
+
+def test_focused_expression_only_replaces_unbound_financial_explanation(monkeypatch):
+    import asyncio
+    import json
+    from datetime import datetime, timezone
+    from backend.agents import expressing_agent
+    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.output_policy import explanation_projection, prompt_context
+    from intent_engine import _llm_client
+    from tests.test_sec_real_original import parse
+
+    source = parse()
+    evidence = assess({}, symbol="LI:US", research=[source],
+        at=datetime(2026, 10, 30, 12, tzinfo=timezone.utc),
+        disclosure_verifier={source["record_id"]: source}.get)
+    evidence["financial_research"] = build(evidence)
+    metric = next(row for row in evidence["financial_research"]["records"]
+                  if row["field"] == "revenue_yoy_pct")
+    ref = metric["record_id"]
+    bound = dict(topic="business", basis="inference", scope="research_only",
+        text="收入变化为{{n1}}，盈利转化仍需复核。", evidence_refs=[ref],
+        numbers=[dict(id="n1", evidence_ref=ref, field="revenue_yoy_pct")])
+    risk = dict(topic="risk", basis="inference", scope="research_only",
+        text="收入与盈利可能背离，应核查现金流与竞争压力。", evidence_refs=[ref])
+    calls = []
+    monkeypatch.setattr(_llm_client, "get_client", lambda: object())
+    def completion(*args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content=json.dumps({"professional_explanation": [bound, risk]}, ensure_ascii=False)))])
+    monkeypatch.setattr(expressing_agent, "chat_completion", completion)
+    question = "研究理想经营" + prompt_context(evidence)
+    found = asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk]))
+    assert found == [risk, bound]
+    checked, _ = explanation_projection(found, evidence)
+    assert checked[1]["numbers"][0]["field"] == "revenue_yoy_pct"
+    assert calls[0]["reasoning_effort"] == "high" and calls[0]["max_tokens"] == 28672
+    assert calls[0]["messages"][1]["content"].count("专业解释附加契约") == 1
+    # A full verified report is preserved, even if the supplement could bind numbers.
+    complete = [dict(risk, topic=topic) for topic in
+                ["business", "competition", "investment_thesis", "risk", "review_condition", "business"]]
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, complete)) is None
+    assert len(calls) == 1
+    second = next(row for row in evidence["financial_research"]["records"]
+                  if row.get("quality") == "valid" and row["record_id"] != ref
+                  and "margin" in row["field"])
+    sufficient = dict(bound, text="利润变化为{{n1}}，盈利转化仍需复核。", numbers=[dict(
+        id="n1", evidence_ref=second["record_id"], field=second["field"])],
+        evidence_refs=[second["record_id"]])
+    assert len(explanation_projection([bound, sufficient], evidence)[0]) == 2, explanation_projection([bound, sufficient], evidence)
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [bound, sufficient])) is None
+    assert len(calls) == 1
+    nonkey = next(row for row in evidence["verified_field_records"] if row["field"] == "revenue_quarter")
+    fact = dict(bound, text="收入为{{n1}}，盈利转化仍需复核。", evidence_refs=[nonkey["record_id"]],
+        numbers=[dict(id="n1", evidence_ref=nonkey["record_id"], field=nonkey["field"])])
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [fact])) == [fact, bound]
+    def unsafe(*args, **kwargs):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "professional_explanation": [dict(bound, text="建议卖出100股。"), risk]}, ensure_ascii=False)))])
+    monkeypatch.setattr(expressing_agent, "chat_completion", unsafe)
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk])) is None
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(assessment(), question, [risk])) is None
+    monkeypatch.setattr(expressing_agent, "chat_completion", lambda *args, **kwargs:
+        SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "professional_explanation": [dict(bound, evidence_refs=["invented"])]}))) ]))
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk])) is None

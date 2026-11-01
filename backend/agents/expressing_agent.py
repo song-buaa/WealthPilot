@@ -161,6 +161,82 @@ _NEW_ENTRY_SYSTEM_PROMPT = """你是 WealthPilot 投资分析助手。用户正�
 - 如果纪律约束已阻止(如组合熔断),明确拒绝并说明原因
 - 输出使用 Markdown 格式"""
 
+_PURE_RESEARCH_SYSTEM_PROMPT = """你是 WealthPilot 单标专业投研助手。用户明确未持仓且没有买入意图。
+请基于下列合格证据分析经营变化、财务质量、竞争反证、投资逻辑及复核条件。
+事实与推论分开；无合格证据的估值和现金流结论保持未知。
+仅输出根 JSON 中的 chat_answer 与 professional_explanation；不要给出建仓价、仓位、减仓分批或订单指令。
+专业解释的引用和数字占位符必须遵循用户消息中的确定性证据合同。"""
+
+
+async def _focused_numeric_explanation(assessment: dict, question: str, candidate: object):
+    """Use the same Expressing evidence contract when the large decision JSON omitted numbers."""
+    from backend.services.market_data.output_policy import explanation_projection
+
+    metrics = (assessment.get("financial_research") or {}).get("records") or []
+    if not any(row.get("quality") == "valid" and row.get("kind") == "research_metric"
+               and row.get("field") not in {"observed_price", "fx_rate"} for row in metrics):
+        return None
+    accepted, _ = explanation_projection(candidate, assessment)
+    key_refs = {row["record_id"] for row in metrics
+                if row.get("quality") == "valid" and row.get("kind") == "research_metric"
+                and any(part in row.get("field", "") for part in
+                        ("yoy", "qoq", "margin", "cash_conversion", "per_delivery"))}
+    def bindings(rows):
+        return {number.get("evidence_ref") for row in rows for number in row.get("numbers", [])
+                if number.get("evidence_ref") in key_refs}
+    if not key_refs or len(bindings(accepted)) >= min(2, len(key_refs)):
+        return None
+    # Never erase a verified paragraph to make room for a numerical supplement.
+    # Keep raw candidates so the final owner can reapply its placeholder contract.
+    original = [row for row in (candidate or []) if explanation_projection([row], assessment)[0]]
+    if len(original) >= 6:
+        return None
+
+    from intent_engine._llm_client import get_client
+    import json
+
+    try:
+        response = await asyncio.to_thread(lambda: chat_completion(
+            get_client(), model=MODEL_MAIN, reasoning_effort="high", max_tokens=28672,
+            timeout=180, messages=[
+                {"role": "system", "content": (
+                    "你在原PEER的Expressing阶段补足专业解释，不重新计算事实或决定交易。"
+                    "仅输出JSON对象，根字段professional_explanation为最多六段的数组。"
+                    "依据用户消息中已有的有效引用及数字绑定合同，至少一段经营解释应绑定实际可用的"
+                    "同比、利润率或汽车经营指标；仅在证据允许时论述现金质量、竞争反证、投资逻辑与复核条件。"
+                    "把事实与推论分开；缺失的估值、分部和来源保持未知。"
+                    "不得给出交易价格、数量、订单或未绑定的数字。")},
+                {"role": "user", "content": question},
+            ]))
+        raw = response.choices[0].message.content or ""
+        parsed = json.loads(raw)
+        proposed = parsed.get("professional_explanation") if isinstance(parsed, dict) else None
+        checked, _ = explanation_projection(proposed, assessment)
+        logger.info("focused_explanation accepted=%s numeric_bound=%s",
+                    len(checked), sum(bool(row.get("numbers")) for row in checked))
+        merged = list(original)
+        seen = {(row.get("topic"), row.get("text")) for row in original}
+        covered = bindings(accepted)
+        for row in proposed or []:
+            valid, _ = explanation_projection([row], assessment)
+            if not valid or not (bindings(valid) - covered):
+                continue
+            identity = (row.get("topic"), row.get("text"))
+            if identity in seen or len(merged) >= 6:
+                continue
+            merged.append(row)
+            seen.add(identity)
+            covered |= bindings(valid)
+        final, _ = explanation_projection(merged, assessment)
+        if len(final) == len(merged) and bindings(final) > bindings(accepted):
+            return merged
+    except Exception as exc:
+        # A supplementary explanation is never allowed to erase a completed
+        # first pass. Keep diagnostics free of model text and private context.
+        logger.warning("focused_explanation unavailable category=%s",
+                       getattr(exc, "kind", type(exc).__name__))
+    return None
+
 _CHAT_FORMAT_NEW_ENTRY = """【标的信息】
 - 标的: {asset_name} ({ticker})
 
@@ -511,6 +587,11 @@ class ExpressingAgent:
         if llm_result.structured_result:
             structured = dict(llm_result.structured_result)
             structured.pop("chat_answer", None)
+            if assessment and not llm_result.is_fallback:
+                enriched = await _focused_numeric_explanation(
+                    assessment, user_query, structured.get("professional_explanation"))
+                if enriched is not None:
+                    structured["professional_explanation"] = enriched
             out.structured_payload = structured
 
         out.mode = "fallback" if llm_result.is_fallback else "structured"
@@ -550,13 +631,16 @@ class ExpressingAgent:
             full_discipline_rules=getattr(loaded, "full_discipline_rules", None),
         )
 
-        prompt = _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload)
         assessment = getattr(execution_output, "position_evidence", {})
+        intent = assessment.get("research_intent") or {}
+        pure_research = bool(assessment and intent.get("no_holding_research")
+                             and intent.get("objective") == "evaluate")
+        prompt = (_PURE_RESEARCH_SYSTEM_PROMPT + "\n标的：" + str(payload["asset_name"])
+                  + " (" + str(payload["ticker"]) + ")" if pure_research else
+                  _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload))
         if assessment:
-            from backend.services.market_data.output_policy import explanation_prompt
             prompt += ("\n本次有确定性证据资格控制。请输出JSON对象，包含chat_answer和professional_explanation；"
-                       "chat_answer不会直接显示，专业解释必须遵循以下附加契约。"
-                       + explanation_prompt(assessment))
+                       "chat_answer不会直接显示，专业解释必须遵循用户消息中已有的证据与数字绑定合同。")
         from backend.services.technical_patterns.ai_integration import (
             format_pattern_ai_prompt_section,
         )
@@ -578,8 +662,11 @@ class ExpressingAgent:
                         {"role": "user", "content": user_query},
                     ],
                     temperature=0.3,
-                    max_tokens=2000,
-                    timeout=30,
+                    # Hidden reasoning counts against completion tokens. The
+                    # prior 8192 effective cap was exhausted before any JSON.
+                    max_tokens=28672 if assessment else 2000,
+                    reasoning_effort="high" if pure_research else None,
+                    timeout=180 if assessment else 30,
                 ),
             )
             chat_answer = response.choices[0].message.content or ""
@@ -592,12 +679,12 @@ class ExpressingAgent:
         out.chat_answer = chat_answer
         out.raw_text = chat_answer
         out.mode = "structured"
-        out.prompt_template_id = "new_entry_evaluation"
+        out.prompt_template_id = "single_security_research" if pure_research else "new_entry_evaluation"
 
-        # 强制 decisionType = buy_init
+        # A virtual position is not evidence of an intention to buy.
         out.structured_payload = {
-            "decisionType": "buy_init",
-            "is_new_entry": True,
+            "decisionType": "watch" if pure_research else "buy_init",
+            "is_new_entry": not pure_research,
             "asset_name": getattr(virtual_pos, "name", ""),
             "ticker": getattr(virtual_pos, "ticker", ""),
         }

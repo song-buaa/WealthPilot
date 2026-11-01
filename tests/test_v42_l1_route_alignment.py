@@ -132,6 +132,7 @@ def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, 
     from decision_engine import data_loader
     from backend.agents import expressing_agent
     from backend.services.market_data import av_fundamentals_service
+    from backend.services import position_analysis
     from decision_engine import llm_engine
     from backend.core import demo_mode
     from research_v2 import official_disclosures, sec_disclosures
@@ -160,12 +161,19 @@ def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, 
         "av_fundamentals": None, "market_not_supported_message": None, "warning": None,
     })
     monkeypatch.setattr(av_fundamentals_service, "fetch_fundamentals", lambda *a, **k: None)
+    original_prepare = position_analysis.prepare
+    research_questions = []
+    def capture_prepare(*args, **kwargs):
+        research_questions.append(kwargs["options"]["research_question"])
+        return original_prepare(*args, **kwargs)
+    monkeypatch.setattr(position_analysis, "prepare", capture_prepare)
     monkeypatch.setattr(expressing_agent, "chat_completion", lambda *a, **k: NS(
         choices=[NS(message=NS(content=json.dumps({"chat_answer": "研究公司经营与风险。",
             "professional_explanation": []}, ensure_ascii=False)))]))
     result = asyncio.run(analyze(analysis_db, 7, "analyze_position", {
         "question": question,
         "symbol": "XPEV:US"}, synthetic=True, async_l1=True))
+    assert research_questions and all(item == question for item in research_questions)
     if not accepted:
         assert result["status"] == "unavailable"
         assert result["intent"]["asset"] == "LI"
