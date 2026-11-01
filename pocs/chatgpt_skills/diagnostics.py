@@ -4,7 +4,7 @@ import time
 
 from app.llm_observation import safe_call_timings, safe_stage_timings, run_id, safe_metadata, STAGES as PEER_STAGES, ERRORS as MODEL_ERRORS
 
-ANALYSIS_OPERATIONS = {"analyze_position", "review_portfolio", "analyze_performance"}
+ANALYSIS_OPERATIONS = {"compare_company_pool", "analyze_position", "review_portfolio", "analyze_performance"}
 STAGES = {"mcp_received", "worker_start", "request_send", "ipc_wait", "request_received",
           "analyze_peer", "result_serialization", "ipc_receive", "pydantic_validation", "mcp_return", "worker_cleanup"}
 CATEGORIES = {"NONE", "UNKNOWN", "worker_start_failed", "worker_start_refused", "ipc_timeout", "worker_exited",

@@ -23,6 +23,7 @@ from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
 SAFE_ERRORS |= HISTORY_ERRORS
+SAFE_ERRORS |= {"S3_RESEARCH_UNAVAILABLE", "S3_ARTIFACT_UNAVAILABLE", "S3_ARCHIVE_INVALID", "S3_SYNTHETIC_SOURCE_REQUIRED"}
 
 # Transport metadata only; importing it must not load a model client in the
 # independent MCP environment. Values come from local operator configuration.
@@ -115,6 +116,56 @@ def checked_mock(path):
     return path
 
 
+def pool_worker(args):
+    """Single public research request, before any business DB/config setup."""
+    try:
+        envelope = json.loads(sys.stdin.readline())
+        operation, arguments = envelope['operation'], envelope['arguments']
+        if operation not in {'compare_company_pool', 'read_company_pool_research'}:
+            raise ValueError('S3_RESEARCH_UNAVAILABLE')
+        live = operation == 'compare_company_pool' and not args.s3_source_root
+        if live and args.synthetic_input:
+            raise ValueError('S3_SYNTHETIC_SOURCE_REQUIRED')
+        os.environ.update(PUBLIC_DEMO_MODE='false' if live else 'true',
+            DEMO_ACCESS_PASSWORD='synthetic-only', DEMO_ALLOW_MARKET_DATA='false',
+            PYTHON_DOTENV_DISABLED='1', BROKER_MODE='mock', IBKR_READ_ONLY_MODE='true',
+            ENABLE_IBKR_LIVE_TRADING='false', ENABLE_TIGER_LIVE_TRADING='false', FUTU_READ_ONLY_MODE='true')
+        with contextlib.redirect_stdout(io.StringIO()):
+            if live:
+                if args.analysis_env_file:
+                    load_analysis_environment(args.analysis_env_file)
+                from research_v2.sec_disclosures import request_identity
+                if not request_identity():
+                    from research_v2.sec_identity import DEFAULT_PATH
+                    load_analysis_environment(DEFAULT_PATH, sec_identity_only=True)
+            else:
+                import socket
+                def denied(*a, **k):
+                    raise OSError('S3_FROZEN_NETWORK_DISABLED')
+                class OfflineSocket(socket.socket):
+                    connect = denied
+                    connect_ex = denied
+                socket.socket = OfflineSocket
+                socket.create_connection = denied
+            from backend.services.s3_research_entry import read_company_pool
+            if operation == 'read_company_pool_research':
+                if set(arguments) != {'artifact_id'}:
+                    raise ValueError('S3_ARTIFACT_UNAVAILABLE')
+                result = read_company_pool(arguments['artifact_id'], archive_root=args.s3_archive_root,
+                    synthetic=args.synthetic_input)
+            else:
+                from backend.services.decision_service_v3 import run_company_pool_research
+                result = run_company_pool_research(arguments, archive_root=args.s3_archive_root,
+                    source_root=args.s3_source_root, reuse_sources=args.s3_reuse_sources,
+                    synthetic=args.synthetic_input)
+        response = dict(ok=True, result=result)
+    except Exception as error:
+        code = str(error) if str(error) in SAFE_ERRORS else (
+            'S3_ARTIFACT_UNAVAILABLE' if locals().get('operation') == 'read_company_pool_research' else 'S3_RESEARCH_UNAVAILABLE')
+        response = dict(ok=False, error=code)
+    print(json.dumps(response, ensure_ascii=False, allow_nan=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-mock")
@@ -123,6 +174,10 @@ def main():
     parser.add_argument("--real-config")
     parser.add_argument("--analysis-env-file")
     parser.add_argument("--single-analysis", action="store_true")
+    parser.add_argument("--single-pool-research", action="store_true")
+    parser.add_argument("--s3-archive-root")
+    parser.add_argument("--s3-source-root")
+    parser.add_argument("--s3-reuse-sources")
     parser.add_argument("--frozen-database")
     parser.add_argument("--asset-view-source")
     parser.add_argument("--source-contract")
@@ -130,6 +185,9 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     logging.getLogger().handlers = [logging.NullHandler()]
+    if args.single_pool_research:
+        pool_worker(args)
+        return
     if args.init_mock:
         init_mock(args.init_mock, args.portfolio_id)
         print(json.dumps({"ok": True, "synthetic": True})); return

@@ -1268,7 +1268,13 @@ def execute_assess_position_evidence(**kwargs):
     return result
 
 
+def execute_compare_company_pool(**kwargs):
+    from backend.services.s3_research_entry import run_company_pool
+    return run_company_pool(**kwargs)
+
+
 TOOL_EXECUTORS = {
+    "compare_company_pool": execute_compare_company_pool,
     "assess_position_evidence": execute_assess_position_evidence,
     "fetch_holdings":             execute_fetch_holdings,
     "check_discipline_rules":     execute_check_discipline,

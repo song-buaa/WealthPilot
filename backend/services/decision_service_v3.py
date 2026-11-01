@@ -1127,3 +1127,13 @@ def _build_done_payload(
         "conclusion_label": "普通对话",
         **actionable_fields,
     }
+
+
+def run_company_pool_research(request, **operator_context):
+    """Explicit public research Skill entry; no position/portfolio or model run.
+
+    Operator context is supplied by the isolated Worker, not external request
+    fields. The existing S3 engine owns all calculations and frozen artifacts.
+    """
+    from backend.skills import invoke_skill
+    return invoke_skill('wp-compare-quality-valuation', request=request, **operator_context)

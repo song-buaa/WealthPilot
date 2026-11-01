@@ -1,6 +1,6 @@
 # S3-A 冻结公司池质量与估值研究
 
-S3-A已由PR #67以Research Only集成main `99040f6811167ee6af2318ab2ae59d212e1ad36f`；原基线PR #66 `1ce59ae58c234777c1e4bd9d3697acdf4f649ab3`。以下S3-A段落保留v1.1方法的能力边界，S3-B本地新版本见文末，不覆盖旧方法或工件。没有生产接线、MCP/Web入口、新Skill、模型调用或交易权限。
+S3-A已由PR #67以Research Only集成main `99040f6811167ee6af2318ab2ae59d212e1ad36f`；原基线PR #66 `1ce59ae58c234777c1e4bd9d3697acdf4f649ab3`。以下S3-A段落保留v1.1方法的历史能力边界，后续版本及一期可选MCP/Skill接入见文末，不覆盖旧方法或工件。尚未生产发布或真实ChatGPT线上验收，没有交易权限。
 
 ## 范围与复用
 
@@ -180,3 +180,33 @@ Price由原AVKlineProvider/technical_evidence/Evidence负责，SEC由原私有�
 S3-D固定34位Decimal上下文与原估值Owner一致，避免初步质量观察与最终计算继承不同调用方精度。新方法`s3-d.real-pool.v1`单列，原S3-A/B/C不改算法；历史工件以原Git源码回放，独立标准库核验新增原始收盘/拆股/参数链。原始DAILY与复权价格不混用；以SPLITS历史事件审核选定EPS期间内的类股可比性，存在拆股则保留UNKNOWN等待原Owner桥，不自行换算。该历史feed不保证所有公司行动覆盖。
 
 实际TSLA材料若未提供Owner可解析的Q4 EPS，不能以全年减前三季或非GAAP数替代；仍保留可检查、可修改的五年候选参数及缺口，不捏造回报。金融保险方法不适用不会因为正EPS或有价格被纳入普通估值。未来参数与GAAP事实、正常化UNKNOWN及质量警示均分开。
+
+## S3 一期 ChatGPT / PEER Skill 接入
+
+S3-D 已由 PR #77 合入 `3f869982e48a26971385b43449176abebee65049`。一期产品接入只增加可选 MCP 包装，复用原 `PositionJobs`、`BusinessClient`、单次隔离 Worker、`invoke_skill` 和 S3 服务；不增加 Agent Runtime 或数据库。入口为 [company_pool](../../pocs/chatgpt_skills/company_pool.py)、[研究适配](../../backend/services/s3_research_entry.py) 及内部 [wp-compare-quality-valuation](../../skills/wp-compare-quality-valuation/SKILL.md)。原单标 Evidence Skill 不承载多公司版本化比较，因此新增 Skill 仅包装原 S3，不复制财务或估值计算、不改既有 Skill 契约。
+
+仅当操作者显式提供 `--s3-archive-root /private/s3/archive` 时，原 ChatGPT Skills MCP 增加三个工具，默认工具集合保持不变：
+
+- `start_company_pool_research(request_id, request={symbols, purpose})`：接收用户公司池及研究目的，异步启动原 Worker，公开来源只读采集，显式写私人研究归档；故 `read_only_hint=false`。不读持仓、不调用 prepare、不创建 E1 判断或订单。
+- `get_company_pool_research_result(job_id)`：复用原有界进程内收据，读取同一个结果；断连不取消研究，不自动重新启动。结果到期或重启后 unknown，不得据此重跑。
+- `read_company_pool_research(artifact_id)`：在固定私人归档根下只读哈希目录，验证原输入、来源与报告并重算。历史方法漂移保留原结果及 `METHOD_DRIFT_REPLAY_REQUIRES_ORIGINAL_VERSION`，不以新方法替换旧值；原 CLI/独立脚本仍可回放对应版本。
+
+用户可以直接问：“帮我比较 AAPL、NVDA、GOOG、MSFT、META、TSLA，从企业质量、估值吸引力和未来五年潜在回报来看，哪些值得优先考虑？”ChatGPT 选择上述工具并维护收据，不要求用户构造 CLI 或记住内部 ID。必须展示六张卡、合格公司分档/档内排名、不可比清单、假设依据与不确定性。自动候选参数是研发假设，未证明远期盈利；公司研究优先级不等于组合配置，实际配置资格始终 UNKNOWN。
+
+MCP 返回保留全部分档、门禁、情景、敏感性和警示；重复财务输入树、原始GAAP序列及未被引用的历史目录仅存完整冻结工件。引文以别名去重，保留原Evidence ID、公开来源URL/hash和定位；完整结果hash随返回提供，不修改计算结果。synthetic及采集/冻结重核模式随payload内容哈希冻结，读取时不得因服务配置改变而升级为真实。旧S3 CLI工件继续沿原版本回放，不冒充带一期入口provenance的新工件。
+
+MCP 请求不接受来源路径、财务数字、研究时钟、投资政策或订单参数。可选操作者 `--s3-source-root` 用于已冻结来源重核；`--s3-reuse-sources` 用于原采集器公开原件种子。实时采集仅在一次性子进程进行，避免原采集器的临时环境/HTTP拦截影响并发服务。`decision_at` 在来源获取/读取后使用真实当前时间，旧源过期继续拒绝；不倒填历史时钟。标准 SEC 配置沿 [开发 SOP](../dev_setup.md#sec-官方来源开发配置)，现有 analysis-env JSON 仍仅按原白名单加载；冻结重核与归档读取禁止网络，不打开原业务配置/数据库。
+
+这是确定性 Research Only Skill。`professional_analysis_complete=false` 明示未宣称完成四 Agent 模型审查，不伪造 Planning/Executing/Expressing/Reviewing PASS。有限 US GAAP 非金融筛查、条件盈利倍数情景及候选参数的全部原限制不变；无新增收益资格、生产交易或投资政策权限。
+
+### 一期验收与生产发布边界
+
+本地可使用真实公开来源完成六公司 MCP 协议→隔离 Worker→原 Skill→S3→冻结→新进程读回及独立脚本复算；合成协议/失败测试与真实来源验收分别留证。源码/loopback PASS 不等于 ChatGPT 线上验收。至少两家有同一合格时点的真实五年条件回报即可；其余保留精确 Owner 缺口，TSLA Q4 EPS、BRK 专用估值、DCF/全行业 ROIC 不再阻断一期。
+
+正式生产部署、MCP 注册/工具刷新、Mini 服务重启及 ChatGPT 线上调用仍需原发布授权。本任务不执行这些动作。获授权后的最小发布步骤：
+
+1. 依 [既有组件发布流程](../PROJECT_GOVERNANCE.md#github-集成与-mac-mini-部署)，验证最终 main exact SHA 与四项 CI，在 Mini 原 MCP 组件安装审核版本；不启动第二套 backend、不改数据库。
+2. 为原服务属主配置独立私人 0700 S3 归档目录；核对 Mini 自己的 SEC 身份、原 analysis-env 中 AV 权限与网络。MacBook 私有配置不自动共享；不复制完整环境文件。必要公开冻结原件可作为种子，仍逐项重核时钟/hash/来源。
+3. 只为原 MCP 启动参数增加 `--s3-archive-root`（及明确需要的公开源种子），保持既有读取/prepare/E1边界和权限。新工具 start 仅写研究目录，不能沿用“所有工具都只读”的旧描述；需要显式批准该研究归档写权限。核对原工具全集加三项（全配置原18项时共21项；其他 opt-in 另计）。
+4. 经批准重启原组件、刷新连接后，在真实 ChatGPT 发起一次上面的六公司问题。保留同一 request/job ID，六家公司都应留卡，至少两家可比较；检查来源、决策时钟、参数与方法、公司/配置区别。保存 artifact_id，再读取及独立复算。不得创建订单或修改政策。
+5. 如失败，撤回 S3 可选参数并恢复原组件版本；不删除原冻结研究、不迁移 DB、不重跑未知付费任务。记录真实线上结果后才可声明 RELEASED。

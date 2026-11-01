@@ -108,9 +108,11 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 ### S3 公司池 Research Only
 
-S3-D本地候选：[真实池适配](../backend/services/s3_pool_research.py)和[采集包装](../backend/services/s3_pool_capture.py)沿原内部CLI执行显式公开读取或冻结来源重用、同点核验、透明研发候选参数、原质量/估值/分档、内容寻址保存。原AV Owner共享纯日线/拆股解码，严格身份模式仅opt-in；不增加行情源、TTM计算、Agent Runtime或生产入口。recalculate只复用已冻结决策时点，不能以历史日期新抓未来材料。
+一期产品入口：[可选公司池MCP](../pocs/chatgpt_skills/company_pool.py)以原PositionJobs、BusinessClient隔离Worker调用decision_service_v3.run_company_pool_research→invoke_skill→[薄研究适配](../backend/services/s3_research_entry.py)→原S3。显式私人archive-root启用start/get/read三项；只有start写研究归档。无业务/E1数据库、持仓或订单访问，不改原position_multi路由，不新增Agent编排；确定性Skill不声称四Agent专业审查。自然语言产品仍待生产发布及真实ChatGPT验收，当前保持Research Only。
 
-[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；S3-B本地候选在原SEC parse_companyfacts中显式opt-in瞬时/YTD语义，原Evidence以独立来源证明投影quality事实，原financial_research.build_quality做期间对齐和现金/平均权益算术，[有限质量规则](../backend/services/market_data/quality_evaluation.py)只解释原Owner输出。采集入口与季度/TTM算术仍为原Owner；S3-C沿原SEC收口UTC/工作日/晚间资格上界及直接目标类别EPS，不把注册证券数量或同额EPS当作股份换算证明。正式原文核验真实accepted与官方filed，S3不复制解析/时钟/股份规则。交易资格不变；源码及冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
+S3-D已由PR #77集成：[真实池适配](../backend/services/s3_pool_research.py)和[采集包装](../backend/services/s3_pool_capture.py)沿原内部CLI执行显式公开读取或冻结来源重用、同点核验、透明研发候选参数、原质量/估值/分档、内容寻址保存。原AV Owner共享纯日线/拆股解码，严格身份模式仅opt-in；不增加行情源、TTM计算、Agent Runtime或生产入口。recalculate只复用已冻结决策时点，不能以历史日期新抓未来材料。
+
+[内部S3入口](../scripts/s3_quality_valuation.py)在显式冻结工件上复用Evidence.assess与financial_research.build；[S3纯计算](../backend/services/market_data/quality_valuation.py)新增四底线、五年盈利情景、分档与敏感性，[冻结适配](../backend/services/quality_valuation_research.py)仅写显式本地研究工件。复用E1 canonical序列化但不打开E1/业务库，不新建Agent或生产端点；配置优先级UNKNOWN。原SEC/TTM/价格资格Owner不变；S3-B已集成，在原SEC parse_companyfacts中显式opt-in瞬时/YTD语义，原Evidence以独立来源证明投影quality事实，原financial_research.build_quality做期间对齐和现金/平均权益算术，[有限质量规则](../backend/services/market_data/quality_evaluation.py)只解释原Owner输出。采集入口与季度/TTM算术仍为原Owner；S3-C沿原SEC收口UTC/工作日/晚间资格上界及直接目标类别EPS，不把注册证券数量或同额EPS当作股份换算证明。正式原文核验真实accepted与官方filed，S3不复制解析/时钟/股份规则。交易资格不变；源码及冻结样例不等于生产PEER或策略有效性。方法、合同及限制见[S3-A](v4.3/S3_A_IMPLEMENTATION.md)。
 
 ## 5. Web 交易、数据库与任务
 

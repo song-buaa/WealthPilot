@@ -62,7 +62,8 @@ class BusinessClient:
         with self.lock:
             identifier = (request_run.get() or run_id()) if operation in ANALYSIS_OPERATIONS else None
             started = time.monotonic()
-            async_l1 = operation == "analyze_position" and getattr(self.settings, "async_l1", False)
+            pool_operation = operation in {"compare_company_pool", "read_company_pool_research"}
+            async_l1 = operation in {"analyze_position", "compare_company_pool"} and getattr(self.settings, "async_l1", False)
             time_policy = policy(getattr(self.settings, "analysis_env_file", None)) if async_l1 else None
             stage = "worker_start"
             def record(value):
@@ -89,13 +90,21 @@ class BusinessClient:
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
                     command = [self.settings.business_python, str(Path(__file__).with_name("worker.py")),
                                "--portfolio-id", str(self.settings.portfolio_id)]
-                    if async_l1:
+                    if async_l1 and not pool_operation:
                         command += ["--single-analysis"]
                     if getattr(self.settings, "analysis_env_file", None):
                         command += ["--analysis-env-file", self.settings.analysis_env_file]
-                    if self.settings.real_config:
+                    if pool_operation:
+                        command += ["--single-pool-research", "--s3-archive-root", self.settings.s3_archive_root]
+                        for flag in ('s3_source_root', 's3_reuse_sources'):
+                            value = getattr(self.settings, flag, None)
+                            if value:
+                                command += ['--'+flag.replace('_', '-'), str(value)]
+                        if not self.settings.real_config:
+                            command += ['--synthetic-input']
+                    if not pool_operation and self.settings.real_config:
                         command += ["--real-config", self.settings.real_config]
-                    if self.settings.mock_database:
+                    if not pool_operation and self.settings.mock_database:
                         command += ["--mock-database", self.settings.mock_database]
                     self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL, text=True, env=env,
@@ -211,10 +220,12 @@ def create_server(settings):
         "These are independent purposes, not nested permissions: single-security C never grants portfolio-wide B. Show the qualification_scope and actual blockers; never assume FX conversion or margin from another currency's cash. "
         "Use request.analysis_scope=net_worth for net-worth/loan/solvency planning and request.symbol for an explicit single-security scope. "
         "When can_propose_rebalance=false, preserve warnings and do not give precise executable quantities/prices. Eligibility never replaces final Web authorization.") if prepare_config else ""
+    pool_instructions = (" For an explicit company pool comparison of enterprise quality, valuation and five-year returns, use start_company_pool_research then get_company_pool_research_result. This needs no holdings, prepare or portfolio analysis. Preserve all cards and specific noncomparability. Candidate scenario parameters are unverified research assumptions, not policy. Retain artifact_id for read_company_pool_research after restart. Company priority is not portfolio allocation; no orders or policy changes. "
+        if getattr(settings, 's3_archive_root', None) else "")
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
         instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Generate one unique client request_id per user-authorized research; reuse it for retries within the same process. request_scope is informational, never a required prefix. Process-local receipts cannot guarantee deduplication across restart; unknown jobs never authorize a new start. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
-                      "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions)
+                      "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions+pool_instructions)
     overview.settings = settings
     security_meta = {"securitySchemes": [{"type": "noauth"}]}  # Private Tunnel supplies access control.
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
@@ -409,6 +420,10 @@ def create_server(settings):
     def analyze_performance(request: AnalysisRequest) -> AnalysisResult:
         return analysis_call("analyze_performance", request)
 
+    if getattr(settings, 's3_archive_root', None):
+        from pocs.chatgpt_skills.company_pool import register_pool_tools
+        register_pool_tools(server, analysis_settings, analysis_lock, security_meta, BusinessClient)
+
     # Real production: P1 + pure P2 URL + three analysis reads.
     # The original Mock workflow stays available to isolated automated tests.
     if settings.real_config:
@@ -445,6 +460,9 @@ def main():
     parser.add_argument("--prepare-config", help="Opt-in private loopback prepare URL/token-file configuration; seven existing tools stay read-only")
     parser.add_argument("--e1-db-path", help="4.3 opt-in private research store; read-only unless separately enabled, no creation or business writes")
     parser.add_argument("--e1-enable-writes", action="store_true", help="Separately authorized E1 preview/confirmed research save ONLY; default off; never enables business/trading writes")
+    parser.add_argument("--s3-archive-root", help="Opt-in private S3 research archive and three company-pool tools; no account writes")
+    parser.add_argument("--s3-source-root", help="Operator-only frozen source manifest directory; original clocks and qualification remain")
+    parser.add_argument("--s3-reuse-sources", help="Operator-only public raw-source seed for original capture Owner")
     parser.add_argument("--mock-database")
     parser.add_argument("--portfolio-id", type=int, default=1)
     parser.add_argument("--web-base-url", default=os.environ.get("WEALTHPILOT_WEB_BASE_URL", ""))

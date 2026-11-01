@@ -303,3 +303,5 @@ python scripts/m5_e2e_18_cases.py --mode offline
 本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE) 文件。
 
 B3交易体验/产品查询已随4.1交付：原批次恢复、最终确认及U2状态呈现，账户权限缺证据保持UNKNOWN。B3无Schema迁移，详见[实现与验收合同](docs/B3_IMPLEMENTATION.md)及[当前结项状态](docs/releases/v4.1.md)。
+
+公司池质量与估值的 ChatGPT 可选入口和发布边界见 [S3 一期说明](docs/v4.3/S3_A_IMPLEMENTATION.md#s3-一期-chatgpt--peer-skill-接入)。自然语言示例：“帮我比较 AAPL、NVDA、GOOG、MSFT、META、TSLA 的质量、估值及五年潜在回报。”当前 Research Only；生产接线及线上验收须单独授权。
