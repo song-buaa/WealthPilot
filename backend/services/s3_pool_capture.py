@@ -179,8 +179,15 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
                 from datetime import date
                 end=date.fromisoformat(annuals[0]['filed'])
                 candidates=[f for f in filings if f['form']=='8-K' and 0<=(end-date.fromisoformat(f['filed'])).days<=7][:3]
+            # CompanyFacts does not carry target-class dimensions. Reuse the
+            # SEC Owner's direct listed-class parser on a bounded set of actual
+            # statements, rather than guessing EPS from another listed ticker.
+            listed_classes=len(issuer.get('registered_tickers',[]))>1
+            if listed_classes:
+                candidates += [f for f in filings if f['form']=='10-Q'][:3] + annuals
             for filing in candidates:
-                if existing:break  # explicit reused quarter original, no repeated fetch
+                if existing and not listed_classes:break  # explicit reused single-class quarter original
+                if filing['full_url'] in existing:continue
                 original=sec_get(filing['full_url'],symbol[:-3]+'-'+filing['accession']+'.txt')
                 if original.get('path'):entry['originals'].append(original)
         except (ValueError,KeyError,TypeError,OSError,ArithmeticError) as exc:

@@ -139,6 +139,8 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 
 正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)仅管理有界进程私有登记/结果。客户端唯一ID在进程内幂等，旧scope格式兼容且不作门槛；跨重启不保证去重，未知job查询不执行业务或自动重跑；完整原报告保留两小时。无新平台/数据库/模型/Provider/权限，原同步入口兼容、原11工具保留。测试见[登记](../tests/test_position_jobs.py)、[真实隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；生产与真实质量仍待授权验收，见[4.2边界](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
 
+S3 P1科技覆盖开发候选沿[原SEC与S3 Owner](v4.3/S3_P1_US_TECH_COVERAGE.md)适配META同目标分段附件链接、表内GAAP标题及MSFT美元同格EPS；多注册证券有界补采直接类别原件。真实冻结回归不改变估值公式、质量门槛或上线资格；GOOG完整TTM/类别方法及TSLA图片Q4仍UNKNOWN，不强行排名。
+
 ### 4.3：E1 人工投资假设、复核与本地待办发现
 
 Owner：WP [investment_thesis](../backend/services/investment_thesis/service.py)；[store/types](../backend/services/investment_thesis/store.py)、[CLI](../backend/services/investment_thesis/cli.py) 实现显式私人研究库、不可覆盖版本/差异、支持/反对claim、原PEER结果副本与Review持久化。[纯敞口](../backend/services/investment_thesis/exposure.py) 复用U1/发行人和已核阶段目标，缺证未知、ETF不穿透；不维护第二套账户或风险规则。

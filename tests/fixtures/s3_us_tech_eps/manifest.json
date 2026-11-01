@@ -1,0 +1,92 @@
+{
+  "GOOG:US": {
+    "directory": {
+      "url": "https://www.sec.gov/files/company_tickers.json",
+      "path": "GOOG-directory.json",
+      "sha256": "3087398afcb236e5eef138bc383afe6292bb5bcc31644b8edae5222cd9305ce0",
+      "fetched_at": "2026-11-01T23:42:25.437742+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "submissions": {
+      "url": "https://data.sec.gov/submissions/CIK0001652044.json",
+      "path": "GOOG-submissions.json",
+      "sha256": "f511541380630b90a80ec59dd6a4c7f2e37b9c32ff1f6cfa60ec022fdbadbf11",
+      "fetched_at": "2026-11-01T23:42:25.724861+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "companyfacts": {
+      "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001652044.json",
+      "path": "GOOG-companyfacts.json",
+      "sha256": "ec4a3095d634583925b5ea450db8a5ed974dc48f6f1b4f594022310bc78d4032",
+      "fetched_at": "2026-11-01T23:42:26.251481+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "original": {
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084/0001652044-26-000084.txt",
+      "path": "GOOG-original.txt",
+      "sha256": "b74e29c9e29e1287ddfb71da78577fcf7f1d26dd0aad599dbea9b778b465a6b1",
+      "fetched_at": "2026-11-01T23:43:09.566552+00:00",
+      "owner": "SEC"
+    }
+  },
+  "META:US": {
+    "directory": {
+      "url": "https://www.sec.gov/files/company_tickers.json",
+      "path": "META-directory.json",
+      "sha256": "3087398afcb236e5eef138bc383afe6292bb5bcc31644b8edae5222cd9305ce0",
+      "fetched_at": "2026-11-01T23:42:25.437742+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "submissions": {
+      "url": "https://data.sec.gov/submissions/CIK0001326801.json",
+      "path": "META-submissions.json",
+      "sha256": "22b3d14392e7ad9740a5d5c6f977b7383024ba14cc33ebc33c1ddb1366745e0f",
+      "fetched_at": "2026-11-01T23:42:26.712257+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "companyfacts": {
+      "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001326801.json",
+      "path": "META-companyfacts.json",
+      "sha256": "b0d0d92870b68488cec086cffd83514f2cc6c80d3e8c4f91e192b17ce3e7c946",
+      "fetched_at": "2026-11-01T23:42:27.279226+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "original": {
+      "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026003832/0001628280-26-003832.txt",
+      "path": "META-original.txt",
+      "sha256": "944b4d74a167b36017094ac89c94fe340d7b798099d6d62f6d77dad4a71d0b2f",
+      "fetched_at": "2026-11-01T23:43:13.343934+00:00",
+      "owner": "SEC"
+    }
+  },
+  "MSFT:US": {
+    "directory": {
+      "url": "https://www.sec.gov/files/company_tickers.json",
+      "path": "MSFT-directory.json",
+      "sha256": "3087398afcb236e5eef138bc383afe6292bb5bcc31644b8edae5222cd9305ce0",
+      "fetched_at": "2026-11-01T23:42:31.177361+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "submissions": {
+      "url": "https://data.sec.gov/submissions/CIK0000789019.json",
+      "path": "MSFT-submissions.json",
+      "sha256": "46f3d184653f44f040005c30746b50f6e6a3e93b6e08630d4b400a73a9f6738e",
+      "fetched_at": "2026-11-01T23:42:31.427987+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "companyfacts": {
+      "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000789019.json",
+      "path": "MSFT-companyfacts.json",
+      "sha256": "464cc12cc4796c90a6a0c709eb4920788aa7d4d5eee8b44f2d11d7d44804ae37",
+      "fetched_at": "2026-11-01T23:42:33.262605+00:00",
+      "status": "HTTP200_RAW_ONLY_NOT_FINANCIAL_QUALIFICATION"
+    },
+    "original": {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323632/0001193125-26-323632.txt",
+      "path": "MSFT-original.txt",
+      "sha256": "d5bf29b45bc42bf81154ac3adb2f33c0f003d1633e7ce5fc36f306072c9806b6",
+      "fetched_at": "2026-11-01T23:43:13.669788+00:00",
+      "owner": "SEC"
+    }
+  }
+}

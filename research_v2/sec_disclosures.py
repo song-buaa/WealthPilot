@@ -620,7 +620,10 @@ def _declared_exhibit(cover, filename, kind):
         link_cells = [cell for cell in cells if link in cell.descendants]
         # A different row, an ambiguous multi-link row, or a label in the link
         # cell cannot identify this document as the declared exhibit.
-        if len(link_cells) != 1 or len(row.find_all('a', href=True)) != 1:
+        # Inline formatting may split one exhibit title into several anchors.
+        # They must all identify this exact same declared document; a second
+        # destination remains ambiguous, regardless of its visible label.
+        if len(link_cells) != 1 or {a['href'] for a in row.find_all('a', href=True)} != {filename}:
             continue
         for cell in cells:
             if cell is link_cells[0]:

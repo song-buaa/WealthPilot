@@ -486,23 +486,41 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
     result=[]
     for ti,table in enumerate(soup.find_all('table')):
         nearby=[]
+        heading_labels=[]
         for node in table.previous_elements:
             if getattr(node,'name',None)=='table':
                 break
             if isinstance(node,NavigableString):
                 value=' '.join(str(node).split())
                 if value:
+                    title=node.find_parent(['h1','h2','h3','h4','h5','h6','caption'])
+                    if title:
+                        heading_labels.append(title.get_text(' ',strip=True))
                     nearby.append(value)
                     if len(nearby)>=8:
                         break
         heading=' '.join(reversed(nearby))
-        if (not re.search(r'\b(?:condensed )?consolidated statements of (?:operations|income)\b',heading,re.I)
-                or not re.search(r'\bexcept\b.{0,70}\bper[ -]?share\b',heading,re.I)
-                or re.search(r'non[ -]?gaap|reconciliation',heading,re.I)):
-            continue
         try:
             rows=_grid(table)
         except ValueError:
+            continue
+        # Statement titles/units may be table rows (META), or a separate
+        # immediately preceding INCOME STATEMENTS heading (MSFT). Only the
+        # bounded statement header supplies qualification, not earlier prose.
+        title_pattern=r'\b(?:condensed )?(?:consolidated statements of (?:operations|income)|income statements)\b'
+        inside=' '.join(' '.join(dict.fromkeys(row)) for row in rows[:5])
+        if re.search(title_pattern,inside,re.I):
+            # An in-table title cannot override an explicit nearby adjusted
+            # statement/reconciliation label. Long narrative disclaimers before
+            # the separately titled statement do not label this table.
+            if (any(re.search(r'non[ -]?gaap|reconciliation|\badjusted\b',text,re.I) for text in heading_labels)
+                    or any(re.fullmatch(r'(?:non[ -]?gaap(?:\s+reconciliation)?|reconciliation(?:\s+of\s+.*)?|(?:non[ -]?gaap|adjusted)\s+.*(?:statements|results|income))',text,re.I)
+                           for text in nearby)):
+                continue
+            heading=inside
+        if (not re.search(title_pattern,heading,re.I)
+                or not re.search(r'\bexcept\b.{0,70}\bper[ -]?share\b',heading,re.I)
+                or re.search(r'non[ -]?gaap|reconciliation',heading,re.I)):
             continue
         for ri,row in enumerate(rows):
             label=next((v.strip().lower().rstrip(':') for v in row if v.strip()),'')
@@ -515,7 +533,10 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
                 candidates={}
                 for col in range(1,len(diluted)):
                     value=_cell_amount(rows,di,col)
-                    if value is None or col==0 or rows[di][col-1].strip()!='$':
+                    dollar_in_cell=bool(re.fullmatch(r'\$\s*\d+(?:\.\d+)?',rows[di][col].strip()))
+                    if dollar_in_cell:
+                        value=_amount(rows[di][col].strip()[1:].strip())
+                    if value is None or col==0 or not (rows[di][col-1].strip()=='$' or dollar_in_cell):
                         continue
                     header=_column_header(rows,di,col)
                     dates=re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2}',header,re.I)
