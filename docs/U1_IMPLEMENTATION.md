@@ -95,3 +95,22 @@
 - **I01 输出时效**：原 PEER 输出前，对同一不可变视图再执行 `public_view`；不查活动持仓、不刷新、不换 ID。来源/视图过期则更新 issues/资格并提示一般分析；运行中超过 30 分钟上下文则返回 unavailable、`ANALYSIS_CONTEXT_EXPIRED`，不提供原专业结构化方案。响应 `data_quality.asset_view` 和 `context_current` 是最终状态，Web 使用它更新提示和按钮。
 - **I02 最近尝试与 Last-good**：原 broker_sync API 共用 `safe_sync_reason/public_sync_attempt`，投影 `last_attempt_time/status/reason_code`；last-good run、成功时间、`last_good_quality`、FX/证券时间保持独立。只有原 `SAFE_SYNC_CODES` 可直接返回，原始 SDK/账户/连接异常统一为 `SYNC_SOURCE_FAILED`；外部投影不含发布 hash 或原始异常。
 - 正式安全回归：[评审回归](../tests/test_u1_review_regressions.py) 覆盖 Web clear、CSV/平台替换、同条数的身份/数量/金额变化、跨连接冻结竞态、旧 run/旧 view、合法空仓、模型运行跨期、失败原因及敏感文本；[浏览器](../frontend/tests/e2e/asset-view.spec.ts) 验证最终质量替换初始资格，金额与 ID 保持固定。真实 ChatGPT 自然语言工具规划仍须发布后单独验收，测试客户端显式传 ID 不替代它。
+
+## 4.4 A-min合格分母纯投影（本地候选）
+
+入口为`backend/services/investable_assets.py:project_investable_assets`。这是原Portfolio/Wealth对已冻结U1事实的纯投影，不读取数据库、不刷新券商、不解析/激活政策、不写入原payload。未接入prepare、Web、PEER、MCP或PolicySession；不实现B2。PolicyAssets合同及既有资格门不变。
+
+调用者提供原Owner的view、portfolio_id、snapshot_id、snapshot_sha256及显式时区时钟at。hash复用Policy canonical/digest，绑定完整payload；hash只能证明内容绑定，不能认证来源或证明事实正确。调用者必须来自可信原Owner，不能接受用户上传的scope evidence作真实资产资格。
+
+新的内部`data_quality.investable_scope_evidence`与来源同被冻结，schema为`wealthpilot.investable-scope.v1`，包含：
+
+- portfolio_id、snapshot_id、as_of；与原view匹配。
+- dispositions：以`position:<id>`或`wealth:<id>`引用原行，无新金额副本。state仅INCLUDED/EXCLUDED/UNKNOWN；reason为FREE_INVESTMENT、LIVING_CASH、EMERGENCY_RESERVE、DEBT_RESERVE、RESTRICTED、PENSION、DUPLICATE、UNKNOWN，须有原Owner evidence_refs。现金用途排除不能直接套到股票上。
+- coverage：accounts、manual_assets、pensions、gold、btc、deduplication，各含PRESENT/ABSENT/UNKNOWN、as_of、evidence_refs、asset_refs。账号/手工资产/去重清单与源行逐一对照；ABSENT是有证据的无持有，缺平台/缺证据保持UNKNOWN。
+- pension_links：已登记already_investment_accounted的`wealth:<id>`到实际`position:<id>`映射。金额级扣除不证明持仓身份；缺失/冲突映射阻止正式D。
+
+原来源仍来自security_inputs、原get_manual_wealth_items及wealth totals。金额为CNY major Decimal；保留源精度、不先舍入，JSON为十进制字符串。投资资金D不减全部贷款；原总资产/负债与派生净资产单列。过期债务令净资产UNKNOWN，不单独否决已完整证实的投资分母。用途、账号publication/同步、原持仓/现金/价格时点及FX按原U1纯质量函数重新核验，不采信can_propose_rebalance或客户端合格标志；原5分钟门和manual/FX规则未放宽。
+
+输出为`wealthpilot.investable-projection.v1`，包含来源hash、逐行状态/理由/问题及原PolicyAssets。证据不足时denominator_cny=null、denominator_qualified=false，保留观测金额及UNKNOWN原因；不填0，不输出目标配置或可执行金额。养老金映射生产维护、共享DDL、外部来源接入及真实验收均不在本候选范围。
+
+测试入口：`tests/test_investable_assets.py`，合成隔离、I/O阻断、hash/scope/时钟、负债与分母、FX/来源、用途排除和养老金负面边界。

@@ -224,6 +224,8 @@ U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite �
 
 PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影指纹；freshness 复用和冻结副本内均验证，不把最近 success 当当前行完整证明。无旧证据须刷新或降级，不事后认领历史事实。原 PEER 输出前重核同 ID 时效，Web 采用最终质量；最近失败尝试使用原安全错误白名单，与 last-good 质量分列。未新增 Schema。
 
+4.4 A-min本地候选在原Portfolio/Wealth域增加[纯分母投影](../backend/services/investable_assets.py)：消费同一U1 payload的来源事实与内部scope evidence，返回原PolicyAssets及不可变来源hash；没有数据库/Provider读取、写入或新API。旧U1缺完整证据时仍UNKNOWN；不接入B2的PolicySession装配和目标差距。输入合同见[U1补充](U1_IMPLEMENTATION.md#44-a-min合格分母纯投影本地候选)。
+
 ## 14. U2 成交驱动同步与只读状态（已合入）
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
