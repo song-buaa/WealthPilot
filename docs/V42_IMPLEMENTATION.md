@@ -626,3 +626,9 @@ The focused follow-up reuses the existing issuer/research/evidence owners for ex
 沿原SEC完整申报及附件解析、Evidence Registry和financial_research计算，不新建数据Owner。经原CIK、accession、申报类型、附件声明、原文字节哈希和正式时钟验证后，受限解析财报附件中明确季度的交付量、汽车销售收入及车辆业务毛利率；同字段同季度在原文内有冲突时拒绝。月度交付汇总未接入，故不从不完整月份凑季度。季度收入/交付量仅作近似指标，不代表成交均价或收入确认同批车辆；不得仅凭比例变化推断车型结构、降价或成本原因。经营指标仅进入L1研究引用与原数字绑定，不授予新的L2–L4或交易资格。
 
 LI完整SEC 2026 Q2冻结原文可解析交付量98,330、汽车销售收入约241亿元CNY和车辆业务毛利率9.4%；XPEV 2026 Q2公开SEC EX-99.1载有交付量103,295、汽车销售收入170.5亿元CNY及车辆毛利率12.1%，目前本地仅用公开原文摘录验证标签适配，未取得完整XPEV原始申报字节作端到端来源验收，生产自动来源状态仍待核验。两公司业务口径、车型组合和收入确认时点不可直接横向当ASP比较。非汽车标的仍使用原财务链。
+
+### L1 Expressing 截断与纯研究语义（2026-11-01 开发候选）
+
+生产 XPEV 运行的 Expressing 观测为 Sol medium、输入117,613 tokens、输出及推理各8,192 tokens、`truncated`，Reviewing 未执行。原无持仓分支同时给模型旧建仓 Markdown 模板和新的专业解释 JSON 合同；`prompt_context()` 已包含 `explanation_prompt()`，原分支又追加一次。原请求 `max_tokens=2000` 经统一适配得到8,192总输出预算，包含隐藏推理。现仅在原 Expressing 分支移除重复合同，纯研究使用明确的非建仓 JSON 提示、Sol high 与32,768总输出预算；非纯研究仍沿原模型与输出门槛。`research_intent` 使用 MCP 传来的原始研究问题，避免附加的政策/证据文字改变用户意图。原 Evidence、Output Policy、L1–L4、人工交易权限未改。
+
+开发试验只用冻结的公开 SEC 原文、原 `assess → build → Expressing → enforce`，不读取生产资产或发起生产模型请求。XPEV medium 一次及 high 两次均返回有效 JSON，实际引用由原过滤复核；这证明该证据范围下表达可完成，不等同 117K 输入、生产 ACTIVE 政策或完整四标 PEER 质量验收。生产 Prompt 的逐项构成和历史三条未保存的被拒原文仍为 UNKNOWN。所有开发报告、实际调用和全链路范围应在 PR 验收记录中单独标明。

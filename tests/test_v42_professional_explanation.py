@@ -274,8 +274,54 @@ def test_original_new_entry_small_json_retains_only_cited_explanation(monkeypatc
             out, plan, executed, "研究是否适合建仓", [])]
     chunks = asyncio.run(collect())
     assert len(captured) == 1
-    assert "professional_explanation" in captured[0]["messages"][0]["content"]
+    assert "professional_explanation" in captured[0]["messages"][1]["content"]
     assert TEXT in "".join(chunks) and TEXT in out.chat_answer
     assert "987654" not in str(out)
     assert out.structured_payload["decisionType"] == "buy_init"
     assert not out.actionable
+
+
+def test_real_xpev_filing_reaches_pure_research_prompt_once_with_completion_headroom(monkeypatch):
+    import asyncio
+    import json
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from backend.agents.contracts import ExecutionOutput, ExpressionOutput
+    from backend.agents.expressing_agent import ExpressingAgent
+    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.output_policy import prompt_context
+    from intent_engine import _llm_client
+    from tests.test_xpev_sec_real_original import parse
+
+    row = parse()  # Frozen, hash-checked 2026 Q2 SEC 6-K original.
+    evidence = assess({}, symbol="XPEV:US", research=[row],
+        at=datetime(2026, 10, 30, 12, tzinfo=timezone.utc),
+        disclosure_verifier={row["record_id"]: row}.get)
+    evidence["research_intent"] = dict(no_holding_research=True, objective="evaluate")
+    loaded = SimpleNamespace(target_position=SimpleNamespace(name="XPeng", ticker="XPEV"),
+        av_fundamentals=None, total_assets=0, full_discipline_rules=None)
+    executed = ExecutionOutput(loaded_data=loaded)
+    executed.position_evidence = evidence
+    calls = []
+    def create(**options):
+        calls.append(options)
+        answer = json.dumps({"chat_answer": "研究经营证据。", "professional_explanation": []})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=answer))])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(_llm_client, "get_client", lambda: client)
+    output = ExpressionOutput()
+    question = "没有持仓，也没有买入意图，只研究小鹏汽车经营。"
+    async def run():
+        return [part async for part in ExpressingAgent()._express_new_entry(
+            output, executed, question + prompt_context(evidence))]
+    asyncio.run(run())
+    assert len(calls) == 1
+    assert calls[0]["max_completion_tokens"] == 32768
+    assert calls[0]["reasoning_effort"] == "high"
+    system, user = (message["content"] for message in calls[0]["messages"])
+    assert "建仓价区间" not in system and "单标专业投研" in system
+    assert user.count("专业解释附加契约") == 1
+    assert "revenue_quarter" in user and "vehicle_sales_quarter" in user
+    assert output.prompt_template_id == "single_security_research"
+    assert output.structured_payload["decisionType"] == "watch"
+    assert output.structured_payload["is_new_entry"] is False

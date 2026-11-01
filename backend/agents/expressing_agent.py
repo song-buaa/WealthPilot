@@ -161,6 +161,12 @@ _NEW_ENTRY_SYSTEM_PROMPT = """你是 WealthPilot 投资分析助手。用户正�
 - 如果纪律约束已阻止(如组合熔断),明确拒绝并说明原因
 - 输出使用 Markdown 格式"""
 
+_PURE_RESEARCH_SYSTEM_PROMPT = """你是 WealthPilot 单标专业投研助手。用户明确未持仓且没有买入意图。
+请基于下列合格证据分析经营变化、财务质量、竞争反证、投资逻辑及复核条件。
+事实与推论分开；无合格证据的估值和现金流结论保持未知。
+仅输出根 JSON 中的 chat_answer 与 professional_explanation；不要给出建仓价、仓位、减仓分批或订单指令。
+专业解释的引用和数字占位符必须遵循用户消息中的确定性证据合同。"""
+
 _CHAT_FORMAT_NEW_ENTRY = """【标的信息】
 - 标的: {asset_name} ({ticker})
 
@@ -550,13 +556,16 @@ class ExpressingAgent:
             full_discipline_rules=getattr(loaded, "full_discipline_rules", None),
         )
 
-        prompt = _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload)
         assessment = getattr(execution_output, "position_evidence", {})
+        intent = assessment.get("research_intent") or {}
+        pure_research = bool(assessment and intent.get("no_holding_research")
+                             and intent.get("objective") == "evaluate")
+        prompt = (_PURE_RESEARCH_SYSTEM_PROMPT + "\n标的：" + str(payload["asset_name"])
+                  + " (" + str(payload["ticker"]) + ")" if pure_research else
+                  _NEW_ENTRY_SYSTEM_PROMPT + "\n\n" + _CHAT_FORMAT_NEW_ENTRY.format(**payload))
         if assessment:
-            from backend.services.market_data.output_policy import explanation_prompt
             prompt += ("\n本次有确定性证据资格控制。请输出JSON对象，包含chat_answer和professional_explanation；"
-                       "chat_answer不会直接显示，专业解释必须遵循以下附加契约。"
-                       + explanation_prompt(assessment))
+                       "chat_answer不会直接显示，专业解释必须遵循用户消息中已有的证据与数字绑定合同。")
         from backend.services.technical_patterns.ai_integration import (
             format_pattern_ai_prompt_section,
         )
@@ -578,8 +587,11 @@ class ExpressingAgent:
                         {"role": "user", "content": user_query},
                     ],
                     temperature=0.3,
-                    max_tokens=2000,
-                    timeout=30,
+                    # Hidden reasoning counts against completion tokens. The
+                    # prior 8192 effective cap was exhausted before any JSON.
+                    max_tokens=28672 if assessment else 2000,
+                    reasoning_effort="high" if pure_research else None,
+                    timeout=180 if assessment else 30,
                 ),
             )
             chat_answer = response.choices[0].message.content or ""
@@ -592,12 +604,12 @@ class ExpressingAgent:
         out.chat_answer = chat_answer
         out.raw_text = chat_answer
         out.mode = "structured"
-        out.prompt_template_id = "new_entry_evaluation"
+        out.prompt_template_id = "single_security_research" if pure_research else "new_entry_evaluation"
 
-        # 强制 decisionType = buy_init
+        # A virtual position is not evidence of an intention to buy.
         out.structured_payload = {
-            "decisionType": "buy_init",
-            "is_new_entry": True,
+            "decisionType": "watch" if pure_research else "buy_init",
+            "is_new_entry": not pure_research,
             "asset_name": getattr(virtual_pos, "name", ""),
             "ticker": getattr(virtual_pos, "ticker", ""),
         }
