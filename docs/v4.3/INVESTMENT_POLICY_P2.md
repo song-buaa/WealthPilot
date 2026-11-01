@@ -71,3 +71,11 @@ P3前必须补齐生产私人理念、custom/official优先级、生效rules_con
 ## P3-A集成候选
 
 P1/P2在最新已集成main之上形成独立Draft PR候选，仍未部署或真实激活。受限Web的显式路由目录复用同一只读政策GET处理器，不加载完整Backend或开放纪律写接口，避免默认LEGACY页面查询404。客户端错误仅返回有界原因代码，文件系统异常、SQL或私人原文值不向Web/MCP传播。无真实Publisher、迁移、审批或交易权限扩张；具体PR/CI证据由本轮私人交付保存，不把代码集成视为生产迁移就绪。
+
+## 4.4 B1 Allocation snapshot HTTP兼容（本地候选）
+
+原`GET /api/allocation/snapshot`仅补受控错误映射：POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED、POLICY_BUCKET_CLASSIFICATION_UNVERIFIED、POLICY_ASSET_WEIGHTS_NOT_CLOSED及POLICY_VERSION_CONFLICT返回409；POLICY_CONTEXT_UNAVAILABLE返回503。detail保持原Web客户端可解析的稳定字符串。未知PolicyError或程序异常继续500，不泄露任意异常文本；既有合格/LEGACY成功200的AllocationSnapshot结构不变。
+
+资格不足不生成零资产/空配置成功响应，不回退旧目标。保留Policy原资格门，不增加snapshot参数、PolicySession装配或ACTIVE目标差距（B2）。受限页面继续沿原InvestmentPolicyBoundary；本候选没有改交易/刷新入口或MCP合同。测试使用最小FastAPI app，不导入生产lifespan；覆盖真实合成ACTIVE服务、合格已有绑定session、缺资格/过期、不可用及未知异常，阻断网络、SyncExecutor、OrderManager和WhatIf，检查Policy库未写入。
+
+复核入口：`tests/test_allocation_snapshot_errors.py`。Registry无需更新：这是原Allocation读取接口的错误表达修复，无新增能力或数据权威；生产部署及浏览器真实验收未包含在本地候选内。

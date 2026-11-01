@@ -37,8 +37,25 @@ router = APIRouter()
 @router.get("/snapshot")
 def api_snapshot() -> dict:
     """获取当前五大类配置快照"""
+    from backend.services.investment_policy.parser import PolicyError
+
     pid = state.portfolio_id
-    snapshot = get_snapshot(pid)
+    try:
+        snapshot = get_snapshot(pid)
+    except PolicyError as exc:
+        # Qualification failures are expected domain results. Keep detail a
+        # string for existing Web clients; never manufacture an empty snapshot.
+        code = str(exc)
+        if code == 'POLICY_CONTEXT_UNAVAILABLE':
+            raise HTTPException(503, detail=code) from None
+        if code in {
+            'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+            'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED',
+            'POLICY_ASSET_WEIGHTS_NOT_CLOSED',
+            'POLICY_VERSION_CONFLICT',
+        }:
+            raise HTTPException(409, detail=code) from None
+        raise  # Unknown defects retain a 500; do not disclose arbitrary text.
     return snapshot.model_dump()
 
 
