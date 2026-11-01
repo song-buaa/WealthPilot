@@ -167,6 +167,52 @@ _PURE_RESEARCH_SYSTEM_PROMPT = """你是 WealthPilot 单标专业投研助手。
 仅输出根 JSON 中的 chat_answer 与 professional_explanation；不要给出建仓价、仓位、减仓分批或订单指令。
 专业解释的引用和数字占位符必须遵循用户消息中的确定性证据合同。"""
 
+
+async def _focused_numeric_explanation(assessment: dict, question: str, candidate: object):
+    """Use the same Expressing evidence contract when the large decision JSON omitted numbers."""
+    from backend.services.market_data.output_policy import explanation_projection
+
+    metrics = (assessment.get("financial_research") or {}).get("records") or []
+    if not any(row.get("quality") == "valid" and row.get("kind") == "research_metric"
+               and row.get("field") not in {"observed_price", "fx_rate"} for row in metrics):
+        return None
+    accepted, _ = explanation_projection(candidate, assessment)
+    if any(row.get("numbers") for row in accepted):
+        return None
+
+    from intent_engine._llm_client import get_client
+    import json
+
+    try:
+        response = await asyncio.to_thread(lambda: chat_completion(
+            get_client(), model=MODEL_MAIN, reasoning_effort="high", max_tokens=28672,
+            timeout=180, messages=[
+                {"role": "system", "content": (
+                    "你在原PEER的Expressing阶段补足专业解释，不重新计算事实或决定交易。"
+                    "仅输出JSON对象，根字段professional_explanation为最多六段的数组。"
+                    "依据用户消息中已有的有效引用及数字绑定合同，至少一段经营解释应绑定实际可用的"
+                    "同比、利润率或汽车经营指标；仅在证据允许时论述现金质量、竞争反证、投资逻辑与复核条件。"
+                    "把事实与推论分开；缺失的估值、分部和来源保持未知。"
+                    "不得给出交易价格、数量、订单或未绑定的数字。")},
+                {"role": "user", "content": question},
+            ]))
+        raw = response.choices[0].message.content or ""
+        parsed = json.loads(raw)
+        proposed = parsed.get("professional_explanation") if isinstance(parsed, dict) else None
+        checked, _ = explanation_projection(proposed, assessment)
+        logger.info("focused_explanation accepted=%s numeric_bound=%s",
+                    len(checked), sum(bool(row.get("numbers")) for row in checked))
+        minimum = min(4, max(2, len(accepted)))
+        if (len(checked) >= minimum and any(row.get("numbers") for row in checked)
+                and len({row["topic"] for row in checked}) >= 2):
+            return proposed
+    except Exception as exc:
+        # A supplementary explanation is never allowed to erase a completed
+        # first pass. Keep diagnostics free of model text and private context.
+        logger.warning("focused_explanation unavailable category=%s",
+                       getattr(exc, "kind", type(exc).__name__))
+    return None
+
 _CHAT_FORMAT_NEW_ENTRY = """【标的信息】
 - 标的: {asset_name} ({ticker})
 
@@ -517,6 +563,11 @@ class ExpressingAgent:
         if llm_result.structured_result:
             structured = dict(llm_result.structured_result)
             structured.pop("chat_answer", None)
+            if assessment and not llm_result.is_fallback:
+                enriched = await _focused_numeric_explanation(
+                    assessment, user_query, structured.get("professional_explanation"))
+                if enriched is not None:
+                    structured["professional_explanation"] = enriched
             out.structured_payload = structured
 
         out.mode = "fallback" if llm_result.is_fallback else "structured"

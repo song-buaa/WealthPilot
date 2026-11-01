@@ -629,6 +629,8 @@ LI完整SEC 2026 Q2冻结原文可解析交付量98,330、汽车销售收入约2
 
 ### L1 Expressing 截断与纯研究语义（2026-11-01 开发候选）
 
-生产 XPEV 运行的 Expressing 观测为 Sol medium、输入117,613 tokens、输出及推理各8,192 tokens、`truncated`，Reviewing 未执行。原无持仓分支同时给模型旧建仓 Markdown 模板和新的专业解释 JSON 合同；`prompt_context()` 已包含 `explanation_prompt()`，原分支又追加一次。原请求 `max_tokens=2000` 经统一适配得到8,192总输出预算，包含隐藏推理。现仅在原 Expressing 分支移除重复合同，纯研究使用明确的非建仓 JSON 提示、Sol high 与32,768总输出预算；非纯研究仍沿原模型与输出门槛。`research_intent` 使用 MCP 传来的原始研究问题，避免附加的政策/证据文字改变用户意图。原 Evidence、Output Policy、L1–L4、人工交易权限未改。
+生产 XPEV 运行的 Expressing 观测为 Sol medium、输入117,613 tokens、输出及推理各8,192 tokens、`truncated`，Reviewing 未执行。原无持仓分支同时给模型旧建仓 Markdown 模板和新的专业解释 JSON 合同；`prompt_context()` 已包含 `explanation_prompt()`，原分支又追加一次。原请求 `max_tokens=2000` 经统一适配得到8,192总输出预算，包含隐藏推理。现仅在原 Expressing 分支移除重复合同，纯研究使用明确的非建仓 JSON 提示、Sol high 与32,768总输出预算；`research_intent` 使用 MCP 传来的原始研究问题，避免附加的政策/证据文字改变用户意图。已有持仓的原大型决策 JSON 若未绑定可用的经营计算指标，原 Expressing 可追加一次聚焦专业解释调用；只有原 Output Policy 接受跨主题、有效数字绑定时才替换首轮候选，调用失败保留首轮结果。其他旧路径仍沿原模型与输出门槛。原 Evidence、Output Policy、L1–L4、人工交易权限未改。
 
 开发试验只用冻结的公开 SEC 原文、原 `assess → build → Expressing → enforce`，不读取生产资产或发起生产模型请求。XPEV medium 一次及 high 两次均返回有效 JSON，实际引用由原过滤复核；这证明该证据范围下表达可完成，不等同 117K 输入、生产 ACTIVE 政策或完整四标 PEER 质量验收。生产 Prompt 的逐项构成和历史三条未保存的被拒原文仍为 UNKNOWN。所有开发报告、实际调用和全链路范围应在 PR 验收记录中单独标明。
+
+开发环境进一步使用同一冻结 SEC 证据、隔离临时 SQLite 与真实 Sol/Luna 走完整 PEER（无生产资产、Provider 刷新或交易）。XPEV 两次均完成四阶段并保留 5 段专业解释；开发环境中无持仓、无买入意图保持 `watch`。LI 原完整 PEER 的 4/6（medium）及 5/6（high）解释虽完成，但经营计算指标没有进入最终数字绑定；聚焦补充后最终保留 5 段，其中 3 段绑定经营数字。PDD 原完整 PEER 保留 6/6 定性段落而无数字绑定；聚焦补充后最终保留 5 段，其中 4 段绑定收入同比、利润率及现金流指标。聚焦补充的结果仍经原 Output Policy 二次验证，不能代替事实资格。此处的组合持仓是隔离夹具，政策为开发环境 LEGACY；没有经过生产 ACTIVE 规则和真实账户验证。美团尚无合格的冻结财务/行情输入，故本轮不以旧未核夹具制造完整 PEER 成功样例。开发完成不等于三标生产质量达到 8 分。
