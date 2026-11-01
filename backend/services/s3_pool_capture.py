@@ -18,8 +18,8 @@ def now():return datetime.now(timezone.utc).isoformat()
 def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
     from research_v2 import sec_disclosures as sec
     from backend.services.s3_method_research import identity_projection
-    from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES,get_next_av_key,_av_get
-    from backend.services.execution_plan.kline_provider import AVKlineProvider
+    from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES,get_next_av_key,_av_get,_response_status,response_diagnostic
+    from backend.services.execution_plan.kline_provider import AVKlineProvider,decode_av_daily,decode_av_splits
     from backend.services.instruments.issuers import sec_ticker_matches
     if not 1<=len(symbols)<=20 or len(set(symbols))!=len(symbols):raise ValueError('POOL_SIZE_OR_DUPLICATE')
     import re
@@ -53,6 +53,27 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
         if not entry.get('path'):return None
         path=archive.safe_file(reuse,entry['path'])
         if archive.file_hash(path)!=entry['sha256']:raise ValueError('REUSE_SOURCE_HASH_MISMATCH')
+        if kind in {'price','splits'}:
+            function = 'SPLITS' if kind == 'splits' else 'TIME_SERIES_DAILY'
+            if (entry.get('url') != 'https://www.alphavantage.co/query'
+                    or entry.get('function') != function or entry.get('symbol') != symbol):
+                raise ValueError('REUSE_AV_SOURCE_IDENTITY_REJECTED')
+            try:
+                payload = json.loads(path.read_bytes())
+            except (ValueError, UnicodeError):
+                payload = {'_av_error':'invalid_response'}
+            status = _response_status(function, payload)
+            if status != 'available':
+                # Do not erase/overwrite the old immutable failure. Preserve its
+                # identity/hash as a diagnostic, and allow a fresh request.
+                manifest['companies'][symbol].setdefault('reuse_diagnostics', []).append(dict(
+                    kind=kind, status=status, rate_limit_scope=response_diagnostic(function,payload,'demo').get('rate_limit_scope'),
+                    source_sha256=entry['sha256'], action='REJECTED_REUSE_REACQUIRE'))
+                return None
+            if kind == 'splits':
+                decode_av_splits(payload, symbol)
+            else:
+                decode_av_daily(payload, symbol, count=300, strict_identity=True)
         return store(path.read_bytes(),entry['url'],symbol.replace(':','_')+'-'+kind+'.json',entry['fetched_at'],
             **{k:v for k,v in entry.items() if k not in {'url','path','sha256','fetched_at'}})
     def sec_get(url,name):
@@ -76,14 +97,33 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
                     raw=response.read();at=now()
             except Exception as exc:
                 manifest['requests'].append(dict(symbol=symbol,function=query['function'][0],status='FAILED',
-                    error_class=type(exc).__name__,cause_class=type(getattr(exc,'reason',None)).__name__,fetched_at=now()))
+                    error_class=type(exc).__name__,cause_class=type(getattr(exc,'reason',None)).__name__,
+                    http_status=getattr(exc,'code',None),fetched_at=now()))
                 save();raise
             function=query['function'][0];mode=query.get('outputsize',[''])[0]
             saved=store(raw,'https://www.alphavantage.co/query',ticker+'-'+function+'-'+mode+'.json',at,
                 symbol=symbol,function=function,mode=mode,owner='AV',status='RAW_NOT_YET_QUALIFIED')
             saved['http_status']=200
-            if function=='SPLITS':entry['splits']=saved
-            elif isinstance(json.loads(raw).get('Time Series (Daily)'),dict):entry['price']=saved
+            try:
+                payload = json.loads(raw)
+            except (ValueError, UnicodeError):
+                payload = {'_av_error':'invalid_response'}
+            diagnostic = response_diagnostic(function, payload, get_next_av_key(), mode=mode or None)
+            if function == 'SPLITS':
+                entry['splits_diagnostic'] = diagnostic
+                if diagnostic['status'] == 'available':
+                    # Original Owner validates listed identity, finite factors
+                    # and unique event dates; HTTP 200 is never qualification.
+                    try:
+                        decode_av_splits(payload, symbol)
+                    except (ValueError, KeyError, TypeError, ArithmeticError):
+                        diagnostic.update(status='invalid_response', qualification_error='AV_SPLITS_QUALIFICATION_REJECTED')
+                if diagnostic['status'] == 'available':
+                    entry['splits'] = saved
+                else:
+                    entry['splits'] = dict(status=diagnostic['status'], diagnostics=[diagnostic])
+            elif diagnostic['status'] == 'available':
+                entry['price'] = saved
             class Response(io.BytesIO):
                 def __enter__(self):return self
                 def __exit__(self,*_):self.close()
@@ -112,13 +152,20 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
                 entry['originals'].append(store(path.read_bytes(),original['url'],symbol[:-3]+'-'+Path(original['path']).name,original['fetched_at'],owner='SEC'))
             if scope['issuer_type']=='domestic' and not 6000<=int(scope['sic'])<=6999:
                 entry['price']=retained(symbol,'price');entry['splits']=retained(symbol,'splits')
-                if (not entry['price'] or not entry['splits']) and get_next_av_key()=='demo':
+                if (not entry['price'] or not entry['splits'] or not entry['splits'].get('path')) and get_next_av_key()=='demo':
                     raise ValueError('AV_IDENTITY_UNCONFIGURED')
                 with av_capture(symbol,entry):
                     if not entry['price']:
                         provider=AVKlineProvider();provider.get_kline(symbol,'US',count=300)
                         entry['price_diagnostic']=dict(diagnostics=getattr(provider,'diagnostics',{}),reason=provider.failure_reason)
-                    if not entry['splits']:_av_get('SPLITS',symbol[:-3],get_next_av_key())
+                    if not entry['splits'] or not entry['splits'].get('path'):
+                        payload = _av_get('SPLITS',symbol[:-3],get_next_av_key())
+                        if 'splits_diagnostic' not in entry:
+                            # Transport failures have no raw HTTP-200 body for
+                            # the capture wrapper. Preserve the Owner's result.
+                            diagnostic = response_diagnostic('SPLITS',payload,get_next_av_key())
+                            entry['splits_diagnostic'] = diagnostic
+                            entry['splits'] = dict(status=diagnostic['status'], diagnostics=[diagnostic])
             # Existing SEC Owner handles any needed Q4 original. Bounded official
             # annual-neighbor earnings events; never derive Q4 by S3 subtraction.
             if scope['issuer_type']!='domestic' or 6000<=int(scope['sic'])<=6999:

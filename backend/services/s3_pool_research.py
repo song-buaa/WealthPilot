@@ -22,7 +22,7 @@ def _error_code(error, default):
 
 
 def _capture_diagnostics(entry):
-    result={k:entry[k] for k in ('capture_failure','price_diagnostic') if k in entry}
+    result={k:entry[k] for k in ('capture_failure','price_diagnostic','splits_diagnostic','reuse_diagnostics') if k in entry}
     result['missing_sources']=[]
     for kind in ('directory','submissions','companyfacts','price','splits'):
         if kind not in entry:continue

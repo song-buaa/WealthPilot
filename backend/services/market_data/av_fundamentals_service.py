@@ -6,6 +6,7 @@ Alpha Vantage 财报、现金流 + 分析师数据 adapter。
 import os
 import json
 import logging
+import re
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -50,8 +51,15 @@ def av_identity(api_key):
 def response_diagnostic(function, payload, api_key, *, mode=None):
     rows = (payload.get("quarterlyReports") or payload.get("feed") or payload.get("quarterlyEarnings") or []) if isinstance(payload, dict) else []
     dates = sorted(row.get("fiscalDateEnding") or row.get("time_published") or "" for row in rows if isinstance(row, dict))
+    if function == 'TIME_SERIES_DAILY' and isinstance(payload, dict):
+        series = payload.get('Time Series (Daily)')
+        dates = sorted(series) if isinstance(series, dict) else []
+        rows = dates
+    elif function == 'SPLITS' and isinstance(payload, dict):
+        rows = payload.get('data') if isinstance(payload.get('data'), list) else []
+        dates = sorted(row.get('effective_date', '') for row in rows if isinstance(row, dict))
     return dict(function=function, request_mode=mode, **av_identity(api_key),
-        status=_response_status(function, payload), row_count=len(rows),
+        status=_response_status(function, payload), rate_limit_scope=_rate_limit_scope(payload), row_count=len(rows),
         first_data_date=dates[0] if dates else None, last_data_date=dates[-1] if dates else None,
         fetched_at=datetime.now(timezone.utc).isoformat(), cache_hit=False, fallback_reason=None)
 
@@ -84,20 +92,50 @@ def _av_get(function: str, symbol: str, api_key: str) -> Optional[dict]:
         return {"_av_error": "network_error"}
 
 
+def _notice(payload):
+    if not isinstance(payload, dict):
+        return ''
+    return ' '.join(str(payload.get(k) or '') for k in ('Information', 'Note', 'Error Message')).strip().lower()
+
+
+def _rate_limit_scope(payload):
+    """Closed metadata only; never return credential-bearing vendor text."""
+    notice = _notice(payload)
+    limited = any(word in notice for word in ('limit', 'quota', 'frequency', 'too many', 'exceed'))
+    if not limited:
+        return None
+    if any(word in notice for word in ('per day', 'requests/day', 'daily limit', 'daily rate', 'daily quota')):
+        return 'daily'
+    if any(word in notice for word in ('per minute', 'requests/minute', 'minute limit', 'minute quota')):
+        return 'minute'
+    if 'frequency' in notice or 'rate limit' in notice or 'too many' in notice:
+        return 'unknown'
+    return None
+
+
 def _response_status(function, payload):
     if not isinstance(payload, dict) or not payload:
         return "missing"
     if payload.get("_av_error") in {"network_error", "invalid_response", "rate_limited", "access_denied", "provider_error"}:
         return payload["_av_error"]
-    notice = str(payload.get("Information") or payload.get("Note") or "").lower()
-    if notice:
-        if "premium" in notice:
-            return "premium"
-        if any(word in notice for word in ("rate", "frequency", "per day", "per minute", "limit")):
-            return "rate_limited"
-        return "provider_notice"
+    notice = _notice(payload)
+    if re.search(r'(?:api[ _-]*key|apikey).*?(?:invalid|not valid|missing)|(?:invalid|missing).*?(?:api[ _-]*key|apikey)', notice):
+        return 'invalid_key'
+    # Explicit daily/minute limits often contain a Premium sales link. A sales
+    # mention cannot override the actual upstream refusal.
+    if _rate_limit_scope(payload):
+        return 'rate_limited'
     if "Error Message" in payload:
         return "provider_error"
+    if notice:
+        if 'premium' in notice and re.search(r'premium\s+(?:api|endpoint|key|membership|subscription|plan)|(?:requires?|only available).*premium|subscribe.*unlock', notice):
+            return 'premium'
+        return 'provider_notice'
+    if function == 'TIME_SERIES_DAILY':
+        series = payload.get('Time Series (Daily)')
+        return 'available' if isinstance(series, dict) and series else 'missing'
+    if function == 'SPLITS':
+        return 'available' if isinstance(payload.get('symbol'), str) and isinstance(payload.get('data'), list) else 'missing'
     if function in {"OVERVIEW","COMPANY_OVERVIEW"}:
         return "available" if payload.get("Symbol") else "missing"
     if function=="NEWS_SENTIMENT":
