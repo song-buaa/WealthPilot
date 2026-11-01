@@ -48,6 +48,8 @@ def test_partial_pool_is_preserved_frozen_and_read_without_capture(tmp_path, mon
     result = run_company_pool({'symbols':['BBB','AAA'], 'purpose':'synthetic missing-source boundary'},
         archive_root=tmp_path/'archive', source_root=source, synthetic=True)
     assert result['data_quality']['comparable_count'] == 0
+    assert '| 不参与排名 |' in result['conclusion']
+    assert '| 稳定 |' not in result['conclusion']
     assert len(result['professional_result']['cards']) == 2
     assert all(c['rank'] is None for c in result['professional_result']['cards'])
     artifact = result['evidence']['artifact_id']

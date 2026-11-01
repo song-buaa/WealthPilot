@@ -109,6 +109,19 @@ def transport_result(result):
     return value
 
 
+def report_summary(result):
+    from backend.services.quality_valuation_research import markdown
+    summary = markdown(result).split('## 逐公司判断卡')[0].strip()
+    noncomparable = {c['symbol'] for c in result['cards'] if c['comparison_status'] != 'COMPARABLE'}
+    lines = []
+    for line in summary.splitlines():
+        if any(line.startswith('| '+symbol+' |') for symbol in noncomparable):
+            # No rank exists: a false instability flag cannot mean stable rank.
+            line = line.rsplit('|', 2)[0] + '| 不参与排名 |'
+        lines.append(line)
+    return '\n'.join(lines)
+
+
 def project(bundle, verification):
     from backend.services import quality_valuation_research as store
     payload = bundle['payload']; result = payload['result']
@@ -122,7 +135,7 @@ def project(bundle, verification):
         for symbol, assessment in payload['assessments'].items()}
     return dict(synthetic=synthetic, scenario='company_pool_research', status=result['status'],
         issues=result.get('issues', []), queried_at=result['decision_at'],
-        conclusion=store.markdown(result).split('## 逐公司判断卡')[0].strip(),
+        conclusion=report_summary(result),
         intent=dict(symbols=provenance['symbols'], purpose=payload['request']['purpose']),
         professional_result=transport_result(result),
         evidence=dict(artifact_id=bundle['artifact_id'], verification=verification,
