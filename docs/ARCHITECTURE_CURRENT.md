@@ -108,7 +108,7 @@ Web 继续 `decision_service.run_chat_stream` → `decision_service_v3.run_chat_
 
 ### S3 公司池 Research Only
 
-一期产品入口：[可选公司池MCP](../pocs/chatgpt_skills/company_pool.py)以原PositionJobs、BusinessClient隔离Worker调用decision_service_v3.run_company_pool_research→invoke_skill→[薄研究适配](../backend/services/s3_research_entry.py)→原S3。显式私人archive-root启用start/get/read三项；只有start写研究归档。无业务/E1数据库、持仓或订单访问，不改原position_multi路由，不新增Agent编排；确定性Skill不声称四Agent专业审查。自然语言产品仍待生产发布及真实ChatGPT验收，当前保持Research Only。
+一期产品入口：[可选公司池MCP](../pocs/chatgpt_skills/company_pool.py)以原PositionJobs、BusinessClient隔离Worker调用decision_service_v3.run_company_pool_research→invoke_skill→[薄研究适配](../backend/services/s3_research_entry.py)→原S3。显式私人archive-root启用start/get/read三项；只有start写研究归档。无业务/E1数据库、持仓或订单访问，不改原position_multi路由，不新增Agent编排；确定性Skill不声称四Agent专业审查。2026-11-01 PM确认一期`WEALTHPILOT_S3_V1_RELEASED`，生产`0ce2e392e9e76f43802d749788a1ed3a9c311848`已完成真实ChatGPT start→get→read：六公司6/6保留、AAPL/NVDA两家合格可比，其余保留具体UNKNOWN及不可比原因；冻结工件独立读回`verified=true`。仍为Research Only，无持仓使用、订单、交易或正式组合配置授权；结项依据与非阻断维护项见[S3一期结项](v4.3/S3_A_IMPLEMENTATION.md#一期正式结项2026-11-01)。
 
 S3-D已由PR #77集成：[真实池适配](../backend/services/s3_pool_research.py)和[采集包装](../backend/services/s3_pool_capture.py)沿原内部CLI执行显式公开读取或冻结来源重用、同点核验、透明研发候选参数、原质量/估值/分档、内容寻址保存。原AV Owner共享纯日线/拆股解码，严格身份模式仅opt-in；不增加行情源、TTM计算、Agent Runtime或生产入口。recalculate只复用已冻结决策时点，不能以历史日期新抓未来材料。
 
