@@ -359,16 +359,36 @@ def test_focused_expression_only_replaces_unbound_financial_explanation(monkeypa
     monkeypatch.setattr(expressing_agent, "chat_completion", completion)
     question = "研究理想经营" + prompt_context(evidence)
     found = asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk]))
-    assert found == [bound, risk]
+    assert found == [risk, bound]
     checked, _ = explanation_projection(found, evidence)
-    assert checked[0]["numbers"][0]["field"] == "revenue_yoy_pct"
+    assert checked[1]["numbers"][0]["field"] == "revenue_yoy_pct"
     assert calls[0]["reasoning_effort"] == "high" and calls[0]["max_tokens"] == 28672
     assert calls[0]["messages"][1]["content"].count("专业解释附加契约") == 1
-    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, found)) is None
+    # A full verified report is preserved, even if the supplement could bind numbers.
+    complete = [dict(risk, topic=topic) for topic in
+                ["business", "competition", "investment_thesis", "risk", "review_condition", "business"]]
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, complete)) is None
     assert len(calls) == 1
+    second = next(row for row in evidence["financial_research"]["records"]
+                  if row.get("quality") == "valid" and row["record_id"] != ref
+                  and "margin" in row["field"])
+    sufficient = dict(bound, text="利润变化为{{n1}}，盈利转化仍需复核。", numbers=[dict(
+        id="n1", evidence_ref=second["record_id"], field=second["field"])],
+        evidence_refs=[second["record_id"]])
+    assert len(explanation_projection([bound, sufficient], evidence)[0]) == 2, explanation_projection([bound, sufficient], evidence)
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [bound, sufficient])) is None
+    assert len(calls) == 1
+    nonkey = next(row for row in evidence["verified_field_records"] if row["field"] == "revenue_quarter")
+    fact = dict(bound, text="收入为{{n1}}，盈利转化仍需复核。", evidence_refs=[nonkey["record_id"]],
+        numbers=[dict(id="n1", evidence_ref=nonkey["record_id"], field=nonkey["field"])])
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [fact])) == [fact, bound]
     def unsafe(*args, **kwargs):
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
             "professional_explanation": [dict(bound, text="建议卖出100股。"), risk]}, ensure_ascii=False)))])
     monkeypatch.setattr(expressing_agent, "chat_completion", unsafe)
     assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk])) is None
     assert asyncio.run(expressing_agent._focused_numeric_explanation(assessment(), question, [risk])) is None
+    monkeypatch.setattr(expressing_agent, "chat_completion", lambda *args, **kwargs:
+        SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "professional_explanation": [dict(bound, evidence_refs=["invented"])]}))) ]))
+    assert asyncio.run(expressing_agent._focused_numeric_explanation(evidence, question, [risk])) is None

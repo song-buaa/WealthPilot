@@ -177,7 +177,19 @@ async def _focused_numeric_explanation(assessment: dict, question: str, candidat
                and row.get("field") not in {"observed_price", "fx_rate"} for row in metrics):
         return None
     accepted, _ = explanation_projection(candidate, assessment)
-    if any(row.get("numbers") for row in accepted):
+    key_refs = {row["record_id"] for row in metrics
+                if row.get("quality") == "valid" and row.get("kind") == "research_metric"
+                and any(part in row.get("field", "") for part in
+                        ("yoy", "qoq", "margin", "cash_conversion", "per_delivery"))}
+    def bindings(rows):
+        return {number.get("evidence_ref") for row in rows for number in row.get("numbers", [])
+                if number.get("evidence_ref") in key_refs}
+    if not key_refs or len(bindings(accepted)) >= min(2, len(key_refs)):
+        return None
+    # Never erase a verified paragraph to make room for a numerical supplement.
+    # Keep raw candidates so the final owner can reapply its placeholder contract.
+    original = [row for row in (candidate or []) if explanation_projection([row], assessment)[0]]
+    if len(original) >= 6:
         return None
 
     from intent_engine._llm_client import get_client
@@ -202,10 +214,22 @@ async def _focused_numeric_explanation(assessment: dict, question: str, candidat
         checked, _ = explanation_projection(proposed, assessment)
         logger.info("focused_explanation accepted=%s numeric_bound=%s",
                     len(checked), sum(bool(row.get("numbers")) for row in checked))
-        minimum = min(4, max(2, len(accepted)))
-        if (len(checked) >= minimum and any(row.get("numbers") for row in checked)
-                and len({row["topic"] for row in checked}) >= 2):
-            return proposed
+        merged = list(original)
+        seen = {(row.get("topic"), row.get("text")) for row in original}
+        covered = bindings(accepted)
+        for row in proposed or []:
+            valid, _ = explanation_projection([row], assessment)
+            if not valid or not (bindings(valid) - covered):
+                continue
+            identity = (row.get("topic"), row.get("text"))
+            if identity in seen or len(merged) >= 6:
+                continue
+            merged.append(row)
+            seen.add(identity)
+            covered |= bindings(valid)
+        final, _ = explanation_projection(merged, assessment)
+        if len(final) == len(merged) and bindings(final) > bindings(accepted):
+            return merged
     except Exception as exc:
         # A supplementary explanation is never allowed to erase a completed
         # first pass. Keep diagnostics free of model text and private context.
