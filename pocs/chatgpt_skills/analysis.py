@@ -273,6 +273,16 @@ def deadline_result(value):
     return result.model_dump(mode='json')
 
 
+def _finalize_research_completion(result, scenario):
+    if scenario == 'analyze_position' and result.get('professional_analysis_complete') and not result.get('professional_result', {}).get('analysis_result', {}).get('professional_explanation'):
+        result['professional_analysis_complete'] = False
+        if result['status'] != 'unavailable':
+            result['status'] = 'partial'
+        result['issues'] = sorted(set(result.get('issues', []) + ['PROFESSIONAL_EXPLANATION_INCOMPLETE']))
+        result['missing_stages'] = list(dict.fromkeys(result.get('missing_stages', []) + ['professional_explanation']))
+        result.setdefault('stage_diagnostics', {})['professional_result'] = 'incomplete'
+
+
 @observed_result
 @budgeted_analysis(on_expired=deadline_result)
 async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
@@ -294,6 +304,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
             if session.mode=='POLICY_ACTIVE':
                 from backend.agents.contracts import ExpressionOutput
                 out=ExpressionOutput(structured_payload=result.get('professional_result',{}).get('analysis_result') or {})
+                # The result below is owned by this analysis, not a model-provided diagnostic.
+                out.explanation_diagnostics = out.structured_payload.get('explanationDiagnostics', {})
                 executed=SimpleNamespace(loaded_data=None,position_evidence=result.get('evidence',{}).get('position_evidence'),
                     portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
                 finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
@@ -304,6 +316,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                     result['conclusion']=out.chat_answer
                     result['professional_result']={'analysis_result':out.structured_payload}
                 session.ensure_current()
+            _finalize_research_completion(result, scenario)
             return result
         except PolicyError as exc:
             return AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[str(exc)],

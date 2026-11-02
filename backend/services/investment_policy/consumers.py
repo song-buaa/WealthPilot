@@ -113,15 +113,19 @@ def finalize_output(plan, executed, expressed):
     expressed.actionable_hint = None
     # Reuse the original evidence-qualified renderer. Arbitrary model prose and
     # action fields are never a qualified policy output, regardless of spelling.
-    from backend.services.market_data.output_policy import _explanations_with_trace, render_explanation, facts_only_result
+    from backend.services.market_data.output_policy import _explanations_with_trace, render_explanation, facts_only_result, _evidence_index
     from .store import clock, utc_now
     assessments = ([executed.position_evidence] if getattr(executed,'position_evidence',None)
                    else list(getattr(executed,'portfolio_evidence',[]) or []))
-    combined={'records':[r for a in assessments for r in a.get('records',[])],
-              'verified_field_records':[r for a in assessments for r in a.get('verified_field_records',[])]}
+    # Resolve each complete owner assessment before combining. Derived metrics
+    # require its symbol, periods and publication proofs; flattening first loses them.
+    combined = {'records': [record for assessment in assessments
+                            for record in _evidence_index(assessment).values()]}
     explanation_input=SimpleNamespace(structured_payload=expressed.structured_payload or {},
+        explanation_diagnostics=getattr(expressed,"explanation_diagnostics",{}),
         llm_result=getattr(expressed,'llm_result',None),raw_text=getattr(expressed,'raw_text',''))
     explanations, diagnostics = _explanations_with_trace(explanation_input,combined)
+    expressed.explanation_diagnostics = diagnostics
     fact_text=[]
     for assessment in assessments:
         retained=facts_only_result(assessment,at=clock(utc_now()))
@@ -129,7 +133,9 @@ def finalize_output(plan, executed, expressed):
             fact_text.append(retained[2])
     expressed.structured_payload = {'mode':'policy_qualified_research','policy_context':value,
         'policy_reference':value.get('policy_reference'), 'execution_authorized':False,
-        'professional_explanation':explanations,'explanationDiagnostics':diagnostics,'policy_precision':'CANNOT_QUANTIFY'}
+        'professional_explanation':explanations,'explanationDiagnostics':diagnostics,
+        'research_delivery_status':'DELIVERED' if explanations else 'INCOMPLETE',
+        'policy_precision':'CANNOT_QUANTIFY'}
     expressed.chat_answer = ('\n\n'.join(fact_text) if fact_text else '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')
     expressed.chat_answer += render_explanation(explanations)
     expressed.raw_text=''

@@ -636,3 +636,11 @@ LI完整SEC 2026 Q2冻结原文可解析交付量98,330、汽车销售收入约2
 开发环境进一步使用同一冻结 SEC 证据、隔离临时 SQLite 与真实 Sol/Luna 走完整 PEER（无生产资产、Provider 刷新或交易）。XPEV 两次均完成四阶段并保留 5 段专业解释；开发环境中无持仓、无买入意图保持 `watch`。LI 原完整 PEER 的 4/6（medium）及 5/6（high）解释虽完成，但经营计算指标没有进入最终数字绑定；聚焦补充后最终保留 5 段，其中 3 段绑定经营数字。PDD 原完整 PEER 保留 6/6 定性段落而无数字绑定；聚焦补充后最终保留 5 段，其中 4 段绑定收入同比、利润率及现金流指标。聚焦补充的结果仍经原 Output Policy 二次验证，不能代替事实资格。此处的组合持仓是隔离夹具，政策为开发环境 LEGACY；没有经过生产 ACTIVE 规则和真实账户验证。美团尚无合格的冻结财务/行情输入，故本轮不以旧未核夹具制造完整 PEER 成功样例。开发完成不等于三标生产质量达到 8 分。
 
 PR #79 最终质量保护：聚焦解释不再整数组替换首轮。两组候选均由原 `explanation_projection` 验证；保留每一段首轮安全解释，仅在六段上限内追加带来新关键经营计算指标绑定的有效段落。首轮六段已满时不补充，不以段落数量覆盖已有主题；已有至少两个可用关键指标绑定（仅一个可用时为一个）不追加调用。非关键数字不阻止补充，补充无新增合格绑定则保留原结果。此保守规则可能让完整六段报告继续缺少数字解释，避免未经证明的替换损失研究深度。
+
+## LI 专业研究交付修复（2026-11-02）
+
+L2 最小修复，复用原 Evidence / Financial Research / ACTIVE Policy / MCP；不改变事实资格、数字合同、政策和交易权限。生产 `c347281` 的原 LI job 缓存显示四阶段完成、四次模型成功、最终零候选/零解释但 `professional_analysis_complete=true`。没有模型原文或首次候选的持久副本，原始内容及首次过滤数量 UNKNOWN，后续诊断不得反推为模型没有输出。
+
+代码断点：`consumers.finalize_output` 原先先拼接 records/verified_field_records，丢失 symbol、历史/期间字段及派生计算所需的 owner assessment；财务 `calc:` 引用随之不可用。现逐个完整 assessment 通过原 `_evidence_index` 重核后再组合，保留相同来源/时钟/冲突规则。重复投影仍复核原 text_template/numbers，不接受渲染文本的自由数字。MCP 只透传本轮服务端生成的诊断，保留首次 generation 与本次 final；复制诊断防止后续投影覆盖首次计数，不从模型 JSON 采信自报诊断。ACTIVE 输出明确 `research_delivery_status`；MCP 最终零合格解释时 `professional_analysis_complete=false`、professional_result=incomplete，并列明缺失 professional_explanation，财务事实可继续 partial。阶段完成不等于研究交付完成。
+
+Registry 无需更新：原 owner 和入口未变。生产只读核验不启动研究；开发真实模型使用隔离临时持仓、冻结公开 SEC 与只读核验的政策结构化投影（校验 structured hash），不复制生产库，不修改政策或 E1。完整业务评分仍依实际交付内容，不以工程结果替代 LI 8 分验收。

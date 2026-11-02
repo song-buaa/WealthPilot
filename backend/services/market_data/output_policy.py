@@ -387,6 +387,8 @@ def _explanations_with_trace(output, assessment):
     # from the same model call, then apply the exact same final policy.
     trace = (getattr(output, "explanation_diagnostics", {})
              or getattr(output.llm_result, "_explanation_diagnostics", {}))
+    from copy import deepcopy
+    trace = deepcopy(trace)
     if not trace:
         parsed = None
         raw = output.raw_text or getattr(output.llm_result, "raw_output", "")

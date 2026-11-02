@@ -437,3 +437,63 @@ def test_missing_private_store_never_exposes_configured_path(active,monkeypatch)
     assert value['mode']=='UNAVAILABLE' and value['reason']=='POLICY_STORE_UNAVAILABLE'
     assert str(active[2]) not in json.dumps(value) and 'PRIVATE_PATH_SENTINEL' not in json.dumps(value)
     assert not missing.exists()
+
+
+def test_active_repeated_projection_preserves_real_li_derived_bindings(active):
+    from datetime import datetime, timezone
+    from tests.test_sec_real_original import parse
+    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.output_policy import explanation_projection
+    from backend.services.investment_policy.consumers import finalize_output
+    from backend.agents.contracts import ExpressionOutput
+    source = parse()
+    assessment = assess({}, symbol='LI:US', research=[source],
+        at=datetime(2026, 10, 30, 12, tzinfo=timezone.utc),
+        disclosure_verifier={source['record_id']: source}.get)
+    records = build(assessment)['records']
+    metric = next(r for r in records if r['field']=='revenue_yoy_pct' and r['quality']=='valid')
+    candidate = dict(topic='business',basis='inference',scope='research_only',
+        text='收入同比变化为{{n1}}，盈利转化与现金质量仍需核查。',
+        evidence_refs=[metric['record_id']],numbers=[dict(id='n1',evidence_ref=metric['record_id'],field=metric['field'])])
+    projected, diagnostics = explanation_projection([candidate], assessment)
+    assert len(projected)==1
+    out=ExpressionOutput(structured_payload={'professional_explanation':projected,
+        'explanationDiagnostics':{'generation':diagnostics}})
+    out.explanation_diagnostics = {'generation':diagnostics}
+    executed=SimpleNamespace(position_evidence=assessment,loaded_data=None)
+    with bind(session()):
+        for _ in range(3):
+            finalize_output(SimpleNamespace(portfolio_id=7),executed,out)
+            result=out.structured_payload
+            assert result['professional_explanation']==projected
+            assert result['explanationDiagnostics']['generation']['accepted_count']==1
+            assert result['explanationDiagnostics']['final']['accepted_count']==1
+            assert result['execution_authorized'] is False
+        # Losing the actual owner evidence must still fail closed.
+        finalize_output(SimpleNamespace(portfolio_id=7),SimpleNamespace(loaded_data=None),out)
+        assert out.structured_payload['professional_explanation']==[]
+        assert out.structured_payload['explanationDiagnostics']['generation']['accepted_count']==1
+        assert out.structured_payload['explanationDiagnostics']['final']['accepted_count']==0
+
+
+def test_final_delivery_completion_requires_actual_explanation():
+    from pocs.chatgpt_skills.analysis import _finalize_research_completion
+    value=dict(status='partial',professional_analysis_complete=True,issues=[],
+        professional_result={'analysis_result':{'professional_explanation':[]}},
+        stage_diagnostics={'expressing':'completed','reviewing':'completed','professional_result':'accepted'})
+    _finalize_research_completion(value,'analyze_position')
+    assert value['professional_analysis_complete'] is False
+    assert value['stage_diagnostics']['expressing']=='completed'
+    assert value['stage_diagnostics']['professional_result']=='incomplete'
+    assert value['missing_stages']==['professional_explanation']
+
+
+def test_nonempty_delivered_result_keeps_existing_completion():
+    from copy import deepcopy
+    from pocs.chatgpt_skills.analysis import _finalize_research_completion
+    value=dict(status='partial',professional_analysis_complete=True,issues=[],
+        professional_result={'analysis_result':{'professional_explanation':[{'topic':'risk'}]}})
+    before=deepcopy(value)
+    _finalize_research_completion(value,'analyze_position')
+    assert value==before  # qualification still belongs to the output owner

@@ -160,8 +160,9 @@ def test_qualified_technical_periods_survive_without_financial_facts(symbol):
 def test_normal_complete_peer_retains_professional_result(analysis_db,peer):
     result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
     assert result['status']=='partial'  # existing data gaps, not an inference failure
-    assert result['professional_analysis_complete']
-    assert not result['missing_stages'] and result['professional_result']['analysis_result'].get('mode')!='facts_only'
+    assert not result['professional_analysis_complete']  # The mock returned no qualified explanation.
+    assert result['missing_stages']==['professional_explanation']
+    assert result['professional_result']['analysis_result'].get('mode')!='facts_only'
     assert not result['execution_authorized']
 
 
@@ -235,7 +236,8 @@ def test_original_peer_finishes_after_old_240_second_deadline_with_virtual_clock
     old=asyncio.run(run(False))
     assert 'ANALYSIS_TIMEOUT' in old['issues'] and not old['professional_analysis_complete']
     new=asyncio.run(run(True))
-    assert 'ANALYSIS_TIMEOUT' not in new['issues'] and new['professional_analysis_complete']
+    assert 'ANALYSIS_TIMEOUT' not in new['issues']
+    assert not new['professional_analysis_complete'] and 'PROFESSIONAL_EXPLANATION_INCOMPLETE' in new['issues']
 
 
 def test_recovery_rechecks_old_qualification_and_cannot_create_new_refs():
