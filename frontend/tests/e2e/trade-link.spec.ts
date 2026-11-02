@@ -464,3 +464,45 @@ test('B3 failure before dispatch leaves recheck available without implying an or
   await expect(final.getByRole('checkbox')).not.toBeChecked()
   expect(submits).toBe(0)
 })
+
+test('mobile decimal limit retains editing text and sends exact numeric price without an order', async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const originalOrders = (await (await request.get(`${base}/api/action/orders`)).json()).items
+  let orderCalls = 0
+  page.on('request', r => { if (r.url().endsWith('/place_order')) orderCalls++ })
+  await page.goto(link().replace('NVDA%3AUS', 'PDD%3AUS').replace('side=BUY', 'side=SELL').replace('quantity=10', 'quantity=30').replace('limit_price=180', 'limit_price=82') + '&time_in_force=GTC')
+  const dialog = page.getByRole('dialog')
+  const price = dialog.getByLabel('限价', { exact: true })
+  const join = dialog.getByRole('button', { name: '加入投资行动' })
+  await expect(price).toHaveAttribute('inputmode', 'decimal')
+  await price.focus()
+  await price.evaluate((input: HTMLInputElement) => input.setSelectionRange(input.value.length, input.value.length))
+  await price.pressSequentially('.')
+  await expect(price).toHaveValue('82.')
+  await expect(join).toBeDisabled()
+  await price.pressSequentially('40')
+  await expect(price).toHaveValue('82.40')
+  await price.press('Backspace')
+  await expect(price).toHaveValue('82.4')
+  await price.fill('')
+  await expect(join).toBeDisabled()
+  for (const invalid of ['0', '82.40001', '.', '9999999999999999.99']) {
+    await price.fill(invalid)
+    await expect(join).toBeDisabled()
+  }
+  await price.fill('82')
+  for (const invalid of ['82x', '-82.40', '8e2', '82..40', '82,40']) {
+    await price.fill(invalid)
+    await expect(price).toHaveValue('82')
+  }
+  // fill exercises whole-value replacement, including the paste input path.
+  await price.fill('82.40')
+  await expect(dialog.getByLabel('数量（股）')).toHaveValue('30')
+  const sent = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/api/action/drafts'))
+  await join.click()
+  const payload = (await sent).postDataJSON()
+  expect(payload.payload.symbol_strategies[0]).toMatchObject({symbol:'PDD:US', side:'SELL', quantity:30, limit_price:82.4, time_in_force:'GTC'})
+  await expect(page.getByTestId('confirm-order-dialog')).toContainText('82.4')
+  expect(orderCalls).toBe(0)
+  expect((await (await request.get(`${base}/api/action/orders`)).json()).items).toEqual(originalOrders)
+})

@@ -74,3 +74,12 @@
 [运行时故障注入](../tests/test_b3_ibkr_runtime.py)覆盖真实独立loop、并发首次连接、失败共享/重试、候选超时清理、等待者超时、断线/重连、旧事件、shutdown、真实ib_async Future/迟到reqId、工厂并发、受保护HTTP预算及IB01/CBU3身份/Owner；[PR31评审安全回归](../tests/test_b3_ibkr_review_regressions.py)覆盖迟到初始化/shutdown交错、清理期间锁释放、16次无End超时及迟到STK/bond/End、正常CBU3恢复、显式等待者取消、共享连接上的原OrderManager FILLED/UNKNOWN与原orderRef对账且无重发；[MCP协议回归](../pocs/chatgpt_skills/test_u1_protocol.py)覆盖已配置/未配置错误投影、只读注解与越权拒绝。原交易确认、B0提交幂等、UNKNOWN恢复、U2同步及固定视图合同不变。Registry无需更新：能力、权威Owner、工具及接口参数没有新增/迁移，仅修复原入口的运行时生命周期。
 
 生产部署输入（需另行授权）：Backend、MCP和业务worker统一本PR固定SHA，按现有流程切换进程以清除旧Adapter状态；Web可同SHA统一发布。**0 Schema/Digest/依赖/权限变更，不执行DDL，不改Gateway/clientId/Owner/token/实盘开关**。先健康串行、再受控并发IB01/CBU3只读合约查询，核对身份、一次初始化、断线/超时后的收敛及错误码；ChatGPT刷新目录后中文只读查询，仍允许权限UNKNOWN和费用NULL。不得通过试探下单/撤单验收。回滚组件到上一固定SHA，保留全部数据库事实，不恢复旧数据库。
+
+
+### 2026-11-02 移动端限价编辑修复候选
+
+普通P2预填草稿原先每次按键立即parseFloat，导致`82.`回写为`82`。原ActionDraftCard保留独立的限价编辑文本并指定`inputMode=decimal`，仅将数值投影给原API；保留尾零和中间态，不通过格式化或舍入修正价格。空值、非正数、未完成小数及超过原Numeric(20,4)存储精度的价格不能继续确认。非法字母、符号/指数/多小数点输入不覆盖当前合法编辑值。数量字段、原确认/资金/WhatIf/TTL/订单授权链路不变；不新增Schema或依赖。
+
+四位是现有持久化精度上限，不是证券最小报价单位承诺。现有普通单链路没有统一账户级tick证据，此项仍需来源合同核实；不得据此声称所有市场价格已验证，也不自动round到可成交价格。
+
+新增原trade-link浏览器回归覆盖输入、删除、整值替换、清空/重编、整数、小数及非法输入，核对API/后端预览价格一致、订单前后不变。Chromium整组24/24、WebKit移动模拟定向1/1、lint/build、后端全量3070 passed/7 skipped及Offline M5 18/18通过；WebKit复用本机已有webkit-2311，不是iPhone实机证明。iPhone Safari及ChatGPT内置浏览器实机验收待用户配合，只验证参数不提交订单。当前为本地候选，未push/合并/部署；生产限价编辑问题不得标记已上线修复。

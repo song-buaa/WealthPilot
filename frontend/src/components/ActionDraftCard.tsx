@@ -79,6 +79,15 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
   const [strategies, setStrategies] = useState<SymbolStrategyDraft[]>(
     () => draft?.payload?.symbol_strategies || [],
   )
+  // Keep decimal editing text separate from numeric API fields (e.g. 82. and 82.40).
+  const [limitInputs, setLimitInputs] = useState<Record<number, string>>({})
+  const validLimits = strategies.every((strategy, index) => {
+    const text = limitInputs[index] ?? String(strategy.limit_price ?? '')
+    if (!/^\d+(?:\.\d{1,4})?$/.test(text) || !Number.isFinite(Number(text)) || Number(text) <= 0) return false
+    const [whole, fraction = ''] = text.split('.')
+    // Reject numeric transport precision loss rather than silently rounding user input.
+    return Number(text).toFixed(4) === `${whole.replace(/^0+(?=\d)/, '')}.${fraction.padEnd(4, '0')}`
+  })
   const intents = draft?.payload?.allocation_intents || []
   const riskNotes = draft?.risk_notes || draft?.payload?.risk_notes || []
   const [missingFields, setMissingFields] = useState<MissingField[]>(
@@ -102,7 +111,7 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
     && Number.isFinite(Number(ibkr.order.target_amount))
     && (!ibkr.limit || (Number.isFinite(Number(ibkr.limit)) && Number(ibkr.limit) > 0)))
   const canConfirm = ibkr ? !ibkr.busy && (ibkr.stage === 'edit' ? validEntry
-    : Boolean(ibkr.quote?.batch.status === 'READY' && fresh && !ibkr.dirty)) : missingFields.length === 0
+    : Boolean(ibkr.quote?.batch.status === 'READY' && fresh && !ibkr.dirty)) : missingFields.length === 0 && validLimits
 
   // 判断是否为执行计划模式(N 条同 symbol 同 side 的批次)
   const isExecutionPlan = strategies.length > 0 && planMeta?.plan_id
@@ -421,8 +430,12 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <EditableField label="数量（股）" value={s.quantity ?? ''}
                         onChange={v => handleFieldChange(i, 'quantity', v ? (draft?.prefill_request_id ? Number(v) : parseInt(v)) : null)} />
-                      <EditableField label="限价" value={s.limit_price ?? ''}
-                        onChange={v => handleFieldChange(i, 'limit_price', v ? parseFloat(v) : null)} />
+                      <EditableField label="限价" inputMode="decimal" value={limitInputs[i] ?? s.limit_price ?? ''}
+                        onChange={v => {
+                          if (!/^\d*(?:\.\d*)?$/.test(v)) return
+                          setLimitInputs(prev => ({ ...prev, [i]: v }))
+                          handleFieldChange(i, 'limit_price', v && Number.isFinite(Number(v)) ? Number(v) : null)
+                        }} />
                       {draft?.prefill_request_id && <>
                         <label>订单类型<select aria-label="订单类型" value={s.order_type} onChange={e => handleFieldChange(i, 'order_type', e.target.value)}><option>LIMIT</option><option>CONDITIONAL_LIMIT</option></select></label>
                         <label>交易币种<input aria-label="交易币种" value={s.currency || ''} onChange={e => handleFieldChange(i, 'currency', e.target.value)} style={inputStyle} /></label>
@@ -515,13 +528,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function EditableField({ label, value, onChange }: {
-  label: string; value: string | number; onChange: (v: string) => void
+function EditableField({ label, value, onChange, inputMode }: {
+  label: string; value: string | number; onChange: (v: string) => void; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
 }) {
   return (
     <div>
       <label style={{ fontSize: 11, color: '#6B7280', marginBottom: 2, display: 'block' }}>{label}</label>
-      <input aria-label={label} type="text" value={value} onChange={e => onChange(e.target.value)} style={{
+      <input aria-label={label} type="text" inputMode={inputMode} value={value} onChange={e => onChange(e.target.value)} style={{
         width: '100%', padding: '6px 10px', fontSize: 13,
         border: '1px solid #E5E7EB', borderRadius: 6, outline: 'none', fontFamily: 'inherit',
       }} />
