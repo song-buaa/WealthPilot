@@ -133,6 +133,19 @@ def verify_operating(path,parent_verifier):
                 cutoff=datetime.fromisoformat(p['result']['decision_at'])
                 entry=manifest['companies'][symbol]
                 inputs=parent_path.parent/'sources/inputs'
+                allowed_context={
+                    'AAPL:US':'https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/',
+                    'MSFT:US':'https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1',
+                    'NVDA:US':'https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-Announces-Financial-Results-for-Second-Quarter-Fiscal-2027/'}
+                for proof in context.get('research_documents',[]):
+                    assert proof['source_ref']==allowed_context[symbol]
+                    assert proof['known_at']==proof['fetched_at']
+                    assert datetime.fromisoformat(proof['known_at'])<=cutoff
+                    assert proof['publication_clock']=='UNKNOWN_MUTABLE_PAGE_CAPTURE_CLOCK_ONLY'
+                    receipt=next(r for r in manifest['requests'] if r.get('url')==proof['source_ref'] and r.get('sha256')==proof['source_sha256'])
+                    assert receipt['fetched_at']==proof['fetched_at'] and receipt['owner']=='ISSUER_IR_RESEARCH_CONTEXT_NOT_GAAP'
+                    assert receipt['http_status']==200 and receipt['final_url']==proof['source_ref']
+                    assert hashlib.sha256((inputs/receipt['path']).read_bytes()).hexdigest()==proof['source_sha256']
                 for proof in context['disclosures']+context['historical_pe']['samples']:
                     assert datetime.fromisoformat(proof['published_at'])<=datetime.fromisoformat(proof['fetched_at'])<=cutoff
                     assert any(r['sha256']==proof['source_sha256'] and r['url']==proof.get('source_ref') for r in entry['originals'])
@@ -179,7 +192,7 @@ def verify_operating(path,parent_verifier):
             profile=p['dossier']['companies'][symbol];assert card['operating_assumptions']==profile
             for note in profile['source_notes']:
                 raw=(parent_path.parent/'sources/inputs'/note['path']).read_bytes()
-                assert any(n.get('path')==note['path'] and n.get('url')==note['url'] and n.get('sha256')==note['sha256'] for n in manifest['companies'][symbol]['originals'])
+                assert any(n.get('path')==note['path'] and n.get('url')==note['url'] and n.get('sha256')==note['sha256'] for n in manifest['companies'][symbol]['originals']+manifest.get('requests',[]))
                 assert 0<=note['begin']<note['end']<=len(raw)
                 assert hashlib.sha256(raw).hexdigest()==note['sha256']
                 assert hashlib.sha256(raw[note['begin']:note['end']]).hexdigest()==note['excerpt_sha256']

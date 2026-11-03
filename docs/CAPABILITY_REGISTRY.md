@@ -180,3 +180,5 @@ PR-A（原财务研究Owner最小扩展）：`backend/services/market_data/finan
 PR-B开发候选：原S3 Owner的`quality_valuation.foreign_ads_conditional_research`分派正盈利ADS五年收益及亏损发行人的有界经营恢复假设；均复用原Evidence/Financial Research，研究假设与历史事实分离，不进入domestic排序、正式公允价值或交易资格。显式`ResearchIntent.conditional_valuation`及普通长期研究意图均沿原PEER；后者仅在EPS、价格、FX、静态PE和同比均合格时生成标为系统参考敏感性的PDD类条件情景，来源或独立假设不足返回`HYPOTHESES_REQUIRED`及N/A。原Output Policy、ACTIVE最终再验证和MCP结果投影继续适用。LI当前股数/完整净现金与美团IFRS资格未闭合；见V42实现记录。
 
 S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
+
+S3 P2.2本地候选沿[原经营研究](../backend/services/s3_operating_research.py)与[原官方披露Owner](../research_v2/official_disclosures.py)增加限定官方IR上下文捕获资格、稀疏年度PE经营背景和#89空参数拒绝卡兼容；不提升为GAAP、不回填网页PIT、不改变生产默认方法。版本、测试、正常MCP仍需薄适配及发布准备边界见[P2实施记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p22-本地证据与发布准备候选)。

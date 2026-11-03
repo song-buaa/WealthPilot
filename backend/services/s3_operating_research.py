@@ -16,7 +16,7 @@ from backend.services import s3_pool_research as pool
 from backend.services.market_data import quality_valuation as engine
 from backend.services.market_data.financial_research import operating_ttm_bridge
 
-VERSION='s3-p2.operating-earnings.v1.1'
+VERSION='s3-p2.operating-earnings.v1.2'
 STRESS=('-.03', '0', '.03')
 
 
@@ -49,7 +49,7 @@ class SourceNote(engine.Contract):
     end: int = Field(gt=0)
     excerpt_sha256: str = Field(pattern='^[a-f0-9]{64}$')
     summary: str = Field(min_length=30,max_length=3000)
-    role: str = Field(pattern='^(HISTORICAL_BUSINESS_CONTEXT|EXPIRED_GUIDANCE_NOT_FORWARD_INPUT|PRIOR_GUIDANCE_NOT_RECONFIRMED|CURRENT_DISCLOSURE_CONTEXT|HISTORICAL_PE_ANCHOR)$')
+    role: str = Field(pattern='^(HISTORICAL_BUSINESS_CONTEXT|EXPIRED_GUIDANCE_NOT_FORWARD_INPUT|PRIOR_GUIDANCE_NOT_RECONFIRMED|CURRENT_DISCLOSURE_CONTEXT|HISTORICAL_PE_ANCHOR|OFFICIAL_IR_CONTEXT)$')
 
 
 class Profile(engine.Contract):
@@ -198,7 +198,9 @@ def evaluate(qualified,dossier,assessments):
                 cards.append(card);failures[symbol]=reason
         fallback={c['symbol']:c['assumptions'] for c in qualified['cards']}
         params={c['symbol']:c['assumptions'] or fallback[c['symbol']] for c in cards}
-        request=engine.ResearchRequest.model_validate(dict(pool_id='s3_p2',pool_version='v1',
+        # Method-qualified parents can legitimately have no assumptions (META).
+        # Ranking needs thresholds, not fabricated parameters for refused cards.
+        request=pool.PoolRequest.model_validate(dict(pool_id='s3_p2',pool_version='v1',
             purpose='Retrospective same-input model comparison, not an investment signal',
             decision_at=qualified['decision_at'],source_manifest_sha256='0'*64,companies=params,
             tie_band=qualified['ranking']['tie_band'],downside_floor=qualified['ranking']['downside_floor'],
@@ -255,8 +257,9 @@ def make_bundle(parent_path,dossier_raw):
     manifest=archive._load(root,'manifest.json',p['request']['source_manifest_sha256'])
     calibration={}
     for symbol,profile in dossier.companies.items():
-        receipts=manifest['companies'][symbol].get('originals',[])
         for note in profile.source_notes:
+            receipts=(manifest.get('requests',[]) if note.role=='OFFICIAL_IR_CONTEXT'
+                      else manifest['companies'][symbol].get('originals',[]))
             if not any(r.get('path')==note.path and r.get('sha256')==note.sha256 and r.get('url')==note.url for r in receipts):
                 raise ValueError('P2_SOURCE_NOTE_IDENTITY_REJECTED')
             raw=archive.safe_file(root,note.path).read_bytes()
@@ -270,7 +273,7 @@ def make_bundle(parent_path,dossier_raw):
     result=evaluate(q['result'],dossier,q['assessments'])
     for card in result['cards']:
         context=calibration[card['symbol']]
-        if context['disclosures'] or context['historical_pe']['samples']:
+        if context['disclosures'] or context['historical_pe']['samples'] or context['research_documents']:
             card['calibration_evidence']=context
             if card.get('valuation_context'):
                 card['valuation_context']['historical_pe']=context['historical_pe']
@@ -304,8 +307,8 @@ def calibration_context(root,manifest,symbol,profile,decision_at):
     from backend.services.s3_method_research import identity_projection
     from backend.services.execution_plan.kline_provider import decode_av_daily,decode_av_splits
     entry=manifest['companies'][symbol]
-    selected=[n for n in profile.source_notes if n.role in {'CURRENT_DISCLOSURE_CONTEXT','HISTORICAL_PE_ANCHOR'}]
-    context=dict(disclosures=[],historical_pe=dict(status='UNKNOWN',samples=[],rejected=[],
+    selected=[n for n in profile.source_notes if n.role in {'CURRENT_DISCLOSURE_CONTEXT','HISTORICAL_PE_ANCHOR','OFFICIAL_IR_CONTEXT'}]
+    context=dict(disclosures=[],research_documents=[],historical_pe=dict(status='UNKNOWN',samples=[],rejected=[],
         scope='SPARSE_RECONSTRUCTED_ASFILED_ANNUAL_PE_NOT_TTM_DISTRIBUTION; RAW_PRICE_FETCHED_AT_CURRENT_RESEARCH_TIME',
         rule_version='s3-p2.1.asfiled-pe.v1'))
     if not selected:return context
@@ -318,6 +321,13 @@ def calibration_context(root,manifest,symbol,profile,decision_at):
     issuer,_,_=identity_projection(symbol,directory,submissions)
     filings=sec.discover_filings(issuer,json.loads(submissions[0]))
     for note in selected:
+        if note.role=='OFFICIAL_IR_CONTEXT':
+            from research_v2.official_disclosures import verify_current_issuer_context
+            receipt=next(r for r in manifest.get('requests',[]) if r.get('path')==note.path and r.get('url')==note.url)
+            proof=verify_current_issuer_context(archive.safe_file(root,note.path).read_bytes(),receipt,issuer,decision_at)
+            context['research_documents'].append(dict(**proof,summary=note.summary,
+                role='HUMAN_CHECKED_CONTEXT_NOT_QUALIFIED_GAAP_OR_FIVE_YEAR_GUIDANCE'))
+            continue
         filing=next((f for f in filings if f['full_url']==note.url),None)
         receipt=next(r for r in entry['originals'] if r['path']==note.path)
         body=archive.safe_file(root,note.path).read_bytes()
@@ -356,6 +366,7 @@ def calibration_context(root,manifest,symbol,profile,decision_at):
             if not price.is_finite() or price<=0:raise ValueError('HISTORICAL_PRICE_NOT_POSITIVE')
             context['historical_pe']['samples'].append(dict(**eps,price_date=day,price=str(price),
                 pe=engine.text(price/Decimal(eps['diluted_eps'])),
+                operating_context_note=note.summary,
                 price_source_sha256=entry['price']['sha256'],split_source_sha256=entry['splits']['sha256'],
                 price_fetched_at=entry['price']['fetched_at'],split_fetched_at=entry['splits']['fetched_at']))
         except ValueError as exc:

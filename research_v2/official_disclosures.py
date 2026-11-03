@@ -15,6 +15,40 @@ import urllib.request
 from bs4 import BeautifulSoup
 
 IR_INDEX = 'https://ir.lixiang.com/news/'
+# Bounded opt-in public research context. These are not financial-fact parsers
+# or a historical publication clock. A live page is known only when captured.
+RESEARCH_CONTEXT_URLS = {
+    '0000320193': 'https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/',
+    '0000789019': 'https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1',
+    '0001045810': 'https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-Announces-Financial-Results-for-Second-Quarter-Fiscal-2027/',
+}
+
+
+def verify_current_issuer_context(body, receipt, issuer, decision_at):
+    """Explicit original-issuer page, byte hash and capture clock only.
+
+    Human-checked statements/guidance remain research context. No metric is
+    promoted to GAAP, no page date is used to backdate a mutable web page.
+    """
+    try:
+        cik = str(int(issuer['cik'])).zfill(10)
+        fetched = datetime.fromisoformat(receipt['fetched_at'].replace('Z', '+00:00'))
+        cutoff = datetime.fromisoformat(str(decision_at).replace('Z', '+00:00'))
+        if (receipt['url'] != RESEARCH_CONTEXT_URLS.get(cik)
+                or receipt.get('http_status') != 200
+                or receipt.get('final_url') != receipt['url']
+                or receipt.get('owner') != 'ISSUER_IR_RESEARCH_CONTEXT_NOT_GAAP'
+                or not isinstance(body, bytes) or not 1000 <= len(body) <= 8*1024*1024
+                or hashlib.sha256(body).hexdigest() != receipt['sha256']
+                or fetched.tzinfo is None or cutoff.tzinfo is None or fetched > cutoff):
+            raise ValueError()
+        return dict(source_ref=receipt['url'], source_sha256=receipt['sha256'],
+                    fetched_at=fetched.isoformat(), known_at=fetched.isoformat(),
+                    publication_clock='UNKNOWN_MUTABLE_PAGE_CAPTURE_CLOCK_ONLY',
+                    rule_version='official.current-research-context.v1', cik=cik)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise ValueError('ISSUER_RESEARCH_CONTEXT_REJECTED') from None
+
 MAX_BYTES = 2 * 1024 * 1024
 LABELS = {
     'revenues': ('totalRevenue', 'total_revenue'),
