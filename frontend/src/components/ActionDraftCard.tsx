@@ -82,8 +82,8 @@ export default function ActionDraftCard(props: Props) {
     (draft?.payload?.symbol_strategies ?? []).map(s => [s.symbol, s.side, s.quantity,
       s.quantity_pct, s.order_type, s.trigger_price, s.limit_price, s.parent_intent_index,
       s.currency, s.time_in_force]),
-    (draft?.payload?.allocation_intents ?? []).map(i => [i.title,
-      Object.entries(i.target_allocation ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)]),
+    (draft?.payload?.allocation_intents ?? []).map(i =>
+      Object.entries(i.target_allocation ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
     normalizeMissingFields(draft).map(f => [f.target_type, f.target_index, f.field]),
     draft?.risk_notes ?? draft?.payload?.risk_notes ?? [],
   ])

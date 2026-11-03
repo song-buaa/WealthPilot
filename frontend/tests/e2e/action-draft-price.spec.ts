@@ -108,7 +108,7 @@ test('semantic equality preserves decimal edits despite property order and unrel
   await set({ ...source, updated_at: '2026-11-03T15:00:00Z', decision_summary: 'Updated label',
     payload: { ...source.payload, display_metadata: { fetched_at: 'later' },
       symbol_strategies: source.payload.symbol_strategies.map(s => ({ ...Object.fromEntries(Object.entries(s).reverse()), value_sources: { limit_price: 'Updated explanatory metadata' } })),
-      allocation_intents: [{ title: 'Synthetic allocation', target_allocation: { cash: 40, equity: 60 } }] } })
+      allocation_intents: [{ title: 'Updated explanatory title', target_allocation: { cash: 40, equity: 60 } }] } })
   await expect(limit).toHaveValue('82.40')
   await expect(limit).toBeFocused()
   await limit.fill('82.')
@@ -139,5 +139,12 @@ test('meaningful source parameters and authorization fields invalidate edits', a
   await set(source)
   await limit.fill('83.20')
   await set({ ...source, risk_notes: ['New source risk must be reviewed'] })
+  await expect(limit).toHaveValue('82')
+  const allocation = { ...source, payload: { ...source.payload,
+    allocation_intents: [{ title: 'Synthetic allocation', target_allocation: { equity: 60, cash: 40 } }] } }
+  await set(allocation)
+  await limit.fill('83.20')
+  await set({ ...allocation, payload: { ...allocation.payload,
+    allocation_intents: [{ title: 'Synthetic allocation', target_allocation: { equity: 40, cash: 60 } }] } })
   await expect(limit).toHaveValue('82')
 })
