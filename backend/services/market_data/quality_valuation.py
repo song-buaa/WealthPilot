@@ -5,6 +5,7 @@ Decimal outputs are strings so frozen calculations survive JSON round trips.
 """
 from copy import deepcopy
 from decimal import Decimal, localcontext
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
@@ -37,6 +38,7 @@ class Scenario(Contract):
 
 class Assumptions(Contract):
     basis: str = Field(pattern=r"^S3_RESEARCH_ASSUMPTION_NOT_POLICY$")
+    origin: Literal['user_explicit', 'system_qualified_reference_sensitivity'] = 'user_explicit'
     rationale: str = Field(min_length=10, max_length=3000)
     method: str = Field(default="earnings_exit_multiple", pattern="^earnings_exit_multiple$")
     required_return: Decimal = Field(gt=0, le=.5)
@@ -64,6 +66,7 @@ class RecoveryCase(Contract):
 
 class RecoveryAssumptions(Contract):
     basis: str = Field(pattern=r"^S3_RESEARCH_ASSUMPTION_NOT_POLICY$")
+    origin: Literal['user_explicit'] = 'user_explicit'
     rationale: str = Field(min_length=20, max_length=3000)
     multiple_basis: str = Field(min_length=20, max_length=2000)
     required_return: Decimal = Field(gt=0, le=.5)
@@ -112,7 +115,11 @@ def operating_recovery_scenario(revenue_cny, price_usd_per_ads, ordinary_shares_
                       implied_year_five_ebit_margin=text(implied_margin),
                       implied_year_five_ebit_cny=text(implied_margin * terminal_revenue),
                       terminal_price_usd_per_ads=None, annualized_return=None,
-                      status='NO_POSITIVE_TERMINAL_EBIT')
+                      status='NO_POSITIVE_TERMINAL_EBIT',
+                      economic_consistency=dict(status='UNVERIFIED_HYPOTHESIS_BRIDGE',
+                          unresolved=['INTERIM_EBIT_TAX_WORKING_CAPITAL_AND_CAPEX_NOT_RECONCILED',
+                                      'FUTURE_SHARE_CHANGE_AND_BUYBACK_CASH_NOT_RECONCILED',
+                                      'INITIAL_NET_CASH_AND_FUNDING_NOT_QUALIFIED']))
         if terminal_ebit <= 0:
             return result
         equity = terminal_ebit * p.terminal_ev_ebit_multiple + cash
@@ -265,6 +272,78 @@ def foreign_ads_conditional_research(assessment, assumptions):
     if 'terminal_ev_ebit_multiple' in case:
         return foreign_ads_operating_recovery_research(assessment, assumptions)
     raise ValueError('SUPPORTED_CONDITIONAL_VALUATION_METHOD_REQUIRED')
+
+
+def propose_foreign_ads_conditional_research(assessment):
+    """Natural-language L1 reference study from qualified facts, never a forecast.
+
+    The current static multiple and observed growth rates define a sensitivity
+    *around market facts*. They do not certify a terminal multiple, future
+    earnings, share path, dividend policy or a user-required return.
+    """
+    from backend.services.market_data.financial_research import build
+    derived={row['field']:row for row in build(assessment)['records'] if row.get('quality')=='valid'}
+    required=('diluted_eps_ttm','observed_price','fx_rate','pe_ttm',
+              'earnings_yield_pct','revenue_yoy_pct','net_income_yoy_pct')
+    missing=[name for name in required if name not in derived]
+    na=dict(status='HYPOTHESES_REQUIRED',method_version='s3-foreign-ads-natural-research.v1',
+            symbol=assessment.get('symbol'),proposal_origin='system_evidence_bound_reference',
+            fair_value=None,execution_authorized=False,missing=missing,
+            reverse_equation='Required terminal earnings or EBIT depends on qualified listed price, FX, economic shares, terminal multiple, future cash and a stated return requirement; unavailable inputs remain variables.',
+            limitations=['NO_UNSUPPORTED_GROWTH_MULTIPLE_SHARES_NET_CASH_OR_FX_DEFAULTS',
+                         'HISTORICAL_FACTS_DO_NOT_PROVE_FUTURE_RETURN'])
+    operating_margin=derived.get('operating_margin_pct',{}).get('values',{}).get('operating_margin_pct')
+    eps=derived.get('diluted_eps_ttm',{}).get('values',{}).get('diluted_eps_ttm')
+    if (eps is None or dec(eps)<=0) and operating_margin is not None and dec(operating_margin)<0:
+        from backend.services.market_data.financial_research import build_valuation_inputs
+        unit=build_valuation_inputs(assessment).get('listed_unit') or {}
+        na.update(method_version='s3-foreign-ads-recovery-reverse.v1',
+                  missing=['CURRENT_ECONOMIC_SHARES','COMPLETE_NET_CASH',
+                           'INDEPENDENT_TERMINAL_EV_EBIT_MULTIPLE_BASIS',
+                           'FUTURE_CASH_SHARE_AND_FX_HYPOTHESES']+
+                          (['QUALIFIED_ADS_PRICE_REQUIRED'] if 'observed_price' not in derived else [])+
+                          (['OFFICIAL_ADS_RATIO_REQUIRED'] if not unit.get('ordinary_shares_per_ads') else []),
+                  reverse_equation='Required year-five EBIT margin = (listed ADS price × FX × future economic ordinary shares ÷ ordinary shares per ADS × (1 + annual return hurdle)^5 − terminal net cash) ÷ (terminal EV/EBIT multiple × year-five revenue). All future values and unqualified current capital inputs remain variables.',
+                  limitations=na['limitations']+['LOSS_MAKING_PERIOD_PE_NOT_APPLICABLE'])
+        return na
+    if missing:return na
+    try:
+        pe=dec(derived['pe_ttm']['values']['pe_ttm'])
+        earnings_yield=dec(derived['earnings_yield_pct']['values']['earnings_yield_pct'])/100
+        revenue_growth=dec(derived['revenue_yoy_pct']['values']['revenue_yoy_pct'])/100
+        profit_growth=dec(derived['net_income_yoy_pct']['values']['net_income_yoy_pct'])/100
+        if not (0<pe<=D('80') and 0<earnings_yield<=D('.5') and
+                D('-.5')<=revenue_growth<=1 and D('-.5')<=profit_growth<=1):
+            na['missing'].append('OBSERVED_REFERENCE_OUTSIDE_SUPPORTED_SENSITIVITY_RANGE')
+            return na
+        growth=sorted((D(0),revenue_growth,profit_growth))
+        multiples=(pe*D('.75'),pe,pe*D('1.25'))
+        if multiples[-1]>100:
+            na['missing'].append('OBSERVED_MULTIPLE_OUTSIDE_SUPPORTED_SENSITIVITY_RANGE')
+            return na
+        common=dict(annual_share_change='0',dividend_payout='0')
+        cases={name:dict(common,earnings_growth=text(growth[i]),terminal_pe=text(multiples[i]))
+               for i,name in enumerate(SCENARIOS)}
+        assumptions=Assumptions.model_validate(dict(
+            basis='S3_RESEARCH_ASSUMPTION_NOT_POLICY',origin='system_qualified_reference_sensitivity',
+            rationale='Sensitivity only: observed same-period revenue and net-income year-on-year rates plus a zero-growth reference; terminal PE at 0.75, 1.00 and 1.25 times the qualified current static PE. Flat shares and no dividend are explicit neutral reference assumptions, not forecasts. The required-return comparison uses observed earnings yield as a reference, not a user hurdle or policy.',
+            required_return=text(earnings_yield),**cases)).model_dump(mode='json')
+        result=foreign_ads_earnings_research(assessment,assumptions)
+    except (ValueError,KeyError,TypeError):
+        na['missing'].append('QUALIFIED_REFERENCE_SENSITIVITY_INVALID')
+        return na
+    if result['status']!='CONDITIONAL_RESEARCH_ONLY':
+        na['missing']+=result.get('missing',[])
+        return na
+    result['proposal_origin']='system_evidence_bound_reference'
+    result['proposal_basis']={name:dict(record_id=derived[name]['record_id'],
+                                        period=derived[name]['period'],
+                                        evidence_refs=derived[name]['evidence_refs'])
+                              for name in required}
+    result['limitations']+=['CURRENT_PE_IS_NOT_AN_INDEPENDENT_TERMINAL_MULTIPLE',
+                            'OBSERVED_EARNINGS_YIELD_IS_NOT_USER_REQUIRED_RETURN',
+                            'FLAT_SHARES_ZERO_DIVIDENDS_AND_GROWTH_GRID_ARE_REFERENCE_HYPOTHESES']
+    return result
 
 
 class ResearchRequest(Contract):

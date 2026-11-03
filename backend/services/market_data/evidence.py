@@ -716,7 +716,10 @@ def safe_market(market_data, assessment):
                         setattr(original, name, None)
                 setattr(result, kind, original if any(state["quality"] == "valid" for state in records[0]["field_quality"].values()) else None)
         elif kind=="technical" and records and records[0]["quality"]=="partial":
-            original=copy(getattr(result,kind))
+            original=getattr(result,kind,None)
+            if original is None:
+                continue
+            original=copy(original)
             original.series={p:row for p,row in original.series.items() if records[0]["period_quality"].get(p,{}).get("quality")=="valid"}
             if "day" not in original.series:
                 for name in ("current_price","ma5","ma20","rsi14","macd","macd_signal","macd_hist"):
