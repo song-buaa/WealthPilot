@@ -122,6 +122,71 @@ def scenario(eps, price, parameters, required_return):
                     implied_earnings_growth_no_dividends=text(implied_growth))
 
 
+def foreign_ads_earnings_research(assessment, assumptions):
+    """Use the original S3 arithmetic for qualified positive EPS per ADS.
+
+    This is a bounded foreign-issuer research projection. It never changes the
+    domestic S3 ranking/applicability rule or treats a future share-change
+    assumption as an observed buyback. Complete net cash is not added to PE.
+    """
+    from backend.services.market_data.financial_research import build, build_valuation_inputs
+    params = Assumptions.model_validate(assumptions)
+    v = build_valuation_inputs(assessment)
+    derived = {r['field']: r for r in build(assessment)['records']}
+    eps, price, fx = (derived.get(k) for k in ('diluted_eps_ttm', 'observed_price', 'fx_rate'))
+    ratio = v.get('listed_unit', {}).get('ordinary_shares_per_ads')
+    missing = [k for k, value in (('QUALIFIED_TTM_ADS_EPS', eps), ('QUALIFIED_LISTED_PRICE', price),
+                                  ('QUALIFIED_FX', fx), ('OFFICIAL_ADS_RATIO', ratio)) if value is None]
+    result = dict(status='INSUFFICIENT_EVIDENCE', method_version='s3-foreign-ads-earnings.v1',
+                  symbol=assessment.get('symbol'), scenarios={}, sensitivity=[], missing=missing,
+                  execution_authorized=False, conditional_value=None)
+    if missing:
+        return result
+    period_ratios = eps.get('details', {}).get('ordinary_shares_per_ads')
+    if (eps.get('currency') != 'CNY' or price.get('currency') != 'USD' or
+            eps.get('details', {}).get('share_basis') != 'diluted_eps_ads_quarter' or
+            period_ratios != [ratio] or dec(eps['values']['diluted_eps_ttm']) <= 0 or
+            fx.get('details', {}).get('from_currency') != 'USD' or
+            fx.get('details', {}).get('to_currency') != 'CNY'):
+        result['missing'] = ['LISTED_ADS_EPS_CURRENCY_OR_RATIO_CONFLICT']
+        return result
+    rate = dec(fx['values']['fx_rate'])
+    if rate <= 0:
+        result['missing'] = ['QUALIFIED_FX_NONPOSITIVE']
+        return result
+    eps_usd = dec(eps['values']['diluted_eps_ttm']) / rate
+    listed_price = dec(price['values']['observed_price'])
+    for name in SCENARIOS:
+        result['scenarios'][name] = scenario(eps_usd, listed_price, getattr(params, name), params.required_return)
+    for field, offsets in SENSITIVITY_OFFSETS:
+        for delta in offsets:
+            variant = params.base.model_dump()
+            required = params.required_return
+            if field == 'required_return':
+                required += delta
+            elif field == 'terminal_pe':
+                variant[field] *= 1 + delta
+            else:
+                variant[field] += delta
+            try:
+                calculation = scenario(eps_usd, listed_price, variant, required)
+            except ValueError:
+                calculation = None
+            result['sensitivity'].append(dict(parameter=field, delta=str(delta),
+                                              required_return=str(required), result=calculation))
+    result.update(status='CONDITIONAL_RESEARCH_ONLY', missing=[],
+                  assumptions=params.model_dump(mode='json'),
+                  qualified_inputs=dict(eps_cny_per_ads=eps['values']['diluted_eps_ttm'],
+                      eps_usd_per_ads=text(eps_usd),price_usd_per_ads=price['values']['observed_price'],
+                      fx_cny_per_usd=fx['values']['fx_rate'],ordinary_shares_per_ads=ratio,
+                      evidence_refs=sorted({eps['record_id'],price['record_id'],fx['record_id'],
+                                             *eps['evidence_refs'],*price['evidence_refs']})),
+                  limitations=['FUTURE_EARNINGS_GROWTH_SHARE_CHANGE_MULTIPLE_AND_PAYOUT_ARE_RESEARCH_ASSUMPTIONS',
+                               'NO_VERIFIED_BUYBACK_OR_DILUTION_FORECAST',
+                               'CONDITIONAL_PE_VALUE_NOT_INTRINSIC_VALUE_OR_TARGET_PRICE'])
+    return result
+
+
 def _facts(assessment, decision_at):
     """Reject incompatible qualified rows rather than guess a normalized basis."""
     rows = assessment.get("verified_field_records", []) + assessment.get("historical_field_records", [])
