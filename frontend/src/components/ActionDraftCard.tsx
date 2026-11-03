@@ -71,7 +71,23 @@ function normalizeMissingFields(draft: ActionDraftResponse | null): MissingField
 }
 
 export default function ActionDraftCard(props: Props) {
-  return <ActionDraftCardContent key={props.ibkr?.preview.request_id ?? props.draft?.id ?? 'empty'} {...props} />
+  if (!props.open) return null
+  const draft = props.draft
+  // Compare explicit business values, not payload property order or display metadata.
+  // Row order is significant: indexed edits must never migrate to another strategy.
+  const context = JSON.stringify([
+    props.ibkr ? ['ibkr', props.ibkr.preview.request_id]
+      : draft?.prefill_request_id ? ['prefill', draft.prefill_request_id] : ['draft', draft?.id],
+    props.planMeta?.plan_id, draft?.status,
+    (draft?.payload?.symbol_strategies ?? []).map(s => [s.symbol, s.side, s.quantity,
+      s.quantity_pct, s.order_type, s.trigger_price, s.limit_price, s.parent_intent_index,
+      s.currency, s.time_in_force]),
+    (draft?.payload?.allocation_intents ?? []).map(i =>
+      Object.entries(i.target_allocation ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
+    normalizeMissingFields(draft).map(f => [f.target_type, f.target_index, f.field]),
+    draft?.risk_notes ?? draft?.payload?.risk_notes ?? [],
+  ])
+  return <ActionDraftCardContent key={context} {...props} />
 }
 
 function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, executionLabel, ibkr }: Props) {
@@ -81,8 +97,8 @@ function ActionDraftCardContent({ open, onClose, draft, onConfirmed, planMeta, e
   )
   // Keep decimal editing text separate from numeric API fields (e.g. 82. and 82.40).
   const [limitInputs, setLimitInputs] = useState<Record<number, string>>({})
-  const validLimits = strategies.every((strategy, index) => {
-    const text = limitInputs[index] ?? String(strategy.limit_price ?? '')
+  // Preserve legacy eligibility for untouched strategies; validate only explicit price edits.
+  const validLimits = Object.values(limitInputs).every(text => {
     if (!/^\d+(?:\.\d{1,4})?$/.test(text) || !Number.isFinite(Number(text)) || Number(text) <= 0) return false
     const [whole, fraction = ''] = text.split('.')
     // Reject numeric transport precision loss rather than silently rounding user input.
