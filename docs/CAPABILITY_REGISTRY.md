@@ -1,5 +1,7 @@
 # WealthPilot 已有能力索引
 
+S3 P2本地研究候选沿[原Financial Research](../backend/services/market_data/financial_research.py)增加显式同EPS窗口的经营流量桥，复用[原估值/排序](../backend/services/market_data/quality_valuation.py)和[归档](../backend/services/quality_valuation_research.py)；[薄研究适配](../backend/services/s3_operating_research.py)消费公司特定经营dossier，提供五年收入/利润率/below-line/股份路径、联合敏感性、反推和新旧对照，不改变原事实信任Owner、四底线或旧方法。仅显式内部CLI，非生产MCP；实装边界、独立复算和未知见[S3 P2说明](v4.3/S3_P2_OPERATING_RESEARCH.md)。本地工程和专业评分单独留证，不表示完整盈利预测、8分达标或交易资格。
+
 ## 4.3 五层能力复用补充（2026-10-30）
 
 五层职责、14份Skill逐项矩阵、研究融合与最小Gap统一见[统一投资决策架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)。本节仅索引原Owner，不新建Registry/Runtime。CODE表示源码可用，生产/研究证据分别列出；不因主分支合入而升级策略资格。

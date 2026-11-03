@@ -538,6 +538,52 @@ def _facts(assessment, decision_at):
     return result
 
 
+def operating_scenario(eps, price, baseline, parameters, required_return):
+    """P2 opt-in operating bridge; reuse original zero-payout PE settlement.
+
+    Revenue paths and margins are assumptions, not financial facts. The GAAP
+    starting EPS is never rebuilt from income/end shares. With zero payout,
+    an equivalent compound aggregate-earnings rate gives exactly the same
+    year-five terminal calculation; intermediate operating paths stay visible.
+    Historical scenario()/contracts and all their outputs remain unchanged.
+    """
+    with localcontext() as ctx:
+        ctx.prec = 34
+        if dec(parameters.get('dividend_payout', 0)) != 0:
+            raise ValueError('P2_ZERO_PAYOUT_ONLY_NO_DISTRIBUTION_DOUBLE_COUNT')
+        rates = [dec(x) for x in parameters['revenue_growth']]
+        if len(rates)!=5 or any(x<D('-.5') or x>D('1') for x in rates):
+            raise ValueError('P2_REVENUE_PATH_OUT_OF_RANGE')
+        base_margin,base_conversion = dec(baseline['operating_margin']),dec(baseline['net_to_operating_conversion'])
+        margin,conversion = dec(parameters['terminal_operating_margin']),dec(parameters['terminal_conversion'])
+        if not 0<margin<=D('.8') or not 0<conversion<=D('1.2') or min(base_margin,base_conversion)<=0:
+            raise ValueError('P2_MARGIN_OR_CONVERSION_OUT_OF_RANGE')
+        shares_change=dec(parameters['annual_share_change']); revenue=D(1);years=[]
+        for year,g in enumerate(rates,1):
+            revenue*=1+g
+            m=base_margin+(margin-base_margin)*year/5
+            c=base_conversion+(conversion-base_conversion)*year/5
+            earnings=revenue*m/base_margin*c/base_conversion
+            shares=(1+shares_change)**year
+            if shares<=0:raise ValueError('P2_SHARE_PATH_INVALID')
+            years.append(dict(year=year,revenue_index=text(revenue),operating_margin=text(m),
+                net_to_operating_conversion=text(c),earnings_index=text(earnings),relative_shares=text(shares),
+                eps=text(dec(eps)*earnings/shares),dividend='0.00000000'))
+        equivalent=earnings**(D(1)/5)-1
+        compiled=dict(earnings_growth=str(equivalent),annual_share_change=str(shares_change),
+            terminal_pe=str(parameters['terminal_pe']),dividend_payout='0')
+        result=scenario(eps,price,compiled,required_return)
+        assert result['years'][-1]['eps']==years[-1]['eps']
+        result['years']=years
+        result['equivalent_aggregate_earnings_cagr']=text(equivalent)
+        # Invert revenue CAGR holding the terminal margin, conversion, shares,
+        # zero distribution and required return fixed. This is not a forecast.
+        required=dec(price)*(1+dec(required_return))**5/dec(eps)/dec(parameters['terminal_pe'])
+        revenue_factor=required*(1+shares_change)**5/(margin/base_margin)/(conversion/base_conversion)
+        result['implied_revenue_cagr_for_required_return']=text(revenue_factor**(D(1)/5)-1)
+        return result, compiled
+
+
 def _series(rows, field):
     groups = {}
     for row in rows:
@@ -728,7 +774,7 @@ def _rank(cards, request):
             group, reason = GROUPS[2], "Confirmed major quality risk blocks priority irrespective of valuation returns."
         elif base < required_return or cautious < request.downside_floor:
             group, reason = GROUPS[2], "Research thresholds not met under stated assumptions; quality evidence gaps are separate, and actual fundamental deterioration is not established."
-        elif blockers or not card["sensitivity_complete"] or (card.get("high_sensitivity") and not robust):
+        elif blockers or card.get('research_method_blockers') or not card["sensitivity_complete"] or (card.get("high_sensitivity") and not robust):
             group, reason = GROUPS[1], "Research observation only: quality evidence gap/warning, incomplete required sensitivities or base-scenario one-factor threshold crossing prevents priority; passing scenario thresholds is not a positive investment judgment."
         else:
             group, reason = GROUPS[0], "All evidence-bound quality gates pass; return/downside thresholds pass and all eight required single-factor cases are computable and high-dispersion base-scenario returns remain above required return (not full downside-risk robustness). Research Only, not investment authorization."

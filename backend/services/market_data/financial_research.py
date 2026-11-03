@@ -409,6 +409,64 @@ def build(assessment):
     return dict(records=metrics,limitations=sorted(set(missing)),valuation_sensitivity=sensitivity,comparative_selections=selections)
 
 
+def operating_ttm_bridge(assessment, eps=None):
+    """Opt-in operating flows on the *existing* qualified EPS window.
+
+    FY + current YTD - comparable prior YTD is a flow bridge, never an EPS
+    reconstruction. Original quality/Evidence owners alone qualify facts.
+    Missing/conflicting boundaries fail closed; no end-share EPS estimate.
+    """
+    from decimal import localcontext
+    owned = next((r for r in build(assessment)['records'] if r['field']=='diluted_eps_ttm'), None)
+    if not owned or (eps is not None and eps != owned):
+        raise ValueError('OPERATING_BRIDGE_OWNER_EPS_REQUIRED')
+    eps = owned
+    q = build_quality(assessment)
+    if q['rejected_refs'] or q['conflicts'] or assessment.get('conflicts') or assessment.get('source_conflicts'):
+        raise ValueError('OPERATING_BRIDGE_SOURCE_CONFLICT')
+    refs = set(eps.get('evidence_refs', []))
+    selected = [r for r in assessment.get('verified_field_records', []) + assessment.get('historical_field_records', [])
+                if r.get('record_id') in refs and r.get('field') == 'diluted_eps_ordinary_quarter']
+    windows = sorted({(r['fiscal_period_start'], r['period']) for r in selected})
+    if len(windows) != 4 or any((stamp(b[0])-stamp(a[1])).days != 1 for a,b in zip(windows,windows[1:])):
+        raise ValueError('OPERATING_BRIDGE_EPS_WINDOW_UNKNOWN')
+    start,end = windows[0][0],windows[-1][1]
+    if not 350 <= (stamp(end)-stamp(start)).days+1 <= 380:
+        raise ValueError('OPERATING_BRIDGE_WINDOW_INVALID')
+    facts=q['facts']; output={}
+    with localcontext() as ctx:
+        ctx.prec=34
+        for field in ('revenue','operating_income','net_income'):
+            rows=[r for r in facts if r['field']==field]
+            direct=[r for r in rows if r['start']==start and r['period']==end and r['scope']=='annual']
+            matches=[]
+            if direct: matches=[(Decimal(direct[0]['value']),direct,'direct annual same EPS window')]
+            else:
+                for fy in (r for r in rows if r['scope']=='annual'):
+                    for cur in (r for r in rows if r['period']==end and r['scope'] in ('quarterly','year_to_date')):
+                        if (stamp(cur['start'])-stamp(fy['period'])).days != 1: continue
+                        for prior in (r for r in rows if r['start']==fy['start'] and r['scope']==cur['scope']):
+                            if (stamp(start)-stamp(prior['period'])).days != 1: continue
+                            span=(stamp(cur['period'])-stamp(cur['start'])).days
+                            oldspan=(stamp(prior['period'])-stamp(prior['start'])).days
+                            if abs(span-oldspan)>7 or not 350 <= (stamp(cur['period'])-stamp(prior['period'])).days <= 380: continue
+                            value=Decimal(fy['value'])+Decimal(cur['value'])-Decimal(prior['value'])
+                            matches.append((value,[fy,cur,prior],'FY + current YTD - comparable prior YTD; not EPS subtraction'))
+            if not matches or len({v for v,_,_ in matches})!=1:
+                raise ValueError('OPERATING_BRIDGE_PERIOD_OR_INPUT_MISSING')
+            value,components,formula=matches[0]
+            output[field]=dict(value=format(value,'f'),components=components,formula=formula,
+                evidence_refs=sorted({ref for row in components for ref in row['evidence_refs']}))
+        revenue,op,net=[Decimal(output[f]['value']) for f in ('revenue','operating_income','net_income')]
+        if min(revenue,op,net)<=0: raise ValueError('OPERATING_BRIDGE_NONPOSITIVE_BASE')
+        return dict(status='QUALIFIED_GAAP_OPERATING_TTM_NOT_NORMALIZED',start=start,period=end,
+            currency='USD',unit='currency_units',flows=output,
+            operating_margin=format(op/revenue,'f'),net_to_operating_conversion=format(net/op,'f'),
+            net_margin=format(net/revenue,'f'),eps=eps,
+            limitations=['FLOW_TTM_IS_NOT_WEIGHTED_SHARE_EPS_RECONSTRUCTION',
+                'GAAP_BELOW_LINE_AND_TAX_EFFECTS_NOT_NORMALIZED','FUTURE_EPS_USES_EXPLICIT_RELATIVE_SHARE_ASSUMPTION'])
+
+
 def display(row,field):
     value=number(row.get('values',{}).get(field))
     if value is None:return None

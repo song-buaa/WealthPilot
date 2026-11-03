@@ -158,6 +158,11 @@ def verify(path):
     path = Path(path)
     b = json.loads(path.read_text())
     p = b["payload"]
+    if p['result']['method_version']=='s3-p2.operating-earnings.v1':
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('s3_operating_verify',Path(__file__).with_name('s3_operating_verify.py'))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        return module.verify_operating(path,verify)
     assert hashlib.sha256(canonical(p).encode()).hexdigest() == b["artifact_id"], "artifact hash"
     for relative, expected in p["view_hashes"].items():
         view = (path.parent / relative).resolve()
