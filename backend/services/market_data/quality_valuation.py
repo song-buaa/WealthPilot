@@ -156,8 +156,15 @@ def foreign_ads_earnings_research(assessment, assumptions):
         return result
     eps_usd = dec(eps['values']['diluted_eps_ttm']) / rate
     listed_price = dec(price['values']['observed_price'])
+    def bounded_case(parameters, required_return):
+        case = scenario(eps_usd, listed_price, parameters, required_return)
+        # The original S3 discounted per-share value needs a separate method
+        # applicability and capital-structure review for foreign ADS research.
+        case.pop('conditional_value')
+        case.pop('margin_to_conditional_value')
+        return case
     for name in SCENARIOS:
-        result['scenarios'][name] = scenario(eps_usd, listed_price, getattr(params, name), params.required_return)
+        result['scenarios'][name] = bounded_case(getattr(params, name), params.required_return)
     for field, offsets in SENSITIVITY_OFFSETS:
         for delta in offsets:
             variant = params.base.model_dump()
@@ -169,7 +176,7 @@ def foreign_ads_earnings_research(assessment, assumptions):
             else:
                 variant[field] += delta
             try:
-                calculation = scenario(eps_usd, listed_price, variant, required)
+                calculation = bounded_case(variant, required)
             except ValueError:
                 calculation = None
             result['sensitivity'].append(dict(parameter=field, delta=str(delta),

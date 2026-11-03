@@ -658,6 +658,7 @@ Registry 无需更新：原 owner 和入口未变。生产只读核验不启动�
 ## 条件估值 PR-B 开发候选（2026-11-03）
 
 沿原 `quality_valuation.py::scenario` 的五年正盈利每股收益算术增加外国发行人 ADS 限定投影 `foreign_ads_earnings_research`。仅在原 `Financial Research` 同时产出正式连续四季度每ADS EPS、合格美元日线观察价、同日 FX，且与官方明确 ADS 比例一致时执行；未来增长、股份变化、分红和终值 PE 均为显式研究假设。原 S3 domestic/US-GAAP 方法适用性、分组排名和 ACTIVE 政策不变。计算结果是条件研究，不是目标价、交易建议或质量8分证明。
+外国 ADS 投影只保留条件期末价值、回报与反向增长，不暴露原 S3 折现 `conditional_value` / `margin_to_conditional_value`；后两项需要另行验证方法适用性与资本结构，不能因一组研究倍数变成伪精确公允价值。
 
 开发侧真实冻结 PDD 四份正式 SEC 季度 EPS 与 2026-11-02 AV 日线、同日 FX 可在原 `assess → build` 后产生 63.14 CNY/ADS、81.68 USD/ADS、6.6483 CNY/USD，进而进入同一五年条件算术及独立 Decimal 复算。此方法没有进入 PEER，未执行完整 Sol 研究。LI 的 2025 年正式收入和 2026 Q2 财务已取到，但在 2026-11-03 决策时点，当前经济股数、完整净现金（含租赁、受限资金和资金可用性）及有来源依据的终值倍数均未闭合；2026 Q2 加权股数和部分现金借款差额不能替代。LI 恢复估值及反向隐含经营改善仍为 N/A。美团港交所公告可读不等于 IFRS 字段已获 Evidence 资格。开发 AV full 模式遭 Premium 拒绝而 compact 日线可用，不代表生产 Premium 权限状态；价格证据只证明日线，周线仍不足。以上缺口在取得合格输入和完整 PEER 验证前阻断 PR-B 完整验收。
 
