@@ -203,6 +203,20 @@ def test_fresh_sec_originals_reuse_existing_bytes_with_actual_new_fetch_receipts
         assert all(x['fetched_at']==receipt['fetched_at'] for x in a['quality_field_records'])
         assert r['net_cash'] is None and r['market_cap'] is None
         if receipt['symbol']=='LI':assert r['cash_less_disclosed_borrowings']['value']=='32967578000.0'
+        # Production-shaped source combination: preserve the exact original
+        # column role alongside the same issuer's CompanyFacts convenience USD.
+        ticker=receipt['symbol']
+        sub=json.loads(gzip.decompress((root/(ticker+'-submissions.json.gz')).read_bytes()))
+        cf_body=gzip.decompress((root/(ticker+'-companyfacts.json.gz')).read_bytes())
+        cf=sec.parse_companyfacts((cf_body,manifest[ticker+'-companyfacts']['fetched_at']),receipt['issuer'],
+            sec.discover_filings(receipt['issuer'],sub),identity_digest=manifest['directory']['sha256'],quality='all')
+        rows=cf+[source];proof={x['record_id']:x for x in rows}
+        combined=assess({},symbol=receipt['issuer']['symbol'],research=rows,
+            at=datetime.fromisoformat(receipt['fetched_at']),disclosure_verifier=proof.get)
+        merged=build_valuation_inputs(combined)
+        assert merged['currency']=='CNY' and merged['listed_unit']==r['listed_unit']
+        assert merged['cash_less_disclosed_borrowings']==r['cash_less_disclosed_borrowings']
+        assert merged['net_cash'] is None and merged['market_cap'] is None
 
 
 def test_tiny_per_share_values_keep_their_currency_and_share_unit():
