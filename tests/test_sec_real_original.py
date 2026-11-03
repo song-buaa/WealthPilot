@@ -30,6 +30,30 @@ def original():
     return b
 
 
+def test_monthly_delivery_parser_requires_single_dated_month_and_does_not_sum_quarters():
+    from bs4 import BeautifulSoup
+    from research_v2.official_disclosures import parse_monthly_vehicle_delivery
+    text='Li Auto Inc. October 2026 Delivery Update. In October, Li Auto delivered 29,025 vehicles in October 2026.'
+    rows=parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-11-02T06:10:00-05:00','Li Auto Inc.')
+    assert len(rows)==1 and rows[0]['value']==29025
+    assert rows[0]['period_basis']=='monthly' and rows[0]['fiscal_period_end']=='2026-10-31'
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text+' '+text,'html.parser'),'2026-11-02','Li Auto Inc.')
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-10-15','Li Auto Inc.')
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-11-02','Other Issuer Inc.')
+    competitor='Li Auto Inc. October 2026 Delivery Update. XPeng delivered 30,000 vehicles in October 2026.'
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(competitor,'html.parser'),'2026-11-02','Li Auto Inc.')
+
+
+def test_management_commentary_requires_the_actual_forecast_phrase():
+    from research_v2.sec_disclosures import _reviewed_management_context
+    vague='intense market competition and a major model refresh cycle; product mix optimizes'
+    assert _reviewed_management_context('LI_AUTO',vague) is None
+    pdd='global trade and regulatory landscapes have continued to evolve; stepped up our ecosystem investments in the second quarter'
+    statement=_reviewed_management_context('PDD_HOLDINGS',pdd)
+    assert statement and 'Temu独立利润' in statement
+    assert '商家支持' not in statement and '强调合规' not in statement
+
+
 def metadata(body=None,symbol='LI:US',issuer_id='LI_AUTO'):
     body=body or original();text=body.decode()
     h=re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>',text,re.S)[1]
@@ -55,6 +79,7 @@ def parse(body=None,issuer=None,filing=None):
 def test_original_hash_before_and_after_parser_and_four_exact_native_fields():
     body=original();before=hashlib.sha256(body).hexdigest();row=parse(body)
     assert row and row['source_verification']['document_sha256']==before
+    assert '管理层陈述' in row['content'] and '前瞻假设' in row['content']
     facts={o['source_field']:o for o in row['financial_observations'] if o['fiscal_period_end']=='2026-06-30'}
     assert {k:facts[k]['value']*facts[k]['unit_scale'] for k in EXPECTED}==EXPECTED
     assert sum(o['source_field'] in EXPECTED for o in row['financial_observations'])==12  # original four in three actual periods

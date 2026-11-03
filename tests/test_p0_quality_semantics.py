@@ -41,6 +41,7 @@ def pdd_record(body=None):
 
 def test_real_PDD_quarter_fields_use_actual_SEC_clock_and_exact_native_cells():
     r=pdd_record();assert r
+    assert '管理层陈述' in r['content'] and '本段不能证明Temu独立利润' in r['content']
     rows={o['source_field']:o for o in r['financial_observations'] if o['fiscal_period_end']=='2026-06-30'}
     assert {k:rows[k]['value']*rows[k]['unit_scale'] for k in ('totalRevenue','netIncome','operatingCashflow')}=={'totalRevenue':112358000000,'netIncome':27182000000,'operatingCashflow':25670000000}
     assert rows['operatingIncome']['value']*rows['operatingIncome']['unit_scale']==27764000000

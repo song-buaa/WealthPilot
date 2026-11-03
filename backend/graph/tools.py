@@ -1225,7 +1225,8 @@ def execute_assess_position_evidence(**kwargs):
     diagnostics=[]
     rows=[]
     # Original-source verification is a server dependency, never request/card trust.
-    if (kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or "").endswith(":US"):
+    source_symbol=kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or ""
+    if source_symbol.endswith(":US"):
         from research_v2.official_disclosures import collect
         from research_v2.sec_disclosures import source_diagnostics
         rows, verifier = collect(kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol"),
@@ -1234,6 +1235,12 @@ def execute_assess_position_evidence(**kwargs):
         if rows:
             kwargs["research"] = [*kwargs.get("research", ()), *rows]
             kwargs["disclosure_verifier"] = verifier
+    elif source_symbol == '3690:HK':
+        from research_v2.official_disclosures import collect_hkex
+        rows,verifier=collect_hkex(source_symbol)
+        if rows:
+            kwargs["research"]=[*kwargs.get("research",()),*rows]
+            kwargs["disclosure_verifier"]=verifier
     result=assess(**kwargs)
     # Reuse the original FX authority only when research has verified per-listed
     # EPS in a different currency. No portfolio/snapshot dependency or DB writes.

@@ -148,10 +148,8 @@ def facts_only_result(assessment, *, at, asset_view=None, professional_delivered
     text=('已核验研究事实；专业解释与限制见下文，不构成交易授权。\n' if professional_delivered else
           '专业推断未完成；以下仅保留已核验来源事实，不包含投资决策或交易建议。\n')
     current['financial_research']['valuation_sensitivity']=[]
-    text+='\n\n'.join(fact_sections(current,include_scenarios=False))
-    text+='\n\n来源与时钟：\n'+'\n'.join(
-        f"- {r['record_id']}；来源 {r.get('source_url') or r.get('source')}；期间 {r.get('period')}；数据日 {r.get('data_as_of')}；发布 {r.get('published_at') or 'UNKNOWN'}；抓取 {r.get('fetched_at') or 'UNKNOWN'}。"
-        for r in facts)
+    text+='\n\n'.join(fact_sections(current,include_scenarios=False,concise=True))
+    text+=f'\n\n完整来源、时钟与原始字段见结构化 Evidence（{len(facts)} 条合格记录）；正文仅展示决定性事实与限制。'
     return current, facts, text
 
 
@@ -217,7 +215,9 @@ def explanation_prompt(assessment):
                        conditional.get('method_version')=='s3-foreign-ads-earnings.v1' else "")
     return (auto_focus+earnings_focus+"\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
         "每项包含topic、basis='inference'、scope='research_only'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
-        "risk、exit_rationale、review_condition、technical_trend。用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
+        "risk、exit_rationale、review_condition、technical_trend。围绕经营事实、竞争机制、反证、条件估值参数与投资判断形成因果链；"
+        "竞争或分部数据不足时明确缺口，不把管理层自述当作独立验证的竞争胜出，也不虚构Temu独立利润。"
+        "用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
         "基本面缺失但技术证据有效时，使用technical_trend解释趋势、动量与量价背离及其局限，"
         "不得由技术走势推导营收或竞争优势。business、competition、investment_thesis须引用经营或研究证据。"
@@ -455,7 +455,9 @@ def render_explanation(paragraphs):
     if not paragraphs:
         return "\n专业解释：当前缺少可引用的合格证据或模型未返回合格解释，保留研究问题，不补写经营结论。"
     lines = ["\nAI专业分析推断（依据下列有效证据，推论仍需人工复核；具体数值与资格以上述确定性报告为准）："]
-    for paragraph in paragraphs:
+    priority={'investment_thesis':0,'business':1,'competition':2,'valuation':3,
+              'risk':4,'technical_trend':5,'review_condition':6}
+    for paragraph in sorted(paragraphs,key=lambda item:priority.get(item['topic'],7)):
         refs = "；".join(f"{s['evidence_ref']}，{s['data_as_of']}" for s in paragraph["sources"])
         lines.append(f"- {_TOPIC_LABELS[paragraph['topic']]}：{paragraph['text']}\n  依据：{refs}")
     return "\n".join(lines)
