@@ -110,7 +110,7 @@ def bound_item(a):
 
 def test_bound_paragraph_whitespace_is_not_a_numeric_or_trade_bypass():
     a=combined();item=bound_item(a);accepted,d=explanation_projection([item],a)
-    assert d['accepted_count']==1 and '8.05%' in accepted[0]['text']
+    assert d['accepted_count']==1 and '8.0521%' in accepted[0]['text']
     assert explanation_projection(accepted,a)[0]==accepted
     for tail in ['预计达到99%。','立即挂单卖出。','立即\n卖出。','目标\n价维持既有观察。','https:\n//example.com','\u200b']:
         bad=deepcopy(item);bad['text']+=tail

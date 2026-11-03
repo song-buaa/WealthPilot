@@ -9,10 +9,10 @@ from backend.services import quality_valuation_research as archive
 from backend.services.s3_method_research import MethodRequest, compare_methods, identity_projection
 from backend.services.market_data.evidence import assess, assess_quality_facts, mapping, stamp
 from backend.services.market_data.financial_research import build
-from backend.services.market_data.method_applicability import applicability, APPLICABLE, notice_assets
+from backend.services.market_data.method_applicability import applicability, APPLICABLE
 from backend.services.market_data.quality_valuation import Assumptions
 
-VERSION = 's3-d.real-pool.v1.1'
+VERSION = 's3-d.real-pool.v1'
 PARAMETER_VERSION = 's3-d.transparent-candidates.v1'
 
 
@@ -120,9 +120,6 @@ def _compare_pool(raw_request, assessments, price_qualification=None):
         symbol = card['symbol']
         if card['method_applicability']['earnings_model']['status'] != APPLICABLE:
             request_data['companies'][symbol] = None
-            if card['method_applicability'].get('return_unit_qualification'):
-                all_parameters[symbol]=None
-                contexts.pop(symbol,None)
             continue
         try:
             if request_data['companies'][symbol] is None:
@@ -275,7 +272,6 @@ def _make_bundle(root,raw_request):
         'backend/services/market_data/method_applicability.py','research_v2/sec_identity.py',
         'backend/services/s3_pool_research.py','backend/services/execution_plan/kline_provider.py')
     methods += ('backend/services/s3_pool_capture.py','scripts/s3_quality_valuation.py')
-    methods += notice_assets()
     files.update({'methods/'+n:archive.ROOT/n for n in methods})
     payload=dict(request=resolved.model_dump(mode='json'),assessments=assessments,input_failures=failures,
         price_qualification=prices,method_files={n:archive.file_hash(archive.ROOT/n) for n in methods},

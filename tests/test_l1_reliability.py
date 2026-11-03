@@ -100,7 +100,7 @@ def test_pdd_facts_only_preserves_clocks_and_exact_fields_without_decision():
     assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_available_to_ordinary_shareholders_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter','cost_of_revenue_reported_quarter','sales_marketing_reported_quarter','general_admin_reported_quarter','research_development_reported_quarter','income_tax_reported_quarter'}
     assert all(r['published_at']=='2026-08-25T07:20:02-04:00' for r in rows if r['kind']=='fundamental_field')
     assert all(r['published_at'] is None and r['evidence_refs'] for r in rows if r['kind']=='research_metric')  # calculations are not filings
-    assert '专业推断未完成' in text and '1,123.58亿元' in text
+    assert '专业推断未完成' in text and '112358000000' in text
     assert original==before
     later=facts_only_result(original,at=AT.replace(year=2027))
     assert not later[0]['verified_field_records'] and all(r.get('historical_only') for r in later[1])

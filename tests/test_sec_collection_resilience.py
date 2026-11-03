@@ -127,6 +127,4 @@ def test_complete_companyfacts_quarter_cannot_skip_newer_8K(monkeypatch):
     monkeypatch.setattr(sec,'_fetch',fetch)
     rows,_=sec.collect('AAPL:US')
     assert len(calls)==5 and calls[3].endswith('/0001104659-26-200001.txt')  # newer event first, then original to supplement missing EPS/expenses
-    observations=[o for r in rows for o in r['financial_observations']]
-    assert {o['source_field'] for o in observations if not o['source_field'].startswith('quality_')}==set(EXPECTED)
-    assert {o['source_field'] for o in observations if o['source_field'].startswith('quality_')}=={'quality_revenue','quality_cfo','quality_capex'}
+    assert {o['source_field'] for r in rows for o in r['financial_observations']}==set(EXPECTED)

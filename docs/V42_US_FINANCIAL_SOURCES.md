@@ -147,7 +147,3 @@ DEI TradingSymbol与Security12bTitle、同CIK类股context须共同绑定目标�
 记录出口丢弃传入EPS资格flag，并从同原件/真实SEC-HEADER重新提取类别事实。多注册证券记录引用含ticker，避免GOOG/GOOGL共享原件SHA而事实投影混淆；单注册证券原记录ID不变。Source缓存键升级避免旧无类别投影沿用。正式原文分别核验`accepted_at`与官方FILED AS OF DATE，保守published上界不再冒充真实header接受时刻；相同验证用于parse_filing及verify_filing_envelope。
 
 真实Alphabet回归证明：合并EPS与A/C类EPS并不恒相同；GOOG/GOOGL按各自官方直接事实恢复，存托优先股GOOGM/N不接收普通股EPS。该回归仅为来源资格，不宣称完整TTM、实时PE或S3估值。BRK.A/B的CompanyFacts无归属EPS继续拒绝；S3金融模型不适用仍生效。原始材料与数值在私人交付，不提交Git或公开PR。
-
-### PR-A：股份、余额与估值输入范围
-
-原SEC Owner同时投影普通财务与质量字段；正式合并表格的报告币、余额时点、ADS明确关系及期间加权股数通过原独立披露核验进入`quality_field_records`。外国发行人字段资格不等于通过S3国内US-GAAP质量筛查；其原适用边界不变。`build_valuation_inputs`复用原`build_quality`，输出资格和来源，不作公允价值计算。部分借款覆盖的现金差额与完整净现金分开；普通股/ADS加权数不替代当前经济总股本。缺少完整债务、公司行动、报价/FX或上市单位证明时PR-B输入继续N/A。

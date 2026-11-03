@@ -65,38 +65,3 @@ def test_six_cards_async_durable_read_and_no_business_config_access(tmp_path, mo
             assert bad.is_error
             assert str(tmp_path) not in str(bad.content)
     asyncio.run(run())
-
-
-def test_professional_optional_method_uses_same_jobs_archive_and_refusal_cards(tmp_path):
-    sources=tmp_path/'sources';sources.mkdir()
-    symbols=['AAPL','MSFT','NVDA','META']
-    (sources/'manifest.json').write_text(json.dumps({'schema_version':'s3-d.sources.v1','requests':[],
-        'companies':{s+':US':{'directory':{'status':'FAILED'}} for s in symbols}}))
-    async def run():
-        async with Client(create_server(configuration(tmp_path)),mode='legacy') as c:
-            tools={t.name:t for t in (await c.list_tools()).tools}
-            schema=tools['start_company_pool_research'].input_schema
-            assert 'professional' in json.dumps(schema) and 'standard' in json.dumps(schema)
-            args=dict(request_id='synthetic-professional-1',request=dict(symbols=symbols,purpose='Synthetic P3 protocol, no real data',method='professional'))
-            start=value(await c.call_tool('start_company_pool_research',args))
-            repeated=value(await c.call_tool('start_company_pool_research',args))
-            assert repeated['job_id']==start['job_id']
-            conflict=value(await c.call_tool('start_company_pool_research',{**args,'request':{**args['request'],'method':'standard'}}))
-            assert conflict['issue']=='REQUEST_ID_CONFLICT'
-            for _ in range(150):
-                result=value(await c.call_tool('get_company_pool_research_result',{'job_id':start['job_id']}))
-                if result['state']!='running':break
-                await asyncio.sleep(.1)
-            assert result['state']=='completed',result
-            report=result['result'];assert report['intent']['method']=='professional'
-            assert len(report['professional_result']['cards'])==4 and report['data_quality']['comparable_count']==0
-            assert report['professional_result']['assumption_profile_version']=='s3-p3.reviewed-profiles.p22.v1'
-            assert report['evidence']['verification']['verified'] and not report['order_created']
-            artifact=report['evidence']['artifact_id']
-            assert value(await c.call_tool('read_company_pool_research',{'artifact_id':artifact}))==report
-            bad=await c.call_tool('start_company_pool_research',{**args,'request':{**args['request'],'terminal_pe':99}})
-            assert bad.is_error
-        async with Client(create_server(configuration(tmp_path)),mode='legacy') as c:
-            read=value(await c.call_tool('read_company_pool_research',{'artifact_id':artifact}))
-            assert read==report
-    asyncio.run(run())

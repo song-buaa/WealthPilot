@@ -108,5 +108,5 @@ def complete_ibkr_request(body: dict):
 def demo(): return {'public_demo_mode': False}
 @app.get('/api/{path:path}')
 def unused(path: str): return {'items':[], 'total':0}
-app.mount('/', StaticFiles(directory=root/'frontend/dist',html=True))
+app.mount('/', StaticFiles(directory=Path(os.environ.get('WP_TEST_WEB_DIST', str(root/'frontend/dist'))),html=True))
 if __name__=='__main__': uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[1]))

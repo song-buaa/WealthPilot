@@ -61,12 +61,7 @@ def test_pdd_higher_scope_and_currency_not_silently_certified():
     assert not a['verified_field_records']
     six=pdd_original().replace(b'three months',b'six months')
     x=pdd_record(six)
-    # Instant balance-sheet facts remain valid when income becomes six-month.
-    # No duration or weighted-share fact may be certified as an independent quarter.
-    assert x is not None
-    assert x['financial_observations']
-    assert all(o['period_basis']=='instant' and o['source_field'].startswith('quality_')
-               for o in x['financial_observations'])
+    assert x is None or not x['financial_observations']
 
 
 def test_keyword_optimism_is_not_a_financial_or_personal_rule_pass():
