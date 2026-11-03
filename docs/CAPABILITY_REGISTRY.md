@@ -182,3 +182,5 @@ PR-B开发候选：原S3 Owner的`quality_valuation.foreign_ads_conditional_rese
 S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
 
 S3 P2.2本地候选沿[原经营研究](../backend/services/s3_operating_research.py)与[原官方披露Owner](../research_v2/official_disclosures.py)增加限定官方IR上下文捕获资格、稀疏年度PE经营背景和#89空参数拒绝卡兼容；不提升为GAAP、不回填网页PIT、不改变生产默认方法。版本、测试、正常MCP仍需薄适配及发布准备边界见[P2实施记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p22-本地证据与发布准备候选)。
+
+S3 P3专业入口候选：原[公司池服务](../backend/services/s3_research_entry.py)与[既有MCP工具](../pocs/chatgpt_skills/company_pool.py)增加可选`request.method=standard|professional`，默认P1；[专业适配](../backend/services/s3_professional_research.py)绑定服务端已评审P2.2档案和新时点原Owner资格，三公司场景参数不改，META保护优先，变更/缺证不静默P1回退。原start/get/read、冻结与独立复算复用，无新工具/Runtime/数据库/交易权限。合同及分阶段发布证据见[P3记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。

@@ -64,3 +64,23 @@ P2.1边界回归见[测试](../../tests/test_s3_p2_1_calibration.py)。独立标
 专项边界见[P2.2测试](../../tests/test_s3_p2_2_evidence.py)。真实三公司报告及独立五维评分留在私人交付；三公司同口径P2.1评分基线为8.0，不能把剔除META造成的范围效应当改进。没有新证据支持则保留数值参数，不追求回报上调。
 
 当前正常MCP公司池入口仍默认P1自动候选；此本地P2 CLI不会隐式切换生产方法。正式替代须先明确并审核服务端dossier选择/时效/适用范围、原start/get/read与P2回放/transport的薄适配及历史版本隔离，再经受保护PR/CI、另行授权部署和真实链路验收；本轮不Merge或Deploy。没有这一产品桥不得声称当前正常MCP已能交付P2。
+
+## P3 专业研究产品接线候选
+
+现有`start_company_pool_research`的`request.method`可选`standard`（默认原P1）或`professional`（原P2.2经营模型）。不新增工具、Agent、Skill或数据库，不要求客户端提交增长/PE/源/时钟。原`run_company_pool_research`→Skill→S3服务与单次Worker继续为唯一入口；start/get/read、请求幂等和无交易权限不变。
+
+服务端[版本化研究档案](../../research_v2/s3_profiles/p22-v1.json)保存P2.2原三家公司参数、已核来源和原Owner年度EPS快照，非Investment Policy、自动预测或私人账户配置。原[专业适配](../../backend/services/s3_professional_research.py)在每次新公开采集时禁用可变元数据复用，补充原SEC/官方IR上下文，然后以真实采集完成后的decision_at先走原P1资格链；重核CIK、最新10-K/10-Q/8-K、合格TTM期间/数值、SEC原件hash/包络及可变IR正文指纹。变化或缺证逐公司UNKNOWN，不静默退回P1数值；META原Owner拒绝优先。未支持公司保留研究卡，不扩GOOG/TSLA方法。
+
+IR正文指纹只排除排版/脚本变化，文本语义变化需重新人工研究；官方页面仍只以新fetched_at作known_at，不据网页日期回填。采集继续限定原URL、无跳转、大小与HTTP200。年度EPS快照只复用原SEC `asfiled_annual_eps`的不可变已核原件事实，再由原Owner重核原件hash、发行人、accession及单位/期间；改变原件不能沿用快照。新价格与拆股、公开资格日仍由原Owner重算历史PE，不拼接当前重列EPS或跨拆股换算。
+
+P3沿原P2经营路径/PE结算，方法版本`s3-p2.operating-earnings.v1.3`仅反映产品/拒绝/回放合同升级，数值模型和三公司参数不变。专业结果新增`professional_qualification`、profile版本/hash和当前重核时钟，原经营桥、联合敏感性、反向门槛、风险及三档保留。公司研究优先级不是配置建议。
+
+为保持原MCP读回期限，专业入口先完整资格化一次原父快照，再调用原Owner `pool.replay`核验冻结源/视图/方法和已资格化投影，重建P2；read无网络、不再次抓取或声称新事实资格。年度EPS仅复用绑定原文hash的Owner快照；当前书本/方法不匹配明确METHOD_DRIFT，不重写历史。旧P2本地CLI严格原文重资格回放仍可在原版本执行。读回verified说明同一冻结输入、参数和方法下重算一致，不等于预测准确或来源在今日仍适用。
+
+示例（正常ChatGPT不需要CLI）：
+
+```json
+{"request_id":"one-unique-authorized-request","request":{"symbols":["AAPL","MSFT","NVDA"],"purpose":"专业质量与五年条件回报比较，不涉及持仓或交易","method":"professional"}}
+```
+
+省略method继续standard。当前schema保留原字段和工具名；原MCP transport完整保留P2字段，仅继续删除重复审计树/去重引用。专项见[接线测试](../../tests/test_s3_professional_entry.py)、[实际MCP协议](../../pocs/chatgpt_skills/test_s3_protocol.py)。本地/CI、受保护合并、生产安装/原launchd受管重启、真实MCP验收分别留证；本段接线说明不自行宣称已上线。

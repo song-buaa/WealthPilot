@@ -16,7 +16,7 @@ from backend.services import s3_pool_research as pool
 from backend.services.market_data import quality_valuation as engine
 from backend.services.market_data.financial_research import operating_ttm_bridge
 
-VERSION='s3-p2.operating-earnings.v1.2'
+VERSION='s3-p2.operating-earnings.v1.3'
 STRESS=('-.03', '0', '.03')
 
 
@@ -69,7 +69,7 @@ class Dossier(engine.Contract):
     version: str = Field(pattern='^s3-p2.research-dossier.v1$')
     parent_artifact_id: str = Field(pattern='^[a-f0-9]{64}$')
     research_recorded_at: AwareDatetime
-    companies: dict[str,Profile] = Field(min_length=1,max_length=20)
+    companies: dict[str,Profile] = Field(max_length=20)
 
 
 def _eight(card):
@@ -156,7 +156,7 @@ def _positions(cards):
     return {c['symbol']:[c['group'],c['rank']] if c.get('scenarios') else [None,None] for c in cards}
 
 
-def evaluate(qualified,dossier,assessments):
+def evaluate(qualified,dossier,assessments,qualification_failures=None):
     """Same qualified facts/price/quality and research thresholds as P1."""
     dossier=Dossier.model_validate(dossier)
     with localcontext() as ctx:
@@ -165,6 +165,10 @@ def evaluate(qualified,dossier,assessments):
         for old in qualified['cards']:
             symbol=old['symbol']
             try:
+                if qualification_failures is not None:
+                    if old['comparison_status']!='COMPARABLE':
+                        raise ValueError(old.get('failure_reason') or 'P2_PARENT_NOT_COMPARABLE')
+                    if symbol in qualification_failures:raise ValueError(qualification_failures[symbol])
                 profile=dossier.companies[symbol]
                 if profile.return_unit_qualification!='NO_KNOWN_UNRESOLVED_DISTRIBUTION':
                     raise ValueError('KNOWN_FUTURE_CLASS_DISTRIBUTION_REQUIRES_ENTITLEMENT_BRIDGE')
@@ -196,15 +200,16 @@ def evaluate(qualified,dossier,assessments):
                         profile=dossier.companies[symbol].model_dump(mode='json'))
                     card['change_conditions']=dossier.companies[symbol].review_conditions
                 cards.append(card);failures[symbol]=reason
-        fallback={c['symbol']:c['assumptions'] for c in qualified['cards']}
+        fallback={c['symbol']:c.get('assumptions') for c in qualified['cards']}
         params={c['symbol']:c['assumptions'] or fallback[c['symbol']] for c in cards}
+        thresholds={k:qualified['ranking'].get(k,pool.PoolRequest.model_fields[k].default)
+                    for k in ('tie_band','downside_floor','downside_tie_band')}
         # Method-qualified parents can legitimately have no assumptions (META).
         # Ranking needs thresholds, not fabricated parameters for refused cards.
         request=pool.PoolRequest.model_validate(dict(pool_id='s3_p2',pool_version='v1',
             purpose='Retrospective same-input model comparison, not an investment signal',
             decision_at=qualified['decision_at'],source_manifest_sha256='0'*64,companies=params,
-            tie_band=qualified['ranking']['tie_band'],downside_floor=qualified['ranking']['downside_floor'],
-            downside_tie_band=qualified['ranking']['downside_tie_band']))
+            **thresholds))
         for card in cards:
             card['joint_sensitivity']=[]
             if card['scenarios']:
@@ -237,22 +242,36 @@ def evaluate(qualified,dossier,assessments):
             not_comparable=[dict(symbol=s,reason=v) for s,v in failures.items()],
             research_recorded_at=dossier.research_recorded_at.isoformat(),
             research_scope='RETROSPECTIVE_METHOD_COMPARISON_NOT_OUT_OF_SAMPLE_FORECAST',
-            ranking={**qualified['ranking'],'stable':not changes,'changes':changes})
+            ranking={**qualified['ranking'],**{k:str(getattr(request,k)) for k in thresholds},
+                'stable':not changes,'changes':changes})
         return result
 
 
-def make_bundle(parent_path,dossier_raw):
+def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_provenance=None,_frozen_owner=False):
     parent_path=Path(parent_path)
     parent=archive.read_bundle(parent_path);dossier=Dossier.model_validate(dossier_raw);p=parent['payload']
     if parent['artifact_id']!=dossier.parent_artifact_id:raise ValueError('P2_PARENT_ID_MISMATCH')
     if dossier.research_recorded_at<engine.stamp(p['request']['decision_at']):raise ValueError('P2_RESEARCH_CLOCK_INVALID')
     if not set(dossier.companies)<=set(p['request']['companies']):raise ValueError('P2_POOL_IDENTITY_MISMATCH')
-    request=deepcopy(p['request']);request['companies']={s:request['companies'][s] for s in dossier.companies}
-    request['assumption_context']={s:request['assumption_context'][s] for s in dossier.companies}
+    if not dossier.companies and professional_context is None:raise ValueError('P2_EMPTY_DOSSIER')
+    request=deepcopy(p['request'])
+    if professional_context is None:
+        request['companies']={s:request['companies'][s] for s in dossier.companies}
+        request['assumption_context']={s:request['assumption_context'][s] for s in dossier.companies}
     # Requalify original bytes through their existing Owners. Never trust a
     # manually supplied metric or modify the parent to fit this new model.
-    requalified,_=pool.make_bundle(parent_path.parent/'sources/inputs',request)
-    q=requalified['payload'];old={c['symbol']:c for c in p['result']['cards']}
+    if _frozen_owner:
+        if professional_context is None:raise ValueError('P2_FROZEN_OWNER_CONTEXT_REQUIRED')
+        pool.replay(parent_path)
+        result,resolved=pool.compare_pool(request,p['assessments'],p['price_qualification'])
+        archive._project_source_failures(result,p['input_failures'])
+        for item in result['not_comparable']:
+            if item['symbol'] in p['input_failures']:item['source_failure']=p['input_failures'][item['symbol']]
+        q=dict(p,request=resolved.model_dump(mode='json'),result=result)
+    else:
+        requalified,_=pool.make_bundle(parent_path.parent/'sources/inputs',request)
+        q=requalified['payload']
+    old={c['symbol']:c for c in p['result']['cards']}
     root=parent_path.parent/'sources/inputs'
     manifest=archive._load(root,'manifest.json',p['request']['source_manifest_sha256'])
     calibration={}
@@ -266,13 +285,15 @@ def make_bundle(parent_path,dossier_raw):
             if (archive.file_hash(archive.safe_file(root,note.path))!=note.sha256 or note.begin>=note.end
                     or note.end>len(raw) or hashlib.sha256(raw[note.begin:note.end]).hexdigest()!=note.excerpt_sha256):
                 raise ValueError('P2_SOURCE_NOTE_EXCERPT_REJECTED')
-        calibration[symbol]=calibration_context(root,manifest,symbol,profile,p['request']['decision_at'])
+        snapshots=(professional_context['annual_eps_snapshots'][symbol] if professional_context is not None else None)
+        calibration[symbol]=calibration_context(root,manifest,symbol,profile,p['request']['decision_at'],annual_snapshots=snapshots)
     for card in q['result']['cards']:
         for field in ('quality','cross_checks','scenarios','assumptions','comparison_status'):
-            if card[field]!=old[card['symbol']][field]:raise ValueError('P2_BASELINE_OWNER_REQUALIFICATION_DIFFERENCE')
-    result=evaluate(q['result'],dossier,q['assessments'])
+            if card.get(field)!=old[card['symbol']].get(field):raise ValueError('P2_BASELINE_OWNER_REQUALIFICATION_DIFFERENCE')
+    result=evaluate(q['result'],dossier,q['assessments'],
+        professional_context['failures'] if professional_context is not None else None)
     for card in result['cards']:
-        context=calibration[card['symbol']]
+        context=calibration.get(card['symbol'],dict(disclosures=[],research_documents=[],historical_pe=dict(samples=[])))
         if context['disclosures'] or context['historical_pe']['samples'] or context['research_documents']:
             card['calibration_evidence']=context
             if card.get('valuation_context'):
@@ -286,16 +307,24 @@ def make_bundle(parent_path,dossier_raw):
     files.update({'baseline/'+name:archive.safe_file(parent_path.parent,name) for name in p['view_hashes']})
     files.update({'baseline/sources/'+name:archive.safe_file(parent_path.parent/'sources',name) for name in p['source_files']})
     methods=tuple(q['method_files'])+('backend/services/s3_operating_research.py','scripts/s3_operating_verify.py')
+    if professional_context is not None:
+        methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
+        result['professional_qualification']=professional_context
+        result['assumption_profile_version']=professional_context['profile_version']
+        result['research_scope']='CURRENT_EVIDENCE_CONDITIONAL_RESEARCH_NOT_VALIDATED_FORECAST'
+        if result['comparable_count']<len(result['cards']):result['status']='partial'
     files.update({'methods/'+name:archive.ROOT/name for name in methods})
     payload=dict(request=request,dossier=dossier.model_dump(mode='json'),assessments=q['assessments'],
         qualified_baseline=q['result'],parent_artifact_id=parent['artifact_id'],result=result,
         method_files={name:archive.file_hash(archive.ROOT/name) for name in methods},
         source_files={name:archive.file_hash(path) for name,path in sorted(files.items())})
+    if professional_context is not None:payload['professional_context']=professional_context
+    if entry_provenance is not None:payload['entry_provenance']=entry_provenance
     payload['view_hashes']=archive.view_hashes(result)
     return dict(artifact_id=archive.digest(payload),payload=payload),files
 
 
-def calibration_context(root,manifest,symbol,profile,decision_at):
+def calibration_context(root,manifest,symbol,profile,decision_at,*,annual_snapshots=None):
     """Source/clock qualification in original Owners; never auto-predict parameters.
 
     A filing-vintage annual PE is only a sparse retrospective anchor, NOT a
@@ -340,7 +369,8 @@ def calibration_context(root,manifest,symbol,profile,decision_at):
                 summary=note.summary,role='HUMAN_VERIFIED_RESEARCH_CONTEXT_NOT_OWNER_GAAP_METRIC_OR_FIVE_YEAR_GUIDANCE'))
             continue
         try:
-            eps=sec.asfiled_annual_eps((body,receipt['fetched_at']),issuer,filing)
+            eps=(sec.revalidate_asfiled_snapshot((body,receipt['fetched_at']),issuer,filing,annual_snapshots[note.url])
+                 if annual_snapshots is not None else sec.asfiled_annual_eps((body,receipt['fetched_at']),issuer,filing))
             price_raw,_=raw('price');split_raw,_=raw('splits')
             if (entry['price'].get('function')!='TIME_SERIES_DAILY' or entry['splits'].get('function')!='SPLITS'
                     or entry['price'].get('symbol')!=symbol or entry['splits'].get('symbol')!=symbol):
@@ -381,6 +411,12 @@ def replay(path):
         if archive.file_hash(archive.ROOT/name)!=expected:raise ValueError('METHOD_DRIFT_REPLAY_REQUIRES_ORIGINAL_VERSION')
     parent=archive.read_bundle(Path(path).parent/'sources/baseline/bundle.json')
     if parent['artifact_id']!=p['parent_artifact_id']:raise ValueError('P2_PARENT_ID_MISMATCH')
-    rebuilt,_=make_bundle(Path(path).parent/'sources/baseline/bundle.json',p['dossier'])
+    parent_path=Path(path).parent/'sources/baseline/bundle.json'
+    if 'professional_context' in p:
+        from backend.services.s3_professional_research import prepare,provenance
+        dossier,context=prepare(parent_path)
+        rebuilt,_=make_bundle(parent_path,dossier,professional_context=context,
+            entry_provenance=provenance(parent['payload']['entry_provenance'],context),_frozen_owner=True)
+    else:rebuilt,_=make_bundle(parent_path,p['dossier'])
     if rebuilt!=b:raise ValueError('RECOMPUTATION_DIFFERENCE')
     return dict(verified=True,artifact_id=b['artifact_id'],result_sha256=archive.digest(p['result']))

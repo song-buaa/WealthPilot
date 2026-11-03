@@ -24,6 +24,38 @@ RESEARCH_CONTEXT_URLS = {
 }
 
 
+def research_context_fingerprint(body, cik):
+    """Visible reviewed article/transcript only; never extracts financial facts."""
+    selectors = {'0000320193': ('article.article', 'Services'),
+                 '0000789019': ('div.cmp-text', 'JONATHAN NEILSON:'),
+                 '0001045810': ('div.module_body', 'Revenue is expected')}
+    try:
+        selector, marker = selectors[str(int(cik)).zfill(10)]
+        soup = BeautifulSoup(body, 'html.parser')
+        for node in soup.select('script,style,noscript'):
+            node.decompose()
+        texts = [re.sub(r'\s+', ' ', n.get_text(' ', strip=True)).strip()
+                 for n in soup.select(selector) if marker in n.get_text(' ', strip=True)]
+        if len(texts) != 1 or len(texts[0]) < 1000:
+            raise ValueError()
+        return hashlib.sha256(texts[0].encode()).hexdigest()
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('ISSUER_RESEARCH_CONTEXT_LAYOUT_REQUIRES_REVIEW') from None
+
+
+def fetch_current_issuer_context(cik):
+    """Bounded explicit opt-in fetch from the same issuer context allowlist."""
+    url = RESEARCH_CONTEXT_URLS[str(int(cik)).zfill(10)]
+    request = urllib.request.Request(url, headers={'User-Agent': 'WealthPilotResearch/1.0'})
+    with urllib.request.build_opener(_NoRedirect()).open(request, timeout=20) as response:
+        body = response.read(8*1024*1024+1)
+        if response.status != 200 or response.geturl() != url or len(body) > 8*1024*1024:
+            raise ValueError('ISSUER_RESEARCH_CONTEXT_FETCH_REJECTED')
+        return body, dict(url=url, final_url=response.geturl(), http_status=200,
+            fetched_at=datetime.now(timezone.utc).isoformat(), sha256=hashlib.sha256(body).hexdigest(),
+            owner='ISSUER_IR_RESEARCH_CONTEXT_NOT_GAAP')
+
+
 def verify_current_issuer_context(body, receipt, issuer, decision_at):
     """Explicit original-issuer page, byte hash and capture clock only.
 

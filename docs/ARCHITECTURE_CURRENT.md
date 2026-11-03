@@ -308,3 +308,7 @@ PR-A估值必要输入仍归原Financial Research Owner：`build_valuation_input
 PR-B候选沿原S3 `quality_valuation` 增加外国发行人ADS正盈利条件情景投影，原 `financial_research` 仍负责财务、价格和FX资格。普通长期研究请求经原 `position_analysis` 意图入口触发证据限定的参考敏感性；缺少合格价格、EPS、FX、上市单位或独立未来假设时保留N/A和反向条件变量。该投影不改变S3 domestic适用范围、PEER编排、ACTIVE政策或交易权限；缺少LI股本/完整净现金等必要输入时，恢复估值继续N/A。
 
 S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
+
+### S3专业研究方法选择（P3候选）
+
+原MCP公司池的`request.method`向后兼容：默认`standard`复用原P1，`professional`沿同一PEER/Skill入口调用原P2.2经营模型。服务端版本化档案仅保存已评审研究假设，不成为财务或投资政策Owner；原SEC/Price/Evidence先资格化新采集，专业薄适配再核当前窗口、最新申报及研究上下文适用性，变化则逐公司UNKNOWN。META原权益门禁不因方法切换而解除。原归档保存完整父资格与参数/方法/来源，读回按冻结原Owner投影重算、无新网络/事实资格；漂移要求原版本，不静默改历史。无新MCP工具、Agent Runtime、数据库或交易权限；接口、年度原件快照复用与发布/验收边界见[P3合同](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。

@@ -120,13 +120,47 @@ def verify_operating(path,parent_verifier):
     manifest=json.loads((parent_path.parent/'sources/inputs/manifest.json').read_text())
     assert datetime.fromisoformat(p['dossier']['research_recorded_at'])>=datetime.fromisoformat(p['request']['decision_at'])
     assert p['result']['decision_at']==old['result']['decision_at']
+    if 'professional_context' in p:
+        context=p['professional_context']
+        assert p['result']['professional_qualification']==context
+        book_path=path.parent/'sources/methods/research_v2/s3_profiles/p22-v1.json'
+        assert hashlib.sha256(book_path.read_bytes()).hexdigest()==context['profile_sha256']
+        book=json.loads(book_path.read_text())
+        assert book['version']==context['profile_version']==p['entry_provenance']['assumption_profile_version']
+        assert p['entry_provenance']['research_method']=='professional'
+        assert datetime.fromisoformat(context['revalidated_at'])==datetime.fromisoformat(p['result']['decision_at'])
+        assert p['result']['assumption_profile_version']==book['version']
+        assert set(context['companies'])==set(oldcards)
+        for symbol,check in context['companies'].items():
+            card=next(c for c in p['result']['cards'] if c['symbol']==symbol)
+            if check['status']=='REVALIDATED':
+                assert datetime.fromisoformat(book['reviewed_at'])<=datetime.fromisoformat(context['revalidated_at'])
+                approved=book['companies'][symbol];profile=p['dossier']['companies'][symbol]
+                assert check['latest_filings']==approved['latest_reviewed_filings']
+                for scenario in ('cautious','base','optimistic'):
+                    for key,value in approved['profile'][scenario].items():
+                        actual=profile[scenario][key]
+                        if isinstance(value,list):assert list(map(D,actual))==list(map(D,value))
+                        else:assert D(actual)==D(value)
+                assert context['annual_eps_snapshots'][symbol]==approved['annual_eps_snapshots']
+                for name,note in approved['profile']['notes'].items():
+                    assert all(profile['notes'][name][k]==v for k,v in note.items())
+                for proof in check['evidence']:
+                    source=next(n for n in approved['sources'] if n['url']==proof['source_ref'])
+                    if source['role']=='OFFICIAL_IR_CONTEXT':
+                        assert proof['visible_context_sha256']==source['visible_context_sha256']
+                    else:assert proof['source_sha256']==source['sha256']
+            else:
+                assert symbol in context['failures'] and symbol not in p['dossier']['companies']
+                assert not card['scenarios'] and card['assumptions'] is None and card['rank'] is None
+                assert 'conditional_value_range' not in card
     checked=0;changes=[]
     original_ranks={c['symbol']:[c['group'],c['rank']] for c in p['result']['cards']}
     with localcontext() as ctx:
         ctx.prec=40
         for card in p['result']['cards']:
             symbol=card['symbol'];oc=oldcards[symbol]
-            assert card['quality']==oc['quality'] and card['cross_checks']==oc['cross_checks']
+            assert card['quality']==oc['quality'] and card.get('cross_checks')==oc.get('cross_checks')
             context=card.get('calibration_evidence')
             if context:
                 from zoneinfo import ZoneInfo
@@ -161,7 +195,7 @@ def verify_operating(path,parent_verifier):
                     assert sample['price_source_sha256']==entry['price']['sha256'] and sample['split_source_sha256']==entry['splits']['sha256']
                     close(sample['price'],D(price[day]['4. close']))
                     close(sample['pe'],D(price[day]['4. close'])/D(sample['diluted_eps']))
-            unit=p['dossier']['companies'][symbol].get('return_unit_qualification','NO_KNOWN_UNRESOLVED_DISTRIBUTION')
+            unit=p['dossier']['companies'].get(symbol,{}).get('return_unit_qualification','NO_KNOWN_UNRESOLVED_DISTRIBUTION')
             if unit!='NO_KNOWN_UNRESOLVED_DISTRIBUTION':
                 assert not card['scenarios'] and card['rank'] is None and card['comparison_status']=='NOT_COMPARABLE'
                 assert card['failure_reason']==unit

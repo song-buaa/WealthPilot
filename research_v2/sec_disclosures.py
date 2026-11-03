@@ -1036,6 +1036,30 @@ def asfiled_annual_eps(source, issuer, filing):
                 status='ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED', rule_version='sec.asfiled-annual-eps.v1')
 
 
+def revalidate_asfiled_snapshot(source, issuer, filing, snapshot):
+    """Reuse an Owner-qualified immutable annual record, never a new TTM fact.
+
+    Only server-owned reviewed snapshots may call this opt-in path. A changed
+    original/issuer/filing cannot inherit the old qualification or EPS vintage.
+    """
+    proof = verify_filing_envelope(source, issuer, filing)
+    if (not proof or snapshot.get('source_sha256') != proof['source_sha256']
+            or snapshot.get('accession') != filing['accession'] or filing['form'] != '10-K'
+            or issuer.get('issuer_type') != 'domestic'
+            or len(issuer.get('registered_equity_tickers', [])) != 1):
+        raise ValueError('ASFILED_SNAPSHOT_SOURCE_REJECTED')
+    if snapshot.get('error'):
+        raise ValueError(snapshot['error'])
+    record = snapshot['record']
+    if (record['period'] != filing['report_date'] or record['accession'] != filing['accession']
+            or record['source_ref'] != proof['source_ref']
+            or record['currency'] != 'USD' or record['unit'] != 'USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS'
+            or record['status'] != 'ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED'
+            or not Decimal(record['diluted_eps']).is_finite() or Decimal(record['diluted_eps']) <= 0):
+        raise ValueError('ASFILED_SNAPSHOT_RECORD_REJECTED')
+    return dict(record, **proof)
+
+
 def collect(symbol):
     """Current-cycle discovery: cached directory + Submissions + facts + originals.
 
