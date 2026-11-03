@@ -494,6 +494,9 @@ def fact_sections(assessment, *, include_scenarios=True, concise=False):
         for name in SCENARIOS:
             row=conditional['scenarios'][name]
             description=f"{name}: 5年条件年化回报 {percentage(row.get('annualized_return'))}"
+            params=(conditional.get('assumptions') or {}).get(name) or {}
+            if params:
+                description+='；显式研究假设 '+', '.join(f'{key}={value}' for key,value in params.items())
             if row.get('required_return_met') is not None:
                 hurdle=('观察收益率参考（非用户要求回报）' if
                         conditional.get('proposal_origin')=='system_evidence_bound_reference' else

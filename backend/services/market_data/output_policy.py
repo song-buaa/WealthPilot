@@ -217,6 +217,8 @@ def explanation_prompt(assessment):
         "每项包含topic、basis='inference'、scope='research_only'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
         "risk、exit_rationale、review_condition、technical_trend。围绕经营事实、竞争机制、反证、条件估值参数与投资判断形成因果链；"
         "竞争或分部数据不足时明确缺口，不把管理层自述当作独立验证的竞争胜出，也不虚构Temu独立利润。"
+        "投资逻辑首段必须给出当前研究更支持持有、观察还是退出复核的条件性倾向，并说明支持证据、最强反证、估值约束与下一次复核。"
+        "估值或竞争证据不足可以支持观察，不得把缺口当作买入、卖出结论；无持仓时不推定建仓，既有退出方向也须独立检验。"
         "用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
         "基本面缺失但技术证据有效时，使用technical_trend解释趋势、动量与量价背离及其局限，"
@@ -458,7 +460,8 @@ def render_explanation(paragraphs):
     priority={'investment_thesis':0,'business':1,'competition':2,'valuation':3,
               'risk':4,'technical_trend':5,'review_condition':6}
     for paragraph in sorted(paragraphs,key=lambda item:priority.get(item['topic'],7)):
-        refs = "；".join(f"{s['evidence_ref']}，{s['data_as_of']}" for s in paragraph["sources"])
+        # Full immutable references remain in professional_explanation.sources.
+        refs = "；".join(dict.fromkeys(f"{s.get('source','来源')} / {s['data_as_of']}" for s in paragraph["sources"]))
         lines.append(f"- {_TOPIC_LABELS[paragraph['topic']]}：{paragraph['text']}\n  依据：{refs}")
     return "\n".join(lines)
 

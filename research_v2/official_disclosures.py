@@ -258,15 +258,24 @@ def parse_monthly_vehicle_delivery(soup, published, issuer_name):
     if not isinstance(issuer_name,str) or issuer_name.lower() not in text[:1000].lower():
         return []
     named=re.sub(r'\s+Inc\.?$', '', issuer_name, flags=re.I)
-    matches=list(re.finditer(
-        r'\b'+re.escape(named)+r'\s+delivered\s+([\d,]+)\s+vehicles\s+in\s+'
-        r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b',
-        text,re.I))
+    month=r'(January|February|March|April|May|June|July|August|September|October|November|December)'
+    named_pattern=re.escape(named)
+    patterns=[
+        named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+        r'In\s+'+month+r'\s+(20\d{2}),\s*'+named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\b',
+        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),[^.!?]{0,180}today announced that it delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+    ]
+    matches=[]
+    for index,pattern in enumerate(patterns):
+        for match in re.finditer(pattern,text,re.I):
+            groups=match.groups()
+            amount,month_name,year=(groups[2],groups[0],groups[1]) if index==1 else groups
+            matches.append((amount,month_name,year,match.group(0)))
     if len(matches)!=1:
         return []
     match=matches[0]
-    year=int(match[3]);month=list(calendar.month_name).index(match[2].title())
-    value=_amount(match[1]);end=datetime(year,month,calendar.monthrange(year,month)[1]).date()
+    year=int(match[2]);month=list(calendar.month_name).index(match[1].title())
+    value=_amount(match[0]);end=datetime(year,month,calendar.monthrange(year,month)[1]).date()
     try:
         if value is None or value<=0 or end>datetime.fromisoformat(str(published).replace('Z','+00:00')).date():
             return []
@@ -274,8 +283,8 @@ def parse_monthly_vehicle_delivery(soup, published, issuer_name):
         return []
     return [dict(source_field='vehicleDeliveries',accounting_basis='vehicle_deliveries',
         period_basis='monthly',fiscal_period_start=f'{year:04d}-{month:02d}-01',
-        fiscal_period_end=end.isoformat(),currency=None,unit='vehicles',unit_scale=1,value=value,
-        source_locator='issuer delivery update / '+match.group(0))]
+        fiscal_period_end=end.isoformat(),currency=None,unit='vehicles',unit_scale=1,value=float(value),
+        source_locator='issuer delivery update / '+match[3])]
 
 
 def parse_vehicle_operating(soup, published):
