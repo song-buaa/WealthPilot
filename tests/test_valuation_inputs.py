@@ -38,6 +38,9 @@ def test_real_pdd_reuses_the_same_share_parser_and_qualification():
     r=build_valuation_inputs(a)
     assert r['listed_unit']['ordinary_shares_per_ads']==4
     assert r['weighted_share_observations']
+    assert not any('Liabilities and Shareholders' in x.get('source_locator','')
+                   for x in a['quality_field_records'] if x['field']=='equity')
+    assert r['balance'].get('equity') is None  # combined liabilities + equity is not parent equity
     assert all(x['values']['diluted_shares']>1e9 for x in r['weighted_share_observations'])
     assert r['market_cap'] is None
 
@@ -223,3 +226,15 @@ def test_tiny_per_share_values_keep_their_currency_and_share_unit():
     row=dict(values={'eps':0.001},unit='currency_per_ordinary_share',currency='CNY',period='2026-06-30')
     text=display(row,'eps')
     assert '0.001000' in text and 'CNY/普通股' in text
+
+
+@pytest.mark.parametrize('label', ["Total noncontrolling shareholders’ equity", "Total preferred shareholders’ equity"])
+def test_equity_subclass_label_never_becomes_parent_equity(label):
+    from tests.test_p0_quality_semantics import pdd_original,pdd_record
+    body=pdd_original()
+    original=b'Total Liabilities and Shareholders&' + b'rsquo;\n    Equity'
+    assert original in body
+    changed=body.replace(original,label.replace('’','&rsquo;').encode())
+    source=pdd_record(changed)
+    assert source
+    assert not any(o['source_field']=='quality_equity' for o in source['financial_observations'])

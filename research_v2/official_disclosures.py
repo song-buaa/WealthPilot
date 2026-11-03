@@ -731,8 +731,8 @@ def parse_valuation_statement_inputs(soup, published):
             elif income and re.fullmatch(r'weighted[- ]average (?:number of )?adss?',label):
                 group='quality_diluted_ads_shares';group_scale=1 if 'except for ads/ordinary share' in head else None
             elif income and label and label not in {'basic','diluted','-basic','-diluted'}:group=None
-            if balance and re.fullmatch(r'total .+ shareholders[’\'] equity',label):
-                labels[label]='quality_equity'  # Explicit parent equity; not total equity including NCI.
+            # Parent equity needs an exact taxonomy concept or verified issuer
+            # label, not a wildcard that also matches liabilities/NCI/preferred.
             field=labels.get(label) if balance else group if label in {'diluted','-diluted'} else None
             if not field:continue
             for col in range(1,len(row)):
