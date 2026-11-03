@@ -5,6 +5,15 @@ from research_v2 import sec_disclosures as sec
 from backend.services.market_data.evidence import assess
 
 
+def test_equivalent_monthly_sentences_do_not_become_a_conflict():
+    from bs4 import BeautifulSoup
+    from research_v2.official_disclosures import parse_monthly_vehicle_delivery
+    text='NIO Inc. ("NIO") (NYSE: NIO), today announced that it delivered 20,000 vehicles in May 2025. NIO delivered 20,000 vehicles in May 2025.'
+    rows=parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2025-06-02','NIO Inc.')
+    assert len(rows)==1 and rows[0]['value']==20000
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text.replace('NIO delivered 20,000','NIO delivered 20,001'),'html.parser'),'2025-06-02','NIO Inc.')
+
+
 def test_real_monthly_originals_keep_issuer_month_and_source_closure():
     root=Path(__file__).parent/'fixtures/monthly_deliveries'
     for meta in json.loads((root/'manifest.json').read_text()):

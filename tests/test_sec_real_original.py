@@ -37,7 +37,8 @@ def test_monthly_delivery_parser_requires_single_dated_month_and_does_not_sum_qu
     rows=parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-11-02T06:10:00-05:00','Li Auto Inc.')
     assert len(rows)==1 and rows[0]['value']==29025
     assert rows[0]['period_basis']=='monthly' and rows[0]['fiscal_period_end']=='2026-10-31'
-    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text+' '+text,'html.parser'),'2026-11-02','Li Auto Inc.')
+    assert len(parse_monthly_vehicle_delivery(BeautifulSoup(text+' '+text,'html.parser'),'2026-11-02','Li Auto Inc.'))==1
+    assert not parse_monthly_vehicle_delivery(BeautifulSoup(text+' '+text.replace('29,025','29,026'),'html.parser'),'2026-11-02','Li Auto Inc.')
     assert not parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-10-15','Li Auto Inc.')
     assert not parse_monthly_vehicle_delivery(BeautifulSoup(text,'html.parser'),'2026-11-02','Other Issuer Inc.')
     competitor='Li Auto Inc. October 2026 Delivery Update. XPeng delivered 30,000 vehicles in October 2026.'

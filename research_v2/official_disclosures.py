@@ -263,7 +263,7 @@ def parse_monthly_vehicle_delivery(soup, published, issuer_name):
     patterns=[
         named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
         r'In\s+'+month+r'\s+(20\d{2}),\s*'+named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\b',
-        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),[^.!?]{0,180}today announced that it delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),\s*(?:a [^,;.!?]{1,160},\s*)?today announced that it delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
     ]
     matches=[]
     for index,pattern in enumerate(patterns):
@@ -271,6 +271,7 @@ def parse_monthly_vehicle_delivery(soup, published, issuer_name):
             groups=match.groups()
             amount,month_name,year=(groups[2],groups[0],groups[1]) if index==1 else groups
             matches.append((amount,month_name,year,match.group(0)))
+    matches=list({(item[0].replace(',', ''),item[1].lower(),item[2]):item for item in matches}.values())
     if len(matches)!=1:
         return []
     match=matches[0]
