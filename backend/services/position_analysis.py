@@ -456,10 +456,12 @@ def fact_sections(assessment, *, include_scenarios=True, concise=False):
         grouped.setdefault(key,[]).append(r)
     for equal in grouped.values():
         r=equal[0]
-        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        scope=("历史可比基线（非当前经营事实）" if r.get('historical_only') else
+               "年度经营基线（非最新季度）" if r.get('scope')=='annual' else
+               "月度" if r.get('scope')=='monthly' else "季度")
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
         decisive_fields={'revenue_quarter','net_income_quarter','operating_income_quarter',
-                         'operating_cash_flow_quarter','vehicle_deliveries_quarter',
+                         'operating_cash_flow_quarter','vehicle_deliveries_quarter','vehicle_deliveries_month',
                          'vehicle_sales_quarter','vehicle_margin_pct',
                          'core_local_commerce_revenue_quarter','core_local_commerce_operating_income_quarter',
                          'new_initiatives_revenue_quarter','new_initiatives_operating_income_quarter'}

@@ -54,6 +54,19 @@ def test_management_commentary_requires_the_actual_forecast_phrase():
     assert '商家支持' not in statement and '强调合规' not in statement
 
 
+def test_qualified_monthly_deliveries_keep_monthly_report_scope():
+    from backend.services.position_analysis import fact_sections
+    assessment=assess({},symbol='LI:US',at=AT)
+    assessment['verified_field_records'].append(dict(
+        field='vehicle_deliveries_month',record_id='official:monthly:vehicle_deliveries_month:2026-09-30',
+        source='official_disclosure',source_url='https://www.sec.gov/Archives/edgar/data/1791706/example',
+        period='2026-09-30',data_as_of='2026-09-30',scope='monthly',currency=None,
+        historical_only=False,values={'vehicle_deliveries_month':31817}))
+    text='\n'.join(fact_sections(assessment,concise=True))
+    assert '月度字段事实 vehicle_deliveries_month' in text
+    assert '季度字段事实 vehicle_deliveries_month' not in text
+
+
 def metadata(body=None,symbol='LI:US',issuer_id='LI_AUTO'):
     body=body or original();text=body.decode()
     h=re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>',text,re.S)[1]
