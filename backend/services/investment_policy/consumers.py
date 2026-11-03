@@ -127,13 +127,18 @@ def finalize_output(plan, executed, expressed):
     explanations, diagnostics = _explanations_with_trace(explanation_input,combined)
     expressed.explanation_diagnostics = diagnostics
     fact_text=[]
+    conditional_results=[]
     for assessment in assessments:
         retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations))
         if retained:
             fact_text.append(retained[2])
+            if retained[0].get('conditional_valuation'):
+                conditional_results.append(retained[0]['conditional_valuation'])
     expressed.structured_payload = {'mode':'policy_qualified_research','policy_context':value,
         'policy_reference':value.get('policy_reference'), 'execution_authorized':False,
         'professional_explanation':explanations,'explanationDiagnostics':diagnostics,
+        'conditionalValuation':conditional_results[0] if len(conditional_results)==1 else None,
+        'conditionalValuations':[{'symbol':r.get('symbol'),'result':r} for r in conditional_results],
         'research_delivery_status':'DELIVERED' if explanations else 'INCOMPLETE',
         'policy_precision':'CANNOT_QUANTIFY'}
     expressed.chat_answer = ('\n\n'.join(fact_text) if fact_text else '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')

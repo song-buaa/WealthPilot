@@ -110,6 +110,25 @@ def captured_facts(assessment, *, at, asset_view=None):
     from backend.services.market_data.financial_research import build_valuation_inputs
     original['valuation_inputs']=build_valuation_inputs(original)
     original['financial_research']=build(original)  # never retain a stale pre-Expression calculation cache
+    previous=assessment.get('conditional_valuation') or {}
+    assumptions=previous.get('assumptions')
+    if assumptions:
+        from backend.services.market_data.quality_valuation import foreign_ads_conditional_research
+        current=foreign_ads_conditional_research(original,assumptions)
+        def source_receipts(value):
+            receipts=dict(value.get('input_receipts') or {})
+            receipts.pop('decision_at',None)  # recheck time may move forward
+            return receipts
+        # The fresh assessment may only remove authority, never promote a new
+        # source or a changed input receipt on the final ACTIVE/MCP projection.
+        if (current.get('status')=='CONDITIONAL_RESEARCH_ONLY' and
+                current.get('qualified_inputs')==previous.get('qualified_inputs') and
+                str(current.get('input_receipts',{}).get('decision_at',''))[:4] ==
+                str(previous.get('input_receipts',{}).get('decision_at',''))[:4] and
+                source_receipts(current)==source_receipts(previous)):
+            original['conditional_valuation']=current
+        else:
+            original.pop('conditional_valuation',None)
     facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
     return original, facts
 
@@ -445,8 +464,9 @@ def prompt_context(assessment):
         dict(records=records,qualification=assessment["qualification"],issues=assessment["issues"],
              planner=assessment["planner"],confidence_ceiling=assessment["confidence_ceiling"],
              allocation_context=assessment.get("allocation_context"),scenarios=assessment.get("scenarios"),
+             conditional_valuation=assessment.get('conditional_valuation'),
              exit_candidates=assessment.get("exit_candidates"),
-             authority="Use frozen cross-account issuer exposure for company concentration. Request target versions are unverified proposals; only confirmed_stage_targets from the server store are confirmed user targets. Formal discipline and defaults are separate; a legacy single-security rule pass does not establish that company targets are met. Static scenarios and account exit candidates are assumptions, never orders. Use their owner-calculated values for comparison; never invent prices or quantities."),
+             authority="Use frozen cross-account issuer exposure for company concentration. Request target versions are unverified proposals; only confirmed_stage_targets from the server store are confirmed user targets. Formal discipline and defaults are separate; a legacy single-security rule pass does not establish that company targets are met. Static scenarios and account exit candidates are assumptions, never orders. Conditional valuation is explicitly hypothesized research, not verified historical evidence, fair value or an execution price. Explain which scenarios do or do not meet the stated research return, the operating conditions and counterevidence; connect them to qualified business facts without asserting future outcomes. Only owner-qualified evidence_refs and numeric bindings may support factual model claims. Never invent prices or quantities."),
         ensure_ascii=False,default=str)+explanation_prompt(assessment)
 
 
@@ -477,6 +497,7 @@ def enforce(output, assessment):
     output.chat_answer += render_explanation(explanations)
     output.raw_text=""
     payload["exitPlan"]=plan
+    payload['conditionalValuation']=assessment.get('conditional_valuation')
     payload["professional_explanation"] = explanations
     payload["explanationDiagnostics"] = diagnostics
     payload.update(confidence=min(prior,assessment["confidence_ceiling"]),

@@ -51,6 +51,222 @@ class Assumptions(Contract):
         return self
 
 
+class RecoveryCase(Contract):
+    """Explicit five-year operating hypotheses, never observed company facts."""
+    annual_revenue_growth: Decimal = Field(ge=-.5, le=1)
+    year_five_ebit_margin: Decimal = Field(ge=-1, le=1)
+    annual_cash_after_capital_cny: Decimal
+    terminal_ev_ebit_multiple: Decimal = Field(gt=0, le=100)
+    year_five_ordinary_shares: Decimal = Field(gt=0)
+    initial_net_cash_cny: Decimal
+    fx_cny_per_usd: Decimal = Field(gt=0)
+
+
+class RecoveryAssumptions(Contract):
+    basis: str = Field(pattern=r"^S3_RESEARCH_ASSUMPTION_NOT_POLICY$")
+    rationale: str = Field(min_length=20, max_length=3000)
+    multiple_basis: str = Field(min_length=20, max_length=2000)
+    required_return: Decimal = Field(gt=0, le=.5)
+    cautious: RecoveryCase
+    base: RecoveryCase
+    optimistic: RecoveryCase
+
+
+def operating_recovery_scenario(revenue_cny, price_usd_per_ads, ordinary_shares_per_ads,
+                                parameters, required_return, *, baseline_year=None,
+                                decision_year=None):
+    """Reuse the S3 Decimal calculation owner for conditional EV/EBIT research.
+
+    Annual cash after capital is an explicit *assumption*, including funding and
+    reinvestment. It is not extrapolated from a single quarter's reported FCF.
+    Negative terminal EBIT stays N/A rather than becoming a positive PE value.
+    """
+    p = RecoveryCase.model_validate(parameters)
+    with localcontext() as ctx:
+        ctx.prec = 34
+        revenue, price, ratio, required = map(dec, (revenue_cny, price_usd_per_ads,
+                                                   ordinary_shares_per_ads, required_return))
+        if min(revenue, price, ratio, required) <= 0:
+            raise ValueError('POSITIVE_REVENUE_LISTED_PRICE_ADS_RATIO_RETURN_REQUIRED')
+        gap=(decision_year-baseline_year) if baseline_year is not None and decision_year is not None else 0
+        if not 0 <= gap <= 2:
+            raise ValueError('HISTORICAL_REVENUE_BASE_TOO_OLD_OR_FUTURE')
+        years = []
+        cash = p.initial_net_cash_cny
+        for year in range(1, 6):
+            projected_revenue = revenue * (1 + p.annual_revenue_growth) ** (gap+year)
+            # The supplied year-five margin is a terminal hypothesis. Interim
+            # margins are deliberately not invented by linear interpolation.
+            cash += p.annual_cash_after_capital_cny
+            years.append(dict(year=year, fiscal_year=decision_year+year if decision_year else None,
+                              revenue_cny=text(projected_revenue),
+                              cash_after_capital_cny=text(p.annual_cash_after_capital_cny),
+                              cumulative_net_cash_cny=text(cash)))
+        terminal_revenue = revenue * (1 + p.annual_revenue_growth) ** (gap+5)
+        terminal_ebit = terminal_revenue * p.year_five_ebit_margin
+        required_equity = price * p.fx_cny_per_usd / ratio * p.year_five_ordinary_shares * (1 + required) ** 5
+        implied_margin = (required_equity - cash) / p.terminal_ev_ebit_multiple / terminal_revenue
+        result = dict(years=years, terminal_revenue_cny=text(terminal_revenue),
+                      terminal_ebit_cny=text(terminal_ebit), terminal_net_cash_cny=text(cash),
+                      unobserved_revenue_bridge_years=gap,
+                      implied_year_five_ebit_margin=text(implied_margin),
+                      implied_year_five_ebit_cny=text(implied_margin * terminal_revenue),
+                      terminal_price_usd_per_ads=None, annualized_return=None,
+                      status='NO_POSITIVE_TERMINAL_EBIT')
+        if terminal_ebit <= 0:
+            return result
+        equity = terminal_ebit * p.terminal_ev_ebit_multiple + cash
+        if equity <= 0:
+            result['status'] = 'NO_POSITIVE_TERMINAL_EQUITY'
+            return result
+        terminal_price = equity / p.year_five_ordinary_shares * ratio / p.fx_cny_per_usd
+        result.update(status='CONDITIONAL_RESEARCH_ONLY',
+                      terminal_price_usd_per_ads=text(terminal_price),
+                      annualized_return=text((terminal_price / price) ** (D(1) / 5) - 1))
+        result['required_return_met'] = dec(result['annualized_return']) >= required
+        return result
+
+
+def _price_source_receipt(assessment, price):
+    """Bind a derived close to the original quote or daily series bytes."""
+    from backend.services.quality_valuation_research import digest
+    refs=set(price.get('evidence_refs') or [])
+    rows=[{key:row.get(key) for key in ('record_id','symbol','source','source_url',
+                                        'data_as_of','published_at','fetched_at','values')}
+          for row in assessment.get('records',[]) if row.get('kind') in {'quote','technical'}
+          and (row.get('record_id') in refs or
+               (row.get('values',{}).get('series',{}).get('day',{}).get('record_id') in refs
+                if row.get('kind')=='technical' else False))]
+    return dict(source_record_ids=sorted(row['record_id'] for row in rows),
+                source_sha256=digest(sorted(rows,key=lambda row:row['record_id']))) if rows else None
+
+
+def foreign_ads_operating_recovery_research(assessment, assumptions):
+    """Qualified historical revenue/price/ADS inputs plus separately named hypotheses.
+
+    Missing point-in-time economic shares and complete net cash prevent a
+    present fair-value claim; they never prevent a clearly conditional reverse
+    question with explicit future share and cash hypotheses.
+    """
+    from backend.services.market_data.financial_research import build_valuation_inputs
+    from backend.services.quality_valuation_research import digest
+    def source_bound(row):
+        """Never turn a relabeled quarter receipt into an annual model base."""
+        links=row.get('publication_links') or []
+        if not links or not row.get('fiscal_period_start') or not row.get('record_id'):
+            return False
+        try:
+            amount=dec(row['values']['revenue_annual'])
+            return all(
+                link.get('source_field') in {'totalRevenue','revenue'}
+                and link.get('period_basis') == 'annual'
+                and link.get('fiscal_period_start') == row['fiscal_period_start']
+                and link.get('fiscal_period_end') == row['period']
+                and link.get('currency') == row['currency']
+                and link.get('unit') == row['unit']
+                and link.get('accounting_basis') == row['accounting_basis']
+                and dec(link['value']) * dec(link['unit_scale']) == amount
+                and link.get('source_document_sha256')
+                and link.get('record_id') and row['record_id'].startswith(link['record_id'] + ':')
+                and link.get('source_url') == row.get('source_url')
+                and link.get('source_locator') and link.get('publication_locator')
+                and link.get('published_at') == row.get('published_at')
+                and link.get('fetched_at') == row.get('fetched_at')
+                for link in links)
+        except (KeyError, ValueError, TypeError):
+            return False
+    params = RecoveryAssumptions.model_validate(assumptions)
+    v = build_valuation_inputs(assessment)
+    rows = [r for r in assessment.get('verified_field_records', [])
+            if r.get('quality') == 'valid' and r.get('field') == 'revenue_annual'
+            and r.get('currency') == 'CNY' and r.get('symbol') == assessment.get('symbol')
+            and r.get('unit') == 'currency_units' and r.get('accounting_basis') == 'total_revenue'
+            and r.get('source') == 'official_disclosure']
+    period = max((r['period'] for r in rows), default=None)
+    latest = [r for r in rows if r['period'] == period]
+    values = {dec(r['values']['revenue_annual']) for r in latest if source_bound(r)}
+    derived = {r['field']: r for r in build(assessment)['records']}
+    price = derived.get('observed_price')
+    price_receipt=_price_source_receipt(assessment,price) if price else None
+    ratio = v.get('listed_unit', {}).get('ordinary_shares_per_ads')
+    missing = []
+    if len(values) != 1 or any(not source_bound(r) for r in latest):
+        missing.append('QUALIFIED_ANNUAL_REVENUE_MISSING_OR_CONFLICTING')
+    if not price or price.get('currency') != 'USD': missing.append('QUALIFIED_USD_ADS_PRICE_REQUIRED')
+    if price and not price_receipt: missing.append('QUALIFIED_PRICE_SOURCE_RECEIPT_REQUIRED')
+    if ratio is None: missing.append('OFFICIAL_ADS_RATIO_REQUIRED')
+    baseline_year=stamp(period).year if stamp(period) else None
+    decision_year=stamp(assessment.get('as_of')).year if stamp(assessment.get('as_of')) else None
+    if baseline_year is None or decision_year is None or not 0 <= decision_year-baseline_year <= 2:
+        missing.append('ANNUAL_REVENUE_DECISION_HORIZON_MISMATCH')
+    result = dict(status='INSUFFICIENT_EVIDENCE', method_version='s3-foreign-ads-operating-recovery.v1',
+                  symbol=assessment.get('symbol'), scenarios={}, missing=missing,
+                  fair_value=None, execution_authorized=False)
+    if missing: return result
+    revenue = next(iter(values))
+    for name in SCENARIOS:
+        result['scenarios'][name] = operating_recovery_scenario(
+            revenue, price['values']['observed_price'], ratio, getattr(params, name), params.required_return,
+            baseline_year=baseline_year, decision_year=decision_year)
+    result['sensitivity'] = []
+    for field, deltas in (
+            ('annual_revenue_growth', (D('-.02'), D('.02'))),
+            ('year_five_ebit_margin', (D('-.02'), D('.02'))),
+            ('terminal_ev_ebit_multiple', (D('-.2'), D('.2'))),
+            ('annual_cash_after_capital_cny', (D('-2000000000'), D('2000000000'))),
+            ('initial_net_cash_cny', (D('-10000000000'), D('10000000000'))),
+            ('year_five_ordinary_shares', (D('-.1'), D('.1'))),
+            ('fx_cny_per_usd', (D('-.05'), D('.05'))),
+            ('required_return', (D('-.02'), D('.02')))):
+        for delta in deltas:
+            case = params.base.model_dump()
+            required = params.required_return
+            if field == 'required_return': required += delta
+            elif field in {'terminal_ev_ebit_multiple','year_five_ordinary_shares','fx_cny_per_usd'}:
+                case[field] *= 1 + delta
+            else: case[field] += delta
+            try:
+                calculation = operating_recovery_scenario(
+                    revenue, price['values']['observed_price'], ratio, case, required,
+                    baseline_year=baseline_year, decision_year=decision_year)
+            except ValueError:
+                calculation = None
+            result['sensitivity'].append(dict(parameter=field, delta=str(delta),
+                                              required_return=str(required), result=calculation))
+    result.update(status='CONDITIONAL_RESEARCH_ONLY', assumptions=params.model_dump(mode='json'),
+                  qualified_inputs=dict(revenue_cny=text(revenue), revenue_period=period,
+                                        price_usd_per_ads=price['values']['observed_price'],
+                                        price_period=price['period'], ordinary_shares_per_ads=ratio,
+                                        evidence_refs=sorted({price['record_id'], *price['evidence_refs'],
+                                                              *v['listed_unit']['evidence_refs'],
+                                                              *(r['record_id'] for r in latest)})),
+                  input_receipts=dict(decision_at=assessment.get('as_of'),
+                                      revenue=[{k:r.get(k) for k in ('record_id','source_url','period','fiscal_period_start',
+                                              'published_at','fetched_at','publication_links')} for r in latest],
+                                      price={k:price.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs')} | {'source_receipt':price_receipt},
+                                      ads_ratio=v.get('listed_unit')),
+                  limitations=['CURRENT_ECONOMIC_SHARES_UNVERIFIED', 'COMPLETE_NET_CASH_UNVERIFIED',
+                               'REVENUE_BETWEEN_ANNUAL_BASE_AND_DECISION_YEAR_IS_UNOBSERVED_HYPOTHESIS',
+                               'FUTURE_SHARES_CASH_FX_GROWTH_MARGIN_AND_MULTIPLE_ARE_RESEARCH_HYPOTHESES',
+                               'LOSS_MAKING_PERIOD_PE_NOT_APPLICABLE',
+                               'TERMINAL_PRICE_IS_CONDITIONAL_NOT_FAIR_VALUE_OR_TARGET_PRICE'])
+    result['input_sha256'] = digest(dict(method_version=result['method_version'],
+                                         qualified_inputs=result['qualified_inputs'],
+                                         input_receipts=result['input_receipts'],
+                                         assumptions=result['assumptions']))
+    return result
+
+
+def foreign_ads_conditional_research(assessment, assumptions):
+    """One S3 owner entry for earnings and operating-recovery hypotheses."""
+    case = (assumptions or {}).get('base') or {}
+    if 'terminal_pe' in case:
+        return foreign_ads_earnings_research(assessment, assumptions)
+    if 'terminal_ev_ebit_multiple' in case:
+        return foreign_ads_operating_recovery_research(assessment, assumptions)
+    raise ValueError('SUPPORTED_CONDITIONAL_VALUATION_METHOD_REQUIRED')
+
+
 class ResearchRequest(Contract):
     pool_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     pool_version: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
@@ -134,9 +350,11 @@ def foreign_ads_earnings_research(assessment, assumptions):
     v = build_valuation_inputs(assessment)
     derived = {r['field']: r for r in build(assessment)['records']}
     eps, price, fx = (derived.get(k) for k in ('diluted_eps_ttm', 'observed_price', 'fx_rate'))
+    price_receipt=_price_source_receipt(assessment,price) if price else None
     ratio = v.get('listed_unit', {}).get('ordinary_shares_per_ads')
     missing = [k for k, value in (('QUALIFIED_TTM_ADS_EPS', eps), ('QUALIFIED_LISTED_PRICE', price),
                                   ('QUALIFIED_FX', fx), ('OFFICIAL_ADS_RATIO', ratio)) if value is None]
+    if price and not price_receipt: missing.append('QUALIFIED_PRICE_SOURCE_RECEIPT_REQUIRED')
     result = dict(status='INSUFFICIENT_EVIDENCE', method_version='s3-foreign-ads-earnings.v1',
                   symbol=assessment.get('symbol'), scenarios={}, sensitivity=[], missing=missing,
                   execution_authorized=False, conditional_value=None)
@@ -162,6 +380,7 @@ def foreign_ads_earnings_research(assessment, assumptions):
         # applicability and capital-structure review for foreign ADS research.
         case.pop('conditional_value')
         case.pop('margin_to_conditional_value')
+        case['required_return_met'] = dec(case['annualized_return']) >= dec(required_return)
         return case
     for name in SCENARIOS:
         result['scenarios'][name] = bounded_case(getattr(params, name), params.required_return)
@@ -190,7 +409,7 @@ def foreign_ads_earnings_research(assessment, assumptions):
                                              *eps['evidence_refs'],*price['evidence_refs']})),
                   input_receipts=dict(decision_at=assessment.get('as_of'),
                       eps={k: eps.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs','details')},
-                      price={k: price.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs','details')},
+                      price={k: price.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs','details')} | {'source_receipt':price_receipt},
                       fx={k: fx.get(k) for k in ('record_id','period','fetched_at','details')},
                       ads_ratio=v.get('listed_unit')),
                   limitations=['FUTURE_EARNINGS_GROWTH_SHARE_CHANGE_MULTIPLE_AND_PAYOUT_ARE_RESEARCH_ASSUMPTIONS',
