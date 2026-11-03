@@ -38,6 +38,9 @@ def test_real_pdd_adss_eps_price_fx_enter_original_s3_five_year_arithmetic():
     assert q['eps_cny_per_ads']==63.14 and q['price_usd_per_ads']==81.68
     assert q['ordinary_shares_per_ads']==4 and q['fx_cny_per_usd']==6.6483
     assert len(q['evidence_refs'])>=6 and r['conditional_value'] is None
+    assert r['input_receipts']['decision_at']==AT.isoformat()
+    assert r['input_receipts']['ads_ratio']['evidence_refs']
+    assert r['input_receipts']['fx']['details']['rate_date']=='2026-11-02'
     eps=Decimal('63.14')/Decimal('6.6483')
     terminal=eps*Decimal('1.05')**5/Decimal('.99')**5*Decimal(10)
     assert abs(Decimal(r['scenarios']['base']['terminal_price'])-terminal)<Decimal('.00000001')

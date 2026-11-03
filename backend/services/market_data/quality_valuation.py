@@ -181,8 +181,14 @@ def foreign_ads_earnings_research(assessment, assumptions):
                       fx_cny_per_usd=fx['values']['fx_rate'],ordinary_shares_per_ads=ratio,
                       evidence_refs=sorted({eps['record_id'],price['record_id'],fx['record_id'],
                                              *eps['evidence_refs'],*price['evidence_refs']})),
+                  input_receipts=dict(decision_at=assessment.get('as_of'),
+                      eps={k: eps.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs','details')},
+                      price={k: price.get(k) for k in ('record_id','period','published_at','fetched_at','evidence_refs','details')},
+                      fx={k: fx.get(k) for k in ('record_id','period','fetched_at','details')},
+                      ads_ratio=v.get('listed_unit')),
                   limitations=['FUTURE_EARNINGS_GROWTH_SHARE_CHANGE_MULTIPLE_AND_PAYOUT_ARE_RESEARCH_ASSUMPTIONS',
                                'NO_VERIFIED_BUYBACK_OR_DILUTION_FORECAST',
+                               'POST_FILING_CORPORATE_ACTION_AND_FX_RAW_SOURCE_CLOSURE_NOT_IN_THIS_PROJECTION',
                                'CONDITIONAL_PE_VALUE_NOT_INTRINSIC_VALUE_OR_TARGET_PRICE'])
     return result
 
