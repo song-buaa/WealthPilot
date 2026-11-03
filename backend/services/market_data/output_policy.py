@@ -19,10 +19,10 @@ def _evidence_index(assessment):
     index = {}
     from backend.services.market_data.financial_research import build
     derived=build(assessment)['records'] if assessment.get('symbol') else []
-    for record in [*assessment.get("records", []), *assessment.get("verified_field_records", []),
+    for record in [*assessment.get("records", []), *assessment.get("verified_field_records", []), *assessment.get("quality_field_records", []),
                    *assessment.get('historical_field_records',[]), *assessment.get("verified_period_records", []),*derived]:
         if (record.get("quality") != "valid" or record.get("is_seed") or record.get("is_mock")
-                or record.get("kind") not in {"fundamentals", "fundamental_field", "research", "event", "technical", "research_metric"}
+                or record.get("kind") not in {"fundamentals", "fundamental_field", "research", "event", "technical", "research_metric", "quality_financial_field"}
                 or (assessment.get("symbol") and record.get("symbol") != assessment["symbol"])):
             continue
         for ref in (record.get("record_id"), record.get("source_url")):
@@ -53,9 +53,9 @@ def captured_facts(assessment, *, at, asset_view=None):
     from backend.services.market_data.evidence import assess
     original=deepcopy(assessment)
     index=_evidence_index(original)
-    allowed={(r['kind'],r.get('record_id') or r.get('source_url')) for key in ('records','verified_field_records','historical_field_records','verified_period_records')
+    allowed={(r['kind'],r.get('record_id') or r.get('source_url')) for key in ('records','verified_field_records','historical_field_records','verified_period_records','quality_field_records')
              for r in original.get(key,[]) if r.get('quality')=='valid' and (r.get('kind') in {'quote','capital_flow'} or r.get('record_id') in index or r.get('source_url') in index)}
-    trusted_ids={link.get('record_id') for row in original.get('verified_field_records',[])+original.get('historical_field_records',[])
+    trusted_ids={link.get('record_id') for row in original.get('verified_field_records',[])+original.get('historical_field_records',[])+original.get('quality_field_records',[])
                  if row.get('source')=='official_disclosure' and row.get('quality')=='valid'
                  for link in row.get('publication_links',[])}
     market, research, events, proofs = {}, [], [], {}
@@ -90,7 +90,7 @@ def captured_facts(assessment, *, at, asset_view=None):
         if row['kind']=='technical' and row['quality']=='valid' and any(
                 (p,v.get('record_id')) not in allowed_periods for p,v in row['values'].get('series',{}).items()):
             row['quality']='unknown'
-    for key in ('verified_field_records','historical_field_records','verified_period_records'):
+    for key in ('verified_field_records','historical_field_records','verified_period_records','quality_field_records'):
         original[key]=[row for row in fresh.get(key,[]) if (row['kind'],row.get('record_id') or row.get('source_url')) in allowed
                        and row.get('quality')=='valid']
     # Existing formulas re-evaluate current clocks/context; the original result
@@ -107,18 +107,21 @@ def captured_facts(assessment, *, at, asset_view=None):
     original['technical_levels']={p:v for p,v in (fresh.get('technical_levels') or {}).items()
                                   if (p,v.get('record_id')) in allowed_periods}
     from backend.services.market_data.financial_research import build
+    from backend.services.market_data.financial_research import build_valuation_inputs
+    original['valuation_inputs']=build_valuation_inputs(original)
     original['financial_research']=build(original)  # never retain a stale pre-Expression calculation cache
     facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
     return original, facts
 
 
-def facts_only_result(assessment, *, at, asset_view=None):
+def facts_only_result(assessment, *, at, asset_view=None, professional_delivered=False):
     """Deterministic facts only; never project incomplete/unreviewed model prose."""
     from backend.services.position_analysis import fact_sections
     current, facts=captured_facts(assessment,at=at,asset_view=asset_view)
     if not facts:
         return None
-    text='专业推断未完成；以下仅保留已核验来源事实，不包含投资决策或交易建议。\n'
+    text=('已核验研究事实；专业解释与限制见下文，不构成交易授权。\n' if professional_delivered else
+          '专业推断未完成；以下仅保留已核验来源事实，不包含投资决策或交易建议。\n')
     current['financial_research']['valuation_sensitivity']=[]
     text+='\n\n'.join(fact_sections(current,include_scenarios=False))
     text+='\n\n来源与时钟：\n'+'\n'.join(
@@ -286,7 +289,7 @@ def _bound_text(item,index,diagnostic=None):
         ident=binding.get('id');ref=binding.get('evidence_ref');field=binding.get('field')
         if (not isinstance(ident,str) or not isinstance(ref,str) or not isinstance(field,str) or not re.fullmatch(r'n[1-9][0-9]{0,2}',ident) or ident in ids
                 or ref not in item.get('evidence_refs',[]) or ref not in index
-                or index[ref].get('kind') not in {'fundamental_field','research_metric'}):return reject('binding_identity_or_reference')
+                or index[ref].get('kind') not in {'fundamental_field','research_metric','quality_financial_field'}):return reject('binding_identity_or_reference')
         value=display(index[ref],field)
         token='{{'+ident+'}}'
         if not value:return reject('binding_field_unavailable')
@@ -344,7 +347,7 @@ def explanation_projection(candidate, assessment):
                 reason = "unverified_timeframe"
             elif item["topic"] in {"business", "competition", "investment_thesis"} and all(_technical_periods(index[ref]) or index[ref].get('field') in {'observed_price','fx_rate'} for ref in refs):
                 reason = "topic_evidence_mismatch"
-            elif item['topic']=='competition' and all(index[ref]['kind'] in {'fundamental_field','fundamentals','research_metric'} for ref in refs) and not re.search(r'若|如果|可能|假设|无法|尚无|不能|缺少|未知',text):
+            elif item['topic']=='competition' and all(index[ref]['kind'] in {'fundamental_field','fundamentals','research_metric','quality_financial_field'} for ref in refs) and not re.search(r'若|如果|可能|假设|无法|尚无|不能|缺少|未知',text):
                 reason = 'competition_mechanism_not_conditional'
         if reason:
             rejected[reason] += 1

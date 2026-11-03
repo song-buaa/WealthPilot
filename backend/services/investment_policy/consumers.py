@@ -128,7 +128,7 @@ def finalize_output(plan, executed, expressed):
     expressed.explanation_diagnostics = diagnostics
     fact_text=[]
     for assessment in assessments:
-        retained=facts_only_result(assessment,at=clock(utc_now()))
+        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations))
         if retained:
             fact_text.append(retained[2])
     expressed.structured_payload = {'mode':'policy_qualified_research','policy_context':value,

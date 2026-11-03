@@ -41,6 +41,11 @@ LABELS={
     'earnings_yield_pct':'基础TTM盈利收益率','observed_price':'历史收盘观察价格',
     'fx_rate':'财报币/上市币汇率',
 }
+LABELS.update(dict(cash='现金及现金等价物',restricted_cash='受限现金',deposits_investments='定期存款及短期投资',
+    current_debt='已披露流动债务/短期借款',noncurrent_debt='已披露非流动债务/长期借款',
+    shares='已披露普通股数量（类别范围须另核）',diluted_shares='期间加权稀释普通股数',
+    diluted_ads_shares='期间加权稀释ADS数',ads_ratio='普通股/ADS换算',assets='总资产',
+    liabilities='总负债',total_equity='含非控股权益的总权益',noncontrolling='非控股权益'))
 for _stem,_label in {'cost_of_revenue':'营业成本率','sales_marketing':'销售营销费用率',
                       'general_admin':'管理费用率','research_development':'研发费用率'}.items():
     LABELS[_stem+'_burden_pct']=_label
@@ -407,16 +412,29 @@ def build(assessment):
 def display(row,field):
     value=number(row.get('values',{}).get(field))
     if value is None:return None
-    unit=row.get('unit');suffix='%' if unit=='percent' else '个百分点' if unit=='percentage_points' else '倍' if unit in {'ratio','multiple'} else ''
-    label=LABELS.get(field,field)
+    unit=row.get('unit');currency=row.get('currency');label=LABELS.get(field,field)
+    units={'vehicles':'辆','shares':'份ADS' if field=='diluted_ads_shares' else '股',
+           'percent':'%','percentage_points':'个百分点','ratio':'倍','multiple':'倍',
+           'ordinary_shares_per_ads':'股普通股/ADS'}
+    suffix=units.get(unit,'');shown=f"{value:,.2f}"
+    if unit=='currency_units' and currency:
+        if currency=='CNY' and abs(value)>=100000000:shown=f"{value/100000000:,.2f}";suffix='亿元'
+        elif currency=='CNY' and abs(value)>=10000:shown=f"{value/10000:,.2f}";suffix='万元'
+        elif abs(value)>=1000000:shown=f"{value/1000000:,.2f}";suffix='百万'+currency
+        else:suffix=currency
+    elif unit in {'vehicles','shares'}:shown=f"{value:,.0f}"
+    elif 0<abs(value)<0.01:shown=f"{value:,.6f}"
+    if unit in {'currency_per_listed_unit','currency_per_ordinary_share'}:suffix=(currency or '币种未知')+('/ADS或上市单位' if unit=='currency_per_listed_unit' else '/普通股')
     caveat='；静态估算，股本/拆股变更未核验，非当前精确估值' if field in {'pe_ttm','earnings_yield_pct'} and row.get('source')=='owner_calculation' else ''
-    return f"{label}（{row.get('period') or row.get('data_as_of')}，{row.get('currency') or '无币种比率'}）{value:,.4f}{suffix}{caveat}"
+    if row.get('historical_only'):caveat+='；历史基线，非当前事实'
+    return f"{label}（{row.get('period') or row.get('data_as_of')}{'，'+currency if currency else ''}）{shown}{suffix}{caveat}"
+
 
 
 QUALITY_INPUT_VERSION = 'financial-quality-inputs.v1'
 
 
-def build_quality(assessment):
+def build_quality(assessment, *, currency="USD"):
     """Opt-in GAAP quality projection from Registry-qualified facts.
 
     No new parser, TTM or source-trust owner. Instant balances and YTD durations
@@ -430,12 +448,13 @@ def build_quality(assessment):
     entries, rejected, conflicts = {}, [], []
     for row in assessment.get('quality_field_records', []):
         field = row.get('field')
+        if field in {'ads_ratio','diluted_ads_shares'}:continue  # Listed-unit bridge is not a GAAP balance/cash input.
         start, end = stamp(row.get('fiscal_period_start')), stamp(row.get('period'))
         links = row.get('publication_links', [])
         valid = (at and field in bases and row.get('quality')=='valid'
             and row.get('symbol')==assessment.get('symbol') and not row.get('is_seed') and not row.get('is_mock')
             and row.get('accounting_basis')==bases.get(field)
-            and row.get('currency')==(None if field in {'shares','diluted_shares'} else 'USD')
+            and row.get('currency')==(None if field in {'shares','diluted_shares'} else currency)
             and row.get('unit')==('shares' if field in {'shares','diluted_shares'} else 'currency_units')
             and end and end<=at and links)
         if valid:
@@ -525,7 +544,7 @@ def build_quality(assessment):
                                  'Period length differs across issuers; no cross-company ROE ranking.'])
         return dict(version=QUALITY_INPUT_VERSION, period=end,
             fresh=bool(at and end and 0<=(at-stamp(end)).days<=150),
-            facts=list(index.values()), balance=balance, cash_periods=cash_periods, latest_cash=latest_cash,
+            facts=list(index.values()), balance=balance, currency=currency, cash_periods=cash_periods, latest_cash=latest_cash,
             quarters=quarters, rejected_refs=sorted(rejected), conflicts=conflicts,
             capital_efficiency=dict(roe=roe, roic=dict(status='UNKNOWN',
                 reason='Average operating invested capital/NOPAT scope, lease classes and R&D capitalization not closed; no proxy ROIC ranking.',
@@ -533,3 +552,64 @@ def build_quality(assessment):
                 nopat='UNKNOWN_TAX_AND_OPERATING_SCOPE_NOT_NORMALIZED', rnd_treatment='EXPENSED_GAAP_NOT_CAPITALIZED')),
             normalization=dict(status='UNKNOWN', adjustments=[],
                 reason='GAAP retained. Working-capital changes are observations, not a complete cash bridge; no verified one-off normalization.'))
+
+
+def build_valuation_inputs(assessment):
+    """Qualified historical inputs for the existing research Owner, never fair value.
+
+    A cash-only borrowing bridge is deliberately not surplus/distributable cash.
+    Weighted period shares never supply point-in-time market capitalization.
+    """
+    from decimal import Decimal
+    currency_rows=[r for r in assessment.get('quality_field_records',[]) if r.get('quality')=='valid' and r.get('field')=='assets']
+    latest_balance=max((r.get('period','') for r in currency_rows),default=None)
+    currency_rows=[r for r in currency_rows if r.get('period')==latest_balance]
+    explicit={r.get('currency') for r in currency_rows if r.get('currency_role')=='reporting_currency'}
+    currencies=explicit or {r.get('currency') for r in currency_rows}
+    out=dict(version='valuation-inputs.v1',symbol=assessment.get('symbol'),decision_at=assessment.get('as_of'),
+        net_cash=None,cash_less_disclosed_borrowings=None,listed_unit={},market_cap=None,issues=[],execution_authorized=False)
+    currency=next(iter(currencies)) if len(currencies)==1 else None
+    if currency not in {'CNY','USD','HKD'}:
+        out['issues'].append('BALANCE_CURRENCY_MISSING_OR_AMBIGUOUS')
+    q=build_quality(assessment,currency=currency);b=q['balance']
+    out.update(currency=currency,balance=b,balance_period=q.get('period'),source_conflicts=q['conflicts'])
+    if not q['fresh'] or any(row[0] in {'cash','current_debt','noncurrent_debt','assets','liabilities','total_equity'} for row in q['conflicts']):
+        out['issues'].append('BALANCE_INPUTS_STALE_CONFLICTING_OR_REJECTED')
+    else:
+        fields=['cash','current_debt','noncurrent_debt','assets','liabilities','total_equity']
+        if all(b.get(f) for f in fields):
+            v=lambda f:Decimal(b[f]['value'])
+            if v('assets')==v('liabilities')+v('total_equity') and v('cash')<=v('assets'):
+                out['cash_less_disclosed_borrowings']=dict(debt_coverage='PARTIAL_DISCLOSED_BORROWINGS',usable_for_equity_bridge=False,value=str(v('cash')-v('current_debt')-v('noncurrent_debt')),
+                    currency=currency,period=q['period'],formula='cash - disclosed current debt - disclosed noncurrent debt',
+                    basis='CASH_ONLY_LESS_DISCLOSED_BORROWINGS_OTHER_FINANCING_NOT_VERIFIED_NOT_DISTRIBUTABLE_CASH',
+                    evidence_refs=sorted({ref for f in fields for ref in b[f]['evidence_refs']}))
+            else:out['issues'].append('BALANCE_SHEET_DOES_NOT_RECONCILE')
+        else:out['issues'].append('CASH_OR_DEBT_OR_BALANCE_CLOSURE_MISSING')
+    # These are already source-owner-qualified fields; additionally check decision
+    # clocks and exact semantics before exposing a listed-unit bridge.
+    ratios=[];weighted=[];point=[]
+    for r in assessment.get('quality_field_records',[]):
+        if (r.get('quality')!='valid' or r.get('symbol')!=assessment.get('symbol') or r.get('is_seed') or r.get('is_mock')
+                or not r.get('publication_links') or not stamp(r.get('published_at')) or not stamp(r.get('fetched_at'))
+                or not stamp(r.get('period')) or not stamp(assessment.get('as_of'))
+                or not stamp(r['period'])<=stamp(r['published_at'])<=stamp(r['fetched_at'])<=stamp(assessment['as_of'])):continue
+        if (r.get('field')=='ads_ratio' and r.get('unit')=='ordinary_shares_per_ads'
+                and r.get('accounting_basis')=='ordinary_shares_per_ads' and r.get('currency') is None
+                and number(r['values'].get('ads_ratio')) and r['values']['ads_ratio']>0):ratios.append(r)
+        if r.get('field') in {'diluted_shares','diluted_ads_shares'} and r.get('unit')=='shares':weighted.append(r)
+        if r.get('field')=='shares' and r.get('scope')=='instant' and r.get('unit')=='shares':point.append(r)
+    latest=max((r['period'] for r in ratios),default=None)
+    selected=[r for r in ratios if r['period']==latest]
+    if len({r['values']['ads_ratio'] for r in selected})==1:
+        out['listed_unit']=dict(ordinary_shares_per_ads=selected[0]['values']['ads_ratio'],as_of=latest,
+            evidence_refs=[r['record_id'] for r in selected],basis='EXPLICIT_OFFICIAL_ADS_FOOTNOTE_NOT_CURRENT_SHARE_COUNT')
+    else:out['issues'].append('ADS_RATIO_MISSING_OR_CONFLICTING')
+    out['weighted_share_observations']=weighted
+    out['reported_point_share_observations']=point
+    derived={r['field']:r for r in build(assessment)['records']}
+    out['observed_price']=derived.get('observed_price')
+    out['qualified_fx']=derived.get('fx_rate')
+    out['issues'] += ['POINT_IN_TIME_ECONOMIC_SHARES_UNVERIFIED','CURRENT_PRICE_FX_AND_CORPORATE_ACTION_CLOSURE_REQUIRED',
+                     'SURPLUS_CASH_AND_COMPLETE_LEASE_DEBT_TREATMENT_UNKNOWN']
+    return out

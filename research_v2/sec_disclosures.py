@@ -83,7 +83,17 @@ QUALITY_CONCEPTS = {
     ('us-gaap', 'IncomeTaxExpenseBenefit'): ('quality_tax', 'income_tax_expense'),
     ('us-gaap', 'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest'): ('quality_pretax_income', 'pretax_income'),
 }
+# Additional exact labels in verified original statements; not inferred totals.
+QUALITY_CONCEPTS.update({
+    ('us-gaap', 'RestrictedCashAndCashEquivalentsCurrent'): ('quality_restricted_cash', 'restricted_cash'),
+    ('wp-disclosure', 'TotalEquity'): ('quality_total_equity', 'total_equity'),
+    ('wp-disclosure', 'NoncontrollingInterests'): ('quality_noncontrolling', 'noncontrolling_interests'),
+    ('wp-disclosure', 'TimeDepositsAndShortTermInvestments'): ('quality_deposits_investments', 'time_deposits_and_short_term_investments'),
+    ('wp-disclosure', 'OrdinarySharesPerADS'): ('quality_ads_ratio', 'ordinary_shares_per_ads'),
+    ('wp-disclosure', 'WeightedDilutedADS'): ('quality_diluted_ads_shares', 'weighted_diluted_ads'),
+})
 QUALITY_INSTANT = {'quality_finance_lease_liability', 'quality_operating_lease_liability', 'quality_current_debt', 'quality_current_assets', 'quality_current_long_term_debt', 'quality_shares', 'quality_cash_including_restricted', 'quality_commercial_paper', 'quality_noncurrent_debt', 'quality_equity', 'quality_cash', 'quality_current_liabilities', 'quality_assets', 'quality_liabilities'}
+QUALITY_INSTANT |= {'quality_restricted_cash', 'quality_deposits_investments', 'quality_ads_ratio', 'quality_total_equity', 'quality_noncontrolling'}
 
 _request_lock = threading.Lock()
 _last_request = 0.0
@@ -377,7 +387,7 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest, quality=Fals
         return []
     by_accession={f['accession']:f for f in filings}
     by_filing={}
-    for (taxonomy, concept), (field, basis) in (QUALITY_CONCEPTS if quality else CONCEPTS).items():
+    for (taxonomy, concept), (field, basis) in (list(CONCEPTS.items()) + list(QUALITY_CONCEPTS.items()) if quality == 'all' else (QUALITY_CONCEPTS if quality else CONCEPTS).items()):
         concepts=all_facts.get(taxonomy)
         definition=concepts.get(concept) if isinstance(concepts,dict) else None
         units=definition.get('units') if isinstance(definition,dict) else None
@@ -385,11 +395,12 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest, quality=Fals
             continue
         for original_unit, rows in units.items():
             currency=original_unit.removesuffix('/shares')
-            if quality and original_unit != ('shares' if field in {'quality_shares','quality_diluted_shares'} else 'USD'):
+            is_quality = field.startswith('quality_')
+            if is_quality and original_unit not in ({'shares'} if field in {'quality_shares','quality_diluted_shares'} else {'USD','CNY','HKD'}):
                 continue
-            if not quality and (field=='dilutedEPSOrdinary') != original_unit.endswith('/shares'):
+            if not is_quality and (field=='dilutedEPSOrdinary') != original_unit.endswith('/shares'):
                 continue
-            if (currency not in {'USD', 'CNY', 'HKD'} and not (quality and original_unit=='shares')) or not isinstance(rows, list):
+            if (currency not in {'USD', 'CNY', 'HKD'} and not (is_quality and original_unit=='shares')) or not isinstance(rows, list):
                 continue
             for i, row in enumerate(rows):
                 if not isinstance(row,dict):
@@ -399,9 +410,9 @@ def parse_companyfacts(source, issuer, filings, *, identity_digest, quality=Fals
                     if not filing or row.get('form')!=filing['form'] or row.get('filed')!=filing['filed']:
                         continue
                     scope=_period(row.get('start'),row.get('end')) if row.get('start') else None
-                    if quality and field in QUALITY_INSTANT and not row.get('start'):
+                    if is_quality and field in QUALITY_INSTANT and not row.get('start'):
                         scope='instant'
-                    elif quality and row.get('start') and not scope and 105 < (_day(row['end'])-_day(row['start'])).days < 350:
+                    elif is_quality and row.get('start') and not scope and 105 < (_day(row['end'])-_day(row['start'])).days < 350:
                         scope='year_to_date'
                     if not scope or _day(row['end'])>_day(filing['filed']):
                         continue
@@ -742,9 +753,10 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')
-        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating, parse_us_gaap_diluted_eps
+        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating, parse_us_gaap_diluted_eps, parse_valuation_statement_inputs
         try:
             table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
+            table_observations += parse_valuation_statement_inputs(soup, filing['published_at'])
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
@@ -776,7 +788,7 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             return None
         for obs in table_observations:
             end=date.fromisoformat(obs['fiscal_period_end'])
-            if not obs.get('fiscal_period_start'):
+            if not obs.get('fiscal_period_start') and obs.get('period_basis') != 'instant':
                 obs['fiscal_period_start']=end.replace(day=1,month=end.month-2).isoformat()
             obs.update(document_type=kind,document_filename=filename,document_sequence=sequence)
             obs['source_locator']=f'DOCUMENT[{doc_index}]/{filename}/'+obs['source_locator']
@@ -954,7 +966,7 @@ def collect(symbol):
         facts = _fetch('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json')
         if not facts and _access_failed():
             return [], {}.get
-        rows = parse_companyfacts(facts, issuer, filings, identity_digest=identity_digest)
+        rows = parse_companyfacts(facts, issuer, filings, identity_digest=identity_digest, quality="all")
         if facts and not rows:
             invalid=_json(facts) is None
             _diagnose('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json','invalid_json' if invalid else 'data_missing')
