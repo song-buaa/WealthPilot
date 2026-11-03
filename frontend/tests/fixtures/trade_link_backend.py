@@ -22,6 +22,14 @@ from tests.test_execution_batch_service import FakeIBKRExecutionAdapter
 from backend.services.execution_batch import link_handoff
 from backend.services.execution_batch.service import ExecutionBatchService
 from datetime import datetime, timezone
+from app.fx_service import FXQuote, fx_service
+
+# Exercise the same warmed U0 cache shape as production, not an empty cache
+# that would hide consumer type-contract regressions. No FX provider is called.
+fx_service._cache[('USD', 'CNY', 'latest')] = FXQuote(
+    7.1, datetime.now(timezone.utc).date().isoformat(),
+    datetime.now(timezone.utc).isoformat(), 'provider_fixture', 'current')
+fx_service._expires[('USD', 'CNY', 'latest')] = fx_service._clock() + fx_service.ttl
 
 ibkr = FakeIBKRExecutionAdapter()
 ibkr_state = {'quality':'LIVE', 'cash':10000, 'fee':5}

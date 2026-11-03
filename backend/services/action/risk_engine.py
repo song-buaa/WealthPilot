@@ -13,8 +13,9 @@ v3.2 实现 3 条规则：
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,37 @@ def validate_confirmation(risk_result: RiskCheckResult, confirmation_text: str) 
     return confirmation_text == CONFIRMATION_TEXT
 
 
+def _cached_fx_rate_to_cny(currency):
+    """Read existing FX evidence only; never refresh during order risk review.
+
+    U0 caches FXQuote, while older injected caches used (rate, date). Keep that
+    legacy contract and accept serialized quotes without treating degraded or
+    expired observations as quantified risk evidence.
+    """
+    from app.fx_service import FXQuote, fx_service
+    key = (currency, "CNY", "latest")
+    with fx_service._lock:
+        cached = fx_service._cache.get(key)
+        if isinstance(cached, FXQuote):
+            cached = cached.to_dict()
+        if isinstance(cached, Mapping):
+            if (cached.get("quality") not in {"current", "legacy"}
+                    or fx_service._clock() >= fx_service._expires.get(key, 0)):
+                return None
+            value, rate_date = cached.get("rate"), cached.get("rate_date")
+        elif isinstance(cached, tuple) and len(cached) == 2:
+            value, rate_date = cached
+        else:
+            return None
+        if not isinstance(rate_date, str) or not rate_date or rate_date in {"fallback", "latest", "stale"}:
+            return None
+        try:
+            rate = Decimal(str(value))
+            return rate if rate.is_finite() and rate > 0 else None
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+
 def portfolio_order_risk(session, *, portfolio_id, symbol, side, quantity, limit_price, currency=None):
     """Shared ordinary/Batch risk inputs, scoped to the same Portfolio.
 
@@ -157,7 +189,6 @@ def portfolio_order_risk(session, *, portfolio_id, symbol, side, quantity, limit
     function does not weaken hard quote/contract/cash/WhatIf execution gates.
     """
     from app.models import Position
-    from app.fx_service import fx_service
     rows = session.query(Position).filter_by(portfolio_id=portfolio_id, segment="投资").all()
     positive = [p for p in rows if p.market_value_cny is not None and p.market_value_cny > 0]
     matching = [p for p in rows if p.symbol == symbol or (":" not in symbol and p.ticker == symbol)]
@@ -171,12 +202,7 @@ def portfolio_order_risk(session, *, portfolio_id, symbol, side, quantity, limit
     elif currency:
         # Only an already available FX observation counts. Do not call providers
         # or package a hardcoded fallback as a quantified PASS.
-        cached = getattr(fx_service, "_cache", {}).get((currency, "CNY", "latest"))
-        if cached and cached[1] not in {"fallback", "latest", None}:
-            try:
-                rate = Decimal(str(cached[0]))
-            except (TypeError, ValueError):
-                pass
+        rate = _cached_fx_rate_to_cny(currency)
     total = sum((Decimal(str(p.market_value_cny)) for p in positive), Decimal("0"))
     position = sum((Decimal(str(p.market_value_cny or 0)) for p in matching), Decimal("0"))
     discipline = None

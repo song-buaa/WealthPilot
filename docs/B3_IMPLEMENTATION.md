@@ -147,3 +147,27 @@ HTTP/gzip/内容哈希，本地修复不能被描述为解决了历史下载中�
 已确认的小数、旧草稿资格和无意义重挂载问题关闭，未发现新增Critical/Important；
 本地准入为READY_FOR_RELEASE，表示可在另行授权后进入原PR/CI及单Web受控发布流程，
 不表示新CI、生产部署或iPhone验收已完成。
+
+## IB01预览FX缓存类型修复（2026-11-03，本地候选）
+
+生产Backend与最新main的原风险检查仍以元组下标读取FX缓存；U0实际缓存为
+`FXQuote`，使原`trade-link/quote → ExecutionBatch → portfolio_order_risk`在风险
+投影阶段抛出类型异常，不能返回已计算的报价/资金/WhatIf预览。该接口将异常
+转为HTTP错误，既有生产日志没有保留该次完整堆栈；首次失败位置由字节一致源码
+和隔离重放确认，不能冒称已取得生产堆栈。
+
+仅在原risk_engine归一化缓存读取：支持实际FXQuote、同合同dict及原测试/兼容
+元组，不调用FX Provider。对象/dict必须仍在FXService TTL内且质量合格；过期、
+fallback、stale、缺日期、无效或非正汇率保持原data_quality风险确认，不伪造PASS。
+不更改IBKR行情/身份、LIVE/30秒TTL、tick、费用、WhatIf、原币现金、预算/安全垫、
+Owner、确认指纹或最终人工授权；不调用真实订单。
+
+回归入口：[缓存类型及2650 USD隔离合同](../tests/test_ib01_fxquote_preview.py)、
+原IB01 link/Batch/B0测试，以及原浏览器交易fixture中预热的类型化缓存与
+2650 USD预算/2692.91 USD现金场景。行情和费用均为明确合成测试输入，不代表
+真实市场报价或成交。Registry无需更新：能力及权威入口没有变化。
+
+本节记录本地修复/测试；集成及生产状态以本次PR和发布回执为准。生产操作须按
+任务单独授权、部署差异门、原Git/CI、固定Backend制品及回滚入口执行；生产只读
+报价/WhatIf仍需核实Gateway权限和真实来源，
+不得以隔离Mock或本地READY代替实盘授权或成交验收。无Schema/Digest/依赖变更。
