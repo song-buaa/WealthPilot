@@ -15,6 +15,7 @@ class ResearchIntent(BaseModel):
     reference_quantity: float | None=Field(default=None,gt=0,allow_inf_nan=False)
     tranche_fractions: list[float]=Field(default_factory=list,max_length=8)
     historical_price_bands: list[tuple[float,float]]=Field(default_factory=list,max_length=8)
+    conditional_valuation: dict | None=None
 
     @model_validator(mode='after')
     def valid_assumptions(self):
@@ -25,6 +26,11 @@ class ResearchIntent(BaseModel):
             raise ValueError('RESEARCH_FRACTIONS_INVALID')
         if any(not all(math.isfinite(v) for v in pair) or not 0<pair[0]<=pair[1] for pair in self.historical_price_bands):
             raise ValueError('RESEARCH_OBSERVATION_ASSUMPTION_INVALID')
+        if self.conditional_valuation is not None:
+            from backend.services.market_data.quality_valuation import Assumptions, RecoveryAssumptions
+            case=(self.conditional_valuation.get('base') or {}) if isinstance(self.conditional_valuation,dict) else {}
+            contract=Assumptions if 'terminal_pe' in case else RecoveryAssumptions
+            self.conditional_valuation=contract.model_validate(self.conditional_valuation).model_dump(mode='json')
         return self
 
 
@@ -131,6 +137,13 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
                         candidate['scenario']['amount_blockers']=loan_b.get('blockers',[])
     from backend.services.market_data.financial_research import build
     assessment['financial_research']=build(assessment)
+    assumptions=assessment['research_intent'].get('conditional_valuation')
+    if assumptions:
+        from backend.services.market_data.quality_valuation import foreign_ads_conditional_research
+        assessment['conditional_valuation']=foreign_ads_conditional_research(assessment,assumptions)
+    elif assessment['research_intent'].get('valuation_research_requested'):
+        from backend.services.market_data.quality_valuation import propose_foreign_ads_conditional_research
+        assessment['conditional_valuation']=propose_foreign_ads_conditional_research(assessment)
     return assessment
 
 
@@ -158,6 +171,9 @@ def research_intent(options):
         r'不(?:假设|认为|预设)?(?:我|本人|用户)?(?:已|实际|目前|当前)?(?:持有|持仓)|没有持仓|无持仓|未持有|纯研究|仅(?:作|做)?研究|'
         r'no\s+(?:current\s+)?(?:position|holdings?)|not\s+(?:currently\s+)?holding', question,re.I)
         and not re.search(buy_words,buy_context,re.I))
+    valuation_research_requested=bool(isinstance(question,str) and re.search(
+        r'长期.{0,12}(?:投资|持有|回报|退出|价值|经营恢复)|(?:五年|估值|预期回报|条件回报|内在价值|长期回报|长期投资|当前价(?:格)?隐含)',
+        question,re.I))
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
         if not isinstance(text,str):continue
@@ -188,7 +204,10 @@ def research_intent(options):
                     from datetime import date
                     value['review_date']=date(*map(int,matches[0])).isoformat();sources['review_date']=source
                 except ValueError:pass
+    if valuation_research_requested and not value.get('conditional_valuation'):
+        sources['conditional_valuation']='system_evidence_bound_reference_or_unknown'
     return dict(value,sources=sources,no_holding_research=no_holding_research,
+                valuation_research_requested=valuation_research_requested,
                 confirmation='user_research_assumption_only',
                 holdings_verified=False,formal_target_confirmed=False)
 
@@ -447,6 +466,30 @@ def fact_sections(assessment, *, include_scenarios=True):
     if include_scenarios and financial['valuation_sensitivity']:
         import json
         facts.append('估值敏感性（盈利/倍数变化为假设，固定FX；非预测、目标价或订单）：'+json.dumps(financial['valuation_sensitivity'],ensure_ascii=False))
+    conditional=assessment.get('conditional_valuation') or {}
+    if conditional.get('status')=='CONDITIONAL_RESEARCH_ONLY':
+        from backend.services.market_data.quality_valuation import SCENARIOS
+        from decimal import Decimal
+        def percentage(value):
+            return 'N/A' if value is None else f"{Decimal(str(value))*100:.2f}%"
+        cases=[]
+        for name in SCENARIOS:
+            row=conditional['scenarios'][name]
+            description=f"{name}: 5年条件年化回报 {percentage(row.get('annualized_return'))}"
+            if row.get('required_return_met') is not None:
+                hurdle=('观察收益率参考（非用户要求回报）' if
+                        conditional.get('proposal_origin')=='system_evidence_bound_reference' else
+                        '研究要求回报')
+                description+='；'+('达到' if row['required_return_met'] else '未达到')+hurdle
+            if 'implied_year_five_ebit_margin' in row:
+                description+=f"；当前价隐含第五年营业利润率 {percentage(row['implied_year_five_ebit_margin'])}"
+            cases.append(description+f"；状态 {row.get('status',conditional['status'])}")
+        facts.insert(0,'五年条件估值研究（服务端计算；研究假设，不是历史事实、公允价值、目标价或交易指令；'
+                     '原始输入与假设见结构化回执）：'+ '；'.join(cases)+'；限制：'+', '.join(conditional.get('limitations',[])))
+    elif conditional.get('status')=='HYPOTHESES_REQUIRED':
+        facts.insert(0,'长期条件估值：N/A；缺口：'+', '.join(conditional.get('missing',[]))+
+                     '；反向条件：'+conditional['reverse_equation']+
+                     '；未取得独立假设依据时不制造公允价值、目标价或回报。')
     facts.append('独立缺口（不影响其他合格研究）：'+'；'.join(financial['limitations'])+'。旧观点和Seed不作当前经营事实。')
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")

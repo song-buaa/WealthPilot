@@ -305,4 +305,6 @@ P2汽车经营研究候选复用既有SEC原始申报来源Owner：只有经过�
 
 PR-A估值必要输入仍归原Financial Research Owner：`build_valuation_inputs`消费Evidence的正式质量字段，显式报告币与时点，区分加权股数、点时披露股数、ADS关系和当前经济股本资格。部分借款现金差额不得用作完整净现金或权益估值桥；旧S3适用性不变。无新存储/Provider/Agent，详见V42实现记录PR-A。
 
+PR-B候选沿原S3 `quality_valuation` 增加外国发行人ADS正盈利条件情景投影，原 `financial_research` 仍负责财务、价格和FX资格。普通长期研究请求经原 `position_analysis` 意图入口触发证据限定的参考敏感性；缺少合格价格、EPS、FX、上市单位或独立未来假设时保留N/A和反向条件变量。该投影不改变S3 domestic适用范围、PEER编排、ACTIVE政策或交易权限；缺少LI股本/完整净现金等必要输入时，恢复估值继续N/A。
+
 S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。

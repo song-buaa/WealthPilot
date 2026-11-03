@@ -175,4 +175,6 @@ P2汽车经营指标候选沿原[SEC来源](../research_v2/sec_disclosures.py)�
 
 PR-A（原财务研究Owner最小扩展）：`backend/services/market_data/financial_research.py::build_valuation_inputs`提供正式资产负债/股份/ADS输入与UNKNOWN清单；复用原SEC/官方表格、Evidence和`build_quality`。输出`cash_less_disclosed_borrowings`为部分借款口径，非完整net_cash；加权股数不授予市值资格。原Output Policy同源重核与单位渲染不改变值或交易边界；验收见`tests/test_valuation_inputs.py`和`docs/V42_IMPLEMENTATION.md`的PR-A记录。
 
+PR-B开发候选：原S3 Owner的`quality_valuation.foreign_ads_conditional_research`分派正盈利ADS五年收益及亏损发行人的有界经营恢复假设；均复用原Evidence/Financial Research，研究假设与历史事实分离，不进入domestic排序、正式公允价值或交易资格。显式`ResearchIntent.conditional_valuation`及普通长期研究意图均沿原PEER；后者仅在EPS、价格、FX、静态PE和同比均合格时生成标为系统参考敏感性的PDD类条件情景，来源或独立假设不足返回`HYPOTHESES_REQUIRED`及N/A。原Output Policy、ACTIVE最终再验证和MCP结果投影继续适用。LI当前股数/完整净现金与美团IFRS资格未闭合；见V42实现记录。
+
 S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。

@@ -110,6 +110,31 @@ def captured_facts(assessment, *, at, asset_view=None):
     from backend.services.market_data.financial_research import build_valuation_inputs
     original['valuation_inputs']=build_valuation_inputs(original)
     original['financial_research']=build(original)  # never retain a stale pre-Expression calculation cache
+    previous=assessment.get('conditional_valuation') or {}
+    assumptions=previous.get('assumptions')
+    if assumptions or previous.get('proposal_origin')=='system_evidence_bound_reference':
+        from backend.services.market_data.quality_valuation import (
+            foreign_ads_conditional_research,propose_foreign_ads_conditional_research)
+        automatic=previous.get('proposal_origin')=='system_evidence_bound_reference'
+        current=(propose_foreign_ads_conditional_research(original) if automatic else
+                 foreign_ads_conditional_research(original,assumptions))
+        def source_receipts(value):
+            receipts=dict(value.get('input_receipts') or {})
+            receipts.pop('decision_at',None)  # recheck time may move forward
+            return receipts
+        # The fresh assessment may only remove authority, never promote a new
+        # source or a changed input receipt on the final ACTIVE/MCP projection.
+        if (current.get('status')==previous.get('status') and
+                current.get('status') in {'CONDITIONAL_RESEARCH_ONLY','HYPOTHESES_REQUIRED'} and
+                current.get('qualified_inputs')==previous.get('qualified_inputs') and
+                current.get('missing')==previous.get('missing') and
+                current.get('proposal_basis')==previous.get('proposal_basis') and
+                str(current.get('input_receipts',{}).get('decision_at',''))[:4] ==
+                str(previous.get('input_receipts',{}).get('decision_at',''))[:4] and
+                source_receipts(current)==source_receipts(previous)):
+            original['conditional_valuation']=current
+        else:
+            original.pop('conditional_valuation',None)
     facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
     return original, facts
 
@@ -184,7 +209,13 @@ def explanation_prompt(assessment):
     auto_focus=("\n本次有正式汽车经营证据。第一段business先绑定可用的车辆交付、汽车销售收入、车辆毛利率，"
                 "解释其与集团收入/盈利的已证关系及不能证实的原因；若需节省段落，压缩重复的集团财务复述。"
                 "本句不授权自行计算数字。\n" if automotive_refs else "")
-    return (auto_focus+"\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
+    conditional=assessment.get('conditional_valuation') or {}
+    earnings_focus=("\n本次有服务端条件估值研究。请在投资逻辑或复核条件中把条件回报差异与盈利持续性、竞争及现金风险相连，"
+                    "指出足以推翻基准假设的可验证反证；区分历史静态PE、未来研究假设、条件终值与正式公允价值。"
+                    "条件情景不是已核实的历史数字，不得自行把它写成事实引用、目标价或交易指令。\n"
+                    if conditional.get('status')=='CONDITIONAL_RESEARCH_ONLY' and
+                       conditional.get('method_version')=='s3-foreign-ads-earnings.v1' else "")
+    return (auto_focus+earnings_focus+"\n专业解释附加契约：保留原决策JSON，同时新增professional_explanation数组；"
         "每项包含topic、basis='inference'、scope='research_only'、text、evidence_refs，可选numbers。topic可为business、investment_thesis、competition、"
         "risk、exit_rationale、review_condition、technical_trend。用有深度的自然语言解释经营变化、竞争机制、投资逻辑、风险和减仓理由，"
         "每段绑定下列当前有效evidence_ref。区分来源事实与自己的推论，使用条件与不确定性表达。"
@@ -445,8 +476,9 @@ def prompt_context(assessment):
         dict(records=records,qualification=assessment["qualification"],issues=assessment["issues"],
              planner=assessment["planner"],confidence_ceiling=assessment["confidence_ceiling"],
              allocation_context=assessment.get("allocation_context"),scenarios=assessment.get("scenarios"),
+             conditional_valuation=assessment.get('conditional_valuation'),
              exit_candidates=assessment.get("exit_candidates"),
-             authority="Use frozen cross-account issuer exposure for company concentration. Request target versions are unverified proposals; only confirmed_stage_targets from the server store are confirmed user targets. Formal discipline and defaults are separate; a legacy single-security rule pass does not establish that company targets are met. Static scenarios and account exit candidates are assumptions, never orders. Use their owner-calculated values for comparison; never invent prices or quantities."),
+             authority="Use frozen cross-account issuer exposure for company concentration. Request target versions are unverified proposals; only confirmed_stage_targets from the server store are confirmed user targets. Formal discipline and defaults are separate; a legacy single-security rule pass does not establish that company targets are met. Static scenarios and account exit candidates are assumptions, never orders. Conditional valuation is explicitly hypothesized research, not verified historical evidence, fair value or an execution price. Explain which scenarios do or do not meet the stated research return, the operating conditions and counterevidence; connect them to qualified business facts without asserting future outcomes. Only owner-qualified evidence_refs and numeric bindings may support factual model claims. Never invent prices or quantities."),
         ensure_ascii=False,default=str)+explanation_prompt(assessment)
 
 
@@ -477,6 +509,7 @@ def enforce(output, assessment):
     output.chat_answer += render_explanation(explanations)
     output.raw_text=""
     payload["exitPlan"]=plan
+    payload['conditionalValuation']=assessment.get('conditional_valuation')
     payload["professional_explanation"] = explanations
     payload["explanationDiagnostics"] = diagnostics
     payload.update(confidence=min(prior,assessment["confidence_ceiling"]),
