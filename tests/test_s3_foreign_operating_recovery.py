@@ -104,6 +104,8 @@ def test_natural_study_missing_fact_keeps_reverse_formula_and_no_return():
 
 def test_loss_making_natural_study_requests_recovery_inputs_not_positive_pe():
     a=li_assessment()
+    intent=research_intent({'research_question':'仅研究理想汽车的长期经营恢复、当前价格隐含条件及持有逻辑；没有新增交易授权。'})
+    assert intent['valuation_research_requested']
     a['verified_field_records']=[r for r in a['verified_field_records'] if r['field']!='diluted_eps_ads_quarter']
     for row in a['verified_field_records']:
         if row['field']=='operating_income_quarter':

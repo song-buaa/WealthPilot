@@ -172,7 +172,7 @@ def research_intent(options):
         r'no\s+(?:current\s+)?(?:position|holdings?)|not\s+(?:currently\s+)?holding', question,re.I)
         and not re.search(buy_words,buy_context,re.I))
     valuation_research_requested=bool(isinstance(question,str) and re.search(
-        r'长期.{0,12}(?:投资|持有|回报|退出|价值)|(?:五年|估值|预期回报|条件回报|内在价值|长期回报|长期投资)',
+        r'长期.{0,12}(?:投资|持有|回报|退出|价值|经营恢复)|(?:五年|估值|预期回报|条件回报|内在价值|长期回报|长期投资|当前价(?:格)?隐含)',
         question,re.I))
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
