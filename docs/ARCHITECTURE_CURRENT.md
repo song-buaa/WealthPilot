@@ -304,3 +304,5 @@ N1不新增schema或scheduler：[自然扫描](../backend/services/investment_th
 P2汽车经营研究候选复用既有SEC原始申报来源Owner：只有经过原发行主体/CIK、accession、附件声明、正式发布与抓取时钟及原文哈希验证的季度经营观察值，才由Evidence Registry投影为L1可引用字段。EX-99.1附件声明可位于官方封面同一表格行的独立单元格，仍要求精确文件名与唯一链接。financial_research复用统一计算记录与原引用合同计算汽车交付、汽车销售收入、车辆业务毛利率及汽车收入/交付量近似值；Output Policy继续最终数字绑定。该行业层不修改基础财报、资产/交易Owner、分析资格或PEER编排；缺失独立季度/币种/业务口径继续UNKNOWN。XPEV完整原文已通过离线资格链，生产自动发现和真实PEER解释仍待验收。
 
 PR-A估值必要输入仍归原Financial Research Owner：`build_valuation_inputs`消费Evidence的正式质量字段，显式报告币与时点，区分加权股数、点时披露股数、ADS关系和当前经济股本资格。部分借款现金差额不得用作完整净现金或权益估值桥；旧S3适用性不变。无新存储/Provider/Agent，详见V42实现记录PR-A。
+
+S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
