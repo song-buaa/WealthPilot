@@ -24,6 +24,7 @@
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
 | Mac Mini Prod | 原生 ARM Python / Node、launchd、完整 Web/后端、MCP/Tunnel、生产数据库及原业务服务。数据、配置、凭证、日志和备份位于代码外。 |
 | MacBook Dev / GitHub | 本地开发与隔离测试 → 短期分支 / PR / 四项 CI → 经授权集成 → Mini 安装确认的完整 SHA，不在生产直接改业务代码。 |
+| 个人历史回测研究（离线） | [research_backtest](../research_backtest/__init__.py)复用已验收的个人AV文件转换、独立Decimal账本和原生LEAN隔离runner；[资格边界](v4.3/AV_LEAN_RESEARCH_INFRA.md)。只消费不可变AV响应/事件/日历，不复制采集客户端、不导入生产Owner运行时；不是Portfolio历史收益服务或交易模型。五ETF研究PASS、严格结算PARTIAL；严格请求启动前拒绝，默认研究模式不得替代。 |
 
 P1–P5 均 DONE：资产负债查询、明确交易预填链接、单标决策、组合评估、当前持仓收益分析。Web/iOS 读取与分析、MacBook/iPhone 交易预填均已实际验收；P2 新入口首次真实券商提交/成交仍未验收。P5 完成的是现有持仓账面盈亏能力，不包含完整历史收益归因。
 
