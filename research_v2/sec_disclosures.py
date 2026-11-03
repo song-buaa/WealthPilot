@@ -923,6 +923,119 @@ def verify_filing_envelope(source, issuer, filing):
         return None
 
 
+def asfiled_annual_eps(source, issuer, filing):
+    """Opt-in filing-vintage annual EPS anchor, never a current TTM input.
+
+    Only the primary 10-K's current-year, entity-wide US GAAP USD/share
+    diluted EPS is accepted. No comparative-column restatement, class conversion,
+    split adjustment, normalization or inference from net income/shares.
+    """
+    proof = verify_filing_envelope(source, issuer, filing)
+    if (not proof or filing.get('form') != '10-K' or issuer.get('issuer_type') != 'domestic'
+            or len(issuer.get('registered_equity_tickers', [])) != 1):
+        raise ValueError('ASFILED_ANNUAL_IDENTITY_REJECTED')
+    report, filed = _day(filing.get('report_date')), _day(filing.get('filed'))
+    public_day = datetime.fromisoformat(proof['published_at']).astimezone(ZoneInfo('America/New_York')).date()
+    if not report or not filed or report > filed or report > public_day:
+        raise ValueError('ASFILED_REPORT_CLOCK_REJECTED')
+    text = source[0].decode('utf-8')
+    documents = []
+    for doc in re.findall(r'<DOCUMENT>(.*?)</DOCUMENT>', text, re.S | re.I):
+        kind = re.search(r'<TYPE>([^\r\n<]+)', doc, re.I)
+        filename = re.search(r'<FILENAME>([^\r\n<]+)', doc, re.I)
+        sequence = re.search(r'<SEQUENCE>(\d+)', doc, re.I)
+        if not kind or not filename or not sequence:
+            raise ValueError('ASFILED_DOCUMENT_REJECTED')
+        documents.append((kind[1].strip(), filename[1].strip(), int(sequence[1]), doc))
+    if (len({d[1] for d in documents}) != len(documents)
+            or len({d[2] for d in documents}) != len(documents)):
+        raise ValueError('ASFILED_DOCUMENT_REJECTED')
+    primary = [d for d in documents if d[:3] == ('10-K', filing['primary_url'].rsplit('/', 1)[-1], 1)]
+    if len(primary) != 1:
+        raise ValueError('ASFILED_DOCUMENT_REJECTED')
+    soup = BeautifulSoup(primary[0][3], 'html.parser')
+    def local(node, name):
+        return node.name.lower().split(':')[-1] == name
+    def instance(node):
+        return bool(node and ':' in node.name and _namespace(node, node.name.split(':')[0]) == 'http://www.xbrl.org/2003/instance')
+    def children(node, names):
+        if not instance(node): return None
+        rows = node.find_all(recursive=False)
+        if len(rows) != len(names) or not all(instance(n) for n in rows): return None
+        result = {}
+        for name in names:
+            matches = [n for n in rows if local(n, name)]
+            if len(matches) != 1: return None
+            result[name] = matches[0]
+        return result
+    contexts, units = {}, set()
+    for node in soup.find_all(lambda t: local(t, 'context')):
+        key = node.get('id')
+        if key in contexts:
+            raise ValueError('ASFILED_CONTEXT_AMBIGUOUS')
+        contexts[key] = None
+        if not instance(node) or node.find(lambda t: local(t, 'segment') or local(t, 'scenario')):
+            continue
+        structure = children(node, ('entity', 'period'))
+        entity = children(structure['entity'], ('identifier',)) if structure else None
+        period = children(structure['period'], ('startdate', 'enddate')) if structure else None
+        if not entity or not period: continue
+        identifier, start, end = entity['identifier'], period['startdate'], period['enddate']
+        if (any(n.find() for n in (identifier,start,end)) or identifier.get('scheme') not in {'http://www.sec.gov/CIK', 'https://www.sec.gov/CIK'}
+                or identifier.get_text(strip=True).lstrip('0') != str(int(issuer['cik'])) or not start or not end):
+            continue
+        begin, finish = _day(start.get_text(strip=True)), _day(end.get_text(strip=True))
+        if begin and finish and finish.isoformat() == filing['report_date'] and 350 <= (finish - begin).days + 1 <= 380:
+            contexts[key] = (begin.isoformat(), finish.isoformat())
+    seen_units = set()
+    for node in soup.find_all(lambda t: local(t, 'unit')):
+        key = node.get('id')
+        if key in seen_units:
+            raise ValueError('ASFILED_UNIT_AMBIGUOUS')
+        seen_units.add(key)
+        unit = children(node, ('divide',))
+        divide = children(unit['divide'], ('unitnumerator','unitdenominator')) if unit else None
+        numerator = children(divide['unitnumerator'], ('measure',)) if divide else None
+        denominator = children(divide['unitdenominator'], ('measure',)) if divide else None
+        if not numerator or not denominator: continue
+        a, b = numerator['measure'], denominator['measure']
+        def measure(n, namespace, name):
+            q = n.get_text(strip=True).split(':')
+            return len(q) == 2 and q[1] == name and _namespace(n, q[0]) == namespace
+        if (not a.find() and not b.find() and measure(a, 'http://www.xbrl.org/2003/iso4217', 'USD')
+                and measure(b, 'http://www.xbrl.org/2003/instance', 'shares')):
+            units.add(key)
+    values = set()
+    for node in soup.find_all(lambda t: local(t, 'nonfraction')):
+        period = contexts.get(node.get('contextref'))
+        if (_standard_concept(node) != ('dilutedEPSOrdinary', 'diluted_eps_ordinary') or not period
+                or node.get('unitref') not in units):
+            continue
+        prefix = node.name.split(':')[0]
+        if (_namespace(node, prefix) not in {'http://www.xbrl.org/2013/inlineXBRL', 'http://www.xbrl.org/2008/inlineXBRL'}
+                or node.find() or any(k.split(':')[-1] in {'nil', 'continuedat', 'escape'} for k in node.attrs)
+                or node.get('format') not in {None, 'ixt:numdotdecimal', 'ixt:num-dot-decimal'}):
+            raise ValueError('ASFILED_NUMERIC_ENCODING_UNSUPPORTED')
+        try:
+            if node.get('scale', '0') != '0': raise ValueError()
+            # Historical PE accepts positive EPS only. Do not invert a signed
+            # literal again or support extra inline sign encodings here.
+            if node.get('sign') is not None: raise ValueError()
+            shown = node.get_text(strip=True)
+            if not re.fullmatch(r'(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?', shown): raise ValueError()
+            value = Decimal(shown.replace(',', ''))
+            if not value.is_finite() or value <= 0: raise ValueError()
+        except (ValueError, InvalidOperation, OverflowError):
+            raise ValueError('ASFILED_EPS_NOT_POSITIVE_FINITE') from None
+        values.add((*period, str(value)))
+    if len(values) != 1:
+        raise ValueError('ASFILED_ANNUAL_EPS_MISSING_OR_CONFLICT')
+    begin, end, value = values.pop()
+    return dict(**proof, start=begin, period=end, diluted_eps=value, currency='USD',
+                unit='USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS', accession=filing['accession'],
+                status='ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED', rule_version='sec.asfiled-annual-eps.v1')
+
+
 def collect(symbol):
     """Current-cycle discovery: cached directory + Submissions + facts + originals.
 

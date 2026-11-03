@@ -158,7 +158,7 @@ def verify(path):
     path = Path(path)
     b = json.loads(path.read_text())
     p = b["payload"]
-    if p['result']['method_version']=='s3-p2.operating-earnings.v1':
+    if p['result']['method_version'] in {'s3-p2.operating-earnings.v1','s3-p2.operating-earnings.v1.1'}:
         import importlib.util
         spec=importlib.util.spec_from_file_location('s3_operating_verify',Path(__file__).with_name('s3_operating_verify.py'))
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

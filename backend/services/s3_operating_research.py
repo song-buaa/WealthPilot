@@ -16,7 +16,7 @@ from backend.services import s3_pool_research as pool
 from backend.services.market_data import quality_valuation as engine
 from backend.services.market_data.financial_research import operating_ttm_bridge
 
-VERSION='s3-p2.operating-earnings.v1'
+VERSION='s3-p2.operating-earnings.v1.1'
 STRESS=('-.03', '0', '.03')
 
 
@@ -49,10 +49,11 @@ class SourceNote(engine.Contract):
     end: int = Field(gt=0)
     excerpt_sha256: str = Field(pattern='^[a-f0-9]{64}$')
     summary: str = Field(min_length=30,max_length=3000)
-    role: str = Field(pattern='^(HISTORICAL_BUSINESS_CONTEXT|EXPIRED_GUIDANCE_NOT_FORWARD_INPUT|PRIOR_GUIDANCE_NOT_RECONFIRMED)$')
+    role: str = Field(pattern='^(HISTORICAL_BUSINESS_CONTEXT|EXPIRED_GUIDANCE_NOT_FORWARD_INPUT|PRIOR_GUIDANCE_NOT_RECONFIRMED|CURRENT_DISCLOSURE_CONTEXT|HISTORICAL_PE_ANCHOR)$')
 
 
 class Profile(engine.Contract):
+    return_unit_qualification: str = Field(default='NO_KNOWN_UNRESOLVED_DISTRIBUTION',pattern='^(NO_KNOWN_UNRESOLVED_DISTRIBUTION|KNOWN_FUTURE_CLASS_DISTRIBUTION_REQUIRES_ENTITLEMENT_BRIDGE)$')
     cautious: OperatingScenario
     base: OperatingScenario
     optimistic: OperatingScenario
@@ -60,7 +61,7 @@ class Profile(engine.Contract):
     business_thesis: str = Field(min_length=40,max_length=4000)
     risks: list[str] = Field(min_length=2)
     review_conditions: list[str] = Field(min_length=2)
-    current_guidance: str = Field(pattern='^(UNKNOWN_NO_QUALIFIED_CURRENT_GUIDANCE|PARTIAL_PRIOR_GUIDANCE_NOT_RECONFIRMED)$')
+    current_guidance: str = Field(pattern='^(UNKNOWN_NO_QUALIFIED_CURRENT_GUIDANCE|PARTIAL_PRIOR_GUIDANCE_NOT_RECONFIRMED|QUALIFIED_NEAR_TERM_NOT_FIVE_YEAR_GUIDANCE)$')
     source_notes: list[SourceNote] = Field(min_length=1)
 
 
@@ -165,6 +166,8 @@ def evaluate(qualified,dossier,assessments):
             symbol=old['symbol']
             try:
                 profile=dossier.companies[symbol]
+                if profile.return_unit_qualification!='NO_KNOWN_UNRESOLVED_DISTRIBUTION':
+                    raise ValueError('KNOWN_FUTURE_CLASS_DISTRIBUTION_REQUIRES_ENTITLEMENT_BRIDGE')
                 if old['comparison_status']!='COMPARABLE':raise ValueError('P2_PARENT_NOT_COMPARABLE')
                 catalog=set(old['quality']['evidence_catalog'])
                 for field in ('revenue','operating_margin','conversion','shares','terminal_pe'):
@@ -176,9 +179,25 @@ def evaluate(qualified,dossier,assessments):
             except (ValueError,KeyError,TypeError,ArithmeticError) as exc:
                 reason=pool._error_code(exc,'P2_INPUT_REJECTED')
                 card=deepcopy(old);card.update(scenarios={},sensitivity=[],comparison_status='NOT_COMPARABLE',
-                    valuation_status='UNKNOWN',failure_reason=reason,rank=None)
+                    valuation_status='UNKNOWN',failure_reason=reason,rank=None,assumptions=None,
+                    group=None,rank_reason=reason+'; current comparable return withheld, not an adverse fundamental judgment.',
+                    classification_reasons=dict(input_qualification=reason),
+                    historical_benchmark_ref=dict(parent_artifact_id=dossier.parent_artifact_id,symbol=symbol,
+                        scope='PARENT_NUMERIC_OUTPUT_NOT_CURRENT_VALUATION'))
+                # A safe refusal must also withhold inherited target prices and
+                # projection explanations, not merely empty the scenario array.
+                for field in ('conditional_value_range','formula','assumption_context','operating_baseline',
+                              'operating_assumptions','valuation_context','p1_comparison','high_sensitivity',
+                              'sensitivity_complete','sensitivity_qualification','sensitivity_span',
+                              'sensitivity_threshold_robust','tie_reason'):
+                    card.pop(field,None)
+                if symbol in dossier.companies:
+                    card['unexecuted_operating_profile']=dict(status='UNEXECUTED_NOT_CURRENT_VALUATION',
+                        profile=dossier.companies[symbol].model_dump(mode='json'))
+                    card['change_conditions']=dossier.companies[symbol].review_conditions
                 cards.append(card);failures[symbol]=reason
-        params={c['symbol']:c['assumptions'] for c in cards}
+        fallback={c['symbol']:c['assumptions'] for c in qualified['cards']}
+        params={c['symbol']:c['assumptions'] or fallback[c['symbol']] for c in cards}
         request=engine.ResearchRequest.model_validate(dict(pool_id='s3_p2',pool_version='v1',
             purpose='Retrospective same-input model comparison, not an investment signal',
             decision_at=qualified['decision_at'],source_manifest_sha256='0'*64,companies=params,
@@ -234,6 +253,7 @@ def make_bundle(parent_path,dossier_raw):
     q=requalified['payload'];old={c['symbol']:c for c in p['result']['cards']}
     root=parent_path.parent/'sources/inputs'
     manifest=archive._load(root,'manifest.json',p['request']['source_manifest_sha256'])
+    calibration={}
     for symbol,profile in dossier.companies.items():
         receipts=manifest['companies'][symbol].get('originals',[])
         for note in profile.source_notes:
@@ -243,10 +263,22 @@ def make_bundle(parent_path,dossier_raw):
             if (archive.file_hash(archive.safe_file(root,note.path))!=note.sha256 or note.begin>=note.end
                     or note.end>len(raw) or hashlib.sha256(raw[note.begin:note.end]).hexdigest()!=note.excerpt_sha256):
                 raise ValueError('P2_SOURCE_NOTE_EXCERPT_REJECTED')
+        calibration[symbol]=calibration_context(root,manifest,symbol,profile,p['request']['decision_at'])
     for card in q['result']['cards']:
         for field in ('quality','cross_checks','scenarios','assumptions','comparison_status'):
             if card[field]!=old[card['symbol']][field]:raise ValueError('P2_BASELINE_OWNER_REQUALIFICATION_DIFFERENCE')
     result=evaluate(q['result'],dossier,q['assessments'])
+    for card in result['cards']:
+        context=calibration[card['symbol']]
+        if context['disclosures'] or context['historical_pe']['samples']:
+            card['calibration_evidence']=context
+            if card.get('valuation_context'):
+                card['valuation_context']['historical_pe']=context['historical_pe']
+                if context['historical_pe']['samples']:
+                    card['assumption_context']['uncertainty']=[x for x in card['assumption_context']['uncertainty'] if x!='HISTORICAL_PIT_PE_UNKNOWN']
+                    card['assumption_context']['uncertainty'].append('SPARSE_ANNUAL_ASFILED_PE_ANCHORS_NOT_TTM_DISTRIBUTION_OR_FAIR_VALUE')
+                card['assumption_context']['management_guidance']['used_as_near_term_research_anchor']=(
+                    bool(context['disclosures']) and dossier.companies[card['symbol']].current_guidance=='QUALIFIED_NEAR_TERM_NOT_FIVE_YEAR_GUIDANCE')
     files={'baseline/bundle.json':parent_path}
     files.update({'baseline/'+name:archive.safe_file(parent_path.parent,name) for name in p['view_hashes']})
     files.update({'baseline/sources/'+name:archive.safe_file(parent_path.parent/'sources',name) for name in p['source_files']})
@@ -258,6 +290,78 @@ def make_bundle(parent_path,dossier_raw):
         source_files={name:archive.file_hash(path) for name,path in sorted(files.items())})
     payload['view_hashes']=archive.view_hashes(result)
     return dict(artifact_id=archive.digest(payload),payload=payload),files
+
+
+def calibration_context(root,manifest,symbol,profile,decision_at):
+    """Source/clock qualification in original Owners; never auto-predict parameters.
+
+    A filing-vintage annual PE is only a sparse retrospective anchor, NOT a
+    contemporaneously downloaded price vintage, TTM distribution or fair value.
+    Split-affected fiscal windows are rejected uniformly, without conversion.
+    """
+    from zoneinfo import ZoneInfo
+    from research_v2 import sec_disclosures as sec
+    from backend.services.s3_method_research import identity_projection
+    from backend.services.execution_plan.kline_provider import decode_av_daily,decode_av_splits
+    entry=manifest['companies'][symbol]
+    selected=[n for n in profile.source_notes if n.role in {'CURRENT_DISCLOSURE_CONTEXT','HISTORICAL_PE_ANCHOR'}]
+    context=dict(disclosures=[],historical_pe=dict(status='UNKNOWN',samples=[],rejected=[],
+        scope='SPARSE_RECONSTRUCTED_ASFILED_ANNUAL_PE_NOT_TTM_DISTRIBUTION; RAW_PRICE_FETCHED_AT_CURRENT_RESEARCH_TIME',
+        rule_version='s3-p2.1.asfiled-pe.v1'))
+    if not selected:return context
+    def raw(kind):
+        rec=entry[kind];path=archive.safe_file(root,rec['path'])
+        if archive.file_hash(path)!=rec['sha256'] or engine.stamp(rec['fetched_at'])>engine.stamp(decision_at):
+            raise ValueError('P2_CALIBRATION_SOURCE_HASH_OR_CLOCK')
+        return path.read_bytes(),rec['fetched_at']
+    directory,submissions=raw('directory'),raw('submissions')
+    issuer,_,_=identity_projection(symbol,directory,submissions)
+    filings=sec.discover_filings(issuer,json.loads(submissions[0]))
+    for note in selected:
+        filing=next((f for f in filings if f['full_url']==note.url),None)
+        receipt=next(r for r in entry['originals'] if r['path']==note.path)
+        body=archive.safe_file(root,note.path).read_bytes()
+        proof=sec.verify_filing_envelope((body,receipt['fetched_at']),issuer,filing)
+        if (not proof or engine.stamp(proof['published_at'])>engine.stamp(decision_at)
+                or engine.stamp(proof['fetched_at'])>engine.stamp(decision_at)):
+            raise ValueError('P2_CALIBRATION_DISCLOSURE_CLOCK_OR_IDENTITY')
+        if note.role=='CURRENT_DISCLOSURE_CONTEXT':
+            context['disclosures'].append(dict(**proof,form=filing['form'],report_date=filing['report_date'],
+                summary=note.summary,role='HUMAN_VERIFIED_RESEARCH_CONTEXT_NOT_OWNER_GAAP_METRIC_OR_FIVE_YEAR_GUIDANCE'))
+            continue
+        try:
+            eps=sec.asfiled_annual_eps((body,receipt['fetched_at']),issuer,filing)
+            price_raw,_=raw('price');split_raw,_=raw('splits')
+            if (entry['price'].get('function')!='TIME_SERIES_DAILY' or entry['splits'].get('function')!='SPLITS'
+                    or entry['price'].get('symbol')!=symbol or entry['splits'].get('symbol')!=symbol):
+                raise ValueError('HISTORICAL_PRICE_FUNCTION_OR_IDENTITY')
+            bars=decode_av_daily(json.loads(price_raw),symbol,count=100000,strict_identity=True).bars
+            public_day=engine.stamp(proof['published_at']).astimezone(ZoneInfo('America/New_York')).date().isoformat()
+            eligible=bars[bars['date']>public_day]
+            if eligible.empty:raise ValueError('NO_POST_PUBLICATION_PRICE')
+            row=eligible.iloc[0];day=row['date']
+            from datetime import datetime
+            closed=datetime.fromisoformat(day+'T16:00:00').replace(tzinfo=ZoneInfo('America/New_York'))
+            if closed.weekday()>=5 or closed>min(engine.stamp(decision_at),engine.stamp(entry['price']['fetched_at'])):
+                raise ValueError('HISTORICAL_PRICE_NOT_CLOSED_AT_RESEARCH_CLOCK')
+            numbers=[Decimal(str(row[k])) for k in ('open','high','low','close','volume')]
+            o,h,l,c,v=numbers
+            if not all(n.is_finite() and n>0 for n in numbers) or not l<=min(o,c)<=max(o,c)<=h:
+                raise ValueError('HISTORICAL_OHLCV_REJECTED')
+            # No hidden split adjustment from fiscal start through observed close.
+            events=decode_av_splits(json.loads(split_raw),symbol)
+            if any(eps['start']<=e['effective_date']<=day and Decimal(e['split_factor'])!=1 for e in events):
+                raise ValueError('SPLIT_AFFECTED_FISCAL_TO_PRICE_WINDOW')
+            price=Decimal(str(row['close']))
+            if not price.is_finite() or price<=0:raise ValueError('HISTORICAL_PRICE_NOT_POSITIVE')
+            context['historical_pe']['samples'].append(dict(**eps,price_date=day,price=str(price),
+                pe=engine.text(price/Decimal(eps['diluted_eps'])),
+                price_source_sha256=entry['price']['sha256'],split_source_sha256=entry['splits']['sha256'],
+                price_fetched_at=entry['price']['fetched_at'],split_fetched_at=entry['splits']['fetched_at']))
+        except ValueError as exc:
+            context['historical_pe']['rejected'].append(dict(source_ref=note.url,reason=pool._error_code(exc,'ASFILED_PE_INPUT_REJECTED')))
+    if context['historical_pe']['samples']:context['historical_pe']['status']='PARTIAL_SPARSE_ANNUAL_ANCHORS'
+    return context
 
 
 def replay(path):

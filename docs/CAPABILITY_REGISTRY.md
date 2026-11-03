@@ -1,6 +1,6 @@
 # WealthPilot 已有能力索引
 
-S3 P2本地研究候选沿[原Financial Research](../backend/services/market_data/financial_research.py)增加显式同EPS窗口的经营流量桥，复用[原估值/排序](../backend/services/market_data/quality_valuation.py)和[归档](../backend/services/quality_valuation_research.py)；[薄研究适配](../backend/services/s3_operating_research.py)消费公司特定经营dossier，提供五年收入/利润率/below-line/股份路径、联合敏感性、反推和新旧对照，不改变原事实信任Owner、四底线或旧方法。仅显式内部CLI，非生产MCP；实装边界、独立复算和未知见[S3 P2说明](v4.3/S3_P2_OPERATING_RESEARCH.md)。本地工程和专业评分单独留证，不表示完整盈利预测、8分达标或交易资格。
+S3 P2本地研究候选沿[原Financial Research](../backend/services/market_data/financial_research.py)增加显式同EPS窗口的经营流量桥，复用[原估值/排序](../backend/services/market_data/quality_valuation.py)和[归档](../backend/services/quality_valuation_research.py)；[薄研究适配](../backend/services/s3_operating_research.py)消费公司特定经营dossier，提供五年收入/利润率/below-line/股份路径、联合敏感性、反推和新旧对照，不改变原事实信任Owner、四底线或旧方法。仅显式内部CLI，非生产MCP；实装边界、独立复算和未知见[S3 P2说明](v4.3/S3_P2_OPERATING_RESEARCH.md)。P2.1增量在原SEC Owner增加opt-in `asfiled_annual_eps()`及原S3适配中的披露时钟/稀疏年度PE校准，已知未桥接跨类别权益事件拒绝可比回报，默认财务事实链不变；沿同一说明与CLI，不新增入口平台。本地工程和专业评分单独留证，不表示完整盈利预测、8分达标或交易资格。
 
 ## 4.3 五层能力复用补充（2026-10-30）
 

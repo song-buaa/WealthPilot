@@ -127,6 +127,33 @@ def verify_operating(path,parent_verifier):
         for card in p['result']['cards']:
             symbol=card['symbol'];oc=oldcards[symbol]
             assert card['quality']==oc['quality'] and card['cross_checks']==oc['cross_checks']
+            context=card.get('calibration_evidence')
+            if context:
+                from zoneinfo import ZoneInfo
+                cutoff=datetime.fromisoformat(p['result']['decision_at'])
+                entry=manifest['companies'][symbol]
+                inputs=parent_path.parent/'sources/inputs'
+                for proof in context['disclosures']+context['historical_pe']['samples']:
+                    assert datetime.fromisoformat(proof['published_at'])<=datetime.fromisoformat(proof['fetched_at'])<=cutoff
+                    assert any(r['sha256']==proof['source_sha256'] and r['url']==proof.get('source_ref') for r in entry['originals'])
+                price=json.loads((inputs/entry['price']['path']).read_text())['Time Series (Daily)']
+                splits=json.loads((inputs/entry['splits']['path']).read_text())['data']
+                for sample in context['historical_pe']['samples']:
+                    public=datetime.fromisoformat(sample['published_at']).astimezone(ZoneInfo('America/New_York')).date().isoformat()
+                    day=min(d for d in price if d>public)
+                    assert sample['price_date']==day
+                    closed=datetime.fromisoformat(day+'T16:00:00').replace(tzinfo=ZoneInfo('America/New_York'))
+                    assert closed.weekday()<5 and closed<=min(cutoff,datetime.fromisoformat(sample['price_fetched_at']))
+                    assert not any(sample['start']<=s['effective_date']<=day and D(s['split_factor'])!=1 for s in splits)
+                    assert sample['price_source_sha256']==entry['price']['sha256'] and sample['split_source_sha256']==entry['splits']['sha256']
+                    close(sample['price'],D(price[day]['4. close']))
+                    close(sample['pe'],D(price[day]['4. close'])/D(sample['diluted_eps']))
+            unit=p['dossier']['companies'][symbol].get('return_unit_qualification','NO_KNOWN_UNRESOLVED_DISTRIBUTION')
+            if unit!='NO_KNOWN_UNRESOLVED_DISTRIBUTION':
+                assert not card['scenarios'] and card['rank'] is None and card['comparison_status']=='NOT_COMPARABLE'
+                assert card['failure_reason']==unit
+                assert card['assumptions'] is None and not {'conditional_value_range','formula','assumption_context'} & card.keys()
+                assert card['unexecuted_operating_profile']['status']=='UNEXECUTED_NOT_CURRENT_VALUATION'
             if not card['scenarios']:assert card['comparison_status']=='NOT_COMPARABLE';continue
             base=card['operating_baseline'];eps=D(str(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm']));price=D(str(card['cross_checks']['observed_price']['values']['observed_price']));rate=D(card['assumptions']['required_return'])
             assert base['eps']==oc['cross_checks']['diluted_eps_ttm']

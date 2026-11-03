@@ -36,3 +36,19 @@ python scripts/s3_independent_recompute.py /private/research/archive/ARTIFACT/bu
 CLI业务导入前禁网，不建MCP/Runtime/数据库。改dossier再运行产生新版本，不覆盖旧版本。同输入/参数/方法确定性重复；replay重跑Owner，不能只相信存储投影。标准库[校验器](../../scripts/s3_operating_verify.py)独立检查父工件、流量桥、年度路径、终值/反推、八项/九格、重中心化资格及排名，不导入业务引擎。
 
 边界[回归](../../tests/test_s3_p2_operating_model.py)使用合成材料。四家真实dossier/原件/输出在私人交付，不进Git。独立Review按数据准确性、预测合理性、估值可信度、风险、决策价值等权评分；工程通过不自动代表8分或未来收益。
+
+## P2.1 本地证据校准增量
+
+`s3-p2.operating-earnings.v1.1`保留原经营桥、终值公式、10%/−10%研发阈值、八项/九格门禁和排序。原P2归档不改；旧方法在原source version回放，新旧数值兼容另做同输入/参数对照。未Push、未集成、未部署。
+
+新增两种显式原件笔记：`CURRENT_DISCLOSURE_CONTEXT`和`HISTORICAL_PE_ANCHOR`。它们必须绑定父工件公司manifest的SEC原件URL、全文/片段hash，经原SEC envelope/identity确认披露与抓取均不晚于新的decision_at；摘要是人工核对的研究上下文，不自动成为Owner GAAP事实或五年指引。近季度指引的适用期、已结束待披露季度目标、非GAAP定义变化、一次性项及原事实覆盖滞后分别说明。新披露不能塞回旧P1/P2决策时钟。
+
+[原SEC Owner](../../research_v2/sec_disclosures.py)增加opt-in `asfiled_annual_eps()`：仅原primary 10-K当前财年、单上市类别、非分部US GAAP diluted EPS、USD/shares、350–380天年度、期间不晚于申报及公开日；不采用后续报表比较列、不做股份换算/TTM/正常化。Unsupported编码、重复/冲突、负EPS及多上市类别拒绝；默认SEC事实链不调用此入口。
+
+稀疏年度PE只配对严格晚于NY公开资格日期的首个真实原始交易日收盘，并在新研究时点已经完成。价格/SPLITS沿原Owner严格解码和身份；OHLCV/来源hash/抓取时钟校验，财年起点至配对日跨任何非1拆股统一拒绝。原始价格在今天抓取，绝不声称当年下载快照或完整历史PIT估值分布；年度GAAP税项/损益可能污染倍数。2–3个样本只能检验终值假设量级，不能宣称历史均值、公允PE或机械决定终值。
+
+`Profile.return_unit_qualification`是显式研究输入。已知未来跨类别派发且缺乏原Owner经济权益桥时，`KNOWN_FUTURE_CLASS_DISTRIBUTION_REQUIRES_ENTITLEMENT_BRIDGE`保留质量卡，清空可比回报并令rank=None；不是基本面差，不降为观察后继续数值排名。不能把股票股息当现金、额外100%收益、SBC稀释或擅自按两类价格各半。META新增C类事件属于此真实证据边界。
+
+四组对照分离：旧D0/旧参数/原方法；同D0参数新方法兼容；新D1时点数据/旧数值参数；新D1/校准参数。后两组允许新资料改变适用性；不能把数据/时间/假设效应混称模型准确性提升。股息继续零建模，未来股数、正常化、ROIC及未合格来源缺口不因新增证据而自动解除。
+
+P2.1边界回归见[测试](../../tests/test_s3_p2_1_calibration.py)。独立标准库复算扩展验证历史配对/拆股/PE数值与资格时钟；原SEC数据真实性仍由来源Owner及人工原件Review负责，不以算术复算代替数据审计。真实私人校准报告与五维评分分别交PM，不因工程通过或样本回报升降就宣称8分达标。
