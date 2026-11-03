@@ -174,3 +174,5 @@ P1.1定点修复仍复用上述原财务投影/SEC表格/Output Policy：同原�
 P2汽车经营指标候选沿原[SEC来源](../research_v2/sec_disclosures.py)、[官方表格语义](../research_v2/official_disclosures.py)、[Evidence Registry](../backend/services/market_data/evidence.py)和[financial_research](../backend/services/market_data/financial_research.py)运行，复用[Output Policy](../backend/services/market_data/output_policy.py)最终数字绑定；明确季度交付/汽车收入/车辆毛利率缺源即UNKNOWN，汽车收入/交付量只为近似。LI与XPEV真实完整SEC原文均覆盖离线来源资格回归；XPEV封面同一表格行分列的EX-99.1声明按精确附件身份识别。该回归不代表生产自动发现或真实PEER验收。口径与边界见[4.2实现记录](V42_IMPLEMENTATION.md)。
 
 PR-A（原财务研究Owner最小扩展）：`backend/services/market_data/financial_research.py::build_valuation_inputs`提供正式资产负债/股份/ADS输入与UNKNOWN清单；复用原SEC/官方表格、Evidence和`build_quality`。输出`cash_less_disclosed_borrowings`为部分借款口径，非完整net_cash；加权股数不授予市值资格。原Output Policy同源重核与单位渲染不改变值或交易边界；验收见`tests/test_valuation_inputs.py`和`docs/V42_IMPLEMENTATION.md`的PR-A记录。
+
+PR-B开发候选：`quality_valuation.foreign_ads_earnings_research` 在原S3 Owner复用五年EPS/股数/分红/终值算术，仅接受原Financial Research合格的连续四季度每ADS EPS、日线观察价、同点FX和官方ADS比例；研究假设与历史事实分离，不进入原domestic排序或交易资格。LI经营恢复及美团IFRS路径未闭合，见V42实现记录。
