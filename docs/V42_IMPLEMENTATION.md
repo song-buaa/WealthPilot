@@ -644,3 +644,13 @@ L2 最小修复，复用原 Evidence / Financial Research / ACTIVE Policy / MCP�
 代码断点：`consumers.finalize_output` 原先先拼接 records/verified_field_records，丢失 symbol、历史/期间字段及派生计算所需的 owner assessment；财务 `calc:` 引用随之不可用。现逐个完整 assessment 通过原 `_evidence_index` 重核后再组合，保留相同来源/时钟/冲突规则。重复投影仍复核原 text_template/numbers，不接受渲染文本的自由数字。MCP 只透传本轮服务端生成的诊断，保留首次 generation 与本次 final；复制诊断防止后续投影覆盖首次计数，不从模型 JSON 采信自报诊断。ACTIVE 输出明确 `research_delivery_status`；MCP 最终零合格解释时 `professional_analysis_complete=false`、professional_result=incomplete，并列明缺失 professional_explanation，财务事实可继续 partial。阶段完成不等于研究交付完成。
 
 Registry 无需更新：原 owner 和入口未变。生产只读核验不启动研究；开发真实模型使用隔离临时持仓、冻结公开 SEC 与只读核验的政策结构化投影（校验 structured hash），不复制生产库，不修改政策或 E1。完整业务评分仍依实际交付内容，不以工程结果替代 LI 8 分验收。
+
+## PR-A：正式估值输入与报告交付口径（2026-11-03）
+
+范围L2：沿原SEC/official_disclosures、Evidence及Financial Research补正式资产负债与股份输入，不实现PR-B估值/预测，不改政策、模型、资产或交易。原S3默认domestic/USD适用性不放宽。通用原文解析新增明确合并资产负债表的日期/报告币/单位，以及GAAP加权股数和明确ADS脚注；加权股数与点时股数分开，不把任意历史/否定ADS提及变成当前比例。原CompanyFacts同一请求同时投影普通与质量字段，不增加第二个Provider；显式币种的`build_quality`原默认USD仍保持。
+
+`financial_research.build_valuation_inputs()`是原Owner的纯投影：提供带来源的资产负债、报告币、加权/已披露点时股数观察及ADS关系；不等于已验证当前经济总股本或公司行动。现金减已披露短/长期借款只输出`cash_less_disclosed_borrowings`，`debt_coverage=PARTIAL_DISCLOSED_BORROWINGS`、`usable_for_equity_bridge=false`；完整`net_cash`、`market_cap`仍N/A。受限现金、定存/投资不随意计入可分配现金；未披露的其他债务不填零。报告币只能由同一最新资产负债期的明确原文列证明，历史币种不能替最新混币数据授予资格。旧字段保留历史标记，不冒充当前余额，不改TTL。
+
+原Output Policy索引/数字绑定接入正式质量字段，仍执行来源/时钟与纯财务竞争解释条件限制；原`captured_facts`重复核验完整质量上下文。ACTIVE已交付解释时采用“已核验研究事实”正文，未完成时继续保留原未完成提示。金额/交付/股数/比率仅调整显示单位与舍入，原值、公式、哈希及绑定不变。无币种交付不再显示“无币种比率”。
+
+真实LI/PDD完整SEC冻结原文及开发公开CompanyFacts/Submissions/目录回放覆盖解析、身份、原始哈希与实际抓取时钟。原Q2冻结原文的历史下载钟仍按原夹具说明，不补造；本次新公开请求单独保存实际完成时间。美团仅做官方公告可行性检查，不把可读PDF等同已接入Evidence；HK/IFRS原文资格及映射未闭合时保持缺口，不阻断LI/PDD交付。只有三PR集成后才安排完整隔离LI质量评估；本PR不启动生产Job或为评分重复部署。

@@ -74,6 +74,8 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     context["effective_rules_provenance"]=rule_source
     member_ids={m["id"] for m in (context.get("company_exposure") or {}).get("members",[])}
     context["security_inputs"]=[r for r in rows if r.get("id") in member_ids]
+    from backend.services.market_data.financial_research import build_valuation_inputs
+    assessment["valuation_inputs"]=build_valuation_inputs(assessment)
     assessment["allocation_context"]=context
     assessment['research_intent']=research_intent(options)
     if assessment['research_intent']['objective']=='evaluate' and 'objective' not in assessment['research_intent']['sources']:
@@ -420,10 +422,16 @@ def fact_sections(assessment, *, include_scenarios=True):
         field_currencies=sorted({f.get('currency') for f in assessment.get('verified_field_records',[]) if f.get('currency') and str(f.get('record_id','')).startswith(str(r.get('record_id'))+':')})
         report_currency=r['values'].get('report_currency') or '/'.join(field_currencies) or '未核验'
         facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；经营财务币种 {report_currency}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
+    from backend.services.market_data.financial_research import build_valuation_inputs, display
+    valuation=build_valuation_inputs(assessment)
+    bridge=valuation.get('cash_less_disclosed_borrowings')
+    if bridge:
+        section('历史现金/借款口径（非可分配净现金或公允价值）',
+            display(dict(values={'cash_less_disclosed_borrowings':float(bridge['value'])},unit='currency_units',currency=bridge['currency'],period=bridge['period']),'cash_less_disclosed_borrowings')+f"；{bridge['basis']}；引用："+', '.join(bridge['evidence_refs']))
     # Display equal facts once; all original records/references remain in evidence.
     import json
     grouped={}
-    for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[]):
+    for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[])+assessment.get('quality_field_records',[]):
         key=(r.get('field'),r.get('period'),r.get('currency'),r.get('scope'),
              json.dumps(r.get('values'),sort_keys=True,default=str))
         grouped.setdefault(key,[]).append(r)
@@ -431,7 +439,7 @@ def fact_sections(assessment, *, include_scenarios=True):
         r=equal[0]
         scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
-        facts.append(f"- {scope}字段事实 {r.get('field')}：{r.get('values')}；币种 {r.get('currency') or '未核验'}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
+        facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
     from backend.services.market_data.financial_research import build,display
     financial=build(assessment)
     for metric in financial['records']:

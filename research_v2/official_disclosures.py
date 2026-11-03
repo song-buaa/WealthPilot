@@ -682,3 +682,80 @@ def collect(symbol, candidates=()):
     ir_rows, _ = _collect_li(symbol, candidates)
     rows = [*sec_rows, *ir_rows]
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get
+
+
+def parse_valuation_statement_inputs(soup, published):
+    """Exact balance labels/dated columns and weighted shares in GAAP exhibits.
+
+    No ticker branches, assumed zeros, balance-sheet date from release headline,
+    or substitution of weighted shares for point-in-time shares outstanding.
+    """
+    from research_v2.sec_disclosures import QUALITY_CONCEPTS
+    bases = dict(QUALITY_CONCEPTS.values())
+    labels = {'cash and cash equivalents':'quality_cash', 'restricted cash':'quality_restricted_cash',
+        'time deposits and short-term investments':'quality_deposits_investments',
+        'short-term borrowings':'quality_current_debt', 'long-term borrowings':'quality_noncurrent_debt',
+        'total assets':'quality_assets', 'total liabilities':'quality_liabilities',
+        'total current assets':'quality_current_assets','total current liabilities':'quality_current_liabilities',
+        'total shareholders’ equity':'quality_total_equity', 'total shareholders\' equity':'quality_total_equity', 'noncontrolling interests':'quality_noncontrolling'}
+    result=[]
+    # Only a standalone current footnote or an exact GAAP EPS row can prove
+    # the ratio. A historical/changed/negated mention elsewhere is not authority.
+    nums={'one':1,'two':2,'three':3,'four':4,'five':5,'ten':10}
+    ratios=set()
+    for node in soup.find_all(['p','div']):
+        match=re.fullmatch(r'(?:[0-9]+\s*)?Each ADS represents (\d+|one|two|three|four|five|ten) Class A ordinary shares\.?',node.get_text(' ',strip=True),re.I)
+        if match:ratios.add(nums.get(match[1].lower(),int(match[1]) if match[1].isdigit() else None))
+    for ti,table in enumerate(soup.find_all('table')):
+        try:rows=_grid(table)
+        except ValueError:continue
+        context=_table_context(table);head=(context+' '+' '.join(' '.join(r) for r in rows[:2])).lower()
+        if re.search(r'non-gaap|reconciliation',head):continue
+        balance=bool(re.search(r'consolidated balance sheets',head))
+        income=_statement_kind(rows,context)=='income'
+        if not balance and not income:continue
+        scales=[scale for label,scale in [('thousands',1000),('millions',1000000)] if re.search(r'in '+label,head)]
+        if len(scales)!=1:continue
+        table_ratios=set(ratios)
+        if income:
+            for row in rows:
+                match=re.fullmatch(r'Earnings per ADS \((\d+) ordinary shares equals 1 ADS\):?',row[0].strip(),re.I) if row else None
+                if match:table_ratios.add(int(match[1]))
+        group=None;group_scale=None
+        for ri,row in enumerate(rows):
+            if not row:continue
+            label=row[0].strip().lower().rstrip(':')
+            if income and re.fullmatch(r'weighted[- ]average (?:number of )?ordinary shares(?: outstanding)?(?: \(in (?:thousands|millions)\))?',label):
+                group='quality_diluted_shares'
+                group_scale=1000000 if '(in millions)' in label else 1000 if '(in thousands)' in label else 1 if 'except for ads/ordinary share' in head else None
+            elif income and re.fullmatch(r'weighted[- ]average (?:number of )?adss?',label):
+                group='quality_diluted_ads_shares';group_scale=1 if 'except for ads/ordinary share' in head else None
+            elif income and label and label not in {'basic','diluted','-basic','-diluted'}:group=None
+            if balance and re.fullmatch(r'total .+ shareholders[’\'] equity',label):
+                labels[label]='quality_equity'  # Explicit parent equity; not total equity including NCI.
+            field=labels.get(label) if balance else group if label in {'diluted','-diluted'} else None
+            if not field:continue
+            for col in range(1,len(row)):
+                header=_column_header(rows,ri,col)
+                dates=set(re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2}',header))
+                if len(dates)!=1:continue
+                end=datetime.strptime(next(iter(dates)).replace(',',''),'%B %d %Y').date().isoformat()
+                if end>published[:10]:continue
+                currencies={_column_currency(v) for r in rows[:ri] for v in ([r[col]] if col<len(r) else [])} - {None}
+                if len(currencies)!=1:continue
+                currency=next(iter(currencies))
+                if currency!='CNY':continue  # Explicit reporting RMB only; convenience USD is not a second fact.
+                value=_cell_amount(rows,ri,col)
+                if value is None or not value.is_finite() or value<0:continue
+                start=_calendar_quarter_start(header,end) if income else None
+                if income and (not start or group_scale is None):continue
+                result.append(dict(source_field=field,value=float(value),currency=None if income else currency,
+                    unit='shares' if income else 'currency_units',unit_scale=group_scale if income else scales[0],
+                    period_basis='quarterly' if income else 'instant',fiscal_period_start=start,fiscal_period_end=end,
+                    currency_role='reporting_currency' if balance else None,accounting_basis=bases[field],source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
+                if income and len(table_ratios)==1 and next(iter(table_ratios)):
+                    result.append(dict(source_field='quality_ads_ratio',value=next(iter(table_ratios)),currency=None,
+                        unit='ordinary_shares_per_ads',unit_scale=1,period_basis='instant',fiscal_period_start=None,
+                        fiscal_period_end=published[:10],accounting_basis=bases['quality_ads_ratio'],
+                        source_locator=f'table[{ti}]/column[{col}]; original explicit ADS/ordinary share statement'))
+    return result
