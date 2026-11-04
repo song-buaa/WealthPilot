@@ -1,11 +1,14 @@
 # WealthPilot 已有能力索引
 
+S3 P2本地研究候选沿[原Financial Research](../backend/services/market_data/financial_research.py)增加显式同EPS窗口的经营流量桥，复用[原估值/排序](../backend/services/market_data/quality_valuation.py)和[归档](../backend/services/quality_valuation_research.py)；[薄研究适配](../backend/services/s3_operating_research.py)消费公司特定经营dossier，提供五年收入/利润率/below-line/股份路径、联合敏感性、反推和新旧对照，不改变原事实信任Owner、四底线或旧方法。仅显式内部CLI，非生产MCP；实装边界、独立复算和未知见[S3 P2说明](v4.3/S3_P2_OPERATING_RESEARCH.md)。P2.1增量在原SEC Owner增加opt-in `asfiled_annual_eps()`及原S3适配中的披露时钟/稀疏年度PE校准，已知未桥接跨类别权益事件拒绝可比回报，默认财务事实链不变；沿同一说明与CLI，不新增入口平台。本地工程和专业评分单独留证，不表示完整盈利预测、8分达标或交易资格。
+
 ## 4.3 五层能力复用补充（2026-10-30）
 
 五层职责、14份Skill逐项矩阵、研究融合与最小Gap统一见[统一投资决策架构](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md)。本节仅索引原Owner，不新建Registry/Runtime。CODE表示源码可用，生产/研究证据分别列出；不因主分支合入而升级策略资格。
 
 | 能力/业务层 | 原Owner及入口 | 成熟度与复用限制 |
 |---|---|---|
+| 个人AV × LEAN离线历史回测 | [prepare](../research_backtest/prepare.py)、[原生转换/账本](../research_backtest/native_data.py)、[隔离运行](../research_backtest/run.py)、[独立复算](../research_backtest/verify.py)、[资格汇总](../research_backtest/report.py)；来源/使用见[能力合同](v4.3/AV_LEAN_RESEARCH_INFRA.md) | 五ETF3598日研究设施PASS，严格分红金额/支付日结算PARTIAL；只消费冻结文件、不复制AV HTTP/Key客户端或调用生产Owner。严格请求启动前拒绝，默认模式不得替代；[核心](../tests/test_research_backtest_core.py)、[拒绝](../tests/test_research_backtest_review_guards.py)、[隔离](../tests/test_research_backtest_isolation.py)。不是全市场PIT/退市覆盖或实盘资格 |
 | 正式政策L1 | 原[philosophy](../backend/services/philosophy_service.py)/[discipline](../backend/services/discipline_service.py)/[config](../app/discipline/config.py)/[knowledge](../knowledge_base/README.md)；P1候选[investment_policy](../backend/services/investment_policy) | 两份私人Markdown内容已批准；[P1](v4.3/INVESTMENT_POLICY_P1.md)提供派生/不可变Bundle/只读PolicyService/迁移探针，[P2](v4.3/INVESTMENT_POLICY_P2.md)以原runtime/consumers接入Web/Allocation/纪律/PEER及可选只读MCP；默认LEGACY、ACTIVE仅合成验证，未部署或真实ACTIVE；无默认值冒充新版政策；[P3-B](v4.3/INVESTMENT_POLICY_P3B.md)复用同三表补正式Publisher/审批安装收据/版本回滚及隔离副本DDL，本地候选，非生产迁移；[R1共库受限连接](../backend/services/investment_policy/colocated.py)复用原共享契约及authorizer，生产Schema/备份与外键资格仍按独立收据判定 |
 | 政策Schema显式安装（本地候选） | [schema_install](../backend/services/investment_policy/schema_install.py)、[CLI](../scripts/install_policy_schema.py)，原shared_sqlite仍为身份Owner | 三表九trigger、单事务、原子Owner指纹切换与显式向前恢复；[测试](../tests/test_policy_schema_install.py)、[一次连续上线Runbook](v4.3/POLICY_SCHEMA_INSTALL_RUNBOOK.md)。不由启动/部署/PolicyService自动执行，不创建Bundle/激活，不控制生产进程。用户报告5571087的LEGACY部署及18工具通过；本轮只验证隔离副本，生产安装未执行 |
 | 共享证据L2 | [U1](../app/asset_views.py)、[Portfolio](../backend/services/portfolio_service.py)、[Evidence](../backend/services/market_data/evidence.py)、[SEC](../research_v2/sec_disclosures.py)、[Repository](../research_v2/repository.py) | CODE/限定历史运行证据；复用身份、币种、来源时点及质量；共享目标池版本引用仍PROPOSED |
@@ -172,3 +175,13 @@ P1.1定点修复仍复用上述原财务投影/SEC表格/Output Policy：同原�
 基础估值正向链 P1 本地候选仍由[SEC原 Owner](../research_v2/sec_disclosures.py)、[正式表格解析](../research_v2/official_disclosures.py)、[Evidence](../backend/services/market_data/evidence.py)和[financial_research](../backend/services/market_data/financial_research.py)共同完成：正式8-K/EX-99.1的GAAP稀释EPS以CompanyFacts年度/前季事实证明非日历Q4期间，原日线Evidence核验价格，原`build`确定性输出四季EPS、历史PE和盈利收益率。AAPL/NVDA真实原文禁网回归及开发侧冻结复算见[来源说明](V42_US_FINANCIAL_SOURCES.md)；不代表生产研究、内在价值或交易资格。
 
 P2汽车经营指标候选沿原[SEC来源](../research_v2/sec_disclosures.py)、[官方表格语义](../research_v2/official_disclosures.py)、[Evidence Registry](../backend/services/market_data/evidence.py)和[financial_research](../backend/services/market_data/financial_research.py)运行，复用[Output Policy](../backend/services/market_data/output_policy.py)最终数字绑定；明确季度交付/汽车收入/车辆毛利率缺源即UNKNOWN，汽车收入/交付量只为近似。LI与XPEV真实完整SEC原文均覆盖离线来源资格回归；XPEV封面同一表格行分列的EX-99.1声明按精确附件身份识别。该回归不代表生产自动发现或真实PEER验收。口径与边界见[4.2实现记录](V42_IMPLEMENTATION.md)。
+
+PR-A（原财务研究Owner最小扩展）：`backend/services/market_data/financial_research.py::build_valuation_inputs`提供正式资产负债/股份/ADS输入与UNKNOWN清单；复用原SEC/官方表格、Evidence和`build_quality`。输出`cash_less_disclosed_borrowings`为部分借款口径，非完整net_cash；加权股数不授予市值资格。原Output Policy同源重核与单位渲染不改变值或交易边界；验收见`tests/test_valuation_inputs.py`和`docs/V42_IMPLEMENTATION.md`的PR-A记录。
+
+PR-B开发候选：原S3 Owner的`quality_valuation.foreign_ads_conditional_research`分派正盈利ADS五年收益及亏损发行人的有界经营恢复假设；均复用原Evidence/Financial Research，研究假设与历史事实分离，不进入domestic排序、正式公允价值或交易资格。显式`ResearchIntent.conditional_valuation`及普通长期研究意图均沿原PEER；后者仅在EPS、价格、FX、静态PE和同比均合格时生成标为系统参考敏感性的PDD类条件情景，来源或独立假设不足返回`HYPOTHESES_REQUIRED`及N/A。原Output Policy、ACTIVE最终再验证和MCP结果投影继续适用。LI当前股数/完整净现金与美团IFRS资格未闭合；见V42实现记录。
+
+S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
+
+S3 P2.2本地候选沿[原经营研究](../backend/services/s3_operating_research.py)与[原官方披露Owner](../research_v2/official_disclosures.py)增加限定官方IR上下文捕获资格、稀疏年度PE经营背景和#89空参数拒绝卡兼容；不提升为GAAP、不回填网页PIT、不改变生产默认方法。版本、测试、正常MCP仍需薄适配及发布准备边界见[P2实施记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p22-本地证据与发布准备候选)。
+
+S3 P3专业入口候选：原[公司池服务](../backend/services/s3_research_entry.py)与[既有MCP工具](../pocs/chatgpt_skills/company_pool.py)增加可选`request.method=standard|professional`，默认P1；[专业适配](../backend/services/s3_professional_research.py)绑定服务端已评审P2.2档案和新时点原Owner资格，三公司场景参数不改，META保护优先，变更/缺证不静默P1回退。原start/get/read、冻结与独立复算复用，无新工具/Runtime/数据库/交易权限。合同及分阶段发布证据见[P3记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。

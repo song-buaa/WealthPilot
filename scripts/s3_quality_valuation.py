@@ -28,6 +28,10 @@ def main():
     pool.add_argument('--av-env-file', type=Path)
     pool.add_argument('--assumptions', type=Path)
     pool.add_argument('--archive', type=Path, required=True)
+    operating = sub.add_parser('operating', help='P2 same-frozen-input operating scenarios; explicit research dossier')
+    operating.add_argument('parent', type=Path)
+    operating.add_argument('--dossier',type=Path,required=True)
+    operating.add_argument('--archive',type=Path,required=True)
     recalc = sub.add_parser('recalculate', help='Change explicit assumptions on an existing frozen decision clock')
     recalc.add_argument('bundle', type=Path)
     recalc.add_argument('--assumptions', type=Path, required=True)
@@ -81,7 +85,13 @@ def main():
     socket.socket.connect = deny
     socket.create_connection = deny
     from backend.services.quality_valuation_research import make_bundle, save_bundle, read_bundle, replay, difference
-    if args.command == 'pool':
+    if args.command == 'operating':
+        from backend.services.s3_operating_research import make_bundle as operating_bundle
+        bundle,files=operating_bundle(args.parent,json.loads(args.dossier.read_text()))
+        target=save_bundle(args.archive,bundle,files)
+        result=dict(artifact_id=bundle['artifact_id'],bundle=str(target/'bundle.json'),
+            comparable_count=bundle['payload']['result']['comparable_count'])
+    elif args.command == 'pool':
         bundle, files = pool_bundle(source_root, request)
         path = save_bundle(args.archive,bundle,files)
         result = dict(artifact_id=bundle['artifact_id'],bundle=str(path/'bundle.json'),
@@ -114,7 +124,10 @@ def main():
     elif args.command == "read":
         result = read_bundle(args.bundle)["payload"]["result"]
     elif args.command == "replay":
-        if read_bundle(args.bundle)['payload']['result']['method_version'].startswith('s3-d.'):
+        if read_bundle(args.bundle)['payload']['result']['method_version'].startswith('s3-p2.'):
+            from backend.services.s3_operating_research import replay as operating_replay
+            result=operating_replay(args.bundle)
+        elif read_bundle(args.bundle)['payload']['result']['method_version'].startswith('s3-d.'):
             from backend.services.s3_pool_research import replay as pool_replay
             result = pool_replay(args.bundle)
         elif read_bundle(args.bundle)['payload']['result']['method_version'].startswith('s3-c.'):

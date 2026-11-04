@@ -51,6 +51,31 @@ def test_v42_targets_and_scenarios_roundtrip_actual_mcp_schema(monkeypatch):
     asyncio.run(run())
 
 
+def test_explicit_conditional_research_assumptions_cross_original_mcp_schema(monkeypatch):
+    case = dict(earnings_growth='.04', annual_share_change='0', terminal_pe='12', dividend_payout='0')
+    assumptions = dict(basis='S3_RESEARCH_ASSUMPTION_NOT_POLICY',
+                       rationale='Synthetic MCP serialization contract only.', required_return='.10',
+                       cautious=dict(case, earnings_growth='0'), base=case,
+                       optimistic=dict(case, earnings_growth='.08'))
+    calls=[]
+    def record(self, operation, arguments):
+        calls.append((operation,arguments))
+        return dict(synthetic=True,scenario=operation,status='partial',issues=['TEST_ONLY'],
+                    queried_at='2026-11-03T00:00:00+00:00',conclusion='fixture')
+    monkeypatch.setattr(BusinessClient,'call',record)
+    async def run():
+        server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
+        async with Client(server,mode='legacy') as client:
+            tool=next(t for t in (await client.list_tools()).tools if t.name=='analyze_position')
+            request=dict(symbol='PDD:US',question='仅研究有条件的五年收益，不执行交易',
+                         research_context=dict(objective='evaluate',conditional_valuation=assumptions))
+            jsonschema.validate({'request':request},tool.input_schema)
+            result=await client.call_tool('analyze_position',{'request':request})
+            assert not result.is_error
+            assert calls[0][1]['research_context']['conditional_valuation']['basis']=='S3_RESEARCH_ASSUMPTION_NOT_POLICY'
+    asyncio.run(run())
+
+
 def test_server_target_configuration_crosses_business_process_boundary(monkeypatch, tmp_path):
     """The path is server configuration, never a tool argument or confirmation."""
     import subprocess
