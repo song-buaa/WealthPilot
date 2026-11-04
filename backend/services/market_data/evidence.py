@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import math
+import re
 from urllib.parse import urlparse
 
 
@@ -280,6 +281,9 @@ _OFFICIAL_FIELD_BASIS = {"totalRevenue":"total_revenue", "operatingCashflow":"op
                          "incomeTaxReported":"income_tax_as_reported",
                          "sellingGeneralAdminReported":"combined_selling_general_admin_as_reported",
                          "vehicleDeliveries":"vehicle_deliveries", "vehicleSales":"vehicle_sales", "vehicleMargin":"vehicle_margin",
+                         "coreLocalRevenue":"core_local_commerce_revenue", "newInitiativesRevenue":"new_initiatives_revenue",
+                         "coreLocalOperatingIncome":"core_local_commerce_operating_income",
+                         "newInitiativesOperatingIncome":"new_initiatives_operating_income",
                          "dilutedEPSADS":"diluted_eps_ads", "dilutedEPSOrdinary":"diluted_eps_ordinary"}
 
 
@@ -324,12 +328,23 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
             and ((parsed.hostname=="data.sec.gov" and parsed.path=="/api/xbrl/companyfacts/CIK"+cik+".json")
                  or (parsed.hostname=="www.sec.gov" and parsed.path.startswith("/Archives/edgar/data/"+str(int(cik))+"/"))))
         if sec_source: issuer=expected
+    # The HKEX source owner verifies an exact issuer-directory row and re-fetches
+    # the linked original. Neither a research card nor a bare PDF URL can confer
+    # source authority or publication time.
+    hkex_source=(issuer=='MEITUAN' and symbol=='3690:HK' and
+        parsed.hostname=='www1.hkexnews.hk' and not parsed.query and not parsed.fragment and
+        re.fullmatch(r'/listedco/listconews/sehk/\d{4}/\d{4}/\d+\.pdf',parsed.path) is not None and
+        meta.get('stock_code')=='03690' and proof.get('stock_code')=='03690' and
+        proof.get('document_url')==raw.get('source_url') and
+        proof.get('listing_url')=='https://www1.hkexnews.hk/search/titlesearch.xhtml?category=0&market=SEHK&stockId=198419' and
+        isinstance(proof.get('listing_sha256'),str) and len(proof['listing_sha256'])==64 and
+        proof['listing_url'] in str(proof.get('publication_locator','')))
     # Preserve the reviewed legacy full-submission LI parser's independent proof.
     sec_original = (issuer == "LI_AUTO" and parsed.hostname == "www.sec.gov"
                     and parsed.path.startswith("/Archives/edgar/data/") and not identity)
     host=parsed.hostname or ""
     published,fetched=stamp(raw.get("published_at")),stamp(raw.get("fetched_at"))
-    if (parsed.scheme!="https" or parsed.username or parsed.password or not (sec_source or (domain and (host==domain or host.endswith("."+domain))) or sec_original)
+    if (parsed.scheme!="https" or parsed.username or parsed.password or not (sec_source or hkex_source or (domain and (host==domain or host.endswith("."+domain))) or sec_original)
             or not issuer or meta.get("issuer_id")!=issuer or meta.get("source_url")!=raw.get("source_url")
             or not raw.get("record_id") or not published or not fetched or not published<=fetched<=at
             or any(token in str(raw.get("source","")).lower() for token in ("seed","mock","fixture","synthetic","demo"))
@@ -346,7 +361,7 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
             continue
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
         if (key not in (_OFFICIAL_FIELD_BASIS | quality_basis) or obs.get("accounting_basis") not in {(_OFFICIAL_FIELD_BASIS | quality_basis)[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
-                or obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
+                or obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual","monthly"} if sec_source and key=="vehicleDeliveries" else {"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
                 or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent","quality_shares":"shares","quality_diluted_shares":"shares","quality_diluted_ads_shares":"shares","quality_ads_ratio":"ordinary_shares_per_ads"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
@@ -650,15 +665,19 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "incomeTaxReported":"income_tax_reported_quarter",
                       "sellingGeneralAdminReported":"selling_general_admin_reported_quarter",
                       "vehicleDeliveries":"vehicle_deliveries_quarter", "vehicleSales":"vehicle_sales_quarter", "vehicleMargin":"vehicle_margin_pct",
+                      "coreLocalRevenue":"core_local_commerce_revenue_quarter", "newInitiativesRevenue":"new_initiatives_revenue_quarter",
+                      "coreLocalOperatingIncome":"core_local_commerce_operating_income_quarter",
+                      "newInitiativesOperatingIncome":"new_initiatives_operating_income_quarter",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
     for obs in quarter_observations:
         end = stamp(obs["fiscal_period_end"])
         if not end:
             continue
-        historical=(at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400
+        historical=(at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 60 if obs["period_basis"]=="monthly" else 150)*86400
         field = quarter_fields[obs["source_field"]]
         if obs["period_basis"]=="annual": field=field.replace("_quarter","_annual")
+        if obs["period_basis"]=="monthly": field=field.replace("_quarter","_month")
         if obs['source_field']=='netIncome' and obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
         (historical_field_records if historical else verified_field_records).append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],

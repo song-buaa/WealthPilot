@@ -423,7 +423,7 @@ def exit_plan(assessment, *, at=None):
         order_created=False,execution_authorized=False,manual_trade_preparation_allowed=False)
 
 
-def fact_sections(assessment, *, include_scenarios=True):
+def fact_sections(assessment, *, include_scenarios=True, concise=False):
     """Existing deterministic research sections, shared by full and facts-only reports."""
     sections=[]
     def section(name, text):
@@ -436,7 +436,7 @@ def fact_sections(assessment, *, include_scenarios=True):
             continue
         values=[f"{label}：{r['values'][key]}" for key,label in labels.items() if r["values"].get(key) is not None]
         content=r["values"].get("content") or r["values"].get("text")
-        if content:
+        if content and not concise:
             values.append(str(content))
         field_currencies=sorted({f.get('currency') for f in assessment.get('verified_field_records',[]) if f.get('currency') and str(f.get('record_id','')).startswith(str(r.get('record_id'))+':')})
         report_currency=r['values'].get('report_currency') or '/'.join(field_currencies) or '未核验'
@@ -456,14 +456,32 @@ def fact_sections(assessment, *, include_scenarios=True):
         grouped.setdefault(key,[]).append(r)
     for equal in grouped.values():
         r=equal[0]
-        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        scope=("历史可比基线（非当前经营事实）" if r.get('historical_only') else
+               "年度经营基线（非最新季度）" if r.get('scope')=='annual' else
+               "月度" if r.get('scope')=='monthly' else "季度")
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
-        facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
+        decisive_fields={'revenue_quarter','net_income_quarter','operating_income_quarter',
+                         'operating_cash_flow_quarter','vehicle_deliveries_quarter','vehicle_deliveries_month',
+                         'vehicle_sales_quarter','vehicle_margin_pct',
+                         'core_local_commerce_revenue_quarter','core_local_commerce_operating_income_quarter',
+                         'new_initiatives_revenue_quarter','new_initiatives_operating_income_quarter'}
+        if concise and not r.get('historical_only') and r.get('field') in decisive_fields:
+            facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}。")
+        elif concise and r.get('historical_only') and r.get('field') in {'revenue_quarter','net_income_quarter'}:
+            facts.append(f"- {scope} {r.get('field')}：{display(r,r['field'])}；期间 {r['period']}。")
+        elif not concise:
+            facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
     from backend.services.market_data.financial_research import build,display
     financial=build(assessment)
     for metric in financial['records']:
-        facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+'；计算口径：'+str(metric['details']))
-    if include_scenarios and financial['valuation_sensitivity']:
+        if concise and metric['field'] not in {'revenue_yoy_pct','net_income_yoy_pct','gross_margin_pct','operating_margin_pct',
+                'vehicle_deliveries_qoq_pct','vehicle_sales_qoq_pct','vehicle_margin_change_pp',
+                'core_local_commerce_operating_margin_pct','new_initiatives_operating_margin_pct',
+                'cash_conversion','free_cash_flow_quarter','diluted_eps_ttm','pe_ttm','earnings_yield_pct'}:
+            continue
+        facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+
+                     ('' if concise else '；计算口径：'+str(metric['details'])))
+    if include_scenarios and financial['valuation_sensitivity'] and not concise:
         import json
         facts.append('估值敏感性（盈利/倍数变化为假设，固定FX；非预测、目标价或订单）：'+json.dumps(financial['valuation_sensitivity'],ensure_ascii=False))
     conditional=assessment.get('conditional_valuation') or {}
@@ -476,6 +494,9 @@ def fact_sections(assessment, *, include_scenarios=True):
         for name in SCENARIOS:
             row=conditional['scenarios'][name]
             description=f"{name}: 5年条件年化回报 {percentage(row.get('annualized_return'))}"
+            params=(conditional.get('assumptions') or {}).get(name) or {}
+            if params:
+                description+='；显式研究假设 '+', '.join(f'{key}={value}' for key,value in params.items())
             if row.get('required_return_met') is not None:
                 hurdle=('观察收益率参考（非用户要求回报）' if
                         conditional.get('proposal_origin')=='system_evidence_bound_reference' else

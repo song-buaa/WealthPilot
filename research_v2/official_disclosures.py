@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
+import calendar
 import re
 from urllib.parse import urlsplit, urljoin
 import urllib.request
@@ -315,6 +316,42 @@ def _column_currency(value):
     match=re.fullmatch(r'(?:(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}\s+)?'
                        r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
     return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
+
+
+def parse_monthly_vehicle_delivery(soup, published, issuer_name):
+    """A single explicitly dated issuer monthly count, never a quarterly proxy."""
+    text=' '.join(soup.stripped_strings)
+    if not isinstance(issuer_name,str) or issuer_name.lower() not in text[:1000].lower():
+        return []
+    named=re.sub(r'\s+Inc\.?$', '', issuer_name, flags=re.I)
+    month=r'(January|February|March|April|May|June|July|August|September|October|November|December)'
+    named_pattern=re.escape(named)
+    patterns=[
+        named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+        r'In\s+'+month+r'\s+(20\d{2}),\s*'+named_pattern+r'\s+delivered\s+([\d,]+)\s+vehicles\b',
+        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),\s*(?:a [^,;.!?]{1,160},\s*)?today announced that it delivered\s+([\d,]+)\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+    ]
+    matches=[]
+    for index,pattern in enumerate(patterns):
+        for match in re.finditer(pattern,text,re.I):
+            groups=match.groups()
+            amount,month_name,year=(groups[2],groups[0],groups[1]) if index==1 else groups
+            matches.append((amount,month_name,year,match.group(0)))
+    matches=list({(item[0].replace(',', ''),item[1].lower(),item[2]):item for item in matches}.values())
+    if len(matches)!=1:
+        return []
+    match=matches[0]
+    year=int(match[2]);month=list(calendar.month_name).index(match[1].title())
+    value=_amount(match[0]);end=datetime(year,month,calendar.monthrange(year,month)[1]).date()
+    try:
+        if value is None or value<=0 or end>datetime.fromisoformat(str(published).replace('Z','+00:00')).date():
+            return []
+    except (TypeError,ValueError):
+        return []
+    return [dict(source_field='vehicleDeliveries',accounting_basis='vehicle_deliveries',
+        period_basis='monthly',fiscal_period_start=f'{year:04d}-{month:02d}-01',
+        fiscal_period_end=end.isoformat(),currency=None,unit='vehicles',unit_scale=1,value=float(value),
+        source_locator='issuer delivery update / '+match[3])]
 
 
 def parse_vehicle_operating(soup, published):
@@ -748,6 +785,199 @@ def collect(symbol, candidates=()):
     ir_rows, _ = _collect_li(symbol, candidates)
     rows = [*sec_rows, *ir_rows]
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get
+
+
+_HKEX_MEITUAN_INDEX = 'https://www1.hkexnews.hk/search/titlesearch.xhtml?category=0&market=SEHK&stockId=198419'
+
+
+def _hkex_fetch(url):
+    """Read only the reviewed HKEX issuer index and its listed PDF originals."""
+    try:
+        p = urlsplit(url)
+        allowed = (url == _HKEX_MEITUAN_INDEX or
+            (p.scheme == 'https' and p.hostname == 'www1.hkexnews.hk' and p.port in (None,443) and
+             re.fullmatch(r'/listedco/listconews/sehk/\d{4}/\d{4}/\d+\.pdf', p.path) and
+             not p.query and not p.fragment and not p.username and not p.password))
+        if not allowed:
+            return None
+        req = urllib.request.Request(url, headers={'User-Agent':'WealthPilot/4.2 Research',
+                                                   'Accept':'application/pdf,text/html'})
+        with urllib.request.build_opener(_NoRedirect).open(req, timeout=15) as response:
+            if response.geturl() != url:
+                return None
+            body = response.read(8 * 1024 * 1024 + 1)
+        if not body or len(body) > 8 * 1024 * 1024:
+            return None
+        return body, datetime.now(timezone.utc).isoformat()
+    except (OSError, ValueError):
+        return None
+
+
+def _hkex_quarter_observations(body):
+    """Extract only unambiguous IFRS quarter columns from the official text PDF.
+
+    This deliberately does not interpret the six-month IAS 34 statement as an
+    independent quarter, and does not infer capex from investing cash flow.
+    """
+    from io import BytesIO
+    from pypdf import PdfReader
+    pages = PdfReader(BytesIO(body)).pages
+    if len(pages) < 23:
+        return []
+    first, segment, cash = (pages[i].extract_text() or '' for i in (0, 2, 22))
+    if (not re.search(r'Stock Codes:\s*3690\s*\(HKD counter\)', first)
+            or 'THREE AND SIX MONTHS ENDED JUNE 30, 2026' not in first
+            or not re.search(r'Unaudited\s+Three Months Ended\s+June 30, 2026 June 30, 2025', first)
+            or '(RMB in thousands, except for percentages)' not in first.split('Non-IFRS Accounting Standards',1)[0]
+            or 'Non-IFRS Accounting Standards' not in first):
+        return []
+    specs = [('Revenues','totalRevenue','total_revenue'),
+             ('Operating profit','operatingIncome','operating_income'),
+             ('Profit for the period','netIncome','consolidated_net_income')]
+    observations=[]
+    for label,field,basis in specs:
+        match=re.search(r'^'+re.escape(label)+r'\s+([\d,()\-]+)\s+(?:nm|[\d.()%]+)\s+([\d,()\-]+)\s+',first,re.M)
+        if not match:
+            return []
+        for value,end in ((match[1],'2026-06-30'),(match[2],'2025-06-30')):
+            number=_amount(value)
+            if number is None:
+                return []
+            observations.append(dict(source_field=field,accounting_basis=basis,
+                period_basis='quarterly',fiscal_period_start=end[:4]+'-04-01',
+                fiscal_period_end=end,currency='CNY',unit='currency_units',unit_scale=1000,
+                value=number,source_locator='PDF page 1 Financial Summary: '+label+' / '+end))
+    if 'Financial Information by Segment' in segment:
+        tables=list(re.finditer(
+            r'Unaudited\s+Three Months Ended June 30, (2026|2025)\s+'
+            r'Core Local\s+Commerce\s+New\s+Initiatives\s+Unallocated\s+items3?\s+Total\s+'
+            r'\(RMB in thousands\)(.*?)'
+            r'(?=Unaudited\s+Three Months Ended June 30, (?:2026|2025)|\Z)',segment,re.S))
+        if len(tables)!=2 or {table[1] for table in tables}!={'2026','2025'}:
+            tables=[]
+        for table in tables:
+            end=table[1]+'-06-30'
+            for label,fields in [('Total revenues',('coreLocalRevenue','newInitiativesRevenue')),
+                                 ('Operating profit/(loss)',('coreLocalOperatingIncome','newInitiativesOperatingIncome'))]:
+                match=re.search(r'^'+re.escape(label)+r'\s+([\d,()\-–]+)\s+([\d,()\-–]+)\s+([\d,()\-–]+)\s+([\d,()\-–]+)',table[2],re.M)
+                if not match:
+                    continue
+                amounts=[_amount(value) for value in match.groups()[:2]]
+                total=_amount(match[4])
+                if any(value is None for value in amounts) or total is None:
+                    continue
+                group_field='totalRevenue' if label=='Total revenues' else 'operatingIncome'
+                if total != next((row['value'] for row in observations
+                        if row['source_field']==group_field and row['fiscal_period_end']==end),None):
+                    continue
+                for number,field in zip(amounts,fields):
+                    observations.append(dict(source_field=field,accounting_basis={
+                            'coreLocalRevenue':'core_local_commerce_revenue',
+                            'newInitiativesRevenue':'new_initiatives_revenue',
+                            'coreLocalOperatingIncome':'core_local_commerce_operating_income',
+                            'newInitiativesOperatingIncome':'new_initiatives_operating_income'}[field],
+                            period_basis='quarterly',fiscal_period_start=end[:4]+'-04-01',
+                            fiscal_period_end=end,currency='CNY',unit='currency_units',
+                            unit_scale=1000,value=number,
+                            source_locator='PDF page 3 Segment: '+label+' / '+field+' / '+end))
+    quarter_cash=_hkex_cash_quarter(cash)
+    if quarter_cash is not None:
+        observations.append(dict(source_field='operatingCashflow',accounting_basis='operating_cash_flow',
+            period_basis='quarterly',fiscal_period_start='2026-04-01',fiscal_period_end='2026-06-30',
+            currency='CNY',unit='currency_units',unit_scale=1000,value=quarter_cash,
+            source_locator='PDF page 23 Cash Flows: three months / 2026-06-30'))
+    return observations
+
+
+def _hkex_cash_quarter(text):
+    """The first value qualifies only with the adjacent quarter-first column header."""
+    match=re.search(
+        r'The following table sets forth our cash flows for the periods indicated:\s*'
+        r'Unaudited\s+Three Months\s+Ended\s+June 30, 2026\s+'
+        r'Unaudited\s+Six Months\s+Ended\s+June 30, 2026\s+'
+        r'\(RMB in thousands\)\s+'
+        r'Net cash flows generated from operating activities\s+([\d,()\-]+)\s+([\d,()\-]+)',
+        text)
+    return _amount(match[1]) if match else None
+
+
+def _hkex_business_context(body):
+    """Bounded issuer commentary, explicitly attributed rather than asserted as fact."""
+    from io import BytesIO
+    from pypdf import PdfReader
+    pages=PdfReader(BytesIO(body)).pages
+    if len(pages)<8:
+        return None
+    text=' '.join((pages[i].extract_text() or '').replace('\n',' ') for i in (5,6,7))
+    return _hkex_business_context_text(text)
+
+
+def _hkex_business_context_text(text):
+    text=' '.join(text.split()).lower()
+    anchors=('food delivery industry gradually shifted back to operational efficiency',
+             'both our order mix and user mix continued to improve',
+             'intensified industry competition',
+             'in hong kong, the business achieved stable profitability',
+             'the middle east market continued to see sequential efficiency improvements',
+             'in brazil, we remained focused on the são paulo market')
+    if not all(anchor in text for anchor in anchors):
+        return None
+    return ('发行人管理层在正式2026年二季度公告中的自述，需与财务事实区分：'
+            '外卖行业竞争仍激烈，管理层称订单与用户结构改善；'
+            'Keeta在香港称达到稳定盈利，在中东称效率改善，在巴西仍聚焦圣保罗。'
+            '这些表述不能证明集团各区域利润或未来竞争优势；原文定位为PDF第6至8页。')
+
+
+def collect_hkex(symbol):
+    """Bounded official Meituan disclosure discovery; index is a hint, PDF is authority."""
+    if symbol != '3690:HK':
+        return [], {}.get
+    fetched=_hkex_fetch(_HKEX_MEITUAN_INDEX)
+    if not fetched:
+        return [], {}.get
+    index_bytes,_=fetched
+    soup=BeautifulSoup(index_bytes,'html.parser')
+    rows=[]
+    for tr in soup.select('tr'):
+        code=tr.select_one('td.stock-short-code')
+        link=tr.select_one('a[href*="/listedco/listconews/sehk/"]')
+        release=tr.select_one('td.release-time')
+        if not code or not link or not release or not re.search(r'\b03690\b',code.get_text(' ',strip=True)):
+            continue
+        if 'RESULTS' not in link.get_text(' ',strip=True).upper() or 'THREE AND SIX MONTHS ENDED JUNE 30, 2026' not in link.get_text(' ',strip=True).upper():
+            continue
+        clock_match=re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})',release.get_text(' ',strip=True))
+        if not clock_match:
+            continue
+        published=datetime.strptime(clock_match[1],'%d/%m/%Y %H:%M').replace(tzinfo=timezone(timedelta(hours=8)))
+        url=urljoin('https://www1.hkexnews.hk',link.get('href',''))
+        original=_hkex_fetch(url)
+        if not original or not original[0].startswith(b'%PDF-'):
+            continue
+        try:
+            observations=_hkex_quarter_observations(original[0])
+        except Exception:
+            continue
+        if not observations:
+            continue
+        try:
+            context=_hkex_business_context(original[0])
+        except Exception:
+            context=None
+        digest=hashlib.sha256(original[0]).hexdigest()
+        row=dict(symbol=symbol,source='official_disclosure',source_url=url,
+            record_id='official:sha256:'+digest,published_at=published.isoformat(),
+            fetched_at=original[1],data_as_of=published.date().isoformat(),period='2026 Q2',
+            content=context,
+            official_disclosure=dict(issuer_id='MEITUAN',source_url=url,stock_code='03690'),
+            financial_observations=observations,
+            source_verification=dict(document_sha256=digest,
+                publication_locator=_HKEX_MEITUAN_INDEX+' / '+clock_match[1]+' / '+url,
+                listing_url=_HKEX_MEITUAN_INDEX,listing_sha256=hashlib.sha256(index_bytes).hexdigest(),
+                stock_code='03690',document_url=url))
+        rows.append(row)
+        break
+    return rows,{r['record_id']:deepcopy(r) for r in rows}.get
 
 
 def parse_valuation_statement_inputs(soup, published):

@@ -141,8 +141,12 @@ def finalize_output(plan, executed, expressed):
         'conditionalValuations':[{'symbol':r.get('symbol'),'result':r} for r in conditional_results],
         'research_delivery_status':'DELIVERED' if explanations else 'INCOMPLETE',
         'policy_precision':'CANNOT_QUANTIFY'}
-    expressed.chat_answer = ('\n\n'.join(fact_text) if fact_text else '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')
-    expressed.chat_answer += render_explanation(explanations)
+    fact_report=('\n\n'.join(fact_text) if fact_text else
+        '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')
+    # Lead with the qualified investment reasoning. The deterministic source
+    # detail remains immediately below and in the unchanged structured Evidence.
+    expressed.chat_answer = (render_explanation(explanations)+'\n\n'+fact_report
+                             if explanations else fact_report+render_explanation(explanations))
     expressed.raw_text=''
     loaded = getattr(executed,'loaded_data',None)
     if loaded:

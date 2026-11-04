@@ -337,7 +337,8 @@ def _deduplicate(observations):
     return result
 
 
-def _record(issuer, filing, observations, body, url, fetched_at, *, identity_digest):
+def _record(issuer, filing, observations, body, url, fetched_at, *, identity_digest,
+            management_context=None):
     # Issuer identity does not qualify per-listed-class earnings. In particular,
     # a directory alias must not turn a group's Class A EPS into Class B EPS.
     # A later qualified class bridge can extend this Owner; no conversion here.
@@ -366,7 +367,8 @@ def _record(issuer, filing, observations, body, url, fetched_at, *, identity_dig
         official_disclosure=dict(issuer_id=issuer['issuer_id'], source_url=url, cik=issuer['cik'],
                                  accession=filing['accession'], form=filing['form']),
         financial_observations=_deduplicate(observations),
-        content='Independently sourced SEC statement facts; fiscal and filing clocks remain separate.',
+        content=(management_context or
+                 'Independently sourced SEC statement facts; fiscal and filing clocks remain separate.'),
         source_verification=dict(document_sha256=digest, publication_locator=filing['publication_locator'],
             issuer_identity=deepcopy(issuer), identity_document_sha256=identity_digest))
 
@@ -703,6 +705,24 @@ def _domestic_fiscal_eps_context(rows, issuer):
     return context
 
 
+def _reviewed_management_context(issuer_id, text):
+    """Bounded original-exhibit commentary; issuer claims are not verified outcomes."""
+    normalized=' '.join(text.split()).lower()
+    if issuer_id=='LI_AUTO' and all(anchor in normalized for anchor in
+            ('intense market competition and a major model refresh cycle',
+             'we anticipate further margin expansion for the second half of the year as our product mix optimizes')):
+        return ('发行人在正式SEC附件中的管理层陈述：当前经历激烈竞争与车型换代；'
+                '管理层预计下半年产品组合优化可能带来利润率扩张。后一句属于前瞻假设，'
+                '不能当作已验证的毛利修复或竞争份额；需结合后续交付、车辆毛利及现金流复核。')
+    if issuer_id=='PDD_HOLDINGS' and all(anchor in normalized for anchor in
+            ('global trade and regulatory landscapes have continued to evolve',
+             'stepped up our ecosystem investments in the second quarter')):
+        return ('发行人在正式SEC附件中的管理层陈述：全球贸易与监管变化带来挑战，'
+                '二季度加大生态投资。本段不能证明Temu独立利润；'
+                '投资持续性与监管影响仍是待验证假设，不可由集团利润直接推断。')
+    return None
+
+
 def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=None):
     """Restricted full-submission envelope and inline XBRL, including exhibits.
 
@@ -743,6 +763,7 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
     cover=BeautifulSoup(primary[0][4],'html.parser')
     observations=[]
     statement_issues=[]
+    management_context=None
     # Contexts and external statement headings are document-scoped. An exhibit
     # must be declared by the original primary document with its actual identity.
     for doc_index,kind,filename,sequence,document in documents:
@@ -753,10 +774,14 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
         if not (is_primary or is_exhibit):
             continue
         soup=BeautifulSoup(document,'html.parser')
-        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating, parse_us_gaap_diluted_eps, parse_valuation_statement_inputs
+        if is_exhibit and filing['form']=='6-K' and management_context is None:
+            management_context=_reviewed_management_context(issuer['issuer_id'],soup.get_text(' ',strip=True))
+        from research_v2.official_disclosures import parse_statement_tables, parse_vehicle_operating, parse_monthly_vehicle_delivery, parse_us_gaap_diluted_eps, parse_valuation_statement_inputs
         try:
             table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
             table_observations += parse_valuation_statement_inputs(soup, filing['published_at'])
+            if is_exhibit and filing['form']=='6-K':
+                table_observations += parse_monthly_vehicle_delivery(soup,filing['published_at'],issuer['name'])
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
@@ -838,7 +863,8 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
                     source_locator=f'DOCUMENT[{doc_index}]/{filename}/ix:nonFraction[{i}]/{node.get("name")}'))
             except (ValueError, TypeError, InvalidOperation):
                 continue
-    record=_record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)
+    record=_record(issuer, filing, observations, body, filing['full_url'], fetched_at,
+                   identity_digest=identity_digest,management_context=management_context)
     if record:
         record['financial_observation_issues']=statement_issues
     return record

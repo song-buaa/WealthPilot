@@ -1,0 +1,76 @@
+[
+  {
+    "symbol": "LI:US",
+    "issuer": {
+      "symbol": "LI:US",
+      "issuer_id": "LI_AUTO",
+      "cik": "0001791706",
+      "name": "Li Auto Inc.",
+      "issuer_type": "foreign_private",
+      "sec_ticker": "LI",
+      "registered_tickers": [
+        "LAAOF",
+        "LI"
+      ],
+      "registered_equity_tickers": [
+        "LAAOF",
+        "LI"
+      ],
+      "identity_source": "https://www.sec.gov/files/company_tickers.json",
+      "submissions_url": "https://data.sec.gov/submissions/CIK0001791706.json"
+    },
+    "filing": {
+      "accession": "0001104659-26-120858",
+      "form": "6-K",
+      "filed": "2026-11-02",
+      "report_date": "2026-11-02",
+      "published_at": "2026-11-02T11:10:50+00:00",
+      "accepted_at": "2026-11-02T11:10:50+00:00",
+      "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+      "publication_locator": "Submissions/filings/recent/acceptanceDateTime[0]",
+      "primary_url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926120858/tm2628723d1_6k.htm",
+      "full_url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926120858/0001104659-26-120858.txt"
+    },
+    "identity_digest": "c8a30d85a53059474fd0abbb6f8e6e9b842e056a805612b4a061de0f05180a66",
+    "fetched_at": "2026-11-03T11:08:16.725890+00:00",
+    "sha256": "85f560cecdeafc87447171e253ab99c218d57744dfeacd8635bc3786b9468491",
+    "file": "0001104659-26-120858.txt.gz"
+  },
+  {
+    "symbol": "XPEV:US",
+    "issuer": {
+      "symbol": "XPEV:US",
+      "issuer_id": "XPENG",
+      "cik": "0001810997",
+      "name": "XPENG INC.",
+      "issuer_type": "foreign_private",
+      "sec_ticker": "XPEV",
+      "registered_tickers": [
+        "XPEV",
+        "XPNGF"
+      ],
+      "registered_equity_tickers": [
+        "XPEV",
+        "XPNGF"
+      ],
+      "identity_source": "https://www.sec.gov/files/company_tickers.json",
+      "submissions_url": "https://data.sec.gov/submissions/CIK0001810997.json"
+    },
+    "filing": {
+      "accession": "0001193125-26-411251",
+      "form": "6-K",
+      "filed": "2026-10-02",
+      "report_date": "2026-10-02",
+      "published_at": "2026-10-02T11:09:24+00:00",
+      "accepted_at": "2026-10-02T11:09:24+00:00",
+      "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+      "publication_locator": "Submissions/filings/recent/acceptanceDateTime[4]",
+      "primary_url": "https://www.sec.gov/Archives/edgar/data/1810997/000119312526411251/d129675d6k.htm",
+      "full_url": "https://www.sec.gov/Archives/edgar/data/1810997/000119312526411251/0001193125-26-411251.txt"
+    },
+    "identity_digest": "89a0ba5ab4481f9d00263705b13069f1253e85129bf52f186981ed609cab0b0a",
+    "fetched_at": "2026-11-03T11:08:20.232058+00:00",
+    "sha256": "5f242e8f5e6336edb43ad1803e97f40458bd92f41b299ab7323ab7156af35e4b",
+    "file": "0001193125-26-411251.txt.gz"
+  }
+]

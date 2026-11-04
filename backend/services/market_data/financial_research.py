@@ -22,6 +22,12 @@ LABELS={
     'vehicle_margin_pct':'季度汽车业务毛利率','vehicle_revenue_per_delivery_approx':'季度汽车收入/交付量近似值',
     'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
     'vehicle_deliveries_qoq_pct':'季度交付量环比','vehicle_margin_change_pp':'汽车业务毛利率同比变化',
+    'core_local_commerce_revenue_quarter':'核心本地商业季度收入',
+    'core_local_commerce_operating_income_quarter':'核心本地商业季度营业利润',
+    'new_initiatives_revenue_quarter':'新业务季度收入',
+    'new_initiatives_operating_income_quarter':'新业务季度营业结果',
+    'core_local_commerce_operating_margin_pct':'核心本地商业季度营业利润率',
+    'new_initiatives_operating_margin_pct':'新业务季度营业利润率',
     'revenue_yoy_pct':'季度收入同比','revenue_qoq_pct':'季度收入环比',
     'net_income_yoy_pct':'季度合并净利润同比',
     'gross_margin_pct':'季度集团综合毛利率',
@@ -186,6 +192,19 @@ def build(assessment):
                 if previous and previous>0:
                     add(stem+'_'+suffix+'_pct',(current_value/previous-1)*100,now[1]+prior[1],period=latest,unit='percent',
                         details=dict(formula='(current/prior - 1)*100',comparison_period=prior_end))
+    # Segment results are not consolidated profit. Compute margins only when
+    # revenue and operating result share the same issuer, quarter and currency.
+    for stem in ('core_local_commerce','new_initiatives'):
+        revenue=unique(stem+'_revenue_quarter',latest)
+        operating=unique(stem+'_operating_income_quarter',latest)
+        if revenue and operating and _same_span(revenue[0],operating[0]):
+            amount=number(revenue[0]['values'][stem+'_revenue_quarter'])
+            if amount and amount>0:
+                add(stem+'_operating_margin_pct',
+                    number(operating[0]['values'][stem+'_operating_income_quarter'])/amount*100,
+                    revenue[1]+operating[1],period=latest,unit='percent',
+                    details=dict(formula='segment operating result / segment revenue * 100',
+                                 scope=stem,not_group_profit=True))
     vehicle_sales=unique('vehicle_sales_quarter',latest)
     deliveries=unique('vehicle_deliveries_quarter',latest)
     if vehicle_sales and deliveries and _same_span(vehicle_sales[0],deliveries[0]):
