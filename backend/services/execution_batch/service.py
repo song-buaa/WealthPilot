@@ -821,8 +821,9 @@ class ExecutionBatchService:
             what_if = leg["what_if"] or {}
             leg["what_if"] = {"status": what_if.get("status"),
                               "fee": format(_commission_in_funding_currency(what_if, batch.funding_currency).normalize(), "f") if what_if.get("status") == "PASS" else None}
-        facts["legs"] = [{**item, "quote_ask": format(money(leg.quote_ask).normalize(), "f"), "quote_bid": format(money(leg.quote_bid).normalize(), "f")}
-                         for item, leg in zip(facts["legs"], batch.legs)]
+        if authorization:
+            facts["legs"] = [{**item, "quote_ask": format(money(leg.quote_ask).normalize(), "f"), "quote_bid": format(money(leg.quote_bid).normalize(), "f")}
+                             for item, leg in zip(facts["legs"], batch.legs)]
         return hashlib.sha256(_json(facts).encode()).hexdigest()
 
     def _lock_review(self, batch: ExecutionBatch) -> None:

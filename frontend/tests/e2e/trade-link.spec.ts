@@ -5,6 +5,29 @@ import { expect, test } from '@playwright/test'
 
 let backend: ChildProcess
 const base = 'http://127.0.0.1:18092'
+
+for (const mobile of [false,true]) {
+  test(`nonempty Portfolio fee refresh and moving bid reaches confirmation (${mobile ? 'iPhone' : 'desktop'})`,async({page,request})=>{
+    await resetIBKR(request)
+    await request.post(`${base}/__test/ibkr-state`,{data:{seed_portfolio:true,bid_offset:0}})
+    if(mobile)await page.setViewportSize({width:390,height:844})
+    let submits=0
+    page.on('request',r=>{if(r.url().endsWith('/submit')||r.url().endsWith('/place_order'))submits++})
+    await page.goto(ibkrLink())
+    await page.getByRole('button',{name:'加入投资行动',exact:true}).click()
+    await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeEnabled()
+    await request.post(`${base}/__test/ibkr-state`,{data:{fee:6}})
+    await page.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+    await expect(page.getByRole('dialog')).toContainText('PREVIEW_CHANGED')
+    await page.getByRole('button',{name:'重新计算股数、费用及 WhatIf',exact:true}).click()
+    await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeEnabled()
+    await request.post(`${base}/__test/ibkr-state`,{data:{bid_offset:0.001}})
+    await page.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+    await expect(page.getByTestId('confirm-order-dialog')).toBeVisible()
+    expect(submits).toBe(0)
+    await request.post(`${base}/__test/ibkr-state`,{data:{bid_offset:0}})
+  })
+}
 function link(extra = '') {
   return `${base}/#/action?trade=1&request_id=${randomUUID()}&symbol=NVDA%3AUS&side=BUY&quantity=10&order_type=LIMIT&limit_price=180&currency=USD${extra}`
 }
@@ -61,10 +84,10 @@ test('invalid and duplicate parameters are explicit, no implicit defaults', asyn
   await page.goto(link())
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.goto(link('&quantity=2'))
-  await expect(page.getByRole('alert')).toContainText('参数重复')
+  await expect(page.getByRole('alert').filter({hasText:'参数重复'})).toBeVisible()
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await page.goto(link().replace('currency=USD',''))
-  await expect(page.getByRole('alert')).toContainText('currency')
+  await expect(page.getByRole('alert').filter({hasText:'currency'})).toBeVisible()
   await expect(page.getByRole('dialog')).not.toBeVisible()
 })
 

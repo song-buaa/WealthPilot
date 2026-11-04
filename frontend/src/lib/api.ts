@@ -830,7 +830,7 @@ export const executionBatchApi = {
   ),
   confirmTradeLinkIntent: (preview: IBKRLinkPreview, quote: IBKRQuote, limit?: string) => request<ExecutionBatchResponse>(
     '/execution-batches/trade-link/confirm-intent', {
-      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true, preview_hash: quote.preview_hash, quote_as_of: quote.batch.legs[0].quote_as_of, ...(limit ? {limit_price: limit} : {}) }),
+      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true, preview_hash: quote.preview_hash, quote_as_of: quote.batch.legs[0].quote_as_of, limit_price: limit || quote.batch.legs[0].final_limit }),
     },
   ),
   create: (conversationId: string, messageId: number) =>
