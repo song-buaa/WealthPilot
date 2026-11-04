@@ -310,7 +310,7 @@ def replay(path):
 def difference(old_path, new_path):
     old, new = read_bundle(old_path)["payload"], read_bundle(new_path)["payload"]
     return dict(data_changed=digest(old["assessments"]) != digest(new["assessments"]),
-                assumptions_changed=old.get('dossier',{}).get('companies',old['request']['companies']) != new.get('dossier',{}).get('companies',new['request']['companies']),
+                assumptions_changed=old["request"]["companies"] != new["request"]["companies"],
                 method_changed=old["method_files"] != new["method_files"],
                 pool_changed=list(old["request"]["companies"]) != list(new["request"]["companies"]),
                 before=[{k: c[k] for k in ("symbol", "group", "rank")} for c in old["result"]["cards"]],

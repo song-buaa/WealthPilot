@@ -644,38 +644,3 @@ L2 最小修复，复用原 Evidence / Financial Research / ACTIVE Policy / MCP�
 代码断点：`consumers.finalize_output` 原先先拼接 records/verified_field_records，丢失 symbol、历史/期间字段及派生计算所需的 owner assessment；财务 `calc:` 引用随之不可用。现逐个完整 assessment 通过原 `_evidence_index` 重核后再组合，保留相同来源/时钟/冲突规则。重复投影仍复核原 text_template/numbers，不接受渲染文本的自由数字。MCP 只透传本轮服务端生成的诊断，保留首次 generation 与本次 final；复制诊断防止后续投影覆盖首次计数，不从模型 JSON 采信自报诊断。ACTIVE 输出明确 `research_delivery_status`；MCP 最终零合格解释时 `professional_analysis_complete=false`、professional_result=incomplete，并列明缺失 professional_explanation，财务事实可继续 partial。阶段完成不等于研究交付完成。
 
 Registry 无需更新：原 owner 和入口未变。生产只读核验不启动研究；开发真实模型使用隔离临时持仓、冻结公开 SEC 与只读核验的政策结构化投影（校验 structured hash），不复制生产库，不修改政策或 E1。完整业务评分仍依实际交付内容，不以工程结果替代 LI 8 分验收。
-
-## PR-A：正式估值输入与报告交付口径（2026-11-03）
-
-范围L2：沿原SEC/official_disclosures、Evidence及Financial Research补正式资产负债与股份输入，不实现PR-B估值/预测，不改政策、模型、资产或交易。原S3默认domestic/USD适用性不放宽。通用原文解析新增明确合并资产负债表的日期/报告币/单位，以及GAAP加权股数和明确ADS脚注；加权股数与点时股数分开，不把任意历史/否定ADS提及变成当前比例。原CompanyFacts同一请求同时投影普通与质量字段，不增加第二个Provider；显式币种的`build_quality`原默认USD仍保持。
-
-`financial_research.build_valuation_inputs()`是原Owner的纯投影：提供带来源的资产负债、报告币、加权/已披露点时股数观察及ADS关系；不等于已验证当前经济总股本或公司行动。现金减已披露短/长期借款只输出`cash_less_disclosed_borrowings`，`debt_coverage=PARTIAL_DISCLOSED_BORROWINGS`、`usable_for_equity_bridge=false`；完整`net_cash`、`market_cap`仍N/A。受限现金、定存/投资不随意计入可分配现金；未披露的其他债务不填零。报告币只能由同一最新资产负债期的明确原文列证明，历史币种不能替最新混币数据授予资格。旧字段保留历史标记，不冒充当前余额，不改TTL。
-
-原Output Policy索引/数字绑定接入正式质量字段，仍执行来源/时钟与纯财务竞争解释条件限制；原`captured_facts`重复核验完整质量上下文。ACTIVE已交付解释时采用“已核验研究事实”正文，未完成时继续保留原未完成提示。金额/交付/股数/比率仅调整显示单位与舍入，原值、公式、哈希及绑定不变。无币种交付不再显示“无币种比率”。
-
-真实LI/PDD完整SEC冻结原文及开发公开CompanyFacts/Submissions/目录回放覆盖解析、身份、原始哈希与实际抓取时钟。原Q2冻结原文的历史下载钟仍按原夹具说明，不补造；本次新公开请求单独保存实际完成时间。美团仅做官方公告可行性检查，不把可读PDF等同已接入Evidence；HK/IFRS原文资格及映射未闭合时保持缺口，不阻断LI/PDD交付。只有三PR集成后才安排完整隔离LI质量评估；本PR不启动生产Job或为评分重复部署。
-
-## 条件估值 PR-B 开发候选（2026-11-03）
-
-沿原 `quality_valuation.py::scenario` 的五年正盈利每股收益算术增加外国发行人 ADS 限定投影 `foreign_ads_earnings_research`。仅在原 `Financial Research` 同时产出正式连续四季度每ADS EPS、合格美元日线观察价、同日 FX，且与官方明确 ADS 比例一致时执行；未来增长、股份变化、分红和终值 PE 均为显式研究假设。原 S3 domestic/US-GAAP 方法适用性、分组排名和 ACTIVE 政策不变。计算结果是条件研究，不是目标价、交易建议或质量8分证明。
-外国 ADS 投影只保留条件期末价值、回报与反向增长，不暴露原 S3 折现 `conditional_value` / `margin_to_conditional_value`；后两项需要另行验证方法适用性与资本结构，不能因一组研究倍数变成伪精确公允价值。
-
-开发侧真实冻结 PDD 四份正式 SEC 季度 EPS 与 2026-11-02 AV 日线、同日 FX 可在原 `assess → build` 后产生 63.14 CNY/ADS、81.68 USD/ADS、6.6483 CNY/USD，进而进入同一五年条件算术及独立 Decimal 复算。第二轮通过可选 `ResearchIntent.conditional_valuation` 将该原 Owner 的结果交给原 PEER 证据上下文、确定性报告、ACTIVE 再验证与 MCP 最终投影；无解释时研究状态仍是 `INCOMPLETE`。历史事实仅能由原 Evidence 合格引用支持，情景回报仅为显式研究假设下的服务端计算，不能当公允价值或交易价。
-
-最终收口候选增加普通自然语言长期研究接入：`research_intent()`只从当前问题识别长期/估值意图，`position_analysis.prepare()`向原S3 Owner请求条件研究。正盈利ADS须同时具备合格四季EPS、价格、FX、静态PE、收益率及同口径收入/利润同比，才给出围绕已观察历史指标的**系统参考敏感性**：零增长与两项已观察同比构成范围，终值PE只取当前静态PE的0.75/1/1.25倍，股份不变、无分红和收益率参考均明示为研究假设，绝非预测或用户要求回报。亏损经营证据触发的自然请求不套用正盈利PE，返回经营恢复反向公式和股数、完整净现金、独立倍数及未来现金/FX假设缺口。其余缺少必要来源时也返回`HYPOTHESES_REQUIRED`、反向条件变量与N/A；没有独立倍数、净现金或当前经济股数时始终没有正式公允价值。原`captured_facts()`重新计算并比较来源回执，防止首轮条件结果在ACTIVE/MCP投影时携带变更后的依据。确定性报告把条件研究置于历史明细前，并将系统参考收益率与用户要求回报明确区分；正盈利ADS情景的专业解释提示其假设反证与竞争/现金风险，LI经营恢复路径不套该提示（真实模型对照显示会损失合格主题），原数字与引用过滤不变。LI经营恢复情景新增现金流、税/营运资本/资本支出及回购资金与利润假设未闭合的显式标记；其数值仍只供显式假设下的条件研究，不能提升估值资格。
-
-实际 PDD 冻结来源：四个官方季度构成63.14 CNY/ADS，2026-11-02 原 AV compact 日线81.68 USD/ADS，原 FXService 同日6.6483 CNY/USD，原静态PE约8.60。AV full 在当前开发密钥返回 Premium 拒绝，compact 100根通过日线校验，周线不足；不能称 Premium full 已在本开发环境可用。以显式研究假设演示五年谨慎/基准/乐观条件年化约−5.42%/+9.31%/+24.16%；基准未达到示例10%要求回报，绝非盈利预测或目标价。真实 Sol 在冻结官方财务证据上完成一次**表达组件级**开发验证：6候选、5段经原数字引用过滤保留；经营、现金转化、股数/汇率和 Temu 证据限制均有具体分析。该组件级样本不能替代下文的完整隔离 PEER 回放。
-
-LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/tm2624080d1_ex99-1.htm)与已冻结20-F为合格经营来源；2025全年正式收入112,312,511,000 CNY、2026Q2营业利润率约−8.96%、2026-11-02合格观察价11.18 USD/ADS、官方2普通股/ADS均可进条件研究。2026-09-30 [港交所月报的SEC附件](https://www.sec.gov/Archives/edgar/data/1791706/000110465926115185/tm2627401d1_ex99-1.htm)记录A类不含库存股1,716,030,157股、库存股102,294,952股、B类345,199,159股；观察日不含库存股合计2,061,229,316普通股。该**日期明确的观察**不能证明11月研究时点股数，也不能把期权/RSU/可转债潜在股数直接相加为实际摊薄数。[2026中报正式资产负债表](https://www.sec.gov/Archives/edgar/data/1791706/000110465926105658/tm2624872d2_ex99-1.pdf)中，6月末现金及等价物40.117782bn CNY、受限现金0.014782bn、短期定存及投资45.474274bn、借款7.150204bn、经营租赁负债7.192375bn、非流动融资租赁0.349322bn；流动性、资金可转移性、其他融资和未来资本需求未闭合。原329.67578亿元部分现金借款差额仍不得充当完整净现金。
-
-第二轮在原 S3 Decimal Owner 增加五年营业收入/第五年EBIT率/年度资本后现金变化/期末股数/净现金/ADS/FX/终值EV-EBIT的**显式假设**与反向利润率计算；亏损终值维持 N/A，`fair_value=None`。示意输入基于合格2025收入和11月2日价格，年增长−5%/3%/12%、第五年营业利润率−3%/5%/12%、终值EV/EBIT 8/10/12；倍数只是待核验研究范围，不是 S3 默认倍数或独立已验证同业证据。以2025财年收入为基数、2026年决策时点起算五年（终值为2031财年），中间未观察的2026年收入桥接同样属于增长假设。在这些假设及10%研究要求回报下，当前价隐含第五年营业利润率约18.43%/9.08%/4.58%；谨慎情景因仍亏损无正终值估值，基准条件年化约−1.18%，乐观约32.12%。净现金/股数/FX及未来现金消耗均为可改变结果的研究假设，不是已取得正式估值输入。真正当前公允价值、亏损期PE继续 N/A；不能用情景结果替代资产/资本结构闭环。原方法附16项单因素敏感性和输入摘要哈希；冻结开发工件保存在私人Developer诊断目录，不提交原始证据或私人配置。
-
-美团 [HKEX 2026中期业绩公告目录](https://www1.hkexnews.hk/search/titlesearch.xhtml?category=0&market=SEHK&stockId=198419)可定位8月28日业绩公告与9月29日中报；[公司IR报告目录](https://www.meituan.com/en-US/investor/reports)亦列示中报。PDF可阅读且为正式披露候选，但现有 SEC/AV 财务 Owner 不解析 HKEX IFRS 报表为带原文定位、期间和抓取时钟的合格字段。收入、IFRS集团利润、分部结果、现金流、资产负债及股本在原 Evidence 中仍为 UNKNOWN，不用网站摘要或半年累计值伪装独立季度，也不阻断 LI/PDD 的条件研究。完整 PEER、生产真实来源发现及正式三标8分研究验收仍待单独验证。
-
-### PR-B最终隔离研究回执（开发环境，非生产验收）
-
-使用已冻结的真实SEC/AV/FX Evidence assessment，原`analysis.analyze()`依次执行真实Luna Planning、原Executing、真实Sol Expressing、原Reviewing、ACTIVE `finalize_output()`及MCP `AnalysisResult`序列化。实际ACTIVE政策结构化投影由原只读工具取得，Bundle `policy-ce1ea09f9a5e7cb71dadc79f`、v1、SHA `995d40d90a978d9e0c11e7767a918c3f759c7c5680e960433c5ae23161434256`；隔离运行按原PolicySession重放，未复制生产库或激活政策。只读投影不含原批准日，测试夹具仅以现有效日填充Snapshot验证必填字段，不将其当真实批准时钟或生产PolicyStore收据。隔离SQLite内仅有虚拟研究持仓，故不能验证真实个人敞口、完整资产分母或生产源自动发现；测试库哈希前后一致。
-
-在上述边界内，LI显式研究假设的完整回放四阶段完成、最终6段解释保留，营业恢复的2031年终值、谨慎情景N/A、基准/乐观条件年化约−1.18%/+32.12%、当前价反向所需终值营业利润率约18.43%/9.08%/4.58%均由服务端计算并经独立Decimal公式复算；`fair_value=None`。普通LI自然语言完整回放也完成四阶段并保留6段解释；原问题“长期经营恢复、当前价格隐含条件”曾漏过意图识别，定点补齐后最终MCP结果包含`HYPOTHESES_REQUIRED`恢复型反向条件，列出当前经济股数、完整净现金、独立EV/EBIT依据及未来现金/FX假设缺口，公允价值仍N/A。PDD普通自然语言完整回放四阶段完成、最终5段解释保留，四季63.14 CNY/ADS EPS、81.68 USD/ADS观察价、6.6483 FX及约8.60倍历史静态PE进入服务端参考敏感性；谨慎/基准/乐观条件年化约−16.56%/0%/+12.98%，独立Decimal复算一致。PDD模型解释明确指出静态PE不是便宜证明、Temu与盈利持续性反证，以及下一次退出研究触发条件；这些仍非完整竞争或公允价值证明。三次完整回放最终`professional_analysis_complete=true`、业务`partial`，正式政策引用保留，交易授权始终false。
-
-真实模型对照显示，对所有条件估值统一加强提示会使LI的竞争、投资逻辑和复核条件段被原安全过滤拒绝（6段降为3段）；因此只给正盈利ADS路径增加限定提示，LI仍沿原Prompt。此前PDD参考情景提示后的5段包含investment_thesis与Temu风险；历史原始候选未保存时不反推过滤词。大规模字段明细使隔离报告文本仍超过十万字符，是可读性待改进项；本PR不裁掉原证据或扩大报告引擎。以上开发验证不等于生产完整L1、正式三标8分或美团IFRS资格通过。

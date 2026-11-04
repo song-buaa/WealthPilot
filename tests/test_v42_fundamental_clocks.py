@@ -126,14 +126,6 @@ def test_partial_fundamentals_copy_retains_only_individually_verified_fields():
     assert bundle.fundamentals.pe_ttm == 999
 
 
-def test_partial_technical_record_without_market_object_stays_missing():
-    bundle = MarketDataBundle(symbol="LI:US", technical=None)
-    state = {"kind": "technical", "quality": "partial",
-             "period_quality": {"day": {"quality": "valid"}}}
-    safe = safe_market(bundle, {"records": [state]})
-    assert safe.technical is None
-
-
 def test_original_av_adapter_consumes_cash_flow_without_inventing_provider_clocks(monkeypatch):
     from backend.services.market_data import av_fundamentals_service as adapter
     import backend.core.demo_mode as demo

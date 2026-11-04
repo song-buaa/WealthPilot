@@ -234,17 +234,3 @@ GOOG、MSFT、META、TSLA 的财务缺口，以及长期研究假设校准，记
 S3采集保留失败HTTP原件于请求审计，但不会把供应商提示放入可用SPLITS。复用AV日线/拆股前，原Owner解码器重核身份与数据形状；失败正文允许重新采集，原件与原抓取时钟保留，哈希冲突和股份/因子冲突继续阻断。原SEC/价格时效及质量/估值门禁不变。
 
 本次不改变质量、估值或情景参数版本；来源处理代码的内容哈希随修复改变，历史冻结工件保持不可变，并继续在其原源码版本或自带独立脚本回放。生产配置仅经原Owner更新AV槽位，原私人配置在Mini本地备份，不依赖MacBook Shell覆盖；新AAPL/NVDA生产验收的版本与收据另行留存，不改原8公司失败工件。
-
-## META 已知资本结构资格修复（2026-11-03 候选）
-
-P2.1发现的资本结构资料不要求整套P2盈利模型上线。现行P1只核当前注册证券，尚不能把未来Class A+C派发、强制可转优先股/存托股份及forward结算转换成原普通股持有人的完整五年回报。此处只修研究资格，不改变盈利增长、15/20/30倍候选、10%标尺、质量四底线或交易权限。
-
-原[适用性Owner](../../backend/services/market_data/method_applicability.py)增加有界、人工核验的CIK权益notice，复用P2.1已确认的两份SEC完整原件（accession `0001628280-26-066700`、`0001193125-26-438017`）。公开原件和manifest保存在[原SEC目录下](../../research_v2/qualified_notices/meta-capital-structure.json)，不是新事件扫描器、财务资料库或投资政策。manifest pin、解压全文hash、原SEC canonical URL/CIK/accession/acceptance/filed/fetched资格逐项验证，按合格issuer identity匹配，不靠ticker打分或猜股份价值。
-
-公开和实际抓取时钟均不晚于新decision_at才能引用notice。早于公告不注入未来信息；公告后但notice尚未被合格抓取的历史时点保留具体资格UNKNOWN，不冒充完成全事件筛查。原件缺失、损坏、hash或CIK冲突继续拒绝，不能当“没有事件”。限制不在生效/record/payment日自动解除，必须由原Owner补齐A+C、优先分配/转换及forward股份结算权益桥，或提供有源取消证明后另行版本化。
-
-质量筛查与财务事实不变；该notice使earnings_model为INSUFFICIENT_EVIDENCE、企业仍保留研究卡。原method/pool/MCP链一致跳过候选参数与估值，不输出旧assumptions/context、条件价、五年回报、PE比较信号或名次。估值不可比不是基本面恶化，不按A/C各半价值、股数翻倍或股价减半计算。AAPL/MSFT/NVDA无该有源限制，不受全局阻断。
-
-方法版本为`s3-c.method-applicability.v1.3` / `s3-d.real-pool.v1.1`；原盈利结算和研发参数版本不变。现有内容寻址归档同时冻结规则、manifest和两份公开原件，标准库独立复算核验资格与来源hash。旧冻结工件不改写；当前读回在方法漂移时只声明integrity_verified，原源码/独立脚本另行复算，不把旧META回报重认证成当前可投资研究。
-
-[专项测试](../../tests/test_s3_meta_entitlement_qualification.py)覆盖真实公开原件及合成财务边界，二者不混称真实公司估值验收。生产仍须按原start→get→read验证四公司、META拒绝/质量保留及其他三家能力，记录exact部署SHA和旧工件hash。既有main的并行4.2 Owner改动继续保留，不集成P2/P2.1盈利方法，不改账户、ACTIVE政策、E1或订单系统。

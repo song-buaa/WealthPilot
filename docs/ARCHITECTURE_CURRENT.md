@@ -24,7 +24,6 @@
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
 | Mac Mini Prod | 原生 ARM Python / Node、launchd、完整 Web/后端、MCP/Tunnel、生产数据库及原业务服务。数据、配置、凭证、日志和备份位于代码外。 |
 | MacBook Dev / GitHub | 本地开发与隔离测试 → 短期分支 / PR / 四项 CI → 经授权集成 → Mini 安装确认的完整 SHA，不在生产直接改业务代码。 |
-| 个人历史回测研究（离线） | [research_backtest](../research_backtest/__init__.py)复用已验收的个人AV文件转换、独立Decimal账本和原生LEAN隔离runner；[资格边界](v4.3/AV_LEAN_RESEARCH_INFRA.md)。只消费不可变AV响应/事件/日历，不复制采集客户端、不导入生产Owner运行时；不是Portfolio历史收益服务或交易模型。五ETF研究PASS、严格结算PARTIAL；严格请求启动前拒绝，默认研究模式不得替代。 |
 
 P1–P5 均 DONE：资产负债查询、明确交易预填链接、单标决策、组合评估、当前持仓收益分析。Web/iOS 读取与分析、MacBook/iPhone 交易预填均已实际验收；P2 新入口首次真实券商提交/成交仍未验收。P5 完成的是现有持仓账面盈亏能力，不包含完整历史收益归因。
 
@@ -303,13 +302,3 @@ B3-2沿同一私人E1库显式迁移 [监控事件及待办收据](../backend/se
 N1不新增schema或scheduler：[自然扫描](../backend/services/investment_thesis/natural_scan.py)只对显式opt-in的US证券复用原SEC directory/Submissions/full-submission读取，首次建水位不回放，后续用CIK/accession/接受时间/原件哈希确定性去重；源失败追加失败收据并隔离，不能解释为无事件。[MCP适配](../pocs/chatgpt_skills/investment_thesis.py)新增第三项E1只读待办投影，使用稳定event key的at-least-once语义，不改变任务或研究记录。生产自动扫描继续OFF；Scheduled task私人连接和用户TEST ONLY提醒已通过。真实SEC验收发现抓取完成时间被误作PIT截止，PR59只以SEC acceptance/known clock判断未来信息并保留真实`fetched_at`。2026-10-29本对话已核对生产收据：4e4fdb4ea0831eb079cf96518f91d4397e326e05运行，18工具/E1 v2及既有canonical记录不变，4次SEC HTTP200，首次76 accession，独立进程0新待办，临时monitor取消。水位后真实新accession尚未验证；状态为E1_CORE_RELEASED_N1_NOTIFICATION_PASS_NATURAL_NEW_EVENT_PENDING，不是E1_RELEASED。上述扫描OFF/通知NOT_WIRED为该次验收值，今日状态本轮未重测。旧N1记录的修复待发布段落保留其历史时点，当前证据边界见[统一映射](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#7-生产证据与现状差异)。实现、限制和一次性上线验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
 
 P2汽车经营研究候选复用既有SEC原始申报来源Owner：只有经过原发行主体/CIK、accession、附件声明、正式发布与抓取时钟及原文哈希验证的季度经营观察值，才由Evidence Registry投影为L1可引用字段。EX-99.1附件声明可位于官方封面同一表格行的独立单元格，仍要求精确文件名与唯一链接。financial_research复用统一计算记录与原引用合同计算汽车交付、汽车销售收入、车辆业务毛利率及汽车收入/交付量近似值；Output Policy继续最终数字绑定。该行业层不修改基础财报、资产/交易Owner、分析资格或PEER编排；缺失独立季度/币种/业务口径继续UNKNOWN。XPEV完整原文已通过离线资格链，生产自动发现和真实PEER解释仍待验收。
-
-PR-A估值必要输入仍归原Financial Research Owner：`build_valuation_inputs`消费Evidence的正式质量字段，显式报告币与时点，区分加权股数、点时披露股数、ADS关系和当前经济股本资格。部分借款现金差额不得用作完整净现金或权益估值桥；旧S3适用性不变。无新存储/Provider/Agent，详见V42实现记录PR-A。
-
-PR-B候选沿原S3 `quality_valuation` 增加外国发行人ADS正盈利条件情景投影，原 `financial_research` 仍负责财务、价格和FX资格。普通长期研究请求经原 `position_analysis` 意图入口触发证据限定的参考敏感性；缺少合格价格、EPS、FX、上市单位或独立未来假设时保留N/A和反向条件变量。该投影不改变S3 domestic适用范围、PEER编排、ACTIVE政策或交易权限；缺少LI股本/完整净现金等必要输入时，恢复估值继续N/A。
-
-S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
-
-### S3专业研究方法选择（P3候选）
-
-原MCP公司池的`request.method`向后兼容：默认`standard`复用原P1，`professional`沿同一PEER/Skill入口调用原P2.2经营模型。服务端版本化档案仅保存已评审研究假设，不成为财务或投资政策Owner；原SEC/Price/Evidence先资格化新采集，专业薄适配再核当前窗口、最新申报及研究上下文适用性，变化则逐公司UNKNOWN。META原权益门禁不因方法切换而解除。原归档保存完整父资格与参数/方法/来源，读回按冻结原Owner投影重算、无新网络/事实资格；漂移要求原版本，不静默改历史。无新MCP工具、Agent Runtime、数据库或交易权限；接口、年度原件快照复用与发布/验收边界见[P3合同](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。
