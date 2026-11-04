@@ -33,6 +33,10 @@ def register_pool_tools(server, settings, slot, meta, client_class):
         idempotent_hint=True, open_world_hint=True), description=(
         'For an explicit US company pool (e.g. AAPL NVDA GOOG MSFT META TSLA), start quality, valuation and five-year '
         'conditional-return comparison. Supply symbols and the user research purpose; no holdings or prepare is needed. '
+        'request.method is optional: standard (default, original P1) or professional (reviewed P2 operating model, initially AAPL/MSFT/NVDA). '
+        'Use professional when the user asks for professional company-specific earnings/valuation research; no client growth rates or PE inputs. '
+        'Professional assumptions are server-versioned and must requalify current sources/windows; changed or unsupported evidence remains UNKNOWN. '
+        'META original entitlement protection applies to both methods. '
         'Reuses original SEC/Price/Evidence/S3 via existing Skill and isolated Worker. Writes only the private frozen research archive. '
         'Research Only: automatic candidates are assumptions, not verified forecasts or Investment Policy. Preserve UNKNOWN, '
         'warnings and noncomparables; company priority is not portfolio allocation or a buy instruction. '

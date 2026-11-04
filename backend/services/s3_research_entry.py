@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.utils.symbol import normalize_symbol, parse_symbol
@@ -14,6 +15,7 @@ class CompanyPoolRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     symbols: list[str] = Field(min_length=1, max_length=20)
     purpose: str = Field(min_length=1, max_length=1000)
+    method: Literal['standard','professional'] = 'standard'
 
     @field_validator('symbols')
     @classmethod
@@ -136,7 +138,8 @@ def project(bundle, verification):
     return dict(synthetic=synthetic, scenario='company_pool_research', status=result['status'],
         issues=result.get('issues', []), queried_at=result['decision_at'],
         conclusion=report_summary(result),
-        intent=dict(symbols=provenance['symbols'], purpose=payload['request']['purpose']),
+        intent=dict(symbols=provenance['symbols'], purpose=payload['request']['purpose'],
+            method=provenance.get('research_method','standard')),
         professional_result=transport_result(result),
         evidence=dict(artifact_id=bundle['artifact_id'], verification=verification,
             entry_provenance=provenance, price_sources=prices, full_result_sha256=store.digest(result), method_files=payload['method_files'], source_manifest_sha256=payload['request']['source_manifest_sha256']),
@@ -162,8 +165,14 @@ def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=N
             raise ValueError('S3_SYNTHETIC_SOURCE_REQUIRED')
         from backend.services.s3_pool_capture import capture_pool
         source_root = root / '.captures' / uuid.uuid4().hex
-        capture_pool(request.symbols, source_root, reuse=reuse_sources)
+        # A new professional clock must refresh mutable SEC metadata as well
+        # as issuer context; an old submissions list cannot prove no new filing.
+        capture_pool(request.symbols, source_root,
+            reuse=None if request.method=='professional' else reuse_sources)
     source_root = Path(source_root)
+    if request.method=='professional' and source_mode=='PUBLIC_CAPTURE':
+        from backend.services.s3_professional_research import capture_context
+        capture_context(source_root,request.symbols)
     # Capture/load first; never accept a client-supplied or backdated clock.
     decision_at = datetime.now(timezone.utc).isoformat()
     raw = dict(pool_id='chatgpt_company_pool', pool_version='v1', purpose=request.purpose,
@@ -171,10 +180,16 @@ def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=N
         source_manifest_sha256=store.file_hash(source_root / 'manifest.json'))
     bundle, files = engine.make_bundle(source_root, raw)
     bundle['payload']['entry_provenance'] = dict(version='s3-mcp.entry.v1', synthetic=synthetic,
-        source_mode=source_mode, symbols=request.symbols)
+        source_mode=source_mode, symbols=request.symbols,research_method='standard',requested_method=request.method)
     bundle['artifact_id'] = store.digest(bundle['payload'])
     target = store.save_bundle(root, bundle, files)
-    verification = engine.replay(target / 'bundle.json')
+    if request.method=='professional':
+        from backend.services.s3_professional_research import make_bundle as professional_bundle
+        from backend.services.s3_operating_research import replay as professional_replay
+        bundle,files=professional_bundle(target/'bundle.json')
+        target=store.save_bundle(root,bundle,files)
+        verification=professional_replay(target/'bundle.json')
+    else:verification = engine.replay(target / 'bundle.json')
     return project(bundle, verification)
 
 
@@ -190,7 +205,10 @@ def read_company_pool(artifact_id, *, archive_root, synthetic=False):
     if bundle['artifact_id'] != artifact_id:
         raise ValueError('S3_ARTIFACT_INVALID')
     try:
-        verification = engine.replay(path)
+        if bundle['payload']['result']['method_version'].startswith('s3-p2.'):
+            from backend.services.s3_operating_research import replay as professional_replay
+            verification=professional_replay(path)
+        else:verification = engine.replay(path)
     except ValueError as error:
         if str(error) != 'METHOD_DRIFT_REPLAY_REQUIRES_ORIGINAL_VERSION':
             raise
