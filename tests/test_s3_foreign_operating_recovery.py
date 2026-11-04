@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
+import pytest
 
 from backend.services.market_data.output_policy import captured_facts, prompt_context
 from backend.services.market_data.quality_valuation import (
@@ -9,8 +10,19 @@ from backend.services.market_data.quality_valuation import (
     propose_foreign_ads_conditional_research,
 )
 from backend.services.position_analysis import ResearchIntent, fact_sections, research_intent
-from tests.test_s3_foreign_ads import assessment as pdd_assessment, assumptions as pdd_assumptions
+from tests.test_s3_foreign_ads import AT, assessment as pdd_assessment, assumptions as pdd_assumptions
 from tests.test_policy_integration import active, session
+
+
+@pytest.fixture
+def finalizer_clock(monkeypatch):
+    """Control only the final evidence recheck; never refresh frozen receipts."""
+    from backend.services.investment_policy import store
+
+    def set_clock(at=AT):
+        monkeypatch.setattr(store, 'utc_now', lambda: at.isoformat())
+
+    return set_clock
 
 
 def recovery_assumptions():
@@ -239,13 +251,14 @@ def test_actual_li_companyfacts_annual_receipt_is_accepted_without_invented_pric
     assert 'QUALIFIED_USD_ADS_PRICE_REQUIRED' in result['missing']
 
 
-def test_pdd_original_active_finalizer_delivers_condition_without_trade_authority(active):
+def test_pdd_original_active_finalizer_delivers_condition_without_trade_authority(active, finalizer_clock):
     from types import SimpleNamespace
     from backend.agents.contracts import ExpressionOutput
     from backend.services.investment_policy.consumers import finalize_output
     from backend.services.investment_policy.runtime import bind
     a=pdd_assessment();a['conditional_valuation']=foreign_ads_conditional_research(a,pdd_assumptions())
     out=ExpressionOutput(structured_payload={'professional_explanation':[]})
+    finalizer_clock()
     with bind(session()):
         finalize_output(SimpleNamespace(portfolio_id=7),
                         SimpleNamespace(position_evidence=a,loaded_data=None),out)
@@ -258,13 +271,14 @@ def test_pdd_original_active_finalizer_delivers_condition_without_trade_authorit
     assert '五年条件估值研究' in out.chat_answer
 
 
-def test_natural_pdd_reference_survives_original_active_finalizer(active):
+def test_natural_pdd_reference_survives_original_active_finalizer(active, finalizer_clock):
     from types import SimpleNamespace
     from backend.agents.contracts import ExpressionOutput
     from backend.services.investment_policy.consumers import finalize_output
     from backend.services.investment_policy.runtime import bind
     a=pdd_assessment();a['conditional_valuation']=propose_foreign_ads_conditional_research(a)
     out=ExpressionOutput(structured_payload={'professional_explanation':[]})
+    finalizer_clock()
     with bind(session()):
         finalize_output(SimpleNamespace(portfolio_id=7),
                         SimpleNamespace(position_evidence=a,loaded_data=None),out)
@@ -275,16 +289,48 @@ def test_natural_pdd_reference_survives_original_active_finalizer(active):
     assert result['research_delivery_status']=='INCOMPLETE'
 
 
-def test_active_multi_assessment_keeps_each_condition_receipt(active):
+def test_active_multi_assessment_keeps_each_condition_receipt(active, finalizer_clock):
     from types import SimpleNamespace
     from backend.agents.contracts import ExpressionOutput
     from backend.services.investment_policy.consumers import finalize_output
     from backend.services.investment_policy.runtime import bind
     a=pdd_assessment();a['conditional_valuation']=foreign_ads_conditional_research(a,pdd_assumptions())
     out=ExpressionOutput(structured_payload={'professional_explanation':[]})
+    finalizer_clock()
     with bind(session()):
         finalize_output(SimpleNamespace(portfolio_id=7),
                         SimpleNamespace(portfolio_evidence=[a,deepcopy(a)],loaded_data=None),out)
     assert out.structured_payload['conditionalValuation'] is None
     assert len(out.structured_payload['conditionalValuations'])==2
     assert all(x['result']['input_receipts'] for x in out.structured_payload['conditionalValuations'])
+
+
+@pytest.mark.parametrize('mode', ['explicit', 'natural', 'multi'])
+def test_active_finalizer_removes_condition_when_frozen_price_expires(active, finalizer_clock, mode):
+    from types import SimpleNamespace
+    from backend.agents.contracts import ExpressionOutput
+    from backend.services.investment_policy.consumers import finalize_output
+    from backend.services.investment_policy.runtime import bind
+
+    a=pdd_assessment()
+    a['conditional_valuation']=(propose_foreign_ads_conditional_research(a) if mode=='natural'
+                                else foreign_ads_conditional_research(a,pdd_assumptions()))
+    assert a['conditional_valuation']['status']=='CONDITIONAL_RESEARCH_ONLY'
+    original=deepcopy(a)
+    # The next US session has closed; the frozen Nov 2 close no longer covers it.
+    expired_at=datetime.fromisoformat('2026-11-04T00:26:57+00:00')
+    fresh,_=captured_facts(a,at=expired_at)
+    assert 'TECHNICAL_DAY_MISSING_TRADING_SESSIONS' in fresh['issues']
+    assert 'conditional_valuation' not in fresh
+    assert foreign_ads_conditional_research(fresh,pdd_assumptions())['status']=='INSUFFICIENT_EVIDENCE'
+    finalizer_clock(expired_at)
+    executed=(SimpleNamespace(portfolio_evidence=[a,deepcopy(a)],loaded_data=None) if mode=='multi'
+              else SimpleNamespace(position_evidence=a,loaded_data=None))
+    out=ExpressionOutput(structured_payload={'professional_explanation':[]})
+    with bind(session()):
+        finalize_output(SimpleNamespace(portfolio_id=7),executed,out)
+    assert out.structured_payload['conditionalValuation'] is None
+    assert out.structured_payload['conditionalValuations']==[]
+    assert out.structured_payload['execution_authorized'] is False
+    assert out.actionable is False
+    assert a==original  # Rechecking cannot refresh or rewrite the source receipt.
