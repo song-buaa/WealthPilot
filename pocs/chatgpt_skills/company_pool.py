@@ -4,7 +4,10 @@ from typing import Annotated, Literal
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from pocs.chatgpt_skills.analysis import AnalysisResult
-from pocs.chatgpt_skills.position_jobs import PositionJobs, PositionAnalysisJob
+from pocs.chatgpt_skills.position_jobs import (
+    ProcessLocalPositionJobs as PositionJobs,
+    ProcessLocalPositionAnalysisJob as PositionAnalysisJob,
+)
 from pocs.chatgpt_skills.diagnostics import request_run
 from backend.services.s3_research_entry import CompanyPoolRequest
 
