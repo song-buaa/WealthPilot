@@ -223,7 +223,7 @@ def create_server(settings):
     pool_instructions = (" For an explicit company pool comparison of enterprise quality, valuation and five-year returns, use start_company_pool_research then get_company_pool_research_result. request.method defaults to standard; use professional for reviewed company-specific operating/earnings research (initially AAPL/MSFT/NVDA). Do not supply underlying forecast/PE parameters; server-owned profiles must requalify current evidence. META entitlement refusal remains authoritative in both methods. This needs no holdings, prepare or portfolio analysis. Preserve all cards and specific noncomparability. Candidate scenario parameters are unverified research assumptions, not policy. Retain artifact_id for read_company_pool_research after restart. Company priority is not portfolio allocation; no orders or policy changes. "
         if getattr(settings, 's3_archive_root', None) else "")
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
-        instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Generate one unique client request_id per user-authorized research; reuse it for retries within the same process. request_scope is informational, never a required prefix. Process-local receipts cannot guarantee deduplication across restart; unknown jobs never authorize a new start. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
+        instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Generate one unique client request_id per user-authorized research; reuse it for retries, including after process restart. request_scope is informational, never a required prefix. Durable receipts prevent replay across restart; unknown jobs never authorize a new start. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
                       "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions+pool_instructions)
     overview.settings = settings
@@ -337,7 +337,7 @@ def create_server(settings):
                 stage = "pydantic_validation"
                 overview.record_analysis_event(settings, diagnostic(identifier, stage))
                 result = AnalysisResult.model_validate(value)
-                final = diagnostic(identifier, "mcp_return", status=result.status,
+                final = diagnostic(identifier, "analysis_result_ready" if _reserved else "mcp_return", status=result.status,
                     category="business_unavailable" if result.status == "unavailable" else "NONE",
                     observation=result.llm_observation)
                 return result
@@ -385,25 +385,41 @@ def create_server(settings):
         return analysis_call("analyze_position", request, _client=BusinessClient(SimpleNamespace(**{**vars(analysis_settings), "async_l1":True})),
             _identifier=identifier, _reserved=True)
 
-    position_jobs = PositionJobs(execute_position_job, analysis_lock)
+    # Production must explicitly provision a private root/quota/retention. Only
+    # the existing synthetic protocol server gets a temporary test-only store.
+    result_root=getattr(settings,'analysis_results_dir',None)
+    result_quota=getattr(settings,'analysis_results_quota_bytes',None)
+    result_retention=getattr(settings,'analysis_results_retention_seconds',None)
+    if getattr(settings,'mock_database',None) and not getattr(settings,'real_config',None) and result_root is None:
+        import tempfile
+        result_root=tempfile.mkdtemp(prefix='wp-synthetic-position-results-')
+        result_quota=128*1024*1024
+        result_retention=7200
+    configured=(result_root is not None,result_quota is not None,result_retention is not None)
+    if any(configured) and not all(configured):
+        raise ValueError('ANALYSIS_RESULTS_CONFIG_INCOMPLETE')
+    position_jobs = PositionJobs(execute_position_job, analysis_lock,
+        storage_root=result_root, quota_bytes=result_quota,
+        retention_seconds=7200 if result_retention is None else result_retention,
+        event=lambda value:overview.record_position_storage_event(settings,value))
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=True),
         description=("Preferred single-symbol professional research. Quickly start exactly one original PEER/readonly Worker; no sync, prepare or trades. "
             "Generate a unique request_id (for example a UUID; 1-128 letters/digits/:/_/-). No scope prefix or tool refresh is required; legacy scoped IDs are also accepted. "
-            "Keep the EXACT ID and identical request parameters when retrying a lost start response in the same process; it returns the existing job. "
-            "Same ID with changed parameters is rejected within the process. request_scope is informational only. Receipts are not persistent: across restart even the same ID may start new paid work. Never automatically re-submit after restart or unknown/expired job; only an explicit new user research request authorizes new work. "
+            "Keep the EXACT ID and identical request parameters when retrying a lost start response; it returns the existing job. "
+            "Same ID with changed parameters is rejected across processes. request_scope is informational only. Receipts are durable in the configured private store: across restart the same ID never restarts accepted work. Never automatically re-submit after restart or unknown/expired job; only an explicit new user research request authorizes new work. "
             "Supply the same original AnalysisRequest (question, optional symbol/history/snapshot). No snapshot is required for normal LI research. "
             "Preserve user's current holding/reduction/exit intent and explicit review date in question/history; optional research_context carries only user research assumptions (objective, review_date, reference_quantity, tranche_fractions, historical_price_bands, conditional_valuation), never verified holdings or confirmed allocation. Conditional valuation requires explicit complete user research hypotheses; do not invent missing assumptions or ask the user to construct JSON. "
             "Save returned job_id and query get_position_analysis_result; do not call sync analyze_position or start again while waiting. "
-            "One analysis at a time; busy/capacity errors do not start work. Results remain private in memory for two hours after completion; restart loses them."))
+            "One analysis at a time; busy/capacity errors do not start work. Results use versioned report delivery plus a private full artifact; completed jobs survive restart. Interrupted jobs never automatically resume. Retention is operator configured; expired receipts never authorize new work."))
     def start_position_analysis(request_id: Annotated[str, Field(min_length=1, max_length=128,
             pattern=r"^[A-Za-z0-9:_-]+$")], request: AnalysisRequest) -> PositionAnalysisJob:
         return position_jobs.start(request_id, request)
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=False),
-        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: return the original full AnalysisResult, including professional_result/conclusion/evidence/quality/limitations, at its original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Process-local private results expire two hours after completion.")
+        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: return wealthpilot.analysis-report.v1 with the full professional report/explanations/valuation/limitations and summarized machine Evidence; artifact metadata identifies the complete private wealthpilot.analysis.v1 result without exposing paths. Preserve report/full_artifact distinctions and original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Reports expire at configured retention; private artifacts and idempotency tombstones remain. Queries never start work.")
     def get_position_analysis_result(job_id: Annotated[str, Field(min_length=32, max_length=64,
             pattern=r"^[A-Za-z0-9_-]+$")]) -> PositionAnalysisJob:
         return position_jobs.get(job_id)
@@ -450,6 +466,9 @@ def create_server(settings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8810)
+    parser.add_argument('--analysis-results-dir', help='Explicit private durable L1 store (0700), outside Git')
+    parser.add_argument('--analysis-results-quota-bytes', type=int, help='Explicit private L1 disk quota; no automatic cleanup')
+    parser.add_argument('--analysis-results-retention-seconds', type=float, help='Explicit report retention; tombstones/full artifacts are not automatically deleted')
     parser.add_argument("--events", help="Optional private metadata-only completion ledger, outside Git")
     parser.add_argument("--business-python", required=True)
     parser.add_argument("--real-config")

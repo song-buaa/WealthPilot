@@ -84,6 +84,31 @@ def record_analysis_event(configuration, value):
     if clean is None:
         return
     event = {"time": datetime.now(timezone.utc).isoformat(), "event": "mcp_analysis", **clean}
+    _record_private_event(configuration,event)
+
+
+def record_position_storage_event(configuration, value):
+    """Closed content-free L1 storage event, through the original private sink."""
+    import re
+    categories={'serialization_completed','committed','recovered','RESULT_EXPIRED','ANALYSIS_INTERRUPTED','RESULT_STORAGE_UNAVAILABLE','RESULT_STORAGE_QUOTA',
+        'RESULT_ARTIFACT_CORRUPT','RESULT_ARTIFACT_MISSING','RESULT_STORAGE_UNSAFE','RESULT_RECEIPTS_CORRUPT',
+        'RESULT_SERIALIZATION_FAILED','ANALYSIS_RESULT_INVALID','ANALYSIS_WORKER_FAILED','ANALYSIS_JOB_FAILED',
+        'ANALYSIS_IPC_TIMEOUT','ANALYSIS_WORKER_EXITED','ANALYSIS_WORKER_START_FAILED','ANALYSIS_JSON_INVALID'}
+    if (not isinstance(value,dict) or value.get('schema_version')!='wealthpilot.position-storage-event.v1'
+            or not isinstance(value.get('storage_status'),str) or value['storage_status'] not in categories
+            or not isinstance(value.get('analysis_run_id'),str) or not re.fullmatch(r'[a-f0-9]{32}',value['analysis_run_id'])
+            or not isinstance(value.get('job_id'),str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,64}',value['job_id'])):
+        return
+    clean={key:value[key] for key in ('schema_version','analysis_run_id','job_id','storage_status')}
+    size=value.get('result_bytes');digest=value.get('artifact_sha256')
+    clean['result_bytes']=size if type(size) is int and size>=0 else 'UNKNOWN'
+    clean['artifact_sha256']=digest if isinstance(digest,str) and re.fullmatch(r'[a-f0-9]{64}',digest) else 'UNKNOWN'
+    clean['business_status']=value.get('business_status') if isinstance(value.get('business_status'),str) and value.get('business_status') in {'ok','partial','unavailable'} else 'UNKNOWN'
+    _record_private_event(configuration,{'time':datetime.now(timezone.utc).isoformat(),'event':'position_result_storage',**clean})
+
+
+def _record_private_event(configuration,event):
+    import logging
     line = json.dumps(event, ensure_ascii=True)
     # Never use stdout: it belongs to MCP/IPC. No exception strings or payloads.
     logging.getLogger("wealthpilot.mcp.analysis").warning(line)

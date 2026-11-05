@@ -140,7 +140,7 @@ GPT-6 发布前观测候选：原统一请求 owner 加入 [安全元数据](../
 
 正常 MCP 错误诊断复用 [server](../pocs/chatgpt_skills/server.py)、[Worker](../pocs/chatgpt_skills/worker.py) 与[原只读事件入口](../pocs/poc02_wealth_mcp/server.py)，[闭合投影](../pocs/chatgpt_skills/diagnostics.py)只传匿名 ID、阶段、协议/业务状态、耗时和有证据的模型调用统计；未知为 UNKNOWN。无新工具/数据库/业务计算/付费调用，原 L1–L4/人工交易权限不变。专项见[正常 MCP 协议回归](../pocs/chatgpt_skills/test_v42_protocol.py)；部署与真实验证仍待单独授权，见[4.2说明](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
-正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)仅管理有界进程私有登记/结果。客户端唯一ID在进程内幂等，旧scope格式兼容且不作门槛；跨重启不保证去重，未知job查询不执行业务或自动重跑；完整原报告保留两小时。无新平台/数据库/模型/Provider/权限，原同步入口兼容、原11工具保留。测试见[登记](../tests/test_position_jobs.py)、[真实隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；生产与真实质量仍待授权验收，见[4.2边界](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+正常ChatGPT单标长研究：原[server](../pocs/chatgpt_skills/server.py)的`start_position_analysis` / `get_position_analysis_result`复用原只读Worker/PEER/AnalysisResult与安全观测；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)拥有L1任务准入和持久收据，[私有文件IO](../pocs/chatgpt_skills/position_store.py)先提交完整过滤结果再提交完成状态。显式私有目录、配额、保留期下，客户端ID跨进程幂等，旧scope兼容；中断、过期不自动重跑。v2 Job返回版本化report及完整工件身份，不泄露路径。S3继续使用原进程内登记和冻结格式，无数据库、模型、Provider或交易权限变化。测试见[登记](../tests/test_position_jobs.py)、[隔离HTTP/Worker](../pocs/chatgpt_skills/test_v42_protocol.py)；合同及生产待验收边界见[方案C](V42_IMPLEMENTATION.md#l1-异步结果持久交付方案-c2026-11-05开发候选)。
 
 S3 P1科技覆盖开发候选沿[原SEC与S3 Owner](v4.3/S3_P1_US_TECH_COVERAGE.md)适配META同目标分段附件链接、表内GAAP标题及MSFT美元同格EPS；多注册证券有界补采直接类别原件。真实冻结回归不改变估值公式、质量门槛或上线资格；GOOG完整TTM/类别方法及TSLA图片Q4仍UNKNOWN，不强行排名。
 

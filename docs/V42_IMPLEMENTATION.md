@@ -679,3 +679,16 @@ LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/0001104
 在上述边界内，LI显式研究假设的完整回放四阶段完成、最终6段解释保留，营业恢复的2031年终值、谨慎情景N/A、基准/乐观条件年化约−1.18%/+32.12%、当前价反向所需终值营业利润率约18.43%/9.08%/4.58%均由服务端计算并经独立Decimal公式复算；`fair_value=None`。普通LI自然语言完整回放也完成四阶段并保留6段解释；原问题“长期经营恢复、当前价格隐含条件”曾漏过意图识别，定点补齐后最终MCP结果包含`HYPOTHESES_REQUIRED`恢复型反向条件，列出当前经济股数、完整净现金、独立EV/EBIT依据及未来现金/FX假设缺口，公允价值仍N/A。PDD普通自然语言完整回放四阶段完成、最终5段解释保留，四季63.14 CNY/ADS EPS、81.68 USD/ADS观察价、6.6483 FX及约8.60倍历史静态PE进入服务端参考敏感性；谨慎/基准/乐观条件年化约−16.56%/0%/+12.98%，独立Decimal复算一致。PDD模型解释明确指出静态PE不是便宜证明、Temu与盈利持续性反证，以及下一次退出研究触发条件；这些仍非完整竞争或公允价值证明。三次完整回放最终`professional_analysis_complete=true`、业务`partial`，正式政策引用保留，交易授权始终false。
 
 真实模型对照显示，对所有条件估值统一加强提示会使LI的竞争、投资逻辑和复核条件段被原安全过滤拒绝（6段降为3段）；因此只给正盈利ADS路径增加限定提示，LI仍沿原Prompt。此前PDD参考情景提示后的5段包含investment_thesis与Temu风险；历史原始候选未保存时不反推过滤词。大规模字段明细使隔离报告文本仍超过十万字符，是可读性待改进项；本PR不裁掉原证据或扩大报告引擎。以上开发验证不等于生产完整L1、正式三标8分或美团IFRS资格通过。
+
+## L1 异步结果持久交付方案 C（2026-11-05，开发候选）
+
+范围：修复原PositionJobs的2MiB丢弃、进程内结果丢失及跨重启重复启动风险。不改PEER、模型、Evidence、ACTIVE、E1、资产或交易；工程候选不代表部署或历史事故最终归因。
+
+- **Owner与合同**：PositionJobs保留L1准入/结果Owner，position_store只做私有文件IO。原AnalysisResult v1完整保存；异步Job升级为`wealthpilot.position-analysis-job.v2`，`delivery=report`，result为`wealthpilot.analysis-report.v1`。报告保留全部结论、专业解释、数字/来源、条件估值/假设/敏感性、完成状态及UNKNOWN；移走底层Evidence树和重复政策全文。artifact提供opaque ID、原结果SHA256和编码字节数、原schema及`authorized_private_file_only`边界，不暴露路径。旧客户端须识别新schema，不能把report当全量Evidence。
+- **提交顺序**：文件锁内提交Request ID摘要、参数指纹、Job/Run、接收时间、代码指纹和状态，再启动原Worker。原analysis_lock及跨进程active.lock协调单项L1。完成结果使用原JSON编码、0600临时文件、fsync、不可覆盖原子提交及目录fsync；读验成功再更新收据。completed表示结果可取回，业务unavailable仍需如实展示。异步提前事件改为`analysis_result_ready`；最终存储事件committed也不冒充客户端已收到。
+- **恢复与失败**：相同ID/参数跨进程返回原Job，变参拒绝；get不执行研究。无活跃执行锁、无工件的running标ANALYSIS_INTERRUPTED；工件提交后收据未更新时，严格核对Job/Run/参数、schema、hash、bytes和AnalysisResult才恢复。损坏或缺失索引、非法权限、配额或磁盘失败均拒绝，不重置旧结果。过期报告不再返回正文，完整工件与幂等tombstone不自动删除。本系统不重复启动的证明，不等于外部Provider绝对exactly-once计费。
+- **生产配置待批准**：预建仓库外私有目录0700，属主为MCP运行用户，文件0600；拒绝符号链接、路径穿越、非普通文件和多硬链接，父目录逐级NOFOLLOW打开。必须同时设置`--analysis-results-dir`、`--analysis-results-quota-bytes`、`--analysis-results-retention-seconds`；不完整或非正配置拒绝。未配置时异步L1明确RESULT_STORAGE_UNCONFIGURED，不回退内存/同步研究。根目录丢失不自动重建。配额含原子替换峰值和遗留临时文件，原64收据/8有效结果容量保留，满则拒绝；不得删除收据后复用旧请求。生产容量、保留和人工归档由项目管理决定，本PR不执行清理。合成协议服务器仅用隔离临时目录和测试默认值。
+- **诊断与兼容**：沿原私有--events记录serialization_completed/committed/recovered、过期/中断和闭集错误；包含匿名Job/Run、已知实际字节/hash及业务状态，未知保持UNKNOWN。不记录正文、Prompt、账户或原始异常。父进程仍须持久化原诊断，不依赖stderr。同步入口、Worker、原工具、S3 standard/professional及冻结读取格式不变；S3明确使用原ProcessLocal登记，不启用L1新配置或report。PR92只验证共享合同，不合入业务改动。
+- **冻结验收**：PDD完整结果2,207,475 bytes，原编码SHA256为`4cdf627f475b6a97889a62db9666023958c4013181c1400faf29a6ca6ce588bf`；report正文247,412 bytes，六段完整解释及估值保持。私人源工件不进Git。专项覆盖更大合法结果、配额耗尽、真实多进程同ID、两个崩溃窗口、过期及损坏；最终测试和exact-HEAD CI以PR记录为准。
+
+部署须单独授权私有目录、配额、保留期及同版本MCP父进程/Worker发布；不迁移数据库或旧进程内任务。回滚前停止新研究并确认在途状态，完整保留新收据、工件和事件。旧代码不理解新收据，不能把旧请求重新提交到旧进程；回滚不删除存储、不自动补跑，新结果仅由授权私有读取或兼容版本恢复。

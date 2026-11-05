@@ -6,7 +6,7 @@ from app.llm_observation import safe_call_timings, safe_stage_timings, run_id, s
 
 ANALYSIS_OPERATIONS = {"compare_company_pool", "analyze_position", "review_portfolio", "analyze_performance"}
 STAGES = {"mcp_received", "worker_start", "request_send", "ipc_wait", "request_received",
-          "analyze_peer", "result_serialization", "ipc_receive", "pydantic_validation", "mcp_return", "worker_cleanup"}
+          "analyze_peer", "result_serialization", "ipc_receive", "pydantic_validation", "mcp_return", "analysis_result_ready", "worker_cleanup"}
 CATEGORIES = {"NONE", "UNKNOWN", "worker_start_failed", "worker_start_refused", "ipc_timeout", "worker_exited",
               "ipc_io", "invalid_json", "invalid_envelope", "run_id_mismatch", "business_error",
               "business_unavailable", "serialization_failed", "validation_failed", "unexpected_error", "cleanup_failed"}

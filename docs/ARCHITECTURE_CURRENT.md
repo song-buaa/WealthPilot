@@ -290,7 +290,7 @@ P1.1仍在原纯投影内选择同原文比较列/明确精度相容值，保留
 
 正常 MCP 分析的安全阶段诊断沿原 [server/BusinessClient](../pocs/chatgpt_skills/server.py) → [Worker](../pocs/chatgpt_skills/worker.py) → 原 PEER → IPC/Pydantic 返回，复用匿名 analysis_run_id 与原只读事件入口，区分协议错误与业务 ok/partial/unavailable。安全枚举投影和阶段记录不参与业务资格，不输出原文；未观测的模型/Provider 请求数 UNKNOWN。240/270 秒超时与专项预算 owner 不变；字段、离线覆盖及待授权的一次 LI 验证见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
-正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配，优先于同步analyze_position；[进程内登记](../pocs/chatgpt_skills/position_jobs.py)只拥有任务准入/收据/暂存结果，原Worker/PEER仍是研究与证据owner。后台独立BusinessClient与HTTP请求生命周期解耦，get不执行业务/Provider；共享准入锁最多一项分析。客户端唯一ID在进程内幂等，兼容缓存旧scope格式；request_scope仅诊断，不要求刷新目录。纯内存不保证跨重启去重，未知job不自动重跑，结果两小时保留，旧/过期任务UNKNOWN/unavailable，无新数据库/队列/资格/交易权限。原10/11工具不移除，增加start/get后12/13项；120秒官方规则、证据强度、容量/隐私及待授权真实LI使用见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)拥有L1准入和持久收据，原Worker/PEER仍是研究与证据owner。后台BusinessClient与HTTP生命周期解耦；get只读工件。原进程锁与跨进程文件锁协调单项L1，请求摘要和参数指纹在启动前提交。完整Evidence/ACTIVE过滤结果先原子保存、校验，再标completed；v2 Job返回analysis-report.v1和完整analysis.v1工件的哈希/字节数，不暴露路径。重启可恢复完整结果，中断/过期收据不自动重跑。目录、配额、保留期必须显式配置，无生产默认保存或清理策略。同步入口不作自动回退；S3继续使用此Owner内保留的原进程内登记，其标准/专业入口和冻结格式不变。详见[持久交付合同](V42_IMPLEMENTATION.md#l1-异步结果持久交付方案-c2026-11-05开发候选)。
 
 ## 4.3 开发边界：E1 研究记录
 

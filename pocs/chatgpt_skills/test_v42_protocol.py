@@ -471,8 +471,11 @@ worker.main()
 
     @contextmanager
     def http_server():
+        (tmp_path/'results').mkdir(mode=0o700,exist_ok=True)
         server=create_server(SimpleNamespace(real_config='not-opened',mock_database=None,
-            business_python='replaced-by-isolated-probe',portfolio_id=7,events=str(tmp_path/'events.jsonl')))
+            business_python='replaced-by-isolated-probe',portfolio_id=7,events=str(tmp_path/'events.jsonl'),
+            analysis_results_dir=tmp_path/'results',analysis_results_quota_bytes=10000000,
+            analysis_results_retention_seconds=7200))
         app=server.streamable_http_app(json_response=True,stateless_http=True)
         listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(16)
         config=uvicorn.Config(app,log_level='critical',access_log=False)
@@ -491,7 +494,7 @@ worker.main()
         async with Client(url,mode='legacy',read_timeout_seconds=10) as client:
             tools={tool.name:tool for tool in (await client.list_tools()).tools}
             description=tools['start_position_analysis'].description
-            assert 'No scope prefix' in description and 'Receipts are not persistent' in description
+            assert 'No scope prefix' in description and 'Receipts are durable' in description
             assert not re.search(r'pa_[0-9a-f]{32}',description)
             scope='pa_'+'a'*32  # A cached description from an unrelated previous process.
             assert len(tools)==12 and 'Synchronous compatibility' in tools['analyze_position'].description
@@ -532,7 +535,8 @@ worker.main()
                 assert final['state']=='unavailable' and final['result'] is None and final['business_status']=='UNKNOWN'
             else:
                 assert final['state']=='completed' and final['business_status']==outcome
-                assert final['result']==AnalysisResult.model_validate_json(expected.read_text()).model_dump(mode='json')
+                from pocs.chatgpt_skills.position_jobs import report_projection
+                assert final['result']==report_projection(AnalysisResult.model_validate_json(expected.read_text())).model_dump(mode='json')
                 assert final['result']['llm_observation']['analysis_run_id']==first['analysis_run_id']
                 assert not final['result']['order_created']
             again=await client.call_tool('start_position_analysis',arguments)
@@ -540,14 +544,14 @@ worker.main()
             return first,request_id
     try:
         with http_server() as url:first,request_id=asyncio.run(run(url))
-        # Receipt loss is explicit; querying the old job never launches new work.
+        # A new server instance reads the same durable receipt without launching work.
         with http_server() as url:
             async def restarted():
                 async with Client(url,mode='legacy') as client:
                     missing=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
-                    assert missing.structured_content['issue']=='JOB_UNKNOWN_OR_PROCESS_RESTARTED'
-                    assert missing.structured_content['business_status']=='UNKNOWN'
-                    assert missing.structured_content['result'] is None
+                    assert missing.structured_content['state']==('unavailable' if outcome=='exit' else 'completed')
+                    assert missing.structured_content['business_status']==('UNKNOWN' if outcome=='exit' else outcome)
+                    assert (missing.structured_content['result'] is None)==(outcome=='exit')
                     assert len(children)==1
             asyncio.run(restarted())
         assert len(children)==1
@@ -680,3 +684,13 @@ worker.main()
         assert detail['protocol_is_error']
         client.process.wait(timeout=3)  # error path is single-use too
     finally:client.close()
+
+
+@pytest.mark.parametrize('values',[
+    {'analysis_results_dir':'/not/opened','analysis_results_quota_bytes':1000},
+    {'analysis_results_dir':'/not/opened','analysis_results_quota_bytes':1000,'analysis_results_retention_seconds':0},
+])
+def test_durable_results_require_explicit_complete_positive_configuration(values):
+    from pocs.chatgpt_skills.server import create_server
+    with pytest.raises(ValueError):
+        create_server(SimpleNamespace(real_config='not-opened',**values))
