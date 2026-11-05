@@ -53,19 +53,32 @@ def report_projection(full):
     """Keep all user prose/explanations/valuation; archive bulk machine Evidence."""
     value = full.model_dump(mode='json')
     original = value['evidence']
-    position = original.get('position_evidence') or {}
-    financial = position.get('financial_research') or {}
+    incomplete = []
+    def mapping(value):
+        if value is None:return {}
+        if isinstance(value,dict):return value
+        incomplete.append(True)
+        return {}
+    def records(value):
+        if value is None:return []
+        if not isinstance(value,list):
+            incomplete.append(True)
+            return []
+        if any(not isinstance(row,dict) for row in value):incomplete.append(True)
+        return [row for row in value if isinstance(row,dict)]
+    position = mapping(original.get('position_evidence'))
+    financial = mapping(position.get('financial_research'))
     value['evidence'] = dict(delivery='summary_complete_evidence_in_private_artifact',
         financial_research={k:deepcopy(v) for k,v in financial.items() if k != 'records'},
         financial_metrics=[{**{k:deepcopy(v) for k,v in row.items() if k != 'details'},
-            'details':{k:deepcopy(v) for k,v in row.get('details',{}).items()
+            'details':{k:deepcopy(v) for k,v in mapping(row.get('details')).items()
                        if k in {'formula','comparison_period','limitations','method'}}}
-                           for row in financial.get('records',[])],
+                           for row in records(financial.get('records'))],
         technical_levels=deepcopy(position.get('technical_levels')),
         source_index=[{k:deepcopy(v) for k,v in row.items() if k in
             {'kind','symbol','source','source_url','record_id','published_at','data_as_of','fetched_at',
              'scope','period','quality','issues','is_seed','is_mock','is_fallback'}}
-            for row in position.get('records',[])],
+            for row in records(position.get('records'))],
         position_context={k:deepcopy(position.get(k)) for k in
             ('symbol','as_of','issues','conflicts','source_conflicts','confidence_ceiling','infoNeeded','research_intent')},
         conditional_valuation=deepcopy(position.get('conditional_valuation')),
@@ -76,6 +89,8 @@ def report_projection(full):
     analysis = value.get('professional_result',{}).get('analysis_result')
     if isinstance(analysis,dict):
         analysis.pop('policy_context',None)
+    if incomplete:
+        value['limitations'].append('REPORT_EVIDENCE_SUMMARY_PARTIAL: unsupported machine evidence shapes remain in the complete private artifact.')
     value['schema_version'] = 'wealthpilot.analysis-report.v1'
     return AnalysisReport.model_validate(value)
 
@@ -241,6 +256,7 @@ class PositionJobs:
             full=AnalysisResult.model_validate(returned)
             _reject_nonfinite(full.model_dump(mode="python"))
             # Exactly the old encoder contract, before any report projection.
+            report_projection(full)  # Verify delivery before exposing a completed receipt.
             raw=encode(full.model_dump(mode='json'))
             serialized={'result_bytes':len(raw),'result_sha256':hashlib.sha256(raw).hexdigest()}
             row['business_status']=full.status

@@ -315,3 +315,18 @@ def test_symlink_parent_and_file_root_are_rejected(tmp_path):
     regular=tmp_path/'file';regular.write_text('not a directory')
     jobs=PositionJobs(lambda *a:calls.append(1),threading.Lock(),storage_root=regular,quota_bytes=100000)
     assert jobs.start('id',request()).state=='unavailable' and not calls
+
+
+@pytest.mark.parametrize('position',[
+    ['unexpected nested shape'],
+    {'records':[None,'unexpected',{'kind':'technical'}],'financial_research':{'records':[None,{'details':[]}]}},
+    {'records':{},'financial_research':[]},
+])
+def test_valid_analysis_nested_shape_never_loses_full_completed_result(tmp_path,position):
+    full=original_result();full.evidence={'position_evidence':position}
+    jobs=factory(tmp_path/'store',lambda *a:full);first=jobs.start('id',request());done=finish(jobs,first.job_id)
+    assert done.state=='completed' and done.result.professional_result==full.professional_result
+    assert any('REPORT_EVIDENCE_SUMMARY_PARTIAL' in s for s in done.result.limitations)
+    stored=json.loads((tmp_path/'store'/(first.job_id+'.result.json')).read_text())
+    assert stored['result']==full.model_dump(mode='json')
+    assert factory(tmp_path/'store',lambda *a:pytest.fail('replayed')).get(first.job_id).state=='completed'
