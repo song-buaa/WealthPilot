@@ -164,6 +164,13 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
         covered = evidence.coverage.get('pensions') if evidence else None
         pension_ok = bool(pension_ok and covered and covered.status == 'PRESENT'
                           and pension_rows <= set(covered.asset_refs))
+        for key in pension_rows:
+            disposition = evidence.dispositions.get(key) if evidence else None
+            expected = 'DUPLICATE' if any(f'wealth:{row.get("id")}' == key
+                and row.get('already_investment_accounted') for row in manual) else 'PENSION'
+            if not (disposition and disposition.state == 'EXCLUDED'
+                    and disposition.reason == expected and _evidenced(disposition.evidence_refs)):
+                pension_ok = False
     for row in manual:
         if not row.get('already_investment_accounted'):
             continue
@@ -174,7 +181,10 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
                  and set(links) <= {k for k in keys if k.startswith('position:')}
                  and not linked_positions.intersection(links)
                  and disposition and _evidenced(disposition.evidence_refs)
-                 and disposition.state == 'EXCLUDED' and disposition.reason == 'DUPLICATE')
+                 and disposition.state == 'EXCLUDED' and disposition.reason == 'DUPLICATE'
+                 and all((linked := evidence.dispositions.get(ref))
+                         and linked.state == 'EXCLUDED' and linked.reason == 'PENSION'
+                         and _evidenced(linked.evidence_refs) for ref in links))
         if not valid:
             pension_ok = False
         linked_positions.update(links)
@@ -194,7 +204,7 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
                 or state == 'UNKNOWN' or reason == 'UNKNOWN'
                 or (state == 'INCLUDED') != (reason == 'FREE_INVESTMENT')):
             row_issues.append('ASSET_PURPOSE_UNVERIFIED')
-        if key in linked_positions and not pension_ok:
+        if key in pension_rows | linked_positions and not pension_ok:
             row_issues.append('PENSION_HOLDING_LINK_UNVERIFIED')
         if state == 'EXCLUDED' and reason in {'LIVING_CASH', 'EMERGENCY_RESERVE', 'DEBT_RESERVE'}:
             if not (row.get('vehicle_type') == 'CASH' or kind == 'wealth' and row.get('item_type') == 'bank_cash'):

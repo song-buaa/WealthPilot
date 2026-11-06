@@ -158,6 +158,29 @@ def test_verified_pension_mapping_excludes_restricted_holding_and_duplicate_amou
     assert result.policy_assets.denominator_cny == 1000
 
 
+def test_linked_pension_holding_cannot_remain_freely_investable(view):
+    pension(view, ['position:1'])
+    result = project(view)
+    assert result.status == 'UNKNOWN'
+    assert result.policy_assets.denominator_cny is None
+    assert not result.policy_assets.pension_exclusion_verified
+    assert result.assets[0].state == 'UNKNOWN'
+
+
+def test_known_manual_pension_cannot_be_claimed_as_free_investment(view):
+    pension(view, ['position:1'])
+    row = view['views']['get_manual_wealth_items']['items'][0]
+    row.update(already_investment_accounted=False, last_verified_at=STAMP)
+    evidence = view['data_quality']['investable_scope_evidence']
+    evidence['pension_links'] = {}
+    evidence['dispositions']['wealth:10'].update(state='INCLUDED', reason='FREE_INVESTMENT')
+    result = project(view)
+    assert result.status == 'UNKNOWN'
+    assert result.policy_assets.denominator_cny is None
+    assert not result.policy_assets.pension_exclusion_verified
+    assert result.assets[1].state == 'UNKNOWN'
+
+
 def test_fx_source_quality_and_native_currency_are_not_assumed(view):
     row = view['data_quality']['security_inputs'][0]
     row.update(currency='USD', original_currency='USD', fx_rate_to_cny=7,

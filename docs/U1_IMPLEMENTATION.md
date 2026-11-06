@@ -109,6 +109,8 @@
 - coverage：accounts、manual_assets、pensions、gold、btc、deduplication，各含PRESENT/ABSENT/UNKNOWN、as_of、evidence_refs、asset_refs。账号/手工资产/去重清单与源行逐一对照；ABSENT是有证据的无持有，缺平台/缺证据保持UNKNOWN。
 - pension_links：已登记already_investment_accounted的`wealth:<id>`到实际`position:<id>`映射。金额级扣除不证明持仓身份；缺失/冲突映射阻止正式D。
 
+养老金排除还须逐行核对原Owner用途证据：独立手工养老金为EXCLUDED/PENSION；已在投资账户记账的养老金为EXCLUDED/DUPLICATE，且每个链接持仓均为有据EXCLUDED/PENSION。链接存在不代表已排除；仍标为FREE_INVESTMENT或用途冲突时，养老金资格及分母保持UNKNOWN，不自动改写用途。
+
 原来源仍来自security_inputs、原get_manual_wealth_items及wealth totals。金额为CNY major Decimal；保留源精度、不先舍入，JSON为十进制字符串。投资资金D不减全部贷款；原总资产/负债与派生净资产单列。过期债务令净资产UNKNOWN，不单独否决已完整证实的投资分母。用途、账号publication/同步、原持仓/现金/价格时点及FX按原U1纯质量函数重新核验，不采信can_propose_rebalance或客户端合格标志；原5分钟门和manual/FX规则未放宽。
 
 输出为`wealthpilot.investable-projection.v1`，包含来源hash、逐行状态/理由/问题及原PolicyAssets。证据不足时denominator_cny=null、denominator_qualified=false，保留观测金额及UNKNOWN原因；不填0，不输出目标配置或可执行金额。养老金映射生产维护、共享DDL、外部来源接入及真实验收均不在本候选范围。
