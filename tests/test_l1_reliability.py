@@ -399,9 +399,17 @@ def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db,
 def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,monkeypatch):
     from pocs.chatgpt_skills import analysis
     from backend.services import position_analysis
+    from backend.services.market_data import l1_context
+    # This injects a result-assembly failure, not a tokenizer/budget failure.
+    # Keep its model input tiny in cache-free CI; real preflight is covered separately.
+    monkeypatch.setattr(l1_context,'messages',lambda *a,**kw:([{'role':'user','content':'offline assembly fixture'}],{'status':'accepted'}))
+    assembly_hits=[]
+    def fail_assembly(*a,**kw):
+        assembly_hits.append(True)
+        raise RuntimeError('private assembly error')
     receipt=facts()
     monkeypatch.setattr(position_analysis,'prepare',lambda *a,**kw:receipt)
-    monkeypatch.setattr(analysis,'captured_evidence',lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('private assembly error')))
+    monkeypatch.setattr(analysis,'captured_evidence',fail_assembly)
     class Clock(datetime):
         @classmethod
         def now(cls,tz=None):return AT
@@ -409,6 +417,7 @@ def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,mon
     result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
     assert result['status']=='partial' and not result['professional_analysis_complete']
     assert result['professional_result']['analysis_result']['mode']=='facts_only'
+    assert assembly_hits
     assert 'PROFESSIONAL_STAGE_FAILURE' in result['issues']
     assert 'private assembly' not in json.dumps(result)
 
