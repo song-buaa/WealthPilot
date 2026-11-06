@@ -23,6 +23,30 @@ test.beforeAll(async () => {
   base=`http://127.0.0.1:${address.port}`
 })
 test.afterAll(() => server?.close())
+
+test('ACTIVE allocation displays qualified gap then expires without writes', async ({page}) => {
+  let writes = 0
+  const stamp = new Date().toISOString()
+  await page.route('**/api/**', async route => {
+    if (route.request().method() !== 'GET') writes++
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({json:{mode:'POLICY_ACTIVE',status:'ACTIVE',bundle_sha:'f'.repeat(64),
+        targets:{neutral:{cash:'.1'},etf_internal:{},direct_equity:{},growth_total:'.65',stable_total:'.35'}}})
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({json:{policy_allocation:{status:'QUALIFIED_MAJOR_CLASSES',snapshot_id:'asset-view:v1:1',
+        snapshot_sha256:'a'.repeat(64),as_of:stamp,expires_at:new Date(Date.now()+5000).toISOString(),
+        denominator_cny:'1000',policy_reference:{bundle_sha256:'f'.repeat(64)},
+        classes:{cash:{amount_cny:'1000',current_ratio:'1',target_ratio:'.1',gap_pp:'90',amount_gap_cny:'900',direction:'OVER'}},
+        focus:['cash'],execution_authorized:false}}})
+    } else await route.fulfill({json:path.endsWith('/summary')?null:{}})
+  })
+  await page.goto(base+'/#/discipline')
+  await expect(page.getByRole('region',{name:'当前与目标配置'})).toContainText('超配')
+  await expect(page.getByRole('region',{name:'当前与目标配置'})).toHaveCount(0,{timeout:10000})
+  await expect(page.getByRole('alert')).toContainText('ASSET_VIEW_EXPIRED')
+  expect(writes).toBe(0)
+})
 for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
   test(`policy ${mode}: legacy editor exposure and zero writes`,async ({page}) => {
     let writes=0
