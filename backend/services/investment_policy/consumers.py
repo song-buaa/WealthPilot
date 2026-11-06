@@ -18,12 +18,15 @@ def allocation_context(portfolio_id=None):
 def targets():
     from app.allocation.types import AssetTarget, AllocAssetClass
     c = allocation_context()
-    n = c['targets']['neutral']
-    n = {k: Decimal(v) for k,v in n.items()}
-    weights = {'cash':n['cash'], 'fixed':n['ib01']+n['cbu3'],
-               'equity':n['us_etf']+n['us_direct']+n['china'], 'alt':n['gold']+n['btc'], 'deriv':Decimal(0)}
+    weights = major_targets(c)
     return [AssetTarget(asset_class=AllocAssetClass(k), floor_ratio=float(v), ceiling_ratio=float(v),
                         mid_ratio=float(v),cash_min_amount=None,cash_max_amount=None) for k,v in weights.items()]
+
+
+def major_targets(c):
+    n = {k:Decimal(v) for k,v in c['targets']['neutral'].items()}
+    return {'cash':n['cash'], 'fixed':n['ib01']+n['cbu3'],
+        'equity':n['us_etf']+n['us_direct']+n['china'], 'alt':n['gold']+n['btc'], 'deriv':Decimal(0)}
 
 
 def conditional_plan(amount, portfolio_id=None):
@@ -76,6 +79,33 @@ def snapshot(portfolio_id):
     session=current(portfolio_id)
     if not assets_qualified(session,complete=True):
         raise PolicyError('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED')
+    if hasattr(session, 'allocation_amounts'):
+        from app.allocation.types import PolicyAllocationSnapshot
+        from decimal import ROUND_HALF_EVEN
+        weights = session.assets.major_class_weights
+        amounts, desired = session.allocation_amounts, major_targets(c)
+        if set(weights) != set(desired) or any(not qualified_bucket(e) for e in weights.values()):
+            raise PolicyError('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED')
+        if sum(e.value for e in weights.values()) != 1 or sum(amounts.values()) != session.assets.denominator_cny:
+            raise PolicyError('POLICY_ASSET_WEIGHTS_NOT_CLOSED')
+        rows = {}
+        for key, amount in amounts.items():
+            difference = amount - desired[key]*session.assets.denominator_cny
+            rows[key] = {'amount_cny':str(amount), 'current_ratio':str(weights[key].value),
+                'target_ratio':str(desired[key]),
+                'gap_pp':str((weights[key].value-desired[key])*100),
+                'amount_gap_cny':str(difference.quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)),
+                'direction':'OVER' if difference > 0 else 'UNDER' if difference < 0 else 'AT_TARGET'}
+        meta = {**session.allocation_source, 'status':'QUALIFIED_MAJOR_CLASSES',
+            'denominator_cny':str(session.assets.denominator_cny), 'amount_unit':'CNY major decimal',
+            'policy_reference':c['policy_reference'], 'classes':rows,
+            'focus':sorted([k for k in rows if rows[k]['direction']!='AT_TARGET'],
+                key=lambda k:abs(Decimal(rows[k]['gap_pp'])), reverse=True),
+            'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
+        return PolicyAllocationSnapshot(snapshot_at=session.assets.as_of,
+            total_investable_assets=float(session.assets.denominator_cny),
+            by_class={k:ClassAllocation(amount=float(v),ratio=float(weights[k].value)) for k,v in amounts.items()},
+            policy_allocation=meta)
     rows=session.assets.bucket_weights
     if set(rows)!=set(c['targets']['neutral']) or any(not qualified_bucket(e) for e in rows.values()):
         raise PolicyError('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED')

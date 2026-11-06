@@ -30,12 +30,20 @@ from app.database import get_session
 from app.models import Position
 
 
-def get_snapshot(portfolio_id: int) -> AllocationSnapshot:
+def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
     """获取当前配置快照"""
-    from backend.services.investment_policy.runtime import current
-    if current(portfolio_id).mode != 'LEGACY':
+    from backend.services.investment_policy.runtime import current, bind
+    pinned = current(portfolio_id)
+    if pinned.mode != 'LEGACY':
+        if snapshot_id and pinned.assets and pinned.assets.snapshot_id != snapshot_id:
+            from backend.services.investment_policy.parser import PolicyError
+            raise PolicyError('POLICY_SCOPE_MISMATCH')
         from backend.services.investment_policy.consumers import snapshot
-        return snapshot(portfolio_id)
+        with bind(pinned):
+            if pinned.mode == 'POLICY_ACTIVE' and pinned.assets is None:
+                with _assembled_policy_assets(portfolio_id, snapshot_id):
+                    return snapshot(portfolio_id)
+            return snapshot(portfolio_id)
     with get_session() as session:
         positions = (
             session.query(Position)
@@ -43,6 +51,111 @@ def get_snapshot(portfolio_id: int) -> AllocationSnapshot:
             .all()
         )
         return build_allocation_snapshot(positions, segment="投资")
+
+
+def _assembled_policy_assets(portfolio_id, snapshot_id=None):
+    """Server-owned read only: pin policy, original stored U1 bytes and A-min.
+
+    Never call prepare, live Portfolio, FX providers or broker synchronization.
+    API arguments select an existing ID; they cannot provide assets/evidence.
+    """
+    from contextlib import contextmanager
+    from decimal import Decimal
+    from datetime import timedelta
+    import os
+    import sqlite3
+    from app import asset_views
+    from app.database import DB_PATH
+    from backend.services.investable_assets import project_investable_assets
+    from backend.services.investment_policy.contracts import digest, MetricEvidence
+    from backend.services.investment_policy.runtime import current, bind, assets_qualified
+    from backend.services.investment_policy.parser import PolicyError
+    from backend.services.investment_policy.store import clock, utc_now
+
+    @contextmanager
+    def assembled():
+        pinned = current(portfolio_id)
+        pinned.ensure_current()
+        try:
+            contract = os.environ.get('WEALTHPILOT_SQLITE_CONTRACT')
+            view = (asset_views.load_view(DB_PATH, portfolio_id, snapshot_id, contract) if snapshot_id
+                    else asset_views.latest_view(DB_PATH, portfolio_id, contract))
+        except (OSError, ValueError) as exc:
+            if (isinstance(exc, ValueError) and str(exc) not in asset_views.ERRORS
+                    and not str(exc).startswith('SHARED_')):
+                raise
+            raise PolicyError('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED') from None
+        except sqlite3.OperationalError as exc:
+            if (getattr(exc, 'sqlite_errorcode', None) not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED,
+                    sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_READONLY}
+                    and str(exc) not in {'no such table: wealth_snapshots', 'no such column: payload_json',
+                        'no such column: analysis_request_id', 'no such column: portfolio_id'}):
+                raise
+            raise PolicyError('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED') from None
+        def reject(code, issues):
+            error = PolicyError(code)
+            error.qualification = {'status':'UNKNOWN', 'snapshot_id':view['snapshot_id'],
+                'snapshot_sha256':digest(view), 'issues':issues, 'execution_authorized':False}
+            raise error
+        owner = view['data_quality'].get('investable_owner_evidence', {})
+        if not owner or clock(owner['valid_until']) < clock(utc_now()):
+            reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+                ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
+                 *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
+        projection = project_investable_assets(view, portfolio_id=portfolio_id,
+            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=clock(utc_now()))
+        # A new request-local session; never mutate a caller's pinned assets.
+        from backend.services.investment_policy.runtime import PolicySession
+        session = PolicySession(portfolio_id, assets=projection.policy_assets)
+        if session.context.get('policy_reference') != pinned.context.get('policy_reference'):
+            raise PolicyError('POLICY_VERSION_CONFLICT')
+        if not assets_qualified(session, complete=True):
+            reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
+        amounts = {k:Decimal(0) for k in ('cash', 'fixed', 'equity', 'alt', 'deriv')}
+        # Canonical economic class only, never broker STK or a display name.
+        from backend.services.instruments.classification import ECONOMIC_CLASS_TO_CN
+        from app.allocation.types import CN_TO_ALLOC
+        classes = {str(k):CN_TO_ALLOC[v].value for k,v in ECONOMIC_CLASS_TO_CN.items() if v in CN_TO_ALLOC}
+        q = view['data_quality']
+        rows = {f'position:{r["id"]}':r for r in q.get('investable_security_inputs', q['security_inputs'])}
+        rows.update({f'wealth:{r["id"]}':r for r in view['views']['get_manual_wealth_items']['items']})
+        manual_classes = view['data_quality'].get('investable_owner_evidence', {}).get('manual_classes', {})
+        for item in projection.assets:
+            if item.state != 'INCLUDED':
+                continue
+            row = rows[item.source_ref]
+            if item.source_ref.startswith('position:'):
+                key = classes.get(row.get('economic_asset_class'))
+            elif row.get('item_type') == 'bank_cash':
+                key = 'cash'
+            else:
+                evidence = manual_classes.get(item.source_ref, {})
+                key = classes.get(evidence.get('economic_asset_class')) if evidence.get('evidence_refs') else None
+            if not key:
+                reject('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED', [f'{item.source_ref}:CLASSIFICATION_UNVERIFIED'])
+            amounts[key] += item.amount_cny
+        denominator = projection.policy_assets.denominator_cny
+        if sum(amounts.values()) != denominator:
+            raise PolicyError('POLICY_ASSET_WEIGHTS_NOT_CLOSED')
+        weights = {k:v/denominator for k,v in amounts.items()}
+        # Decimal division can repeat. Assign only division residue to the
+        # largest class; source CNY amounts remain exact, no threshold relaxed.
+        largest = max(amounts, key=amounts.get)
+        weights[largest] += Decimal(1)-sum(weights.values())
+        session.assets = session.assets.model_copy(update={'major_class_weights': {
+            k:MetricEvidence(value=v, complete=True, fresh=True, identity_verified=True,
+                denominator_qualified=True, as_of=view['captured_at']) for k,v in weights.items()}})
+        session.allocation_amounts = amounts
+        session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
+            'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
+            'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),
+            'owner_evidence_sha256':view['data_quality'].get('investable_owner_evidence', {}).get('sha256'),
+            'issues':projection.policy_assets.issues}
+        with bind(session):
+            session.ensure_current()
+            yield session
+            session.ensure_current()
+    return assembled()
 
 
 def get_targets() -> List[AssetTarget]:

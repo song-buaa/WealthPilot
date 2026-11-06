@@ -71,6 +71,20 @@ def load_view(path, portfolio_id, snapshot_id, contract=None):
     return payload
 
 
+def latest_view(path, portfolio_id, contract=None):
+    """Read the latest U1 attempt; never prepare, sync or resurrect an older view."""
+    if contract:
+        from app.shared_sqlite import verify
+        if verify(path, contract)['portfolio_id'] != portfolio_id:
+            raise ValueError('ASSET_VIEW_NOT_FOUND')
+    with closing(sqlite3.connect(Path(path).resolve(strict=True).as_uri() + '?mode=ro', uri=True)) as db:
+        row = db.execute('SELECT id FROM wealth_snapshots WHERE portfolio_id=? '
+                         'AND analysis_request_id IS NOT NULL ORDER BY id DESC LIMIT 1', (portfolio_id,)).fetchone()
+    if not row:
+        raise ValueError('ASSET_VIEW_NOT_FOUND')
+    return load_view(path, portfolio_id, f'asset-view:v1:{row[0]}', contract)
+
+
 def public_view(payload, *, symbol=None, analysis_scope=None):
     result = deepcopy({k: v for k, v in payload.items() if k != "internal"})
     result["context_current"] = 0 <= (now() - datetime.fromisoformat(payload["captured_at"])).total_seconds() < VIEW_TTL
