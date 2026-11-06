@@ -140,7 +140,10 @@ def project(assessment):
         record = dict(evidence_ref=ref, context_id=context_ids[ref], source_ref=source_id, kind=row['kind'],
             symbol=row.get('symbol'), field=row.get('field'), period=row.get('period'),
             data_as_of=row.get('data_as_of'), scope=row.get('scope'), currency=row.get('currency'),
-            unit=row.get('unit'), quality='valid', historical_only=row.get('historical_only',False),
+            unit=row.get('unit'), accounting_basis=row.get('accounting_basis'),
+            fiscal_period_start=row.get('fiscal_period_start'),
+            ordinary_shares_per_ads=row.get('ordinary_shares_per_ads'), issuer_type=row.get('issuer_type'),
+            historical_only=row.get('historical_only',False),
             values=values, numeric_fields=sorted(k for k,v in values.items()
                 if isinstance(v,(int,float)) and not isinstance(v,bool)),
             dependency_set=dependency_id if dependency else None,
@@ -153,6 +156,7 @@ def project(assessment):
                  'financial_operating_cashflow')
         groups[group].append({k:v for k,v in record.items() if v is not None and v != {}})
     groups['symbol'] = assessment.get('symbol')
+    groups['record_quality'] = 'valid'
     groups['conditional_valuation'] = intern(_conditional(assessment.get('conditional_valuation')))
     groups['sources'] = sources
     groups['dependencies'] = dependencies
@@ -196,7 +200,7 @@ def messages(assessment, question, *, policy, holding, history=()):
         '不生成旧DecisionResult、交易参数或订单。经营、竞争、投资逻辑、风险和复核条件优先；'
         '有退出意图时讨论exit_rationale；技术证据仅在相关且有资格时解释。'
         '持仓事实、用户假设、历史事实、条件估值和未来推论必须分开。'
-        'symbol为本包共同的已核验证券主体；source_ref引用sources时钟；dependency_set引用dependencies；context_id只是本包内部关联，不是合格引用。合格引用必须复制完整evidence_ref。numeric_fields列出可绑定字段；values是原值，单位/币种见同行，展示数字由服务端替换。'
+        'symbol为本包共同的已核验证券主体；record_quality是本包各记录由原Owner授予的共同引用质量，不可升级L2–L4；source_ref引用sources时钟；dependency_set引用dependencies；context_id只是本包内部关联，不是合格引用。合格引用必须复制完整evidence_ref。numeric_fields列出可绑定字段；values是原值，单位/币种见同行，展示数字由服务端替换。'
         '不得自行升级资格或重算数字。条件情景不是公允价值或未来事实。\n'+contract)
     policy=deepcopy(policy)
     for rule in policy.get('rules',[]):

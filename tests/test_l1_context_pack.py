@@ -41,7 +41,7 @@ def test_pack_covers_topics_refs_and_exact_values_without_changing_authority():
     fields={r['field']:r for r in pack['financial_operating_cashflow']}
     assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'}<=set(fields)
     assert fields['revenue_quarter']['values']['revenue_quarter']==112358000000
-    assert all(r['quality']=='valid' for r in fields.values())
+    assert pack['record_quality']=='valid'
     assert pack['competition_counterevidence'] and pack['sources']
     refs={r['evidence_ref'] for key in ('financial_operating_cashflow','valuation_inputs','competition_counterevidence','technical_events') for r in pack[key]}
     assert refs<=set(_evidence_index(a))
@@ -49,6 +49,11 @@ def test_pack_covers_topics_refs_and_exact_values_without_changing_authority():
         assert row['source_ref'] in pack['sources']
         if row.get('dependency_set'):assert row['dependency_set'] in pack['dependencies']
     assert diagnostic['dependency_refs_present']
+    index=_evidence_index(a)
+    for row in fields.values():
+        for key in ('accounting_basis','fiscal_period_start','ordinary_shares_per_ads','issuer_type'):
+            if index[row['evidence_ref']].get(key) is not None:
+                assert row[key]==index[row['evidence_ref']][key]
 
 
 def test_seed_mock_conflict_and_other_symbol_cannot_enter_pack():
