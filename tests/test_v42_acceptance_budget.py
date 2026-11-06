@@ -217,7 +217,8 @@ def test_original_peer_multistage_calls_and_three_stocks_share_campaign(analysis
         payload=json.loads(req.content);sends.append(payload)
         return httpx.Response(200,json=completion(payload['model']))
     client=openai.OpenAI(api_key='PRIVATE_KEY',http_client=httpx.Client(transport=httpx.MockTransport(receive)))
-    original_plan,original_reason,original_review=PlanningAgent.run,llm_engine.reason,ReviewingAgent.run
+    from backend.agents import expressing_agent
+    original_plan,original_expression,original_review=PlanningAgent.run,expressing_agent.chat_completion,ReviewingAgent.run
     @peer_stage('planning')
     def planning(*args,**kwargs):
         chat_completion(client,model=LUNA,max_tokens=15,messages=[dict(role='user',content='synthetic planning')])
@@ -225,13 +226,13 @@ def test_original_peer_multistage_calls_and_three_stocks_share_campaign(analysis
     @peer_stage('expressing')
     def expressing(*args,**kwargs):
         chat_completion(client,model=SOL,max_tokens=15,messages=[dict(role='user',content='synthetic expression')])
-        return original_reason(*args,**kwargs)
+        return original_expression(*args,**kwargs)
     @peer_stage('reviewing')
     def reviewing(*args,**kwargs):
         chat_completion(client,model=LUNA,reasoning_effort='low',max_tokens=15,
             messages=[dict(role='user',content='synthetic review')])
         return original_review(*args,**kwargs)
-    monkeypatch.setattr(PlanningAgent,'run',planning);monkeypatch.setattr(llm_engine,'reason',expressing)
+    monkeypatch.setattr(PlanningAgent,'run',planning);monkeypatch.setattr(expressing_agent,'chat_completion',expressing)
     monkeypatch.setattr(ReviewingAgent,'run',reviewing)
     budget=Budget(tmp_path/'ledger')
     with client, guarded_transport(budget):

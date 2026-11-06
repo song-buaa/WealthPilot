@@ -220,14 +220,14 @@ def test_operator_runtime_values_cross_worker_without_loading_credentials(monkey
 
 def test_original_peer_finishes_after_old_240_second_deadline_with_virtual_clock(analysis_db,peer,monkeypatch):
     """Advance only the event-loop clock; no long sleep or network call."""
-    from decision_engine import llm_engine
-    original=llm_engine.reason
+    from backend.agents import expressing_agent
+    original=expressing_agent.chat_completion
     offset=[0]
     def reason(*a,**kw):
         result=original(*a,**kw)
         offset[0]+=250
         return result
-    monkeypatch.setattr(llm_engine,'reason',reason)
+    monkeypatch.setattr(expressing_agent,'chat_completion',reason)
     async def run(async_l1):
         loop=asyncio.get_running_loop();real=loop.time;offset[0]=0
         loop.time=lambda:real()+offset[0]

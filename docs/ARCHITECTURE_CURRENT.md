@@ -292,7 +292,11 @@ P1.1仍在原纯投影内选择同原文比较列/明确精度相容值，保留
 
 正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)拥有L1准入和持久收据，原Worker/PEER仍是研究与证据owner。后台BusinessClient与HTTP生命周期解耦；get只读工件。原进程锁与跨进程文件锁协调单项L1，请求摘要和参数指纹在启动前提交。完整Evidence/ACTIVE过滤结果先原子保存、校验，再标completed；v2 Job返回analysis-report.v1和完整analysis.v1工件的哈希/字节数，不暴露路径。重启可恢复完整结果，中断/过期收据不自动重跑。目录、配额、保留期必须显式配置，无生产默认保存或清理策略。同步入口不作自动回退；S3继续使用此Owner内保留的原进程内登记，其标准/专业入口和冻结格式不变。详见[持久交付合同](V42_IMPLEMENTATION.md#l1-异步结果持久交付方案-c2026-11-05开发候选)。
 
+2026-11-06 L1 Expressing 开发候选：服务端 `analysis_only + single_position_research` 进入原Expressing的共用专业研究合同，持仓/未持仓均复用原Evidence、数字绑定、Reviewing及ACTIVE最终过滤。原[有界投影](../backend/services/market_data/l1_context.py)只选择当前/可比期、计算依赖和主题证据，不拥有财务计算或资格；原完整Evidence不裁剪。Sol Medium显式总输出32768，输入参考编码预检约40000上限，必要闭包超限不发送。无词表时使用保守UTF-8字节上界，不在研究中下载资源。facts-only默认正文精简，完整原事实仍存私有工件；PR96存储/幂等合同不变。开发冻结测量、真实调用待授权及来源边界见[实施说明](V42_IMPLEMENTATION.md#l1-expressing-有界上下文与输出预算2026-11-06开发候选)。
+
 ## 4.3 开发边界：E1 研究记录
+
+
 
 E1-B0/B1/B2/B3均属WealthPilot 4.3内部阶段。B1独立分支新增 [轻量研究域](../backend/services/investment_thesis/service.py) 和显式私人SQLite，保存不可覆盖假设/证据/复核，不复制Position/账户/订单账本，也不修改业务库schema。专业分析仍为原PEER/AnalysisRequest/AnalysisResult；原MCP任务内存不是E1永久档案。
 

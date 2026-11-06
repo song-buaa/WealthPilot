@@ -692,3 +692,15 @@ LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/0001104
 - **冻结验收**：PDD完整结果2,207,475 bytes，原编码SHA256为`4cdf627f475b6a97889a62db9666023958c4013181c1400faf29a6ca6ce588bf`；report正文247,412 bytes，六段完整解释及估值保持。私人源工件不进Git。专项覆盖更大合法结果、配额耗尽、真实多进程同ID、两个崩溃窗口、过期及损坏；最终测试和exact-HEAD CI以PR记录为准。
 
 部署须单独授权私有目录、配额、保留期及同版本MCP父进程/Worker发布；不迁移数据库或旧进程内任务。回滚前停止新研究并确认在途状态，完整保留新收据、工件和事件。旧代码不理解新收据，不能把旧请求重新提交到旧进程；回滚不删除存储、不自动补跑，新结果仅由授权私有读取或兼容版本恢复。
+
+## L1 Expressing 有界上下文与输出预算（2026-11-06，开发候选）
+
+生产故障由用户提供：PDD Run 70b493cc87cd4c4e8f19487ae3f3faa1，130543输入、8192输出全部用于reasoning，truncated后仅facts-only；PR96已成功保存结果。该生产工件尚未交接，本轮不访问Mini、不重跑研究，精确原Prompt分段状态为`PENDING_PRODUCTION_INPUT_EVIDENCE`。开发冻结PDD测量不能替代生产实测。
+
+- **代码断点**：已持仓PositionDecision此前追加prompt_context后进入旧reason，大JSON、DecisionContext、历史及旧交易字段参与展开；reason请求max_tokens=4096，被原适配转换为8192总输出。新建仓/纯研究曾使用另一输出预算。本轮不修改decision_engine核心或模型全局档位。
+- **同一研究合同**：服务端analysis_only/single_position_research设置内部ExecutionOutput标记，原Expressing在该模式下统一生成professional_explanation JSON。持仓、无持仓、退出及用户研究假设保留，只有原始用户历史作为未验证研究上下文；不再重复注入旧决策payload、助手历史/RAG和整份政策Prompt。不生成旧交易JSON参数。非该模式的旧路径、组合、多标及S3保持原行为。
+- **Context Pack**：l1_context是原Evidence/Output Policy下的确定性投影，不是新金融Owner。仅从原_evidence_index取当前合格引用；保留当前、前一及同比期财务、最新年度基线、所有计算/条件估值依赖闭包、合格研究/事件/技术周期。按主题组织，不按top-K丢弃竞争反证；完整关键主题超预算即安全拒绝，不发送超大请求。稳定evidence_ref、原值、期间、币种/单位、来源资格及时钟不变。单一主体、来源与完全相同依赖共享表示，context_id只做包内关联，不可作为合格引用。旧年度和无关历史从模型投影移走，原Assessment不改。条件情景只移除重复逐年明细，端点、全部假设和敏感性保留；完整年度数组仍在原工件。政策保留全部结构化规则、理念、义务及来源定位；重复规则source_clause全文由原Policy Owner保留，不改变ACTIVE规则。
+- **预算及可知边界**：统一适配的l1_research_options显式发送Sol Medium、max_completion_tokens=32768、JSON对象合同；SDK重试与600/660秒研究/IPC期限均不变。输入目标28000，40000参考Token硬预检并预留消息框架空间。tiktoken==0.12.0使用本地已核验的官方o200k_base参考词表，不宣称这是已验证Sol专用tokenizer；Provider真实Token只有获授权调用后可知。研究期间不下载词表；未预热时用UTF-8字节保守上界，无法容纳则facts-only，不能绕过预检。部署前须在新隔离环境安装锁定依赖、预热官方参考词表并核对缓存，不原地改生产。
+- **安全计数**：只记录各主题bytes/参考Token、有效/选中记录数、原Assessment及旧Evidence Prompt对照、计数方法与预算状态。Prompt、研究原文、账户和模型原始回答不写入诊断；输入分段计数不是模型实际usage。原模型观测增加实际output_token_budget，原安全投影贯通Worker/MCP。缺失观察仍UNKNOWN。
+- **诊断与facts-only**：Expressing有独立started/failed回执，最终安全观测可将真实truncated映射到该阶段，不能记成not_started。阶段完成与最终accepted_final分开，零合格解释仍INCOMPLETE。默认facts-only仅展示实际失败原因、关键财务及合格技术摘要、条件估值状态/假设限制与完整私有工件提示；不会输出新的投资判断，完整原事实不删改。已交付专业解释的正常报告不以facts-only摘要替代。
+- **回归与限制**：使用现有公开SEC原文、私有开发冻结结果、SDK MockTransport及原完整PEER/Reviewing/隔离合成ACTIVE/MCP验证工程合同；未运行真实Sol/Luna研究。PR96存储/幂等文件无改动，PR92保持Draft。真实质量、是否达到8分均为`N/R`，不得把Mock或CI当成内容验收。实际开发模型对照须单独批准次数和预算；本PR不合并、不部署、不改资产/E1/政策或交易。

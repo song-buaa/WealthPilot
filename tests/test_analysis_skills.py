@@ -75,6 +75,16 @@ def peer(monkeypatch):
     def reason(*a,**kw):
         calls.append(('expression','PositionDecision'))
         return LLMResult(decision='HOLD',reasoning=['fixture evidence'],risk=['fixture risk'],strategy=['wait'],chat_answer='FIXTURE professional conclusion',structured_result={'decisionType':'hold'})
+    # Normal L1 now uses the dedicated research contract, not legacy reason().
+    # Keep this orchestration fixture offline at the current model boundary.
+    from backend.agents import expressing_agent
+    from intent_engine import _llm_client
+    def research_completion(*a,**kw):
+        calls.append(('expression','PositionDecision'))
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content=json.dumps({'professional_explanation':[]})))])
+    monkeypatch.setattr(expressing_agent,'chat_completion',research_completion)
+    monkeypatch.setattr(_llm_client,'get_client',lambda:SimpleNamespace())
     monkeypatch.setattr(llm_engine,'reason',reason)
     monkeypatch.setattr(llm_engine,'review_portfolio' ,generic('PortfolioReview'))
     monkeypatch.setattr(llm_engine,'analyze_allocation',generic('AssetAllocation'))

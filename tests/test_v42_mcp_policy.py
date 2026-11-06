@@ -204,6 +204,12 @@ def test_original_peer_cited_explanation_survives_final_mcp_without_snapshot(ana
         model_calls.append('portfolio')
         return GenericLLMResult(intent_type='PortfolioReview', chat_answer='unsafe 987654',
             raw_payload={'chat_answer':'unsafe 987654','professional_explanation':[explanation]})
+    from backend.agents import expressing_agent
+    from types import SimpleNamespace
+    def research_completion(*args,**kwargs):
+        model_calls.append('position')
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({'professional_explanation':[explanation]})))])
+    monkeypatch.setattr(expressing_agent,'chat_completion',research_completion)
     monkeypatch.setattr(llm_engine, 'reason', reason)
     monkeypatch.setattr(llm_engine, 'review_portfolio', portfolio)
     before = hashlib.sha256(analysis_db.read_bytes()).hexdigest()
