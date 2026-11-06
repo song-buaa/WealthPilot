@@ -116,3 +116,31 @@
 输出为`wealthpilot.investable-projection.v1`，包含来源hash、逐行状态/理由/问题及原PolicyAssets。证据不足时denominator_cny=null、denominator_qualified=false，保留观测金额及UNKNOWN原因；不填0，不输出目标配置或可执行金额。养老金映射生产维护、共享DDL、外部来源接入及真实验收均不在本候选范围。
 
 测试入口：`tests/test_investable_assets.py`，合成隔离、I/O阻断、hash/scope/时钟、负债与分母、FX/来源、用途排除和养老金负面边界。
+
+## 4.4 B2 Owner凭据与ACTIVE配置接线
+
+B2沿原`AssetAnalysisPreparation.run`，在原只读副本capture返回并取得snapshot_id之后、原WealthSnapshot JSON发布之前，由原Wealth Owner调用`freeze_investable_scope`。原Portfolio的全部Position进入可投资范围输入`data_quality.investable_security_inputs`，原账户发布证明进入`investable_accounts`；原`security_inputs/accounts`的投资分析范围保留。均来自同一冻结库，没有第二份持仓权威或共享DDL。A-min优先消费这份完整范围扩展；旧视图没有扩展时保守处理，已知Portfolio行若不在输入内则`INVESTABLE_POSITION_SCOPE_INCOMPLETE`，不能靠用途文件隐藏。
+
+原字段不足以证明生活现金/应急或偿债预留、外部黄金/BTC确实无持有、跨账户养老金链接。最小补充是一份**原资产Owner维护的私有事实证据文件**，由服务端环境`WEALTHPILOT_INVESTABLE_EVIDENCE_FILE`指定；不新建账本、审批平台或公开写接口。本轮不创建任何真实证据文件、不修改真实账户/资产记录。
+
+该文件复用原`app.shared_sqlite.private_file`的同OS用户、私有权限、禁止路径symlink规范，大小不超过256KiB；不存金额、比例、政策或合格布尔值。它不是客户端请求参数，也不能由LLM上传。文件内容为：
+
+| 字段 | 合同 |
+|---|---|
+| schema_version / portfolio_id | `wealthpilot.owner-scope.v1`及原组合身份 |
+| inventory_sha256 | `wealth_service.investable_inventory_identity(view)`；绑定实际全部Position ID、账户引用、证券/币种/用途segment身份及手工资产身份，新增/更换资产使旧证据失效；不复制动态金额或负债 |
+| confirmed_at / valid_until | 带时区的Owner事实确认及有效期，最多30天；这是用途/覆盖声明的有效窗口，不是资产/FX价格时点 |
+| dispositions / coverage / pension_links | 复用A-min合同；所有覆盖须明确PRESENT/ABSENT/UNKNOWN及证据引用，不能从空库自动推导ABSENT；不提供denominator_qualified等标志 |
+| manual_classes（可选） | `wealth:<id>`→`economic_asset_class`及非空白`evidence_refs`；仅已知手工资产可用canonical分类，无金额，不覆盖Position已有canonical分类 |
+
+原Wealth结构化退休产品类型可证明该手工项目的限制用途，缺用途时补EXCLUDED/PENSION；不会覆盖冲突声明，也不能由此推断全部养老金覆盖。已经在投资账户记账的养老金仍要求明确持仓链接及逐项排除，金额去重不能替代身份核对。银行现金可沿原类型归为货币，其他未获分类证据的手工资产保持UNKNOWN。
+
+Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部scope receipt，保留Owner文件hash、确认时点及原截止时点。账户同步、publication、现金/持仓/价格时点、FX及原手工值30天门仍由A-min独立验证；文件不能补齐或刷新这些事实。GET再次检查Owner截止时间，精确显示有效期为`min(captured_at+5分钟, Owner valid_until)`。hash只绑定内容，不能认证事实本身；Owner必须从实际账户/用途凭据确认，不得为通过测试编造记录。
+
+原`GET /api/allocation/snapshot`支持可选`snapshot_id`，无ID只读最新原U1尝试；不会prepare、刷新券商、取得行情或写库，也不会绕过最新failed/preparing回退旧快照。真实链为RO load_view → A-min → 原PolicyAssets/请求级PolicySession → 原Allocation消费者。请求快照、portfolio、hash、来源时点及ACTIVE政策版本一起固定，响应前再次核对政策版本；PolicyService仍是唯一政策权威。
+
+合格成功保留原AllocationSnapshot字段，附加`policy_allocation`：Decimal字符串分母/五类金额、当前/目标权重、百分点差距、金额差距、主要偏差方向、PolicyReference、来源ID/hash/时点/截止时间。五类目标仅由ACTIVE neutral聚合，未写另一份目标；源CNY金额不舍入，比例除法余数只修正最大类别的最后Decimal位以闭合，金额差距按分ROUND_HALF_EVEN显示。无PolicyAssets公共字段、共享Schema、MCP工具变化。
+
+缺分母/覆盖/养老金/FX/时点仍B1的409，缺分类409；已知资产库不可读取也受控拒绝，Policy unavailable503，未知程序错误500。`detail`继续为字符串；B2可附加`qualification` UNKNOWN原因及来源引用，不能返回零资产/全绿或交易金额。旧LEGACY、已绑定原P2会话成功结构保留。ACTIVE页面在原政策/组合界面展示差距，到期自动撤销精确金额并显示UNKNOWN，不自动同步；组合穿透风险仍`NOT_ASSESSED_IN_B2`，金额差距只是信息，不是订单建议。
+
+本轮验证入口：`tests/test_b2_allocation.py`、原U1/养老金/B1/Policy/Wealth回归及`frontend/tests/e2e/policy-boundary.spec.ts`。生产事实未连接核验：是否已有完整账户发布证据、用途/外部覆盖确认、养老金映射与当前FX仍UNKNOWN。发布须另行授权，并在原ACTIVE政策和真实Owner确认后取得新的合格U1视图；旧视图不会回填或刷新。缺证据应验收409及明确原因，不能为了200改真实数据；交易资格另行授权。
