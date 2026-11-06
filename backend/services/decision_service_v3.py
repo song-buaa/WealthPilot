@@ -28,7 +28,7 @@ from backend.services.technical_patterns.decision_integration import (
     serialize_pattern_evidence_snapshot,
     target_from_execution_output,
 )
-from app.llm_observation import current
+from app.llm_observation import current, post_model_stage
 from backend.services.trade_intent.models import StructuredTradeIntent
 from backend.services.trade_intent.parser import parse_trade_intent
 
@@ -160,7 +160,8 @@ async def run_chat_stream_v3(*args, **kwargs):
             policy_session.ensure_current()
             if callback:
                 for values in pending:
-                    callback(*values)
+                    with post_model_stage('result_callback', values[2]):
+                        callback(*values)
             emitted=False
             for event in buffered:
                 kind=event.splitlines()[0].removeprefix('event: ')
@@ -521,10 +522,14 @@ async def _run_chat_stream_v3(
             final_view=analysis_context
             final_view = _final_analysis_view(final_view)
             # Review/model latency cannot rejuvenate source clocks or view TTL.
-            exec_out.position_evidence=prepare(plan_out,exec_out,asset_view=final_view,options=analysis_options)
-            enforce(expr_out,exec_out.position_evidence,compact_incomplete=exec_out.analysis_mode=="l1_research")
-            async for chunk in _emit_text_chunks(expr_out.chat_answer):
-                yield _sse("text", {"delta":chunk})
+            with post_model_stage('post_review_requalification', expr_out):
+                exec_out.position_evidence=prepare(plan_out,exec_out,asset_view=final_view,options=analysis_options)
+                enforce(expr_out,exec_out.position_evidence,compact_incomplete=exec_out.analysis_mode=="l1_research")
+            # Async L1 consumes the final qualified result, not this discarded
+            # display stream. Web/portfolio presentation keeps its original pacing.
+            if not (analysis_only and exec_out.analysis_mode == "l1_research"):
+                async for chunk in _emit_text_chunks(expr_out.chat_answer):
+                    yield _sse("text", {"delta":chunk})
 
         if guarded_portfolio:
             from backend.services.market_data.output_policy import enforce_portfolio
@@ -540,12 +545,18 @@ async def _run_chat_stream_v3(
 
         # Optional in-process result adapter; Web SSE behavior stays unchanged.
         from backend.services.investment_policy.consumers import finalize_output
-        finalize_output(plan_out, exec_out, expr_out)
+        with post_model_stage('peer_active_finalization', expr_out):
+            finalize_output(plan_out, exec_out, expr_out)
         from backend.services.investment_policy.runtime import current as policy_current
         if policy_current(portfolio_id).mode=='POLICY_ACTIVE':
             yield _sse('policy_final_text',{'text':expr_out.chat_answer})
+        elif analysis_only and exec_out.analysis_mode == 'l1_research':
+            # LEGACY has no ACTIVE wrapper to emit final_policy_text. Deliver
+            # exactly one final, evidence-qualified frame after all owner gates.
+            yield _sse('text', {'delta': expr_out.chat_answer})
         if result_callback is not None:
-            result_callback(plan_out, exec_out, expr_out, review_out)
+            with post_model_stage('result_receipt', expr_out):
+                result_callback(plan_out, exec_out, expr_out, review_out)
 
         # ── Stage 5: 写入 store + 保存对话历史 + done 事件 ──
         assistant_message_id = await _write_stores_v3(

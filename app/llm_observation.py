@@ -24,6 +24,12 @@ PRICE_SOURCE = "https://developers.openai.com/api/docs/pricing"
 # Reasoning is already part of output_tokens; never charge it twice.
 RATES = {"gpt-6.1-sol": (2.0, 10.0), "gpt-6-luna": (0.10, 0.50)}
 STAGES = {"planning", "executing", "expressing", "reviewing"}
+POST_MODEL_STAGES = {"post_review_requalification", "peer_active_finalization", "result_receipt",
+                     "result_callback", "adapter_requalification", "adapter_active_finalization"}
+EXPLANATION_REJECTIONS = {"candidate_missing", "candidate_not_array", "item_not_object", "topic_invalid",
+    "basis_invalid", "text_not_safe_qualitative", "references_invalid", "reference_not_usable",
+    "topic_evidence_mismatch", "unverified_timeframe", "competition_mechanism_not_conditional",
+    "paragraph_limit", "candidate_limit"}
 ERRORS = {"authentication", "model_access", "quota", "rate_limit", "network", "timeout",
           "invalid_request", "provider", "provider_error", "truncated", "empty_output",
           "refusal", "invalid_output", "model_mismatch", "legacy_profile_required",
@@ -322,8 +328,49 @@ def safe_metadata(value):
 
 
 def safe_stage_timings(rows):
-    return [dict(peer_stage=row['peer_stage'],**{k:counter(row.get(k)) for k in ('start_offset_ms','end_offset_ms','elapsed_ms')})
-            for row in rows[:128] if isinstance(row,dict) and row.get('peer_stage') in STAGES] if isinstance(rows,list) else []
+    if not isinstance(rows, list):return []
+    result=[]
+    for row in rows[:128]:
+        if not isinstance(row,dict) or row.get('peer_stage') not in STAGES | POST_MODEL_STAGES:continue
+        clean=dict(peer_stage=row['peer_stage'],**{k:counter(row.get(k)) for k in ('start_offset_ms','end_offset_ms','elapsed_ms')})
+        if row['peer_stage'] in POST_MODEL_STAGES:
+            clean['status']=row.get('status') if row.get('status') in {'started','completed','failed','timeout','cancelled'} else UNKNOWN
+            for key in ('candidate_count','accepted_count','initial_candidate_count','initial_accepted_count'):
+                if key in row:clean[key]=counter(row[key])
+            reasons=row.get('rejected')
+            if isinstance(reasons,dict):
+                clean['rejected']={k:counter(v) for k,v in reasons.items() if k in EXPLANATION_REJECTIONS}
+        result.append(clean)
+    return result
+
+
+@contextmanager
+def post_model_stage(name, output=None):
+    """Bounded timing/counts only; never captures model prose or exception text."""
+    if name not in POST_MODEL_STAGES:raise ValueError('POST_MODEL_STAGE_INVALID')
+    trace=current()
+    row=trace.start_stage(name) if trace else None
+    status='completed'
+    if row is not None:row['status']='started'
+    try:
+        yield
+    except BaseException as error:
+        status='timeout' if isinstance(error,TimeoutError) else 'cancelled' if not isinstance(error,Exception) else 'failed'
+        raise
+    finally:
+        if row is not None and not trace.closed:
+            trace.end_stage(row)
+            row['status']=status
+            diagnostic=getattr(output,'explanation_diagnostics',{}) or {}
+            if isinstance(diagnostic,dict):
+                for prefix,key in (('initial_','generation'),('','final')):
+                    if not prefix and status != 'completed':continue
+                    values=diagnostic.get(key) or {}
+                    if isinstance(values,dict):
+                        for count_key in ('candidate_count','accepted_count'):
+                            if count_key in values:row[prefix+count_key]=counter(values[count_key])
+                        if not prefix and isinstance(values.get('rejected'),dict):
+                            row['rejected']={k:counter(v) for k,v in values['rejected'].items() if k in EXPLANATION_REJECTIONS}
 
 
 def safe_call_timings(rows):
@@ -414,6 +461,23 @@ def reconcile_research_stages(result):
             errors={c.get('error_category') for c in observed}
             if 'truncated' in errors:diagnostic[stage]='truncated'
             elif any(c.get('status') in {'failed','rejected'} for c in observed):diagnostic[stage]='failed'
-            elif 'ANALYSIS_TIMEOUT' in result.get('issues',[]):diagnostic[stage]='failed'
+            # A completed model call is not failed merely because delivery timed out.
+            # Parse/filter failures already recorded by the owner remain failures.
+    expressing=[c for c in calls if c.get('peer_stage')=='expressing']
+    if expressing:
+        diagnostic['model_generation']=('truncated' if any(c.get('error_category')=='truncated' for c in expressing) else
+            'failed' if any(c.get('status') in {'failed','rejected'} for c in expressing) else
+            'completed' if all(c.get('status')=='completed' for c in expressing) else 'started')
+    timed_out='ANALYSIS_TIMEOUT' in result.get('issues',[])
+    if diagnostic.get('reviewing')=='completed':
+        phases=[r for r in (result.get('llm_observation') or {}).get('stage_timings',[])
+                if r.get('peer_stage') in POST_MODEL_STAGES]
+        states={r.get('status') for r in phases}
+        diagnostic['postprocessing']=('timeout' if timed_out or 'timeout' in states else
+            'failed' if 'failed' in states else 'cancelled' if 'cancelled' in states else
+            'incomplete' if 'started' in states else 'completed' if phases and states=={'completed'} else UNKNOWN)
+    diagnostic['delivery']='timeout' if timed_out else 'accepted_final' if (
+        result.get('professional_analysis_complete') and
+        result.get('professional_result',{}).get('analysis_result',{}).get('professional_explanation')) else 'incomplete'
     diagnostic['final_acceptance']='accepted_final' if (result.get('professional_analysis_complete') and
         result.get('professional_result',{}).get('analysis_result',{}).get('professional_explanation')) else 'incomplete'

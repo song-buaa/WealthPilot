@@ -756,3 +756,13 @@ LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/0001104
 - **安全计数**：只记录各主题bytes/参考Token、有效/选中记录数、原Assessment及旧Evidence Prompt对照、计数方法与预算状态。Prompt、研究原文、账户和模型原始回答不写入诊断；输入分段计数不是模型实际usage。原模型观测增加实际output_token_budget，原安全投影贯通Worker/MCP。缺失观察仍UNKNOWN。
 - **诊断与facts-only**：Expressing有独立started/failed回执，最终安全观测可将真实truncated映射到该阶段，不能记成not_started。阶段完成与最终accepted_final分开，零合格解释仍INCOMPLETE。默认facts-only仅展示实际失败原因、关键财务及合格技术摘要、条件估值状态/假设限制与完整私有工件提示；不会输出新的投资判断，完整原事实不删改。已交付专业解释的正常报告不以facts-only摘要替代。
 - **回归与限制**：使用现有公开SEC原文、私有开发冻结结果、SDK MockTransport及原完整PEER/Reviewing/隔离合成ACTIVE/MCP验证工程合同；未运行真实Sol/Luna研究。PR96存储/幂等文件无改动，PR92保持Draft。真实质量、是否达到8分均为`N/R`，不得把Mock或CI当成内容验收。实际开发模型对照须单独批准次数和预算；本PR不合并、不部署、不改资产/E1/政策或交易。
+
+## L1 后置交付超时修复（2026-11-06，开发候选）
+
+仅服务端 `analysis_only` 且 `execution.analysis_mode == l1_research` 的单标研究，Review 后不再生成最终 ACTIVE 会丢弃的15字符/8ms展示流。原后置 `prepare → enforce → ACTIVE finalize_output → result_callback` 顺序及外层 MCP 再验证不变；Web普通SSE、组合、S3和非L1展示保持原行为。政策仍在真实事件推进与最终交接点检查版本/状态，不做长期ACTIVE缓存。来源采集/SEC/FX及新鲜度逻辑本轮不重构。
+
+原 `llm_observation.stage_timings` 增加封闭枚举的后置阶段（Review后重核、PEER/Adapter ACTIVE审核、Adapter重核、结果收据及正式callback），仅保留相对计时、状态、首筛/终筛数量与安全拒绝类别；经原IPC安全投影保留，不含Prompt、回答、资产或政策原文。阶段超时/异常留下相应安全状态，不把未知计数填0。
+
+`stage_diagnostics` 将模型生成与最终交付分开：Sol已completed时，不再仅因整体`ANALYSIS_TIMEOUT`将Expressing反写为failed；模型返回不代表JSON/证据审核通过，原解析/过滤失败仍保留。Review已完成后的整体超时标为`postprocessing=timeout`、`delivery=timeout`，最终专业完成仍要求合格解释非空。facts-only、600/660秒、Sol Medium/32768、Context Pack约40000参考Token及PR96 Job v2/report v1持久化、幂等、恢复合同不变。
+
+验证采用冻结PDD来源、MockTransport模型、合成ACTIVE及原PEER/Reviewing/Evidence/ACTIVE/AnalysisResult/存储路径；不是本次生产请求重放或真实模型研究评分。诊断旧基线Review后人工分块221.139秒、17427块、后置17442次政策检查；修复后的同口径墙钟与计数以PR交付收据为准。生产约323秒的精确归因仍待已有安全事件，不将离线计时充当生产实测。无新业务能力或Owner入口，Registry无需更新；没有生产部署或付费研究授权。

@@ -51,7 +51,7 @@ class AnalysisRequest(BaseModel):
         return value
 
 
-from app.llm_observation import observed_result, safe_metadata
+from app.llm_observation import observed_result, safe_metadata, post_model_stage
 
 
 class AnalysisResult(BaseModel):
@@ -309,7 +309,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 out.explanation_diagnostics = out.structured_payload.get('explanationDiagnostics', {})
                 executed=SimpleNamespace(loaded_data=None,analysis_mode='l1_research' if scenario=='analyze_position' else '',position_evidence=result.get('evidence',{}).get('position_evidence'),
                     portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
-                finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
+                with post_model_stage('adapter_active_finalization', out):
+                    finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
                 result.setdefault('evidence',{})['policy_context']=out.structured_payload['policy_context']
                 result.setdefault('scope',{})['policy_reference']=out.structured_payload['policy_reference']
                 if result['status']!='unavailable':
@@ -474,12 +475,13 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             # Reuse the captured PEER result and the SAME immutable snapshot.
             # Adapter latency may invalidate an initially qualified nested plan.
             executed, expressed = captured['executed'], captured['expressed']
-            executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
-                options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
-                             research_context=request.research_context.model_dump() if request.research_context else None,
-                             research_question=request.question,research_history=[t.model_dump() for t in request.history],
-                             scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
-            enforce(expressed, executed.position_evidence,compact_incomplete=True)
+            with post_model_stage('adapter_requalification', expressed):
+                executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
+                    options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
+                                 research_context=request.research_context.model_dump() if request.research_context else None,
+                                 research_question=request.question,research_history=[t.model_dump() for t in request.history],
+                                 scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
+                enforce(expressed, executed.position_evidence,compact_incomplete=True)
             result.evidence['position_evidence'] = encode(executed.position_evidence)
             result.issues = sorted(set(result.issues + executed.position_evidence.get('issues', [])))
             if result.status != 'unavailable':
