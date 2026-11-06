@@ -30,6 +30,7 @@ def test_worker_receives_operator_model_policy_without_broker_or_key_inheritance
     for key,value in policy.items():monkeypatch.setenv(key,value)
     monkeypatch.setenv("WEALTHPILOT_OPENAI_API_KEY","PRIVATE_SENTINEL")
     monkeypatch.setenv("ENABLE_IBKR_LIVE_TRADING","true")
+    monkeypatch.setenv("TIKTOKEN_CACHE_DIR","operator-public-vocabulary-cache")
     child=SimpleNamespace(stdin=io.StringIO(),stdout=io.StringIO('{"ok":true,"result":{"fixture":true}}\n'))
     def spawn(*args,**kwargs):seen.update(kwargs);return child
     monkeypatch.setattr(server.subprocess,"Popen",spawn)
@@ -39,6 +40,7 @@ def test_worker_receives_operator_model_policy_without_broker_or_key_inheritance
     assert client.call("get_wealth_overview",{})=={"fixture":True}
     assert {key:seen["env"][key] for key in MODEL_ENV_KEYS}==policy
     assert "WEALTHPILOT_OPENAI_API_KEY" not in seen["env"]
+    assert seen['env']['TIKTOKEN_CACHE_DIR']=='operator-public-vocabulary-cache'
     assert seen["env"]["ENABLE_IBKR_LIVE_TRADING"]=="false" and seen["env"]["BROKER_MODE"]=="mock"
 
 

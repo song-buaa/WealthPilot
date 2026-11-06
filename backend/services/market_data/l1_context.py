@@ -13,6 +13,10 @@ import tempfile
 HARD_TOKENS = 40000
 TARGET_TOKENS = 28000
 FRAME_RESERVE = 1024
+RECORD_SECTIONS = ('financial_operating_cashflow','competition_counterevidence','valuation_inputs','technical_events')
+CORE_QUARTER_FIELDS = {'revenue_quarter','operating_income_quarter','net_income_quarter',
+    'net_income_attributable_parent_quarter','net_income_available_to_ordinary_shareholders_quarter',
+    'operating_cash_flow_quarter','capital_expenditures_quarter','free_cash_flow_quarter'}
 VOCAB_URL = 'https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken'
 VOCAB_SHA = '446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d'
 
@@ -68,10 +72,33 @@ def _conditional(value):
     result = deepcopy(value or {})
     # Only the already-computed repeated annual arrays are omitted. Every
     # scenario endpoint, assumption, input receipt and sensitivity is retained.
-    for case in result.get('scenarios', {}).values():
+    cases = list(result.get('scenarios', {}).values())
+    cases += [row['result'] for row in result.get('sensitivity', [])
+              if isinstance(row,dict) and isinstance(row.get('result'),dict)]
+    for case in cases:
         if isinstance(case.get('years'), list):
             case['annual_detail_in_full_evidence'] = True
             case.pop('years')
+    return result
+
+
+def _record_tables(groups):
+    """Lossless key deduplication, not evidence ranking or truncation.
+
+    project() omits None-valued outer fields, so null cells denote absent keys.
+    Nested values (including explicit nulls) remain unchanged. Full refs stay
+    verbatim, and the final output owner continues to use the original index.
+    """
+    result = deepcopy(groups)
+    for section in RECORD_SECTIONS:
+        rows = groups[section]
+        if len(rows)<2 or any(value is None for row in rows for value in row.values()):
+            continue
+        columns = list(dict.fromkeys(key for row in rows for key in row))
+        table = dict(columns=columns, rows=[[row.get(key) for key in columns] for row in rows],
+                     null_cells='absent_field')
+        if measure(dumps(table))['tokens'] < measure(dumps(rows))['tokens']:
+            result[section] = table
     return result
 
 
@@ -84,13 +111,15 @@ def project(assessment):
                        if r.get('scope') in {'quarter','quarterly'} and r.get('period') and
                        str(r.get('field','')).endswith('_quarter')}, reverse=True)
     periods = set(quarters[:2])
+    core_periods = set(quarters[:4])
     if quarters:
         comparable = str(int(quarters[0][:4])-1)+quarters[0][4:]
         if comparable in quarters: periods.add(comparable)
     annual = max((r.get('period') or '' for r in records.values() if r.get('scope')=='annual'), default='')
     selected = set()
     for ref, row in records.items():
-        if row['kind'] in {'research','event','technical','research_metric'} or row.get('period') in periods:
+        if (row['kind'] in {'research','event','technical','research_metric'} or row.get('period') in periods
+                or (row.get('period') in core_periods and row.get('field') in CORE_QUARTER_FIELDS)):
             selected.add(ref)
         elif row.get('scope')=='annual' and row.get('period')==annual:
             selected.add(ref)
@@ -202,6 +231,8 @@ def messages(assessment, question, *, policy, holding, history=()):
         '持仓事实、用户假设、历史事实、条件估值和未来推论必须分开。'
         'symbol为本包共同的已核验证券主体；record_quality是本包各记录由原Owner授予的共同引用质量，不可升级L2–L4；source_ref引用sources时钟；dependency_set引用dependencies；context_id只是本包内部关联，不是合格引用。合格引用必须复制完整evidence_ref。numeric_fields列出可绑定字段；values是原值，单位/币种见同行，展示数字由服务端替换。'
         '不得自行升级资格或重算数字。条件情景不是公允价值或未来事实。\n'+contract)
+    system += ('\n主题记录如使用columns/rows，则每行按相同列名读取；null_cells=absent_field表示该列未知/未提供。'
+               'evidence_ref原文仍是唯一引用，列号及context_id均不是证据引用或数字字段名。')
     policy=deepcopy(policy)
     for rule in policy.get('rules',[]):
         if isinstance(rule,dict) and isinstance(rule.get('source_clause'),dict):
@@ -211,10 +242,24 @@ def messages(assessment, question, *, policy, holding, history=()):
         t.get('role')=='user' and isinstance(t.get('content'),str) and t['content']!=question))
     groups['request_policy_holding'] = dict(question=question,policy=policy,holding=holding,
         unverified_user_research_context=user_history)
-    diagnostics['sections']['request_policy_holding']=measure(dumps(groups['request_policy_holding']))
-    diagnostics['sections']['system_contract']=measure(system)
     payload = [{'role':'system','content':system},{'role':'user','content':dumps(groups)}]
+    before = measure(dumps(payload))
+    diagnostics['projection_stages']=[dict(stage='topic_projection', **before)]
+    diagnostics['record_encoding']='objects'
+    # A real soft-target action: share repeated record keys without deleting a
+    # single selected fact, dependency, user turn or policy constraint.
+    if before['tokens']+FRAME_RESERVE > TARGET_TOKENS:
+        compact = _record_tables(groups)
+        candidate = [payload[0],dict(role='user',content=dumps(compact))]
+        after = measure(dumps(candidate))
+        if after['tokens'] < before['tokens']:
+            groups, payload = compact, candidate
+            diagnostics['record_encoding']='columns_rows_v1'
+            diagnostics['projection_stages'].append(dict(stage='lossless_record_tables', **after))
+    diagnostics['sections']={key:measure(dumps(value)) for key,value in groups.items()}
+    diagnostics['sections']['system_contract']=measure(system)
     diagnostics['request']=measure(dumps(payload))
+    diagnostics['saved_reference_tokens']=before['tokens']-diagnostics['request']['tokens']
     diagnostics['estimated_with_frame_reserve']=diagnostics['request']['tokens']+FRAME_RESERVE
     diagnostics['status']='accepted' if diagnostics['estimated_with_frame_reserve']<=HARD_TOKENS else 'budget_exceeded'
     if diagnostics['status']=='budget_exceeded':raise ContextBudgetExceeded(diagnostics)

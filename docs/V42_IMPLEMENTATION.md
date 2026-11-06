@@ -695,6 +695,57 @@ LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/0001104
 
 ## L1 Expressing 有界上下文与输出预算（2026-11-06，开发候选）
 
+### PR97 合并前输入余量补验（同日，替代首轮预算结论）
+
+用户补交了本轮PDD实际 `request.question`（588字符），确认没有history、research_context或snapshot_id。本轮将该问题与已保存的pr-c-20261103 Evidence及已核验v1政策冻结投影组合；**这是混合离线复验，不是生产请求重放**。不访问Mini、不调用模型或Provider、不改事实时钟。持仓使用UNKNOWN占位，不从问题推断真实数量。
+
+原b090361候选在同口径构造下含预留39939/40000，仅余61，确有误拒正常追加上下文的风险。最小修正：
+
+- 保留最新四季度关键收入、经营利润、净利润、现金流及原全部指标/估值依赖；当前样本从127增至131条，原454条合格事实不改。
+- 敏感性各result中的重复逐年数组与主情景一致，仅移出模型展示；所有端点、回报、假设和敏感性点保留，完整年度明细仍在原Owner。
+- `TARGET_TOKENS=28000`现在实际触发第二层无损去重：记录使用同一columns与rows表示重复字段名，null_cells表示未提供的外层字段；嵌套原值、完整evidence_ref、来源/会计/期间/单位、政策和用户历史可逆保留。不按Top-K丢竞争反证，不提高40000上限。必要内容仍超限则拒绝发送。
+- 各层仅记录计数、编码方式、减少的参考Token及最终状态，不记录完整Prompt。最终过滤仍使用原完整Evidence，与模型序列化格式无关。
+
+下表为同一合法冻结输入、实际问题及合成长度边界，均按o200k_base参考编码计数，已包含1024框架预留；不能冒充Sol实际usage：
+
+| 场景 | 含预留参考Token | 余量 | 结果 |
+|---|---:|---:|---|
+| 原始588字符问题、无历史 | 34487 | 5513 | 通过 |
+| 同问题、2×300字符历史 | 34918 | 5082 | 通过 |
+| 同问题、2×1000字符历史 | 35918 | 4082 | 通过 |
+| 同问题、4×1500字符历史 | 38776 | 1224 | 通过 |
+| 同问题、8×3000字符历史 | 51648 | 超限 | 拒绝，不截断历史或必需证据 |
+| 6000字符问题、无历史 | 39297 | 703 | 通过 |
+| 协议上限6000字符问题、16×12000字符用户历史 | 176444 | 超限 | 拒绝，模型初始化前停止 |
+
+典型零/短/中历史的消息本体约33463–34894参考Token，符合约30k–35k目标；软目标是去重触发值，不是强制截去事实的门槛。缺少词表时使用UTF-8字节保守上界，本样本109320（含预留）会安全拒绝；该数不是参考编码Token。必需证据过多的合成压力样本同样拒绝。缺失或损坏词表的冷进程测试禁止网络，确认不会在研究中下载。
+
+### ARM 部署前验收清单（只交接，本轮不执行生产操作）
+
+1. 在新隔离release的**完整Business Python**核验原依赖锁（含OpenAI 2.29.0及tiktoken 0.12.0）；不得在旧生产环境原地安装，也不要求MCP轻环境安装完整业务依赖。必须以Python进程内`platform.machine()`验证原生arm64，不能用MacBook或Rosetta导入成功替代。
+2. 在构建/部署准备阶段复用或经授权获取官方公开词表：`https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken`。SHA256必须为`446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`；缓存文件名为URL的SHA1。放入原运维机制选定的持久可读资产目录；不在研究中下载，不依赖可能被清理的临时缓存。
+3. 核对MCP父进程的既有环境与实际`--analysis-env-file`。父进程只白名单透传`TIKTOKEN_CACHE_DIR`；Worker配置文件同名合法项按原加载顺序覆盖继承值。只核验变量存在、资产哈希与可读性，不输出配置内容/Key。原协议回归覆盖父子透传，cache-only配置不重置模型或加载Key。
+4. 用实际Business解释器、实际release代码、实际环境文件启动一个**冷的只读检查进程**，仅按原`load_analysis_environment(..., model_policy_only=True)`加载配置，然后核验下列条件。此检查不启动服务、不运行研究、不创建客户端、不读取账户。检查中禁网；失败即停止，不以暖进程已加载的encoder代替资产存在证明。
+
+   ```python
+   # 在原运行入口/目录执行；环境文件路径取现有MCP参数，不复制生产配置。
+   import hashlib, importlib.metadata, os, platform
+   from pathlib import Path
+   from backend.services.market_data import l1_context as c
+   assert platform.machine() == 'arm64'
+   assert importlib.metadata.version('tiktoken') == '0.12.0'
+   cache = Path(os.environ['TIKTOKEN_CACHE_DIR'])
+   asset = cache / hashlib.sha1(c.VOCAB_URL.encode()).hexdigest()
+   assert asset.is_file() and hashlib.sha256(asset.read_bytes()).hexdigest() == c.VOCAB_SHA
+   assert c._encoder() is not None
+   assert c.measure('中文')['counting'] == 'o200k_base_reference_estimate'
+   # 只汇报上述布尔结果/版本，不打印路径、配置或凭证。
+   ```
+
+5. MCP父进程与只读Worker必须同SHA，重启后的冷Worker仍能读取同一资产。真实研究仍需后续单独授权；本轮只完成离线合并前验收，**ARM现场结果保持PENDING_ARM_RUNTIME_CHECK，不等于生产发布GO**。缺词表不得被解释为行情/模型故障或通过放宽预算补救。
+
+### 首轮候选记录（b090361，以下保留追溯）
+
 生产故障由用户提供：PDD Run 70b493cc87cd4c4e8f19487ae3f3faa1，130543输入、8192输出全部用于reasoning，truncated后仅facts-only；PR96已成功保存结果。该生产工件尚未交接，本轮不访问Mini、不重跑研究，精确原Prompt分段状态为`PENDING_PRODUCTION_INPUT_EVIDENCE`。开发冻结PDD测量不能替代生产实测。
 
 - **代码断点**：已持仓PositionDecision此前追加prompt_context后进入旧reason，大JSON、DecisionContext、历史及旧交易字段参与展开；reason请求max_tokens=4096，被原适配转换为8192总输出。新建仓/纯研究曾使用另一输出预算。本轮不修改decision_engine核心或模型全局档位。

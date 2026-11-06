@@ -5,6 +5,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 import os
+import subprocess
+import sys
 from types import SimpleNamespace as NS
 
 import httpx
@@ -249,3 +251,98 @@ def test_owner_quarterly_scope_does_not_depend_on_derived_metrics(monkeypatch):
     kept={r['evidence_ref'] for r in pack['financial_operating_cashflow']}
     latest=max(r['period'] for r in raw.values())
     assert all((r.get('record_id') or r['source_url']) in kept for r in raw.values() if r['period']==latest)
+
+
+def expand_tables(groups):
+    result=deepcopy(groups)
+    for section in ctx.RECORD_SECTIONS:
+        table=result[section]
+        if isinstance(table,dict):
+            assert table['null_cells']=='absent_field'
+            result[section]=[{key:value for key,value in zip(table['columns'],row) if value is not None}
+                             for row in table['rows']]
+    return result
+
+
+def test_soft_target_triggers_lossless_tables_without_dropping_any_topic(monkeypatch):
+    full,_=ctx.project(facts())
+    full['financial_operating_cashflow'][0]['values']['unknown_nested_value']=None
+    assert expand_tables(ctx._record_tables(full))==full
+    a=qualitative()
+    row=deepcopy(a['records'][0]);row['record_id']='fixture:additional-qualified-context'
+    row.pop('source_url',None);a['records'].append(row)
+    before=deepcopy(a)
+    monkeypatch.setattr(ctx,'TARGET_TOKENS',1000000)
+    raw,first=ctx.messages(a,'仅研究经营与条件回报',policy={'rules':[{'no_orders':True}]},holding={})
+    monkeypatch.setattr(ctx,'TARGET_TOKENS',1)
+    compact,last=ctx.messages(a,'仅研究经营与条件回报',policy={'rules':[{'no_orders':True}]},holding={})
+    assert first['record_encoding']=='objects' and last['record_encoding']=='columns_rows_v1'
+    assert expand_tables(json.loads(compact[1]['content']))==json.loads(raw[1]['content'])
+    assert last['saved_reference_tokens']>0 and last['selected_records']==first['selected_records']
+    assert a==before
+
+
+def test_sensitivity_annual_arrays_are_display_duplicates_not_missing_endpoints():
+    source={'scenarios':{'base':{'years':[{'year':1,'eps':'4'}],'terminal_price':'80'}},
+            'sensitivity':[{'parameter':'growth','delta':'.01','result':
+                {'years':[{'year':1,'eps':'5'}],'terminal_price':'90','annualized_return':'.1'}},
+                {'result':'UNKNOWN'}]}
+    before=deepcopy(source);result=ctx._conditional(source)
+    assert source==before
+    assert result['scenarios']['base']=={'terminal_price':'80','annual_detail_in_full_evidence':True}
+    assert result['sensitivity'][0]['result']=={'terminal_price':'90','annualized_return':'.1','annual_detail_in_full_evidence':True}
+    assert result['sensitivity'][1]==source['sensitivity'][1]
+
+
+def test_four_quarter_core_fields_survive_without_any_derived_dependencies(monkeypatch):
+    from backend.services.market_data import financial_research
+    a=facts();sample=next(r for r in _evidence_index(a).values() if r.get('field')=='operating_income_quarter')
+    for key in ('records','quality_field_records','historical_field_records','verified_period_records'):
+        a[key]=[]
+    a['conditional_valuation']={};a['verified_field_records']=[]
+    dates=['2026-06-30','2026-03-31','2025-12-31','2025-09-30','2024-06-30']
+    for period in dates:
+        row=deepcopy(sample);row.update(record_id='fixture:quarter:'+period,period=period,scope='quarterly')
+        row.pop('source_url',None);a['verified_field_records'].append(row)
+    monkeypatch.setattr(financial_research,'build',lambda value:{'records':[]})
+    pack,_=ctx.project(a)
+    assert {r['period'] for r in pack['financial_operating_cashflow']}==set(dates[:4])
+
+
+def test_longest_legal_user_input_is_rejected_before_model_initialization(monkeypatch):
+    from pocs.chatgpt_skills.analysis import AnalysisRequest
+    from intent_engine import _llm_client
+    from backend.services.investment_policy import runtime
+    request=AnalysisRequest(question='公司经营研究'*1000,
+        history=[{'role':'user','content':(str(i)+'研究假设'*3000)[:12000]} for i in range(16)])
+    assert len(request.question)==6000 and len(request.history)==16
+    monkeypatch.setattr(_llm_client,'get_client',lambda:pytest.fail('must not send oversized legal input'))
+    monkeypatch.setattr(runtime,'context',lambda *a,**kw:{'mode':'LEGACY'})
+    e=ExecutionOutput(analysis_mode='l1_research',research_question=request.question,
+        research_history=[r.model_dump() for r in request.history],position_evidence=qualitative(),
+        loaded_data=NS(is_new_entry=False,target_position=None))
+    async def run():
+        agent=ExpressingAgent()
+        async for _ in agent.run_streaming(PlanningOutput(route='position_single',intent={'primary_intent':'PositionDecision'}),e,'unused'):pass
+        return agent.last_output
+    result=asyncio.run(run())
+    assert result.error=='L1_CONTEXT_BUDGET_EXCEEDED'
+    assert e.research_context_diagnostics['estimated_with_frame_reserve']>40000
+    assert '公司经营研究' not in json.dumps(e.research_context_diagnostics,ensure_ascii=False)
+
+
+@pytest.mark.parametrize('corrupted',[False,True])
+def test_cold_worker_missing_or_corrupted_vocabulary_never_downloads(tmp_path,corrupted):
+    import hashlib
+    cache=tmp_path/'vocab';cache.mkdir()
+    if corrupted:(cache/hashlib.sha1(ctx.VOCAB_URL.encode()).hexdigest()).write_bytes(b'not the official vocabulary')
+    code="""import socket
+socket.socket.connect=lambda *a,**k: (_ for _ in ()).throw(AssertionError('NETWORK_FORBIDDEN'))
+from backend.services.market_data import l1_context as c
+assert c._encoder() is None
+assert c.measure('中文')==dict(bytes=6,tokens=6,counting='utf8_byte_upper_bound')
+"""
+    env={k:os.environ[k] for k in ('PATH','HOME','LANG','TMPDIR') if k in os.environ}
+    env.update(PYTHONPATH=str(Path(__file__).resolve().parents[1]),PYTHON_DOTENV_DISABLED='1',TIKTOKEN_CACHE_DIR=str(cache))
+    result=subprocess.run([sys.executable,'-c',code],env=env,capture_output=True,timeout=15)
+    assert result.returncode==0,result.stderr.decode()
