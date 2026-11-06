@@ -70,7 +70,8 @@ def test_explicit_route_catalog_and_static_mode(web,monkeypatch):
         ("GET", "/api/demo/status"), ("GET", "/api/web/status"),
         *(('GET', '/api/portfolio/' + p) for p in ('summary','positions','liabilities','alerts')),
         ("GET", "/api/wealth/summary"), ("GET", "/api/wealth/items"),
-        ("GET", "/api/allocation/targets"), ("GET", "/api/discipline/policy-context"), ("GET", "/api/broker-sync/status"),
+        ("GET", "/api/allocation/targets"), ("GET", "/api/allocation/snapshot"),
+        ("GET", "/api/discipline/policy-context"), ("GET", "/api/broker-sync/status"),
         ("POST", "/api/broker-sync/trigger"), ("GET", "/")
     ]}
     with TestClient(app, base_url="http://127.0.0.1:8790") as client:
@@ -81,6 +82,32 @@ def test_explicit_route_catalog_and_static_mode(web,monkeypatch):
         policy=client.get('/api/discipline/policy-context?view=portfolio')
         assert policy.status_code==200 and policy.json()['status']=='NOT_ACTIVE'
         assert client.post('/api/discipline/policy-context',json={}).status_code>=400
+
+
+@pytest.mark.parametrize('code,status', [('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',409),
+    ('POLICY_CONTEXT_UNAVAILABLE',503), ('PRIVATE_PROGRAM_DIAGNOSTIC',500), (None,200)])
+def test_b2_snapshot_uses_original_read_handler_and_error_contract(web, monkeypatch, code, status):
+    from backend.api import allocation
+    from fastapi import HTTPException
+    calls = []
+    def original(snapshot_id=None):
+        calls.append(snapshot_id)
+        if code and status != 500:
+            raise HTTPException(status, code)
+        if code:
+            raise ValueError(code)
+        return {'original_read_handler':True}
+    monkeypatch.setattr(allocation, 'api_snapshot', original)
+    config, directory = web
+    app = create_app(config, directory, factory=fake_service)
+    with TestClient(app, base_url='http://127.0.0.1:8790') as client:
+        response = client.get('/api/allocation/snapshot?snapshot_id=asset-view:v1:1')
+        assert response.status_code == status
+        assert calls == ['asset-view:v1:1']
+        assert 'PRIVATE_PROGRAM_DIAGNOSTIC' not in response.text
+        assert client.post('/api/allocation/snapshot',json={}).status_code >= 400
+        assert client.get('/api/allocation/snapshot',headers={'host':'attacker.example'}).status_code == 403
+        assert calls == ['asset-view:v1:1']
         with monkeypatch.context() as broken:
             missing=Path(config['database_path']).parent/'PRIVATE_PATH_SENTINEL.sqlite'
             broken.setenv('WEALTHPILOT_POLICY_DB_PATH',str(missing))
