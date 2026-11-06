@@ -35,13 +35,13 @@ router = APIRouter()
 # ── 配置状态接口 ─────────────────────────────────────────
 
 @router.get("/snapshot")
-def api_snapshot() -> dict:
+def api_snapshot(snapshot_id: str | None = None) -> dict:
     """获取当前五大类配置快照"""
     from backend.services.investment_policy.parser import PolicyError
 
     pid = state.portfolio_id
     try:
-        snapshot = get_snapshot(pid)
+        snapshot = get_snapshot(pid, snapshot_id=snapshot_id) if snapshot_id else get_snapshot(pid)
     except PolicyError as exc:
         # Qualification failures are expected domain results. Keep detail a
         # string for existing Web clients; never manufacture an empty snapshot.
@@ -55,6 +55,9 @@ def api_snapshot() -> dict:
             'POLICY_VERSION_CONFLICT',
             'POLICY_SCOPE_MISMATCH',
         }:
+            if hasattr(exc, 'qualification'):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=409, content={'detail':code, 'qualification':exc.qualification})
             raise HTTPException(409, detail=code) from None
         raise  # Unknown defects retain a 500; do not disclose arbitrary text.
     return snapshot.model_dump()
