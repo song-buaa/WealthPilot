@@ -295,7 +295,7 @@ def safe_metadata(value):
             row["error_category"] = kind if isinstance(kind, str) and kind in ERRORS else None
             for key in ("elapsed_ms", "sdk_retry_count", "transport_attempt_count", "input_tokens", "output_tokens", "reasoning_tokens", "start_offset_ms", "end_offset_ms", "message_count", "input_character_count", "input_byte_count", "timeout_read_ms", "timeout_connect_ms", "timeout_write_ms", "timeout_pool_ms"):
                 row[key] = counter(item.get(key))
-            if counter(item.get("output_token_budget")) is not None:
+            if "output_token_budget" in item:
                 row["output_token_budget"] = counter(item["output_token_budget"])
             row["usage_status"] = "KNOWN" if row["input_tokens"] is not None and row["output_tokens"] is not None else UNKNOWN
             # Cost records are local reference estimates, never arbitrary URLs/text.
