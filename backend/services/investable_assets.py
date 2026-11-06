@@ -113,9 +113,9 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
     elif not _source_current(evidence.as_of, at):
         issues.append('INVESTABLE_SCOPE_EVIDENCE_STALE')
 
-    inputs = quality.get('security_inputs', [])
+    inputs = quality.get('investable_security_inputs', quality.get('security_inputs', []))
     manual = source.get('views', {}).get('get_manual_wealth_items', {}).get('items', [])
-    accounts = quality.get('accounts', [])
+    accounts = quality.get('investable_accounts', quality.get('accounts', []))
     account_map = {a.get('account_ref'): a for a in accounts}
     if len(account_map) != len(accounts) or None in account_map:
         issues.append('INVESTABLE_ACCOUNT_IDENTITY_UNKNOWN')

@@ -42,21 +42,31 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
         issues = set(overview["issues"] + details["issues"] + manual["issues"])
         issues.update(internal.get("prepare_issues", []))
         accounts = []
+        investable_accounts = []
         with get_session() as session:
             from app.fill_sync import pending_accounts
             unsettled = pending_accounts(session,portfolio_id)
             rows = session.query(Position).filter_by(portfolio_id=portfolio_id, segment="投资").all()
+            all_rows = session.query(Position).filter_by(portfolio_id=portfolio_id).all()
             requested = internal.get("owners", [])
             owners = {(p.broker, p.broker_account_id, p.sync_source) for p in rows if p.broker and p.broker_account_id}
             owners.update((o["broker"], o["account"], "api") for o in requested if o["account"])
             owners.update((broker,account,"api") for broker,account in unsettled if account)
+            investment_owners = set(owners)
+            owners.update((p.broker,p.broker_account_id,p.sync_source) for p in all_rows if p.broker and p.broker_account_id)
+            investment_issues = issues
             for broker, account, source in sorted(owners, key=str):
+                # Preserve the original investment analysis quality scope.
+                # B2 receives the complete same-DB inventory separately.
+                issues = investment_issues if (broker,account,source) in investment_owners else set()
                 runs = session.query(PositionSnapshotRun).filter_by(portfolio_id=portfolio_id,
                     broker=broker, account_id=account, sync_source=source).order_by(PositionSnapshotRun.id.desc()).all()
                 latest = runs[0] if runs else None
                 good = next((r for r in runs if r.status == "success"), None)
                 quality = _public_quality(good)
                 sample = next((p for p in rows if p.broker == broker and p.broker_account_id == account), None)
+                if sample is None:
+                    sample = next((p for p in all_rows if p.broker == broker and p.broker_account_id == account), None)
                 if sample is not None:
                     ref = account_ref(portfolio_id, sample)
                 else:
@@ -79,7 +89,9 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                 entry["publication_status"] = publication_status(session, good)
                 if entry["publication_status"] != "matched":
                     issues.add("SYNC_PUBLICATION_"+entry["publication_status"].upper())
-                accounts.append(entry)
+                investable_accounts.append(entry)
+                if (broker,account,source) in investment_owners:
+                    accounts.append(entry)
                 issues.update(quality.get("issues") or [])
                 if not good:
                     issues.add("NO_SUCCESSFUL_SYNC")
@@ -91,7 +103,8 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                     if not 0 <= (now()-stamp).total_seconds() <= 300:
                         issues.add("STALE_ACCOUNT_SYNC")
                 # Source reading time is not the security price/valuation time.
-                owned = [p for p in rows if p.broker == broker and p.broker_account_id == account]
+                scoped_rows = rows if (broker,account,source) in investment_owners else all_rows
+                owned = [p for p in scoped_rows if p.broker == broker and p.broker_account_id == account]
                 entry['time_quality'] = {name:time_quality(quality.get(name), limit, daily=(name=='price_as_of'))
                     for name,limit in [('positions_as_of',300),('cash_as_of',300),('price_as_of',86400)]}
                 for relevant,name,code in [(any(p.vehicle_type!='CASH' for p in owned),'positions_as_of','POSITION_TIME'),
@@ -100,6 +113,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                         issues.add(code+'_'+entry['time_quality'][name].upper())
                 if quality.get("quality") != "current":
                     issues.add("SOURCE_QUALITY_PARTIAL")
+            issues = investment_issues
             if any(not o["account"] for o in requested):
                 issues.add("SYNC_ACCOUNT_UNCONFIGURED")
             for row in rows:
@@ -122,7 +136,7 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
             a = by_ref.get(item["account_ref"], {})
             security_inputs.append({**{k:item.get(k) for k in ("id","symbol","ticker","account_ref","security_symbol",
                 "vehicle_type","economic_asset_class","market_value_cny","currency","original_currency","security_currency","fx_rate_date","fx_rate_to_cny",
-                "quantity","current_price","price_basis")},
+                "quantity","current_price","price_basis","segment")},
                 "fx_quality":(a.get("fx") or {}).get(item.get("original_currency") or item.get("currency"),{}).get("quality","unverified"),
                 **{k:a.get(k) for k in ("positions_as_of","cash_as_of","price_as_of","price_time_basis","time_evidence")}})
         quality = dict(status="partial" if issues else "ok", issues=sorted(issues), policy_version="d1.1",
@@ -131,6 +145,23 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
             manual_inputs=[{k:item[k] for k in ('id','source_type','sync_mode','value_as_of','last_verified_at',
                 'included_in_net_worth','already_investment_accounted')} for item in manual['items']],
             time_contract="account_synced_at / positions_as_of / cash_as_of / price_as_of / fx.rate_date / manual.value_as_of are distinct; captured_at is not a source date")
+        # Original Portfolio values, not a second asset store. This superset is
+        # only consumed by B2; legacy PEER/security_inputs retain their scope.
+        inventory_by_ref = {a['account_ref']:a for a in investable_accounts}
+        values_by_id = {p['id']:p for p in positions['items']}
+        original_inputs = {p['id']:p for p in security_inputs}
+        inventory = []
+        for row in all_rows:
+            if row.id in original_inputs:
+                inventory.append(original_inputs[row.id])
+                continue
+            item = values_by_id[row.id]
+            ref = account_ref(portfolio_id,row)
+            a = inventory_by_ref.get(ref,{})
+            inventory.append({**item, 'account_ref':ref,
+                'fx_quality':(a.get('fx') or {}).get(item.get('original_currency') or item.get('currency'),{}).get('quality','unverified'),
+                **{k:a.get(k) for k in ('positions_as_of','cash_as_of','price_as_of','price_time_basis','time_evidence')}})
+        quality.update(investable_security_inputs=inventory, investable_accounts=investable_accounts)
         result = dict(schema_version=VERSION, pipeline=PIPELINE, state="ready", portfolio_id=portfolio_id,
             captured_at=internal.get("frozen_at",now().isoformat()), data_quality=quality, issuer_exposure=companies,
             views=dict(get_wealth_overview=overview, get_manual_wealth_items=manual,
