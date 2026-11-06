@@ -121,7 +121,8 @@ class AnalysisObservation:
                 pass  # Bad input encoding is not an observation failure or fake zero.
             call.update(start_offset_ms=max(0,int((time.monotonic()-self.started)*1000)),end_offset_ms=None,
                 message_count=len(payload) if isinstance(payload,list) else 1 if payload is not None else 0,
-                input_character_count=characters,input_byte_count=byte_count)
+                input_character_count=characters,input_byte_count=byte_count,
+                output_token_budget=counter(options.get("max_completion_tokens",options.get("max_output_tokens"))))
             timeout=options.get('timeout')
             for phase in ('read','connect','write','pool'):
                 value=getattr(timeout,phase,timeout if isinstance(timeout,(int,float)) else None)
@@ -294,6 +295,8 @@ def safe_metadata(value):
             row["error_category"] = kind if isinstance(kind, str) and kind in ERRORS else None
             for key in ("elapsed_ms", "sdk_retry_count", "transport_attempt_count", "input_tokens", "output_tokens", "reasoning_tokens", "start_offset_ms", "end_offset_ms", "message_count", "input_character_count", "input_byte_count", "timeout_read_ms", "timeout_connect_ms", "timeout_write_ms", "timeout_pool_ms"):
                 row[key] = counter(item.get(key))
+            if counter(item.get("output_token_budget")) is not None:
+                row["output_token_budget"] = counter(item["output_token_budget"])
             row["usage_status"] = "KNOWN" if row["input_tokens"] is not None and row["output_tokens"] is not None else UNKNOWN
             # Cost records are local reference estimates, never arbitrary URLs/text.
             raw_cost = item.get("cost") or {}
@@ -332,7 +335,8 @@ def safe_call_timings(rows):
         error_category=row.get('error_category') if row.get('error_category') in ERRORS else None,
         **{k:counter(row.get(k)) for k in ('start_offset_ms','end_offset_ms','elapsed_ms','message_count',
             'input_character_count','input_byte_count','timeout_read_ms','timeout_connect_ms','timeout_write_ms',
-            'timeout_pool_ms','sdk_retry_count','transport_attempt_count')}) for row in rows[:128] if isinstance(row,dict)]
+            'timeout_pool_ms','sdk_retry_count','transport_attempt_count')},
+        **({'output_token_budget':counter(row['output_token_budget'])} if 'output_token_budget' in row else {})) for row in rows[:128] if isinstance(row,dict)]
 
 
 def peer_stage(name):
@@ -391,5 +395,25 @@ def observed_result(fn):
                 raise
             status = "timeout" if "ANALYSIS_TIMEOUT" in result.get("issues", []) else "failed" if result.get("status") == "unavailable" else "completed"
             result["llm_observation"] = trace.snapshot(status if owner else None)
+            reconcile_research_stages(result)
             return result
     return wrapped
+
+
+def reconcile_research_stages(result):
+    """Observed model activity cannot be called not_started; delivery is separate."""
+    if result.get('scenario')!='analyze_position' or not result.get('stage_diagnostics'):
+        return
+    diagnostic=result['stage_diagnostics']
+    calls=(result.get('llm_observation') or {}).get('calls',[])
+    for stage in ('expressing','reviewing'):
+        observed=[c for c in calls if c.get('peer_stage')==stage]
+        if not observed:continue
+        if diagnostic.get(stage)=='not_started':diagnostic[stage]='started'
+        if stage=='expressing' and not result.get('professional_analysis_complete'):
+            errors={c.get('error_category') for c in observed}
+            if 'truncated' in errors:diagnostic[stage]='truncated'
+            elif any(c.get('status') in {'failed','rejected'} for c in observed):diagnostic[stage]='failed'
+            elif 'ANALYSIS_TIMEOUT' in result.get('issues',[]):diagnostic[stage]='failed'
+    diagnostic['final_acceptance']='accepted_final' if (result.get('professional_analysis_complete') and
+        result.get('professional_result',{}).get('analysis_result',{}).get('professional_explanation')) else 'incomplete'

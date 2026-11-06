@@ -37,3 +37,6 @@ chromadb>=0.5.0
 python-frontmatter>=1.1.0
 langchain-text-splitters>=0.2.0
 pypinyin>=0.53.0
+
+# Offline L1 context preflight; reference encoding is not provider usage.
+tiktoken==0.12.0

@@ -151,6 +151,10 @@ class ExecutionOutput:
     invoked_skills: list[str] = field(default_factory=list)
     """实际调用的 Skill 名称列表（按顺序）。"""
 
+    analysis_mode: str = ""  # Server-only; not supplied by Planner/model.
+    research_question: str = ""  # Original user intent, not expanded prompt.
+    research_history: list[dict] = field(default_factory=list)
+    research_context_diagnostics: dict = field(default_factory=dict)
     position_evidence: dict = field(default_factory=dict)
     portfolio_evidence: list[dict] = field(default_factory=list)
     skill_results: dict = field(default_factory=dict)

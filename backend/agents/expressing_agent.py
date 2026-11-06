@@ -423,7 +423,8 @@ class ExpressingAgent:
         try:
             intent_type = _resolve_intent_type(planning_output)
             from backend.services.investment_policy.runtime import prompt
-            user_query += prompt(planning_output.portfolio_id)
+            if getattr(execution_output,"analysis_mode","") != "l1_research":
+                user_query += prompt(planning_output.portfolio_id)
             out.prompt_template_id = self._intent_to_template_id(intent_type)
             out.citation_rules_applied = ["wp-citation-rules"]
 
@@ -491,6 +492,10 @@ class ExpressingAgent:
         v3.4 M8.4: 新建仓场景(is_new_entry=True)走独立 prompt 模板,
         不复用持仓分析的 _CHAT_FORMAT_FIRST_TURN。
         """
+        if getattr(execution_output,"analysis_mode","") == "l1_research":
+            async for chunk in self._express_l1_research(out, planning_output, execution_output):
+                yield chunk
+            return
         from decision_engine import llm_engine
 
         if execution_output.loaded_data is None:
@@ -601,6 +606,65 @@ class ExpressingAgent:
 
         async for chunk in _emit_text_chunks(out.chat_answer):
             yield chunk
+
+    async def _express_l1_research(self, out, plan, executed):
+        from backend.services.market_data.l1_context import messages, ContextBudgetExceeded
+        from backend.services.market_data.output_policy import enforce
+        from backend.services.investment_policy.runtime import context
+        from app.llm_config import l1_research_options, error_kind, LLMCallError
+        from intent_engine._llm_client import get_client
+        from decision_engine.llm_engine import LLMResult
+        import json
+
+        assessment = executed.position_evidence
+        loaded = executed.loaded_data
+        if not assessment or not loaded:
+            out.mark_failed('L1_EVIDENCE_UNAVAILABLE')
+            return
+        policy = context(plan.portfolio_id, consumer='peer', view='position', symbol=assessment.get('symbol'))
+        policy = {k:v for k,v in policy.items() if k in
+            {'mode','status','policy_reference','rules','philosophy','obligations','position_target','precision','execution_authorized'}}
+        target = getattr(loaded,'target_position',None)
+        holding = dict(state='not_held' if loaded.is_new_entry else 'stored_holding_requires_freshness_check' if target is not None else 'UNKNOWN',
+            source='original_loaded_data',
+            stored_reference={k:getattr(target,k,None) for k in ('ticker','name','quantity','currency')},
+            user_intent=assessment.get('research_intent'), execution_authorized=False)
+        try:
+            payload, diagnostic = messages(assessment, executed.research_question,
+                                          policy=policy, holding=holding, history=executed.research_history)
+            executed.research_context_diagnostics = diagnostic
+            logger.info('l1_context_preflight %s', json.dumps(diagnostic,ensure_ascii=True))
+            response = await asyncio.to_thread(lambda:chat_completion(get_client(),
+                **l1_research_options(), messages=payload))
+            raw = response.choices[0].message.content or ''
+            parsed = json.loads(raw)
+            if not isinstance(parsed,dict):raise LLMCallError('invalid_output')
+        except ContextBudgetExceeded as error:
+            executed.research_context_diagnostics = error.diagnostic
+            out.mark_failed('L1_CONTEXT_BUDGET_EXCEEDED')
+            return
+        except Exception as error:
+            kind = error_kind(error)
+            executed.research_context_diagnostics['model_state'] = kind if kind in {'truncated','timeout','empty_output','invalid_output','refusal'} else 'failed'
+            out.mark_failed('L1_EXPRESSION_'+kind.upper())
+            return
+        objective = (assessment.get('research_intent') or {}).get('objective')
+        pure = (assessment.get('research_intent') or {}).get('no_holding_research')
+        decision = ('watch' if pure else 'exit' if objective=='exit' else 'trim' if objective in {'reduce','trim'} else
+                    'buy_init' if loaded.is_new_entry else 'hold')
+        out.prompt_template_id='l1_professional_research.v1'
+        out.mode='structured'
+        out.structured_payload=dict(decisionType=decision, is_new_entry=bool(loaded.is_new_entry and not pure),
+            professional_explanation=parsed.get('professional_explanation'))
+        out.llm_result=LLMResult('HOLD',[],[],[],chat_answer='',raw_output='',structured_result={})
+        enforce(out,assessment,compact_incomplete=True)  # Original, full authority; the compact pack cannot grant qualification.
+        executed.research_context_diagnostics['model_state']='completed'
+        executed.research_context_diagnostics['accepted_count']=len(out.structured_payload['professional_explanation'])
+        # The original PEER buffers this qualified L1 text until Review/final
+        # requalification. Do not pace a discarded pre-Review copy character by
+        # character; the final owner still controls public delivery.
+        if out.chat_answer:
+            yield out.chat_answer
 
     # ────────────────────────────────────────────────────────
     # 新建仓路径（v3.4 M8.4）

@@ -129,7 +129,8 @@ def finalize_output(plan, executed, expressed):
     fact_text=[]
     conditional_results=[]
     for assessment in assessments:
-        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations))
+        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations),
+            compact=getattr(executed,'analysis_mode','')=='l1_research')
         if retained:
             fact_text.append(retained[2])
             if retained[0].get('conditional_valuation'):

@@ -59,7 +59,9 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
         "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
-    allowed = allowed | POLICY_ENV_KEYS
+    allowed = allowed | POLICY_ENV_KEYS | {"TIKTOKEN_CACHE_DIR"}
+    if "TIKTOKEN_CACHE_DIR" in values and not isinstance(values["TIKTOKEN_CACHE_DIR"],str):
+        raise ValueError("ANALYSIS_CONFIGURATION_INVALID")
     if not model_policy_only:
         from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES
         if any(key in values for key in AV_KEY_NAMES):

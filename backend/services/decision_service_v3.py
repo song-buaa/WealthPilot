@@ -459,6 +459,11 @@ async def _run_chat_stream_v3(
             from backend.services.position_analysis import prepare_portfolio
             exec_out.portfolio_evidence = prepare_portfolio(plan_out,exec_out)
 
+        if analysis_only and (analysis_options or {}).get("single_position_research") and plan_out.route == "position_single":
+            exec_out.analysis_mode = "l1_research"
+            exec_out.research_question = (analysis_options or {}).get("research_question") or user_input
+            exec_out.research_history = (analysis_options or {}).get("research_history") or []
+
         # Internal memory receipt only. No model text, persistence or extra work.
         if stage_callback is not None and plan_out.route == "position_single":
             stage_callback(plan_out, exec_out)
@@ -467,6 +472,8 @@ async def _run_chat_stream_v3(
         # ── Stage 3: ExpressingAgent（流式）──
         yield _sse("stage", {"stage": "reasoning", "label": "AI 推理中..."})
 
+        if stage_callback is not None and plan_out.route == "position_single":
+            stage_callback(plan_out, exec_out, stage="expressing_started")
         expressing = get_expressing_agent()
         guarded_portfolio = (plan_out.route == "portfolio" and isinstance(plan_out.intent, dict)
                              and plan_out.intent.get("primary_intent") in {"PortfolioReview", "AssetAllocation"})
@@ -481,6 +488,8 @@ async def _run_chat_stream_v3(
         expr_out = expressing.last_output
 
         if expr_out is None or expr_out.status == AgentTaskStatus.FAILED:
+            if stage_callback is not None and plan_out.route == "position_single":
+                stage_callback(plan_out, exec_out, stage="expressing_failed")
             yield _sse("error", {
                 "code": "expression_failed",
                 "message": (expr_out.error if expr_out else None) or "LLM 推理失败",
@@ -513,7 +522,7 @@ async def _run_chat_stream_v3(
             final_view = _final_analysis_view(final_view)
             # Review/model latency cannot rejuvenate source clocks or view TTL.
             exec_out.position_evidence=prepare(plan_out,exec_out,asset_view=final_view,options=analysis_options)
-            enforce(expr_out,exec_out.position_evidence)
+            enforce(expr_out,exec_out.position_evidence,compact_incomplete=exec_out.analysis_mode=="l1_research")
             async for chunk in _emit_text_chunks(expr_out.chat_answer):
                 yield _sse("text", {"delta":chunk})
 

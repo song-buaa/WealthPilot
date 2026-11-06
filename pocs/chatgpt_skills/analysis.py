@@ -240,11 +240,12 @@ def captured_evidence(result, captured, portfolio_id):
 
 def retain_facts(result, assessment, *, asset_view=None, missing_stages=None):
     from backend.services.market_data.output_policy import facts_only_result
-    retained=facts_only_result(assessment,at=datetime.now(timezone.utc),asset_view=asset_view)
+    retained=facts_only_result(assessment,at=datetime.now(timezone.utc),asset_view=asset_view,compact=True)
     if not retained:return False
     assessment,facts,conclusion=retained
     result.status='partial'
-    result.conclusion=conclusion
+    reason=[x for x in result.issues if x in {'ANALYSIS_TIMEOUT','L1_CONTEXT_BUDGET_EXCEEDED','L1_EXPRESSION_TRUNCATED','L1_EXPRESSION_TIMEOUT','PEER_EXPRESSION_FAILED'}]
+    result.conclusion=('研究未完成；实际原因：'+', '.join(reason)+'。\n' if reason else '')+conclusion
     result.professional_analysis_complete=False
     result.missing_stages=missing_stages or ['professional_result']
     result.evidence['position_evidence']=encode(assessment)
@@ -306,14 +307,15 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 out=ExpressionOutput(structured_payload=result.get('professional_result',{}).get('analysis_result') or {})
                 # The result below is owned by this analysis, not a model-provided diagnostic.
                 out.explanation_diagnostics = out.structured_payload.get('explanationDiagnostics', {})
-                executed=SimpleNamespace(loaded_data=None,position_evidence=result.get('evidence',{}).get('position_evidence'),
+                executed=SimpleNamespace(loaded_data=None,analysis_mode='l1_research' if scenario=='analyze_position' else '',position_evidence=result.get('evidence',{}).get('position_evidence'),
                     portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
                 finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
                 result.setdefault('evidence',{})['policy_context']=out.structured_payload['policy_context']
                 result.setdefault('scope',{})['policy_reference']=out.structured_payload['policy_reference']
                 if result['status']!='unavailable':
                     result['status']='partial'
-                    result['conclusion']=out.chat_answer
+                    reasons=[x for x in result.get('issues',[]) if x in {'ANALYSIS_TIMEOUT','L1_CONTEXT_BUDGET_EXCEEDED','L1_EXPRESSION_TRUNCATED','L1_EXPRESSION_TIMEOUT','PEER_EXPRESSION_FAILED'}]
+                    result['conclusion']=('研究未完成；实际原因：'+', '.join(reasons)+'。\n' if reasons and not result.get('professional_analysis_complete') else '')+out.chat_answer
                     result['professional_result']={'analysis_result':out.structured_payload}
                 session.ensure_current()
             _finalize_research_completion(result, scenario)
@@ -363,7 +365,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 stage_completed.add(stage)
                 if stage=='evidence_ready':
                     if executed.position_evidence:
-                        stage_receipt.update(assessment=deepcopy(executed.position_evidence),missing=['expressing','reviewing'])
+                        stage_receipt.update(assessment=deepcopy(executed.position_evidence),executed=executed,missing=['expressing','reviewing'])
                 elif stage_receipt:
                     completed={'expressing_complete':'expressing','reviewing_complete':'reviewing'}.get(stage)
                     stage_receipt['missing']=[s for s in stage_receipt['missing'] if s!=completed]
@@ -477,7 +479,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                              research_context=request.research_context.model_dump() if request.research_context else None,
                              research_question=request.question,research_history=[t.model_dump() for t in request.history],
                              scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
-            enforce(expressed, executed.position_evidence)
+            enforce(expressed, executed.position_evidence,compact_incomplete=True)
             result.evidence['position_evidence'] = encode(executed.position_evidence)
             result.issues = sorted(set(result.issues + executed.position_evidence.get('issues', [])))
             if result.status != 'unavailable':
@@ -550,6 +552,12 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.professional_result['analysis_result']['exit_candidates']=result.evidence.get('exit_candidates',[])
             result.conclusion+=render_explanation(explanation)
             result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
+        context_diagnostic=getattr(stage_receipt.get('executed'),'research_context_diagnostics',{})
+        if context_diagnostic:
+            result.evidence['l1_context_diagnostics']=deepcopy(context_diagnostic)
+            state=context_diagnostic.get('model_state')
+            if context_diagnostic.get('status')=='budget_exceeded':result.issues.append('L1_CONTEXT_BUDGET_EXCEEDED')
+            if state in {'truncated','timeout','invalid_output','empty_output'}:result.issues.append('L1_EXPRESSION_'+state.upper())
         if result.status=='unavailable':
             result.professional_analysis_complete=False
             if not result.missing_stages:
@@ -565,7 +573,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.stage_diagnostics={
                 'planning': 'completed' if result.intent else 'failed' if 'PEER_PLANNING_FAILED' in result.issues else 'started' if 'intent' in stage_events else 'not_started',
                 'executing': 'completed' if 'evidence_ready' in stage_completed or captured else 'failed' if 'PEER_EXECUTION_FAILED' in result.issues else 'started' if 'loading' in stage_events else 'not_started',
-                'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'reasoning' in stage_events else 'not_started',
+                'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'expressing_failed' in stage_completed or 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'expressing_started' in stage_completed or 'reasoning' in stage_events else 'not_started',
                 'reviewing': 'completed' if 'reviewing_complete' in stage_completed or captured else 'unknown' if 'expressing_complete' in stage_completed else 'not_started',
                 'professional_result': 'accepted' if result.professional_analysis_complete else 'rejected' if 'ANALYSIS_ROUTE_MISMATCH' in result.issues else 'incomplete',
             }

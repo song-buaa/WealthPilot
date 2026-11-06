@@ -259,6 +259,13 @@ def _observed_options(endpoint, kwargs):
         raise
 
 
+def l1_research_options():
+    """Exact L1 completion cap (hidden reasoning included), not a global upgrade."""
+    return dict(model=MODEL_MAIN, reasoning_effort="medium",
+                max_completion_tokens=32768, timeout=180,
+                response_format={"type":"json_object"})
+
+
 def chat_completion(client, **kwargs):
     return _invoke(client, "chat", _observed_options("chat", kwargs))
 
