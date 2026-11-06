@@ -143,6 +143,8 @@ Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部sco
 
 合格成功保留原AllocationSnapshot字段，附加`policy_allocation`：Decimal字符串分母/五类金额、当前/目标权重、百分点差距、金额差距、主要偏差方向、PolicyReference、来源ID/hash/时点/截止时间。五类目标仅由ACTIVE neutral聚合，未写另一份目标；源CNY金额不舍入，比例除法余数只修正最大类别的最后Decimal位以闭合，金额差距按分ROUND_HALF_EVEN显示。无PolicyAssets公共字段、共享Schema、MCP工具变化。
 
+生产受限Web目录仅追加原Snapshot GET，委派同一handler，保留固定组合/共享库/loopback及同源边界；不挂载整个Allocation router，不开放任何新写方法。该GET未知异常保留B1的sanitized500，其他受限路由的原503处理不变。对应catalog、200/409/503/500、POST拒绝及攻击Host零handler调用由`pocs/poc03_mac_mini/test_restricted_web.py`验证。
+
 缺分母/覆盖/养老金/FX/时点仍B1的409，缺分类409；已知资产库不可读取也受控拒绝，Policy unavailable503，未知程序错误500。`detail`继续为字符串；B2可附加`qualification` UNKNOWN原因及来源引用，不能返回零资产/全绿或交易金额。旧LEGACY、已绑定原P2会话成功结构保留。ACTIVE页面在原政策/组合界面展示差距，到期自动撤销精确金额并显示UNKNOWN，不自动同步；组合穿透风险仍`NOT_ASSESSED_IN_B2`，金额差距只是信息，不是订单建议。
 
 本轮验证入口：`tests/test_b2_allocation.py`、原U1/养老金/B1/Policy/Wealth回归及`frontend/tests/e2e/policy-boundary.spec.ts`。生产事实未连接核验：是否已有完整账户发布证据、用途/外部覆盖确认、养老金映射与当前FX仍UNKNOWN。发布须另行授权，并在原ACTIVE政策和真实Owner确认后取得新的合格U1视图；旧视图不会回填或刷新。缺证据应验收409及明确原因，不能为了200改真实数据；交易资格另行授权。

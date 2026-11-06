@@ -93,6 +93,20 @@ def create_app(config, static_dir, *, factory=None):
     # Same fixed-scope read owner as full Web; no discipline write routes.
     app.add_api_route("/api/discipline/policy-context", get_policy_context, methods=["GET"])
 
+    @app.get('/api/allocation/snapshot')
+    def allocation_snapshot(snapshot_id: str | None = None):
+        # Reuse the original B1/B2 handler, expose no other allocation methods.
+        # The generic restricted middleware returns 503 for legacy routes;
+        # this API's unknown-program-error contract specifically remains 500.
+        from backend.api.allocation import api_snapshot
+        try:
+            return api_snapshot(snapshot_id)
+        except HTTPException:
+            raise
+        except Exception:
+            logging.getLogger('restricted-web-lifecycle').error('allocation_snapshot_unexpected_error')
+            return JSONResponse({'detail':'INTERNAL_SERVER_ERROR'}, status_code=500)
+
     @app.get("/api/allocation/targets")
     def targets():
         from backend.services.allocation_service import get_targets
