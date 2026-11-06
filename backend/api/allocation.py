@@ -53,6 +53,7 @@ def api_snapshot() -> dict:
             'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED',
             'POLICY_ASSET_WEIGHTS_NOT_CLOSED',
             'POLICY_VERSION_CONFLICT',
+            'POLICY_SCOPE_MISMATCH',
         }:
             raise HTTPException(409, detail=code) from None
         raise  # Unknown defects retain a 500; do not disclose arbitrary text.
