@@ -81,7 +81,7 @@ def project(assessment):
     records = {(r.get('record_id') or r['source_url']): r for r in index.values()}
     canonical = {ref: (r.get('record_id') or r['source_url']) for ref, r in index.items()}
     quarters = sorted({r.get('period') for r in records.values()
-                       if r.get('scope') == 'quarter' and r.get('period') and
+                       if r.get('scope') in {'quarter','quarterly'} and r.get('period') and
                        str(r.get('field','')).endswith('_quarter')}, reverse=True)
     periods = set(quarters[:2])
     if quarters:
@@ -105,7 +105,9 @@ def project(assessment):
             if key not in selected:
                 selected.add(key); pending.append(key)
     sources = {}
+    source_keys = {}
     dependencies = {}
+    dependency_keys = {}
     context_ids={ref:'e'+str(n) for n,ref in enumerate(sorted(selected))}
     def intern(value):
         if isinstance(value,str) and value in canonical and canonical[value] in context_ids:
@@ -117,7 +119,8 @@ def project(assessment):
     for ref in sorted(selected):
         row = records[ref]
         source = {k:row.get(k) for k in ('source','source_url','published_at','fetched_at')}
-        source_id = 's'+hashlib.sha256(dumps(source).encode()).hexdigest()[:20]
+        source_key = dumps(source)
+        source_id = source_keys.setdefault(source_key, 's'+str(len(source_keys)))
         sources[source_id] = source
         values = row.get('values') or {}
         if row['kind'] == 'technical':
@@ -130,7 +133,8 @@ def project(assessment):
         else:
             values = {k:v for k,v in values.items() if not isinstance(v,(dict,list))}
         dependency = row.get('evidence_refs',[])
-        dependency_id = 'd'+hashlib.sha256(dumps(dependency).encode()).hexdigest()[:20]
+        dependency_key = dumps(dependency)
+        dependency_id = dependency_keys.setdefault(dependency_key, 'd'+str(len(dependency_keys)))
         if dependency:dependencies[dependency_id]=intern(dependency)
         detail = row.get('details') or {}
         record = dict(evidence_ref=ref, context_id=context_ids[ref], source_ref=source_id, kind=row['kind'],
@@ -147,7 +151,7 @@ def project(assessment):
                  'technical_events' if row['kind'] in {'technical','event'} else
                  'valuation_inputs' if row.get('field') in {'diluted_eps_ttm','observed_price','fx_rate','pe_ttm','earnings_yield_pct','ordinary_shares_per_ads'} else
                  'financial_operating_cashflow')
-        groups[group].append(record)
+        groups[group].append({k:v for k,v in record.items() if v is not None and v != {}})
     groups['symbol'] = assessment.get('symbol')
     groups['conditional_valuation'] = intern(_conditional(assessment.get('conditional_valuation')))
     groups['sources'] = sources

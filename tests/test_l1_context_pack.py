@@ -47,7 +47,7 @@ def test_pack_covers_topics_refs_and_exact_values_without_changing_authority():
     assert refs<=set(_evidence_index(a))
     for row in fields.values():
         assert row['source_ref'] in pack['sources']
-        if row['dependency_set']:assert row['dependency_set'] in pack['dependencies']
+        if row.get('dependency_set'):assert row['dependency_set'] in pack['dependencies']
     assert diagnostic['dependency_refs_present']
 
 
@@ -228,3 +228,16 @@ def test_exact_hypothesis_duplicate_is_shared_without_merging_different_assumpti
     a['conditional_valuation']['assumptions']['growth']='.2'
     p,_=ctx.project(a)
     assert p['constraints_intent']['research_intent']['conditional_valuation']=={'growth':'.1'}
+
+
+def test_owner_quarterly_scope_does_not_depend_on_derived_metrics(monkeypatch):
+    from backend.services.market_data import financial_research
+    a=facts()
+    monkeypatch.setattr(financial_research,'build',lambda value:{'records':[]})
+    eligible=_evidence_index(a)
+    raw={ref:r for ref,r in eligible.items() if r.get('scope')=='quarterly' and r.get('field')=='revenue_quarter'}
+    assert raw
+    pack,_=ctx.project(a)
+    kept={r['evidence_ref'] for r in pack['financial_operating_cashflow']}
+    latest=max(r['period'] for r in raw.values())
+    assert all((r.get('record_id') or r['source_url']) in kept for r in raw.values() if r['period']==latest)
