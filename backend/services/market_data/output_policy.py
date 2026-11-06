@@ -147,6 +147,7 @@ def facts_only_result(assessment, *, at, asset_view=None, professional_delivered
         return None
     text=('已核验研究事实；专业解释与限制见下文，不构成交易授权。\n' if professional_delivered else
           '专业推断未完成；以下仅保留已核验来源事实，不包含投资决策或交易建议。\n')
+    current['financial_research']['valuation_sensitivity']=[]
     if not professional_delivered and compact:
         from backend.services.market_data.l1_context import compact_facts_text
         return current, facts, compact_facts_text(current)

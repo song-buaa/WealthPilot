@@ -212,8 +212,11 @@ def test_tokenizer_asset_path_does_not_reset_model_policy_or_load_keys(tmp_path,
 def test_compact_facts_is_explicit_l1_opt_in_with_unchanged_full_facts():
     from backend.services.market_data.output_policy import facts_only_result
     from tests.test_l1_reliability import AT
-    a=facts();legacy=facts_only_result(a,at=AT);compact=facts_only_result(a,at=AT,compact=True)
+    a=facts();before=deepcopy(a)
+    legacy=facts_only_result(a,at=AT);compact=facts_only_result(a,at=AT,compact=True)
+    assert a==before
     assert legacy[0]==compact[0] and legacy[1]==compact[1]
+    assert compact[0]['financial_research']['valuation_sensitivity']==[]
     assert len(compact[2])<len(legacy[2])
     assert '专业推断未完成' in compact[2]
 
