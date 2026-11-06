@@ -33,6 +33,8 @@ def source():
         value = original_view.__wrapped__(blocked)
     q = value['data_quality']
     q['security_inputs'][0]['economic_asset_class'] = 'CASH'
+    q['security_inputs'][0].update(classification_verification_status='VERIFIED',
+        classification_source='SYNTHETIC_OWNER', classification_version='canonical-v1')
     for ident, symbol, economic in [(2,'IB01:LSE','FIXED_INCOME'), (3,'SYN:US','EQUITY')]:
         q['security_inputs'].append({**q['security_inputs'][0], 'id':ident, 'symbol':symbol,
             'vehicle_type':'ETF' if ident==2 else 'COMMON_STOCK', 'economic_asset_class':economic,
@@ -95,7 +97,7 @@ def test_actual_owner_to_http_success(active, source, tmp_path, monkeypatch, cli
     assert selected.status_code == 200 and selected.json()['policy_allocation'] == meta
 
 
-@pytest.mark.parametrize('change', ['coverage', 'pension', 'fx', 'stale', 'classification', 'scope', 'hash', 'expired', 'permission', 'missing'])
+@pytest.mark.parametrize('change', ['coverage', 'pension', 'fx', 'stale', 'classification', 'unverified_class', 'scope', 'hash', 'expired', 'permission', 'missing'])
 def test_real_chain_rejects_unknown(active, source, tmp_path, monkeypatch, client, change):
     if change == 'pension':
         pension(source, ['position:1'])  # linked cash remains freely investable
@@ -113,12 +115,15 @@ def test_real_chain_rejects_unknown(active, source, tmp_path, monkeypatch, clien
     if change == 'classification':
         source['data_quality']['security_inputs'][0]['economic_asset_class'] = 'UNKNOWN'
         raw['inventory_sha256'] = wealth_service.investable_inventory_identity(source)
+    if change == 'unverified_class':
+        source['data_quality']['security_inputs'][0]['classification_verification_status'] = 'UNVERIFIED'
+        raw['inventory_sha256'] = wealth_service.investable_inventory_identity(source)
     file.write_text(json.dumps(raw))
     if change == 'permission': file.chmod(0o644)
     if change == 'missing': monkeypatch.delenv('WEALTHPILOT_INVESTABLE_EVIDENCE_FILE')
     response = request(source, tmp_path, monkeypatch, client)
     assert response.status_code == 409, response.text
-    expected = 'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED' if change == 'classification' else 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED'
+    expected = 'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED' if change in {'classification','unverified_class'} else 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED'
     assert response.json()['detail'] == expected
     assert response.json()['qualification']['status'] == 'UNKNOWN'
 

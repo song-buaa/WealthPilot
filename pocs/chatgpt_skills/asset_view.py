@@ -152,13 +152,15 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
         original_inputs = {p['id']:p for p in security_inputs}
         inventory = []
         for row in all_rows:
+            verified_class = {k:getattr(row,k) for k in ('economic_asset_class', 'classification_source',
+                'classification_verification_status','classification_version')}
             if row.id in original_inputs:
-                inventory.append(original_inputs[row.id])
+                inventory.append({**original_inputs[row.id], **verified_class})
                 continue
             item = values_by_id[row.id]
             ref = account_ref(portfolio_id,row)
             a = inventory_by_ref.get(ref,{})
-            inventory.append({**item, 'account_ref':ref,
+            inventory.append({**item, **verified_class, 'account_ref':ref,
                 'fx_quality':(a.get('fx') or {}).get(item.get('original_currency') or item.get('currency'),{}).get('quality','unverified'),
                 **{k:a.get(k) for k in ('positions_as_of','cash_as_of','price_as_of','price_time_basis','time_evidence')}})
         quality.update(investable_security_inputs=inventory, investable_accounts=investable_accounts)

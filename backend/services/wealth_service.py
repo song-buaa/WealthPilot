@@ -44,7 +44,8 @@ def investable_inventory_identity(view):
         'all_position_ids': sorted(r['id'] for r in view['views'].get('positions', {}).get('items', rows)),
         'accounts': sorted(a['account_ref'] for a in view['data_quality'].get('investable_accounts', view['data_quality'].get('accounts', []))),
         'positions': sorted([{k:r.get(k) for k in ('id', 'account_ref', 'symbol', 'security_symbol',
-            'vehicle_type', 'currency', 'economic_asset_class', 'segment')} for r in rows], key=lambda r:r['id']),
+            'vehicle_type', 'currency', 'economic_asset_class', 'segment', 'classification_source',
+            'classification_verification_status','classification_version')} for r in rows], key=lambda r:r['id']),
         'manual': sorted([{k:r.get(k) for k in ('id', 'kind', 'item_type', 'currency',
             'already_investment_accounted')} for r in manual if r.get('kind') == 'asset'], key=lambda r:r['id'])})
 

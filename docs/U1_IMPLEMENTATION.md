@@ -135,6 +135,8 @@ B2沿原`AssetAnalysisPreparation.run`，在原只读副本capture返回并取�
 
 原Wealth结构化退休产品类型可证明该手工项目的限制用途，缺用途时补EXCLUDED/PENSION；不会覆盖冲突声明，也不能由此推断全部养老金覆盖。已经在投资账户记账的养老金仍要求明确持仓链接及逐项排除，金额去重不能替代身份核对。银行现金可沿原类型归为货币，其他未获分类证据的手工资产保持UNKNOWN。
 
+五类资格只接受原Position原始canonical分类、当前classification_version及VERIFIED/EXPLICIT/DETERMINISTIC来源证明；完整范围输入保留这些原字段，不能使用序列化器为了旧界面兼容生成的legacy asset_class回退。旧记录缺分类证据或CONFLICT/UNVERIFIED时保持分类UNKNOWN，不能由Owner用途文件覆盖。
+
 Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部scope receipt，保留Owner文件hash、确认时点及原截止时点。账户同步、publication、现金/持仓/价格时点、FX及原手工值30天门仍由A-min独立验证；文件不能补齐或刷新这些事实。GET再次检查Owner截止时间，精确显示有效期为`min(captured_at+5分钟, Owner valid_until)`。hash只绑定内容，不能认证事实本身；Owner必须从实际账户/用途凭据确认，不得为通过测试编造记录。
 
 原`GET /api/allocation/snapshot`支持可选`snapshot_id`，无ID只读最新原U1尝试；不会prepare、刷新券商、取得行情或写库，也不会绕过最新failed/preparing回退旧快照。真实链为RO load_view → A-min → 原PolicyAssets/请求级PolicySession → 原Allocation消费者。请求快照、portfolio、hash、来源时点及ACTIVE政策版本一起固定，响应前再次核对政策版本；PolicyService仍是唯一政策权威。

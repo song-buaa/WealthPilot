@@ -113,7 +113,7 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
         amounts = {k:Decimal(0) for k in ('cash', 'fixed', 'equity', 'alt', 'deriv')}
         # Canonical economic class only, never broker STK or a display name.
-        from backend.services.instruments.classification import ECONOMIC_CLASS_TO_CN
+        from backend.services.instruments.classification import ECONOMIC_CLASS_TO_CN, CLASSIFICATION_VERSION
         from app.allocation.types import CN_TO_ALLOC
         classes = {str(k):CN_TO_ALLOC[v].value for k,v in ECONOMIC_CLASS_TO_CN.items() if v in CN_TO_ALLOC}
         q = view['data_quality']
@@ -125,7 +125,10 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
                 continue
             row = rows[item.source_ref]
             if item.source_ref.startswith('position:'):
-                key = classes.get(row.get('economic_asset_class'))
+                verified = (row.get('classification_verification_status') in {'VERIFIED','EXPLICIT','DETERMINISTIC'}
+                    and isinstance(row.get('classification_source'), str) and row['classification_source'].strip()
+                    and row.get('classification_version') == CLASSIFICATION_VERSION)
+                key = classes.get(row.get('economic_asset_class')) if verified else None
             elif row.get('item_type') == 'bank_cash':
                 key = 'cash'
             else:

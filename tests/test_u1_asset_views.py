@@ -15,6 +15,7 @@ from app.models import Portfolio, Position, WealthItem, WealthSnapshot
 from app.asset_views import load_view, public_view, frozen_input, frozen_result
 from backend.services.asset_analysis import AssetAnalysisPreparation
 from tests.test_analysis_skills import peer  # noqa: F401 - original isolated PEER fixture
+from tests.test_policy_integration import active  # noqa: F401 - isolated policy owner
 
 
 @pytest.fixture
@@ -107,7 +108,21 @@ def test_b2_non_investment_platform_does_not_change_original_account_ref(context
     assert {p['account_ref'] for p in quality['security_inputs']} <= {a['account_ref'] for a in quality['accounts']}
 
 
-def test_b2_owner_receipt_is_frozen_by_original_prepare(context, monkeypatch, tmp_path):
+def test_b2_capture_does_not_promote_legacy_classification(context):
+    with context.sessions() as session:
+        row = Position(portfolio_id=7,name='Synthetic legacy ETF',platform='manual',
+            symbol='OLD:US',asset_class='权益',vehicle_type='ETF',economic_asset_class=None,
+            market_value_cny=10,segment='养老')
+        session.add(row);session.commit();ident=row.id
+    view = ready(context, 'legacy-class')
+    original = next(p for p in view['views']['positions']['items'] if p['id']==ident)
+    inventory = next(p for p in view['data_quality']['investable_security_inputs'] if p['id']==ident)
+    assert original['economic_asset_class']=='EQUITY'  # Original compatibility display only.
+    assert inventory['economic_asset_class'] is None
+    assert inventory['classification_verification_status'] is None
+
+
+def test_b2_owner_receipt_is_frozen_by_original_prepare(context, monkeypatch, tmp_path, active):
     from backend.services.wealth_service import investable_inventory_identity
     from backend.services.investment_policy.contracts import digest
     from backend.services.investable_assets import project_investable_assets
@@ -133,6 +148,12 @@ def test_b2_owner_receipt_is_frozen_by_original_prepare(context, monkeypatch, tm
     assert receipt.status == 'QUALIFIED', receipt.policy_assets.issues
     assert receipt.policy_assets.denominator_cny == 1000
     assert 'investable_scope_evidence' not in first['data_quality']
+    from app import database
+    from backend.services.allocation_service import get_snapshot
+    monkeypatch.setattr(database, 'DB_PATH', context.db)
+    result = get_snapshot(7, snapshot_id=second['snapshot_id'])
+    assert result.total_investable_assets == 1000
+    assert result.policy_allocation['snapshot_sha256'] == digest(second)
 
 
 def test_fixed_scope_does_not_read_unbound_consumption_cashflow(context,monkeypatch):
