@@ -154,6 +154,13 @@ def project(assessment):
     groups['dependencies'] = dependencies
     groups['constraints_intent'] = {k:deepcopy(assessment.get(k)) for k in
         ('qualification','issues','infoNeeded','research_intent','planner','confidence_ceiling')}
+    groups['constraints_intent']['financial_limitations']=(assessment.get('financial_research') or {}).get('limitations',[])
+    groups['constraints_intent']['valuation_limitations']={k:deepcopy(v) for k,v in
+        (assessment.get('valuation_inputs') or {}).items() if k in {'missing','limitations','issues'}}
+    intent=groups['constraints_intent'].get('research_intent') or {}
+    assumptions=(assessment.get('conditional_valuation') or {}).get('assumptions')
+    if assumptions is not None and intent.get('conditional_valuation') == assumptions:
+        intent['conditional_valuation']={'context_reference':'conditional_valuation.assumptions'}
     groups['constraints_intent']['unqualified_conflicts']=[
         {k:r.get(k) for k in ('field','period','reason','issue','sources') if k in r}
         if isinstance(r,dict) else str(r) for r in (assessment.get('source_conflicts') or [])]

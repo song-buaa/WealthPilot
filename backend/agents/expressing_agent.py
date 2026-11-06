@@ -628,7 +628,7 @@ class ExpressingAgent:
         holding = dict(state='not_held' if loaded.is_new_entry else 'stored_holding_requires_freshness_check' if target is not None else 'UNKNOWN',
             source='original_loaded_data',
             stored_reference={k:getattr(target,k,None) for k in ('ticker','name','quantity','currency')},
-            user_intent=assessment.get('research_intent'), execution_authorized=False)
+            execution_authorized=False)
         try:
             payload, diagnostic = messages(assessment, executed.research_question,
                                           policy=policy, holding=holding, history=executed.research_history)

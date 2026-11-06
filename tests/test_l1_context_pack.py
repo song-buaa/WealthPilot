@@ -216,3 +216,15 @@ def test_compact_facts_is_explicit_l1_opt_in_with_unchanged_full_facts():
     assert legacy[0]==compact[0] and legacy[1]==compact[1]
     assert len(compact[2])<len(legacy[2])
     assert '专业推断未完成' in compact[2]
+
+
+def test_exact_hypothesis_duplicate_is_shared_without_merging_different_assumptions():
+    a=qualitative();a['research_intent']={'conditional_valuation':{'growth':'.1'}}
+    a['conditional_valuation']={'assumptions':{'growth':'.1'}};original=deepcopy(a)
+    p,_=ctx.project(a)
+    assert a==original
+    assert p['constraints_intent']['research_intent']['conditional_valuation']=={'context_reference':'conditional_valuation.assumptions'}
+    assert p['conditional_valuation']['assumptions']==original['conditional_valuation']['assumptions']
+    a['conditional_valuation']['assumptions']['growth']='.2'
+    p,_=ctx.project(a)
+    assert p['constraints_intent']['research_intent']['conditional_valuation']=={'growth':'.1'}
