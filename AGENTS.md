@@ -24,6 +24,8 @@ WealthPilot 的 Codex 默认规则入口。开发基线为 `origin/main`；4.1 �
 
 ## 风险、权限与隔离
 
+MacBook 新项目、新 clone、worktree、虚拟环境和构建目录默认使用 `~/Developer/` 下已验证的本机非同步位置；禁止在 Documents、Desktop 或实际受 FileProvider/第三方云盘管理的位置创建活跃开发现场。必须解析 realpath、核验现存父目录的同步状态；不明则拒绝创建。具体创建入口与迁移边界见[本地目录规则](docs/dev_setup.md#macbook-本地开发目录)。已有安全 Codex worktree 可保留，但其公共 Git 目录也必须在非同步位置；历史聊天的旧 cwd 不得用来重新创建已迁出的目录。
+
 风险工作流和质量矩阵以[治理文档](docs/PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)为唯一详细规则：L0 文档、L1 局部修复、L2 跨模块/口径、L3 生产/交易/迁移。简单 Bug 不需要独立架构评审；不能据此豁免原有代码 Gate。
 
 - **个人 Mini 连接**：只使用原生 SSH + Tailscale 的 `wealthpilot-poc03-mini` 和本人密码建立的限时 ControlMaster；先 `ssh -O check wealthpilot-poc03-mini`，有效则直接复用，过期只由本人在 Terminal 续期。**禁止 WealthPilot 使用公司的 `sshm` Skill、公司 SSH Agent 或公司公钥**；不探索替代认证。现有 `MacBook-MacMini-SSH-SOP.md` 的定位与边界见[个人 Mac Mini 连接](docs/PROJECT_GOVERNANCE.md#个人-mac-mini-连接)。

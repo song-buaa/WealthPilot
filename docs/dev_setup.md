@@ -2,6 +2,14 @@
 
 本文件负责本地命令与测试隔离；规则及风险矩阵见[治理文档](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，架构见[当前架构](ARCHITECTURE_CURRENT.md)，复用入口见[能力索引](CAPABILITY_REGISTRY.md)。MacBook Dev / Mac Mini Prod 的发布步骤统一放在治理文档，不复制一套部署流程。
 
+## MacBook 本地开发目录
+
+活跃源码、worktree、依赖、虚拟环境和构建目录默认位于 `~/Developer/`。本机源码主检出迁移目标为 `~/Developer/WealthPilot`；已经位于 `~/.codex/worktrees/` 的安全检出可以保留，须同时核验 `git rev-parse --path-format=absolute --git-common-dir`。独立 PoC 或量化仓库保持独立，不合并历史或数据库。
+
+创建前解析目标 realpath，核对所有软链接及最近存在的父目录；运行 `fileproviderctl evaluate <现存父目录>`，只有明确返回 `No item for URL` 才通过 FileProvider 资格检查，未知/超时拒绝创建。同时拒绝 Documents、Desktop、Mobile Documents、CloudStorage 及其他实际同步根，不能只靠目录名字推断。该 MacBook 已安装的统一入口为 `~/.local/bin/dev-workspace`：先 `check <绝对目标路径>`，再使用其 `init`、`clone` 或 `worktree` 子命令；其他设备未安装时应实现同等资格检查，不静默回退同步目录。分支、PR 和容量治理仍遵循原工作流。
+
+迁移使用 Git 原生 worktree move/repair，保留 dirty、untracked、ignored、本地数据库和唯一研究数据；历史报告保留原路径。迁移本身不构成删除或生产授权，也不要求迁移 Docker 数据、冻结归档或关闭个人文档同步。Codex 新聊天的 primary folder 通过应用受支持设置由操作者确认；历史聊天必须显式核验新 cwd，不能重建旧目录或永久保留旧 iCloud 入口的兼容软链接。Mac Mini 的部署、路径和生产数据不因本规则改变。
+
 ## 文档任务
 
 仓库根执行，标准库 Python 即可，不导入业务、不启动服务：
