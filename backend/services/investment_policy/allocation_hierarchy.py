@@ -31,7 +31,12 @@ FACT_SUFFIXES = tuple(':' + key for key in (*ACCOUNT_FACTS, 'GOLD_EXPOSURE', 'BT
 
 
 def _owner_attests(ref, fact, refs):
-    return f'{ref}:{fact}' in refs and any(not value.endswith(FACT_SUFFIXES) for value in refs)
+    marker = f'{ref}:{fact}'
+    prefix = f'{marker}:source:'
+    return marker in refs and any(
+        value.startswith(prefix) and value[len(prefix):].strip() and not value.endswith(FACT_SUFFIXES)
+        for value in refs
+    )
 
 
 
@@ -39,6 +44,14 @@ def _identity(ref, row, economic, coverage, direct_symbols):
     """Return (policy bucket, optional ETF product, identity evidence)."""
     manual = ref.startswith('wealth:')
     vehicle = row.get('vehicle_type')
+    account_refs = coverage['accounts']['evidence_refs']
+    claims = [fact for fact in ACCOUNT_FACTS if f'{ref}:{fact}' in account_refs]
+    if len(claims) > 1:
+        return None
+    claim = claims[0] if claims else None
+    if claim and (economic != 'EQUITY' or not _owner_attests(ref, claim, account_refs)):
+        return None
+
     alternative = [key for key in ('gold', 'btc') if ref in coverage[key]['asset_refs']]
     if alternative:
         # Domain coverage alone cannot distinguish BTC spot from a fund or CFD.
@@ -68,14 +81,6 @@ def _identity(ref, row, economic, coverage, direct_symbols):
     except ValueError:
         return None
     if symbol != f'{ticker}:{market}' or not re.fullmatch(r'[A-Z0-9][A-Z0-9.-]*', ticker):
-        return None
-
-    account_refs = coverage['accounts']['evidence_refs']
-    claims = [fact for fact in ACCOUNT_FACTS if f'{ref}:{fact}' in account_refs]
-    if len(claims) > 1:
-        return None
-    claim = claims[0] if claims else None
-    if claim and (economic != 'EQUITY' or not _owner_attests(ref, claim, account_refs)):
         return None
 
     if vehicle == 'ETF' and currency == 'USD':

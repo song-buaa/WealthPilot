@@ -73,7 +73,7 @@ def b3(source):
                           currency='CNY', value_as_of=AT.date().isoformat(), last_verified_at=STAMP, quality_issues=[]))
         fact = 'GOLD_EXPOSURE' if key == 'gold' else 'BTC_SPOT_UNLEVERED'
         evidence['coverage'][key].update(status='PRESENT', asset_refs=[ref],
-                                         evidence_refs=[f'fixture:{key}', f'{ref}:{fact}'])
+                                         evidence_refs=[f'{ref}:{fact}:source:fixture:{key}', f'{ref}:{fact}'])
         evidence['coverage']['deduplication']['asset_refs'].append(ref)
         evidence['dispositions'][ref] = dict(state='INCLUDED', reason='FREE_INVESTMENT', evidence_refs=['fixture:purpose'])
         manual_classes[ref] = dict(economic_asset_class=economic, evidence_refs=['fixture:canonical'])
@@ -204,7 +204,7 @@ def test_other_evidenced_us_etf_counts_in_sleeve_without_claiming_product(active
     quality = view['data_quality']
     quality['security_inputs'][1]['symbol'] = 'OTHER:US'
     quality['investable_scope_evidence']['coverage']['accounts']['evidence_refs'].extend(
-        ['position:2:US_EQUITY_ETF', 'fixture:other-us-fund-identity'])
+        ['position:2:US_EQUITY_ETF', 'position:2:US_EQUITY_ETF:source:fixture:other-us-fund-identity'])
     response = read(b3, tmp_path, monkeypatch, client)
     assert response.status_code == 200, response.text
     h = response.json()['policy_allocation']['hierarchy']
@@ -219,8 +219,29 @@ def test_other_evidenced_us_etf_counts_in_sleeve_without_claiming_product(active
 def test_conflicting_region_claim_cannot_override_known_issuer(active, b3, tmp_path, monkeypatch, client):
     view, _ = b3
     evidence = view['data_quality']['investable_scope_evidence']['coverage']['accounts']
-    evidence['evidence_refs'].extend(['position:6:US_DIRECT_EQUITY', 'fixture:conflicting-claim'])
+    evidence['evidence_refs'].extend(['position:6:US_DIRECT_EQUITY', 'position:6:US_DIRECT_EQUITY:source:fixture:conflicting-claim'])
     response = read(b3, tmp_path, monkeypatch, client)
     assert response.status_code == 200, response.text
     h = response.json()['policy_allocation']['hierarchy']
     assert h['status'] == 'PARTIAL' and h['unclassified_asset_refs'] == ['position:6']
+
+
+def test_generic_inventory_reference_cannot_support_specific_etf_claim(active, b3, tmp_path, monkeypatch, client):
+    view, _ = b3
+    quality = view['data_quality']
+    quality['security_inputs'][1]['symbol'] = 'OTHER:US'
+    quality['investable_scope_evidence']['coverage']['accounts']['evidence_refs'].append('position:2:US_EQUITY_ETF')
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    h = response.json()['policy_allocation']['hierarchy']
+    assert h['status'] == 'PARTIAL' and h['unclassified_asset_refs'] == ['position:2']
+
+
+def test_conflicting_equity_claim_cannot_override_alternative(active, b3, tmp_path, monkeypatch, client):
+    view, _ = b3
+    evidence = view['data_quality']['investable_scope_evidence']['coverage']['accounts']
+    evidence['evidence_refs'].extend(['wealth:2:US_DIRECT_EQUITY', 'wealth:2:US_DIRECT_EQUITY:source:fixture:conflict'])
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    h = response.json()['policy_allocation']['hierarchy']
+    assert h['status'] == 'PARTIAL' and h['unclassified_asset_refs'] == ['wealth:2']
