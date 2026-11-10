@@ -171,9 +171,11 @@ def test_bundle_change_during_u1_read_is_409(active, b3, tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize('domain,asset', [('gold','wealth:1'), ('btc','wealth:2')])
-def test_coverage_without_specific_asset_form_is_partial(active, b3, tmp_path, monkeypatch, client, domain, asset):
+@pytest.mark.parametrize('mark_only', [False, True])
+def test_coverage_without_specific_asset_form_is_partial(active, b3, tmp_path, monkeypatch, client, domain, asset, mark_only):
     view, _ = b3
-    view['data_quality']['investable_scope_evidence']['coverage'][domain]['evidence_refs'] = ['fixture:inventory']
+    refs = ['wealth:1:GOLD_EXPOSURE', 'wealth:2:BTC_SPOT_UNLEVERED'] if mark_only else ['fixture:inventory']
+    view['data_quality']['investable_scope_evidence']['coverage'][domain]['evidence_refs'] = refs
     response = read(b3, tmp_path, monkeypatch, client)
     assert response.status_code == 200, response.text
     h = response.json()['policy_allocation']['hierarchy']
@@ -195,3 +197,30 @@ def test_zero_etf_sleeve_does_not_divide_by_zero(active, b3, tmp_path, monkeypat
     spy = h['etf']['products']['SPY']
     assert spy['current_ratio'] is None and spy['gap_pp'] is None
     assert D(spy['current_ratio_of_d']) == 0 and D(spy['target_ratio_of_d']) == D('.09')
+
+
+def test_other_evidenced_us_etf_counts_in_sleeve_without_claiming_product(active, b3, tmp_path, monkeypatch, client):
+    view, _ = b3
+    quality = view['data_quality']
+    quality['security_inputs'][1]['symbol'] = 'OTHER:US'
+    quality['investable_scope_evidence']['coverage']['accounts']['evidence_refs'].extend(
+        ['position:2:US_EQUITY_ETF', 'fixture:other-us-fund-identity'])
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    h = response.json()['policy_allocation']['hierarchy']
+    assert h['status'] == 'QUALIFIED'
+    assert D(h['etf']['denominator_cny']) == 300 and D(h['etf']['other_etf_amount_cny']) == 90
+    assert D(h['etf']['products']['SPY']['amount_cny']) == 0
+    assert D(h['etf']['products']['QQQ']['current_ratio']) == D('.5')
+    assert h['classified_assets']['position:2']['product'] is None
+    assert 'fixture:other-us-fund-identity' not in response.text
+
+
+def test_conflicting_region_claim_cannot_override_known_issuer(active, b3, tmp_path, monkeypatch, client):
+    view, _ = b3
+    evidence = view['data_quality']['investable_scope_evidence']['coverage']['accounts']
+    evidence['evidence_refs'].extend(['position:6:US_DIRECT_EQUITY', 'fixture:conflicting-claim'])
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    h = response.json()['policy_allocation']['hierarchy']
+    assert h['status'] == 'PARTIAL' and h['unclassified_asset_refs'] == ['position:6']

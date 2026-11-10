@@ -7,7 +7,7 @@ from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUM
 from backend.services.instruments.issuers import IDENTITIES, ISSUERS
 from backend.utils.symbol import parse_symbol
 
-from .contracts import Snapshot
+from .contracts import Snapshot, digest
 from .parser import PolicyError
 
 
@@ -22,6 +22,17 @@ US_EQUITY_ETFS = {
     'SPMO': 'https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-momentum-etf.html',
 }
 DIRECT_VEHICLES = {'COMMON_STOCK', 'ADR', 'DEPOSITARY_RECEIPT'}
+ACCOUNT_FACTS = {
+    'US_EQUITY_ETF': 'us_etf', 'US_DIRECT_EQUITY': 'us_direct', 'CN_DIRECT_EQUITY': 'china',
+}
+
+
+FACT_SUFFIXES = tuple(':' + key for key in (*ACCOUNT_FACTS, 'GOLD_EXPOSURE', 'BTC_SPOT_UNLEVERED'))
+
+
+def _owner_attests(ref, fact, refs):
+    return f'{ref}:{fact}' in refs and any(not value.endswith(FACT_SUFFIXES) for value in refs)
+
 
 
 def _identity(ref, row, economic, coverage, direct_symbols):
@@ -36,7 +47,7 @@ def _identity(ref, row, economic, coverage, direct_symbols):
         key = alternative[0]
         refs = coverage[key]['evidence_refs']
         fact = 'GOLD_EXPOSURE' if key == 'gold' else 'BTC_SPOT_UNLEVERED'
-        if f'{ref}:{fact}' not in refs or not any(not value.endswith(':' + fact) for value in refs):
+        if not _owner_attests(ref, fact, refs):
             return None
         if key == 'gold' and economic == 'COMMODITY' and (manual or vehicle in {'ETF', 'OTHER'}):
             return key, None, refs
@@ -59,22 +70,34 @@ def _identity(ref, row, economic, coverage, direct_symbols):
     if symbol != f'{ticker}:{market}' or not re.fullmatch(r'[A-Z0-9][A-Z0-9.-]*', ticker):
         return None
 
+    account_refs = coverage['accounts']['evidence_refs']
+    claims = [fact for fact in ACCOUNT_FACTS if f'{ref}:{fact}' in account_refs]
+    if len(claims) > 1:
+        return None
+    claim = claims[0] if claims else None
+    if claim and (economic != 'EQUITY' or not _owner_attests(ref, claim, account_refs)):
+        return None
+
     if vehicle == 'ETF' and currency == 'USD':
         if economic == 'EQUITY' and market == 'US' and ticker in US_EQUITY_ETFS:
-            return 'us_etf', ticker, [US_EQUITY_ETFS[ticker]]
+            return ('us_etf', ticker, [US_EQUITY_ETFS[ticker]]) if claim in {None, 'US_EQUITY_ETF'} else None
         if economic == 'FIXED_INCOME' and market == 'LSE':
             for key in ('IB01', 'CBU3'):
                 instrument = TRUSTED_INSTRUMENTS[key]
                 if ticker in {instrument.symbol, instrument.local_symbol}:
                     return key.lower(), None, [instrument.verification_source]
+    if vehicle == 'ETF' and claim == 'US_EQUITY_ETF':
+        return 'us_etf', None, account_refs
     if economic == 'EQUITY' and vehicle in DIRECT_VEHICLES:
         issuer = IDENTITIES.get((symbol, currency))
         if issuer and ISSUERS[issuer][1] == 'CN':
-            return 'china', None, ISSUERS[issuer][2]
+            return ('china', None, ISSUERS[issuer][2]) if claim in {None, 'CN_DIRECT_EQUITY'} else None
         if market == 'US' and currency == 'USD' and vehicle == 'COMMON_STOCK' and ticker in direct_symbols:
-            return 'us_direct', None, ['policy:3.2', 'portfolio:canonical_listing']
+            return ('us_direct', None, ['policy:3.2', 'portfolio:canonical_listing']) if claim in {None, 'US_DIRECT_EQUITY'} else None
         if market in {'SH', 'SZ'} and currency == 'CNY' and vehicle == 'COMMON_STOCK' and re.fullmatch(r'\d{6}', ticker):
-            return 'china', None, ['portfolio:canonical_mainland_listing']
+            return ('china', None, ['portfolio:canonical_mainland_listing']) if claim in {None, 'CN_DIRECT_EQUITY'} else None
+        if claim in {'US_DIRECT_EQUITY', 'CN_DIRECT_EQUITY'}:
+            return ACCOUNT_FACTS[claim], None, account_refs
     return None
 
 
@@ -109,7 +132,7 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
             continue
         bucket, product, identity_refs = match
         assigned[ref] = {'bucket': bucket, 'product': product, 'amount_cny': str(item.amount_cny),
-                         'evidence_refs': [*classification_refs, *identity_refs]}
+                         'evidence_sha256': digest([*classification_refs, *identity_refs])}
         amounts[bucket] += item.amount_cny
         if product in products:
             products[product] += item.amount_cny
