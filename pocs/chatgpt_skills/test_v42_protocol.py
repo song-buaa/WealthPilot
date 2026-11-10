@@ -539,6 +539,10 @@ worker.main()
                 assert final['result']==report_projection(AnalysisResult.model_validate_json(expected.read_text())).model_dump(mode='json')
                 assert final['result']['llm_observation']['analysis_run_id']==first['analysis_run_id']
                 assert not final['result']['order_created']
+                audit = await client.call_tool('get_position_analysis_result', {'job_id': first['job_id'], 'view': 'audit'})
+                assert not audit.is_error
+                assert audit.structured_content['result'] == final['result']  # Original v1 stays byte-equivalent.
+                assert audit.structured_content['artifact'] == final['artifact']
             again=await client.call_tool('start_position_analysis',arguments)
             assert again.structured_content['job_id']==first['job_id'] and len(children)==1
             return first,request_id

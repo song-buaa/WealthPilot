@@ -330,3 +330,35 @@ def test_valid_analysis_nested_shape_never_loses_full_completed_result(tmp_path,
     stored=json.loads((tmp_path/'store'/(first.job_id+'.result.json')).read_text())
     assert stored['result']==full.model_dump(mode='json')
     assert factory(tmp_path/'store',lambda *a:pytest.fail('replayed')).get(first.job_id).state=='completed'
+
+
+def test_final_l1_reader_and_audit_share_immutable_receipt_after_restart(tmp_path):
+    full = original_result()
+    ref = 'fixture:qualified-financials'
+    body = '经营现金仍需验证归属。下次财报应核对股东资金可达性。'
+    full.evidence['l1_research_v2'] = dict(scenario_cells={}, key_metrics=[],
+        claims=[dict(role='supporting', question_ids=['Q3', 'Q7'], scenario_cell_refs=[],
+                     paragraph=dict(text=body, evidence_refs=[ref]))],
+        diagnostic={'accepted_count': 1})
+    root = tmp_path/'store'
+    jobs = factory(root, lambda *args: full)
+    started = jobs.start('reader-example', request())
+    reader = finish(jobs, started.job_id)
+    assert '经营现金仍需验证归属。' in reader.result.conclusion
+    assert '下次财报应核对股东资金可达性。' in reader.result.conclusion
+    assert ref not in reader.result.conclusion
+    assert reader.result.conclusion != full.conclusion
+    after = factory(root, lambda *args: pytest.fail('a report view must not run analysis'))
+    audit = after.get(started.job_id, view='audit')
+    assert audit.result.conclusion == full.conclusion
+    assert audit.result.evidence['l1_reader_audit']['citation_key'] == {'1': ref}
+    assert audit.result.evidence['l1_reader_audit']['diagnostic'] == {'accepted_count': 1}
+    assert audit.artifact == reader.artifact and after.get(started.job_id).result == reader.result
+    assert audit.result.professional_result == reader.result.professional_result
+    assert not audit.result.execution_authorized and not audit.result.order_created
+    assert str(root) not in audit.model_dump_json()
+    assert json.loads((root/(started.job_id+'.result.json')).read_text())['result'] == full.model_dump(mode='json')
+    for changes in ({'status': 'unavailable'}, {'professional_analysis_complete': False},
+                    {'professional_result': {'analysis_result': {'mode': 'facts_only'}}},
+                    {'scenario': 'review_portfolio'}):
+        assert report_projection(full.model_copy(update=changes)).conclusion == full.conclusion

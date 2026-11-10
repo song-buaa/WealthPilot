@@ -49,7 +49,33 @@ class PositionAnalysisJob(BaseModel):
     result: AnalysisReport | None = None
 
 
-def report_projection(full):
+def _reader_audit(final, position, financial, citations):
+    """Whitelist trace metadata; the raw evidence and paths stay in the private artifact."""
+    fields = ('source', 'published_at', 'data_as_of', 'fetched_at', 'period', 'currency', 'historical_only')
+    refs = set(citations.values())
+    sources = {}
+    groups = [financial.get('records')] + [position.get(key) for key in (
+        'records', 'verified_field_records', 'historical_field_records', 'quality_field_records',
+        'verified_period_records')]
+    groups.extend(claim['paragraph'].get('sources') for claim in final['claims'])
+    for rows in groups:
+        for row in rows if isinstance(rows, list) else ():
+            if not isinstance(row, dict):
+                continue
+            ref = row.get('evidence_ref') or row.get('record_id')
+            if isinstance(ref, str) and ref in refs:
+                sources.setdefault(ref, {}).update({key: row[key] for key in fields if row.get(key) is not None})
+    cells = {ref: {k: deepcopy(cell[k]) for k in ('name', 'method', 'assumption_ref', 'decision_at',
+                'listed_currency', 'listed_unit', 'required_return', 'parameters', 'result',
+                'owner_cash_parameters', 'entry_price_sensitivity') if k in cell}
+             for ref, cell in final['scenario_cells'].items()}
+    return {'citation_key': citations, 'sources': sources, 'scenario_cells': cells,
+            **{k: deepcopy(final.get(k)) for k in ('coverage', 'generation_diagnostic',
+                                                 'diagnostic', 'scenario_decision_review', 'valuation_status')}}
+
+
+
+def report_projection(full, *, view="reader"):
     """Keep all user prose/explanations/valuation; archive bulk machine Evidence."""
     value = full.model_dump(mode='json')
     original = value['evidence']
@@ -91,6 +117,17 @@ def report_projection(full):
         analysis.pop('policy_context',None)
         if 'l1_research_v2' in original:
             value['evidence']['conditional_valuation'] = deepcopy(analysis.get('conditionalValuation'))
+            final = original['l1_research_v2']
+            if (full.scenario == 'analyze_position' and full.status in {'ok', 'partial'}
+                    and full.professional_analysis_complete and analysis.get('mode') != 'facts_only'
+                    and analysis.get('professional_explanation')):
+                from backend.services.market_data.l1_reader import reader_projection
+                reading = reader_projection(final, position.get("symbol"), policy_bound=bool(analysis.get("policy_reference")))
+                if reading:
+                    if view == 'reader':
+                        value['conclusion'] = reading[0]
+                    else:
+                        value['evidence']['l1_reader_audit'] = _reader_audit(final, position, financial, reading[1])
     if incomplete:
         value['limitations'].append('REPORT_EVIDENCE_SUMMARY_PARTIAL: unsupported machine evidence shapes remain in the complete private artifact.')
     value['schema_version'] = 'wealthpilot.analysis-report.v1'
@@ -136,12 +173,12 @@ class PositionJobs:
             try:self.event(value)
             except Exception:pass  # diagnostics never replace a committed result
 
-    def _response(self,row=None,issue=None,envelope=None):
+    def _response(self,row=None,issue=None,envelope=None, *, view="reader"):
         artifact=None;result=None
         if envelope:
             artifact=ArtifactReference(artifact_id=row['job_id'],sha256=envelope['result_sha256'],bytes=envelope['result_bytes'])
             if not issue:
-                result=report_projection(AnalysisResult.model_validate(envelope['result']))
+                result=report_projection(AnalysisResult.model_validate(envelope['result']), view=view)
         return PositionAnalysisJob(request_scope=self.scope,job_id=row['job_id'] if row else None,
             analysis_run_id=row['analysis_run_id'] if row else None,state='unavailable' if issue else row['state'] if row else 'unavailable',
             business_status=row.get('business_status','UNKNOWN') if row else 'UNKNOWN',issue=issue or (row.get('issue') if row else None),
@@ -156,7 +193,7 @@ class PositionJobs:
         if isinstance(error,OSError):return 'RESULT_STORAGE_UNAVAILABLE'
         return 'ANALYSIS_JOB_FAILED'
 
-    def _recover(self,store,data,row):
+    def _recover(self,store,data,row, *, view="reader"):
         envelope=store.load_result(row)
         if envelope:
             # Validation precedes recovery: an arbitrary JSON file is not success.
@@ -168,7 +205,7 @@ class PositionJobs:
             if time.time()-row['finished'] >= self.retention_seconds:
                 self._emit(row,'RESULT_EXPIRED',envelope)
                 return self._response(row,issue='RESULT_EXPIRED',envelope=envelope)
-            return self._response(row,envelope=envelope)
+            return self._response(row,envelope=envelope,view=view)
         if row['state']=='completed':
             raise StoreError('RESULT_ARTIFACT_MISSING')
         if row['state']=='running':
@@ -282,7 +319,7 @@ class PositionJobs:
         finally:
             os.close(admission);store.close();self.slot.release()
 
-    def get(self,job_id):
+    def get(self,job_id, *, view="reader"):
         if not isinstance(job_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,64}',job_id):
             return self._response(issue='JOB_UNKNOWN_OR_PROCESS_RESTARTED')
         store=None;row=None
@@ -291,7 +328,7 @@ class PositionJobs:
             with self.lock,store.locked():
                 data=store.receipts();row=data['jobs'].get(job_id)
                 if row is None:return self._response(issue='JOB_UNKNOWN_OR_PROCESS_RESTARTED')
-                return self._recover(store,data,row)
+                return self._recover(store,data,row,view=view)
         except Exception as error:
             if row:self._emit(row,self._category(error))
             return self._response(row,issue=self._category(error))

@@ -17,7 +17,10 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
     """
     import httpx,openai
     v2 = mode != "legacy"
-    monkeypatch.setenv("WEALTHPILOT_L1_RESEARCH_V2", "1" if v2 else "0")
+    if v2:
+        monkeypatch.setenv("WEALTHPILOT_L1_RESEARCH_V2", "1")
+    else:
+        monkeypatch.delenv("WEALTHPILOT_L1_RESEARCH_V2", raising=False)
     from datetime import datetime,timezone
     from backend.agents import executing_agent,expressing_agent
     from intent_engine import _llm_client
@@ -89,6 +92,7 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
             assert 'POLICY_VERSION_CONFLICT' in result['issues']
         else:
             assert result['evidence']['l1_research_v2']['claims'] == []
+        assert report_projection(AnalysisResult.model_validate(result)).conclusion == result['conclusion']
         return
     assert result['professional_analysis_complete'],result.get('issues')
     assert result['stage_diagnostics']['expressing']=='completed'
@@ -98,7 +102,9 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
     assert out['professional_explanation'] and out['policy_reference']['bundle_id']==active[1]['bundle_id']
     assert result['evidence']['l1_context_diagnostics']['status']=='accepted'
     assert not result['execution_authorized'] and not result['order_created']
-    report=report_projection(AnalysisResult.model_validate(result)).professional_result['analysis_result']
+    full = AnalysisResult.model_validate(result)
+    projected = report_projection(full)
+    report = projected.professional_result['analysis_result']
     assert report['professional_explanation']==out['professional_explanation']
     assert report['policy_reference']==out['policy_reference']
     assert report['conditionalValuation']==out['conditionalValuation']
@@ -110,5 +116,11 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
         assert final['decision_review'] == 'not_assessed'
         assert '200元' not in result['conclusion']
         assert '专业研究 · 争议与判断' in result['conclusion']
-        assert 'l1_research_v2' not in report_projection(AnalysisResult.model_validate(result)).evidence
+        assert 'l1_research_v2' not in projected.evidence
+        assert final['claims'][0]['paragraph']['text'] in projected.conclusion
+        assert '综合投资判断尚未闭合' in projected.conclusion and '相关回报及反向要求未知' in projected.conclusion
+        assert '200元' not in projected.conclusion
+        assert report_projection(full, view='audit').conclusion == result['conclusion']
+    else:
+        assert projected.conclusion == result['conclusion']
     assert hashlib.sha256(analysis_db.read_bytes()).hexdigest()==before
