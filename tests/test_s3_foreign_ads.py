@@ -55,3 +55,35 @@ def test_missing_or_mismatched_unit_fx_never_produces_scenario():
     assert foreign_ads_earnings_research(a,assumptions())['status']=='INSUFFICIENT_EVIDENCE'
     a=assessment();a['quality_field_records']=[x for x in a['quality_field_records'] if x['field']!='ads_ratio']
     assert foreign_ads_earnings_research(a,assumptions())['status']=='INSUFFICIENT_EVIDENCE'
+
+
+def test_treasury_anchor_rejects_wrong_bytes_wrong_source_and_ambiguous_rows():
+    import pytest
+    from backend.services.market_data.quality_valuation import (
+        TREASURY_COLUMN, TREASURY_CURVE, bind_treasury_terminal_anchor)
+
+    cell = (f'<tr><td><time>11/02/2026</time></td><td headers="{TREASURY_COLUMN}">'
+            '4.60</td></tr>')
+    original = f'<table>{cell}</table>'.encode()
+    repeated = f'<table>{cell * 2}</table>'.encode()
+    a = assessment()
+    day = '2026-11-02'
+
+    def add(body, source=TREASURY_CURVE):
+        ref = 'research:treasury:' + hashlib.sha256(body).hexdigest()
+        a['records'].append(dict(record_id=ref, quality='valid', kind='research', symbol='PDD:US',
+            source='public_primary_research', source_url=source + '?type=daily_treasury_yield_curve',
+            period=day, published_at=day, data_as_of=day, fetched_at='2026-11-03T00:00:00+00:00'))
+        return ref
+
+    ref = add(original)
+    with pytest.raises(ValueError, match='TREASURY_SOURCE_RECEIPT_REQUIRED'):
+        bind_treasury_terminal_anchor(a, original=original+b' ', record_id=ref)
+    bind_treasury_terminal_anchor(a, original=original, record_id=ref)
+    assert Decimal(a['treasury_terminal_anchor']['usd_five_year_cmt']) == Decimal('.046')
+    wrong_source = original + b' '
+    with pytest.raises(ValueError, match='TREASURY_SOURCE_IDENTITY_INVALID'):
+        bind_treasury_terminal_anchor(a, original=wrong_source, record_id=add(wrong_source, 'https://example.com/'))
+    a['records'] = [r for r in a['records'] if not r.get('record_id', '').startswith('research:treasury:')]
+    with pytest.raises(ValueError, match='TREASURY_OBSERVATION_MISSING_OR_AMBIGUOUS'):
+        bind_treasury_terminal_anchor(a, original=repeated, record_id=add(repeated))

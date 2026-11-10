@@ -4,7 +4,9 @@ No collection, TTM reconstruction, portfolio access, LLM or trading authority.
 Decimal outputs are strings so frozen calculations survive JSON round trips.
 """
 from copy import deepcopy
+from datetime import date
 from decimal import Decimal, localcontext
+from hashlib import sha256
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -15,6 +17,12 @@ from backend.services.market_data.financial_research import build
 METHOD_VERSION = "s3-b.quality-evidence.v1.1"
 VALUATION_METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
 SCENARIOS = ("cautious", "base", "optimistic")
+ANCHORED_ORIGIN = 'system_treasury_anchored_conditions'
+REFERENCE_ORIGIN = 'system_evidence_bound_reference'
+AUTOMATIC_ORIGINS = {REFERENCE_ORIGIN, ANCHORED_ORIGIN}
+TREASURY_CURVE = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView'
+TREASURY_COLUMN = 'view-field-bc-5year-table-column'
+
 GROUPS = ("优先考虑", "继续观察", "暂不优先")
 D = Decimal
 SENSITIVITY_OFFSETS = (
@@ -274,6 +282,141 @@ def foreign_ads_conditional_research(assessment, assumptions):
     raise ValueError('SUPPORTED_CONDITIONAL_VALUATION_METHOD_REQUIRED')
 
 
+def bind_treasury_terminal_anchor(assessment, *, original, record_id):
+    """Bind captured official bytes to an existing Evidence record, never client inputs."""
+    from bs4 import BeautifulSoup
+    from .output_policy import _evidence_index
+
+    row = _evidence_index(assessment).get(record_id)
+    content_hash = sha256(original).hexdigest()
+    if not row or record_id != f'research:treasury:{content_hash}':
+        raise ValueError('TREASURY_SOURCE_RECEIPT_REQUIRED')
+    period = date.fromisoformat(row['period'])
+    if not _valid_treasury_source(row, period.isoformat()):
+        raise ValueError('TREASURY_SOURCE_IDENTITY_INVALID')
+    table = BeautifulSoup(original, 'html.parser')
+    entries = [tr for tr in table.find_all('tr') if tr.find('time', string=period.strftime('%m/%d/%Y'))]
+    values = [td.get_text(strip=True) for tr in entries for td in tr.find_all('td')
+              if TREASURY_COLUMN in td.get('headers', [])]
+    if len(values) != 1:
+        raise ValueError('TREASURY_OBSERVATION_MISSING_OR_AMBIGUOUS')
+    rate = dec(values[0]) / 100
+    if not 0 < rate < D('.20'):
+        raise ValueError('TREASURY_OBSERVATION_OUTSIDE_METHOD_RANGE')
+    assessment['treasury_terminal_anchor'] = dict(
+        record_id=record_id, period=period.isoformat(), source_sha256=content_hash,
+        source_url=row['source_url'], fetched_at=row['fetched_at'], usd_five_year_cmt=text(rate))
+
+
+def _valid_treasury_source(row, period):
+    from urllib.parse import parse_qs, urlsplit
+
+    url = urlsplit(row.get('source_url') or '')
+    return (url._replace(query='', fragment='').geturl() == TREASURY_CURVE and not url.fragment
+            and parse_qs(url.query).get('type') == ['daily_treasury_yield_curve']
+            and row.get('kind') == 'research' and row.get('source') == 'public_primary_research'
+            and row.get('period') == period and (row.get('data_as_of') or '')[:10] == period
+            and (row.get('published_at') or '')[:10] == period)
+
+
+def _treasury_anchored_research(assessment, derived, na):
+    from .output_policy import _evidence_index
+
+    receipt = assessment['treasury_terminal_anchor']
+    index = _evidence_index(assessment)
+    na.update(proposal_origin=ANCHORED_ORIGIN, missing=[])
+    drivers = ('revenue_yoy_pct', 'net_income_yoy_pct', 'operating_margin_pct', 'cash_conversion')
+    required = ('diluted_eps_ttm', 'observed_price', 'fx_rate', *drivers)
+    na['missing'] = [name for name in required if name not in derived]
+    if na['missing']:
+        return na
+    period = derived['observed_price']['period']
+    row = index.get(receipt['record_id'])
+    if not (row and _valid_treasury_source(row, period) and receipt['period'] == period
+            and row['record_id'] == f"research:treasury:{receipt['source_sha256']}"
+            and row['source_url'] == receipt['source_url'] and row['fetched_at'] == receipt['fetched_at']
+            and stamp(row['fetched_at']) and stamp(period) <= stamp(row['fetched_at']) <= stamp(assessment['as_of'])):
+        na['missing'] = ['QUALIFIED_SAME_SESSION_USD_TREASURY_ANCHOR_REQUIRED']
+        return na
+    if len({derived[name]['period'] for name in drivers}) != 1:
+        na['missing'] = ['COMPARABLE_OPERATING_AND_CASH_PERIOD_REQUIRED']
+        return na
+    from .financial_research import build_quality
+    profit_row = derived['net_income_yoy_pct']
+    share_periods = (profit_row['details']['comparison_period'], profit_row['period'])
+    share_rows = sorted((r for r in build_quality(assessment, currency='CNY')['facts']
+                         if r['field'] == 'diluted_shares' and r['scope'] == 'quarterly'
+                         and r['period'] in share_periods), key=lambda r: r['period'])
+    if tuple(r['period'] for r in share_rows) != share_periods or abs(
+            (stamp(share_rows[0]['period']) - stamp(share_rows[0]['start'])).days -
+            (stamp(share_rows[1]['period']) - stamp(share_rows[1]['start'])).days) > 7:
+        na['missing'] = ['COMPARABLE_DILUTED_SHARE_OBSERVATIONS_REQUIRED']
+        return na
+    prior, current = (dec(shares['value']) for shares in share_rows)
+    if min(prior, current) <= 0:
+        na['missing'] = ['POSITIVE_DILUTED_SHARE_OBSERVATIONS_REQUIRED']
+        return na
+    share_stress = max(D('.01'), abs(current / prior - 1))
+    rate = dec(receipt['usd_five_year_cmt'])
+    sales = dec(derived['revenue_yoy_pct']['values']['revenue_yoy_pct']) / 100
+    profit = dec(derived['net_income_yoy_pct']['values']['net_income_yoy_pct']) / 100
+    cash_conversion = dec(derived['cash_conversion']['values']['cash_conversion'])
+    if not (0 < rate < D('.20') and share_stress <= D('.20') and cash_conversion > 0
+            and D('-.5') <= min(sales, profit) and max(sales, profit) <= 1):
+        na['missing'] = ['ANCHOR_OR_OPERATING_STRESS_OUTSIDE_METHOD_RANGE']
+        return na
+    hurdle = rate + D('.04')
+    terminal_spreads = (D('.09'), D('.07'), D('.055'))
+    # One realized earnings shock carried to year five, flat aggregate profit,
+    # and half observed revenue growth sustained as earnings growth. The latter
+    # requires stable margins and positive cash conversion; neither is assumed true.
+    growth = ((1 + min(D(0), profit)) ** (D(1) / 5) - 1, D(0), max(D(0), sales / 2))
+    cases = {name: dict(earnings_growth=text(growth[i]), annual_share_change=('0' if i == 2 else text(share_stress)),
+                        terminal_pe=text(1 / (rate + terminal_spreads[i])), dividend_payout='0')
+             for i, name in enumerate(SCENARIOS)}
+    rationale = (
+        '谨慎情景将已观察到的一次集团利润降幅保留到第五年，不假设每年重复下滑。'
+        '基准假设竞争及再投入持续，收入增长不转化为集团盈利增长。乐观假设利润率稳定、现金转化可持续，'
+        '并以观察到的集团收入同比增速的一半作为盈利增速。谨慎和基准每年稀释压力取1%'
+        '与历史加权股数变动绝对幅度中较大者，乐观假设无净稀释。加权股数不证明未来发行。'
+        '各情景均不计派息、回购或净现金增益，经营现金流不等于可分配现金。FX 固定于观察口径，不外推分部利润。'
+    )
+    result = foreign_ads_earnings_research(assessment, dict(
+        basis='S3_RESEARCH_ASSUMPTION_NOT_POLICY', rationale=rationale, required_return=text(hurdle), **cases))
+    if result['status'] != 'CONDITIONAL_RESEARCH_ONLY':
+        na['missing'] = result['missing']
+        return na
+    result['proposal_origin'] = ANCHORED_ORIGIN
+    result['assumptions']['origin'] = ANCHORED_ORIGIN
+    result['proposal_basis'] = {name: dict(record_id=derived[name]['record_id'], period=derived[name]['period'],
+                                          evidence_refs=derived[name]['evidence_refs']) for name in drivers}
+    result['proposal_basis']['terminal_anchor'] = deepcopy(receipt)
+    for name, shares in zip(('prior_diluted_shares', 'current_diluted_shares'), share_rows):
+        result['proposal_basis'][name] = dict(record_id=shares['evidence_refs'][0],
+                                              evidence_refs=shares['evidence_refs'], period=shares['period'])
+    result['assumptions']['multiple_basis'] = (
+        '条件终值 PE = 1 /（观察到的五年期美元国债 CMT + 假设发行人盈利收益率加成）。'
+        '谨慎、基准、乐观加成分别为 9、7、5.5 个百分点，测试门槛为 CMT 加 4 个百分点。'
+        '加成与门槛均为研究假设，未经同行或历史分布校准，也不是用户政策。终值 PE 不使用标的观察价。'
+    )
+    result['limitations'] += ['TREASURY_CMT_IS_NOT_A_REALIZED_TOTAL_RETURN',
+                             'ISSUER_RISK_SPREADS_NOT_EMPIRICALLY_CALIBRATED',
+                             'DISTRIBUTABLE_CASH_AND_FUTURE_NET_DILUTION_UNVERIFIED']
+    eps = result['qualified_inputs']['eps_usd_per_ads']
+    price = dec(result['qualified_inputs']['price_usd_per_ads'])
+    # The original sensitivity grid has no entry-price axis. Reuse the same
+    # arithmetic on explicitly hypothetical prices; never replace the quote.
+    result['entry_price_sensitivity'] = []
+    for change in (D('-.10'), D('.10')):
+        stress_price = price * (1 + change)
+        calculated = scenario(eps, stress_price, cases['base'], hurdle)
+        result['entry_price_sensitivity'].append(dict(
+            relative_change=text(change), hypothetical_price_usd_per_ads=text(stress_price),
+            annualized_return=calculated['annualized_return'],
+            implied_earnings_growth_no_dividends=calculated['implied_earnings_growth_no_dividends']))
+    return result
+
+
 def propose_foreign_ads_conditional_research(assessment):
     """Natural-language L1 reference study from qualified facts, never a forecast.
 
@@ -287,7 +430,7 @@ def propose_foreign_ads_conditional_research(assessment):
               'earnings_yield_pct','revenue_yoy_pct','net_income_yoy_pct')
     missing=[name for name in required if name not in derived]
     na=dict(status='HYPOTHESES_REQUIRED',method_version='s3-foreign-ads-natural-research.v1',
-            symbol=assessment.get('symbol'),proposal_origin='system_evidence_bound_reference',
+            symbol=assessment.get('symbol'),proposal_origin=REFERENCE_ORIGIN,
             fair_value=None,execution_authorized=False,missing=missing,
             reverse_equation='Required terminal earnings or EBIT depends on qualified listed price, FX, economic shares, terminal multiple, future cash and a stated return requirement; unavailable inputs remain variables.',
             limitations=['NO_UNSUPPORTED_GROWTH_MULTIPLE_SHARES_NET_CASH_OR_FX_DEFAULTS',
@@ -306,6 +449,8 @@ def propose_foreign_ads_conditional_research(assessment):
                   reverse_equation='Required year-five EBIT margin = (listed ADS price × FX × future economic ordinary shares ÷ ordinary shares per ADS × (1 + annual return hurdle)^5 − terminal net cash) ÷ (terminal EV/EBIT multiple × year-five revenue). All future values and unqualified current capital inputs remain variables.',
                   limitations=na['limitations']+['LOSS_MAKING_PERIOD_PE_NOT_APPLICABLE'])
         return na
+    if 'treasury_terminal_anchor' in assessment:
+        return _treasury_anchored_research(assessment, derived, na)
     if missing:return na
     try:
         pe=dec(derived['pe_ttm']['values']['pe_ttm'])
@@ -335,7 +480,7 @@ def propose_foreign_ads_conditional_research(assessment):
     if result['status']!='CONDITIONAL_RESEARCH_ONLY':
         na['missing']+=result.get('missing',[])
         return na
-    result['proposal_origin']='system_evidence_bound_reference'
+    result['proposal_origin']=REFERENCE_ORIGIN
     result['proposal_basis']={name:dict(record_id=derived[name]['record_id'],
                                         period=derived[name]['period'],
                                         evidence_refs=derived[name]['evidence_refs'])

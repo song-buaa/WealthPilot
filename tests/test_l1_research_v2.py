@@ -135,3 +135,31 @@ def test_group_format_and_bound_units_do_not_discard_independent_claims(frozen_p
     assert final['coverage']['Q6']['status'] == 'limited'
     assert final['diagnostic']['rejected'] == {'text_not_safe_qualitative': 2, 'dependency_or_key_invalid': 1}
     assert final['diagnostic']['text_rejection_details'] == {'unbound_numeric_literal': 2}
+
+
+def test_synthesis_inherits_only_accepted_current_premises(frozen_pdd):
+    from backend.services.market_data.l1_research_v2 import SYNTHESIS_TEMPLATE, report
+
+    run = prepare(frozen_pdd)
+    ref, (_, _, assumption) = next(iter(run.cells.items()))
+    value = candidate(run, ref, assumption)
+    other = next(r for r in run.visible if r not in value['evidence_refs'])
+    business = dict(key='op', role='supporting', claim_kind='inference', question_ids=['Q3'],
+        text_template='收入能否持续变成股东收益，仍需核对本期利润与现金转化。', evidence_refs=[other])
+    synthesis = dict(key='choice', role='synthesis', claim_kind='inference', question_ids=['Q1', 'Q6'],
+                     text_template=SYNTHESIS_TEMPLATE, decision='lower_priority', requires=['op','value'])
+    ingest(run, business, value, synthesis,
+           synthesis | dict(key='unsupported', text_template='公司已经签约取得新的客户并将给股东发放现金。'),
+           synthesis | dict(key='added_ref', evidence_refs=[next(r for r in run.visible
+                                                       if r not in value['evidence_refs'] + [other])]))
+    final = run.qualify(frozen_pdd, narrow=True)
+    assert len(final['claims']) == 3
+    choice = final['claims'][-1]
+    assert set(choice['paragraph']['evidence_refs']) == {*value['evidence_refs'], other}
+    assert choice['claim_id'] in final['coverage']['Q1']['claim_ids']
+    assert choice['claim_id'] in final['coverage']['Q6']['claim_ids']
+    assert '降低该长期投资命题的研究优先级' in report(final)
+    assert final['diagnostic']['rejected'] == dict(synthesis_requires_decision_contract=1, synthesis_cannot_add_inputs=1)
+    changed = deepcopy(frozen_pdd)
+    changed['conditional_valuation']['scenarios']['cautious']['annualized_return'] = '0.999'
+    assert all(c['role'] != 'synthesis' for c in run.qualify(changed)['claims'])

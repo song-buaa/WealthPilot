@@ -112,10 +112,11 @@ def captured_facts(assessment, *, at, asset_view=None):
     original['financial_research']=build(original)  # never retain a stale pre-Expression calculation cache
     previous=assessment.get('conditional_valuation') or {}
     assumptions=previous.get('assumptions')
-    if assumptions or previous.get('proposal_origin')=='system_evidence_bound_reference':
+    from backend.services.market_data.quality_valuation import AUTOMATIC_ORIGINS
+    automatic=previous.get('proposal_origin') in AUTOMATIC_ORIGINS
+    if assumptions or automatic:
         from backend.services.market_data.quality_valuation import (
             foreign_ads_conditional_research,propose_foreign_ads_conditional_research)
-        automatic=previous.get('proposal_origin')=='system_evidence_bound_reference'
         current=(propose_foreign_ads_conditional_research(original) if automatic else
                  foreign_ads_conditional_research(original,assumptions))
         def source_receipts(value):
@@ -129,6 +130,7 @@ def captured_facts(assessment, *, at, asset_view=None):
                 current.get('qualified_inputs')==previous.get('qualified_inputs') and
                 current.get('missing')==previous.get('missing') and
                 current.get('proposal_basis')==previous.get('proposal_basis') and
+                current.get('assumptions')==previous.get('assumptions') and
                 str(current.get('input_receipts',{}).get('decision_at',''))[:4] ==
                 str(previous.get('input_receipts',{}).get('decision_at',''))[:4] and
                 source_receipts(current)==source_receipts(previous)):
@@ -515,7 +517,11 @@ def project_research_v2(output, assessment):
     from copy import deepcopy
     final = output.research_v2.qualify(assessment, narrow=True)
     output.research_v2_final = final
-    paragraphs = [claim['paragraph'] for claim in final['claims'][:6]]
+    decision = next((c for c in final['claims'] if c.get('decision')), None)
+    priority = ([decision['claim_id'], *decision['requires']] if decision else [])
+    ordered = sorted(final['claims'], key=lambda c: priority.index(c['claim_id'])
+                     if c['claim_id'] in priority else len(priority))
+    paragraphs = [claim['paragraph'] for claim in ordered[:6]]
     diagnostics = deepcopy(output.explanation_diagnostics)
     _, legacy_projection = explanation_projection(paragraphs, assessment)
     diagnostics.setdefault('generation', legacy_projection)
