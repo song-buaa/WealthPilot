@@ -170,3 +170,5 @@ ETF 产品只接受官方身份与冻结 canonical 分类相符的 US 上市 SPY
 风险阈值和规则动作只从绑定的 ACTIVE 规则读取。分母 UNKNOWN 时返回 `CONDITIONAL_RISK / DENOMINATOR_UNVERIFIED`，不给百分比、正式命中或临界额。正式下限可以触发，未知覆盖不能清除风险。BTC 仅统计同一冻结 Owner 证据已确认的现货手工资产，要求逐行形态与来源引用；ETF、衍生品和未验证钱包形态不作现货。正式读取与 B3 同一逐行分类回执及会话时效绑定，风险事件的持久化留给 E。
 
 **供 D 使用。** 消费相同快照与 PolicyReference 的 `known_lower_bound_cny`、`proven_upper_bound_pct`、`denominator_cny` 和 `repayment_threshold`。固定发行人敞口及价格、FX、ETF 权重和费用时，以 ACTIVE 通用人工复核阈值 `t` 计算 `I_critical = E/t` 和 `R_trigger = max(0, I_current-I_critical)`。这里只考虑净偿债从 D 等额流出。下限输入产生下限假设下的临界额，不能解释为安全还贷额度。D 的阶段值应重新计算并标明假设，不回写原快照或触发交易。独立 Fraction 金样及边界见 [C 测试](../tests/test_c_concentration.py)。
+
+C 的原 MCP Policy Context `scope=risk` 现在可显式传入既有 `snapshot_id`，复用 Allocation 的只读投影。原 PEER `review_portfolio` 对同一显式冻结 ID 且匹配政策引用的可用结果附加同一投影。正式资格不足时只保留 `CONDITIONAL_RISK`、冻结时点、来源及非执行假设，省略分母百分比及正式命中。此入口不调用准备、同步、行情或模型。历史 ETF 摘录仅作隔离证据。SPY、QQQ、SPMO 的真实 Owner 配置须另行确认规范身份、同日收盘披露、取证时点、独立哈希及有效期后授权安装。
