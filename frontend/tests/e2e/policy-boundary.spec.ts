@@ -103,6 +103,8 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
           hierarchy: {
             status, strategic: { growth_and_alternatives: status === 'QUALIFIED' ? gap : partial },
             secondary: { us_etf: status === 'QUALIFIED' ? gap : partial },
+            direct_equity: { status, issuers: { Alphabet: status === 'QUALIFIED' ? gap : partial },
+              unallocated: { status: 'UNASSIGNED', target_ratio: '.03' } },
             etf: { status: status === 'QUALIFIED' ? 'QUALIFIED' : 'UNKNOWN', products: {
               SPY: { ...(status === 'QUALIFIED' ? gap : partial),
                 current_ratio_of_d: status === 'QUALIFIED' ? '.12' : null, target_ratio_of_d: '.09' },
@@ -120,6 +122,8 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
     const hierarchy = page.getByRole('region', { name: 'ACTIVE 分层配置' })
     await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('9.00%')
     await expect(hierarchy).toContainText('RULE_SCOPE_UNVERIFIED')
+    await expect(hierarchy.getByRole('table', { name: '美国核心直接股（占 D）' })).toContainText('Alphabet')
+    await expect(hierarchy).toContainText('未指定自主选股预算 3.00% · 待研究')
     await expect(hierarchy).not.toContainText('人工专项配置复核')
     await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('中性政策目标')
     if (fixture === 'QUALIFIED') {
