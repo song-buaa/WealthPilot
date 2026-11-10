@@ -174,6 +174,18 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
     return assembled()
 
 
+def read_frozen_concentration(database, portfolio_id, snapshot_id, contract=None, *, expected_policy=None):
+    from app.asset_views import load_view
+    from backend.services.investment_policy.runtime import bind, current
+
+    session = current(portfolio_id)
+    with bind(session):
+        if expected_policy is not None and session.context.get("policy_reference") != expected_policy:
+            return {"status": "UNKNOWN", "issues": ["POLICY_VERSION_CONFLICT"], "execution_authorized": False}
+        view = load_view(database, portfolio_id, snapshot_id, contract)
+        return project_frozen_concentration(portfolio_id, view)
+
+
 def project_frozen_concentration(portfolio_id, view):
     """Original Allocation qualification for an explicitly selected server-owned U1 view."""
     from backend.services.investable_assets import project_investable_assets

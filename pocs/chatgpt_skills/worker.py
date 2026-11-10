@@ -168,18 +168,6 @@ def pool_worker(args):
     print(json.dumps(response, ensure_ascii=False, allow_nan=False), flush=True)
 
 
-def frozen_concentration(database, portfolio_id, snapshot_id, contract=None, *, expected_policy=None):
-    from app.asset_views import load_view
-    from backend.services.allocation_service import project_frozen_concentration
-    from backend.services.investment_policy.runtime import bind, current
-
-    session = current(portfolio_id)
-    with bind(session):
-        if expected_policy is not None and session.context.get("policy_reference") != expected_policy:
-            return {"status": "UNKNOWN", "issues": ["POLICY_VERSION_CONFLICT"], "execution_authorized": False}
-        return project_frozen_concentration(portfolio_id, load_view(database, portfolio_id, snapshot_id, contract))
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-mock")
@@ -258,7 +246,8 @@ def main():
                             if a.get('snapshot_id'):
                                 if a.get('scope') != 'risk' or a.get('symbol') is not None:
                                     raise ValueError('POLICY_RISK_SNAPSHOT_SCOPE_REQUIRED')
-                                result['concentration'] = frozen_concentration(
+                                from backend.services.allocation_service import read_frozen_concentration
+                                result['concentration'] = read_frozen_concentration(
                                     config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
                                     config.get('database_contract_path') if config else None)
                     elif operation == "capture_asset_view" and args.frozen_database:
@@ -304,7 +293,8 @@ def main():
                                 selected = value.get('snapshot_id')
                                 reference = value.get('scope', {}).get('policy_reference')
                                 if selected and selected == a.get('snapshot_id') and reference:
-                                    value.setdefault('evidence', {})['concentration'] = frozen_concentration(
+                                    from backend.services.allocation_service import read_frozen_concentration
+                                    value.setdefault('evidence', {})['concentration'] = read_frozen_concentration(
                                         config['database_path'] if config else path,
                                         config['portfolio_id'] if config else args.portfolio_id, selected,
                                         config.get('database_contract_path') if config else None, expected_policy=reference)

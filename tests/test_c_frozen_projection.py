@@ -3,9 +3,8 @@ from copy import deepcopy
 
 import pytest
 
-from backend.services.allocation_service import project_frozen_concentration
+from backend.services.allocation_service import project_frozen_concentration, read_frozen_concentration
 from backend.services.investment_policy.contracts import digest
-from pocs.chatgpt_skills.worker import frozen_concentration
 from tests.test_b2_allocation import clock, source, owner_file, publish
 from tests.test_b3_allocation import b3
 from tests.test_c_allocation_integration import active
@@ -30,7 +29,7 @@ def test_same_source_projection_does_not_write(active, b3, tmp_path, monkeypatch
     publish(view, db, monkeypatch)
     before = db.read_bytes()
     policy = active[0].path.read_bytes()
-    value = frozen_concentration(db, 7, view["snapshot_id"])
+    value = read_frozen_concentration(db, 7, view["snapshot_id"])
     assert value == project_frozen_concentration(7, deepcopy(view))
     assert value["snapshot_sha256"] == digest(view)
     assert db.read_bytes() == before and active[0].path.read_bytes() == policy
@@ -44,4 +43,4 @@ def test_same_source_projection_does_not_write(active, b3, tmp_path, monkeypatch
         assert value["assumptions"]
         row = value["issuers"][TESLA]
         assert not row["policy_hits"] and row["known_lower_bound_pct"] is None
-    assert frozen_concentration(db, 7, view["snapshot_id"], expected_policy={"wrong": "bundle"})["status"] == "UNKNOWN"
+    assert read_frozen_concentration(db, 7, view["snapshot_id"], expected_policy={"wrong": "bundle"})["status"] == "UNKNOWN"
