@@ -5,6 +5,7 @@ interface Gap {
   amount_cny: string | null
   current_ratio: string | null
   target_ratio: string
+  target_kind?: 'NEUTRAL_POLICY'
   gap_pp: string | null
   amount_gap_cny: string | null
 }
@@ -14,7 +15,7 @@ interface Hierarchy {
   secondary: Record<string, Gap>
   etf: { status: string; products: Record<string, Gap & {
     current_ratio_of_d: string | null; target_ratio_of_d: string }> }
-  strategic_review: { status: string; threshold_pp: string; triggered_classes: string[] }
+  strategic_review: { status: string; threshold_pp: string; candidate_hit_classes?: string[] | null }
   unclassified_asset_refs: string[]
   unclassified_amount_cny: string
 }
@@ -28,7 +29,7 @@ interface Diagnostic {
   denominator_cny: string
   policy_reference: { bundle_sha256: string }
   classes: Record<string, { amount_cny: string; current_ratio: string; target_ratio: string;
-    gap_pp: string; amount_gap_cny: string; direction: string }>
+    gap_pp: string; amount_gap_cny: string; direction: string; target_kind?: Gap['target_kind'] }>
   focus: string[]
   hierarchy?: Hierarchy
   execution_authorized: false
@@ -43,10 +44,14 @@ const policyLabels: Record<string, string> = {
 const percent = (ratio: string | null) => ratio === null ? '—' : (Number(ratio) * 100).toFixed(2) + '%'
 const currency = (amount: string | null) => amount === null ? '—' : fmtCny(Number(amount))
 
+const targetLabel = (rows: Record<string, { target_kind?: Gap['target_kind'] }>, fallback: string) =>
+  Object.values(rows).length > 0 && Object.values(rows).every(row => row.target_kind === 'NEUTRAL_POLICY')
+    ? '中性政策目标' : fallback
+
 function GapTable({ title, rows }: { title: string; rows: Record<string, Gap> }) {
   return <table>
     <caption>{title}</caption>
-    <thead><tr><th>类别</th><th>当前金额</th><th>当前权重</th><th>目标权重</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
+    <thead><tr><th>类别</th><th>当前金额</th><th>当前权重</th><th>{targetLabel(rows, '目标权重')}</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
     <tbody>{Object.entries(rows).map(([key, row]) => <tr key={key}>
       <th scope="row">{policyLabels[key] ?? key}</th><td>{currency(row.amount_cny)}</td>
       <td>{percent(row.current_ratio)}</td><td>{percent(row.target_ratio)}</td>
@@ -64,13 +69,14 @@ function PolicyHierarchy({ value }: { value: Hierarchy }) {
       来源 {value.unclassified_asset_refs.join('、')}。
     </p>}
     <GapTable title="一级战略配置（占 D）" rows={value.strategic} />
-    {review.status === 'HUMAN_REVIEW'
-      ? <p role="status">人工专项配置复核：{review.triggered_classes.map(key => policyLabels[key]).join('、')}。</p>
-      : review.status === 'NOT_TRIGGERED' && <p>一级偏差未超过 {Number(review.threshold_pp)} 个百分点。</p>}
+    <p role="status">RULE_SCOPE_UNVERIFIED · 政策复核适用节点待确认。
+      {review.status === 'RULE_SCOPE_UNVERIFIED' && !!review.candidate_hit_classes?.length &&
+        <>候选偏差超过 {Number(review.threshold_pp)} 个百分点（{review.candidate_hit_classes.map(key => policyLabels[key]).join('、')}）。</>}
+    </p>
     <GapTable title="二级政策预算（占 D）" rows={value.secondary} />
     {value.etf.status === 'NO_ETF_HOLDINGS' && <p>当前美国股票 ETF 子组合为空，内部权重未定义。</p>}
     <GapTable title="ETF 产品配置（占 ETF 子组合）" rows={value.etf.products} />
-    <table><caption>ETF 产品占 D</caption><thead><tr><th>产品</th><th>当前</th><th>派生目标</th></tr></thead>
+    <table><caption>ETF 产品占 D</caption><thead><tr><th>产品</th><th>当前</th><th>{targetLabel(value.etf.products, '派生目标')}</th></tr></thead>
       <tbody>{Object.entries(value.etf.products).map(([key, row]) => <tr key={key}>
         <th scope="row">{key}</th><td>{percent(row.current_ratio_of_d)}</td><td>{percent(row.target_ratio_of_d)}</td>
       </tr>)}</tbody>
@@ -109,7 +115,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
   return <section aria-label="当前与目标配置">
     <h3>可投资资产 {fmtCny(Number(value.denominator_cny))}</h3>
     <p>快照 {value.snapshot_id} · 来源时点 {value.as_of}</p>
-    <table><thead><tr><th>类别</th><th>当前金额</th><th>当前</th><th>目标</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
+    <table><thead><tr><th>类别</th><th>当前金额</th><th>当前</th><th>{targetLabel(value.classes, '目标')}</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
       <tbody>{Object.entries(value.classes).map(([key, row]) => <tr key={key}>
         <th>{labels[key]}</th><td>{fmtCny(Number(row.amount_cny))}</td>
         <td>{(Number(row.current_ratio) * 100).toFixed(2)}%</td><td>{(Number(row.target_ratio) * 100).toFixed(2)}%</td>

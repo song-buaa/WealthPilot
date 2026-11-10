@@ -81,9 +81,11 @@ for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
   })
 }
 
-for (const status of ['QUALIFIED', 'PARTIAL']) {
-  test(`ACTIVE hierarchy renders ${status} independently of the five classes`, async ({ page }) => {
-    const gap = { amount_cny: '760', current_ratio: '.76', target_ratio: '.70', gap_pp: '6', amount_gap_cny: '60' }
+for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
+  test(`ACTIVE hierarchy renders ${fixture} without an unverified formal review`, async ({ page }) => {
+    const status = fixture === 'PARTIAL' ? 'PARTIAL' : 'QUALIFIED'
+    const gap = { amount_cny: '760', current_ratio: '.76', target_ratio: '.70', target_kind: 'NEUTRAL_POLICY',
+      gap_pp: '6', amount_gap_cny: '60' }
     const partial = { ...gap, amount_cny: null, current_ratio: null, gap_pp: null, amount_gap_cny: null }
     const writes: string[] = []
     await page.route('**/api/**', async route => {
@@ -105,8 +107,10 @@ for (const status of ['QUALIFIED', 'PARTIAL']) {
               SPY: { ...(status === 'QUALIFIED' ? gap : partial),
                 current_ratio_of_d: status === 'QUALIFIED' ? '.12' : null, target_ratio_of_d: '.09' },
             } },
-            strategic_review: { status: status === 'QUALIFIED' ? 'HUMAN_REVIEW' : 'UNKNOWN', threshold_pp: '5',
-              triggered_classes: status === 'QUALIFIED' ? ['growth_and_alternatives'] : [] },
+            strategic_review: fixture === 'OLD_HIERARCHY'
+              ? { status: 'HUMAN_REVIEW', threshold_pp: '5', triggered_classes: ['growth_and_alternatives'] }
+              : { status: 'RULE_SCOPE_UNVERIFIED', threshold_pp: '5', triggered_classes: [],
+                  candidate_hit_classes: status === 'QUALIFIED' ? ['growth_and_alternatives'] : null },
             unclassified_asset_refs: ['position:99'], unclassified_amount_cny: '15',
           },
         } } })
@@ -115,13 +119,19 @@ for (const status of ['QUALIFIED', 'PARTIAL']) {
     await page.goto(base + '/#/discipline')
     const hierarchy = page.getByRole('region', { name: 'ACTIVE 分层配置' })
     await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('9.00%')
+    await expect(hierarchy).toContainText('RULE_SCOPE_UNVERIFIED')
+    await expect(hierarchy).not.toContainText('人工专项配置复核')
+    await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('中性政策目标')
+    if (fixture === 'QUALIFIED') {
+      await expect(hierarchy).toContainText('候选偏差超过 5 个百分点')
+    } else {
+      await expect(hierarchy).not.toContainText('候选偏差超过')
+    }
     if (status === 'QUALIFIED') {
-      await expect(hierarchy).toContainText('人工专项配置复核')
       await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('12.00%')
     } else {
       await expect(hierarchy).toContainText('position:99')
       await expect(hierarchy.getByRole('table', { name: '一级战略配置（占 D）' })).not.toContainText('76.00%')
-      await expect(hierarchy).not.toContainText('人工专项配置复核')
     }
     expect(writes).toEqual([])
   })

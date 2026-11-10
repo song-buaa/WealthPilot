@@ -25,7 +25,15 @@ for old, new in (
     ('65%增长及另类＋35%稳健', '70%增长及另类＋30%稳健'),
     ('U＝65%', 'U＝70%'), ('U≥45%', 'U≥50%'),
     ('AAA／BBB／CCC按ETF子组合内部20%／60%／20%', 'SPY／QQQ／SPMO按ETF子组合内部30%／50%／20%'),
-    ('其他自主选股 | 3%', '其他自主选股 | 8%'),
+    # Mirror the ACTIVE label forms, with synthetic weights totaling 27% plus 3%.
+    ('SYN1 | 3%', 'AAPL（苹果） | 4%'),
+    ('SYN2 | 3%', 'Alphabet（GOOG、GOOGL合并） | 5%'),
+    ('SYN3 | 4%', 'BRK.B（伯克希尔） | 4%'),
+    ('SYN4 | 4%', 'META | 4%'),
+    ('SYN5 | 4%', 'MSFT（微软） | 5%'),
+    ('SYN6 | 4%', 'TSLA（特斯拉） | 5%'),
+    ('已指定六股合计22%', '已指定六股合计27%'),
+    ('特别发行人SYN1', '特别发行人AAPL'),
     ('合计 | 25%', '合计 | 30%'),
     ('严格超过9个百分点', '严格超过5个百分点'),
 ):
@@ -49,7 +57,7 @@ def b3(source):
         ('SPY:US', 'ETF', 'EQUITY', 'USD', '90'),
         ('QQQ:US', 'ETF', 'EQUITY', 'USD', '150'),
         ('SPMO:US', 'ETF', 'EQUITY', 'USD', '60'),
-        ('SYN1:US', 'COMMON_STOCK', 'EQUITY', 'USD', '300'),
+        ('AAPL:US', 'COMMON_STOCK', 'EQUITY', 'USD', '300'),
         ('PDD:US', 'ADR', 'EQUITY', 'USD', '50'),
         ('IB01:LSE', 'ETF', 'FIXED_INCOME', 'USD', '200'),
         ('CSBGU3:LSE', 'ETF', 'FIXED_INCOME', 'USD', '100'),
@@ -87,9 +95,9 @@ def read(b3, tmp_path, monkeypatch, client):
     return request(view, tmp_path, monkeypatch, client)
 
 
-@pytest.mark.parametrize('stable_shift,review', [('0','NOT_TRIGGERED'), ('50','NOT_TRIGGERED'),
-                                                 ('50.00001','HUMAN_REVIEW'), ('-50.00001','HUMAN_REVIEW')])
-def test_hierarchy_closes_and_reviews_strictly(active, b3, tmp_path, monkeypatch, client, stable_shift, review):
+@pytest.mark.parametrize('stable_shift,hit', [('0',False), ('50',False), ('-50',False),
+                                               ('50.00001',True), ('-50.00001',True)])
+def test_hierarchy_closes_and_compares_unverified_scope_strictly(active, b3, tmp_path, monkeypatch, client, stable_shift, hit):
     view, _ = b3
     inputs = view['data_quality']['security_inputs']
     inputs[4]['market_value_cny'] = str(300 + D(stable_shift))
@@ -107,9 +115,15 @@ def test_hierarchy_closes_and_reviews_strictly(active, b3, tmp_path, monkeypatch
     assert meta['snapshot_id'] == view['snapshot_id']
     assert meta['policy_reference'] == runtime.current(7).context['policy_reference']
     assert meta['status'] == 'QUALIFIED_MAJOR_CLASSES' and h['status'] == 'QUALIFIED'
-    assert h['strategic_review']['status'] == review and not h['execution_authorized']
-    assert h['strategic_review']['threshold_pp'] == '5.00'
-    assert h['strategic_review']['triggered_classes'] == (list(h['strategic']) if review == 'HUMAN_REVIEW' else [])
+    review = h['strategic_review']
+    assert review['status'] == 'RULE_SCOPE_UNVERIFIED' and not h['execution_authorized']
+    assert review['threshold_pp'] == '5.00' and review['operator'] == 'gt'
+    assert review['triggered_classes'] == []
+    assert review['candidate_hit_classes'] == (list(h['strategic']) if hit else [])
+    assert D(h['strategic']['growth_and_alternatives']['gap_pp']) == D(stable_shift) / 10
+    assert all(row['target_kind'] == 'NEUTRAL_POLICY'
+               for level in (meta['classes'], h['strategic'], h['secondary'], h['etf']['products'])
+               for row in level.values())
     assert [D(v['target_ratio']) for v in h['strategic'].values()] == [D('.7'), D('.3')]
     targets = dict(us_etf='.30', us_direct='.30', china='.05', gold='.03', btc='.02', ib01='.20', cbu3='.10', cash='0')
     assert {k: D(r['target_ratio']) for k, r in h['secondary'].items()} == {k: D(v) for k, v in targets.items()}
@@ -143,7 +157,9 @@ def test_unproven_product_preserves_b2_without_precise_hierarchy(active, b3, tmp
     assert h['status'] == 'PARTIAL'
     assert h['unclassified_asset_refs'] == ['position:2']
     assert D(h['unclassified_amount_cny']) == 90
-    assert h['strategic_review']['status'] == 'UNKNOWN'
+    assert h['strategic_review']['status'] == 'RULE_SCOPE_UNVERIFIED'
+    assert h['strategic_review']['candidate_hit_classes'] is None
+    assert h['strategic_review']['triggered_classes'] == []
     assert h['etf']['products']['SPY']['current_ratio_of_d'] is None
     assert h['secondary']['us_etf']['amount_gap_cny'] is None
 
@@ -245,3 +261,26 @@ def test_conflicting_equity_claim_cannot_override_alternative(active, b3, tmp_pa
     assert response.status_code == 200, response.text
     h = response.json()['policy_allocation']['hierarchy']
     assert h['status'] == 'PARTIAL' and h['unclassified_asset_refs'] == ['wealth:2']
+
+
+@pytest.mark.parametrize('ticker', ['GOOG', 'GOOGL', 'AAPL', 'BRK.B', 'META', 'MSFT', 'TSLA'])
+def test_active_core_share_classes_use_policy_tickers(active, b3, tmp_path, monkeypatch, client, ticker):
+    view, _ = b3
+    view['data_quality']['security_inputs'][4].update(symbol=f'{ticker}:US', name='Unrelated display name')
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    hierarchy = response.json()['policy_allocation']['hierarchy']
+    assert hierarchy['status'] == 'QUALIFIED'
+    assert hierarchy['classified_assets']['position:5']['bucket'] == 'us_direct'
+    assert D(hierarchy['secondary']['us_direct']['amount_cny']) == 300
+
+
+@pytest.mark.parametrize('symbol,vehicle', [('ALPHABET:US','COMMON_STOCK'), ('GOOG:US','OPTION')])
+def test_display_name_or_wrong_vehicle_cannot_authorize_core_identity(active, b3, tmp_path, monkeypatch, client, symbol, vehicle):
+    view, _ = b3
+    view['data_quality']['security_inputs'][4].update(symbol=symbol, vehicle_type=vehicle, name='Alphabet（GOOG、GOOGL合并）')
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    hierarchy = response.json()['policy_allocation']['hierarchy']
+    assert hierarchy['status'] == 'PARTIAL'
+    assert hierarchy['unclassified_asset_refs'] == ['position:5']

@@ -39,7 +39,6 @@ def _owner_attests(ref, fact, refs):
     )
 
 
-
 def _identity(ref, row, economic, coverage, direct_symbols):
     """Return (policy bucket, optional ETF product, identity evidence)."""
     manual = ref.startswith('wealth:')
@@ -107,7 +106,7 @@ def _identity(ref, row, economic, coverage, direct_symbols):
 
 
 def _gap(amount, base, target):
-    row = {'target_ratio': str(target)}
+    row = {'target_kind': 'NEUTRAL_POLICY', 'target_ratio': str(target)}
     if amount is None:
         return {**row, 'amount_cny': None, 'current_ratio': None, 'gap_pp': None, 'amount_gap_cny': None}
     difference = amount - base * target
@@ -119,8 +118,13 @@ def _gap(amount, base, target):
 def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
     """Use B2-qualified CNY amounts and canonical economic classes from one freeze."""
     allocation = snapshot.allocation
-    direct_symbols = {ticker for name in allocation.direct_equity if name != 'unallocated'
-                      for ticker in name.split('（', 1)[0].split('/')}
+    direct_symbols = set()
+    for name in allocation.direct_equity.keys() - {'unallocated'}:
+        label, _, qualifier = name.partition('（')
+        # Policy 3.2 can explicitly list share-class tickers in the qualifier.
+        # Company names are never matched against holding display names.
+        combined = re.fullmatch(r'([A-Z][A-Z0-9.-]*(?:、[A-Z][A-Z0-9.-]*)+)合并）', qualifier)
+        direct_symbols.update(combined[1].split('、') if combined else label.split('/'))
     amounts = dict.fromkeys(allocation.neutral, Decimal(0))
     products = dict.fromkeys(allocation.etf_internal, Decimal(0))
     assigned, unknown = {}, []
@@ -152,14 +156,14 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
                  for key, target in allocation.neutral.items()}
     strategic = {}
     rule = next(r for r in snapshot.rules if r.rule_id == 'allocation.deviation')
-    triggers = []
+    candidate_hits = []
     for key, buckets in STRATEGIC_BUCKETS.items():
         amount = sum(amounts[bucket] for bucket in buckets)
         target = targets[key]
         strategic[key] = _gap(amount if complete else None, denominator, target)
         # Compare CNY amounts before division so equality cannot round into a trigger.
         if complete and abs(amount - denominator * target) > denominator * rule.threshold:
-            triggers.append(key)
+            candidate_hits.append(key)
 
     etf_base = amounts['us_etf']
     etf_rows = {}
@@ -178,8 +182,10 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
                 'denominator_cny': str(etf_base) if complete else None,
                 'other_etf_amount_cny': str(other_etf) if complete else None, 'products': etf_rows},
         'strategic_review': {
-            'status': ('HUMAN_REVIEW' if triggers else 'NOT_TRIGGERED') if complete else 'UNKNOWN',
-            'triggered_classes': triggers, 'rule_id': rule.rule_id, 'operator': rule.operator,
+            # The ACTIVE contract has the rule scope but no authorized node IDs.
+            'status': 'RULE_SCOPE_UNVERIFIED', 'triggered_classes': [],
+            'candidate_hit_classes': candidate_hits if complete else None,
+            'rule_id': rule.rule_id, 'operator': rule.operator,
             'threshold_pp': str(rule.threshold * 100), 'source_clause': rule.source_clause.model_dump(),
         },
         'classified_assets': assigned, 'unclassified_asset_refs': unknown,

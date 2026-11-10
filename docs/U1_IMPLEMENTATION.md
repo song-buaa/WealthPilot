@@ -153,8 +153,8 @@ Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部sco
 
 原 Allocation GET 在合格 B2 响应中追加 `policy_allocation.hierarchy`。快照 ID、哈希、时点、D 和 ACTIVE Bundle 引用沿用同一父对象。五类资产与 LEGACY 200 兼容，原 409/503/500 语义继续适用。当前范围按同一视图内 A-min 的 INCLUDED CNY 金额分桶，保留逐项引用及分类证据哈希，原凭据引用留在私有冻结视图。UNKNOWN/PARTIAL 不提供分层实际权重、偏差或金额差距，仍披露未分类的金额与引用供查证。
 
-一级与八桶以 D 为分母。目标权重由已固定的 ACTIVE 快照读取。一级规则用未舍入 CNY 差额比较 `abs(当前金额 − D × 目标权重) > D × 政策阈值`，相等时不触发，触发时仅要求人工专项复核。ETF 产品分别展示占子组合和占 D 的口径，D 口径目标为 ACTIVE ETF 桶目标乘产品内部目标。已证实的空 ETF 子组合内部权重未定义。API 保留 Decimal 字符串，浏览器仅在展示时舍入。
+一级与八桶以 D 为分母。本切片展示的目标权重来自已固定的 ACTIVE 快照，标记 `target_kind=NEUTRAL_POLICY`，含 B2 兼容视图及 ETF 派生目标。一级候选偏差用未舍入 CNY 差额比较 `abs(当前金额 − D × 目标权重) > D × 政策阈值`，等于 5pp 时不命中。当前 Bundle 未提供获批一级节点的 ID 映射。即使规则 scope 是 `APPROVED_MAJOR_ASSET_CLASS`，诊断也返回 `RULE_SCOPE_UNVERIFIED`，保留定量偏差及 `candidate_hit_classes`，正式 `triggered_classes` 为空。明细不完整时候选列表为 null。正式人工复核判定须待原 Policy Owner 确认节点与条款，持久复核事件由 E 负责。ETF 产品分别展示占子组合和占 D 的口径，D 口径目标为 ACTIVE ETF 桶目标乘产品内部目标。已证实的空 ETF 子组合内部权重未定义。API 保留 Decimal 字符串，浏览器仅在展示时舍入。
 
 ETF 产品只接受官方身份与冻结 canonical 分类相符的 US 上市 SPY/QQQ/SPMO；IB01/CBU3 复用原已验证产品身份。美国直接个股复用 ACTIVE 指定股票的合格 US 直接持仓；中国主动精选可用原已核验中国发行人及合格沪深直接股票。其他可核验的股票及美国股票 ETF 可通过原 `coverage.accounts.evidence_refs` 的逐行 `<asset_ref>:US_DIRECT_EQUITY`、`<asset_ref>:CN_DIRECT_EQUITY` 或 `<asset_ref>:US_EQUITY_ETF` 和独立支持引用补证，同时验证原证券类型，冲突保持 UNKNOWN。其他已核验美国股票 ETF 纳入 ETF 桶及其实际分母，不分配 SPY/QQQ/SPMO 的产品目标。现金按原现金类型及 A-min 可投资用途，计入稳健池。原 Owner 黄金/BTC 覆盖证据必须指向具体记录并与经济分类一致。B3 还要求原 `coverage.<gold|btc>.evidence_refs` 中有对应行的形态确认 `<asset_ref>:GOLD_EXPOSURE` 或 `<asset_ref>:BTC_SPOT_UNLEVERED` 和同一行及事实绑定的支持引用；BTC 当前仅接受如此核验的手工直接持有。此为对既有引用字段的资格检查，不改变 Owner 文件结构或 B2 分母门槛。未证实的地区、基金、产品或现货形态仍为 UNKNOWN。分层结果不包含 ETF 成分、发行人集中度或任何交易授权。
 
-回归入口为 [B3 隔离端到端](../tests/test_b3_allocation.py)及 [Web 政策边界](../frontend/tests/e2e/policy-boundary.spec.ts)。真实 A1 资格和生产验收另行留证。
+回归入口为 [B3 隔离端到端](../tests/test_b3_allocation.py)及 [Web 政策边界](../frontend/tests/e2e/policy-boundary.spec.ts)。真实 A1 资格和生产验收另行留证。P44-02 后续切片覆盖六只美国指定直接股的产品级差距、未定 3% 额度的使用情况、获批弹性情景及条件性 ETF 承接，以及有确认收据和有效期的修复里程碑对照。

@@ -92,7 +92,7 @@ def snapshot(portfolio_id):
         for key, amount in amounts.items():
             difference = amount - desired[key]*session.assets.denominator_cny
             rows[key] = {'amount_cny':str(amount), 'current_ratio':str(weights[key].value),
-                'target_ratio':str(desired[key]),
+                'target_ratio':str(desired[key]), 'target_kind':'NEUTRAL_POLICY',
                 'gap_pp':str((weights[key].value-desired[key])*100),
                 'amount_gap_cny':str(difference.quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)),
                 'direction':'OVER' if difference > 0 else 'UNDER' if difference < 0 else 'AT_TARGET'}
