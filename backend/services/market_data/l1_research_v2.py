@@ -52,6 +52,18 @@ Q4 每条最多两个已发送的 scenario_cell_refs 和对应两个 assumption_
 纯研究不假定持仓，决策映射是研究条件。禁止交易指令、执行价量及自授资格。"""
 
 
+OWNER_CASH_DECISION_PROMPT = """
+现金终值专项：用三个独立主张分别审查谨慎、基准、乐观，每条只引用该格 scenario_cell_ref 和对应 assumption_ref，
+question_ids 至少 Q4/Q7。每格写清：实际经营条件、现有支持和最强反证、尚待验证的关键假设、下一条可观察证据如何改变情景与估值。
+必须用最强乐观情景作为基准判断的反证：具体说为什么过门槛仍不足以据此配置新增资本，或哪些证据会让它更可信。
+另设一个 Q6 主张把历史观察价、服务端的风险补偿门槛、同期限美元国债及三格结果连起来，说明哪个情景是当前工作基准、
+为何更可信、放弃新增配置的机会成本，以及哪些财报或经营信号足以翻转判断。不要给情景虚构概率。
+明确区分继续跟踪公司的价值与在该历史观察价新增资本的价值。条件回报数字由报告的服务端表格提供。
+写“暂不支持新增资本配置”等研究判断，不输出交易指令。具体门槛、反向参数用已计算卡片指代，勿在模型正文重写数字。
+综合仍引用已有经营/财务主张及一条估值或机会成本主张，不添加新事实。
+"""
+
+
 class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -357,6 +369,7 @@ class ResearchRun:
                 paragraph=paragraphs[0], assumption_refs=claim.assumption_refs, scenario_cell_refs=claim.scenario_cell_refs,
                 requires=[p['claim_id'] for p in premises], decision=claim.decision)
         coverage = _coverage(accepted.values(), self.candidates, eligible_cells, assessment, index)
+        scenario_review = _owner_cash_decision_review(eligible_cells, accepted.values())
         if narrow:
             self.surviving_keys = set(accepted)
             self.surviving_cells = set(eligible_cells)
@@ -366,7 +379,7 @@ class ResearchRun:
         if narrow and self.initial_diagnostic is None:
             self.initial_diagnostic = diagnostic
         return dict(claims=list(accepted.values()), coverage=coverage, decision_review='not_assessed',
-                    key_metrics=_key_metrics(index),
+                    key_metrics=_key_metrics(index), scenario_decision_review=scenario_review,
                     conditional_valuation=_compatible_valuation(assessment, eligible_cells, self.cells),
                     valuation_status={k: assessment['conditional_valuation'][k]
                                       for k in ('status', 'missing', 'limitations', 'reverse_equation')
@@ -374,6 +387,29 @@ class ResearchRun:
                     scenario_cells={ref: cell | {'assumption_ref': self.cells[ref][2]}
                                     for ref, cell in eligible_cells.items()},
                     generation_diagnostic=self.initial_diagnostic, diagnostic=diagnostic)
+
+
+def _owner_cash_decision_review(cells, claims):
+    cases = {}
+    for ref, cell in cells.items():
+        if not cell.get('owner_cash_basis'):
+            continue
+        audited = [claim['claim_id'] for claim in claims
+                   if claim['scenario_cell_refs'] == [ref] and {'Q4', 'Q7'} <= set(claim['question_ids'])]
+        meets_hurdle = Decimal(cell['result']['annualized_return']) >= Decimal(cell['required_return'])
+        cases[cell['name']] = dict(cell_ref=ref, claim_ids=audited, meets_research_hurdle=meets_hurdle)
+    if not cases:
+        return None
+    opportunity = [claim['claim_id'] for claim in claims
+                   if claim['role'] != 'synthesis' and 'Q6' in claim['question_ids'] and not claim['scenario_cell_refs']]
+    complete = (set(cases) == {'cautious', 'base', 'optimistic'} and all(c['claim_ids'] for c in cases.values())
+                and bool(opportunity))
+    incremental = 'insufficient_scenario_review'
+    if complete:
+        incremental = ('not_supported_at_observed_price' if not cases['base']['meets_research_hurdle']
+                       else 'requires_separate_capital_judgment')
+    return dict(cases=cases, opportunity_claim_ids=opportunity, complete=complete, incremental_capital=incremental)
+
 
 
 def _compatible_valuation(assessment, eligible, catalog):
@@ -452,6 +488,27 @@ def report(final):
     lines.extend(['\n关键已核验指标', '| 指标 | 观察值及口径 | 引用 |', '|---|---|---|'])
     for row in final['key_metrics']:
         lines.append(f'| {row["field"]} | {row["value"]} | {row["evidence_ref"] or "—"} |')
+    decision_review = final.get('scenario_decision_review')
+    if decision_review:
+        lines.append('\n历史观察价下的资本取舍（研究判断）')
+        status = decision_review['incremental_capital']
+        if status == 'not_supported_at_observed_price':
+            lines.append('当前证据暂不支持在该历史观察价新增资本配置。基准情景未达到条件回报门槛；'
+                         '是否继续跟踪，取决于经营证据能否验证更好的每 ADS 现金兑现及股东可取得性。')
+        elif status == 'insufficient_scenario_review':
+            lines.append('情景论证未闭合，新增资本配置的证据不足。现有模型情景仅供继续研究。')
+        else:
+            lines.append('基准情景达到条件门槛，仍须单独判断经营可信度、风险补偿及替代机会。')
+        labels = dict(cautious='谨慎', base='基准', optimistic='乐观')
+        lines.append('| 情景 | 历史观察价 | 条件年化 | 测试门槛 | 已审核专项论证 |')
+        lines.append('| --- | ---: | ---: | ---: | --- |')
+        for name, row in decision_review['cases'].items():
+            cell = final['scenario_cells'][row['cell_ref']]
+            result = Decimal(cell['result']['annualized_return'])
+            hurdle = Decimal(cell['required_return'])
+            claim_ids = '、'.join(row['claim_ids']) or '待复核'
+            lines.append(f'| {labels[name]} | {cell["inputs"]["price_usd_per_ads"]} USD/ADS | '
+                         f'{result:.2%} | {hurdle:.2%} | {claim_ids} |')
     lines.append('\n条件估值与反向要求')
     for ref, cell in final['scenario_cells'].items():
         value = cell['result']

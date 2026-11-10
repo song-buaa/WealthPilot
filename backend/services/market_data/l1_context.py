@@ -220,9 +220,11 @@ def messages(assessment, question, *, policy, holding, history=(), research_run=
     from backend.services.market_data.output_policy import explanation_prompt
     groups, diagnostics = project(assessment)
     if research_run is not None:
-        from .l1_research_v2 import PROMPT
+        from .l1_research_v2 import OWNER_CASH_DECISION_PROMPT, PROMPT
         research_run.prepare(groups, assessment)
         system = PROMPT
+        if any(cell['label'] == 'OWNER_CASH_CONDITIONAL_NOT_FORECAST' for cell in groups['scenario_catalog']):
+            system += OWNER_CASH_DECISION_PROMPT
         # Use an actual selected Owner field; an invented example ref can
         # otherwise be mistaken for something the request authorized.
         examples = (row for row in groups['financial_operating_cashflow']

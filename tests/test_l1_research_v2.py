@@ -163,3 +163,26 @@ def test_synthesis_inherits_only_accepted_current_premises(frozen_pdd):
     changed = deepcopy(frozen_pdd)
     changed['conditional_valuation']['scenarios']['cautious']['annualized_return'] = '0.999'
     assert all(c['role'] != 'synthesis' for c in run.qualify(changed)['claims'])
+
+
+def test_capital_decision_requires_each_audited_case_and_opportunity_cost():
+    from backend.services.market_data.l1_research_v2 import _owner_cash_decision_review
+
+    names = ('cautious', 'base', 'optimistic')
+    cells = {name: dict(name=name, owner_cash_basis=True, required_return='0.0981',
+                        result={'annualized_return': result})
+             for name, result in zip(names, ('-0.15', '-0.03', '0.14'))}
+    claims = [dict(claim_id=name, role='supporting', scenario_cell_refs=[name], question_ids=['Q4', 'Q7'])
+              for name in names]
+    opportunity = dict(claim_id='choice', role='limitation', scenario_cell_refs=[], question_ids=['Q6'])
+    assert _owner_cash_decision_review(cells, claims)['complete'] is False
+    incomplete = _owner_cash_decision_review(cells, [*claims[:2], opportunity])
+    assert incomplete['incremental_capital'] == 'insufficient_scenario_review'
+    assert not incomplete['cases']['optimistic']['claim_ids']
+    result = _owner_cash_decision_review(cells, [*claims, opportunity])
+    assert result['complete'] and result['opportunity_claim_ids'] == ['choice']
+    assert result['cases']['optimistic']['meets_research_hurdle']
+    assert result['incremental_capital'] == 'not_supported_at_observed_price'
+    cells['base']['result']['annualized_return'] = '0.0981'
+    assert _owner_cash_decision_review(cells, [*claims, opportunity])[
+        'incremental_capital'] == 'requires_separate_capital_judgment'
