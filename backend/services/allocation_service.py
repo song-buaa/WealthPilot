@@ -67,7 +67,9 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
     from app import asset_views
     from app.database import DB_PATH
     from backend.services.investable_assets import project_investable_assets
-    from backend.services.investment_policy.contracts import digest, MetricEvidence
+    from backend.services.investment_policy.contracts import digest, MetricEvidence, Snapshot
+    from backend.services.investment_policy.allocation_hierarchy import build_hierarchy
+    from backend.services.investment_policy.concentration_adapter import allocation_concentration
     from backend.services.investment_policy.runtime import current, bind, assets_qualified
     from backend.services.investment_policy.parser import PolicyError
     from backend.services.investment_policy.store import clock, utc_now
@@ -102,8 +104,9 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
                 ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
+        evaluated_at = clock(utc_now())
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
-            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=clock(utc_now()))
+            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
         # A new request-local session; never mutate a caller's pinned assets.
         from backend.services.investment_policy.runtime import PolicySession
         session = PolicySession(portfolio_id, assets=projection.policy_assets)
@@ -120,6 +123,7 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
         rows = {f'position:{r["id"]}':r for r in q.get('investable_security_inputs', q['security_inputs'])}
         rows.update({f'wealth:{r["id"]}':r for r in view['views']['get_manual_wealth_items']['items']})
         manual_classes = view['data_quality'].get('investable_owner_evidence', {}).get('manual_classes', {})
+        included = []
         for item in projection.assets:
             if item.state != 'INCLUDED':
                 continue
@@ -128,15 +132,19 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
                 verified = (row.get('classification_verification_status') in {'VERIFIED','EXPLICIT','DETERMINISTIC'}
                     and isinstance(row.get('classification_source'), str) and row['classification_source'].strip()
                     and row.get('classification_version') == CLASSIFICATION_VERSION)
-                key = classes.get(row.get('economic_asset_class')) if verified else None
+                economic = row.get('economic_asset_class') if verified else None
+                classification_refs = [row['classification_source']] if verified else []
             elif row.get('item_type') == 'bank_cash':
-                key = 'cash'
+                economic, classification_refs = 'CASH', ['wealth:bank_cash']
             else:
                 evidence = manual_classes.get(item.source_ref, {})
-                key = classes.get(evidence.get('economic_asset_class')) if evidence.get('evidence_refs') else None
+                classification_refs = evidence.get('evidence_refs') or []
+                economic = evidence.get('economic_asset_class') if classification_refs else None
+            key = classes.get(economic)
             if not key:
                 reject('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED', [f'{item.source_ref}:CLASSIFICATION_UNVERIFIED'])
             amounts[key] += item.amount_cny
+            included.append((item, row, economic, classification_refs))
         denominator = projection.policy_assets.denominator_cny
         if sum(amounts.values()) != denominator:
             raise PolicyError('POLICY_ASSET_WEIGHTS_NOT_CLOSED')
@@ -149,6 +157,10 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
             k:MetricEvidence(value=v, complete=True, fresh=True, identity_verified=True,
                 denominator_qualified=True, as_of=view['captured_at']) for k,v in weights.items()}})
         session.allocation_amounts = amounts
+        session.allocation_hierarchy = build_hierarchy(Snapshot.model_validate(session.context['snapshot']),
+            denominator=denominator, included=included, coverage=q['investable_scope_evidence']['coverage'])
+        session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
+            at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'])
         session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
             'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
             'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),

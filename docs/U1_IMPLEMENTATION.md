@@ -148,3 +148,25 @@ Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部sco
 缺分母/覆盖/养老金/FX/时点仍B1的409，缺分类409；已知资产库不可读取也受控拒绝，Policy unavailable503，未知程序错误500。`detail`继续为字符串；B2可附加`qualification` UNKNOWN原因及来源引用，不能返回零资产/全绿或交易金额。旧LEGACY、已绑定原P2会话成功结构保留。ACTIVE页面在原政策/组合界面展示差距，到期自动撤销精确金额并显示UNKNOWN，不自动同步；组合穿透风险仍`NOT_ASSESSED_IN_B2`，金额差距只是信息，不是订单建议。
 
 本轮验证入口：`tests/test_b2_allocation.py`、原U1/养老金/B1/Policy/Wealth回归及`frontend/tests/e2e/policy-boundary.spec.ts`。生产事实未连接核验：是否已有完整账户发布证据、用途/外部覆盖确认、养老金映射与当前FX仍UNKNOWN。发布须另行授权，并在原ACTIVE政策和真实Owner确认后取得新的合格U1视图；旧视图不会回填或刷新。缺证据应验收409及明确原因，不能为了200改真实数据；交易资格另行授权。
+
+### 4.4 B3 ACTIVE分层配置差距
+
+原 Allocation GET 在合格 B2 响应中追加 `policy_allocation.hierarchy`。快照 ID、哈希、时点、D 和 ACTIVE Bundle 引用沿用同一父对象。五类资产与 LEGACY 200 兼容，原 409/503/500 语义继续适用。当前范围按同一视图内 A-min 的 INCLUDED CNY 金额分桶，保留逐项引用及分类证据哈希，原凭据引用留在私有冻结视图。UNKNOWN/PARTIAL 不提供分层实际权重、偏差或金额差距，仍披露未分类的金额与引用供查证。
+
+一级与八桶以 D 为分母。本切片展示的目标权重来自已固定的 ACTIVE 快照，标记 `target_kind=NEUTRAL_POLICY`，含 B2 兼容视图及 ETF 派生目标。一级候选偏差用未舍入 CNY 差额比较 `abs(当前金额 − D × 目标权重) > D × 政策阈值`，等于 5pp 时不命中。当前 Bundle 未提供获批一级节点的 ID 映射。即使规则 scope 是 `APPROVED_MAJOR_ASSET_CLASS`，诊断也返回 `RULE_SCOPE_UNVERIFIED`，保留定量偏差及 `candidate_hit_classes`，正式 `triggered_classes` 为空。明细不完整时候选列表为 null。正式人工复核判定须待原 Policy Owner 确认节点与条款，持久复核事件由 E 负责。ETF 产品分别展示占子组合和占 D 的口径，D 口径目标为 ACTIVE ETF 桶目标乘产品内部目标。已证实的空 ETF 子组合内部权重未定义。API 保留 Decimal 字符串，浏览器仅在展示时舍入。
+
+ETF 产品只接受官方身份与冻结 canonical 分类相符的 US 上市 SPY/QQQ/SPMO；IB01/CBU3 复用原已验证产品身份。美国直接个股复用 ACTIVE 指定股票的合格 US 直接持仓；中国主动精选可用原已核验中国发行人及合格沪深直接股票。其他可核验的股票及美国股票 ETF 可通过原 `coverage.accounts.evidence_refs` 的逐行 `<asset_ref>:US_DIRECT_EQUITY`、`<asset_ref>:CN_DIRECT_EQUITY` 或 `<asset_ref>:US_EQUITY_ETF` 和独立支持引用补证，同时验证原证券类型，冲突保持 UNKNOWN。其他已核验美国股票 ETF 纳入 ETF 桶及其实际分母，不分配 SPY/QQQ/SPMO 的产品目标。现金按原现金类型及 A-min 可投资用途，计入稳健池。原 Owner 黄金/BTC 覆盖证据必须指向具体记录并与经济分类一致。B3 还要求原 `coverage.<gold|btc>.evidence_refs` 中有对应行的形态确认 `<asset_ref>:GOLD_EXPOSURE` 或 `<asset_ref>:BTC_SPOT_UNLEVERED` 和同一行及事实绑定的支持引用；BTC 当前仅接受如此核验的手工直接持有。此为对既有引用字段的资格检查，不改变 Owner 文件结构或 B2 分母门槛。未证实的地区、基金、产品或现货形态仍为 UNKNOWN。分层结果不包含 ETF 成分、发行人集中度或任何交易授权。
+
+回归入口为 [B3 隔离端到端](../tests/test_b3_allocation.py)及 [Web 政策边界](../frontend/tests/e2e/policy-boundary.spec.ts)。真实 A1 资格和生产验收另行留证。P44-02 后续切片覆盖六只美国指定直接股的产品级差距、未定 3% 额度的使用情况、获批弹性情景及条件性 ETF 承接，以及有确认收据和有效期的修复里程碑对照。
+
+### 4.4 C 发行人及 ETF 穿透内核
+
+[集中度内核](../backend/services/investment_policy/concentration.py) 接收原 U1 冻结视图、A-min 投影、服务端固定的 ACTIVE PolicySession、显式时钟和独立版本 pin。保留快照 ID、哈希、Portfolio、分母、估值时点与 PolicyReference。正式百分比要求 A-min 与 C 使用同一评估时钟，避免沿用已过期的原来源资格。原 [发行人 owner](../backend/services/instruments/issuers.py) 扩展核心美股 SEC CIK 身份，Alphabet 两股类归并。原 Li Auto、PDD、美团与 XPeng 身份沿用；原证券、币种、账户引用和金额分别保留。未获 canonical 来源和已知身份的持仓留作未知，不按名称映射。B3 未分桶且无身份冲突的已核验直持仍可贡献已知风险下限。B3 #104 合并后，原 Allocation GET 复用同一次 A-min、PolicySession 及 B3 分类结果，追加 `policy_allocation.concentration`，原 Web 展示下限、上界及风险，穿透证据先于配置结果到期时独立撤下风险数值；原 200/409/503/500 合同保留。MCP/PEER 的原读取与研究响应继续保持既有合同，后续须复用同一服务端固定资格，避免从提示词或公开视图推断。
+
+[ETF 证据合同](../backend/services/instruments/etf_holdings.py) 首期接受 SPY、QQQ、SPMO 的规范上市身份及 ISIN。原证据 Owner 提供来源字节 SHA256、成分日、取得时点、有效期、parser/method 版本和归一化证据 pin。原 Allocation 适配器可选只读 `WEALTHPILOT_ETF_EVIDENCE_FILE` 和独立的 `WEALTHPILOT_ETF_EVIDENCE_SHA256`，要求私有文件、同组合、每基金单版本及 512KiB 上限。文件为 `wealthpilot.etf-evidence.v1` 的 `portfolio_id` 与 `records` 封套。无文件或校验失败时保留直接风险，间接覆盖 UNKNOWN。每日 NAV 成分只可用于相同市场日期的合格收盘估值；未知、过期、提前使用、日期不匹配或版本不匹配都不贡献间接敞口。按 ETF 市值乘可证实的正向股票 NAV 权重下限，避免将基金本金再次计入 D。逐只返回证据与已解析覆盖率。部分样本或未归并成分不能证明安全上界。仅当所有持仓均可解释，且每个 ETF 都有独立固定版本的完整、非杠杆披露并闭合至 100%，才允许输出上界和无触发时的 `SAFE_BOUNDED`。
+
+[官方归档样例](../tests/fixtures/c_official_etf_core_2026-11-06.json) 为 2026-11-06 披露的核心直持交集摘录。SPY 来自 State Street 每日 XLSX，QQQ 与 SPMO 来自 Invesco 官方 NAV holdings JSON。源 SHA256 基于原响应字节，归一化按一单位六位小数百分点的保守舍入裕量扣减再换算为比例。原响应留在本地证据目录。样例仅用于离线复核，未获 Owner 有效期及生产 pin，记录有效期止于取得时刻，不作为当前敞口证明。来源若有杠杆或非线性敞口，现有合同只支持已证实的正向股票金额下限，不能作为净敞口或完整上界。
+
+风险阈值和规则动作只从绑定的 ACTIVE 规则读取。分母 UNKNOWN 时返回 `CONDITIONAL_RISK / DENOMINATOR_UNVERIFIED`，不给百分比、正式命中或临界额。正式下限可以触发，未知覆盖不能清除风险。BTC 仅统计同一冻结 Owner 证据已确认的现货手工资产，要求逐行形态与来源引用；ETF、衍生品和未验证钱包形态不作现货。正式读取与 B3 同一逐行分类回执及会话时效绑定，风险事件的持久化留给 E。
+
+**供 D 使用。** 消费相同快照与 PolicyReference 的 `known_lower_bound_cny`、`proven_upper_bound_pct`、`denominator_cny` 和 `repayment_threshold`。固定发行人敞口及价格、FX、ETF 权重和费用时，以 ACTIVE 通用人工复核阈值 `t` 计算 `I_critical = E/t` 和 `R_trigger = max(0, I_current-I_critical)`。这里只考虑净偿债从 D 等额流出。下限输入产生下限假设下的临界额，不能解释为安全还贷额度。D 的阶段值应重新计算并标明假设，不回写原快照或触发交易。独立 Fraction 金样及边界见 [C 测试](../tests/test_c_concentration.py)。

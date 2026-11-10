@@ -92,7 +92,7 @@ def snapshot(portfolio_id):
         for key, amount in amounts.items():
             difference = amount - desired[key]*session.assets.denominator_cny
             rows[key] = {'amount_cny':str(amount), 'current_ratio':str(weights[key].value),
-                'target_ratio':str(desired[key]),
+                'target_ratio':str(desired[key]), 'target_kind':'NEUTRAL_POLICY',
                 'gap_pp':str((weights[key].value-desired[key])*100),
                 'amount_gap_cny':str(difference.quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)),
                 'direction':'OVER' if difference > 0 else 'UNDER' if difference < 0 else 'AT_TARGET'}
@@ -102,6 +102,10 @@ def snapshot(portfolio_id):
             'focus':sorted([k for k in rows if rows[k]['direction']!='AT_TARGET'],
                 key=lambda k:abs(Decimal(rows[k]['gap_pp'])), reverse=True),
             'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
+        if hasattr(session, 'allocation_hierarchy'):
+            meta['hierarchy'] = session.allocation_hierarchy
+        if hasattr(session, 'allocation_concentration'):
+            meta['concentration'] = session.allocation_concentration
         return PolicyAllocationSnapshot(snapshot_at=session.assets.as_of,
             total_investable_assets=float(session.assets.denominator_cny),
             by_class={k:ClassAllocation(amount=float(v),ratio=float(weights[k].value)) for k,v in amounts.items()},

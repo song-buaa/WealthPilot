@@ -1,6 +1,6 @@
 """Small evidenced direct-security issuer projection. Never combine quantities."""
 from backend.utils.symbol import position_security_identity
-VERSION = "issuer.2026-10-20.1"
+VERSION = "issuer.2026-11-10.1"
 EVIDENCE = ["https://ir.lixiang.com/investor-faqs",
             "https://ir.lixiang.com/news-releases/news-release-details/li-auto-inc-files-its-annual-report-form-20-f-3"]
 IDENTITIES = {("LI:US", "USD"): "LI_AUTO", ("2015:HK", "HKD"): "LI_AUTO",
@@ -17,15 +17,47 @@ ISSUERS = {
 }
 
 
+# The financial-source resolver already uses these SEC CIK identities.
+_CORE_US = (
+    ("0001652044", "Alphabet Inc.", ("GOOG", "GOOGL")),
+    ("0000320193", "Apple Inc.", ("AAPL",)),
+    ("0000789019", "Microsoft Corp.", ("MSFT",)),
+    ("0001326801", "Meta Platforms Inc.", ("META",)),
+    ("0001067983", "Berkshire Hathaway Inc.", ("BRK.B", "BRK-B")),
+    ("0001318605", "Tesla Inc.", ("TSLA",)),
+)
+for cik, name, tickers in _CORE_US:
+    key = "SEC_CIK_" + cik
+    ISSUERS[key] = (name, "US", ["https://www.sec.gov/files/company_tickers.json",
+                                "https://data.sec.gov/submissions/CIK" + cik + ".json"])
+    IDENTITIES.update({(ticker + ":US", "USD"): key for ticker in tickers})
+
+
+def direct_issuer(item):
+    if item.get("economic_asset_class") != "EQUITY" or item.get("vehicle_type") not in {
+            "COMMON_STOCK", "ADR", "DEPOSITARY_RECEIPT"}:
+        return None
+    identity = position_security_identity(item.get("symbol"), item.get("broker"), item.get("broker_security_type"),
+        item.get("original_currency") or item.get("currency"))
+    issuer = IDENTITIES.get(identity)
+    if (item.get("security_symbol") and item["security_symbol"] != item.get("symbol")
+            and item.get("security_currency")):
+        canonical = IDENTITIES.get((item["security_symbol"], item["security_currency"]))
+        if issuer and canonical != issuer:
+            return None
+        issuer = canonical
+    if issuer and issuer.startswith("SEC_CIK_") and item["vehicle_type"] != "COMMON_STOCK":
+        return None
+    return issuer
+
+
 def exposure(items):
     groups, unknown = {}, []
     for item in items:
         if item.get("economic_asset_class") != "EQUITY" or item.get("vehicle_type") not in {
                 "COMMON_STOCK", "ADR", "DEPOSITARY_RECEIPT"}:
             continue  # no ETF look-through, country-by-currency or name matching
-        identity = position_security_identity(item.get("symbol"), item.get("broker"), item.get("broker_security_type"),
-            item.get("original_currency") or item.get("currency"))
-        issuer = IDENTITIES.get(identity)
+        issuer = direct_issuer(item)
         member = {key:item.get(key) for key in ("id", "symbol", "account_ref", "quantity", "cost_price",
                    "currency", "original_currency", "original_value", "current_price", "market_value_cny",
                    "security_symbol", "holding_channel", "cost_value_cny")}

@@ -1,0 +1,127 @@
+[
+  {
+    "symbol": "SPY:US",
+    "isin": "US78462F1030",
+    "holdings_as_of": "2026-11-06",
+    "known_at": "2026-11-10T06:59:36+00:00",
+    "valid_until": "2026-11-10T06:59:36+00:00",
+    "source": "https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx",
+    "source_sha256": "5f65fb3c3090a24a02f7b15557a0015ea4df8a38b3ec78373faf55ceb1844ac3",
+    "parser_version": "official-core-equity-excerpt.v1",
+    "method_version": "etf-nav-lower-bounds.v1",
+    "weight_basis": "NONNEGATIVE_EQUITY_NAV",
+    "scope": "PARTIAL",
+    "rows": [
+      {
+        "symbol": "AAPL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.07850703"
+      },
+      {
+        "symbol": "BRK.B:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.01670392"
+      },
+      {
+        "symbol": "GOOG:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.02120312"
+      },
+      {
+        "symbol": "GOOGL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.02625484"
+      },
+      {
+        "symbol": "META:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.02113846"
+      },
+      {
+        "symbol": "MSFT:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.06190611"
+      },
+      {
+        "symbol": "TSLA:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.01586075"
+      }
+    ]
+  },
+  {
+    "symbol": "QQQ:US",
+    "isin": "US46090E1038",
+    "holdings_as_of": "2026-11-06",
+    "known_at": "2026-11-10T06:57:04+00:00",
+    "valid_until": "2026-11-10T06:57:04+00:00",
+    "source": "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/QQQ/holdings/fund?idType=ticker&productType=ETF",
+    "source_sha256": "7580ded480d8f1b1c1a1b13d18887feccba96a09b25a14c6e2106aa812e61aad",
+    "parser_version": "official-core-equity-excerpt.v1",
+    "method_version": "etf-nav-lower-bounds.v1",
+    "weight_basis": "NONNEGATIVE_EQUITY_NAV",
+    "scope": "PARTIAL",
+    "rows": [
+      {
+        "symbol": "AAPL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.08534254"
+      },
+      {
+        "symbol": "GOOG:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.02680157"
+      },
+      {
+        "symbol": "GOOGL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.02854029"
+      },
+      {
+        "symbol": "META:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.03098659"
+      },
+      {
+        "symbol": "MSFT:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.0672949"
+      },
+      {
+        "symbol": "TSLA:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.03213946"
+      }
+    ]
+  },
+  {
+    "symbol": "SPMO:US",
+    "isin": "US46138E3392",
+    "holdings_as_of": "2026-11-06",
+    "known_at": "2026-11-10T06:59:37+00:00",
+    "valid_until": "2026-11-10T06:59:37+00:00",
+    "source": "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46138E339/holdings/fund?idType=cusip&productType=ETF",
+    "source_sha256": "9cab01c3a69f87719fdd377c5f1977beee35a80f4aa12f909dcf5c19d97e6de0",
+    "parser_version": "official-core-equity-excerpt.v1",
+    "method_version": "etf-nav-lower-bounds.v1",
+    "weight_basis": "NONNEGATIVE_EQUITY_NAV",
+    "scope": "PARTIAL",
+    "rows": [
+      {
+        "symbol": "AAPL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.11250247"
+      },
+      {
+        "symbol": "GOOG:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.03924412"
+      },
+      {
+        "symbol": "GOOGL:US",
+        "currency": "USD",
+        "weight_lower_bound": "0.04846959"
+      }
+    ]
+  }
+]
