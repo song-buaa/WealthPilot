@@ -269,9 +269,9 @@ def _qualitative_text(value, *, research=False, diagnostic=None):
     everyday_numerals = set("零〇一二两三四五六七八九十百千万亿")
     numeric_check = value + text
     if research:
-        # Unicode assigns the character 参 a numeric value. The word 参数
-        # is non-numeric; a standalone 参 or other numeric glyph stays blocked.
-        numeric_check = numeric_check.replace('参数', '')
+        # Unicode assigns 参 a numeric value, even in these ordinary words.
+        # A standalone 参 or other numeric glyph stays blocked.
+        numeric_check = numeric_check.replace('参数', '').replace('参考', '')
     for char in numeric_check:
         try:
             unicodedata.numeric(char)
@@ -405,7 +405,7 @@ def explanation_projection(candidate, assessment, *, qualified_index=None, norma
                 reason = "unverified_timeframe"
             elif item["topic"] in {"business", "competition", "investment_thesis"} and all(_technical_periods(index[ref]) or index[ref].get('field') in {'observed_price','fx_rate'} for ref in refs):
                 reason = "topic_evidence_mismatch"
-            elif item['topic']=='competition' and all(index[ref]['kind'] in {'fundamental_field','fundamentals','research_metric','quality_financial_field'} for ref in refs) and not re.search(r'若|如果|可能|假设|无法|尚无|不能|缺少|未知',text):
+            elif item['topic']=='competition' and all(index[ref]['kind'] in {'fundamental_field','fundamentals','research_metric','quality_financial_field'} for ref in refs) and not re.search(r'若|如果|可能|假设|无法|尚无|不能|缺少|未知|不足以(?:证明|确认|推断|说明)',text):
                 reason = 'competition_mechanism_not_conditional'
         if reason:
             rejected[reason] += 1
