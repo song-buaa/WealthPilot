@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from backend.services.market_data.l1_context import messages
+from backend.services.market_data.l1_context import project
 from backend.services.market_data.l1_research_v2 import ResearchRun
 from backend.services.market_data.quality_valuation import foreign_ads_earnings_research
 
@@ -18,8 +18,12 @@ def frozen_pdd():
 
 def prepare(frozen_pdd):
     run = ResearchRun()
-    messages(frozen_pdd, '研究长期经营与估值', policy={}, holding={}, research_run=run)
+    # Exercise the C1 catalog independently of the runner's tokenizer cache.
+    # Full-message preflight is covered by test_l1_context_pack.
+    groups, _ = project(frozen_pdd)
+    run.prepare(groups, frozen_pdd)
     assert len(run.cells) == 3
+    assert {cell['ref'] for cell in groups['scenario_catalog']} == run.cells.keys()
     return run
 
 
