@@ -372,28 +372,82 @@ def test_valid_SDK_timeout_objects_and_none_are_deadline_clamped():
     assert isinstance(request_options(SOL,timeout=httpx.Timeout(60))['timeout'],httpx.Timeout)
 
 
-def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db,monkeypatch):
+@pytest.mark.parametrize('pre_stream_exhausted', [False, True], ids=['receipt-in-cleanup', 'no-receipt-before-stream'])
+def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db, monkeypatch, pre_stream_exhausted):
+    from app import analysis_runtime
     from pocs.chatgpt_skills import analysis
     from backend.services import decision_service_v3 as svc
-    receipt=facts()
+
+    receipt = facts()
+    elapsed = [0.0]
+    trace = []
+
     class Clock(datetime):
         @classmethod
-        def now(cls,tz=None):return AT
-    monkeypatch.setattr(analysis,'datetime',Clock)
-    async def stream(*a,**kw):
-        kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
-        try:await asyncio.sleep(10)
-        finally:await asyncio.sleep(.2)  # outer deadline interrupts this cleanup
+        def now(cls, tz=None):
+            return AT
+
+    monkeypatch.setattr(analysis, 'datetime', Clock)
+    monkeypatch.setattr(analysis_runtime, 'time', NS(monotonic=lambda: elapsed[0]))
+    original_quality = analysis.quality
+    original_retain = analysis.retain_facts
+
+    def quality(portfolio_id):
+        result = original_quality(portfolio_id)
+        if pre_stream_exhausted:
+            # Spend the .18s work budget during setup, within the .2s outer deadline.
+            elapsed[0] = .19
+        return result
+
+    def retain(result, assessment, **kwargs):
+        trace.append(('retain', assessment == receipt))
+        return original_retain(result, assessment, **kwargs)
+
+    async def stream(*a, **kw):
+        kw['stage_callback'](NS(route='position_single'), NS(position_evidence=receipt))
+        trace.append('evidence_ready')
+        outer, inner = [scope for scope, _ in current().timeout_scopes]
+        loop = asyncio.get_running_loop()
+        try:
+            inner.reschedule(loop.time())
+            await loop.create_future()
+        finally:
+            trace.append(('cleanup', inner.expired(), outer.expired()))
+            outer.reschedule(loop.time())
+            try:
+                await loop.create_future()
+            except asyncio.CancelledError:
+                trace.append(('outer_cancel', outer.expired()))
+                elapsed[0] = .201
+                raise
         yield
-    monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
+
+    monkeypatch.setattr(analysis, 'quality', quality)
+    monkeypatch.setattr(analysis, 'retain_facts', retain)
+    monkeypatch.setattr(svc, 'run_chat_stream_v3', stream)
+
     async def run():
-        with budget_context(Policy(total_seconds=.2)):
-            return await analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True)
-    result=asyncio.run(run())
-    assert result['status']=='partial' and not result['professional_analysis_complete']
-    assert result['professional_result']['analysis_result']['mode']=='facts_only'
+        with budget_context(Policy(total_seconds=.2)) as budget:
+            # Keep the real asyncio scopes and cancellation bookkeeping. Start
+            # each timer only at its asserted stage, independent of setup speed.
+            real_timeout = budget.timeout
+            monkeypatch.setattr(budget, 'timeout', lambda _seconds: real_timeout(None))
+            return await analyze(analysis_db, 7, 'analyze_position', dict(question='frozen'),
+                                 synthetic=True, async_l1=True)
+
+    result = asyncio.run(run())
     assert 'ANALYSIS_TIMEOUT' in result['issues']
-    assert result['evidence']['qualified_facts']
+    assert not result['professional_analysis_complete']
+    if pre_stream_exhausted:
+        assert trace == []
+        assert result['status'] == 'unavailable'
+        assert result['missing_stages'] == ['planning_not_started']
+        assert 'qualified_facts' not in result['evidence']
+    else:
+        assert trace == ['evidence_ready', ('cleanup', True, False), ('outer_cancel', True), ('retain', True)]
+        assert result['status'] == 'partial'
+        assert result['professional_result']['analysis_result']['mode'] == 'facts_only'
+        assert result['evidence']['qualified_facts']
 
 
 def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,monkeypatch):
