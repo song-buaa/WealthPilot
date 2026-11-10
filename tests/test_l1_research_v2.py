@@ -104,3 +104,32 @@ def test_original_freshness_owner_removes_expired_price_and_blocks_c1(frozen_pdd
     final = run.qualify(current)
     assert not final['scenario_cells'] and not final['claims']
     assert (final['conditional_valuation'] or {}).get('status') != 'CONDITIONAL_RESEARCH_ONLY'
+
+
+def test_group_format_and_bound_units_do_not_discard_independent_claims(frozen_pdd):
+    run = prepare(frozen_pdd)
+    from backend.services.market_data.output_policy import _evidence_index
+
+    index = _evidence_index(frozen_pdd)
+    ref, row = next((ref, row) for ref, row in index.items()
+                    if ref in run.visible and row.get('field') == 'earnings_yield_pct')
+    item = dict(key='bound', role='supporting', claim_kind='inference', question_ids=['Q3'],
+                text_template='可核验的盈利收益率为{{n1}}%，该参数不能直接代表未来回报。',
+                evidence_refs=[ref], numbers=[dict(id='n1', evidence_ref=ref, field=row['field'])])
+    invalid = item | dict(key='unbound', text_template='可核验的盈利收益率为{{n1}}%，另有{{n2}}个百分点尚待核对。')
+    literal = item | dict(key='literal', text_template='可核验的盈利收益率为{{n1}}%，另有5%的门槛。')
+    synthesis = item | dict(key='dependent', role='synthesis', question_ids=['Q1'], requires=['unbound'])
+    independent = item | dict(key='independent', numbers=[], question_ids=['Q6'],
+                              text_template='应比较同币种、同期限的可核验替代回报，该参数尚缺。')
+    run.ingest({'debates': [
+        {'debate_key':'long_label_that_should_not_discard_all_its_claims', 'claims':[item, invalid, literal]},
+        {'debate_key':'long_label_that_should_not_discard_all_its_claims', 'claims':[synthesis, independent]},
+    ]})
+    final = run.qualify(frozen_pdd, narrow=True)
+    assert len(final['claims']) == 2
+    assert final['claims'][0]['paragraph']['text'].count('%') == 1
+    assert final['claims'][0]['paragraph']['text_template'].count('%') == 0
+    assert final['coverage']['Q1']['status'] == 'rejected'
+    assert final['coverage']['Q6']['status'] == 'limited'
+    assert final['diagnostic']['rejected'] == {'text_not_safe_qualitative': 2, 'dependency_or_key_invalid': 1}
+    assert final['diagnostic']['text_rejection_details'] == {'unbound_numeric_literal': 2}

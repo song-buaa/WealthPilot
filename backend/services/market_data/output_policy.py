@@ -267,7 +267,12 @@ def _qualitative_text(value, *, research=False, diagnostic=None):
     # letters. Uncommon Unicode numeric glyphs are never needed for qualitative
     # prose; everyday Han words such as 一般/单一/进一步 remain permitted.
     everyday_numerals = set("零〇一二两三四五六七八九十百千万亿")
-    for char in value + text:
+    numeric_check = value + text
+    if research:
+        # Unicode assigns the character 参 a numeric value. The word 参数
+        # is non-numeric; a standalone 参 or other numeric glyph stays blocked.
+        numeric_check = numeric_check.replace('参数', '')
+    for char in numeric_check:
         try:
             unicodedata.numeric(char)
         except (TypeError, ValueError):
@@ -307,7 +312,7 @@ def _qualitative_text(value, *, research=False, diagnostic=None):
     return original
 
 
-def _bound_text(item,index,diagnostic=None):
+def _bound_text(item,index,diagnostic=None, *, normalize_bound_units=False):
     """Render numbers from exact evidence scalars; no free numeric model claims."""
     from backend.services.market_data.financial_research import display
     def reject(reason):
@@ -319,7 +324,7 @@ def _bound_text(item,index,diagnostic=None):
         return _qualitative_text(template,research=item.get('scope')=='research_only',diagnostic=diagnostic),None
     if (not isinstance(template,str) or not isinstance(bindings,list) or len(bindings)>8
             or not isinstance(item.get('evidence_refs'),list)):return reject('binding_format_or_count')
-    rendered=template;ids=set();safe=template
+    replacements={};ids=set()
     for binding in bindings:
         if not isinstance(binding,dict):return reject('binding_format_or_count')
         ident=binding.get('id');ref=binding.get('evidence_ref');field=binding.get('field')
@@ -330,7 +335,24 @@ def _bound_text(item,index,diagnostic=None):
         token='{{'+ident+'}}'
         if not value:return reject('binding_field_unavailable')
         if token not in template:return reject('binding_placeholder_missing')
-        ids.add(ident);rendered=rendered.replace(token,value);safe=safe.replace(token,'已核验字段')
+        ids.add(ident)
+        replacements[token] = value
+        if normalize_bound_units and 'text_template' not in item:
+            row = index[ref]
+            unit, currency = row.get('unit'), row.get('currency')
+            suffix = {'percent': '%％', 'percentage_points': '个百分点',
+                      'multiple': '倍', 'ratio': '倍'}.get(unit)
+            if suffix:
+                # Only remove a repeated unit immediately after a validated
+                # placeholder. A second symbol or literal value still fails.
+                unit_pattern = '[%％]' if unit == 'percent' else re.escape(suffix)
+                template = re.sub(re.escape(token) + unit_pattern, lambda _: token, template)
+            elif unit == 'currency_units' and currency == 'CNY':
+                template = template.replace('人民币' + token + '元', token)
+    rendered=template;safe=template
+    for token,value in replacements.items():
+        rendered=rendered.replace(token,value)
+        safe=safe.replace(token,'已核验字段')
     if not _qualitative_text(safe,research=True,diagnostic=diagnostic):return None,None
     if len(rendered)>2000:return reject('rendered_length')
     # A final recheck consumes the original template and bindings, not previously
@@ -346,7 +368,7 @@ def _technical_periods(record):
     return set()
 
 
-def explanation_projection(candidate, assessment, *, qualified_index=None):
+def explanation_projection(candidate, assessment, *, qualified_index=None, normalize_bound_units=False):
     """Return the safe projection and bounded, content-free rejection diagnostics."""
     index = _evidence_index(assessment) if qualified_index is None else qualified_index
     rejected = Counter()
@@ -365,7 +387,7 @@ def explanation_projection(candidate, assessment, *, qualified_index=None):
             reason = "basis_invalid"
         else:
             detail=[]
-            text,template = _bound_text(item,index,diagnostic=detail)
+            text,template = _bound_text(item,index,diagnostic=detail,normalize_bound_units=normalize_bound_units)
             text_rejections.update(detail)
             refs = item.get("evidence_refs")
             if not text:

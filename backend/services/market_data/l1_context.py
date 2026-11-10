@@ -223,6 +223,16 @@ def messages(assessment, question, *, policy, holding, history=(), research_run=
         from .l1_research_v2 import PROMPT
         research_run.prepare(groups, assessment)
         system = PROMPT
+        # Use an actual selected Owner field; an invented example ref can
+        # otherwise be mistaken for something the request authorized.
+        examples = (row for row in groups['financial_operating_cashflow']
+                    if row.get('field') == 'revenue_yoy_pct' and row['field'] in row['numeric_fields'])
+        example = next(examples, None)
+        if example:
+            ref, field = example['evidence_ref'], example['field']
+            system += '\n真实可用数字绑定示例（只示范绑定，论点仍须论证）：' + dumps(dict(
+                text_template='最近可比期间的集团收入同比为{{n1}}，持续性仍需验证。',
+                evidence_refs=[ref], numbers=[dict(id='n1', evidence_ref=ref, field=field)]))
     else:
         # Reuse the actual selected facts in the original binding/safety contract
         # once, without duplicating their serialized payload. Final qualification
