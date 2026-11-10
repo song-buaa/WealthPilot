@@ -4,7 +4,7 @@ from decimal import Decimal
 import re
 
 from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
-from backend.services.instruments.issuers import IDENTITIES, ISSUERS
+from backend.services.instruments.issuers import IDENTITIES, ISSUERS, direct_issuer
 from backend.utils.symbol import parse_symbol
 
 from .contracts import Snapshot, digest
@@ -119,12 +119,22 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
     """Use B2-qualified CNY amounts and canonical economic classes from one freeze."""
     allocation = snapshot.allocation
     direct_symbols = set()
-    for name in allocation.direct_equity.keys() - {'unallocated'}:
+    direct_targets = {}
+    for name, target in allocation.direct_equity.items():
+        if name == 'unallocated':
+            continue
         label, _, qualifier = name.partition('（')
-        # Policy 3.2 can explicitly list share-class tickers in the qualifier.
-        # Company names are never matched against holding display names.
         combined = re.fullmatch(r'([A-Z][A-Z0-9.-]*(?:、[A-Z][A-Z0-9.-]*)+)合并）', qualifier)
-        direct_symbols.update(combined[1].split('、') if combined else label.split('/'))
+        symbols = combined[1].split('、') if combined else label.split('/')
+        direct_symbols.update(symbols)
+        identities = [IDENTITIES.get((ticker + ':US', 'USD')) for ticker in symbols]
+        issuer = identities[0] if identities and all(key == identities[0] for key in identities) else None
+        direct_targets[name] = (issuer, target)
+    policy_issuers = {issuer for issuer, _ in direct_targets.values() if issuer}
+    direct_symbols.update(symbol.removesuffix(':US') for (symbol, currency), issuer in IDENTITIES.items()
+                          if symbol.endswith(':US') and currency == 'USD' and issuer in policy_issuers)
+    direct_amounts = dict.fromkeys(policy_issuers, Decimal(0))
+    direct_complete = True
     amounts = dict.fromkeys(allocation.neutral, Decimal(0))
     products = dict.fromkeys(allocation.etf_internal, Decimal(0))
     assigned, unknown = {}, []
@@ -143,6 +153,12 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
         assigned[ref] = {'bucket': bucket, 'product': product, 'amount_cny': str(item.amount_cny),
                          'evidence_sha256': digest([*classification_refs, *identity_refs])}
         amounts[bucket] += item.amount_cny
+        if bucket == 'us_direct':
+            issuer = direct_issuer(row)
+            if issuer in direct_amounts:
+                direct_amounts[issuer] += item.amount_cny
+            if issuer is None:
+                direct_complete = False
         if product in products:
             products[product] += item.amount_cny
         elif bucket == 'us_etf':
@@ -175,7 +191,20 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
             'current_ratio_of_d': str(products[key] / denominator) if complete else None,
             'amount_gap_to_d_target_cny': str(products[key] - denominator * d_target) if complete else None,
         }
+    issuer_ids = [issuer for issuer, _ in direct_targets.values()]
+    direct_qualified = complete and direct_complete and None not in issuer_ids and len(set(issuer_ids)) == len(issuer_ids)
+    direct_rows = {
+        name: {**_gap(direct_amounts[issuer] if direct_qualified else None, denominator, target),
+               'issuer_id': issuer}
+        for name, (issuer, target) in direct_targets.items()
+    }
+    unallocated = allocation.direct_equity.get('unallocated')
     return {
+        'direct_equity': {'status': 'QUALIFIED' if direct_qualified else 'UNKNOWN',
+                          'issuers': direct_rows, 'unallocated': {
+                              'status': 'UNASSIGNED', 'target_kind': 'NEUTRAL_POLICY',
+                              'target_ratio': str(unallocated),
+                          } if unallocated is not None else None},
         'status': 'QUALIFIED' if complete else 'PARTIAL' if assigned else 'UNKNOWN',
         'strategic': strategic, 'secondary': secondary,
         'etf': {'status': ('QUALIFIED' if etf_base else 'NO_ETF_HOLDINGS') if complete else 'UNKNOWN',

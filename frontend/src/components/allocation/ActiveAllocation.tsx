@@ -13,6 +13,8 @@ interface Hierarchy {
   status: 'QUALIFIED' | 'PARTIAL' | 'UNKNOWN'
   strategic: Record<string, Gap>
   secondary: Record<string, Gap>
+  direct_equity?: { status: string; issuers: Record<string, Gap>
+    unallocated: { target_ratio: string; status: string } | null }
   etf: { status: string; products: Record<string, Gap & {
     current_ratio_of_d: string | null; target_ratio_of_d: string }> }
   strategic_review: { status: string; threshold_pp: string; candidate_hit_classes?: string[] | null }
@@ -91,6 +93,11 @@ function PolicyHierarchy({ value }: { value: Hierarchy }) {
         <>候选偏差超过 {Number(review.threshold_pp)} 个百分点（{review.candidate_hit_classes.map(key => policyLabels[key]).join('、')}）。</>}
     </p>
     <GapTable title="二级政策预算（占 D）" rows={value.secondary} />
+    {value.direct_equity && <>
+      {value.direct_equity.status !== 'QUALIFIED' && <p role="status">核心直接股的实际差距待身份及覆盖核验。</p>}
+      <GapTable title="美国核心直接股（占 D）" rows={value.direct_equity.issuers} />
+      {value.direct_equity.unallocated && <p>未指定自主选股预算 {percent(value.direct_equity.unallocated.target_ratio)} · 待研究。</p>}
+    </>}
     {value.etf.status === 'NO_ETF_HOLDINGS' && <p>当前美国股票 ETF 子组合为空，内部权重未定义。</p>}
     <GapTable title="ETF 产品配置（占 ETF 子组合）" rows={value.etf.products} />
     <table><caption>ETF 产品占 D</caption><thead><tr><th>产品</th><th>当前</th><th>{targetLabel(value.etf.products, '派生目标')}</th></tr></thead>

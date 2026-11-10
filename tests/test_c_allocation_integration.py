@@ -28,7 +28,7 @@ def active(tmp_path, monkeypatch, clock):
     return policies.active.__wrapped__(tmp_path, monkeypatch)
 
 
-@pytest.mark.parametrize("manifest_state", ["valid", "wrong_pin", "wrong_scope", "absent", "b3_unbucketed_direct"])
+@pytest.mark.parametrize("manifest_state", ["valid", "wrong_pin", "wrong_scope", "absent", "b3_berkshire_alias"])
 def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, monkeypatch, client, manifest_state):
     view, classes = b3
     view["captured_at"] = STAMP
@@ -37,9 +37,9 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
     for row in quality["security_inputs"]:
         row.update(cash_as_of=STAMP, positions_as_of=STAMP,
                    price_as_of=AT.date().isoformat(), price_time_basis="close")
-    quality["security_inputs"][4]["symbol"] = "BRK-B:US" if manifest_state == "b3_unbucketed_direct" else "TSLA:US"
+    quality["security_inputs"][4]["symbol"] = "BRK-B:US" if manifest_state == "b3_berkshire_alias" else "TSLA:US"
     path = tmp_path / "etf-owner.json"
-    if manifest_state not in {"absent", "b3_unbucketed_direct"}:
+    if manifest_state not in {"absent", "b3_berkshire_alias"}:
         record = holdings("QQQ:US", {"TSLA:US":".1"}, valid_until=AT+timedelta(seconds=30))
         data = json.dumps({"schema_version":"wealthpilot.etf-evidence.v1",
                            "portfolio_id": 8 if manifest_state == "wrong_scope" else 7,
@@ -55,7 +55,7 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
     result = request(view, tmp_path, monkeypatch, client)
     assert result.status_code == 200, result.text
     assert active[0].path.read_bytes() == before_policy
-    if manifest_state not in {"absent", "b3_unbucketed_direct"}:
+    if manifest_state not in {"absent", "b3_berkshire_alias"}:
         assert path.read_bytes() == data
     meta = result.json()["policy_allocation"]
     c = meta["concentration"]
@@ -64,9 +64,8 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
     assert c["policy_reference"] == meta["policy_reference"]
     assert c["classification_sha256"] == digest(meta["hierarchy"]["classified_assets"])
     assert Decimal(c["denominator_cny"]) == Decimal(meta["denominator_cny"]) == 1000
-    if manifest_state == "b3_unbucketed_direct":
-        assert "position:5" in meta["hierarchy"]["unclassified_asset_refs"]
-        assert "B3_CLASSIFICATION_UNVERIFIED" in c["issues"]
+    if manifest_state == "b3_berkshire_alias":
+        assert meta["hierarchy"]["classified_assets"]["position:5"]["bucket"] == "us_direct"
         key = "SEC_CIK_0001067983"
     else:
         key = TESLA

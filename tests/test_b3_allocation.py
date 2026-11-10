@@ -284,3 +284,24 @@ def test_display_name_or_wrong_vehicle_cannot_authorize_core_identity(active, b3
     hierarchy = response.json()['policy_allocation']['hierarchy']
     assert hierarchy['status'] == 'PARTIAL'
     assert hierarchy['unclassified_asset_refs'] == ['position:5']
+
+
+def test_direct_policy_targets_merge_alphabet_and_keep_unassigned_budget(active, b3, tmp_path, monkeypatch, client):
+    view, _ = b3
+    q = view['data_quality']
+    row = q['security_inputs'][4]
+    row.update(symbol='GOOG:US', market_value_cny='120')
+    q['security_inputs'].append({**row, 'id':9, 'symbol':'GOOGL:US', 'market_value_cny':'180'})
+    evidence = q['investable_scope_evidence']
+    evidence['dispositions']['position:9'] = evidence['dispositions']['position:5'].copy()
+    for domain in ('accounts', 'deduplication'):
+        evidence['coverage'][domain]['asset_refs'].append('position:9')
+    response = read(b3, tmp_path, monkeypatch, client)
+    assert response.status_code == 200, response.text
+    result = response.json()['policy_allocation']['hierarchy']['direct_equity']
+    assert result['status'] == 'QUALIFIED' and len(result['issuers']) == 6
+    alpha = result['issuers']['Alphabet（GOOG、GOOGL合并）']
+    assert alpha['issuer_id'] == 'SEC_CIK_0001652044'
+    assert D(alpha['amount_cny']) == 300 and D(alpha['gap_pp']) == 25
+    assert all(r['target_kind'] == 'NEUTRAL_POLICY' for r in result['issuers'].values())
+    assert result['unallocated'] == {'status':'UNASSIGNED', 'target_kind':'NEUTRAL_POLICY', 'target_ratio':'0.03'}

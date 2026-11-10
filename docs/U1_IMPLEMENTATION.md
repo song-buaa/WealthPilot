@@ -159,6 +159,8 @@ ETF 产品只接受官方身份与冻结 canonical 分类相符的 US 上市 SPY
 
 回归入口为 [B3 隔离端到端](../tests/test_b3_allocation.py)及 [Web 政策边界](../frontend/tests/e2e/policy-boundary.spec.ts)。真实 A1 资格和生产验收另行留证。P44-02 后续切片覆盖六只美国指定直接股的产品级差距、未定 3% 额度的使用情况、获批弹性情景及条件性 ETF 承接，以及有确认收据和有效期的修复里程碑对照。
 
+B3 直持明细复用 ACTIVE 条款 3.2 的目标及原 issuer 身份，按 D 显示六股中性目标、当前金额和缺口。GOOG/GOOGL 合并，未指定 3% 只列中性预算与待研究状态。身份、覆盖不足时实际差距为 UNKNOWN，5pp 仍保持 `RULE_SCOPE_UNVERIFIED`。
+
 ### 4.4 C 发行人及 ETF 穿透内核
 
 [集中度内核](../backend/services/investment_policy/concentration.py) 接收原 U1 冻结视图、A-min 投影、服务端固定的 ACTIVE PolicySession、显式时钟和独立版本 pin。保留快照 ID、哈希、Portfolio、分母、估值时点与 PolicyReference。正式百分比要求 A-min 与 C 使用同一评估时钟，避免沿用已过期的原来源资格。原 [发行人 owner](../backend/services/instruments/issuers.py) 扩展核心美股 SEC CIK 身份，Alphabet 两股类归并。原 Li Auto、PDD、美团与 XPeng 身份沿用；原证券、币种、账户引用和金额分别保留。未获 canonical 来源和已知身份的持仓留作未知，不按名称映射。B3 未分桶且无身份冲突的已核验直持仍可贡献已知风险下限。B3 #104 合并后，原 Allocation GET 复用同一次 A-min、PolicySession 及 B3 分类结果，追加 `policy_allocation.concentration`，原 Web 展示下限、上界及风险，穿透证据先于配置结果到期时独立撤下风险数值；原 200/409/503/500 合同保留。MCP/PEER 的原读取与研究响应继续保持既有合同，后续须复用同一服务端固定资格，避免从提示词或公开视图推断。
