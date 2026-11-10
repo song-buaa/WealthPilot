@@ -362,3 +362,36 @@ def test_final_l1_reader_and_audit_share_immutable_receipt_after_restart(tmp_pat
                     {'professional_result': {'analysis_result': {'mode': 'facts_only'}}},
                     {'scenario': 'review_portfolio'}):
         assert report_projection(full.model_copy(update=changes)).conclusion == full.conclusion
+
+
+def test_reader_shows_historical_base_case_and_keeps_complete_review_in_audit():
+    full = original_result()
+    cell = dict(name='base', inputs={'price_usd_per_ads': '80.50'},
+                receipts={'price': {'period': '2026-11-09'}},
+                result={'annualized_return': '-0.0315'}, required_return='0.0981')
+    claims = [
+        dict(role='synthesis', decision='continue_validation', question_ids=['Q1'],
+             paragraph=dict(text='需要继续验证现金分配才能支持投资。', evidence_refs=['ref:cash'])),
+    ]
+    for role, question, text in [
+        ('supporting', 'Q3', '下次财报核对利润。'),
+        ('supporting', 'Q6', '下次财报核对现金。'),
+        ('counterclaim', 'Q2', '下次财报核对竞争开支。'),
+        ('supporting', 'Q5', '下次财报核对其他风险。'),
+    ]:
+        claims.append(dict(role=role, question_ids=[question, 'Q7'],
+                           paragraph=dict(text='尚待核验。' + text, evidence_refs=['ref:cash'])))
+    for claim in claims:
+        claim['scenario_cell_refs'] = []
+    full.evidence['l1_research_v2'] = dict(scenario_cells={'cell:base': cell}, claims=claims,
+        scenario_decision_review={'incremental_capital': 'not_supported_at_observed_price'})
+    full.conclusion = '\n'.join(claim['paragraph']['text'] for claim in claims)
+    reader = report_projection(full)
+    lead = reader.conclusion.split('## 条件估值与长期回报')[0]
+    assert '80.50 USD/ADS**（2026-11-09，非实时）' in lead
+    assert '-3.15%' in lead and '9.81%' in lead
+    assert '需要继续验证现金分配才能支持投资。' in lead
+    assert '下次财报核对其他风险。' not in reader.conclusion
+    audit = report_projection(full, view='audit')
+    assert audit.conclusion == full.conclusion
+    assert '下次财报核对其他风险。' in audit.conclusion

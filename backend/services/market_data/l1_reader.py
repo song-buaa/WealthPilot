@@ -39,87 +39,45 @@ def _valuation(cells, status):
         if status.get('reverse_equation'):
             lines.extend(['', status['reverse_equation']])
         return lines
-    lines = ['以下为条件研究。历史观察价不代表当前报价，研究门槛不代表个人要求回报。']
-    lines.extend(['', '| 情景 | 历史观察价 | 五年条件年化 | 研究门槛 | 达门槛所需盈利年增长 / 现金可取得率 |',
-                  '| --- | ---: | ---: | ---: | ---: |'])
-    ordered = sorted(cells.values(), key=lambda c: list(CASE_NAMES).index(c['name']))
-    for cell in ordered:
+    lines = ['以下为五年条件回报。研究门槛不代表个人要求回报。', '',
+             '| 情景 | 条件年化 | 达门槛所需盈利年增长 / 现金可取得率 |', '| --- | ---: | ---: |']
+    for name, label in CASE_NAMES.items():
+        cell = next((c for c in cells.values() if c['name'] == name), None)
+        if not cell:
+            continue
         result = cell['result']
-        inputs = cell['inputs']
-        price = _number(inputs.get('price_usd_per_ads'))
-        unit = 'USD/ADS'
         reverse = f'{_percent(result.get("implied_earnings_growth_no_dividends"))} / {_percent(result.get("implied_economic_access_at_hurdle"))}'
         if result.get('implied_year_five_ebit_margin') is not None:
             reverse = f'第五年营业利润率 {_percent(result["implied_year_five_ebit_margin"])}'
-        lines.append(f'| {CASE_NAMES[cell["name"]]} | {price} {unit} | {_percent(result["annualized_return"])} | '
-                     f'{_percent(cell["required_return"])} | {reverse} |')
-    observation = (ordered[0].get('receipts', {}).get('price') or {}).get('period')
-    as_of = ordered[0].get('decision_at')
-    if observation:
-        lines.extend(['', f'观察价日期 {observation}。'])
-    if as_of:
-        lines.append(f'估值证据截至 {as_of}。')
-    lines.extend(['', '| 情景 | 盈利年增长 | 年股数变化 | 终值 | 分配假设 | 反向终期每 ADS 盈利 |',
-                  '| --- | ---: | ---: | ---: | ---: | ---: |'])
-    for cell in ordered:
-        p = cell['parameters']
-        if 'terminal_pe' in p:
-            values = (_percent(p['earnings_growth']), _percent(p['annual_share_change']),
-                      _number(p['terminal_pe']) + ' 倍 PE', _percent(p['dividend_payout']))
-        else:
-            values = ('收入年增 ' + _percent(p.get('annual_revenue_growth')),
-                      '期末股数 ' + _number(p.get('year_five_ordinary_shares'), 0),
-                      _number(p.get('terminal_ev_ebit_multiple')) + ' 倍 EV/EBIT', '详见收据')
-        reverse_eps = cell['result'].get('implied_terminal_eps_no_dividends')
-        lines.append('| ' + ' | '.join((CASE_NAMES[cell['name']], *values,
-                                        _number(reverse_eps) + ' USD' if reverse_eps is not None else '未知')) + ' |')
-    anchored = next((c for c in ordered if c.get('terminal_anchor')), None)
-    if anchored:
-        a = anchored['terminal_anchor']
-        lines.extend(['', f'{a["period"]} 五年期美元国债收益率 {_percent(a["usd_five_year_cmt"])}。'])
-        if anchored.get('multiple_basis'):
-            lines.append(anchored['multiple_basis'])
-        if anchored.get('assumption_rationale'):
-            lines.append(anchored['assumption_rationale'])
-    cash = next((c['owner_cash_basis'] for c in ordered if c.get('owner_cash_basis')), None)
-    if cash:
-        risk = cash['risk_source']
-        lines.extend(['', f'风险资料版本 {risk["vintage"]}，成熟市场溢价 {_percent(risk["mature_equity_premium"])}，'
-                      f'中国风险溢价 {_percent(risk["china_equity_country_premium"])}。',
-                      '', '| 情景 | 稳态折现 | 稳态增长 | 现金转化 | 现金可取得 | 第六年现金代理 |',
-                      '| --- | ---: | ---: | ---: | ---: | ---: |'])
-        for cell in ordered:
-            p = cell['owner_cash_parameters']
-            result = cell['result']
-            lines.append(f'| {CASE_NAMES[cell["name"]]} | {_percent(p["terminal_discount_rate"])} | '
-                         f'{_percent(p["terminal_cash_growth"])} | {_percent(p["cash_conversion"])} | '
-                         f'{_percent(p["economic_access_fraction"])} | {_number(result["terminal_owner_cash_proxy_usd_per_ads"])} USD/ADS |')
-        lines.extend(['', '历史现金桥为集团人民币口径，每 ADS 按已核验换算作可比展示。',
-                      '', '| 财年末 | 经营现金流 | 生产性资产支出 | 商家应付款现金贡献 | 股权激励经济成本 | 现金代理 | 每 ADS 现金代理 | 转化率 |',
-                      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'])
-        for row in cash['annual_history']:
-            amounts = [_number(Decimal(row[k])/100_000_000) + ' 亿' for k in
-                       ('operating_cash_cny', 'productive_asset_cash_spend_cny', 'merchant_payables_cash_change_cny',
-                        'sbc_economic_cost_cny', 'owner_cash_proxy_cny')]
-            lines.append('| ' + ' | '.join((row['period'], *amounts, _number(row['owner_cash_proxy_per_ads_cny']) + ' 元',
-                                           _percent(row['conversion']))) + ' |')
-    base = next((c for c in ordered if c['name'] == 'base'), {})
-    if base.get('entry_price_sensitivity'):
-        lines.extend(['', '**基准情景的假设入场价敏感性**（非行情）'])
-        for row in base['entry_price_sensitivity']:
-            lines.append(f'- {_number(row["hypothetical_price_usd_per_ads"])} USD/ADS，条件年化 '
-                         f'{_percent(row["annualized_return"])}，反向所需盈利年增长 '
-                         f'{_percent(row["implied_earnings_growth_no_dividends"])}。')
+        lines.append(f'| {label} | {_percent(result["annualized_return"])} | {reverse} |')
+    anchor = next((c['terminal_anchor'] for c in cells.values() if c.get('terminal_anchor')), None)
+    if anchor:
+        lines.extend(['', f'{anchor["period"]} 五年期美元国债收益率为 {_percent(anchor["usd_five_year_cmt"])}。'])
+    lines.extend(['', '完整情景假设、历史现金桥、计算依据与敏感性见审计视图。'])
     return lines
+
+
+def _review_theme(section, role, scenario_label):
+    if section == '财务与现金兑现' and role == 'supporting':
+        return '盈利兑现', 0
+    if section == '机会成本':
+        return '现金质量与股东可取得性', 0
+    if section == '财务与现金兑现' or scenario_label == '基准':
+        return '现金质量与股东可取得性', 1
+    if section == '竞争与反证':
+        return '竞争与监管', 0
+    if section == '经营与商业模式':
+        return '竞争与监管', 1
+    return section, 2
 
 
 def render_reader(final, symbol=None, *, policy_bound=False):
     """Return reader Markdown plus a positional citation key for the audit view."""
     cells = final['scenario_cells']
     claims = final['claims']
-    citations, sections, reviews = {}, {}, []
-    # Every finalized bound paragraph is kept exactly once, with a possible
-    # sentence-boundary split to gather its existing review conditions.
+    citations, sections, reviews = {}, {}, {}
+    # Bound claims keep their substantive text. A short list selects from their
+    # existing review sentences; the audit view preserves the complete native text.
     for claim in claims:
         paragraph = claim['paragraph']
         body = paragraph['text']
@@ -131,6 +89,8 @@ def render_reader(final, symbol=None, *, policy_bound=False):
         scenario = claim['scenario_cell_refs']
         if claim['role'] == 'synthesis':
             section, label = '投资结论', ''
+            if body == '当前值得继续验证长期投资命题。以下是这个判断成立及改变的必要前提。':
+                body = '继续跟踪，验证长期投资命题。'
         elif 'Q6' in questions and questions <= {'Q6', 'Q7'}:
             section, label = '机会成本', ''
         elif scenario or 'Q4' in questions and 'Q3' not in questions:
@@ -147,19 +107,30 @@ def render_reader(final, symbol=None, *, policy_bound=False):
             section, label = '风险与限制', ''
         trigger = re.search(r'(?<=。)(?:下次财报|下一次财报|以下次财报|以方案规定的阶段性评估窗口)', body) if 'Q7' in questions else None
         if trigger:
-            reviews.append(f'**{label or section}**　{body[trigger.start():]} {marker}')
+            theme, priority = _review_theme(section, claim['role'], label)
+            previous = reviews.get(theme)
+            if previous is None or priority < previous[0]:
+                reviews[theme] = (priority, f'**{theme}**　{body[trigger.start():]} {marker}')
             body = body[:trigger.start()]
         text = f'**{label}情景**　{body}' if label else body
         sections.setdefault(section, []).append(f'{text} {marker}')
 
     title = f'# {symbol} 投资研究报告' if isinstance(symbol, str) and re.fullmatch(r'[A-Z0-9.:-]{1,24}', symbol) else '# 投资研究报告'
-    lines = [title, '', '## 投资结论']
+    lines = [title, '', '## 投资结论', '']
+    decision = (final.get('scenario_decision_review') or {}).get('incremental_capital')
+    if decision in CAPITAL:
+        lines.extend([f'**{CAPITAL[decision]}**', ''])
     if '投资结论' not in sections:
         lines.append('综合投资判断尚未闭合。')
     lines.extend(sections.get('投资结论', []))
-    decision = (final.get('scenario_decision_review') or {}).get('incremental_capital')
-    if decision in CAPITAL:
-        lines.extend(['', CAPITAL[decision]])
+    base = next((c for c in cells.values() if c['name'] == 'base'), None)
+    if base:
+        price = base['inputs'].get('price_usd_per_ads')
+        date = (base.get('receipts', {}).get('price') or {}).get('period')
+        if price is not None and date:
+            lines.extend(['', f'历史观察价 **{_number(price)} USD/ADS**（{date}，非实时）。'])
+        lines.extend(['', f'基准情景五年条件年化 **{_percent(base["result"]["annualized_return"])}**，'
+                      f'研究门槛 **{_percent(base["required_return"])}**。'])
     for heading in ('投资命题', '经营与商业模式', '竞争与反证', '财务与现金兑现', '风险与限制'):
         if heading in sections:
             lines.extend(['', f'## {heading}', '', '\n\n'.join(sections[heading])])
@@ -187,7 +158,11 @@ def render_reader(final, symbol=None, *, policy_bound=False):
         lines.extend(['', '同币种、期限与风险可比的机会成本论证仍待核验。'])
     lines.extend(['', '## 观察指标与复核条件', ''])
     if reviews:
-        lines.append('\n\n'.join(reviews))
+        priorities = ('盈利兑现', '现金质量与股东可取得性', '竞争与监管')
+        themes = [theme for theme in priorities if theme in reviews]
+        themes.extend(theme for theme in reviews if theme not in themes)
+        lines.append('\n\n'.join(reviews[theme][1] for theme in themes[:3]))
+        lines.extend(['', '其余复核条件随原文保留在审计视图。'])
     elif any('Q7' in claim['question_ids'] for claim in claims):
         lines.append('复核条件见各项已核验论证。')
     else:
