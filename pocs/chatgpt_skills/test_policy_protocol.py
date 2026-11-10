@@ -104,3 +104,30 @@ def test_colocated_policy_uses_original_contract_in_real_mcp_protocol(shared,mon
             assert value['policy_reference']['bundle_sha256']==digest(bundle)
             assert not value['execution_authorized']
     asyncio.run(run())
+
+
+def test_explicit_risk_snapshot_uses_existing_readonly_tool(active, monkeypatch):
+    cfg = settings(None, None)
+    cfg.e1_db_path = None
+    cfg.e1_enable_writes = False
+    cfg.prepare_config = None
+    calls = []
+
+    def read(self, operation, arguments):
+        calls.append((operation, arguments))
+        return {"concentration": {"status": "CONDITIONAL_RISK", "execution_authorized": False}}
+
+    monkeypatch.setattr(BusinessClient, 'call', read)
+
+    async def run():
+        async with Client(create_server(cfg), mode='legacy') as client:
+            for args in ({'scope':'portfolio', 'snapshot_id':'asset-view:v1:1'},
+                         {'scope':'risk', 'snapshot_id':'../invalid'},
+                         {'scope':'risk', 'symbol':'AAPL', 'snapshot_id':'asset-view:v1:1'}):
+                assert (await client.call_tool('get_investment_policy_context', args)).is_error
+            args = {'scope':'risk', 'snapshot_id':'asset-view:v1:1'}
+            result = await client.call_tool('get_investment_policy_context', args)
+            assert not result.is_error
+            assert calls == [('get_investment_policy_context', args)]
+
+    asyncio.run(run())

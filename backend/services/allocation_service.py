@@ -53,7 +53,7 @@ def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
         return build_allocation_snapshot(positions, segment="投资")
 
 
-def _assembled_policy_assets(portfolio_id, snapshot_id=None):
+def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None):
     """Server-owned read only: pin policy, original stored U1 bytes and A-min.
 
     Never call prepare, live Portfolio, FX providers or broker synchronization.
@@ -80,8 +80,9 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
         pinned.ensure_current()
         try:
             contract = os.environ.get('WEALTHPILOT_SQLITE_CONTRACT')
-            view = (asset_views.load_view(DB_PATH, portfolio_id, snapshot_id, contract) if snapshot_id
-                    else asset_views.latest_view(DB_PATH, portfolio_id, contract))
+            view = frozen_view if frozen_view is not None else (
+                asset_views.load_view(DB_PATH, portfolio_id, snapshot_id, contract) if snapshot_id
+                else asset_views.latest_view(DB_PATH, portfolio_id, contract))
         except (OSError, ValueError) as exc:
             if (isinstance(exc, ValueError) and str(exc) not in asset_views.ERRORS
                     and not str(exc).startswith('SHARED_')):
@@ -171,6 +172,40 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
             yield session
             session.ensure_current()
     return assembled()
+
+
+def project_frozen_concentration(portfolio_id, view):
+    """Original Allocation qualification for an explicitly selected server-owned U1 view."""
+    from backend.services.investable_assets import project_investable_assets
+    from backend.services.investment_policy.concentration_adapter import allocation_concentration
+    from backend.services.investment_policy.contracts import digest
+    from backend.services.investment_policy.parser import PolicyError
+    from backend.services.investment_policy.runtime import current
+    from backend.services.investment_policy.store import clock, utc_now
+
+    session = current(portfolio_id)
+    session.ensure_current()
+    if session.mode != 'POLICY_ACTIVE':
+        return {"status": "UNKNOWN", "issues": ["POLICY_CONTEXT_UNAVAILABLE"], "execution_authorized": False}
+    try:
+        with _assembled_policy_assets(portfolio_id, view["snapshot_id"], frozen_view=view) as assembled:
+            return assembled.allocation_concentration
+    except PolicyError as error:
+        reason = str(error)
+        if reason not in {"POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED", "POLICY_BUCKET_CLASSIFICATION_UNVERIFIED"}:
+            raise
+    at = clock(utc_now())
+    projection = project_investable_assets(view, portfolio_id=portfolio_id, snapshot_id=view["snapshot_id"],
+                                            snapshot_sha256=digest(view), at=at)
+    # A failed Allocation qualification cannot be promoted by the research view.
+    projection = projection.model_copy(update={"status": "UNKNOWN"})
+    result = allocation_concentration(view, projection=projection, session=session,
+                                      at=at, classified_assets=None)
+    result["issues"] = sorted(set(result["issues"]) | {reason, "DENOMINATOR_UNVERIFIED"})
+    result["assumptions"] = ["EXISTING_FROZEN_SOURCE_ONLY", "NO_QUALIFIED_DENOMINATOR",
+                             "OBSERVED_AMOUNTS_DO_NOT_PROVE_PORTFOLIO_RISK"]
+    session.ensure_current()
+    return result
 
 
 def get_targets() -> List[AssetTarget]:
