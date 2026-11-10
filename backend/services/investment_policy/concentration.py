@@ -73,6 +73,15 @@ def _btc_identity(ref, row, quality):
                                         ":US_DIRECT_EQUITY", ":CN_DIRECT_EQUITY")) for r in refs))
 
 
+def _direct_conflict(ref, issuer, coverage, assignment):
+    expected = "china" if ISSUERS[issuer][1] == "CN" else "us_direct"
+    opposite_claims = {"US_EQUITY_ETF", "US_DIRECT_EQUITY" if expected == "china" else "CN_DIRECT_EQUITY"}
+    refs = coverage.get("accounts", {}).get("evidence_refs", [])
+    return (bool(assignment and assignment["bucket"] != expected)
+            or any(f"{ref}:{fact}" in refs for fact in opposite_claims)
+            or any(ref in coverage.get(domain, {}).get("asset_refs", []) for domain in ("gold", "btc")))
+
+
 def _issuer_rules(snapshot):
     rules = [r for r in snapshot.rules if r.metric == "issuer_weight"
              and r.scope == "ALL_INVESTABLE_ASSETS_LOOKTHROUGH" and r.operator in {"gt", "gte"}]
@@ -162,7 +171,16 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
     coverage_issues = set()
     unknown_cny = ZERO
     btc_amount = ZERO
-    btc_coverage = quality.get("investable_scope_evidence", {}).get("coverage", {}).get("btc", {})
+    scope = quality.get("investable_scope_evidence", {})
+    coverage = scope.get("coverage", {})
+    btc_coverage = coverage.get("btc", {})
+    expires_at = None
+    if denominator is not None:
+        source_times = [view["captured_at"], scope["as_of"]]
+        source_times += [coverage[key]["as_of"] for key in ("accounts", "manual_assets", "pensions", "gold", "btc", "deduplication")]
+        source_times += [item["account_synced_at"] for item in quality.get("investable_accounts", quality.get("accounts", []))]
+        expires_at = min(clock(quality["investable_owner_evidence"]["valid_until"]),
+                         min(map(clock, source_times)) + timedelta(minutes=5))
     btc_complete = (denominator is not None and btc_coverage.get("status") in {"ABSENT", "PRESENT"})
     principal = ZERO
     for item in projection.assets:
@@ -175,29 +193,31 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
         if amount is None or not amount.is_finite() or amount < 0:
             raise ValueError("CONCENTRATION_INVALID_AMOUNT")
         principal += amount
+        position = ref.startswith("position:")
+        if expires_at is not None and position:
+            source_field = "cash_as_of" if row.get("vehicle_type") == "CASH" else "positions_as_of"
+            expires_at = min(expires_at, clock(row[source_field]) + timedelta(minutes=5))
         if not amount:
             continue
-        if classified_assets is not None:
-            if ref not in classified_assets:
-                coverage_issues.add("B3_CLASSIFICATION_UNVERIFIED")
-                unknown_cny += amount
-                if ref in btc_coverage.get("asset_refs", []):
-                    btc_complete = False
-                continue
-            if Decimal(classified_assets[ref]["amount_cny"]) != amount:
-                raise ValueError("CONCENTRATION_CLASSIFICATION_AMOUNT_MISMATCH")
-        if _btc_identity(ref, row, quality):
+        assignment = classified_assets.get(ref) if classified_assets is not None else None
+        if classified_assets is not None and assignment is None:
+            coverage_issues.add("B3_CLASSIFICATION_UNVERIFIED")
+        if assignment and Decimal(assignment["amount_cny"]) != amount:
+            raise ValueError("CONCENTRATION_CLASSIFICATION_AMOUNT_MISMATCH")
+        if ((classified_assets is None or (assignment and assignment["bucket"] == "btc"))
+                and _btc_identity(ref, row, quality)):
             btc_amount += amount
             continue
         if ref in btc_coverage.get("asset_refs", []):
             btc_complete = False
-        position = ref.startswith("position:")
         verified = position and _canonical(row)
         if ((verified and row.get("vehicle_type") == "CASH" and row.get("economic_asset_class") == "CASH")
                 or (not position and row.get("item_type") == "bank_cash")):
             continue
         issuer = direct_issuer(row) if verified else None
-        if issuer:
+        # Budget eligibility is independent of the canonical issuer. Preserve
+        # a proven breach when B3 cannot assign a bucket, unless facts conflict.
+        if issuer and not _direct_conflict(ref, issuer, coverage, assignment):
             direct[issuer] += amount
             members[issuer].append({"source_ref": ref, "symbol": row.get("symbol"),
                                     "security_symbol": row.get("security_symbol") or row.get("symbol"),
@@ -208,7 +228,9 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                 and (row.get("original_currency") or row.get("currency")) == "USD"):
             symbol = row.get("symbol")
             evidence = etf_evidence.get(symbol)
-            if row.get("security_symbol") not in (None, symbol) or row.get("security_currency") not in (None, "USD", "CNY"):
+            if ((classified_assets is not None and (not assignment or assignment["bucket"] != "us_etf"))
+                    or row.get("security_symbol") not in (None, symbol)
+                    or row.get("security_currency") not in (None, "USD", "CNY")):
                 evidence = None
             status = (evidence.status(snapshot_at=clock(view["captured_at"]), at=at,
                                       expected_sha256=evidence_pins.get(symbol),
@@ -217,6 +239,8 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                       if evidence is not None and evidence.symbol == symbol else "UNAVAILABLE")
             resolved = ZERO
             if status == "FRESH":
+                if expires_at is not None:
+                    expires_at = min(expires_at, evidence.valid_until)
                 for constituent in evidence.rows:
                     underlying = direct_issuer({"symbol": constituent.symbol, "currency": constituent.currency,
                                                "economic_asset_class": "EQUITY", "vehicle_type": "COMMON_STOCK"})
@@ -272,7 +296,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
     btc_risk, btc_hits = _risk(btc_rules, btc_amount, denominator, btc_complete)
     return {
         "snapshot_id": view["snapshot_id"], "snapshot_sha256": projection.snapshot_sha256,
-        "snapshot_at": view["captured_at"], "evaluated_at": at.isoformat(),
+        "snapshot_at": view["captured_at"], "evaluated_at": at.isoformat(), "expires_at": expires_at,
         "policy_reference": reference.model_dump(), "issuer_mapping_version": VERSION,
         "classification_sha256": digest(classified_assets) if classified_assets is not None else None,
         "denominator_cny": denominator, "status": "CONDITIONAL_RISK" if denominator is None else "DIAGNOSTIC",

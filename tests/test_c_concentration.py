@@ -290,6 +290,7 @@ def test_older_projection_cannot_carry_expired_position_qualification(frozen, ac
     row["positions_as_of"] = (AT-timedelta(seconds=299)).isoformat()
     receipt = project(frozen)
     assert receipt.status == "QUALIFIED"
+    assert run(frozen, active, projection=receipt)["expires_at"] == AT+timedelta(seconds=1)
     later = AT+timedelta(seconds=2)
     assert project(frozen, at=later).status == "UNKNOWN"
     value = run(frozen, active, at=later, projection=receipt)

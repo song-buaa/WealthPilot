@@ -152,7 +152,7 @@ test('ACTIVE concentration retains an 8% lower-bound review with missing upper b
         as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
         denominator_cny: '1000', policy_reference: { bundle_sha256: 'f'.repeat(64) },
         classes: {}, focus: [], execution_authorized: false,
-        concentration: { status: 'DIAGNOSTIC', unknown_coverage: true, issues: ['ETF_LOOKTHROUGH_INCOMPLETE'],
+        concentration: { status: 'DIAGNOSTIC', expires_at: new Date(Date.now() + 3000).toISOString(), unknown_coverage: true, issues: ['ETF_LOOKTHROUGH_INCOMPLETE'],
           issuers: { 'fixture-alphabet': { issuer_name: 'Alphabet Inc.', direct_pct: '4', indirect_known_pct: '4',
             known_lower_bound_pct: '8', proven_upper_bound_pct: null, risk_status: 'HUMAN_REVIEW' } } },
       } } })
@@ -165,5 +165,8 @@ test('ACTIVE concentration retains an 8% lower-bound review with missing upper b
   await expect(alpha).toContainText('8.00%')
   await expect(alpha).toContainText('—')
   await expect(alpha).toContainText('HUMAN_REVIEW')
+  await expect(risk).toContainText('发行人集中度证据已到期')
+  await expect(alpha).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '当前与目标配置' })).toBeVisible()
   expect(writes).toBe(0)
 })

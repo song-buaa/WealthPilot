@@ -22,6 +22,7 @@ interface Hierarchy {
 
 interface Concentration {
   status: string
+  expires_at?: string | null
   unknown_coverage?: boolean
   issues: string[]
   issuers?: Record<string, {
@@ -105,7 +106,9 @@ function ConcentrationRisk({ value }: { value: Concentration }) {
   return <section aria-label="发行人集中度">
     <h4>发行人集中度</h4>
     {(value.status === 'UNKNOWN' || value.unknown_coverage) && <p role="status">
-      穿透覆盖尚未证实完整。已知下限可以触发复核，缺少上界时无法判定安全。
+      {value.issues.includes('CONCENTRATION_EVIDENCE_EXPIRED')
+        ? '发行人集中度证据已到期。'
+        : '穿透覆盖尚未证实完整。已知下限可以触发复核，缺少上界时无法判定安全。'}
     </p>}
     <table>
       <thead><tr><th>发行人</th><th>直接</th><th>间接已知</th><th>已知下限</th><th>证实上界</th><th>风险</th></tr></thead>
@@ -126,6 +129,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let concentrationTimer: ReturnType<typeof setTimeout> | undefined
     fetch('/api/allocation/snapshot').then(async response => {
       const body = await response.json()
       if (!response.ok) throw new Error(typeof body.detail === 'string'
@@ -137,13 +141,22 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
       const remaining = Date.parse(diagnostic.expires_at) - Date.now()
       if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('ASSET_VIEW_EXPIRED')
       if (!cancelled) {
+        const expires = diagnostic.concentration?.expires_at
+        const expiredRisk = { status: 'UNKNOWN', issues: ['CONCENTRATION_EVIDENCE_EXPIRED'] }
+        if (expires) {
+          const riskRemaining = Date.parse(expires) - Date.now()
+          if (!Number.isFinite(riskRemaining) || riskRemaining <= 0) diagnostic.concentration = expiredRisk
+          else if (riskRemaining < remaining) concentrationTimer = setTimeout(() => {
+            setValue(current => current && { ...current, concentration: expiredRisk })
+          }, riskRemaining)
+        }
         setValue(diagnostic); setError('')
         timer = setTimeout(() => { setValue(null); setError('ASSET_VIEW_EXPIRED') }, remaining)
       }
     }).catch((reason: unknown) => {
       if (!cancelled) { setValue(null); setError(reason instanceof Error ? reason.message : 'ALLOCATION_UNAVAILABLE') }
     })
-    return () => { cancelled = true; clearTimeout(timer) }
+    return () => { cancelled = true; clearTimeout(timer); clearTimeout(concentrationTimer) }
   }, [policySha])
   if (error) return <div role="alert">当前配置资格 UNKNOWN：{error}。需要已有合格资产快照及 Owner 用途、覆盖、养老金和 FX 证据；本读取不会触发同步，不提供调仓金额。</div>
   if (!value) return <p>正在读取已冻结的组合配置…</p>
