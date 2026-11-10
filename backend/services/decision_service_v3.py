@@ -462,6 +462,7 @@ async def _run_chat_stream_v3(
 
         if analysis_only and (analysis_options or {}).get("single_position_research") and plan_out.route == "position_single":
             exec_out.analysis_mode = "l1_research"
+            exec_out.enable_l1_research_v2 = analysis_options.get("enable_l1_research_v2") is True
             exec_out.research_question = (analysis_options or {}).get("research_question") or user_input
             exec_out.research_history = (analysis_options or {}).get("research_history") or []
 
@@ -508,6 +509,10 @@ async def _run_chat_stream_v3(
 
         if stage_callback is not None:
             stage_callback(plan_out, exec_out, stage='reviewing_complete')
+
+        research_run = getattr(expr_out, 'research_v2', None)
+        if research_run is not None and (review_out.action != 'pass' or not review_out.hard_validation_passed):
+            research_run.surviving_keys = set()
 
         if review_out.action == "retry":
             yield _sse("validator_warning", {

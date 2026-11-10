@@ -216,21 +216,26 @@ def project(assessment):
     return groups, diagnostics
 
 
-def messages(assessment, question, *, policy, holding, history=()):
+def messages(assessment, question, *, policy, holding, history=(), research_run=None):
     from backend.services.market_data.output_policy import explanation_prompt
     groups, diagnostics = project(assessment)
-    # Reuse the actual selected facts in the original binding/safety contract
-    # once, without duplicating their serialized payload. Final qualification
-    # always uses the original complete assessment.
-    context_records=[r for key in ('financial_operating_cashflow','competition_counterevidence','valuation_inputs','technical_events') for r in groups[key]]
-    contract = explanation_prompt(assessment,context_records=context_records,include_data=False)
-    contract = contract.replace('保留原决策JSON，同时新增professional_explanation数组','仅输出professional_explanation数组')
-    system = ('你是原PEER的L1单标专业投研Expressing。只返回JSON对象professional_explanation。'
-        '不生成旧DecisionResult、交易参数或订单。经营、竞争、投资逻辑、风险和复核条件优先；'
-        '有退出意图时讨论exit_rationale；技术证据仅在相关且有资格时解释。'
-        '持仓事实、用户假设、历史事实、条件估值和未来推论必须分开。'
-        'symbol为本包共同的已核验证券主体；record_quality是本包各记录由原Owner授予的共同引用质量，不可升级L2–L4；source_ref引用sources时钟；dependency_set引用dependencies；context_id只是本包内部关联，不是合格引用。合格引用必须复制完整evidence_ref。numeric_fields列出可绑定字段；values是原值，单位/币种见同行，展示数字由服务端替换。'
-        '不得自行升级资格或重算数字。条件情景不是公允价值或未来事实。\n'+contract)
+    if research_run is not None:
+        from .l1_research_v2 import PROMPT
+        research_run.prepare(groups, assessment)
+        system = PROMPT
+    else:
+        # Reuse the actual selected facts in the original binding/safety contract
+        # once, without duplicating their serialized payload. Final qualification
+        # always uses the original complete assessment.
+        context_records=[r for key in ('financial_operating_cashflow','competition_counterevidence','valuation_inputs','technical_events') for r in groups[key]]
+        contract = explanation_prompt(assessment,context_records=context_records,include_data=False)
+        contract = contract.replace('保留原决策JSON，同时新增professional_explanation数组','仅输出professional_explanation数组')
+        system = ('你是原PEER的L1单标专业投研Expressing。只返回JSON对象professional_explanation。'
+            '不生成旧DecisionResult、交易参数或订单。经营、竞争、投资逻辑、风险和复核条件优先；'
+            '有退出意图时讨论exit_rationale；技术证据仅在相关且有资格时解释。'
+            '持仓事实、用户假设、历史事实、条件估值和未来推论必须分开。'
+            'symbol为本包共同的已核验证券主体；record_quality是本包各记录由原Owner授予的共同引用质量，不可升级L2–L4；source_ref引用sources时钟；dependency_set引用dependencies；context_id只是本包内部关联，不是合格引用。合格引用必须复制完整evidence_ref。numeric_fields列出可绑定字段；values是原值，单位/币种见同行，展示数字由服务端替换。'
+            '不得自行升级资格或重算数字。条件情景不是公允价值或未来事实。\n'+contract)
     system += ('\n主题记录如使用columns/rows，则每行按相同列名读取；null_cells=absent_field表示该列未知/未提供。'
                'evidence_ref原文仍是唯一引用，列号及context_id均不是证据引用或数字字段名。')
     policy=deepcopy(policy)

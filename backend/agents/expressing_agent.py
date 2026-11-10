@@ -629,9 +629,12 @@ class ExpressingAgent:
             source='original_loaded_data',
             stored_reference={k:getattr(target,k,None) for k in ('ticker','name','quantity','currency')},
             execution_authorized=False)
+        if getattr(executed, 'enable_l1_research_v2', False):
+            from backend.services.market_data.l1_research_v2 import ResearchRun
+            out.research_v2 = ResearchRun()
         try:
             payload, diagnostic = messages(assessment, executed.research_question,
-                                          policy=policy, holding=holding, history=executed.research_history)
+                                          policy=policy, holding=holding, history=executed.research_history, research_run=out.research_v2)
             executed.research_context_diagnostics = diagnostic
             logger.info('l1_context_preflight %s', json.dumps(diagnostic,ensure_ascii=True))
             response = await asyncio.to_thread(lambda:chat_completion(get_client(),
@@ -652,7 +655,9 @@ class ExpressingAgent:
         pure = (assessment.get('research_intent') or {}).get('no_holding_research')
         decision = ('watch' if pure else 'exit' if objective=='exit' else 'trim' if objective in {'reduce','trim'} else
                     'buy_init' if loaded.is_new_entry else 'hold')
-        out.prompt_template_id='l1_professional_research.v1'
+        if out.research_v2 is not None:
+            out.research_v2.ingest(parsed)
+        out.prompt_template_id='l1_professional_research.v2' if out.research_v2 is not None else 'l1_professional_research.v1'
         out.mode='structured'
         out.structured_payload=dict(decisionType=decision, is_new_entry=bool(loaded.is_new_entry and not pure),
             professional_explanation=parsed.get('professional_explanation'))

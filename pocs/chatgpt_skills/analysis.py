@@ -266,6 +266,7 @@ def deadline_result(value):
     result.status='unavailable'
     result.conclusion='研究期限已到，专业结果未按时交付；未创建交易。'
     result.professional_result={}
+    result.evidence.pop('l1_research_v2', None)
     result.professional_analysis_complete=False
     result.missing_stages=['timely_delivery']
     result.issues=sorted(set(result.issues+['ANALYSIS_TIMEOUT']))
@@ -286,7 +287,7 @@ def _finalize_research_completion(result, scenario):
 
 @observed_result
 @budgeted_analysis(on_expired=deadline_result)
-async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
+async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None, research_delivery=None):
     from backend.services.investment_policy.runtime import current as policy_current, bind as policy_bind
     from backend.services.investment_policy.parser import PolicyError
     from backend.services.investment_policy.consumers import finalize_output
@@ -299,14 +300,19 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 session.attach_asset_view(asset_view)
             if session.mode=='POLICY_ACTIVE' and arguments.get('target_versions'):
                 raise PolicyError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
+            if research_delivery is None:
+                research_delivery = {}
             result=await _analyze_owned(path,portfolio_id,scenario,arguments,contract=contract,synthetic=synthetic,
-                worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic)
+                worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic,
+                research_delivery=research_delivery)
             session.ensure_current()
             if session.mode=='POLICY_ACTIVE':
                 from backend.agents.contracts import ExpressionOutput
                 out=ExpressionOutput(structured_payload=result.get('professional_result',{}).get('analysis_result') or {})
                 # The result below is owned by this analysis, not a model-provided diagnostic.
                 out.explanation_diagnostics = out.structured_payload.get('explanationDiagnostics', {})
+                if result['status'] != 'unavailable' and 'l1_research_v2' in result.get('evidence', {}):
+                    out.research_v2 = research_delivery.get('run')
                 executed=SimpleNamespace(loaded_data=None,analysis_mode='l1_research' if scenario=='analyze_position' else '',position_evidence=result.get('evidence',{}).get('position_evidence'),
                     portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
                 with post_model_stage('adapter_active_finalization', out):
@@ -318,6 +324,8 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                     reasons=[x for x in result.get('issues',[]) if x in {'ANALYSIS_TIMEOUT','L1_CONTEXT_BUDGET_EXCEEDED','L1_EXPRESSION_TRUNCATED','L1_EXPRESSION_TIMEOUT','PEER_EXPRESSION_FAILED'}]
                     result['conclusion']=('研究未完成；实际原因：'+', '.join(reasons)+'。\n' if reasons and not result.get('professional_analysis_complete') else '')+out.chat_answer
                     result['professional_result']={'analysis_result':out.structured_payload}
+                    if out.research_v2_final is not None:
+                        result['evidence']['l1_research_v2'] = out.research_v2_final
                 session.ensure_current()
             _finalize_research_completion(result, scenario)
             return result
@@ -326,7 +334,7 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 queried_at=datetime.now(timezone.utc).isoformat(),conclusion='政策版本或资格无法核验；未创建交易。').model_dump(mode='json')
 
 
-async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
+async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None, research_delivery=None):
     request=AnalysisRequest.model_validate(arguments)
     if request.snapshot_id and asset_view is None:
         from app.asset_views import load_view, frozen_input, public_view
@@ -335,7 +343,8 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             return await analyze(fixed_path, portfolio_id, scenario, arguments, synthetic=synthetic,
                                  worker_process=worker_process, asset_view=public_view(view,
                                      symbol=request.symbol if scenario == 'analyze_position' else None,
-                                     analysis_scope=request.analysis_scope),async_l1=async_l1,deadline_monotonic=deadline_monotonic)
+                                     analysis_scope=request.analysis_scope),async_l1=async_l1,deadline_monotonic=deadline_monotonic,
+                                 research_delivery=research_delivery)
     conversation='mcp-analysis-'+uuid.uuid4().hex
     result=AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[],
                           queried_at=datetime.now(timezone.utc).isoformat(),conclusion='')
@@ -400,6 +409,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
                         conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
                             analysis_options=dict(single_position_research=scenario=='analyze_position',requested_symbol=request.symbol,
+                                enable_l1_research_v2=async_l1 and os.getenv('WEALTHPILOT_L1_RESEARCH_V2') == '1',
                                 research_question=request.question,
                                 target_versions=[t.model_dump(mode="json") for t in request.target_versions],
                                 research_context=request.research_context.model_dump() if request.research_context else None,
@@ -487,6 +497,10 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             if result.status != 'unavailable':
                 result.conclusion = expressed.chat_answer
                 result.professional_result['analysis_result'] = encode(expressed.structured_payload)
+                if expressed.research_v2_final is not None:
+                    result.evidence['l1_research_v2'] = encode(expressed.research_v2_final)
+                    if research_delivery is not None:
+                        research_delivery['run'] = expressed.research_v2
         from backend.services.investment_policy.runtime import current as policy_current
         if scenario=='review_portfolio' and policy_current(portfolio_id).mode=='LEGACY':
             from backend.services.allocation_scenarios import target_context

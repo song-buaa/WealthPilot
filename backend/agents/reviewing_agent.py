@@ -153,7 +153,8 @@ class ReviewingAgent:
 
             # The 4.2 explanation contract is deterministic. An old Reviewer
             # score cannot convert a missing/filtered explanation into success.
-            if any(rule.startswith("professional_explanation_") for rule in out.failed_rules):
+            if (getattr(expression_output, "research_v2", None) is not None
+                    or any(rule.startswith("professional_explanation_") for rule in out.failed_rules)):
                 out.score = 0.0
                 out.action = "retry"
                 out.jump_step = "expressing"
@@ -232,6 +233,10 @@ class ReviewingAgent:
                 out.failed_rules.append("professional_explanation_missing_with_usable_evidence")
             elif not paragraphs:
                 out.warnings.append("professional_explanation_unavailable_no_usable_evidence")
+            if getattr(expression_output, 'research_v2', None) is not None:
+                checked = expression_output.research_v2.qualify(assessment)
+                if checked['claims'] != expression_output.research_v2_final['claims']:
+                    out.failed_rules.append("professional_explanation_typed_claim_recheck_failed")
             out.hard_validation_passed = not out.failed_rules
             return
 

@@ -82,7 +82,7 @@ class BusinessClient:
                     self.close()
                     record(diagnostic(identifier, stage)) if identifier else None
                     env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "TIKTOKEN_CACHE_DIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
-                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS if k in os.environ})
+                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS | {"WEALTHPILOT_L1_RESEARCH_V2"} if k in os.environ})
                     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
                     env.update({k:os.environ[k] for k in POLICY_ENV_KEYS if k in os.environ})
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",

@@ -156,15 +156,26 @@ def finalize_output(plan, executed, expressed):
         llm_result=getattr(expressed,'llm_result',None),raw_text=getattr(expressed,'raw_text',''))
     explanations, diagnostics = _explanations_with_trace(explanation_input,combined)
     expressed.explanation_diagnostics = diagnostics
+    research_run = getattr(expressed, "research_v2", None)
+    fresh_position = None
     fact_text=[]
     conditional_results=[]
     for assessment in assessments:
-        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations),
+        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations) and research_run is None,
             compact=getattr(executed,'analysis_mode','')=='l1_research')
         if retained:
             fact_text.append(retained[2])
+            if research_run is not None and len(assessments) == 1:
+                fresh_position = retained[0]
             if retained[0].get('conditional_valuation'):
                 conditional_results.append(retained[0]['conditional_valuation'])
+    research_text = ''
+    if research_run is not None:
+        from backend.services.market_data.output_policy import project_research_v2
+        # Qualify all typed claims against the retained, freshly verified facts.
+        explanations, diagnostics, research_text = project_research_v2(expressed, fresh_position or {})
+        conditional = expressed.research_v2_final['conditional_valuation']
+        conditional_results = [conditional] if conditional else []
     expressed.structured_payload = {'mode':'policy_qualified_research','policy_context':value,
         'policy_reference':value.get('policy_reference'), 'execution_authorized':False,
         'professional_explanation':explanations,'explanationDiagnostics':diagnostics,
@@ -173,7 +184,10 @@ def finalize_output(plan, executed, expressed):
         'research_delivery_status':'DELIVERED' if explanations else 'INCOMPLETE',
         'policy_precision':'CANNOT_QUANTIFY'}
     expressed.chat_answer = ('\n\n'.join(fact_text) if fact_text else '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')
-    expressed.chat_answer += render_explanation(explanations)
+    if research_text:
+        expressed.chat_answer = research_text
+    else:
+        expressed.chat_answer += render_explanation(explanations)
     expressed.raw_text=''
     loaded = getattr(executed,'loaded_data',None)
     if loaded:

@@ -346,9 +346,9 @@ def _technical_periods(record):
     return set()
 
 
-def explanation_projection(candidate, assessment):
+def explanation_projection(candidate, assessment, *, qualified_index=None):
     """Return the safe projection and bounded, content-free rejection diagnostics."""
-    index = _evidence_index(assessment)
+    index = _evidence_index(assessment) if qualified_index is None else qualified_index
     rejected = Counter()
     text_rejections = Counter()
     result = []
@@ -487,10 +487,30 @@ def prompt_context(assessment):
         ensure_ascii=False,default=str)+explanation_prompt(assessment)
 
 
+def project_research_v2(output, assessment):
+    """Reapply the same owner gates to the private request-local research state."""
+    from .l1_research_v2 import report
+    from copy import deepcopy
+    final = output.research_v2.qualify(assessment, narrow=True)
+    output.research_v2_final = final
+    paragraphs = [claim['paragraph'] for claim in final['claims'][:6]]
+    diagnostics = deepcopy(output.explanation_diagnostics)
+    _, legacy_projection = explanation_projection(paragraphs, assessment)
+    diagnostics.setdefault('generation', legacy_projection)
+    diagnostics['final'] = legacy_projection
+    output.explanation_diagnostics = diagnostics
+    text = report(final) if paragraphs else ''
+    return paragraphs, diagnostics, text
+
+
 def enforce(output, assessment, *, compact_incomplete=False):
     """Model structure/confidence cannot grant qualification to itself."""
     payload = dict(output.structured_payload or {})
-    explanations, diagnostics = _explanations_with_trace(output, assessment)
+    research_text = ''
+    if getattr(output, 'research_v2', None) is not None:
+        explanations, diagnostics, research_text = project_research_v2(output, assessment)
+    else:
+        explanations, diagnostics = _explanations_with_trace(output, assessment)
     prior = payload.get("confidence")
     try:
         prior = min(max(float(prior),0),1)
@@ -510,15 +530,20 @@ def enforce(output, assessment, *, compact_incomplete=False):
                    is_new_entry=payload.get("is_new_entry") is True and not pure_research)
     from backend.services.position_analysis import exit_plan, report
     plan=exit_plan(assessment)
-    if explanations or not compact_incomplete:
+    if research_text:
+        output.chat_answer = research_text
+    elif explanations or not compact_incomplete:
         output.chat_answer=report(assessment,plan,decision)
     else:
         from backend.services.market_data.l1_context import compact_facts_text
         output.chat_answer=compact_facts_text(assessment)
-    output.chat_answer += render_explanation(explanations)
+    if not research_text:
+        output.chat_answer += render_explanation(explanations)
     output.raw_text=""
     payload["exitPlan"]=plan
-    payload['conditionalValuation']=assessment.get('conditional_valuation')
+    payload['conditionalValuation']=(output.research_v2_final['conditional_valuation']
+                                     if getattr(output, 'research_v2_final', None) is not None
+                                     else assessment.get('conditional_valuation'))
     payload["professional_explanation"] = explanations
     payload["explanationDiagnostics"] = diagnostics
     payload.update(confidence=min(prior,assessment["confidence_ceiling"]),

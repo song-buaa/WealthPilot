@@ -254,6 +254,9 @@ class ExpressionOutput:
     structured_payload: dict = field(default_factory=dict)
     """完整结构化输出（除 chat_answer 外的所有 JSON 字段）。"""
 
+    research_v2: Optional[object] = None  # In-process state only, never serialized.
+    research_v2_final: Optional[dict] = None
+
     explanation_diagnostics: dict = field(default_factory=dict)
     """Server-owned stage/count/reason diagnostics; never model text or asset context."""
 

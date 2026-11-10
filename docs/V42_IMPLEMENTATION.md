@@ -766,3 +766,13 @@ LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/0001104
 `stage_diagnostics` 将模型生成与最终交付分开：Sol已completed时，不再仅因整体`ANALYSIS_TIMEOUT`将Expressing反写为failed；模型返回不代表JSON/证据审核通过，原解析/过滤失败仍保留。Review已完成后的整体超时标为`postprocessing=timeout`、`delivery=timeout`，最终专业完成仍要求合格解释非空。facts-only、600/660秒、Sol Medium/32768、Context Pack约40000参考Token及PR96 Job v2/report v1持久化、幂等、恢复合同不变。
 
 验证采用冻结PDD来源、MockTransport模型、合成ACTIVE及原PEER/Reviewing/Evidence/ACTIVE/AnalysisResult/存储路径；不是本次生产请求重放或真实模型研究评分。诊断旧基线Review后人工分块221.139秒、17427块、后置17442次政策检查；修复后的同口径墙钟与计数以PR交付收据为准。生产约323秒的精确归因仍待已有安全事件，不将离线计时充当生产实测。无新业务能力或Owner入口，Registry无需更新；没有生产部署或付费研究授权。
+
+## L1 v2 P1-A/P1-B 本地候选（2026-11-10）
+
+依据冻结 PRD v1.0 SHA256 `8efa5b6fb5364118dce2d52ab2509b0193ab0fcabc2dc1474e84ae0b4ea261d4`。`WEALTHPILOT_L1_RESEARCH_V2=1` 只在原单标异步 L1 入口启用内部研究合同，默认走原路径。无新的公开请求参数。工作树只用于隔离研发，开启生产另需授权。
+
+原财务 Evidence 与 S3 负责事实及前置条件计算。C1 最多三格，用请求域加内容摘要绑定参数、计算结果、ADS、FX、来源与依赖；当前未选敏感性附加格，C2 未接入。模型只引用已发送的目录及假设，禁止升级机械参考为预测。PDD 用原 ADS 正盈利方法；LI 经营恢复缺输入及美团无适用数值方法时保留变量边界/N/R。
+
+原 PEER Expressing 单次 Sol Medium，原40k参考输入及32768总输出门槛。最多三争议组、十二个原子候选；局部非法数字和必要依赖失效只影响对应主张。Review v2 采用确定性校验，硬失败降级且不追加模型请求。原 Output Policy/ACTIVE 同一权威终审后生成正文、财务表、C1 估值卡、七问覆盖和限度。已合格主张的覆盖状态保守标为 limited，决策审阅 not_assessed。原合格旧段落投影最多六条，完整 v2 对象留在原私有 analysis.v1 Evidence 字典，report v1 延续既有字段。Job v2、原存储、旧工件、资产、S3、ACTIVE、E1、交易门禁及 PR101 无人工分块路径继续沿原合同。无新数据 Owner 或能力入口，Registry 无需更新。
+
+**业务硬门槛为真实原生投资研究报告 ≥8.0/10。** 原五维每维2分：财务事实与证据可信度、经营分析与商业价值驱动、竞争优势与最强反证、估值与长期潜在回报、投资判断/机会成本与决策价值。工程验收独立，缺真实产物为 N/R。经单独授权的真实报告按五维逐项独立评分，未达8分保留 BUSINESS_BLOCKED，依实际扣分项定位，不能以重复付费调用或范围扩张补过。

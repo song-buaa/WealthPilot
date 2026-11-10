@@ -89,6 +89,8 @@ def report_projection(full):
     analysis = value.get('professional_result',{}).get('analysis_result')
     if isinstance(analysis,dict):
         analysis.pop('policy_context',None)
+        if 'l1_research_v2' in original:
+            value['evidence']['conditional_valuation'] = deepcopy(analysis.get('conditionalValuation'))
     if incomplete:
         value['limitations'].append('REPORT_EVIDENCE_SUMMARY_PARTIAL: unsupported machine evidence shapes remain in the complete private artifact.')
     value['schema_version'] = 'wealthpilot.analysis-report.v1'

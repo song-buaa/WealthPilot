@@ -2,18 +2,22 @@
 import asyncio
 import hashlib
 import json
+import pytest
 from tests.test_policy_integration import active  # noqa: F401
 from tests.test_analysis_skills import analysis_db, peer  # noqa: E402,F401
 from backend.agents.reviewing_agent import ReviewingAgent as _L1Reviewer
 _REAL_L1_REVIEW = _L1Reviewer.run
 
 
-def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analysis_db,peer,monkeypatch):
+@pytest.mark.parametrize("mode", ["legacy", "v2", "review_reject", "policy_conflict"])
+def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analysis_db,peer,monkeypatch,mode):
     """Full original orchestration; synthetic sources/policy and SDK MockTransport.
 
     This is an engineering delivery test, never a real Sol quality assessment.
     """
     import httpx,openai
+    v2 = mode != "legacy"
+    monkeypatch.setenv("WEALTHPILOT_L1_RESEARCH_V2", "1" if v2 else "0")
     from datetime import datetime,timezone
     from backend.agents import executing_agent,expressing_agent
     from intent_engine import _llm_client
@@ -30,14 +34,44 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
         return value
     monkeypatch.setattr(executing_agent,'invoke_skill',invoke)
     monkeypatch.setattr(_L1Reviewer,'run',_REAL_L1_REVIEW)
+    if mode == 'review_reject':
+        def reject(self, out, *args):
+            out.failed_rules = ['injected_hard_failure']
+            out.hard_validation_passed = False
+        def unexpected(*a, **kw):
+            pytest.fail('v2 must never request a second model call')
+        monkeypatch.setattr(_L1Reviewer, '_run_hard_validation', reject)
+        monkeypatch.setattr(_L1Reviewer, '_run_llm_scoring', unexpected)
+    if mode == 'policy_conflict':
+        from backend.services.investment_policy.runtime import PolicySession
+        from backend.services.investment_policy.parser import PolicyError
+        reviewed = []
+        ensure = PolicySession.ensure_current
+        def review(*a, **kw):
+            out = _REAL_L1_REVIEW(*a, **kw)
+            reviewed.append(True)
+            return out
+        def conflict(self):
+            if reviewed:
+                raise PolicyError('POLICY_VERSION_CONFLICT')
+            return ensure(self)
+        monkeypatch.setattr(_L1Reviewer, 'run', review)
+        monkeypatch.setattr(PolicySession, 'ensure_current', conflict)
     requests=[]
     def receive(request):
         body=json.loads(request.content);requests.append(body)
         paragraph=dict(topic='business',basis='inference',scope='research_only',
             text='经营改善仍需现金转化支持，竞争投入可能影响利润持续性；应以正式经营数据复核长期假设。',
             evidence_refs=[source['record_id']])
+        content = {'professional_explanation':[paragraph]}
+        if v2:
+            claim = dict(key='valid', role='supporting', claim_kind='inference', question_ids=['Q2', 'Q3', 'Q6', 'Q7'],
+                         text_template=paragraph['text'], evidence_refs=paragraph['evidence_refs'])
+            invalid = claim | dict(key='bad', question_ids=['Q4'], text_template='没有依据的利润预测将达到200元。')
+            dependent = claim | dict(key='dependent', role='synthesis', requires=['bad'], question_ids=['Q1'])
+            content = {'debates':[{'debate_key':'cash', 'claims':[claim, invalid, dependent]}]}
         return httpx.Response(200,json=dict(id='offline',object='chat.completion',created=0,model=SOL,
-            choices=[dict(index=0,finish_reason='stop',message=dict(role='assistant',content=json.dumps({'professional_explanation':[paragraph]})))],
+            choices=[dict(index=0,finish_reason='stop',message=dict(role='assistant',content=json.dumps(content)))],
             usage=dict(prompt_tokens=1000,completion_tokens=100,total_tokens=1100)))
     client=openai.OpenAI(api_key='synthetic',http_client=httpx.Client(transport=httpx.MockTransport(receive)))
     monkeypatch.setattr(_llm_client,'get_client',lambda:client)
@@ -48,6 +82,14 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
     finally:client.close()
     assert len(requests)==1 and requests[0]['max_completion_tokens']==32768
     assert requests[0]['reasoning_effort']=='medium'
+    if mode in {'review_reject', 'policy_conflict'}:
+        assert not result['professional_analysis_complete']
+        assert '专业研究 · 争议与判断' not in result['conclusion']
+        if mode == 'policy_conflict':
+            assert 'POLICY_VERSION_CONFLICT' in result['issues']
+        else:
+            assert result['evidence']['l1_research_v2']['claims'] == []
+        return
     assert result['professional_analysis_complete'],result.get('issues')
     assert result['stage_diagnostics']['expressing']=='completed'
     assert result['stage_diagnostics']['reviewing']=='completed'
@@ -60,4 +102,13 @@ def test_l1_research_sdk_to_real_peer_active_and_mcp_final_contract(active,analy
     assert report['professional_explanation']==out['professional_explanation']
     assert report['policy_reference']==out['policy_reference']
     assert report['conditionalValuation']==out['conditionalValuation']
+    if v2:
+        final = result['evidence']['l1_research_v2']
+        assert len(final['claims']) == 1
+        assert final['coverage']['Q1']['status'] == 'rejected'
+        assert final['coverage']['Q4']['status'] == 'rejected'
+        assert final['decision_review'] == 'not_assessed'
+        assert '200元' not in result['conclusion']
+        assert '专业研究 · 争议与判断' in result['conclusion']
+        assert 'l1_research_v2' not in report_projection(AnalysisResult.model_validate(result)).evidence
     assert hashlib.sha256(analysis_db.read_bytes()).hexdigest()==before
