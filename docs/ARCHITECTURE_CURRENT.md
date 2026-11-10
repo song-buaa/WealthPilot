@@ -230,6 +230,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 4.4 B3沿原只读Allocation快照追加ACTIVE分层差距。原Wealth/U1、A-min及PolicySession共同约束分母、身份、时点和政策版本，原五类输出保留。一级、八个二级桶与有限ETF产品层按逐项证据汇总，未归类留在D并披露，不发布不完整分层的当前权重或金额差距。详见[B3合同](U1_IMPLEMENTATION.md#44-b3-active分层配置差距)。
 
+4.4 C 隔离内核复用原发行人身份、U1/A-min 与固定 ACTIVE PolicySession，使用独立版本化 ETF 成分证据评估已知风险下限及有证上界。消费入口待 B3 合并后接入。详见[C 合同](U1_IMPLEMENTATION.md#44-c-发行人及-etf-穿透内核)。
+
 ## 14. U2 成交驱动同步与只读状态（已合入）
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
