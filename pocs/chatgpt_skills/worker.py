@@ -239,9 +239,17 @@ def main():
                     progress(phase)
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     if operation == 'get_investment_policy_context':
-                        from backend.services.investment_policy.runtime import context
-                        result = context(config['portfolio_id'] if config else args.portfolio_id,consumer='mcp',
-                            view=a.get('scope','portfolio'),symbol=a.get('symbol'))
+                        from backend.services.investment_policy.runtime import bind, context, current
+                        portfolio_id = config['portfolio_id'] if config else args.portfolio_id
+                        with bind(current(portfolio_id)):
+                            result = context(portfolio_id, consumer='mcp', view=a.get('scope','portfolio'), symbol=a.get('symbol'))
+                            if a.get('snapshot_id'):
+                                if a.get('scope') != 'risk' or a.get('symbol') is not None:
+                                    raise ValueError('POLICY_RISK_SNAPSHOT_SCOPE_REQUIRED')
+                                from backend.services.allocation_service import read_frozen_concentration
+                                result['concentration'] = read_frozen_concentration(
+                                    config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
+                                    config.get('database_contract_path') if config else None)
                     elif operation == "capture_asset_view" and args.frozen_database:
                         from pocs.chatgpt_skills.asset_view import capture
                         import socket
@@ -281,6 +289,15 @@ def main():
                                     synthetic=args.synthetic_input or config is None, worker_process=True,
                                     _analysis_run_id=request.get("analysis_run_id"), async_l1=args.single_analysis,
                                     deadline_monotonic=request.get("analysis_deadline_monotonic") if args.single_analysis else None)
+                            if operation == 'review_portfolio' and value.get('status') != 'unavailable':
+                                selected = value.get('snapshot_id')
+                                reference = value.get('scope', {}).get('policy_reference')
+                                if selected and selected == a.get('snapshot_id') and reference:
+                                    from backend.services.allocation_service import read_frozen_concentration
+                                    value.setdefault('evidence', {})['concentration'] = read_frozen_concentration(
+                                        config['database_path'] if config else path,
+                                        config['portfolio_id'] if config else args.portfolio_id, selected,
+                                        config.get('database_contract_path') if config else None, expected_policy=reference)
                             if args.single_analysis:
                                 result=value
                                 phase="result_serialization"
