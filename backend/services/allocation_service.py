@@ -69,6 +69,7 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
     from backend.services.investable_assets import project_investable_assets
     from backend.services.investment_policy.contracts import digest, MetricEvidence, Snapshot
     from backend.services.investment_policy.allocation_hierarchy import build_hierarchy
+    from backend.services.investment_policy.concentration_adapter import allocation_concentration
     from backend.services.investment_policy.runtime import current, bind, assets_qualified
     from backend.services.investment_policy.parser import PolicyError
     from backend.services.investment_policy.store import clock, utc_now
@@ -103,8 +104,9 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
                 ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
+        evaluated_at = clock(utc_now())
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
-            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=clock(utc_now()))
+            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
         # A new request-local session; never mutate a caller's pinned assets.
         from backend.services.investment_policy.runtime import PolicySession
         session = PolicySession(portfolio_id, assets=projection.policy_assets)
@@ -157,6 +159,8 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None):
         session.allocation_amounts = amounts
         session.allocation_hierarchy = build_hierarchy(Snapshot.model_validate(session.context['snapshot']),
             denominator=denominator, included=included, coverage=q['investable_scope_evidence']['coverage'])
+        session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
+            at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'])
         session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
             'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
             'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),

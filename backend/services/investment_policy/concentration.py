@@ -6,7 +6,7 @@ from decimal import Decimal, localcontext
 
 from backend.services.instruments.classification import CLASSIFICATION_VERSION
 from backend.services.instruments.etf_holdings import ETFHoldings
-from backend.services.instruments.issuers import IDENTITIES, VERSION, direct_issuer
+from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, direct_issuer
 
 from .contracts import PolicyReference, Snapshot, digest
 from .parser import PolicyError
@@ -126,7 +126,7 @@ def _critical(amount, denominator, threshold, complete):
 
 
 def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[str, ETFHoldings],
-                          evidence_pins: dict[str, str]):
+                          evidence_pins: dict[str, str], classified_assets=None):
     """C/D internal contract. Pass only the original U1/A-min result and pinned PolicySession.
 
     Evidence pins come from the source owner independently of the supplied records.
@@ -137,10 +137,10 @@ def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[s
         raise ValueError("CONCENTRATION_AWARE_CLOCK_REQUIRED")
     with localcontext() as ctx:
         ctx.prec = 60
-        return _analyze(view, projection, session, at, etf_evidence, evidence_pins)
+        return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets)
 
 
-def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
+def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets):
     reference, snapshot = _pinned_policy(session, view["portfolio_id"], at)
     denominator = _denominator(view, projection, at)
     issuer_rules, exceptions, review = _issuer_rules(snapshot)
@@ -177,6 +177,15 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
         principal += amount
         if not amount:
             continue
+        if classified_assets is not None:
+            if ref not in classified_assets:
+                coverage_issues.add("B3_CLASSIFICATION_UNVERIFIED")
+                unknown_cny += amount
+                if ref in btc_coverage.get("asset_refs", []):
+                    btc_complete = False
+                continue
+            if Decimal(classified_assets[ref]["amount_cny"]) != amount:
+                raise ValueError("CONCENTRATION_CLASSIFICATION_AMOUNT_MISMATCH")
         if _btc_identity(ref, row, quality):
             btc_amount += amount
             continue
@@ -199,7 +208,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
                 and (row.get("original_currency") or row.get("currency")) == "USD"):
             symbol = row.get("symbol")
             evidence = etf_evidence.get(symbol)
-            if row.get("security_symbol") not in (None, symbol) or row.get("security_currency") not in (None, "USD"):
+            if row.get("security_symbol") not in (None, symbol) or row.get("security_currency") not in (None, "USD", "CNY"):
                 evidence = None
             status = (evidence.status(snapshot_at=clock(view["captured_at"]), at=at,
                                       expected_sha256=evidence_pins.get(symbol),
@@ -226,6 +235,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
                          "evidence_sha256": digest(evidence) if evidence else None,
                          "holdings_as_of": evidence.holdings_as_of if evidence else None,
                          "known_at": evidence.known_at if evidence else None,
+                         "valid_until": evidence.valid_until if evidence else None,
                          "source": evidence.source if evidence else None,
                          "source_sha256": evidence.source_sha256 if evidence else None,
                          "parser_version": evidence.parser_version if evidence else None,
@@ -249,6 +259,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
         lower = direct[issuer] + indirect[issuer]
         risk, hits = _risk(applicable, lower, denominator, complete)
         issuer_rows[issuer] = {
+            "issuer_name": ISSUERS[issuer][0],
             "direct_cny": direct[issuer], "direct_pct": _percent(direct[issuer], denominator),
             "direct_members": members[issuer], "indirect_members": indirect_members[issuer],
             "indirect_known_cny": indirect[issuer],
@@ -263,6 +274,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins):
         "snapshot_id": view["snapshot_id"], "snapshot_sha256": projection.snapshot_sha256,
         "snapshot_at": view["captured_at"], "evaluated_at": at.isoformat(),
         "policy_reference": reference.model_dump(), "issuer_mapping_version": VERSION,
+        "classification_sha256": digest(classified_assets) if classified_assets is not None else None,
         "denominator_cny": denominator, "status": "CONDITIONAL_RISK" if denominator is None else "DIAGNOSTIC",
         "issues": sorted(coverage_issues | ({"DENOMINATOR_UNVERIFIED", *projection.policy_assets.issues}
                                             if denominator is None else set())),

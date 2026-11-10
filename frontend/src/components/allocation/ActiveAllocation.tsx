@@ -20,6 +20,21 @@ interface Hierarchy {
   unclassified_amount_cny: string
 }
 
+interface Concentration {
+  status: string
+  unknown_coverage?: boolean
+  issues: string[]
+  issuers?: Record<string, {
+    issuer_name: string
+    direct_pct: string | null
+    indirect_known_pct: string | null
+    known_lower_bound_pct: string | null
+    proven_upper_bound_pct: string | null
+    risk_status: string
+  }>
+  btc?: { known_lower_bound_pct: string | null; risk_status: string }
+}
+
 interface Diagnostic {
   status: string
   snapshot_id: string
@@ -32,6 +47,7 @@ interface Diagnostic {
     gap_pp: string; amount_gap_cny: string; direction: string; target_kind?: Gap['target_kind'] }>
   focus: string[]
   hierarchy?: Hierarchy
+  concentration?: Concentration
   execution_authorized: false
 }
 const labels: Record<string, string> = { cash: '货币', fixed: '固收', equity: '权益', alt: '另类', deriv: '衍生' }
@@ -84,6 +100,25 @@ function PolicyHierarchy({ value }: { value: Hierarchy }) {
   </section>
 }
 
+function ConcentrationRisk({ value }: { value: Concentration }) {
+  const display = (ratio: string | null) => ratio === null ? '—' : Number(ratio).toFixed(2) + '%'
+  return <section aria-label="发行人集中度">
+    <h4>发行人集中度</h4>
+    {(value.status === 'UNKNOWN' || value.unknown_coverage) && <p role="status">
+      穿透覆盖尚未证实完整。已知下限可以触发复核，缺少上界时无法判定安全。
+    </p>}
+    <table>
+      <thead><tr><th>发行人</th><th>直接</th><th>间接已知</th><th>已知下限</th><th>证实上界</th><th>风险</th></tr></thead>
+      <tbody>{Object.entries(value.issuers ?? {}).map(([issuer, row]) => <tr key={issuer}>
+        <th scope="row">{row.issuer_name}</th><td>{display(row.direct_pct)}</td>
+        <td>{display(row.indirect_known_pct)}</td><td>{display(row.known_lower_bound_pct)}</td>
+        <td>{display(row.proven_upper_bound_pct)}</td><td>{row.risk_status}</td>
+      </tr>)}</tbody>
+    </table>
+    {value.btc && <p>BTC 现货已知下限 {display(value.btc.known_lower_bound_pct)} · {value.btc.risk_status}</p>}
+  </section>
+}
+
 /** Reads an already-frozen view. It never prepares, refreshes or places orders. */
 export default function ActiveAllocation({ policySha }: { policySha?: string }) {
   const [value, setValue] = useState<Diagnostic | null>(null)
@@ -123,6 +158,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
       </tr>)}</tbody></table>
     <p>主要偏差：{value.focus.map(key => `${labels[key]}${value.classes[key].direction === 'OVER' ? '超配' : '低配'}`).join('、') || '与目标一致'}。</p>
     {value.hierarchy && <PolicyHierarchy value={value.hierarchy} />}
-    <p>正差距表示超配，负差距表示低配。仅为配置差距，未完成穿透风险复核，也不是交易或资金操作建议。</p>
+    {value.concentration && <ConcentrationRisk value={value.concentration} />}
+    <p>正差距表示超配，负差距表示低配。配置与风险诊断不构成交易或资金操作建议。</p>
   </section>
 }

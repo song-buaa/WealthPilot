@@ -136,3 +136,34 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
     expect(writes).toEqual([])
   })
 }
+
+
+test('ACTIVE concentration retains an 8% lower-bound review with missing upper bound', async ({ page }) => {
+  let writes = 0
+  await page.route('**/api/**', async route => {
+    if (route.request().method() !== 'GET') writes++
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ json: { policy_allocation: {
+        status: 'QUALIFIED_MAJOR_CLASSES', snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64),
+        as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
+        denominator_cny: '1000', policy_reference: { bundle_sha256: 'f'.repeat(64) },
+        classes: {}, focus: [], execution_authorized: false,
+        concentration: { status: 'DIAGNOSTIC', unknown_coverage: true, issues: ['ETF_LOOKTHROUGH_INCOMPLETE'],
+          issuers: { 'fixture-alphabet': { issuer_name: 'Alphabet Inc.', direct_pct: '4', indirect_known_pct: '4',
+            known_lower_bound_pct: '8', proven_upper_bound_pct: null, risk_status: 'HUMAN_REVIEW' } } },
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  const risk = page.getByRole('region', { name: '发行人集中度' })
+  await expect(risk).toContainText('缺少上界时无法判定安全')
+  const alpha = risk.getByRole('row', { name: /Alphabet Inc/ })
+  await expect(alpha).toContainText('8.00%')
+  await expect(alpha).toContainText('—')
+  await expect(alpha).toContainText('HUMAN_REVIEW')
+  expect(writes).toBe(0)
+})

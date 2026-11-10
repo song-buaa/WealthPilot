@@ -104,6 +104,8 @@ def snapshot(portfolio_id):
             'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
         if hasattr(session, 'allocation_hierarchy'):
             meta['hierarchy'] = session.allocation_hierarchy
+        if hasattr(session, 'allocation_concentration'):
+            meta['concentration'] = session.allocation_concentration
         return PolicyAllocationSnapshot(snapshot_at=session.assets.as_of,
             total_investable_assets=float(session.assets.denominator_cny),
             by_class={k:ClassAllocation(amount=float(v),ratio=float(weights[k].value)) for k,v in amounts.items()},
