@@ -225,6 +225,12 @@ def messages(assessment, question, *, policy, holding, history=(), research_run=
         system = PROMPT
         if any(cell['label'] == 'OWNER_CASH_CONDITIONAL_NOT_FORECAST' for cell in groups['scenario_catalog']):
             system += OWNER_CASH_DECISION_PROMPT
+            price_ref = next((r['evidence_ref'] for r in groups['valuation_inputs']
+                              if r.get('field') == 'observed_price'), None)
+            treasury_ref = groups['terminal_assumption_basis']['terminal_anchor']['record_id']
+            if price_ref and treasury_ref in research_run.visible:
+                system += '\n独立 Q6 主张可直接复制的合格引用：' + dumps(
+                    dict(evidence_refs=[treasury_ref, price_ref]))
         # Use an actual selected Owner field; an invented example ref can
         # otherwise be mistaken for something the request authorized.
         examples = (row for row in groups['financial_operating_cashflow']
