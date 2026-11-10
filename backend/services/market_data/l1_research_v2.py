@@ -56,8 +56,10 @@ OWNER_CASH_DECISION_PROMPT = """
 现金终值专项：用三个独立主张分别审查谨慎、基准、乐观，每条只引用该格 scenario_cell_ref 和对应 assumption_ref，
 question_ids 至少 Q4/Q7。每格写清：实际经营条件、现有支持和最强反证、尚待验证的关键假设、下一条可观察证据如何改变情景与估值。
 必须用最强乐观情景作为基准判断的反证：具体说为什么过门槛仍不足以据此配置新增资本，或哪些证据会让它更可信。
-另设一个 Q6 主张把历史观察价、服务端的风险补偿门槛、同期限美元国债及三格结果连起来，说明哪个情景是当前工作基准、
-为何更可信、放弃新增配置的机会成本，以及哪些财报或经营信号足以翻转判断。不要给情景虚构概率。
+另设一个机会成本主张，question_ids 只填 Q6 或 Q6/Q7，scenario_cell_refs 和 assumption_refs 必须省略或留空。
+它的 evidence_refs 直接引同期限美元国债及观察价等合格事实，最多两个。用自然语言综合已单列的三格，
+不用在该主张重复挂格。说明哪格更适合作当前工作基准、为何更可信、暂缓新增配置的机会成本及哪些新证据足以翻转判断。
+不要给情景虚构概率。综合选一条现金或经营主张与这条机会成本主张，保证两条的直接引用合计不超过五个。
 明确区分继续跟踪公司的价值与在该历史观察价新增资本的价值。条件回报数字由报告的服务端表格提供。
 写“暂不支持新增资本配置”等研究判断，不输出交易指令。具体门槛、反向参数用已计算卡片指代，勿在模型正文重写数字。
 综合仍引用已有经营/财务主张及一条估值或机会成本主张，不添加新事实。
@@ -400,8 +402,9 @@ def _owner_cash_decision_review(cells, claims):
         cases[cell['name']] = dict(cell_ref=ref, claim_ids=audited, meets_research_hurdle=meets_hurdle)
     if not cases:
         return None
-    opportunity = [claim['claim_id'] for claim in claims
-                   if claim['role'] != 'synthesis' and 'Q6' in claim['question_ids'] and not claim['scenario_cell_refs']]
+    opportunity = [claim['claim_id'] for claim in claims if claim['role'] != 'synthesis'
+                   and 'Q6' in claim['question_ids'] and set(claim['question_ids']) <= {'Q6', 'Q7'}
+                   and not claim['scenario_cell_refs']]
     complete = (set(cases) == {'cautious', 'base', 'optimistic'} and all(c['claim_ids'] for c in cases.values())
                 and bool(opportunity))
     incremental = 'insufficient_scenario_review'
