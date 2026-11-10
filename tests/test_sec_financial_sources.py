@@ -375,3 +375,23 @@ def test_source_owner_does_not_promote_multiclass_eps_to_listed_unit():
     # The same centralized record gate protects original filing projections.
     assert sec._record(issuer,filings[0],[dict(source_field='dilutedEPSOrdinary',fiscal_period_end='2026-06-30')],
         b'synthetic','https://www.sec.gov/synthetic',AT.isoformat(),identity_digest=DIGEST) is None
+
+
+def test_compound_productive_cash_tag_requires_exact_consolidated_statement_row():
+    from bs4 import BeautifulSoup
+    from research_v2.sec_disclosures import _annual_cash_bridge_concept
+
+    title = 'CONSOLIDATED STATEMENTS OF CASH FLOWS (Amounts in thousands of RMB and US$)'
+    row = 'Purchase of property, equipment and software and intangible assets'
+    template = ('<html xmlns:issuer="http://issuer.example/20251231"><h2>{}</h2>'
+                '<table><tr><td>{}</td><td><ix:nonfraction '
+                'name="issuer:PaymentsToAcquirePropertyEquipmentAndSoftwareAndIntangibleAssets">'
+                '1,145,077</ix:nonfraction></td></tr></table></html>')
+
+    def mapped(heading, label):
+        soup = BeautifulSoup(template.format(heading, label), 'html.parser')
+        return _annual_cash_bridge_concept(soup.find('ix:nonfraction'), {})
+
+    assert mapped(title, row) == ('quality_productive_asset_payments', 'positive_productive_asset_cash_outflow')
+    assert mapped(title, 'Net cash used in investing activities') is None
+    assert mapped('Company-only statements of cash flows (Amounts in thousands of RMB)', row) is None

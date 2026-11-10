@@ -91,6 +91,7 @@ QUALITY_CONCEPTS.update({
     ('wp-disclosure', 'TimeDepositsAndShortTermInvestments'): ('quality_deposits_investments', 'time_deposits_and_short_term_investments'),
     ('wp-disclosure', 'OrdinarySharesPerADS'): ('quality_ads_ratio', 'ordinary_shares_per_ads'),
     ('wp-disclosure', 'WeightedDilutedADS'): ('quality_diluted_ads_shares', 'weighted_diluted_ads'),
+    ('wp-disclosure', 'CashFlowChangeInMerchantPayables'): ('quality_merchant_float_change', 'signed_merchant_payables_cash_flow_contribution'),
 })
 QUALITY_INSTANT = {'quality_finance_lease_liability', 'quality_operating_lease_liability', 'quality_current_debt', 'quality_current_assets', 'quality_current_long_term_debt', 'quality_shares', 'quality_cash_including_restricted', 'quality_commercial_paper', 'quality_noncurrent_debt', 'quality_equity', 'quality_cash', 'quality_current_liabilities', 'quality_assets', 'quality_liabilities'}
 QUALITY_INSTANT |= {'quality_restricted_cash', 'quality_deposits_investments', 'quality_ads_ratio', 'quality_total_equity', 'quality_noncontrolling'}
@@ -461,6 +462,42 @@ def _standard_concept(node):
     return None
 
 
+def _annual_cash_bridge_concept(node, table_headings):
+    """Annual RMB consolidated cash and income rows, with exact scoped tag semantics."""
+    from research_v2.official_disclosures import _table_context
+
+    prefix, _, concept = node.get('name', '').partition(':')
+    mapping = {
+        'NetCashProvidedByUsedInOperatingActivities': ('cash flows', 'net cash generated from operating activities', 'quality_cfo'),
+        'ShareBasedCompensation': ('cash flows', 'share-based compensation', 'quality_sbc'),
+        'NetIncomeLoss': ('comprehensive income', 'net income', 'quality_net_income'),
+        'WeightedAverageNumberOfDilutedSharesOutstanding': ('comprehensive income', 'diluted', 'quality_diluted_shares'),
+        'PaymentsToAcquirePropertyEquipmentAndSoftwareAndIntangibleAssets': (
+            'cash flows', 'purchase of property, equipment and software and intangible assets', 'quality_productive_asset_payments'),
+        'IncreaseDecreaseInPayablesToMerchants': ('cash flows', 'payable to merchants', 'quality_merchant_float_change'),
+    }
+    if concept not in mapping:
+        return None
+    heading, label, field = mapping[concept]
+    ns = _namespace(node, prefix)
+    if not ns:
+        return None
+    is_gaap = re.fullmatch(r'https?://fasb.org/us-gaap/20[0-9]{2}', ns) is not None
+    extension = field in {'quality_productive_asset_payments', 'quality_merchant_float_change'}
+    if is_gaap == extension:
+        return None
+    row, table = node.find_parent('tr'), node.find_parent('table')
+    first_cell = row.find(['td', 'th'], recursive=False) if row else None
+    if table is None or first_cell is None or first_cell.get_text(' ', strip=True).casefold() != label:
+        return None
+    if id(table) not in table_headings:
+        table_headings[id(table)] = _table_context(table).casefold()
+    context = table_headings[id(table)]
+    if f'consolidated statements of {heading}' not in context or 'thousands of rmb' not in context:
+        return None
+    return field, dict(QUALITY_CONCEPTS.values())[field]
+
+
 def _direct_listed_class_eps(body, issuer, filing, fetched_at):
     """Direct primary-document class EPS only; no class/value conversion.
 
@@ -793,7 +830,7 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             obs.update(document_type=kind,document_filename=filename,document_sequence=sequence)
             obs['source_locator']=f'DOCUMENT[{doc_index}]/{filename}/'+obs['source_locator']
             observations.append(obs)
-        contexts, units = {}, {}
+        contexts, units, table_headings = {}, {}, {}
         for node in soup.find_all(lambda t: t.name.lower().split(':')[-1] == 'context'):
             identifier = node.find(lambda t: t.name.lower().split(':')[-1] == 'identifier')
             start = node.find(lambda t: t.name.lower().split(':')[-1] == 'startdate')
@@ -805,19 +842,25 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             contexts[node.get('id')] = None if node.get('id') in contexts else (start.get_text(strip=True), end.get_text(strip=True))
         for node in soup.find_all(lambda t: t.name.lower().split(':')[-1] == 'unit'):
             measures = node.find_all(lambda t: t.name.lower().split(':')[-1] == 'measure')
-            if len(measures) == 1 and measures[0].get_text(strip=True) in {'iso4217:USD', 'iso4217:CNY', 'iso4217:HKD'}:
-                units[node.get('id')] = None if node.get('id') in units else measures[0].get_text(strip=True).split(':')[1]
+            if len(measures) == 1:
+                measure = measures[0].get_text(strip=True)
+                if measure in {'iso4217:USD', 'iso4217:CNY', 'iso4217:HKD', 'xbrli:shares'}:
+                    units[node.get('id')] = None if node.get('id') in units else measure.split(':')[1]
         for i, node in enumerate(soup.find_all(lambda t: t.name.lower() == 'ix:nonfraction')):
             try:
                 mapped = _standard_concept(node)
+                cash_bridge = (_annual_cash_bridge_concept(node, table_headings)
+                               if is_primary and filing['form'] in {'10-K', '20-F'} else None)
                 period = contexts.get(node.get('contextref')); currency = units.get(node.get('unitref'))
-                if not mapped or not period or not currency or node.get('xsi:nil') == 'true' or node.get('format') not in {None, 'ixt:num-dot-decimal', 'ixt:numdotdecimal'}:
+                if not (mapped or cash_bridge) or not period or not currency or node.get('xsi:nil') == 'true' or node.get('format') not in {None, 'ixt:num-dot-decimal', 'ixt:numdotdecimal'}:
                     continue
                 start, end = period; scope = _period(start, end)
                 if not scope or _day(end) > _day(filing['filed']):
                     continue
                 if filing['form'] in {'10-Q', '10-K', '20-F'} and end != filing['report_date']:
-                    continue
+                    mapped = None
+                if cash_bridge and (scope != 'annual' or not 0 <= (_day(filing['report_date']) - _day(end)).days <= 740):
+                    cash_bridge = None
                 amount = re.sub(r'\s+', '', node.get_text()).replace(',', '')
                 value = _finite(amount)
                 scale = int(node.get('scale', '0'))
@@ -828,14 +871,19 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
                     if value<0:
                         continue
                     value = -value
-                field, basis = mapped
-                if field == 'capitalExpenditures' and value < 0:
-                    continue  # unsigned payment concept only; no blanket abs()
-                observations.append(dict(source_field=field, value=float(value), currency=currency,
-                    unit='currency_units', unit_scale=1, period_basis=scope,
-                    fiscal_period_start=start, fiscal_period_end=end, accounting_basis=basis,
-                    document_type=kind,document_filename=filename,document_sequence=sequence,
-                    source_locator=f'DOCUMENT[{doc_index}]/{filename}/ix:nonFraction[{i}]/{node.get("name")}'))
+                for concept, allowed_currency in ((mapped, {'USD', 'CNY', 'HKD'}), (cash_bridge, {'CNY', 'shares'})):
+                    if not concept or currency not in allowed_currency:
+                        continue
+                    field, basis = concept
+                    if (field == 'quality_diluted_shares') != (currency == 'shares'):
+                        continue
+                    if field in {'capitalExpenditures', 'quality_productive_asset_payments', 'quality_sbc'} and value < 0:
+                        continue  # Explicit positive outflow/expense concepts, not blanket abs().
+                    observations.append(dict(source_field=field, value=float(value), currency=None if currency == 'shares' else currency,
+                        unit='shares' if currency == 'shares' else 'currency_units', unit_scale=1, period_basis=scope,
+                        fiscal_period_start=start, fiscal_period_end=end, accounting_basis=basis,
+                        document_type=kind,document_filename=filename,document_sequence=sequence,
+                        source_locator=f'DOCUMENT[{doc_index}]/{filename}/ix:nonFraction[{i}]/{node.get("name")}'))
             except (ValueError, TypeError, InvalidOperation):
                 continue
     record=_record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)

@@ -131,6 +131,7 @@ def captured_facts(assessment, *, at, asset_view=None):
                 current.get('missing')==previous.get('missing') and
                 current.get('proposal_basis')==previous.get('proposal_basis') and
                 current.get('assumptions')==previous.get('assumptions') and
+                current.get('owner_cash_model')==previous.get('owner_cash_model') and
                 str(current.get('input_receipts',{}).get('decision_at',''))[:4] ==
                 str(previous.get('input_receipts',{}).get('decision_at',''))[:4] and
                 source_receipts(current)==source_receipts(previous)):

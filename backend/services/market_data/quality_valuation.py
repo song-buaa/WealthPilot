@@ -22,6 +22,7 @@ REFERENCE_ORIGIN = 'system_evidence_bound_reference'
 AUTOMATIC_ORIGINS = {REFERENCE_ORIGIN, ANCHORED_ORIGIN}
 TREASURY_CURVE = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView'
 TREASURY_COLUMN = 'view-field-bc-5year-table-column'
+NYU_COUNTRY_RISK = 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html'
 
 GROUPS = ("优先考虑", "继续观察", "暂不优先")
 D = Decimal
@@ -319,6 +320,83 @@ def _valid_treasury_source(row, period):
             and (row.get('published_at') or '')[:10] == period)
 
 
+def bind_country_risk_assumption_source(assessment, *, original, source_url, fetched_at):
+    """A dated third-party method input, separate from current issuer Evidence."""
+    from bs4 import BeautifulSoup
+    from datetime import datetime
+    import re
+
+    if source_url != NYU_COUNTRY_RISK or not stamp(fetched_at):
+        raise ValueError('COUNTRY_RISK_SOURCE_INVALID')
+    soup = BeautifulSoup(original, 'html.parser')
+    dates = [m[1] for text in soup.stripped_strings if
+             (m := re.fullmatch(r'Last updated: ([A-Za-z]+ [0-9]{1,2}, 20[0-9]{2})', ' '.join(text.split())))]
+    if len(dates) != 1:
+        raise ValueError('COUNTRY_RISK_VINTAGE_UNKNOWN')
+    vintage = datetime.strptime(dates[0], '%B %d, %Y').date().isoformat()
+    at = stamp(assessment['as_of'])
+    if not stamp(vintage) <= stamp(fetched_at) <= at or (at - stamp(vintage)).days > 366:
+        raise ValueError('COUNTRY_RISK_VINTAGE_INELIGIBLE')
+    rows = [[' '.join(cell.get_text(' ', strip=True).split()) for cell in tr.find_all('td', recursive=False)]
+            for tr in soup.find_all('tr')]
+    columns = ['Country Risk Premium', 'Equity Risk Premium']
+    headers = [row for row in rows if row and row[0] == 'Country' and all(c in row for c in columns)]
+    if len(headers) != 1:
+        raise ValueError('COUNTRY_RISK_TABLE_AMBIGUOUS')
+    positions = [headers[0].index(c) for c in columns]
+    countries = {name: [r for r in rows if r and r[0] == name and len(r) > max(positions)]
+                 for name in ('China', 'United States')}
+    if any(len(group) != 1 for group in countries.values()):
+        raise ValueError('COUNTRY_RISK_ROWS_AMBIGUOUS')
+    def rates(name):
+        values = [countries[name][0][i] for i in positions]
+        if any(not re.fullmatch(r'[0-9]{1,2}\.[0-9]{2}%', v) for v in values):
+            raise ValueError('COUNTRY_RISK_UNIT_INVALID')
+        return [dec(v[:-1]) / 100 for v in values]
+    china, china_total = rates('China')
+    us, us_total = rates('United States')
+    mature = us_total - us
+    if mature != china_total - china or not 0 < china < mature < D('.20'):
+        raise ValueError('COUNTRY_RISK_RECONCILIATION_FAILED')
+    assessment['country_risk_assumption_source'] = dict(
+        source_url=source_url, source_sha256=sha256(original).hexdigest(), fetched_at=fetched_at,
+        vintage=vintage, mature_equity_premium=text(mature), china_equity_country_premium=text(china),
+        scope='JANUARY_STRUCTURAL_VINTAGE_NOT_SPOT_OR_ISSUER_COST_OF_EQUITY')
+
+
+def _owner_cash_case_parameters(assessment, risk_free, growth):
+    from .financial_research import annual_owner_cash_history
+
+    source = assessment['country_risk_assumption_source']
+    vintage, fetched, at = (stamp(source['vintage']), stamp(source['fetched_at']), stamp(assessment['as_of']))
+    if not (source['source_url'] == NYU_COUNTRY_RISK and vintage and fetched and at
+            and vintage <= fetched <= at and (at - vintage).days <= 366):
+        return None
+    history = annual_owner_cash_history(assessment)
+    if not history:
+        return None
+    mature, china = dec(source['mature_equity_premium']), dec(source['china_equity_country_premium'])
+    if not 0 < china < mature < D('.20'):
+        return None
+    # Mature-market beta=1 is a neutral convention. China exposure is stressed
+    # because there is no issuer-specific estimate or disclosed revenue split.
+    hurdle = risk_free + mature + china
+    conversions = sorted(min(D(1), dec(row['conversion'])) for row in history)
+    inputs, cases = {}, {}
+    for i, name in enumerate(SCENARIOS):
+        country_weight = (D('1.5'), D('1'), D('.5'))[i]
+        cost = risk_free + mature + china * country_weight
+        steady_growth = (D('0'), D('.01'), D('.02'))[i]
+        access = (D('.5'), D('.75'), D('1'))[i]
+        multiple = conversions[i] * access * (1 + steady_growth) / (cost - steady_growth)
+        inputs[name] = dict(cash_conversion=text(conversions[i]), economic_access_fraction=text(access),
+            mature_market_beta='1', china_risk_loading=text(country_weight), terminal_cash_growth=text(steady_growth),
+            terminal_discount_rate=text(cost))
+        cases[name] = dict(earnings_growth=text(growth[i]), annual_share_change='0',
+                           terminal_pe=text(multiple), dividend_payout='0')
+    return hurdle, cases, dict(risk_source=deepcopy(source), annual_history=history, case_parameters=inputs)
+
+
 def _treasury_anchored_research(assessment, derived, na):
     from .output_policy import _evidence_index
 
@@ -381,6 +459,19 @@ def _treasury_anchored_research(assessment, derived, na):
         '与历史加权股数变动绝对幅度中较大者，乐观假设无净稀释。加权股数不证明未来发行。'
         '各情景均不计派息、回购或净现金增益，经营现金流不等于可分配现金。FX 固定于观察口径，不外推分部利润。'
     )
+    owner_cash = None
+    if 'country_risk_assumption_source' in assessment:
+        parameters = _owner_cash_case_parameters(assessment, rate, growth)
+        if parameters is None:
+            na['missing'] = ['QUALIFIED_CONSECUTIVE_OWNER_CASH_AND_RISK_METHOD_INPUTS_REQUIRED']
+            return na
+        hurdle, cases, owner_cash = parameters
+        rationale = (
+            '盈利情景为集团利润下滑一次后保持、利润持平、以及在利润率与竞争投入受控时盈利增长。'
+            '终值用同一审计报表三年经商家浮存、生产性支出及 SBC 调整的现金代理/净利润，取低位、中位、高位并将持续转化率封顶于100%。'
+            '未来 ADS 分母相对不变是情景假设，SBC 已作为经济成本扣除，不重复叠加同一笔稀释；额外发行或回购需要独立情景。'
+            '五年内无分派、无回购收益、无超额净现金加回。终值仅在现金能到达普通股股东且稳态条件成立时有意义。'
+            '完整净现金、法律可转移性、Temu利润和未来净发行仍未知。')
     result = foreign_ads_earnings_research(assessment, dict(
         basis='S3_RESEARCH_ASSUMPTION_NOT_POLICY', rationale=rationale, required_return=text(hurdle), **cases))
     if result['status'] != 'CONDITIONAL_RESEARCH_ONLY':
@@ -404,6 +495,29 @@ def _treasury_anchored_research(assessment, derived, na):
                              'DISTRIBUTABLE_CASH_AND_FUTURE_NET_DILUTION_UNVERIFIED']
     eps = result['qualified_inputs']['eps_usd_per_ads']
     price = dec(result['qualified_inputs']['price_usd_per_ads'])
+    if owner_cash is not None:
+        ads = dec(result['qualified_inputs']['ordinary_shares_per_ads'])
+        for year in owner_cash['annual_history']:
+            year['owner_cash_proxy_per_ads_cny'] = text(dec(year['owner_cash_per_ordinary_share_cny']) * ads)
+        result['assumptions']['multiple_basis'] = (
+            '条件终值 PE = 经历史校准的经营现金代理转化率 × 未来股东可取得比例 × (1+稳态增速) / (股东折现率−稳态增速)。'
+            '折现率 = 同观察日美元五年期国债 CMT + NYU 成熟市场权益溢价 × 中性β + 中国风险溢价 × 情景敞口。'
+            'NYU 是定年第三方研究估计；β、敞口、稳态增速和现金可取得比例是可反证条件，不是估计出的公司参数。'
+            '不以观察价反推终值倍数，当前价只用于算回报和反向门槛。')
+        result['owner_cash_model'] = owner_cash
+        result['limitations'] = [x for x in result['limitations'] if x != 'ISSUER_RISK_SPREADS_NOT_EMPIRICALLY_CALIBRATED']
+        result['limitations'] += ['MARKET_RISK_BENCHMARK_NOT_ISSUER_BETA_OR_CURRENT_SPOT_ESTIMATE',
+                                 'TERMINAL_ECONOMIC_CASH_ACCESS_AND_STEADY_GROWTH_ARE_ASSUMPTIONS',
+                                 'OWNER_CASH_PROXY_NOT_QUARTER_FCF_OR_DISTRIBUTABLE_FCFE']
+        for name, inputs in owner_cash['case_parameters'].items():
+            scenario_row = result['scenarios'][name]
+            terminal_eps = dec(scenario_row['years'][-1]['eps'])
+            next_cash = terminal_eps * dec(inputs['cash_conversion']) * (1 + dec(inputs['terminal_cash_growth']))
+            required_terminal = price * (1 + hurdle) ** 5
+            scenario_row['terminal_owner_cash_proxy_usd_per_ads'] = text(next_cash)
+            scenario_row['implied_economic_access_at_hurdle'] = text(
+                required_terminal * (dec(inputs['terminal_discount_rate']) - dec(inputs['terminal_cash_growth'])) / next_cash)
+
     # The original sensitivity grid has no entry-price axis. Reuse the same
     # arithmetic on explicitly hypothetical prices; never replace the quote.
     result['entry_price_sensitivity'] = []

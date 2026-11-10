@@ -87,3 +87,25 @@ def test_treasury_anchor_rejects_wrong_bytes_wrong_source_and_ambiguous_rows():
     a['records'] = [r for r in a['records'] if not r.get('record_id', '').startswith('research:treasury:')]
     with pytest.raises(ValueError, match='TREASURY_OBSERVATION_MISSING_OR_AMBIGUOUS'):
         bind_treasury_terminal_anchor(a, original=repeated, record_id=add(repeated))
+
+
+def test_country_risk_assumption_requires_known_vintage_and_reconciling_columns():
+    import pytest
+    from backend.services.market_data.quality_valuation import (
+        NYU_COUNTRY_RISK, bind_country_risk_assumption_source)
+
+    source = b'''<p>Last updated: January 5, 2026</p><table>
+    <tr><td>Country</td><td>Country Risk Premium</td><td>Equity Risk Premium</td></tr>
+    <tr><td>China</td><td>0.91%</td><td>5.14%</td></tr>
+    <tr><td>United States</td><td>0.23%</td><td>4.46%</td></tr></table>'''
+    a = {'as_of': '2026-11-10T10:00:00+00:00'}
+    capture = {'source_url': NYU_COUNTRY_RISK, 'fetched_at': '2026-11-10T09:00:00+00:00'}
+    bind_country_risk_assumption_source(a, original=source, **capture)
+    risk = a['country_risk_assumption_source']
+    assert Decimal(risk['mature_equity_premium']) == Decimal('.0423')
+    assert Decimal(risk['china_equity_country_premium']) == Decimal('.0091')
+    assert a.keys() == {'as_of', 'country_risk_assumption_source'}
+    with pytest.raises(ValueError, match='COUNTRY_RISK_RECONCILIATION_FAILED'):
+        bind_country_risk_assumption_source(a, original=source.replace(b'5.14%', b'6.14%'), **capture)
+    with pytest.raises(ValueError, match='COUNTRY_RISK_VINTAGE_INELIGIBLE'):
+        bind_country_risk_assumption_source(a, original=source.replace(b'2026', b'2025'), **capture)

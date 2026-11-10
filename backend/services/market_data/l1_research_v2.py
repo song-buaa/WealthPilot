@@ -1,6 +1,7 @@
 """Internal L1 presentation contract. Evidence, policy and S3 remain the owners."""
 from copy import deepcopy
 from dataclasses import dataclass, field
+from decimal import Decimal
 from hashlib import sha256
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -36,7 +37,9 @@ Q7 指标或事件、基线、复核窗口及判断怎样改变。先提出能�
 text_template 填「此处由服务端根据已审核前提生成综合判断。」；前提合计最多五个不重复证据引用，不能在综合行新增事实、数字、假设或情景。
 Q4 每条最多两个已发送的 scenario_cell_refs 和对应两个 assumption_refs。第三个另写独立主张。
 条件数值由服务端估值卡展示。独立历史估值快照用 limitation 角色和类型，注明口径限制。
-历史机械参考不是基本面预测。有独立国债锚的条件情景应使用已发送的假设与回报，说明价格变动敏感性及反向经营门槛，风险加成不是已观察到的市场数据；用「国债锚定的条件情景」而非「机械参考」描述这种已标记的情景。没有合格情景时，Q4 用 role=limitation、claim_kind=limitation 说明方法和缺口。
+历史机械参考不是基本面预测。若收到 OWNER_CASH_CONDITIONAL_NOT_FORECAST，请说明三年历史现金桥、SBC和商家资金、
+历史现金转化如何映射至终值与每ADS回报、风险数据的日期和未知的股东现金可达性。解释反向盈利和可取得比例，
+大于全部现金可取得比例说明当前参数不闭合。不要将历史现金代理当成季度FCF、现金分红或公允价值。情景共享依赖目录中的 context_id 指向原事实行，不可直接作为证据引用。没有合格情景时，Q4 用 role=limitation、claim_kind=limitation 说明方法和缺口。
 不能自拟估值、追加假设计算或虚构分部利润。
 正文数字只能用 {{n1}} 等占位符，numbers 每项含 id、evidence_ref、field，由服务端从合格字段渲染。
 每个占位符都必须有对应绑定，每个绑定都必须用于正文。占位符自带数字、日期、币种与单位，后面不写 %、元、倍、个百分点。
@@ -127,12 +130,15 @@ def _owner_cells(assessment, index):
         if receipt.get('record_id'):
             refs.add(receipt['record_id'])
     proposal_basis = value.get('proposal_basis') or {}
+    owner_cash = value.get('owner_cash_model') if anchored else None
     if anchored != (origin == ANCHORED_ORIGIN) or (anchored and not proposal_basis.get('terminal_anchor')):
         return {}
     if anchored:
         for receipt in proposal_basis.values():
             refs.add(receipt['record_id'])
             refs.update(receipt.get('evidence_refs') or [])
+    if owner_cash:
+        refs.update(ref for year in owner_cash['annual_history'] for ref in year['evidence_refs'])
     for receipt in receipts.get('revenue') or []:
         if receipt.get('record_id'):
             refs.add(receipt['record_id'])
@@ -149,6 +155,7 @@ def _owner_cells(assessment, index):
         cells[name] = dict(name=name, method=value['method_version'], symbol=value['symbol'], decision_at=decision_at,
             horizon_years=5, listed_currency='USD', listed_unit='ADS',
             label=('MECHANICAL_REFERENCE_NOT_FORECAST' if origin == 'system_qualified_reference_sensitivity'
+                   else 'OWNER_CASH_CONDITIONAL_NOT_FORECAST' if owner_cash
                    else 'TREASURY_ANCHORED_CONDITIONAL_NOT_FORECAST' if anchored
                    else 'USER_EXPLICIT_CONDITIONAL_NOT_FORECAST'),
             parameters=deepcopy(assumptions[name]), required_return=assumptions.get('required_return'),
@@ -156,8 +163,12 @@ def _owner_cells(assessment, index):
             multiple_basis=assumptions.get('multiple_basis'), limitations=deepcopy(value.get('limitations', [])),
             inputs=deepcopy(inputs), receipts=deepcopy(receipts), dependencies=closure,
             result={key: case[key] for key in ('annualized_return', 'implied_terminal_eps_no_dividends',
-                        'implied_earnings_growth_no_dividends', 'implied_year_five_ebit_margin')
+                        'implied_earnings_growth_no_dividends', 'implied_year_five_ebit_margin',
+                        'terminal_owner_cash_proxy_usd_per_ads', 'implied_economic_access_at_hurdle')
                     if case.get(key) is not None})
+        if owner_cash:
+            cells[name]['owner_cash_parameters'] = deepcopy(owner_cash['case_parameters'][name])
+            cells[name]['owner_cash_basis'] = {k: deepcopy(owner_cash[k]) for k in ('risk_source', 'annual_history')}
         if anchored:
             cells[name]['terminal_anchor'] = deepcopy(proposal_basis['terminal_anchor'])
             if name == 'base':
@@ -188,6 +199,9 @@ class ResearchRun:
                         for section in RECORD_SECTIONS for row in groups[section]}
         visible_ids = {index[ref].get('record_id') or index[ref].get('source_url') for ref in self.visible}
         catalog = []
+        context_ids = {row['evidence_ref']: row['context_id']
+                       for section in RECORD_SECTIONS for row in groups[section]}
+        closures = {}
         for name, cell in _owner_cells(assessment, index).items():
             canonical = sorted({index[r].get('record_id') or index[r].get('source_url')
                                 for r in cell['dependencies']})
@@ -198,12 +212,29 @@ class ResearchRun:
             self.cells[ref] = (name, cell, assumption)
             catalog.append({k: cell[k] for k in ('name', 'method', 'symbol', 'decision_at', 'horizon_years',
                           'listed_currency', 'listed_unit', 'label', 'parameters', 'required_return',
-                          'assumption_origin', 'result')} | dict(ref=ref, assumption_ref=assumption, evidence_refs=canonical))
+                          'assumption_origin', 'result')} | dict(ref=ref, assumption_ref=assumption))
+            if cell.get('owner_cash_basis'):
+                key = 'closure_' + digest(canonical)[:16]
+                closures[key] = [context_ids[r] for r in canonical]
+                catalog[-1]['evidence_closure'] = key
+            else:
+                catalog[-1]['evidence_refs'] = canonical
         groups['scenario_catalog'] = catalog
-        if catalog and any(cell['label'] == 'TREASURY_ANCHORED_CONDITIONAL_NOT_FORECAST' for cell in catalog):
+        if closures:
+            groups['scenario_evidence_closures'] = closures
+        if catalog and any(cell['label'] in {'TREASURY_ANCHORED_CONDITIONAL_NOT_FORECAST',
+                                             'OWNER_CASH_CONDITIONAL_NOT_FORECAST'} for cell in catalog):
             _, anchored_cell, _ = next(item for item in self.cells.values() if item[1].get('terminal_anchor'))
             groups['terminal_assumption_basis'] = {k: anchored_cell[k] for k in (
                 'terminal_anchor', 'multiple_basis', 'assumption_rationale')}
+            if anchored_cell.get('owner_cash_basis'):
+                basis = anchored_cell['owner_cash_basis']
+                groups['terminal_assumption_basis']['risk_source'] = basis['risk_source']
+                groups['terminal_assumption_basis']['annual_history'] = [
+                    {k: row[k] for k in ('period', 'owner_cash_proxy_cny', 'owner_cash_proxy_per_ads_cny', 'conversion')}
+                    for row in basis['annual_history']]
+                for cell in catalog:
+                    cell['owner_cash_parameters'] = self.cells[cell['ref']][1]['owner_cash_parameters']
             catalog_base = next((cell for cell in catalog if cell['name'] == 'base'), None)
             if catalog_base is not None:
                 catalog_base['entry_price_sensitivity'] = self.cells[catalog_base['ref']][1]['entry_price_sensitivity']
@@ -356,6 +387,9 @@ def _compatible_valuation(assessment, eligible, catalog):
                                              if name in names}, sensitivity=[]))
     if 'base' not in names:
         result.pop('entry_price_sensitivity', None)
+    if result.get('owner_cash_model'):
+        cases = result['owner_cash_model']['case_parameters']
+        result['owner_cash_model']['case_parameters'] = {k: v for k, v in cases.items() if k in names}
     return result
 
 
@@ -427,6 +461,14 @@ def report(final):
                      f'资格时点 {cell["decision_at"]}，五年年化条件回报 {value["annualized_return"]}（比率）。'
                      f'要求回报率 {cell["required_return"]}（假设比率），反向条件 {dumps(reverse)}。'
                      f'假设 {dumps(cell["parameters"])}。')
+        if cell.get('owner_cash_parameters'):
+            params = cell['owner_cash_parameters']
+            lines.append(f'  稳态折现率 {Decimal(params["terminal_discount_rate"]):.2%}，'
+                         f'增长 {Decimal(params["terminal_cash_growth"]):.2%}，'
+                         f'现金转化 {Decimal(params["cash_conversion"]):.2%}，'
+                         f'可取得 {Decimal(params["economic_access_fraction"]):.2%}。'
+                         f'第六年现金代理 {Decimal(value["terminal_owner_cash_proxy_usd_per_ads"]):.2f} USD/ADS；'
+                         f'按当前经营路径达到测试门槛所需可取得比例 {Decimal(value["implied_economic_access_at_hurdle"]):.2%}。')
     anchored = next((c for c in final['scenario_cells'].values() if c.get('terminal_anchor')), None)
     if anchored:
         anchor = anchored['terminal_anchor']
@@ -434,6 +476,21 @@ def report(final):
                      + anchor['usd_five_year_cmt'] + '（比率）。引用：' + anchor['record_id'] + '。')
         lines.append('终值假设依据：' + anchored['multiple_basis'])
         lines.append('经营与资本配置假设：' + anchored['assumption_rationale'])
+        if anchored.get('owner_cash_basis'):
+            basis = anchored['owner_cash_basis']
+            risk = basis['risk_source']
+            lines.append(f"外部风险研究版本 {risk['vintage']}，成熟市场溢价 {risk['mature_equity_premium']}，"
+                         f"中国风险溢价 {risk['china_equity_country_premium']}（比率），来源 {risk['source_url']}。")
+            lines.append('历史现金桥（集团人民币；每 ADS 按当前已核验换算作可比展示）')
+            for year in basis['annual_history']:
+                billions = Decimal(100_000_000)
+                cash = Decimal(year['owner_cash_proxy_cny']) / billions
+                lines.append(f"- {year['period']}：经营现金流 {Decimal(year['operating_cash_cny']) / billions:.2f} 亿，"
+                             f"生产性资产支出 {Decimal(year['productive_asset_cash_spend_cny']) / billions:.2f} 亿，"
+                             f"商家应付款现金贡献 {Decimal(year['merchant_payables_cash_change_cny']) / billions:.2f} 亿，"
+                             f"SBC 经济成本 {Decimal(year['sbc_economic_cost_cny']) / billions:.2f} 亿；"
+                             f"现金代理 {cash:.2f} 亿元、{Decimal(year['owner_cash_proxy_per_ads_cny']):.2f} 元/ADS，"
+                             f"占集团净利润 {Decimal(year['conversion']):.2%}。")
         base = next((c for c in final['scenario_cells'].values() if c['name'] == 'base'), {})
         if base.get('entry_price_sensitivity'):
             lines.append('基准情景的假设入场价敏感性（非行情）：' + dumps(base['entry_price_sensitivity']) + '。')

@@ -671,3 +671,49 @@ def build_valuation_inputs(assessment):
     out['issues'] += ['POINT_IN_TIME_ECONOMIC_SHARES_UNVERIFIED','CURRENT_PRICE_FX_AND_CORPORATE_ACTION_CLOSURE_REQUIRED',
                      'SURPLUS_CASH_AND_COMPLETE_LEASE_DEBT_TREATMENT_UNKNOWN']
     return out
+
+
+def annual_owner_cash_history(assessment):
+    """Three same-filing RMB years, adjusted for merchant float and SBC economics."""
+    fields = {'cfo', 'productive_asset_payments', 'merchant_float_change', 'sbc', 'net_income', 'diluted_shares'}
+    filings = {}
+    for row in assessment.get('quality_field_records', ()):
+        links = row.get('publication_links') or []
+        if (row.get('field') in fields and row.get('scope') == 'annual' and len(links) == 1
+                and links[0].get('document_type') in {'20-F', '10-K'}
+                and links[0].get('record_id')):
+            filings.setdefault(links[0]['record_id'], []).append(row)
+    histories = []
+    for rows in filings.values():
+        verified = build_quality(assessment | {'quality_field_records': rows}, currency='CNY')['facts']
+        years = {}
+        for row in verified:
+            years.setdefault((row['start'], row['period']), {})[row['field']] = row
+        periods = sorted(years)
+        if len(periods) != 3 or any(set(years[p]) != fields for p in periods):
+            continue
+        if any((stamp(start) - stamp(prior_end)).days != 1 for (_, prior_end), (start, _) in zip(periods, periods[1:])):
+            continue
+        # Historical GAAP reporting basis. These are not point-in-time shares,
+        # current economic cash, or a determination of distributable cash.
+        history = []
+        for (_, day), facts in sorted(years.items()):
+            amounts = {k: Decimal(r['value']) for k, r in facts.items()}
+            cfo, productive, float_change, sbc, profit, shares = (
+                amounts[k] for k in ('cfo', 'productive_asset_payments', 'merchant_float_change',
+                                     'sbc', 'net_income', 'diluted_shares'))
+            cash = cfo - productive - float_change - sbc
+            if min(profit, shares, cash) <= 0:
+                break
+            history.append(dict(period=day, gaap_income_cny=str(profit), operating_cash_cny=str(cfo),
+                productive_asset_cash_spend_cny=str(productive), merchant_payables_cash_change_cny=str(float_change),
+                sbc_economic_cost_cny=str(sbc), owner_cash_proxy_cny=str(cash), weighted_diluted_shares=str(shares),
+                owner_cash_per_ordinary_share_cny=str(cash / shares), conversion=str(cash / profit),
+                evidence_refs=sorted({ref for r in facts.values() for ref in r['evidence_refs']})))
+        if len(history) == 3:
+            histories.append(history)
+    if not histories:
+        return []
+    latest = max(h[-1]['period'] for h in histories)
+    candidates = [h for h in histories if h[-1]['period'] == latest]
+    return candidates[0] if len(candidates) == 1 else []
