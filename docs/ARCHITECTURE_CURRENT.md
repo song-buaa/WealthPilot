@@ -228,6 +228,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 4.4 B2候选由原Wealth Owner在U1冻结发布时读取私有用途/覆盖证据，保留原Portfolio全持仓范围及账户来源；原Allocation GET只读既有固定视图，复用A-min、PolicyAssets及请求级PolicySession计算ACTIVE五大类差距，来源不足409而非假零资产。原政策/组合页面显示证据与到期UNKNOWN；不含同步、穿透风险或交易。无共享DDL/政策写入；Owner文件与真实数据资格须另行确认，见[原U1合同](U1_IMPLEMENTATION.md#44-b2-owner凭据与active配置接线)。
 
+4.4 B3沿原只读Allocation快照追加ACTIVE分层差距。原Wealth/U1、A-min及PolicySession共同约束分母、身份、时点和政策版本，原五类输出保留。一级、八个二级桶与有限ETF产品层按逐项证据汇总，未归类留在D并披露，不发布不完整分层的当前权重或金额差距。详见[B3合同](U1_IMPLEMENTATION.md#44-b3-active分层配置差距)。
+
 ## 14. U2 成交驱动同步与只读状态（已合入）
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。

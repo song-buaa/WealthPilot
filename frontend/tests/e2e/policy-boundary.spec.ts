@@ -80,3 +80,49 @@ for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
     expect(writes).toBe(0)
   })
 }
+
+for (const status of ['QUALIFIED', 'PARTIAL']) {
+  test(`ACTIVE hierarchy renders ${status} independently of the five classes`, async ({ page }) => {
+    const gap = { amount_cny: '760', current_ratio: '.76', target_ratio: '.70', gap_pp: '6', amount_gap_cny: '60' }
+    const partial = { ...gap, amount_cny: null, current_ratio: null, gap_pp: null, amount_gap_cny: null }
+    const writes: string[] = []
+    await page.route('**/api/**', async route => {
+      if (route.request().method() !== 'GET') writes.push(route.request().url())
+      const path = new URL(route.request().url()).pathname
+      if (path.includes('policy-context')) {
+        await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+          targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+      } else if (path === '/api/allocation/snapshot') {
+        await route.fulfill({ json: { policy_allocation: {
+          status: 'QUALIFIED_MAJOR_CLASSES', snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64),
+          as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
+          denominator_cny: '1000', policy_reference: { bundle_sha256: 'f'.repeat(64) },
+          classes: { equity: { ...gap, direction: 'OVER' } }, focus: ['equity'], execution_authorized: false,
+          hierarchy: {
+            status, strategic: { growth_and_alternatives: status === 'QUALIFIED' ? gap : partial },
+            secondary: { us_etf: status === 'QUALIFIED' ? gap : partial },
+            etf: { status: status === 'QUALIFIED' ? 'QUALIFIED' : 'UNKNOWN', products: {
+              SPY: { ...(status === 'QUALIFIED' ? gap : partial),
+                current_ratio_of_d: status === 'QUALIFIED' ? '.12' : null, target_ratio_of_d: '.09' },
+            } },
+            strategic_review: { status: status === 'QUALIFIED' ? 'HUMAN_REVIEW' : 'UNKNOWN', threshold_pp: '5',
+              triggered_classes: status === 'QUALIFIED' ? ['growth_and_alternatives'] : [] },
+            unclassified_asset_refs: ['position:99'], unclassified_amount_cny: '15',
+          },
+        } } })
+      } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+    })
+    await page.goto(base + '/#/discipline')
+    const hierarchy = page.getByRole('region', { name: 'ACTIVE 分层配置' })
+    await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('9.00%')
+    if (status === 'QUALIFIED') {
+      await expect(hierarchy).toContainText('人工专项配置复核')
+      await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('12.00%')
+    } else {
+      await expect(hierarchy).toContainText('position:99')
+      await expect(hierarchy.getByRole('table', { name: '一级战略配置（占 D）' })).not.toContainText('76.00%')
+      await expect(hierarchy).not.toContainText('人工专项配置复核')
+    }
+    expect(writes).toEqual([])
+  })
+}

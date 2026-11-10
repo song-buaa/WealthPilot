@@ -102,6 +102,8 @@ def snapshot(portfolio_id):
             'focus':sorted([k for k in rows if rows[k]['direction']!='AT_TARGET'],
                 key=lambda k:abs(Decimal(rows[k]['gap_pp'])), reverse=True),
             'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
+        if hasattr(session, 'allocation_hierarchy'):
+            meta['hierarchy'] = session.allocation_hierarchy
         return PolicyAllocationSnapshot(snapshot_at=session.assets.as_of,
             total_investable_assets=float(session.assets.denominator_cny),
             by_class={k:ClassAllocation(amount=float(v),ratio=float(weights[k].value)) for k,v in amounts.items()},

@@ -1,6 +1,24 @@
 import { useEffect, useState } from 'react'
 import { fmtCny } from '@/lib/fmt'
 
+interface Gap {
+  amount_cny: string | null
+  current_ratio: string | null
+  target_ratio: string
+  gap_pp: string | null
+  amount_gap_cny: string | null
+}
+interface Hierarchy {
+  status: 'QUALIFIED' | 'PARTIAL' | 'UNKNOWN'
+  strategic: Record<string, Gap>
+  secondary: Record<string, Gap>
+  etf: { status: string; products: Record<string, Gap & {
+    current_ratio_of_d: string | null; target_ratio_of_d: string }> }
+  strategic_review: { status: string; threshold_pp: string; triggered_classes: string[] }
+  unclassified_asset_refs: string[]
+  unclassified_amount_cny: string
+}
+
 interface Diagnostic {
   status: string
   snapshot_id: string
@@ -12,9 +30,53 @@ interface Diagnostic {
   classes: Record<string, { amount_cny: string; current_ratio: string; target_ratio: string;
     gap_pp: string; amount_gap_cny: string; direction: string }>
   focus: string[]
+  hierarchy?: Hierarchy
   execution_authorized: false
 }
 const labels: Record<string, string> = { cash: '货币', fixed: '固收', equity: '权益', alt: '另类', deriv: '衍生' }
+
+const policyLabels: Record<string, string> = {
+  growth_and_alternatives: '成长权益及另类资产', stable_pool: '稳健池',
+  us_etf: '美国股票 ETF', us_direct: '美国直接个股', china: '中国主动精选',
+  gold: '黄金', btc: 'BTC 现货', ib01: 'IB01', cbu3: 'CBU3', cash: '投资账户临时现金',
+}
+const percent = (ratio: string | null) => ratio === null ? '—' : (Number(ratio) * 100).toFixed(2) + '%'
+const currency = (amount: string | null) => amount === null ? '—' : fmtCny(Number(amount))
+
+function GapTable({ title, rows }: { title: string; rows: Record<string, Gap> }) {
+  return <table>
+    <caption>{title}</caption>
+    <thead><tr><th>类别</th><th>当前金额</th><th>当前权重</th><th>目标权重</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
+    <tbody>{Object.entries(rows).map(([key, row]) => <tr key={key}>
+      <th scope="row">{policyLabels[key] ?? key}</th><td>{currency(row.amount_cny)}</td>
+      <td>{percent(row.current_ratio)}</td><td>{percent(row.target_ratio)}</td>
+      <td>{row.gap_pp === null ? '—' : Number(row.gap_pp).toFixed(2)}</td><td>{currency(row.amount_gap_cny)}</td>
+    </tr>)}</tbody>
+  </table>
+}
+
+function PolicyHierarchy({ value }: { value: Hierarchy }) {
+  const review = value.strategic_review
+  return <section aria-label="ACTIVE 分层配置">
+    <h4>ACTIVE 分层配置</h4>
+    {value.status !== 'QUALIFIED' && <p role="status">
+      分层资格 {value.status}。未归类金额 {currency(value.unclassified_amount_cny)}，
+      来源 {value.unclassified_asset_refs.join('、')}。
+    </p>}
+    <GapTable title="一级战略配置（占 D）" rows={value.strategic} />
+    {review.status === 'HUMAN_REVIEW'
+      ? <p role="status">人工专项配置复核：{review.triggered_classes.map(key => policyLabels[key]).join('、')}。</p>
+      : review.status === 'NOT_TRIGGERED' && <p>一级偏差未超过 {Number(review.threshold_pp)} 个百分点。</p>}
+    <GapTable title="二级政策预算（占 D）" rows={value.secondary} />
+    {value.etf.status === 'NO_ETF_HOLDINGS' && <p>当前美国股票 ETF 子组合为空，内部权重未定义。</p>}
+    <GapTable title="ETF 产品配置（占 ETF 子组合）" rows={value.etf.products} />
+    <table><caption>ETF 产品占 D</caption><thead><tr><th>产品</th><th>当前</th><th>派生目标</th></tr></thead>
+      <tbody>{Object.entries(value.etf.products).map(([key, row]) => <tr key={key}>
+        <th scope="row">{key}</th><td>{percent(row.current_ratio_of_d)}</td><td>{percent(row.target_ratio_of_d)}</td>
+      </tr>)}</tbody>
+    </table>
+  </section>
+}
 
 /** Reads an already-frozen view. It never prepares, refreshes or places orders. */
 export default function ActiveAllocation({ policySha }: { policySha?: string }) {
@@ -54,6 +116,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
         <td>{Number(row.gap_pp).toFixed(2)}</td><td>{fmtCny(Number(row.amount_gap_cny))}</td>
       </tr>)}</tbody></table>
     <p>主要偏差：{value.focus.map(key => `${labels[key]}${value.classes[key].direction === 'OVER' ? '超配' : '低配'}`).join('、') || '与目标一致'}。</p>
+    {value.hierarchy && <PolicyHierarchy value={value.hierarchy} />}
     <p>正差距表示超配，负差距表示低配。仅为配置差距，未完成穿透风险复核，也不是交易或资金操作建议。</p>
   </section>
 }
