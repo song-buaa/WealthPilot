@@ -105,13 +105,13 @@ def render_reader(final, symbol=None, *, policy_bound=False):
             section, label = '财务与现金兑现', ''
         else:
             section, label = '风险与限制', ''
-        trigger = re.search(r'(?<=。)(?:下次财报|下一次财报|以下次财报|以方案规定的阶段性评估窗口)', body) if 'Q7' in questions else None
+        trigger = re.search(r'(?<=。)(?:下次财报|下一次财报|以下次财报|以方案规定的阶段性评估窗口)[^。]*(?:。|$)', body) if 'Q7' in questions else None
         if trigger:
             theme, priority = _review_theme(section, claim['role'], label)
             previous = reviews.get(theme)
             if previous is None or priority < previous[0]:
-                reviews[theme] = (priority, f'**{theme}**　{body[trigger.start():]} {marker}')
-            body = body[:trigger.start()]
+                reviews[theme] = (priority, f'**{theme}**　{trigger.group()} {marker}')
+            body = body[:trigger.start()] + body[trigger.end():]
         text = f'**{label}情景**　{body}' if label else body
         sections.setdefault(section, []).append(f'{text} {marker}')
 
@@ -124,13 +124,17 @@ def render_reader(final, symbol=None, *, policy_bound=False):
         lines.append('综合投资判断尚未闭合。')
     lines.extend(sections.get('投资结论', []))
     base = next((c for c in cells.values() if c['name'] == 'base'), None)
-    if base:
-        price = base['inputs'].get('price_usd_per_ads')
-        date = (base.get('receipts', {}).get('price') or {}).get('period')
+    reference_case = base or next(iter(cells.values()), None)
+    if reference_case:
+        price = reference_case['inputs'].get('price_usd_per_ads')
+        date = (reference_case.get('receipts', {}).get('price') or {}).get('period')
         if price is not None and date:
             lines.extend(['', f'历史观察价 **{_number(price)} USD/ADS**（{date}，非实时）。'])
+    if base:
         lines.extend(['', f'基准情景五年条件年化 **{_percent(base["result"]["annualized_return"])}**，'
                       f'研究门槛 **{_percent(base["required_return"])}**。'])
+    elif reference_case:
+        lines.extend(['', f'已核验情景的研究门槛 **{_percent(reference_case["required_return"])}**。'])
     for heading in ('投资命题', '经营与商业模式', '竞争与反证', '财务与现金兑现', '风险与限制'):
         if heading in sections:
             lines.extend(['', f'## {heading}', '', '\n\n'.join(sections[heading])])

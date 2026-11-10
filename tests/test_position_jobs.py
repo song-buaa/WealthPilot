@@ -377,7 +377,7 @@ def test_reader_shows_historical_base_case_and_keeps_complete_review_in_audit():
         ('supporting', 'Q3', '下次财报核对利润。'),
         ('supporting', 'Q6', '下次财报核对现金。'),
         ('counterclaim', 'Q2', '下次财报核对竞争开支。'),
-        ('supporting', 'Q5', '下次财报核对其他风险。'),
+        ('supporting', 'Q5', '下次财报核对其他风险。仍无法确认潜在损失。'),
     ]:
         claims.append(dict(role=role, question_ids=[question, 'Q7'],
                            paragraph=dict(text='尚待核验。' + text, evidence_refs=['ref:cash'])))
@@ -392,6 +392,13 @@ def test_reader_shows_historical_base_case_and_keeps_complete_review_in_audit():
     assert '-3.15%' in lead and '9.81%' in lead
     assert '需要继续验证现金分配才能支持投资。' in lead
     assert '下次财报核对其他风险。' not in reader.conclusion
+    assert '仍无法确认潜在损失。' in reader.conclusion
     audit = report_projection(full, view='audit')
     assert audit.conclusion == full.conclusion
     assert '下次财报核对其他风险。' in audit.conclusion
+
+    cell['name'] = 'cautious'
+    partial = report_projection(full).conclusion
+    assert '80.50 USD/ADS**（2026-11-09，非实时）' in partial
+    assert '已核验情景的研究门槛 **9.81%**' in partial
+    assert '基准情景五年条件年化' not in partial
