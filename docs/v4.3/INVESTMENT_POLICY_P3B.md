@@ -124,3 +124,24 @@ LEGACY安装时保持现有政策env未配置；若误配一个尚无policy表�
 代码回退只恢复已核验兼容的原组件/配置/入口，不替换业务或E1数据库。政策回滚使用`publish_cli release`且operation=ROLLBACK、目标须曾正式发布，绑定当前sequence/ACTIVE SHA、目标Bundle和新安装收据；不得重放旧request_id换内容或用旧备份抹除后续合法历史。代码发布、DDL、结构化批准与ACTIVATE没有一键自动链。
 
 P3-C1最终状态以本轮私人报告、最终PR HEAD及GitHub四CI收据为准；本页说明准备边界，不宣称已安装、激活或真实ChatGPT业务验收通过。P3-C2/C3、真实Provider调用/成本和部署分别等待明确授权。
+
+
+## B3 5pp 结构化来源候选
+
+[#111 方案 A](https://github.com/song-buaa/WealthPilot/issues/111#issuecomment-6814354290) 的两节点映射随正式政策 Markdown 的 6.3 条款派生为 `wp.policy.v2` / `approved-markdown-v2`。Schema 版本与 scope 内递增 Bundle 版本独立。读回使用已存版本重新验证两份源字节，既有 v1 无映射、原字节和 PolicyReference 保留。三表和原治理命令不变。
+
+候选条款块使用以下七行。其他现有规则继续从原条款派生。
+
+```text
+B3节点合同：wp.policy.v2
+B3节点 growth_and_alternatives：70%
+B3节点 stable_pool：30%
+B3节点复核单位：PORTFOLIO_PER_SNAPSHOT
+B3节点现金范围：QUALIFIED_TEMPORARY_INVESTMENT_CASH_IN_STABLE_POOL
+B3节点产品决定：https://github.com/song-buaa/WealthPilot/issues/111#issuecomment-6814354290
+B3节点内容批准：DRAFT_CONTENT
+```
+
+草案可在隔离库 Stage/Validate。完成独立内容审批后，须以确切批准字节重新 stage，最后一行采用 `APPROVED_CONTENT | YYYY-MM-DD | 独立内容批准引用`。产品决定引用不充当内容批准。来源字段仍须由原操作员对照人类批准原文和哈希。正式 Publisher 分别检查结构化审批和激活授权。P1 通用 APPROVED 事件及旧合成发布入口不能激活 v2。
+
+B3 复用同一冻结快照、原分母及资产资格，按两节点绝对偏离严格 >5pp 判定一次组合人工复核。缺映射、版本不一致、旧 v1 或资产证据不足时保留安全降级。一级诊断和读回幂等无需新增表。若已发布 v2，先用原正式 Publisher 按独立授权追加回滚至已发布旧 Bundle 的收据，再考虑退回仅识别 v1 的应用版本。旧代码无法读 v2 时会拒绝政策上下文。禁止覆盖数据库或改写发布历史。

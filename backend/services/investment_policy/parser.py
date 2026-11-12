@@ -10,7 +10,7 @@ from decimal import Decimal
 import hashlib
 import re
 
-from .contracts import Allocation, Rule, Snapshot, SourceClause
+from .contracts import Allocation, Rule, Snapshot, SnapshotV2, SourceClause, StrategicReviewScope
 
 
 class PolicyError(ValueError):
@@ -69,7 +69,8 @@ class Document:
         return result[2:]
 
 
-def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_version: int) -> Snapshot:
+def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_version: int,
+           expected_schema_version: str | None = None) -> Snapshot:
     if set(expected_hashes) != {"philosophy", "policy"}:
         raise PolicyError("EXACTLY_TWO_APPROVED_SOURCES_REQUIRED")
     docs = {"philosophy": Document(philosophy, expected_hashes["philosophy"], "philosophy"),
@@ -179,5 +180,43 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
     contexts = {s: doc.ref(s) for s in doc.sections}
     contexts["philosophy"] = SourceClause(document="philosophy", source_sha256=docs["philosophy"].sha,
         section="full", line_start=1, line_end=len(docs["philosophy"].lines), text=philosophy.decode())
-    return Snapshot(policy_version=policy_version, source_hashes={k: d.sha for k, d in docs.items()},
-                    content_approved_on=approval_dates[0], allocation=allocation, rules=rules, contextual_clauses=contexts)
+    fields = dict(policy_version=policy_version, source_hashes={k: d.sha for k, d in docs.items()},
+                  content_approved_on=approval_dates[0], allocation=allocation, rules=rules, contextual_clauses=contexts)
+    markers = ("B3节点合同：", "B3节点 growth_and_alternatives：", "B3节点 stable_pool：",
+               "B3节点复核单位：", "B3节点现金范围：", "B3节点产品决定：", "B3节点内容批准：")
+    has_versioned_clause = any(line.startswith(markers) for line in doc.lines)
+    schema_version = expected_schema_version
+    if schema_version is None:
+        schema_version = "wp.policy.v2" if has_versioned_clause else "wp.policy.v1"
+    if schema_version == "wp.policy.v1":
+        return Snapshot(**fields)
+    if schema_version != "wp.policy.v2" or not has_versioned_clause:
+        raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
+
+    section = doc.text("6.3")
+    prefix_lines = [line for line in doc.lines if line.startswith("B3节点")]
+    if len(prefix_lines) != 7 or any(line not in section.splitlines() for line in prefix_lines):
+        raise PolicyError("B3_SOURCE_CLAUSE_LAYOUT_INVALID")
+    one(r"^B3节点合同：wp\.policy\.v2$", section)
+    nodes = {
+        key: pct(one(rf"^B3节点 {key}：(\d+(?:\.\d+)?%)$", section))
+        for key in ("growth_and_alternatives", "stable_pool")
+    }
+    review_unit = one(r"^B3节点复核单位：(PORTFOLIO_PER_SNAPSHOT)$", section)
+    cash_scope = one(r"^B3节点现金范围：(QUALIFIED_TEMPORARY_INVESTMENT_CASH_IN_STABLE_POOL)$", section)
+    decision_ref = one(r"^B3节点产品决定：(https://github\.com/song-buaa/WealthPilot/issues/111#issuecomment-6814354290)$", section)
+    approval = one(r"^B3节点内容批准：([^\n]+)$", section)
+    content_status = "DRAFT_CONTENT"
+    approval_ref = None
+    if approval != content_status:
+        approved_on, approval_ref = one(r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| (\S(?:.*\S)?)$", approval)
+        if (approved_on < approval_dates[0] or approval_ref in {
+                decision_ref, "https://github.com/song-buaa/WealthPilot/issues/111#issuecomment-6816141673"
+        }):
+            raise PolicyError("B3_INDEPENDENT_CONTENT_APPROVAL_REQUIRED")
+        fields["content_approved_on"] = approved_on
+        content_status = "APPROVED_CONTENT"
+    mapping = StrategicReviewScope(nodes=nodes, review_unit=review_unit, cash=cash_scope,
+        product_decision_ref=decision_ref, content_status=content_status,
+        content_approval_ref=approval_ref, source_clause=doc.ref("6.3"))
+    return SnapshotV2(**fields, strategic_review_scope=mapping)

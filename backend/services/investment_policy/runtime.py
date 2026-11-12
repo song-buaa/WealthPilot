@@ -9,7 +9,7 @@ import os
 
 from pydantic import Field
 
-from .contracts import Contract, MetricEvidence, Snapshot, canonical
+from .contracts import Contract, MetricEvidence, canonical, parse_snapshot
 from .evaluation import evaluate_snapshot
 from .parser import PolicyError
 from .service import PolicyService
@@ -191,7 +191,7 @@ def diagnose(portfolio_id=None, *, issuer_symbol=None, behaviors=None):
                 metrics["issuer_weight"] = qualify(assets.issuer_weights[issuer_symbol])
             if assets.btc_weight:
                 metrics["btc_weight"] = qualify(assets.btc_weight)
-    result = evaluate_snapshot(Snapshot.model_validate(raw["snapshot"]), metrics=metrics, issuer_symbol=issuer_symbol,
+    result = evaluate_snapshot(parse_snapshot(raw["snapshot"]), metrics=metrics, issuer_symbol=issuer_symbol,
         behavior_facts=behaviors or {}, as_of=utc_now(), max_age=timedelta(minutes=5))
     # Portfolio diagnostics retain every evidenced issuer risk. UNKNOWN coverage
     # cannot replace a known breach; repeat only issuer-specific rules here.
@@ -205,27 +205,29 @@ def diagnose(portfolio_id=None, *, issuer_symbol=None, behaviors=None):
                 result['issuers'][symbol]={'triggers':triggers,'unknown':unknown}
                 result['triggers'].extend(triggers)
                 result['unknown'].extend(unknown)
-    # Evaluate each class with its own deviation evidence, never use a netted average.
+    # Strategic review belongs to the qualified B3 snapshot, never to caller
+    # supplied weights. Reuse its single portfolio diagnostic at the top level.
     result["major_classes"] = {}
-    if assets and qualified:
-        expected = {'growth_and_alternatives':Snapshot.model_validate(raw['snapshot']).allocation.growth_total,
-                    'stable_pool':Snapshot.model_validate(raw['snapshot']).allocation.stable_total}
-        for key, evidence in assets.major_class_weights.items():
-            if key not in expected:
-                result['unknown'].append({'reason':'NOT_A_POLICY_MAJOR_CLASS','class':key})
-                continue
-            value = abs(evidence.value-expected[key]) if evidence.value is not None else None
-            evidence = qualify(evidence).model_copy(update={'value':value})
-            result["major_classes"][key] = evaluate_snapshot(Snapshot.model_validate(raw["snapshot"]),
-                metrics={"major_class_absolute_deviation": evidence}, issuer_symbol=None,
-                behavior_facts={}, as_of=utc_now(), max_age=timedelta(minutes=5))
-            result['triggers'].extend(dict(t,major_class=key) for t in result['major_classes'][key]['triggers'])
-            result['unknown'].extend(result['major_classes'][key]['unknown'])
-        actions={item['action'] for item in result['triggers']}
-        for level in ['HARD_BLOCK','HUMAN_REVIEW','WARNING']:
-            if level in actions:
-                result['status']=level
-                break
+    review = getattr(session, "allocation_hierarchy", {}).get("strategic_review", {})
+    source = getattr(session, "allocation_source", {})
+    if (issuer_symbol is None and review.get("status") in {"HUMAN_REVIEW", "NO_RULE_TRIGGERED"}
+            and review.get("policy_reference") == raw["policy_reference"]
+            and assets_qualified(session, complete=True)
+            and source.get("snapshot_id") == assets.snapshot_id
+            and source.get("snapshot_sha256") == review["snapshot_sha256"]
+            and clock(utc_now()) <= clock(source["expires_at"])):
+        if review["status"] == "HUMAN_REVIEW":
+            result["triggers"].append({**review, "action": "HUMAN_REVIEW", "auto_trade_allowed": False})
+        result["unknown"] = [item for item in result["unknown"]
+                             if item.get("rule_id") != review["rule_id"]]
+    result["portfolio_compliance"] = "UNKNOWN" if result["unknown"] else "NOT_AN_EXECUTION_ASSESSMENT"
+    if result["status"] == "UNKNOWN" and not result["unknown"]:
+        result["status"] = "NO_RULE_TRIGGERED_NOT_EXECUTION_APPROVAL"
+    actions = {item["action"] for item in result["triggers"]}
+    for level in ("HARD_BLOCK", "HUMAN_REVIEW", "WARNING"):
+        if level in actions:
+            result["status"] = level
+            break
     result.update(policy_reference=raw["policy_reference"], mode=raw["mode"],
         asset_snapshot_id=assets.snapshot_id if assets else None,
         asset_issues=assets.issues if assets else ["FULL_INVESTABLE_ASSET_DENOMINATOR_UNVERIFIED", "PENSION_DEDUP_FX_EXTERNAL_GOLD_BTC_COVERAGE_UNKNOWN"])

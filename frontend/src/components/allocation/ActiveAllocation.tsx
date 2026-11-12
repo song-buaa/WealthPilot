@@ -88,7 +88,10 @@ function PolicyHierarchy({ value }: { value: Hierarchy }) {
       来源 {value.unclassified_asset_refs.join('、')}。
     </p>}
     <GapTable title="一级战略配置（占 D）" rows={value.strategic} />
-    <p role="status">RULE_SCOPE_UNVERIFIED · 政策复核适用节点待确认。
+    <p role="status">
+      {review.status === 'HUMAN_REVIEW' ? '一级战略配置偏差严格超过政策阈值，请复核一次组合配置。' :
+        review.status === 'NO_RULE_TRIGGERED' ? '一级战略配置未超过政策复核阈值。' :
+          'RULE_SCOPE_UNVERIFIED · 政策复核资格待确认。'}
       {review.status === 'RULE_SCOPE_UNVERIFIED' && !!review.candidate_hit_classes?.length &&
         <>候选偏差超过 {Number(review.threshold_pp)} 个百分点（{review.candidate_hit_classes.map(key => policyLabels[key]).join('、')}）。</>}
     </p>

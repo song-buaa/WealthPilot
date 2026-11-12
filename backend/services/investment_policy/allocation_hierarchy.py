@@ -1,13 +1,14 @@
 """Read-only strategic allocation of the included rows of one B2 snapshot."""
 
 from decimal import Decimal
+from fractions import Fraction
 import re
 
 from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
 from backend.services.instruments.issuers import IDENTITIES, ISSUERS, direct_issuer
 from backend.utils.symbol import parse_symbol
 
-from .contracts import Snapshot, digest
+from .contracts import PolicyReference, Snapshot, SnapshotV2, digest
 from .parser import PolicyError
 
 
@@ -113,6 +114,55 @@ def _gap(amount, base, target):
     return {**row, 'amount_cny': str(amount), 'current_ratio': str(amount / base) if base else None,
             'gap_pp': str(100 * difference / base) if base else None,
             'amount_gap_cny': str(difference) if base else None}
+
+
+def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id, snapshot_sha256, denominator):
+    """Qualify the existing B3 calculation using the verified PolicyService context."""
+    candidate = hierarchy["strategic_review"]
+    if (not isinstance(snapshot, SnapshotV2) or hierarchy["status"] != "QUALIFIED"
+            or snapshot.strategic_review_scope.content_status != "APPROVED_CONTENT"
+            or policy_context.get("status") != "ACTIVE" or policy_context.get("mode") != "POLICY_ACTIVE"):
+        return candidate
+
+    release = policy_context.get("release") or {}
+    if (release.get("synthetic") is not False
+            or release.get("environment") not in {"PRODUCTION", "ISOLATED_REHEARSAL"}
+            or not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha256 or "")
+            or denominator is None or not denominator.is_finite() or denominator <= 0):
+        return candidate
+    try:
+        reference = PolicyReference.model_validate(policy_context["policy_reference"])
+    except (ValueError, KeyError):
+        return candidate
+    if (reference.scope != f"portfolio:{portfolio_id}" or reference.scope != release.get("scope")
+            or reference.bundle_id != release.get("bundle_id")
+            or reference.bundle_version != snapshot.policy_version
+            or reference.bundle_sha256 != release.get("bundle_sha256")
+            or reference.structured_sha256 != digest(snapshot)
+            or snapshot.source_hashes != policy_context.get("source_hashes")):
+        return candidate
+
+    nodes = snapshot.strategic_review_scope.nodes
+    # Exact ratios of the source Decimal amounts avoid rounding a strictly
+    # greater deviation down to equality under the process Decimal context.
+    totals = {node: sum(Fraction(row["amount_cny"]) for row in hierarchy["classified_assets"].values()
+                        if row["bucket"] in STRATEGIC_BUCKETS[node]) for node in nodes}
+    base = Fraction(denominator)
+    if sum(totals.values()) != base:
+        return candidate
+    rule = next(rule for rule in snapshot.rules if rule.rule_id == "allocation.deviation")
+    hits = [node for node, target in nodes.items()
+            if abs(totals[node] - base * Fraction(target)) > base * Fraction(rule.threshold)]
+    identity = dict(policy_reference=reference.model_dump(), snapshot_sha256=snapshot_sha256,
+                    rule_id=candidate["rule_id"])
+    return {
+        **candidate,
+        **identity,
+        "status": "HUMAN_REVIEW" if hits else "NO_RULE_TRIGGERED",
+        "candidate_hit_classes": hits,
+        "triggered_classes": hits,
+        "review_id": digest(identity) if hits else None,
+    }
 
 
 def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):

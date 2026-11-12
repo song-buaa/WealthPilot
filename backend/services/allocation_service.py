@@ -67,8 +67,8 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
     from app import asset_views
     from app.database import DB_PATH
     from backend.services.investable_assets import project_investable_assets
-    from backend.services.investment_policy.contracts import digest, MetricEvidence, Snapshot
-    from backend.services.investment_policy.allocation_hierarchy import build_hierarchy
+    from backend.services.investment_policy.contracts import digest, MetricEvidence, parse_snapshot
+    from backend.services.investment_policy.allocation_hierarchy import build_hierarchy, formal_strategic_review
     from backend.services.investment_policy.concentration_adapter import allocation_concentration
     from backend.services.investment_policy.runtime import current, bind, assets_qualified
     from backend.services.investment_policy.parser import PolicyError
@@ -158,8 +158,13 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             k:MetricEvidence(value=v, complete=True, fresh=True, identity_verified=True,
                 denominator_qualified=True, as_of=view['captured_at']) for k,v in weights.items()}})
         session.allocation_amounts = amounts
-        session.allocation_hierarchy = build_hierarchy(Snapshot.model_validate(session.context['snapshot']),
+        context = session.consumer("allocation")
+        policy_snapshot = parse_snapshot(context["snapshot"])
+        session.allocation_hierarchy = build_hierarchy(policy_snapshot,
             denominator=denominator, included=included, coverage=q['investable_scope_evidence']['coverage'])
+        session.allocation_hierarchy["strategic_review"] = formal_strategic_review(
+            policy_snapshot, session.allocation_hierarchy, policy_context=context,
+            portfolio_id=portfolio_id, snapshot_sha256=projection.snapshot_sha256, denominator=denominator)
         session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
             at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'])
         session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),

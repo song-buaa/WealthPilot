@@ -147,6 +147,56 @@ class Snapshot(Contract):
         return self
 
 
+B3_NODE_TARGETS = {"growth_and_alternatives": Decimal("0.70"), "stable_pool": Decimal("0.30")}
+
+
+class StrategicReviewScope(Contract):
+    rule_id: Literal["allocation.deviation"] = "allocation.deviation"
+    nodes: dict[str, Decimal]
+    review_unit: Literal["PORTFOLIO_PER_SNAPSHOT"]
+    cash: Literal["QUALIFIED_TEMPORARY_INVESTMENT_CASH_IN_STABLE_POOL"]
+    product_decision_ref: str = Field(min_length=1)
+    content_status: Literal["DRAFT_CONTENT", "APPROVED_CONTENT"]
+    content_approval_ref: str | None
+    source_clause: SourceClause
+
+    @model_validator(mode="after")
+    def exact_scope(self):
+        if (self.nodes != B3_NODE_TARGETS or self.source_clause.document != "policy"
+                or self.source_clause.section != "6.3"):
+            raise ValueError("INVALID_B3_NODE_SCOPE")
+        if (self.content_status == "APPROVED_CONTENT") != bool(self.content_approval_ref):
+            raise ValueError("B3_CONTENT_APPROVAL_REFERENCE_MISMATCH")
+        return self
+
+
+class SnapshotV2(Snapshot):
+    schema_version: Literal["wp.policy.v2"] = "wp.policy.v2"
+    parser_version: Literal["approved-markdown-v2"] = "approved-markdown-v2"
+    strategic_review_scope: StrategicReviewScope
+
+    @model_validator(mode="after")
+    def strategic_review_binding(self):
+        mapping = self.strategic_review_scope
+        rule = next((r for r in self.rules if r.rule_id == mapping.rule_id), None)
+        if (rule is None or (rule.metric, rule.scope, rule.operator, rule.threshold, rule.action, rule.subject)
+                != ("major_class_absolute_deviation", "APPROVED_MAJOR_ASSET_CLASS", "gt",
+                    Decimal("0.05"), "HUMAN_REVIEW", None)
+                or rule.source_clause != mapping.source_clause
+                or mapping.source_clause != self.contextual_clauses.get("6.3")
+                or (self.allocation.growth_total, self.allocation.stable_total)
+                != (mapping.nodes["growth_and_alternatives"], mapping.nodes["stable_pool"])):
+            raise ValueError("B3_SCOPE_RULE_OR_SOURCE_MISMATCH")
+        return self
+
+
+def parse_snapshot(value) -> Snapshot:
+    """Decode frozen versions explicitly; unknown formats fail closed."""
+    if isinstance(value, dict) and value.get("schema_version") == "wp.policy.v2":
+        return SnapshotV2.model_validate(value)
+    return Snapshot.model_validate(value)
+
+
 class PolicyReference(Contract):
     """Optional future E1/analysis reference, without modifying their schemas."""
     bundle_id: str

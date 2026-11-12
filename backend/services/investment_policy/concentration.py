@@ -8,7 +8,7 @@ from backend.services.instruments.classification import CLASSIFICATION_VERSION
 from backend.services.instruments.etf_holdings import ETFHoldings
 from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, direct_issuer
 
-from .contracts import PolicyReference, Snapshot, digest
+from .contracts import PolicyReference, digest, parse_snapshot
 from .parser import PolicyError
 from .store import clock
 
@@ -20,7 +20,7 @@ def _pinned_policy(session, portfolio_id, at):
     if raw.get("mode") != "POLICY_ACTIVE" or raw.get("status") != "ACTIVE":
         raise PolicyError("POLICY_CONTEXT_UNAVAILABLE")
     reference = PolicyReference.model_validate(raw["policy_reference"])
-    snapshot = Snapshot.model_validate(raw["snapshot"])
+    snapshot = parse_snapshot(raw["snapshot"])
     if (session.portfolio_id != portfolio_id or reference.scope != f"portfolio:{portfolio_id}"
             or reference.bundle_version != snapshot.policy_version
             or reference.structured_sha256 != digest(snapshot) or clock(raw["effective_at"]) > at):

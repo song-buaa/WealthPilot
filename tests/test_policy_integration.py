@@ -198,13 +198,13 @@ def test_complete_inventory_does_not_override_missing_qualifications(active,chan
         assert '买入100股' not in out.chat_answer and out.structured_payload['policy_precision']=='CANNOT_QUANTIFY'
 
 
-def test_major_class_review_reaches_top_level_without_becoming_hard_block(active):
+def test_unmapped_major_class_weights_cannot_create_formal_review(active):
     s=session(SYN2='0')
     s.assets=s.assets.model_copy(update={'major_class_weights':{'growth_and_alternatives':metric('.9'),'stable_pool':metric('.1')}})
     with bind(s):
         result=diagnose(7,issuer_symbol='SYN2')
-        assert result['status']=='HUMAN_REVIEW'
-        assert any(t.get('major_class')=='growth_and_alternatives' for t in result['triggers'])
+        assert result['status']=='UNKNOWN'
+        assert not any(t['rule_id']=='allocation.deviation' for t in result['triggers'])
         assert result['unknown'] and not result['auto_trade_allowed']
 
 

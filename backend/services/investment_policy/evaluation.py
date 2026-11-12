@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from .contracts import MetricEvidence, Snapshot
+from .contracts import MetricEvidence, Snapshot, SnapshotV2
 from .parser import PolicyError
 from .store import clock
 
@@ -38,6 +38,9 @@ def evaluate_snapshot(snapshot: Snapshot, *, metrics: dict[str, MetricEvidence],
                 triggers.append({"rule_id": rule.rule_id, "action": rule.action, "source_clause": rule.source_clause.model_dump(), "auto_trade_allowed": False})
             elif value is not False:
                 unknown.append({"rule_id": rule.rule_id, "reason": "BEHAVIOR_FACT_UNKNOWN"})
+            continue
+        if isinstance(snapshot, SnapshotV2) and rule.rule_id == "allocation.deviation":
+            unknown.append({"rule_id": rule.rule_id, "reason": "QUALIFIED_B3_HIERARCHY_REQUIRED"})
             continue
         evidence = metrics.get(rule.metric)
         try:

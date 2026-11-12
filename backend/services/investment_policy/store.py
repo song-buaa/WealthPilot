@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from .contracts import canonical, digest
+from .contracts import SnapshotV2, canonical, digest
 from .parser import PolicyError, derive
 
 SCHEMA = """
@@ -129,7 +129,16 @@ class PolicyStore:
     def _bundle(self, db, scope, bundle_id):
         row = db.execute("SELECT * FROM policy_bundles WHERE scope=? AND bundle_id=?", (scope, bundle_id)).fetchone()
         value = self._read(row)
-        actual = derive(row["philosophy"], row["policy"], expected_hashes=value["source_hashes"], policy_version=value["bundle_version"])
+        frozen_snapshot = value["snapshot"]
+        if not isinstance(frozen_snapshot, dict):
+            raise PolicyError("MARKDOWN_DERIVATIVE_MISMATCH")
+        actual = derive(row["philosophy"], row["policy"], expected_hashes=value["source_hashes"], policy_version=value["bundle_version"],
+                        expected_schema_version=frozen_snapshot.get("schema_version", ""))
+        if (isinstance(actual, SnapshotV2)
+                and (value["content_status"] != actual.strategic_review_scope.content_status
+                     or value["content_approved_on"] != actual.content_approved_on
+                     or value["bundle_version"] != row["version"])):
+            raise PolicyError("B3_BUNDLE_METADATA_MISMATCH")
         if (value["structured_sha256"] != digest(actual) or value["snapshot"] != actual.model_dump(mode="json")
                 or value["scope"] != scope or value["bundle_id"] != bundle_id):
             raise PolicyError("MARKDOWN_DERIVATIVE_MISMATCH")
@@ -166,7 +175,9 @@ class PolicyStore:
             value = dict(bundle_id=bundle_id, bundle_version=version, scope=scope, source_hashes=expected_hashes,
                          source_files={k: p.name for k, p in paths.items()}, structured_sha256=digest(snapshot),
                          snapshot=snapshot.model_dump(mode="json"), created_at=created_at,
-                         content_approved_on=snapshot.content_approved_on, content_status="APPROVED_CONTENT",
+                         content_approved_on=snapshot.content_approved_on,
+                         content_status=(snapshot.strategic_review_scope.content_status
+                                         if isinstance(snapshot, SnapshotV2) else "APPROVED_CONTENT"),
                          deployment_status="NOT_DEPLOYED", effective_at=None, predecessor_version=head or None)
             db.execute("INSERT INTO policy_bundles VALUES(?,?,?,?,?,?,?,?,?)", (scope, version, bundle_id, request_id,
                 request_sha, canonical(value), digest(value), raw["philosophy"], raw["policy"]))
@@ -191,6 +202,8 @@ class PolicyStore:
             raise PolicyError("STRUCTURED_APPROVAL_REFERENCE_REQUIRED")
         with self.connection(write=True) as db:
             value = self._bundle(db, scope, bundle_id)
+            if state == "APPROVED" and value["snapshot"]["schema_version"] == "wp.policy.v2":
+                raise PolicyError("VERSIONED_SCOPE_REQUIRES_FORMAL_APPROVAL")
             if clock(at) < clock(value["created_at"]):
                 raise PolicyError("LIFECYCLE_CLOCK_REVERSED")
             prior = db.execute("SELECT * FROM policy_events WHERE scope=? AND request_id=?", (scope, request_id)).fetchone()
