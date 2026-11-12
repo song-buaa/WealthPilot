@@ -57,7 +57,7 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
         "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
+        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
     allowed = allowed | POLICY_ENV_KEYS | {"TIKTOKEN_CACHE_DIR"}
     if "TIKTOKEN_CACHE_DIR" in values and not isinstance(values["TIKTOKEN_CACHE_DIR"],str):

@@ -22,6 +22,45 @@ LIMITS = {
 }
 
 
+SOURCE_LABELS = {
+    'treasury': '观察日美国国债收益率',
+    'country_risk': '风险溢价来源',
+    'annual_cash_bridge': '同一审计申报的三年现金桥',
+    'requalification': '原估值在终审核验中',
+}
+SOURCE_STATUS = {'MISSING': '缺失', 'STALE': '过期', 'CONFLICT': '冲突',
+                 'UNKNOWN': '未核验', 'NOT_APPLICABLE': '不适用'}
+
+
+def research_context_lines(final):
+    lines = []
+    as_of = final.get('research_as_of')
+    if as_of:
+        lines.append(f'研究时点：{as_of}。财报期末、披露与证据取得时点分别见来源收据。')
+    holding = final.get('holding_context') or {}
+    if holding.get('entry_counterfactual'):
+        lines.append('新增配置作为反事实评估。已有存储持仓、快照资格和政策所载存量方向各按其证据。')
+    if holding.get('stored_position') == 'present':
+        lines.append('存储记录存在该标的持仓。')
+    if holding.get('snapshot') == 'unverified':
+        lines.append('本次未取得合格持仓快照，实际数量与敞口保留未知。')
+    return lines
+
+
+def valuation_method_lines(final):
+    cells = final.get('scenario_cells') or {}
+    statuses = final.get('valuation_source_status') or {}
+    lines = []
+    if any(cell.get('label') == 'MECHANICAL_REFERENCE_NOT_FORECAST' for cell in cells.values()):
+        lines.append('本报告使用机械 PE 敏感性。终值倍数以观察市盈率为基准，比较线为观察盈利收益率。')
+    if statuses:
+        missing = [f'{label}{SOURCE_STATUS[status]}' for key, label in SOURCE_LABELS.items()
+                   if (status := (statuses.get(key) or {}).get('status')) in SOURCE_STATUS]
+        if missing:
+            lines.append('估值输入限制：' + '、'.join(missing) + '。')
+    return lines
+
+
 def _percent(value):
     return '未知' if value is None else f'{Decimal(str(value)):.2%}'
 
@@ -39,21 +78,28 @@ def _valuation(cells, status):
         if status.get('reverse_equation'):
             lines.extend(['', status['reverse_equation']])
         return lines
-    lines = ['以下为五年条件回报。研究门槛不代表个人要求回报。', '',
-             '| 情景 | 条件年化 | 达门槛所需盈利年增长 / 现金可取得率 |', '| --- | ---: | ---: |']
+    mechanical = all(cell.get('label') == 'MECHANICAL_REFERENCE_NOT_FORECAST' for cell in cells.values())
+    reverse_title = ('达到参考收益率所需盈利年增长' if mechanical else
+                     '达门槛所需盈利年增长 / 现金可取得率')
+    lines = ['以下为五年条件回报。', '',
+             f'| 情景 | 条件年化 | {reverse_title} |', '| --- | ---: | ---: |']
     for name, label in CASE_NAMES.items():
         cell = next((c for c in cells.values() if c['name'] == name), None)
         if not cell:
             continue
         result = cell['result']
-        reverse = f'{_percent(result.get("implied_earnings_growth_no_dividends"))} / {_percent(result.get("implied_economic_access_at_hurdle"))}'
+        reverse = _percent(result.get('implied_earnings_growth_no_dividends'))
+        if not mechanical:
+            reverse += f' / {_percent(result.get("implied_economic_access_at_hurdle"))}'
         if result.get('implied_year_five_ebit_margin') is not None:
             reverse = f'第五年营业利润率 {_percent(result["implied_year_five_ebit_margin"])}'
         lines.append(f'| {label} | {_percent(result["annualized_return"])} | {reverse} |')
     anchor = next((c['terminal_anchor'] for c in cells.values() if c.get('terminal_anchor')), None)
     if anchor:
         lines.extend(['', f'{anchor["period"]} 五年期美元国债收益率为 {_percent(anchor["usd_five_year_cmt"])}。'])
-    lines.extend(['', '完整情景假设、历史现金桥、计算依据与敏感性见审计视图。'])
+    detail = ('完整情景假设、计算依据与敏感性见审计视图。' if mechanical else
+              '完整情景假设、历史现金桥、计算依据与敏感性见审计视图。')
+    lines.extend(['', detail])
     return lines
 
 
@@ -120,6 +166,8 @@ def render_reader(final, symbol=None, *, policy_bound=False):
     decision = (final.get('scenario_decision_review') or {}).get('incremental_capital')
     if decision in CAPITAL:
         lines.extend([f'**{CAPITAL[decision]}**', ''])
+    for line in research_context_lines(final):
+        lines.extend([line, ''])
     if '投资结论' not in sections:
         lines.append('综合投资判断尚未闭合。')
     lines.extend(sections.get('投资结论', []))
@@ -131,10 +179,14 @@ def render_reader(final, symbol=None, *, policy_bound=False):
         if price is not None and date:
             lines.extend(['', f'历史观察价 **{_number(price)} USD/ADS**（{date}，非实时）。'])
     if base:
+        comparison = ('观察盈利收益率参考' if base.get('label') == 'MECHANICAL_REFERENCE_NOT_FORECAST'
+                      else '研究门槛')
         lines.extend(['', f'基准情景五年条件年化 **{_percent(base["result"]["annualized_return"])}**，'
-                      f'研究门槛 **{_percent(base["required_return"])}**。'])
+                      f'{comparison} **{_percent(base["required_return"])}**。'])
     elif reference_case:
-        lines.extend(['', f'已核验情景的研究门槛 **{_percent(reference_case["required_return"])}**。'])
+        comparison = ('观察盈利收益率参考' if reference_case.get('label') == 'MECHANICAL_REFERENCE_NOT_FORECAST'
+                      else '已核验情景的研究门槛')
+        lines.extend(['', f'{comparison} **{_percent(reference_case["required_return"])}**。'])
     for heading in ('投资命题', '经营与商业模式', '竞争与反证', '财务与现金兑现', '风险与限制'):
         if heading in sections:
             lines.extend(['', f'## {heading}', '', '\n\n'.join(sections[heading])])
@@ -154,7 +206,8 @@ def render_reader(final, symbol=None, *, policy_bound=False):
                 value = label + '未知'
             lines.append(f'- {value}{marker}')
     valuation_status = final.get('valuation_status') or {}
-    lines.extend(['', '## 条件估值与长期回报', '', *_valuation(cells, valuation_status)])
+    lines.extend(['', '## 条件估值与长期回报', '', *valuation_method_lines(final),
+                  *_valuation(cells, valuation_status)])
     for heading in ('情景依据', '机会成本'):
         if heading in sections:
             lines.extend(['', f'## {heading}', '', '\n\n'.join(sections[heading])])

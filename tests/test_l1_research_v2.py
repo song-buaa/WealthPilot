@@ -186,3 +186,29 @@ def test_capital_decision_requires_each_audited_case_and_opportunity_cost():
     cells['base']['result']['annualized_return'] = '0.0981'
     assert _owner_cash_decision_review(cells, [*claims, opportunity])[
         'incremental_capital'] == 'requires_separate_capital_judgment'
+
+
+def test_reader_labels_reference_and_distinguishes_stored_holdings_and_clocks(frozen_pdd):
+    from backend.services.market_data.l1_reader import render_reader
+    from backend.services.market_data.l1_research_v2 import report
+    from backend.services.market_data.quality_valuation import propose_foreign_ads_conditional_research
+
+    value = deepcopy(frozen_pdd)
+    value['conditional_valuation'] = propose_foreign_ads_conditional_research(value)
+    value['l1_holding_context'] = dict(stored_position='present', snapshot='unverified', entry_counterfactual=True)
+    value['l1_research_as_of'] = value['as_of']
+    value['l1_valuation_sources'] = {'treasury': {'status': 'MISSING', 'reason': 'SAME_SESSION_CMT_UNAVAILABLE'}}
+    run = prepare(value)
+    ref, (_, _, assumption) = next(iter(run.cells.items()))
+    ingest(run, candidate(run, ref, assumption))
+    final = run.qualify(value)
+    reader, _ = render_reader(final, 'PDD:US')
+    for text in (reader, report(final)):
+        assert '机械 PE 敏感性' in text
+        assert '观察盈利收益率' in text
+        assert '观察日美国国债收益率缺失' in text
+        assert '新增配置作为反事实评估' in text
+        assert '存储记录存在该标的持仓' in text
+        assert '本次未取得合格持仓快照' in text
+        assert value['as_of'] in text
+        assert '未持仓' not in text
