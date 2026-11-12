@@ -86,6 +86,7 @@ class AssetClassificationEvidence:
     primary_exchange: str | None = None
     currency: str | None = None
     listing_symbol: str | None = None
+    listing_market: str | None = None
 
 
 @dataclass(frozen=True)

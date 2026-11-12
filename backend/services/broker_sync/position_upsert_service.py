@@ -100,6 +100,7 @@ def _snapshot_classification(
         # Preserve the adapter's canonical listing proof through publication;
         # a raw ticker/name alone must not enable a verified listing exception.
         listing_symbol=stored_evidence.get("listing_symbol"),
+        listing_market=stored_evidence.get("listing_market"),
     )
     return classify_instrument(evidence), evidence
 

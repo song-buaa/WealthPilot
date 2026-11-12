@@ -255,7 +255,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 ## 16. D1 资产质量（已合入）
 
-发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 补充有官方 listing 证据的 Tiger QQQ 例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
+发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 复用有官方上市证据的 Tiger QQQ、LI、PDD 载体例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
 
 原 U1 capture/public_view 在同一不可变输入上输出 A 战略配置、B 大致金额、C 精确参数及逐项阻断；原 can_propose_rebalance 对应 C。可选 analysis_scope 与原 symbol 限定用途/相关证券，贷款陈旧不阻断无关单标；养老金关联未证实继续人工核对。原 WealthService 仍负责主/副表与去重，编辑时间不再冒充余额有效日期。
 

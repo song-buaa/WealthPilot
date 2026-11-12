@@ -1,8 +1,7 @@
 """Data-driven economic classifications verified by stable instrument IDs.
 
-The main lookup uses durable conId/ISIN evidence. The narrowly source-qualified
-QQQ listing correction below handles Tiger STK ambiguity; it is versioned,
-officially evidenced and never takes precedence over conflicting stable IDs.
+The main lookup uses durable conId/ISIN evidence. The source-qualified Tiger
+listing corrections handle known STK wrappers and preserve stable-ID conflicts.
 """
 from __future__ import annotations
 
@@ -91,25 +90,54 @@ BY_ISIN = {
 }
 
 
-def find_verified_listing(evidence):
-    """Narrow source-qualified correction for Tiger's STK wrapper ambiguity.
+_TIGER_USD_LISTINGS = {
+    "QQQ:US": VerifiedAssetClassification(
+        None, "US46090E1038", "ETF", "EQUITY", "EQUITY_LARGE_CAP",
+        "https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html",
+        "2026-10-20",
+    ),
+    "LI:US": VerifiedAssetClassification(
+        None, "US50202M1027", "ADR", "EQUITY", None,
+        "https://adr.db.com/drwebrebrand/dr-universe/dr_details.html?identifier=11703",
+        "2026-11-12",
+    ),
+    "PDD:US": VerifiedAssetClassification(
+        None, "US7223041028", "ADR", "EQUITY", None,
+        "https://adr.db.com/drwebrebrand/dr-universe/dr_details.html?identifier=11378",
+        "2026-11-12",
+    ),
+}
 
-    No generic ticker/name heuristics. Conflicting stable IDs fail closed.
-    Official listing/ISIN: https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html
-    """
-    if (evidence.broker, evidence.listing_symbol, evidence.currency) != ("tiger", "QQQ:US", "USD"):
+
+def find_verified_listing(evidence):
+    """Resolve official Tiger USD listings, preserving conflicting stable IDs."""
+    if (evidence.broker, evidence.currency) != ("tiger", "USD"):
         return None, False
-    if evidence.con_id or evidence.isin and evidence.isin.upper() != "US46090E1038":
-        return None, True
-    # Tiger's verified STK ambiguity and its native ETF wrapper only. The same
-    # underlying symbol does not turn an option/future/other contract into QQQ.
+    listing = _TIGER_USD_LISTINGS.get(evidence.listing_symbol)
+    if listing is None:
+        return None, False
+
     security_type = str(evidence.broker_security_type or "").strip().upper()
     vehicle_hint = str(evidence.vehicle_type_hint or "").strip().upper()
-    if security_type not in {"STK", "ETF"} or vehicle_hint not in {"", "COMMON", "COMMON_STOCK", "ETF"}:
+    if listing.vehicle_type == "ADR":
+        stock_type = str(evidence.stock_type or "").strip().upper()
+        compatible = {"", "COMMON", "COMMON_STOCK", "ADR"}
+        if security_type != "STK" or vehicle_hint not in compatible or stock_type not in compatible:
+            return None, False
+
+        market = str(evidence.listing_market or "").strip().upper()
+        if market and market != "US":
+            return None, True
+        if not market and not (evidence.con_id or evidence.isin):
+            return None, False
+
+    if evidence.con_id or evidence.isin and evidence.isin.strip().upper() != listing.isin:
+        return None, True
+    if listing.vehicle_type == "ETF" and (
+        security_type not in {"STK", "ETF"} or vehicle_hint not in {"", "COMMON", "COMMON_STOCK", "ETF"}
+    ):
         return None, False
-    return VerifiedAssetClassification(None, "US46090E1038", "ETF", "EQUITY", "EQUITY_LARGE_CAP",
-        "https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html",
-        "2026-10-20"), False
+    return listing, False
 
 
 def find_verified_classification(

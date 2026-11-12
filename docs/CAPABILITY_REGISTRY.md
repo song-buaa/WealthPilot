@@ -97,7 +97,7 @@ PR #24 修复仍复用原 owner：Run context 的原子发布指纹用于复用�
 ### D1 当前资产质量（已合入）
 
 - 发行主体 owner：[issuers](../backend/services/instruments/issuers.py)，LI_AUTO / MEITUAN / PDD_HOLDINGS 按证据映射；给出已知中国公司直持风险金额/投资分母、未映射金额及独立成员。基金不穿透，economic_region 不等同注册地或上市地。
-- 分类 owner：[原 classifier](../backend/services/instruments/classification.py) / [verified 数据](../backend/services/instruments/verified_classifications.py)，修正 Tiger QQQ STK wrapper；未来正常同步更新投影，不回写旧视图或猜未知证券。
+- 分类 owner：[原 classifier](../backend/services/instruments/classification.py) / [verified 数据](../backend/services/instruments/verified_classifications.py)，修正 Tiger QQQ、LI、PDD 的 STK 载体；未来正常同步更新投影，不回写旧视图或猜未知证券。
 - 时间/资格 owner：[原 capture](../pocs/chatgpt_skills/asset_view.py) / [public_view](../app/asset_views.py)，复用原 Run/FX 时间。A/B/C 分级按相关 symbol 和 analysis_scope 给出具体 blockers；原 bool 对应 C，原交易门不变。[原市场模块](../backend/services/execution_plan/market_hours.py)用本地 session 库识别近期收盘、开市、过期或未知。
 - 手工核对 owner：[WealthService](../backend/services/wealth_service.py)，保留主/副表及养老金金额去重，按 value_as_of 提醒并返回原更新入口；无自动贷款余额或养老金关联订正。
 - 接口/测试：原 prepare、固定 view、MCP/PEER request 可选 analysis_scope，无新工具/写权限。[D1 合成回归](../tests/test_d1_asset_quality.py)、[固定视图浏览器](../frontend/tests/e2e/asset-view.spec.ts)；[合同及限制](D1_IMPLEMENTATION.md)。零 Schema 迁移；D1已生产交付，来源不提供的时间、真实手工余额和养老关联仍可能partial，按原入口提示人工核实；见[结项边界](releases/v4.1.md)。
