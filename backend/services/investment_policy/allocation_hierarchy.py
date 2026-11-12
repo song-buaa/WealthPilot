@@ -158,6 +158,7 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
     return {
         **candidate,
         **identity,
+        "policy_schema_version": snapshot.schema_version,
         "status": "HUMAN_REVIEW" if hits else "NO_RULE_TRIGGERED",
         "candidate_hit_classes": hits,
         "triggered_classes": hits,

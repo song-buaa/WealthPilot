@@ -81,12 +81,15 @@ for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
   })
 }
 
-for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
-  test(`ACTIVE hierarchy renders ${fixture} without an unverified formal review`, async ({ page }) => {
+for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY', 'FORMAL_V2', 'MISMATCHED_V2']) {
+  test(`ACTIVE hierarchy renders ${fixture} with the appropriate review qualification`, async ({ page }) => {
     const status = fixture === 'PARTIAL' ? 'PARTIAL' : 'QUALIFIED'
     const gap = { amount_cny: '760', current_ratio: '.76', target_ratio: '.70', target_kind: 'NEUTRAL_POLICY',
       gap_pp: '6', amount_gap_cny: '60' }
     const partial = { ...gap, amount_cny: null, current_ratio: null, gap_pp: null, amount_gap_cny: null }
+    const v2 = fixture === 'FORMAL_V2' || fixture === 'MISMATCHED_V2'
+    const ref = { bundle_id: 'fixture-bundle', bundle_version: 2, bundle_sha256: 'f'.repeat(64),
+      structured_sha256: 'e'.repeat(64), scope: 'portfolio:7' }
     const writes: string[] = []
     await page.route('**/api/**', async route => {
       if (route.request().method() !== 'GET') writes.push(route.request().url())
@@ -98,7 +101,7 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
         await route.fulfill({ json: { policy_allocation: {
           status: 'QUALIFIED_MAJOR_CLASSES', snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64),
           as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
-          denominator_cny: '1000', policy_reference: { bundle_sha256: 'f'.repeat(64) },
+          denominator_cny: '1000', policy_reference: v2 ? ref : { bundle_sha256: 'f'.repeat(64) },
           classes: { equity: { ...gap, direction: 'OVER' } }, focus: ['equity'], execution_authorized: false,
           hierarchy: {
             status, strategic: { growth_and_alternatives: status === 'QUALIFIED' ? gap : partial },
@@ -109,7 +112,11 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
               SPY: { ...(status === 'QUALIFIED' ? gap : partial),
                 current_ratio_of_d: status === 'QUALIFIED' ? '.12' : null, target_ratio_of_d: '.09' },
             } },
-            strategic_review: fixture === 'OLD_HIERARCHY'
+            strategic_review: v2
+              ? { status: 'HUMAN_REVIEW', threshold_pp: '5', policy_schema_version: 'wp.policy.v2',
+                  policy_reference: ref, snapshot_sha256: (fixture === 'FORMAL_V2' ? 'a' : 'b').repeat(64),
+                  review_id: 'c'.repeat(64), triggered_classes: ['growth_and_alternatives', 'stable_pool'] }
+              : fixture === 'OLD_HIERARCHY'
               ? { status: 'HUMAN_REVIEW', threshold_pp: '5', triggered_classes: ['growth_and_alternatives'] }
               : { status: 'RULE_SCOPE_UNVERIFIED', threshold_pp: '5', triggered_classes: [],
                   candidate_hit_classes: status === 'QUALIFIED' ? ['growth_and_alternatives'] : null },
@@ -121,7 +128,13 @@ for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY']) {
     await page.goto(base + '/#/discipline')
     const hierarchy = page.getByRole('region', { name: 'ACTIVE 分层配置' })
     await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('9.00%')
-    await expect(hierarchy).toContainText('RULE_SCOPE_UNVERIFIED')
+    if (fixture === 'FORMAL_V2') {
+      await expect(hierarchy.getByText('一级战略配置偏差严格超过政策阈值，请复核一次组合配置。')).toHaveCount(1)
+      await expect(hierarchy).not.toContainText('RULE_SCOPE_UNVERIFIED')
+    } else {
+      await expect(hierarchy).toContainText('RULE_SCOPE_UNVERIFIED')
+      await expect(hierarchy).not.toContainText('请复核一次组合配置')
+    }
     await expect(hierarchy.getByRole('table', { name: '美国核心直接股（占 D）' })).toContainText('Alphabet')
     await expect(hierarchy).toContainText('未指定自主选股预算 3.00% · 待研究')
     await expect(hierarchy).not.toContainText('人工专项配置复核')

@@ -9,6 +9,14 @@ interface Gap {
   gap_pp: string | null
   amount_gap_cny: string | null
 }
+interface PolicyReference {
+  bundle_id?: string
+  bundle_version?: number
+  bundle_sha256: string
+  structured_sha256?: string
+  scope?: string
+}
+
 interface Hierarchy {
   status: 'QUALIFIED' | 'PARTIAL' | 'UNKNOWN'
   strategic: Record<string, Gap>
@@ -17,7 +25,15 @@ interface Hierarchy {
     unallocated: { target_ratio: string; status: string } | null }
   etf: { status: string; products: Record<string, Gap & {
     current_ratio_of_d: string | null; target_ratio_of_d: string }> }
-  strategic_review: { status: string; threshold_pp: string; candidate_hit_classes?: string[] | null }
+  strategic_review: {
+    status: string
+    threshold_pp: string
+    candidate_hit_classes?: string[] | null
+    policy_schema_version?: string
+    policy_reference?: PolicyReference
+    snapshot_sha256?: string
+    review_id?: string | null
+  }
   unclassified_asset_refs: string[]
   unclassified_amount_cny: string
 }
@@ -45,7 +61,7 @@ interface Diagnostic {
   as_of: string
   expires_at: string
   denominator_cny: string
-  policy_reference: { bundle_sha256: string }
+  policy_reference: PolicyReference
   classes: Record<string, { amount_cny: string; current_ratio: string; target_ratio: string;
     gap_pp: string; amount_gap_cny: string; direction: string; target_kind?: Gap['target_kind'] }>
   focus: string[]
@@ -79,8 +95,19 @@ function GapTable({ title, rows }: { title: string; rows: Record<string, Gap> })
   </table>
 }
 
-function PolicyHierarchy({ value }: { value: Hierarchy }) {
+function PolicyHierarchy({ value, diagnostic }: { value: Hierarchy; diagnostic: Diagnostic }) {
   const review = value.strategic_review
+  const ref = review.policy_reference
+  const parent = diagnostic.policy_reference
+  const isHash = (hash?: string | null) => /^[a-f0-9]{64}$/.test(hash ?? '')
+  const verified = value.status === 'QUALIFIED' && review.policy_schema_version === 'wp.policy.v2' &&
+    isHash(review.snapshot_sha256) && review.snapshot_sha256 === diagnostic.snapshot_sha256 &&
+    ref?.bundle_id && ref.bundle_id === parent.bundle_id &&
+    Number.isInteger(ref.bundle_version) && ref.bundle_version === parent.bundle_version &&
+    isHash(ref.bundle_sha256) && ref.bundle_sha256 === parent.bundle_sha256 &&
+    isHash(ref.structured_sha256) && ref.structured_sha256 === parent.structured_sha256 &&
+    ref.scope && ref.scope === parent.scope
+  const reviewRequired = verified && review.status === 'HUMAN_REVIEW' && isHash(review.review_id)
   return <section aria-label="ACTIVE 分层配置">
     <h4>ACTIVE 分层配置</h4>
     {value.status !== 'QUALIFIED' && <p role="status">
@@ -89,8 +116,8 @@ function PolicyHierarchy({ value }: { value: Hierarchy }) {
     </p>}
     <GapTable title="一级战略配置（占 D）" rows={value.strategic} />
     <p role="status">
-      {review.status === 'HUMAN_REVIEW' ? '一级战略配置偏差严格超过政策阈值，请复核一次组合配置。' :
-        review.status === 'NO_RULE_TRIGGERED' ? '一级战略配置未超过政策复核阈值。' :
+      {reviewRequired ? '一级战略配置偏差严格超过政策阈值，请复核一次组合配置。' :
+        verified && review.status === 'NO_RULE_TRIGGERED' ? '一级战略配置未超过政策复核阈值。' :
           'RULE_SCOPE_UNVERIFIED · 政策复核资格待确认。'}
       {review.status === 'RULE_SCOPE_UNVERIFIED' && !!review.candidate_hit_classes?.length &&
         <>候选偏差超过 {Number(review.threshold_pp)} 个百分点（{review.candidate_hit_classes.map(key => policyLabels[key]).join('、')}）。</>}
@@ -180,7 +207,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
         <td>{Number(row.gap_pp).toFixed(2)}</td><td>{fmtCny(Number(row.amount_gap_cny))}</td>
       </tr>)}</tbody></table>
     <p>主要偏差：{value.focus.map(key => `${labels[key]}${value.classes[key].direction === 'OVER' ? '超配' : '低配'}`).join('、') || '与目标一致'}。</p>
-    {value.hierarchy && <PolicyHierarchy value={value.hierarchy} />}
+    {value.hierarchy && <PolicyHierarchy value={value.hierarchy} diagnostic={value} />}
     {value.concentration && <ConcentrationRisk value={value.concentration} />}
     <p>正差距表示超配，负差距表示低配。配置与风险诊断不构成交易或资金操作建议。</p>
   </section>
