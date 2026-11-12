@@ -3,6 +3,7 @@
 This module owns no data/provider, model, persistence, order or sync operations.
 """
 from datetime import datetime, timedelta, timezone
+import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 
@@ -90,6 +91,17 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
         if goal.get('direction')=='gradual_exit':
             assessment['research_intent'].update(objective='exit',formal_target_confirmed=True)
             assessment['research_intent']['sources']['objective']='server_confirmed_stage_target:'+str(formal.get('version'))
+    if options.get('enable_l1_research_v2') or 'l1_holding_context' in (getattr(executed, 'position_evidence', None) or {}):
+        stored = any(row.get('symbol') == symbol and not row.get('is_virtual')
+                     for row in map(mapping, getattr(loaded, 'positions', ()) or ()) if symbol)
+        assessment['l1_research_as_of'] = assessment['as_of']
+        assessment['l1_holding_context'] = {
+            'stored_position': 'present' if stored else 'unknown',
+            'snapshot': 'qualified' if assessment['snapshot_id'] and assessment['qualification']['L2']['allowed'] else 'unverified',
+            'entry_counterfactual': bool(re.search(
+                r'建仓|加仓|增配|新增配置|纳入.{0,12}组合|\b(?:new position|buy|initiate)\b',
+                options.get('research_question') or '', re.I)),
+        }
     if not context["confirmed_stage_targets"]:
         blockers=["CONFIRMED_STAGE_TARGETS_REQUIRED"]
         if context["proposed_stage_targets"]:
@@ -143,6 +155,12 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
         assessment['conditional_valuation']=foreign_ads_conditional_research(assessment,assumptions)
     elif assessment['research_intent'].get('valuation_research_requested'):
         from backend.services.market_data.quality_valuation import propose_foreign_ads_conditional_research
+        if 'l1_holding_context' in assessment and (assessment.get('symbol') or '').endswith(':US'):
+            from backend.services.market_data.l1_valuation import bind_inputs, observation_date, read_inputs
+            if getattr(executed, 'l1_valuation_inputs', None) is None:
+                observed = observation_date(assessment)
+                executed.l1_valuation_inputs = read_inputs(assessment['symbol'], observed)
+            bind_inputs(assessment, executed.l1_valuation_inputs)
         assessment['conditional_valuation']=propose_foreign_ads_conditional_research(assessment)
     return assessment
 

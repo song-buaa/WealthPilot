@@ -632,6 +632,7 @@ class ExpressingAgent:
         if getattr(executed, 'enable_l1_research_v2', False):
             from backend.services.market_data.l1_research_v2 import ResearchRun
             out.research_v2 = ResearchRun()
+            holding = assessment.get('l1_holding_context') or {}
         try:
             payload, diagnostic = messages(assessment, executed.research_question,
                                           policy=policy, holding=holding, history=executed.research_history, research_run=out.research_v2)

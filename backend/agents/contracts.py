@@ -155,6 +155,7 @@ class ExecutionOutput:
     research_question: str = ""  # Original user intent, not expanded prompt.
     research_history: list[dict] = field(default_factory=list)
     research_context_diagnostics: dict = field(default_factory=dict)
+    l1_valuation_inputs: dict | None = None  # Server-owned request-local receipts.
     position_evidence: dict = field(default_factory=dict)
     portfolio_evidence: list[dict] = field(default_factory=list)
     skill_results: dict = field(default_factory=dict)

@@ -51,7 +51,8 @@ class PositionAnalysisJob(BaseModel):
 
 def _reader_audit(final, position, financial, citations):
     """Whitelist trace metadata; the raw evidence and paths stay in the private artifact."""
-    fields = ('source', 'published_at', 'data_as_of', 'fetched_at', 'period', 'currency', 'historical_only')
+    fields = ('source', 'published_at', 'known_at', 'data_as_of', 'fetched_at', 'period',
+              'fiscal_period_start', 'fiscal_period_end', 'currency', 'historical_only')
     refs = set(citations.values())
     sources = {}
     groups = [financial.get('records')] + [position.get(key) for key in (
@@ -64,14 +65,26 @@ def _reader_audit(final, position, financial, citations):
                 continue
             ref = row.get('evidence_ref') or row.get('record_id')
             if isinstance(ref, str) and ref in refs:
-                sources.setdefault(ref, {}).update({key: row[key] for key in fields if row.get(key) is not None})
+                metadata = sources.setdefault(ref, {})
+                metadata.update({key: row[key] for key in fields if row.get(key) is not None})
+                links = row.get('publication_links')
+                if isinstance(links, list) and links:
+                    keys = ('record_id', 'document_type', 'fiscal_period_start', 'fiscal_period_end',
+                            'published_at', 'fetched_at', 'known_at')
+                    metadata['publication_links'] = [
+                        {key: link[key] for key in keys if link.get(key) is not None}
+                        for link in links if isinstance(link, dict)
+                    ]
     cells = {ref: {k: deepcopy(cell[k]) for k in ('name', 'method', 'assumption_ref', 'decision_at',
                 'listed_currency', 'listed_unit', 'required_return', 'parameters', 'result',
-                'owner_cash_parameters', 'entry_price_sensitivity') if k in cell}
+                'label', 'assumption_origin', 'proposal_origin', 'owner_cash_parameters',
+                'entry_price_sensitivity') if k in cell}
              for ref, cell in final['scenario_cells'].items()}
     return {'citation_key': citations, 'sources': sources, 'scenario_cells': cells,
             **{k: deepcopy(final.get(k)) for k in ('coverage', 'generation_diagnostic',
-                                                 'diagnostic', 'scenario_decision_review', 'valuation_status')}}
+                                                 'diagnostic', 'scenario_decision_review', 'valuation_status',
+                                                 'research_as_of', 'holding_context', 'valuation_source_status')
+               if k in final}}
 
 
 
