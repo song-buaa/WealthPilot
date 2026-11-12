@@ -13,7 +13,6 @@ from backend.services.market_data.quality_valuation import (
     ANCHORED_ORIGIN, NYU_COUNTRY_RISK, REFERENCE_ORIGIN, TREASURY_COLUMN, TREASURY_CURVE,
 )
 from research_v2.sec_disclosures import QUALITY_CONCEPTS
-from tests.test_s3_foreign_ads import AT, assessment
 
 
 @pytest.fixture
@@ -62,6 +61,8 @@ def cash_bridge():
 
 @pytest.mark.parametrize('problem', [None, 'missing', 'stale', 'hash', 'wrong_session', 'future', 'bridge'])
 def test_prepare_binds_before_catalog_and_reuses_request_receipts(monkeypatch, tmp_path, sources, problem):
+    from tests.test_s3_foreign_ads import AT, assessment
+
     a = assessment()
     annual = cash_bridge()
     if problem == 'bridge':
