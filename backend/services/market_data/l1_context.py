@@ -191,6 +191,11 @@ def project(assessment):
     groups['dependencies'] = dependencies
     groups['constraints_intent'] = {k:deepcopy(assessment.get(k)) for k in
         ('qualification','issues','infoNeeded','research_intent','planner','confidence_ceiling')}
+    if assessment.get('l1_valuation_sources'):
+        groups['constraints_intent']['valuation_source_status'] = {
+            name: {key: item[key] for key in ('status', 'reason') if key in item}
+            for name, item in assessment['l1_valuation_sources'].items()
+        }
     groups['constraints_intent']['financial_limitations']=(assessment.get('financial_research') or {}).get('limitations',[])
     groups['constraints_intent']['valuation_limitations']={k:deepcopy(v) for k,v in
         (assessment.get('valuation_inputs') or {}).items() if k in {'missing','limitations','issues'}}

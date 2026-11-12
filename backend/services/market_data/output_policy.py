@@ -138,6 +138,10 @@ def captured_facts(assessment, *, at, asset_view=None):
             original['conditional_valuation']=current
         else:
             original.pop('conditional_valuation',None)
+            if original.get('l1_valuation_sources'):
+                original['l1_valuation_sources']['requalification'] = {
+                    'status': 'UNKNOWN', 'reason': 'ORIGINAL_VALUATION_NO_LONGER_QUALIFIED',
+                }
     facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
     return original, facts
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .evidence import stamp
 from .l1_context import RECORD_SECTIONS, dumps
+from .l1_reader import research_context_lines, valuation_method_lines
 from .quality_valuation import ANCHORED_ORIGIN, REFERENCE_ORIGIN
 
 QUESTIONS = tuple(f'Q{i}' for i in range(1, 8))
@@ -382,6 +383,9 @@ class ResearchRun:
             self.initial_diagnostic = diagnostic
         return dict(claims=list(accepted.values()), coverage=coverage, decision_review='not_assessed',
                     key_metrics=_key_metrics(index), scenario_decision_review=scenario_review,
+                    holding_context=deepcopy(assessment.get('l1_holding_context')),
+                    research_as_of=assessment.get('l1_research_as_of'),
+                    valuation_source_status=deepcopy(assessment.get('l1_valuation_sources')),
                     conditional_valuation=_compatible_valuation(assessment, eligible_cells, self.cells),
                     valuation_status={k: assessment['conditional_valuation'][k]
                                       for k in ('status', 'missing', 'limitations', 'reverse_equation')
@@ -468,6 +472,7 @@ def _coverage(accepted, candidates, cells, assessment, index):
 
 def report(final):
     lines = ['专业研究 · 争议与判断', '本研究供人工审阅，决策准备度尚未评定。']
+    lines.extend(research_context_lines(final))
     theses = sorted((c for c in final['claims'] if 'Q1' in c['question_ids'] and c['role'] == 'synthesis'),
                     key=lambda c: c['decision'] is None)
     if theses:
@@ -517,9 +522,11 @@ def report(final):
         value = cell['result']
         reverse = {k: v for k, v in value.items() if k.startswith('implied_')}
         price = cell['inputs'].get('price_usd_per_ads', 'UNKNOWN')
+        rate_label = ('观察盈利收益率参考' if cell['label'] == 'MECHANICAL_REFERENCE_NOT_FORECAST'
+                      else '研究要求回报率')
         lines.append(f'- {ref} · {cell["method"]} · {cell["label"]}。观察价 {price} USD/ADS，'
                      f'资格时点 {cell["decision_at"]}，五年年化条件回报 {value["annualized_return"]}（比率）。'
-                     f'要求回报率 {cell["required_return"]}（假设比率），反向条件 {dumps(reverse)}。'
+                     f'{rate_label} {cell["required_return"]}（比率），反向条件 {dumps(reverse)}。'
                      f'假设 {dumps(cell["parameters"])}。')
         if cell.get('owner_cash_parameters'):
             params = cell['owner_cash_parameters']
@@ -554,6 +561,7 @@ def report(final):
         base = next((c for c in final['scenario_cells'].values() if c['name'] == 'base'), {})
         if base.get('entry_price_sensitivity'):
             lines.append('基准情景的假设入场价敏感性（非行情）：' + dumps(base['entry_price_sensitivity']) + '。')
+    lines.extend(valuation_method_lines(final))
     value = final['valuation_status']
     if not final['scenario_cells']:
         lines.append('N/R。' + '；'.join(value.get('missing') or ['缺少本次合格且已发送的情景']))
