@@ -91,7 +91,8 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
     monkeypatch.setattr(sec,'parse_filing',parse)
     rows,verifier=sec.collect('LI:US')
     assert calls[12]==q2['full_url']
-    assert len(calls)==13  # quarterly facts survive; annual original is no prerequisite
+    assert len(calls)==14 and calls[-1].endswith("/0001104659-26-101066.txt")
+    # Annual failure cannot erase the quarterly observations.
     assessment=assess({},symbol='LI:US',research=deepcopy(rows),at=AT,disclosure_verifier=verifier)
     fields=assessment['verified_field_records']
     expected_fields=({'revenue_quarter'} if failure=='partial_preserved' else
@@ -101,8 +102,13 @@ def test_native_collect_prioritizes_quarter_and_preserves_real_four_fields(monke
     assert all(f['period']=='2026-06-30' for f in fields)
     assert all(not assessment['qualification'][level]['allowed'] for level in ('L2','L3','L4'))
     assert not any('PRIVATE' in str(d) for d in sec.source_diagnostics())
+    diagnostic = sec.source_diagnostics()[-1]
+    expected_reason = {'network': 'timeout', 'parse_exception': 'parse_error',
+                       'partial_preserved': 'parse_error'}.get(failure, 'annual_original_unqualified')
+    assert diagnostic['category'] == expected_reason
     before=len(calls)
     assert sec.collect('LI:US')[0]==rows and len(calls)==before
+    assert sec.source_diagnostics()[-1] == dict(diagnostic, request_attempted=False)
 
 
 def test_complete_companyfacts_quarter_cannot_skip_newer_8K(monkeypatch):
@@ -130,3 +136,51 @@ def test_complete_companyfacts_quarter_cannot_skip_newer_8K(monkeypatch):
     observations=[o for r in rows for o in r['financial_observations']]
     assert {o['source_field'] for o in observations if not o['source_field'].startswith('quality_')}==set(EXPECTED)
     assert {o['source_field'] for o in observations if o['source_field'].startswith('quality_')}=={'quality_revenue','quality_cfo','quality_capex'}
+
+
+def test_complete_foreign_quarters_still_collect_one_latest_annual_original(monkeypatch):
+    from backend.core import demo_mode
+    from backend.services.market_data import cache
+
+    monkeypatch.setattr(demo_mode, 'PUBLIC_DEMO_MODE', False)
+    monkeypatch.delenv('AV_DEV_MOCK', raising=False)
+    monkeypatch.setattr(cache, '_cache', cache.TTLCache())
+    event, annual, older_report = ('0001104659-26-101068', '0001104659-26-050727', '0001104659-26-090010')
+    sub = dict(cik='1737806', name='PDD Holdings Inc.', tickers=['PDD'], filings=dict(recent=dict(
+        accessionNumber=[event, older_report, annual], form=['6-K', '20-F', '20-F'],
+        filingDate=['2026-10-27', '2026-09-30', '2026-04-29'],
+        reportDate=['2026-06-30', '2024-12-31', '2025-12-31'],
+        primaryDocument=['event.htm', 'older.htm', 'annual.htm'],
+        acceptanceDateTime=['2026-10-27T12:00:00Z', '2026-09-30T12:00:00Z', '2026-04-29T10:15:54Z'])))
+    ends = ('2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30',
+            '2025-12-31', '2026-03-31', '2026-06-30')
+    facts = dict(record_id='synthetic-quarters', official_disclosure=dict(accession=event),
+                 financial_observations=[
+                     dict(period_basis='quarterly', fiscal_period_end=end, source_field=field)
+                     for end in ends
+                     for field in ('totalRevenue', 'netIncome', 'operatingCashflow', 'capitalExpenditures', 'dilutedEPSADS')])
+    parsed_annual = dict(record_id='synthetic-annual', official_disclosure=dict(accession=annual),
+                         financial_observations=[dict(period_basis='annual', source_field='quality_cfo')])
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if url == sec.DIRECTORY:
+            return json.dumps(directory()).encode(), AT.isoformat()
+        if '/submissions/' in url:
+            return json.dumps(sub).encode(), AT.isoformat()
+        if '/companyfacts/' in url:
+            return b'{}', AT.isoformat()
+        assert url.endswith(annual + '.txt')
+        return b'synthetic-original', AT.isoformat()
+
+    def parse(source, issuer, filing, **kwargs):
+        assert filing['accession'] == annual and issuer['cik'] == '0001737806'
+        return parsed_annual
+
+    monkeypatch.setattr(sec, '_fetch', fetch)
+    monkeypatch.setattr(sec, 'parse_companyfacts', lambda *a, **kw: [facts])
+    monkeypatch.setattr(sec, 'parse_filing', parse)
+    rows, verifier = sec.collect('PDD:US')
+    assert rows == [facts, parsed_annual] and verifier('synthetic-annual') == parsed_annual
+    assert len(calls) == 4
