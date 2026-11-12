@@ -294,6 +294,11 @@ async def _run_chat_stream_v3(
             align_explicit_single_research(plan_out, analysis_options.get("requested_symbol"),
                                            analysis_options.get("research_question", ""))
 
+        rationale = plan_out.rationale
+        if (analysis_only and (analysis_options or {}).get("enable_l1_research_v2")
+                and plan_out.route == "position_single"):
+            rationale = "单标研究路由已识别。持仓和政策以服务端证据为准。"
+
         # yield intent 事件（兼容 v2.6 协议）
         intent = plan_out.intent or {}
         if isinstance(intent, dict):
@@ -304,7 +309,7 @@ async def _run_chat_stream_v3(
                 "confidence": intent.get("confidence", 0),
                 "needs_clarification": plan_out.needs_clarification,
                 "planner_route": plan_out.route,
-                "planner_rationale": plan_out.rationale,
+                "planner_rationale": rationale,
             })
         else:
             yield _sse("intent", {
@@ -314,7 +319,7 @@ async def _run_chat_stream_v3(
                 "confidence": 0,
                 "needs_clarification": plan_out.needs_clarification,
                 "planner_route": plan_out.route,
-                "planner_rationale": plan_out.rationale,
+                "planner_rationale": rationale,
             })
 
         # ── 特殊路由直通 ──

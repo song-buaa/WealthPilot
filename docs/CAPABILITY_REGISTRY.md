@@ -191,3 +191,5 @@ S3 META权益资格候选沿原[method_applicability](../backend/services/market
 S3 P2.2本地候选沿[原经营研究](../backend/services/s3_operating_research.py)与[原官方披露Owner](../research_v2/official_disclosures.py)增加限定官方IR上下文捕获资格、稀疏年度PE经营背景和#89空参数拒绝卡兼容；不提升为GAAP、不回填网页PIT、不改变生产默认方法。版本、测试、正常MCP仍需薄适配及发布准备边界见[P2实施记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p22-本地证据与发布准备候选)。
 
 S3 P3专业入口候选：原[公司池服务](../backend/services/s3_research_entry.py)与[既有MCP工具](../pocs/chatgpt_skills/company_pool.py)增加可选`request.method=standard|professional`，默认P1；[专业适配](../backend/services/s3_professional_research.py)绑定服务端已评审P2.2档案和新时点原Owner资格，三公司场景参数不改，META保护优先，变更/缺证不静默P1回退。原start/get/read、冻结与独立复算复用，无新工具/Runtime/数据库/交易权限。合同及分阶段发布证据见[P3记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。
+
+L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_analysis.py)和[来源收据读取](../backend/services/market_data/l1_valuation.py)调用现有 S3 Binder。4.1 保持正式原件、时钟及来源资格责任，4.2 负责条件估值消费、终审和阅读输出。部署配置、降级及旧 Job 合同见[4.2 实施说明](V42_IMPLEMENTATION.md#117-l1-v2-估值来源与阅读合同)。
