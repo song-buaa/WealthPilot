@@ -126,7 +126,7 @@ def test_native_collect_recovers_pdd_without_request_dates_or_manual_fields(monk
     assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'} <= {f['field'] for f in a['verified_field_records']}
     assert 'OFFICIAL_FIELD_OPERATINGCASHFLOW_STATEMENT_COLUMN_AMBIGUITY_CORROBORATED' in a['issues']
     assert a['qualification']['L1']['allowed']
-    assert len(calls)==4  # no annual original needed after independent quarters
+    assert len(calls)==5 and calls[-1].endswith("/0001104659-25-000001.txt")
 
 
 def test_report_deduplicates_display_only_and_labels_annual_basis_currency():

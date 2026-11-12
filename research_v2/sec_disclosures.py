@@ -1108,6 +1108,23 @@ def revalidate_asfiled_snapshot(source, issuer, filing, snapshot):
     return dict(record, **proof)
 
 
+def _append_original(rows, issuer, filing, identity_digest):
+    try:
+        original = _fetch(filing['full_url'])
+        if not original:
+            return
+        record = parse_filing(original, issuer, filing, identity_digest=identity_digest,
+                              fiscal_eps_context=_domestic_fiscal_eps_context(rows, issuer))
+    except (ValueError, TypeError, KeyError, UnicodeError, OSError, InvalidOperation, OverflowError):
+        _diagnose(filing['full_url'], 'parse_error')
+        return
+    if record and record['financial_observations']:
+        # The evidence owner resolves overlapping facts and actual conflicts.
+        rows.append(record)
+    elif filing['form'] == '20-F':
+        _diagnose(filing['full_url'], 'annual_original_unqualified')
+
+
 def collect(symbol):
     """Current-cycle discovery: cached directory + Submissions + facts + originals.
 
@@ -1119,10 +1136,12 @@ def collect(symbol):
     from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
     if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
         return [], {}.get
-    cache_key = 'sec-disclosures:v2-listed-eps:'+symbol
+    cache_key = 'sec-disclosures:v3-annual-original:'+symbol
     cached = get_cached(cache_key)
     if cached is not None:
-        return deepcopy(cached), {r['record_id']:deepcopy(r) for r in cached}.get
+        _diagnostics.set(tuple(dict(row, request_attempted=False) for row in cached['diagnostics']))
+        rows = cached['rows']
+        return deepcopy(rows), {r['record_id']:deepcopy(r) for r in rows}.get
     directory_source = get_cached('sec-directory:v1')
     if directory_source is None:
         directory_source = _fetch(DIRECTORY)
@@ -1157,22 +1176,24 @@ def collect(symbol):
             _diagnose('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json','invalid_json' if invalid else 'data_missing')
             if invalid:
                 return [], {}.get
-        # Submissions metadata cannot distinguish earnings 6-Ks from events.
-        # Search the current reporting cycle newest-first, not the first two
-        # events. Annual reports are a fallback, never a prerequisite for L1.
+        # Search current-cycle events newest-first. For foreign issuers the
+        # latest eligible annual original is a separate, bounded source read:
+        # quarterly coverage cannot establish the audited annual cash bridge.
         quarters=[f for f in filings if f['form']=='10-Q']
-        annuals=[f for f in filings if f['form'] in {'10-K','20-F'}]
+        domestic_annuals=[f for f in filings if f['form']=='10-K']
+        foreign_annual=max((f for f in filings if f['form']=='20-F' and f['report_date']),
+                           key=lambda f: (f['report_date'], f['filed'], f['accession']), default=None)
         events=[f for f in filings if f['form'] in {'6-K','8-K'}
                 and (_day(filings[0]['filed'])-_day(f['filed'])).days<=550]
-        selected=sorted(quarters+events,key=lambda f:(f['filed'],f['accession']),reverse=True)+annuals[:1]
+        selected=sorted(quarters+events,key=lambda f:(f['filed'],f['accession']),reverse=True)+domestic_annuals[:1]
         filed_by_accession={f['accession']:f['filed'] for f in filings}
         for filing in selected:
             # Facts retain their independent periods. Older complete quarters
             # cannot conceal a newer, partially observed quarterly statement.
             quarterly=[o for r in rows for o in r['financial_observations']
                        if o['period_basis']=='quarterly']
-            if quarterly and filing['form'] in {'10-K','20-F'}:
-                continue  # current/history quarters do not require a large annual original
+            if quarterly and filing['form'] == '10-K':
+                continue  # Preserve the domestic annual fallback.
             if quarterly:
                 latest=max(o['fiscal_period_end'] for o in quarterly)
                 complete={o['source_field'] for o in quarterly if o['fiscal_period_end']==latest}
@@ -1190,21 +1211,11 @@ def collect(symbol):
             # do not consume this existing financial-record bound.
             if len({r['official_disclosure']['accession'] for r in rows if r.get('source_url','').endswith('.txt') and any(o['period_basis']=='quarterly' for o in r['financial_observations'])})>=MAX_FILINGS:
                 break
-            try:
-                original = _fetch(filing['full_url'])
-                if not original:
-                    continue
-                record = parse_filing(original, issuer, filing, identity_digest=identity_digest,
-                                      fiscal_eps_context=_domestic_fiscal_eps_context(rows,issuer))
-            except (ValueError, TypeError, KeyError, UnicodeError, OSError, InvalidOperation, OverflowError):
-                _diagnose(filing['full_url'],'parse_error')
-                continue
-            if record and record['financial_observations']:
-                # Keep overlapping source facts too; evidence owner handles actual
-                # conflicts rather than silently selecting whichever matches AV.
-                rows.append(record)
+            _append_original(rows, issuer, filing, identity_digest)
+        if foreign_annual is not None:
+            _append_original(rows, issuer, foreign_annual, identity_digest)
         if rows:
-            set_cached(cache_key, deepcopy(rows), FUNDAMENTALS_TTL)
+            set_cached(cache_key, dict(rows=deepcopy(rows), diagnostics=source_diagnostics()), FUNDAMENTALS_TTL)
         return deepcopy(rows), {r['record_id']:deepcopy(r) for r in rows}.get
     except (ValueError, TypeError, KeyError, UnicodeError):
         return [], {}.get
