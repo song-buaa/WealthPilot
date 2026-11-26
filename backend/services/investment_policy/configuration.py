@@ -16,6 +16,16 @@ from .store import clock
 SCHEMA = "wp.policy.config.v1"
 # Asset membership is a capability boundary. The weights live in the config.
 GROWTH = ("us_etf", "us_direct", "china", "gold", "btc")
+ASSET_NAMES = {
+    "us_etf": "美国股票 ETF 子组合",
+    "us_direct": "美国直接个股",
+    "china": "中国主动精选个股",
+    "gold": "黄金",
+    "btc": "BTC 现货",
+    "ib01": "IB01 短期美国国债 ETF",
+    "cbu3": "CBU3 短期美国国债 ETF",
+    "cash": "未投资交易现金",
+}
 HASH = r"^[a-f0-9]{64}$"
 
 
@@ -174,11 +184,13 @@ def display_policy(template, snapshot, config, targets, growth, stable):
     for i, line in enumerate(lines[:doc.sections["1"][0]]):
         if "文档状态：" in line:
             lines[i] = "> **文档状态：由结构化配置生成。发布资格及生效时间由独立发布凭据证明。**"
+        if "重要边界：" in line and "本文件尚未发布到 WealthPilot" in line:
+            lines[i] = "> **重要边界：**实际生效状态以当前 PolicyReference 和发布凭据为准。任何交易均须独立明确授权。"
     with localcontext() as ctx:
         ctx.prec = 60
         budget_table = [
             "| 资产与预算 | 中性目标 |", "|---|---:|",
-            *(f"| {key} | {pct(value)} |" for key, value in sorted(config.neutral.items())),
+            *(f"| {label} | {pct(config.neutral[key])} |" for key, label in ASSET_NAMES.items()),
             "| 合计 | 100% |", "",
             f"一级战略节点为增长及另类 {pct(growth)}、稳健池 {pct(stable)}。",
             "以上均占全部合格可投资资产。临时投资现金占用稳健预算。",
@@ -190,7 +202,9 @@ def display_policy(template, snapshot, config, targets, growth, stable):
         ]
         direct_table = [
             "| 发行人及上市证券 | 占合格可投资资产目标 |", "|---|---:|",
-            *(f"| {label} | {pct(weight)} |" for label, weight in sorted(targets.items())),
+            *(f"| {label} | {pct(weight)} |" for label, weight in sorted(targets.items()) if label != "unallocated"),
+            f"| 未指定战略预算 | {pct(config.unallocated)} |",
+            f"| 合计 | {pct(config.neutral['us_direct'])} |",
         ]
     tables = {"2.1":budget_table, "3.1":etf_table, "3.2":direct_table}
     for key in ("3.2", "3.1", "2.3", "2.1"):
