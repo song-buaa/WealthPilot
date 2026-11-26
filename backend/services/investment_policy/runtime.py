@@ -9,6 +9,8 @@ import os
 
 from pydantic import Field
 
+from backend.services.instruments.issuers import policy_target_identity
+
 from .contracts import Contract, MetricEvidence, canonical, parse_snapshot
 from .evaluation import evaluate_snapshot
 from .parser import PolicyError
@@ -156,9 +158,10 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
     value['obligations'] = {k: v for k,v in snap['contextual_clauses'].items()
                             if k in {'5.2','5.3','6.3','7.1','7.2','7.3','8','9.2','10'}}
     if view == "position":
-        # Source identity is preserved; no guessing aliases/issuer mappings.
+        ticker = symbol.removesuffix(":US") if symbol else None
         direct = snap["allocation"]["direct_equity"]
-        value["position_target"] = {k:v for k,v in direct.items() if symbol and symbol in k.split("（")[0].split("/")}
+        value["position_target"] = {label: target for label, target in direct.items()
+                                    if label != "unallocated" and ticker in policy_target_identity(label)[0]}
     if view in {'portfolio','position','full','risk'}:
         with bind(session):
             value['risk_diagnostic'] = diagnose(session.portfolio_id,issuer_symbol=symbol)

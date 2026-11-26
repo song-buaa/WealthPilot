@@ -1,6 +1,8 @@
 """Small evidenced direct-security issuer projection. Never combine quantities."""
+import re
+
 from backend.utils.symbol import position_security_identity
-VERSION = "issuer.2026-11-10.1"
+VERSION = "issuer.2026-11-26.1"
 EVIDENCE = ["https://ir.lixiang.com/investor-faqs",
             "https://ir.lixiang.com/news-releases/news-release-details/li-auto-inc-files-its-annual-report-form-20-f-3"]
 IDENTITIES = {("LI:US", "USD"): "LI_AUTO", ("2015:HK", "HKD"): "LI_AUTO",
@@ -33,6 +35,39 @@ for cik, name, tickers in _CORE_US:
     IDENTITIES.update({(ticker + ":US", "USD"): key for ticker in tickers})
 
 
+# Filing and exchange notice establish the exact listed security. Broker rows
+# still need the existing canonical US/USD common-stock identity.
+ANT_POLICY_LABEL = "ANT（Anthropic, PBC；Nasdaq Class A普通股）"
+ANT_SECURITY = {
+    "issuer_id": "SEC_CIK_0002130357",
+    "cusip": "03703U107",
+    "nasdaq_class": "Class A",
+}
+for ticker, key, name, evidence in (
+    ("NVDA", "SEC_CIK_0001045810", "NVIDIA Corporation", [
+        "https://data.sec.gov/submissions/CIK0001045810.json",
+    ]),
+    ("ANT", ANT_SECURITY["issuer_id"], "Anthropic, PBC", [
+        "https://www.sec.gov/Archives/edgar/data/2130357/000162828026075973/ant-20261119.htm",
+        "https://www.nasdaqtrader.com/TraderNews.aspx?id=DTN2026-28",
+    ]),
+):
+    IDENTITIES[(ticker + ":US", "USD")] = key
+    ISSUERS[key] = (name, "US", evidence)
+
+
+def policy_target_identity(label):
+    """Resolve a policy table label using the same listing keys as holdings."""
+    ticker, _, qualifier = label.partition("（")
+    combined = re.fullmatch(r"([A-Z][A-Z0-9.-]*(?:、[A-Z][A-Z0-9.-]*)+)合并）", qualifier)
+    symbols = combined[1].split("、") if combined else ticker.split("/")
+    identities = [IDENTITIES.get((symbol + ":US", "USD")) for symbol in symbols]
+    issuer = identities[0] if identities and all(key == identities[0] for key in identities) else None
+    if issuer == ANT_SECURITY["issuer_id"] and label != ANT_POLICY_LABEL:
+        issuer = None
+    return symbols, issuer
+
+
 def direct_issuer(item):
     if item.get("economic_asset_class") != "EQUITY" or item.get("vehicle_type") not in {
             "COMMON_STOCK", "ADR", "DEPOSITARY_RECEIPT"}:
@@ -46,6 +81,13 @@ def direct_issuer(item):
         if issuer and canonical != issuer:
             return None
         issuer = canonical
+    if issuer == ANT_SECURITY["issuer_id"] and (
+            identity != ("ANT:US", "USD")
+            or item.get("security_symbol") not in {None, "ANT:US"}
+            or item.get("security_currency") not in {None, "USD"}
+            or item.get("cusip") not in {None, ANT_SECURITY["cusip"]}
+            or item.get("share_class") not in {None, ANT_SECURITY["nasdaq_class"]}):
+        return None
     if issuer and issuer.startswith("SEC_CIK_") and item["vehicle_type"] != "COMMON_STOCK":
         return None
     return issuer
