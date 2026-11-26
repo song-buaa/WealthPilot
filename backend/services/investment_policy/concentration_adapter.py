@@ -21,12 +21,15 @@ def _read_etf_evidence(portfolio_id, *, at=None):
     expected_sha256 = os.environ.get("WEALTHPILOT_ETF_EVIDENCE_SHA256")
     root = os.environ.get("WEALTHPILOT_ETF_RELEASE_DIRECTORY")
     public_key = os.environ.get("WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY")
-    if root or public_key:
+    owner_uid = os.environ.get("WEALTHPILOT_ETF_RELEASE_OWNER_UID")
+    if root or public_key or owner_uid:
         # An explicitly configured dynamic source fails closed if it cannot be verified.
         try:
-            if not root or not public_key or path or expected_sha256 or at is None:
+            if (not root or not public_key or not owner_uid or not owner_uid.isascii()
+                    or not owner_uid.isdecimal() or path or expected_sha256 or at is None):
                 raise ValueError("ETF_RELEASE_CONFIGURATION_INVALID")
-            receipt, manifest = read_release(consumer_directory(root), bytes.fromhex(public_key), portfolio_id, at)
+            directory = consumer_directory(root, int(owner_uid))
+            receipt, manifest = read_release(directory, bytes.fromhex(public_key), portfolio_id, at)
         except (OSError, ValueError):
             return {}, {}, "ETF_OWNER_EVIDENCE_UNAVAILABLE", {}
         records = {r.symbol: r for r in manifest.records}

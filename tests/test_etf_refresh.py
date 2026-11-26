@@ -4,6 +4,7 @@ from decimal import Decimal
 from hashlib import sha256
 from io import BytesIO
 import json
+import os
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from openpyxl import Workbook
@@ -58,7 +59,9 @@ def test_release_rejects_wrong_scope_key_payload_and_consumer_uid(channel, key, 
     receipt = release.publish(channel, key, 7, {"SPY:US": record()}, AT)
     pub = key.public_key().public_bytes_raw()
     with pytest.raises(ValueError, match="READ_ONLY"):
-        release.consumer_directory(channel)
+        release.consumer_directory(channel, os.getuid())
+    with pytest.raises(ValueError, match="OWNER_UID"):
+        release.consumer_directory(channel, os.getuid() + 1)
     with pytest.raises(ValueError, match="BINDING"):
         release.read_release(channel, pub, 1, AT)
     with pytest.raises(ValueError, match="SIGNATURE"):
@@ -70,15 +73,17 @@ def test_release_rejects_wrong_scope_key_payload_and_consumer_uid(channel, key, 
     with pytest.raises(ValueError, match="DIGEST"):
         release.read_release(channel, pub, 7, AT)
     monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_DIRECTORY", str(channel))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_OWNER_UID", str(os.getuid()))
     monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY", pub.hex())
     assert adapter._read_etf_evidence(7, at=AT)[2] == "ETF_OWNER_EVIDENCE_UNAVAILABLE"
 
 
 def test_signed_update_recalculates_c_without_restarting_and_binds_close(channel, key, monkeypatch, frozen, active):
     monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_DIRECTORY", str(channel))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_OWNER_UID", str(os.getuid()))
     monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY", key.public_key().public_bytes_raw().hex())
     # Simulate the distinct deployment UID. All signature/scope/digest checks still run.
-    monkeypatch.setattr(adapter, "consumer_directory", release.release_root)
+    monkeypatch.setattr(adapter, "consumer_directory", lambda path, owner_uid: release.release_root(path))
     position(frozen, "GOOG:US", 45)
     position(frozen, "GOOGL:US", 25)
     fund = position(frozen, "SPY:US", 200, vehicle="ETF")

@@ -58,9 +58,11 @@ def release_root(path):
     return path
 
 
-def consumer_directory(path):
+def consumer_directory(path, owner_uid):
     root = release_root(path)
-    if root.stat().st_uid == os.getuid():
+    if root.stat().st_uid != owner_uid:
+        raise ValueError("ETF_RELEASE_OWNER_UID_MISMATCH")
+    if owner_uid == os.getuid():
         raise ValueError("ETF_RELEASE_CONSUMER_MUST_BE_READ_ONLY")
     return root
 

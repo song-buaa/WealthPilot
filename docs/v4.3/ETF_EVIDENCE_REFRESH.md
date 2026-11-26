@@ -30,7 +30,7 @@ python -m scripts.refresh_etf_evidence \
 
 ## 权限与估值
 
-消费配置 `WEALTHPILOT_ETF_RELEASE_DIRECTORY` 为规范绝对路径。发布目录和父目录由发布 Owner 或系统管理，消费者无法替换。推荐目录 0750 和共享只读组，版本文件 0640。发布与消费 UID 必须不同。消费者中的 `WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY` 固定为 Owner 公钥的 64 位 hex，由生产配置 Owner 安装。签名、组合 ID、收据时间、manifest SHA、版本和记录时钟在读侧验证。两个入口配置同时出现时读侧保持无资格。
+消费配置 `WEALTHPILOT_ETF_RELEASE_DIRECTORY` 为规范绝对路径。发布目录和父目录由发布 Owner 或系统管理，消费者无法替换。推荐目录 0750 和共享只读组，版本文件 0640。发布与消费 UID 必须不同，消费者通过独立配置 `WEALTHPILOT_ETF_RELEASE_OWNER_UID` 固定发布属主。消费者中的 `WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY` 固定为 Owner 公钥的 64 位 hex，由生产配置 Owner 安装。签名、组合 ID、收据时间、manifest SHA、版本和记录时钟在读侧验证。两个入口配置同时出现时读侧保持无资格。
 
 历史 SPY 方法分母为已验基金净资产。自动候选沿用原数学资格，额外用较大的分母限缩下限。比较官方总净资产与 ETF 份额乘独立收盘上限，再用较大值。C 在同日最近收盘的原资格门之后，验证实际入账 ETF 金额不超过已持份额乘同一 FX 及签名的 USD 收盘上限。缺价格基础或冲突时，该 ETF 正式贡献降级。该收紧避免二级市场溢价放大按份额归属的 NAV 下限。上界和未认证成分继续未知。需要把 Invesco 观察权重升格、把五交易日滞后作为正式有效窗，或修改现有正式规则时，先取得 Product Owner 批准。
 
