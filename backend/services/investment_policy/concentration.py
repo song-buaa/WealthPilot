@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from datetime import timedelta
-from decimal import Decimal, localcontext
+from decimal import Decimal, InvalidOperation, localcontext
 
 from backend.services.instruments.classification import CLASSIFICATION_VERSION
 from backend.services.instruments.etf_holdings import ETFHoldings
@@ -135,7 +135,7 @@ def _critical(amount, denominator, threshold, complete):
 
 
 def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[str, ETFHoldings],
-                          evidence_pins: dict[str, str], classified_assets=None):
+                          evidence_pins: dict[str, str], classified_assets=None, close_caps_usd=None):
     """C/D internal contract. Pass only the original U1/A-min result and pinned PolicySession.
 
     Evidence pins come from the source owner independently of the supplied records.
@@ -146,10 +146,10 @@ def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[s
         raise ValueError("CONCENTRATION_AWARE_CLOCK_REQUIRED")
     with localcontext() as ctx:
         ctx.prec = 60
-        return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets)
+        return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd or {})
 
 
-def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets):
+def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd):
     reference, snapshot = _pinned_policy(session, view["portfolio_id"], at)
     listings = getattr(snapshot, "listings", {})
     listing_names = {item.issuer_id: item.issuer_name for item in listings.values()}
@@ -239,6 +239,17 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                                       valuation_as_of=row.get("price_as_of"),
                                       valuation_basis=row.get("price_time_basis"))
                       if evidence is not None and evidence.symbol == symbol else "UNAVAILABLE")
+            if status == "FRESH" and symbol in close_caps_usd:
+                # A NAV-claim lower bound from the automatic publisher is only
+                # valid at or below its independently verified ETF close ceiling.
+                try:
+                    quantity = Decimal(str(row["quantity"]))
+                    fx = Decimal(str(row["fx_rate_to_cny"]))
+                    if (not quantity.is_finite() or not fx.is_finite() or quantity <= 0 or fx <= 0
+                            or amount > quantity * fx * close_caps_usd[symbol]):
+                        status = "VALUATION_BASIS_UNVERIFIED"
+                except (KeyError, ValueError, InvalidOperation):
+                    status = "VALUATION_BASIS_UNVERIFIED"
             resolved = ZERO
             if status == "FRESH":
                 if expires_at is not None:
