@@ -65,6 +65,7 @@ class Rule(Contract):
 
 
 class Allocation(Contract):
+    allow_dynamic_growth: ClassVar[bool] = False
     denominator: Literal["QUALIFIED_INVESTABLE_ASSETS"]
     neutral: dict[str, Decimal]
     etf_internal: dict[str, Decimal]
@@ -104,7 +105,8 @@ class Allocation(Contract):
         stable = sum(self.neutral[k] for k in ("ib01", "cbu3", "cash"))
         if growth != self.growth_total or stable != self.stable_total or growth + stable != 1:
             raise ValueError("MAJOR_BUDGET_NOT_CLOSED")
-        if self.growth_total - self.flex_joint_max != self.us_core_floor:
+        flex_floor = self.growth_total - self.flex_joint_max
+        if (flex_floor < self.us_core_floor if self.allow_dynamic_growth else flex_floor != self.us_core_floor):
             raise ValueError("FLEX_FLOOR_MISMATCH")
         c, a = self.neutral["china"], self.neutral["gold"] + self.neutral["btc"]
         if not (c < self.flex_china_max_exclusive and a <= self.flex_alternatives_max and c + a <= self.flex_joint_max):
@@ -151,6 +153,7 @@ B3_NODE_TARGETS = {"growth_and_alternatives": Decimal("0.70"), "stable_pool": De
 
 
 class StrategicReviewScope(Contract):
+    fixed_node_targets: ClassVar[bool] = True
     rule_id: Literal["allocation.deviation"] = "allocation.deviation"
     nodes: dict[str, Decimal]
     review_unit: Literal["PORTFOLIO_PER_SNAPSHOT"]
@@ -162,7 +165,9 @@ class StrategicReviewScope(Contract):
 
     @model_validator(mode="after")
     def exact_scope(self):
-        if (self.nodes != B3_NODE_TARGETS or self.source_clause.document != "policy"
+        if (set(self.nodes) != set(B3_NODE_TARGETS)
+                or (self.fixed_node_targets and self.nodes != B3_NODE_TARGETS)
+                or self.source_clause.document != "policy"
                 or self.source_clause.section != "6.3"):
             raise ValueError("INVALID_B3_NODE_SCOPE")
         if (self.content_status == "APPROVED_CONTENT") != bool(self.content_approval_ref):
@@ -174,7 +179,7 @@ class SnapshotV2(Snapshot):
     schema_version: Literal["wp.policy.v2"] = "wp.policy.v2"
     parser_version: Literal["approved-markdown-v2"] = "approved-markdown-v2"
     strategic_review_scope: StrategicReviewScope
-    direct_target_count: ClassVar[int] = 6
+    direct_target_count: ClassVar[int | None] = 6
 
     @property
     def content_status(self):
@@ -182,7 +187,8 @@ class SnapshotV2(Snapshot):
 
     @model_validator(mode="after")
     def strategic_review_binding(self):
-        if len(self.allocation.direct_equity.keys() - {"unallocated"}) != self.direct_target_count:
+        if (self.direct_target_count is not None
+                and len(self.allocation.direct_equity.keys() - {"unallocated"}) != self.direct_target_count):
             raise ValueError("POLICY_SOURCE_TARGET_COUNT_MISMATCH")
         mapping = self.strategic_review_scope
         rule = next((r for r in self.rules if r.rule_id == mapping.rule_id), None)
@@ -229,6 +235,9 @@ class SnapshotV2WithAmendment(SnapshotV2):
 
 def parse_snapshot(value) -> Snapshot:
     """Decode frozen versions explicitly; unknown formats fail closed."""
+    if isinstance(value, dict) and value.get("schema_version") == "wp.policy.config.v1":
+        from .configuration import ConfiguredSnapshot
+        return ConfiguredSnapshot.model_validate(value)
     if isinstance(value, dict) and value.get("schema_version") == "wp.policy.v2":
         model = SnapshotV2WithAmendment if "amendment_approval" in value else SnapshotV2
         return model.model_validate(value)

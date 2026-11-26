@@ -6,7 +6,7 @@ from decimal import Decimal, localcontext
 
 from backend.services.instruments.classification import CLASSIFICATION_VERSION
 from backend.services.instruments.etf_holdings import ETFHoldings
-from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, direct_issuer
+from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, extended_common_issuer
 
 from .contracts import PolicyReference, digest, parse_snapshot
 from .parser import PolicyError
@@ -74,7 +74,7 @@ def _btc_identity(ref, row, quality):
 
 
 def _direct_conflict(ref, issuer, coverage, assignment):
-    expected = "china" if ISSUERS[issuer][1] == "CN" else "us_direct"
+    expected = "china" if ISSUERS.get(issuer, (None, "US"))[1] == "CN" else "us_direct"
     opposite_claims = {"US_EQUITY_ETF", "US_DIRECT_EQUITY" if expected == "china" else "CN_DIRECT_EQUITY"}
     refs = coverage.get("accounts", {}).get("evidence_refs", [])
     return (bool(assignment and assignment["bucket"] != expected)
@@ -151,6 +151,8 @@ def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[s
 
 def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets):
     reference, snapshot = _pinned_policy(session, view["portfolio_id"], at)
+    listings = getattr(snapshot, "listings", {})
+    listing_names = {item.issuer_id: item.issuer_name for item in listings.values()}
     denominator = _denominator(view, projection, at)
     issuer_rules, exceptions, review = _issuer_rules(snapshot)
     btc_rules = [r for r in snapshot.rules if r.metric == "btc_weight" and not r.subject
@@ -214,7 +216,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
         if ((verified and row.get("vehicle_type") == "CASH" and row.get("economic_asset_class") == "CASH")
                 or (not position and row.get("item_type") == "bank_cash")):
             continue
-        issuer = direct_issuer(row) if verified else None
+        issuer = extended_common_issuer(row, listings) if verified else None
         # Budget eligibility is independent of the canonical issuer. Preserve
         # a proven breach when B3 cannot assign a bucket, unless facts conflict.
         if issuer and not _direct_conflict(ref, issuer, coverage, assignment):
@@ -242,8 +244,8 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                 if expires_at is not None:
                     expires_at = min(expires_at, evidence.valid_until)
                 for constituent in evidence.rows:
-                    underlying = direct_issuer({"symbol": constituent.symbol, "currency": constituent.currency,
-                                               "economic_asset_class": "EQUITY", "vehicle_type": "COMMON_STOCK"})
+                    underlying = extended_common_issuer({"symbol": constituent.symbol, "currency": constituent.currency,
+                                               "economic_asset_class": "EQUITY", "vehicle_type": "COMMON_STOCK"}, listings)
                     if underlying:
                         resolved += constituent.weight_lower_bound
                         contribution = amount * constituent.weight_lower_bound
@@ -283,7 +285,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
         lower = direct[issuer] + indirect[issuer]
         risk, hits = _risk(applicable, lower, denominator, complete)
         issuer_rows[issuer] = {
-            "issuer_name": ISSUERS[issuer][0],
+            "issuer_name": listing_names.get(issuer) or ISSUERS[issuer][0],
             "direct_cny": direct[issuer], "direct_pct": _percent(direct[issuer], denominator),
             "direct_members": members[issuer], "indirect_members": indirect_members[issuer],
             "indirect_known_cny": indirect[issuer],

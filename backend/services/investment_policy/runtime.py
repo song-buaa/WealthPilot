@@ -6,6 +6,8 @@ from datetime import timedelta
 from decimal import Decimal
 import json
 import os
+from pathlib import Path
+import re
 
 from pydantic import Field
 
@@ -16,6 +18,25 @@ from .evaluation import evaluate_snapshot
 from .parser import PolicyError
 from .service import PolicyService
 from .store import PolicyStore, clock, utc_now
+
+def _installed_runtime():
+    # Resolve at process import. A later "current" symlink change therefore
+    # cannot make an old Web or MCP worker claim the newly installed code.
+    directory = Path(__file__).resolve().parents[4]
+    sha = directory.name
+    if not re.fullmatch(r"[a-f0-9]{40}", sha):
+        return None
+    try:
+        receipt = json.loads((directory / "installed.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if receipt.get("package_verified") is not True or receipt.get("revision") != sha:
+        return None
+    return {"code_sha": sha, "runtime_id": str(os.getpid())}
+
+
+_INSTALLED_RUNTIME = _installed_runtime()
+
 
 POLICY_ENV_KEYS = {"WEALTHPILOT_POLICY_DB_PATH", "WEALTHPILOT_POLICY_SCOPE", "WEALTHPILOT_POLICY_SHARED_CONTRACT"}
 _current = ContextVar("wealthpilot_policy_session", default=None)
@@ -160,8 +181,14 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
     if view == "position":
         ticker = symbol.removesuffix(":US") if symbol else None
         direct = snap["allocation"]["direct_equity"]
-        value["position_target"] = {label: target for label, target in direct.items()
-                                    if label != "unallocated" and ticker in policy_target_identity(label)[0]}
+        target_issuers = snap.get("target_issuers")
+        if target_issuers is not None:
+            issuer = snap["target_symbols"].get(f"{ticker}:US")
+            value["position_target"] = {label: direct[label] for label, target in target_issuers.items()
+                                        if issuer == target}
+        else:
+            value["position_target"] = {label: target for label, target in direct.items()
+                                        if label != "unallocated" and ticker in policy_target_identity(label)[0]}
     if view in {'portfolio','position','full','risk'}:
         with bind(session):
             value['risk_diagnostic'] = diagnose(session.portfolio_id,issuer_symbol=symbol)
@@ -173,6 +200,8 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
             value.pop(key, None)
     if view != "full":
         value.pop("clauses", None)
+    if _INSTALLED_RUNTIME:
+        value["policy_runtime"] = _INSTALLED_RUNTIME.copy()
     return value
 
 

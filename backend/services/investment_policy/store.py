@@ -106,7 +106,9 @@ class PolicyStore:
                 installed = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
                 if not required.issubset(installed):
                     raise PolicyError("POLICY_SCHEMA_UPGRADE_REQUIRED")
-            db.execute("BEGIN IMMEDIATE" if write else "PRAGMA query_only=ON")
+            if not write:
+                db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield db
             if write:
                 db.commit()
@@ -132,6 +134,10 @@ class PolicyStore:
         frozen_snapshot = value["snapshot"]
         if not isinstance(frozen_snapshot, dict):
             raise PolicyError("MARKDOWN_DERIVATIVE_MISMATCH")
+        if frozen_snapshot.get("schema_version") == "wp.policy.config.v1":
+            from .fast_release import verify_config_bundle
+            verify_config_bundle(self, db, scope, bundle_id, row, value)
+            return value
         actual = derive(row["philosophy"], row["policy"], expected_hashes=value["source_hashes"], policy_version=value["bundle_version"],
                         expected_schema_version=frozen_snapshot.get("schema_version", ""))
         if (isinstance(actual, SnapshotV2)
@@ -202,7 +208,7 @@ class PolicyStore:
             raise PolicyError("STRUCTURED_APPROVAL_REFERENCE_REQUIRED")
         with self.connection(write=True) as db:
             value = self._bundle(db, scope, bundle_id)
-            if state == "APPROVED" and value["snapshot"]["schema_version"] == "wp.policy.v2":
+            if state == "APPROVED" and value["snapshot"]["schema_version"] != "wp.policy.v1":
                 raise PolicyError("VERSIONED_SCOPE_REQUIRES_FORMAL_APPROVAL")
             if clock(at) < clock(value["created_at"]):
                 raise PolicyError("LIFECYCLE_CLOCK_REVERSED")

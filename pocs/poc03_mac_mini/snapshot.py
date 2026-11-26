@@ -19,7 +19,10 @@ import sys
 import tempfile
 import uuid
 
-from common import ROOT, digest, private_dir, private_json, require, safe_cli, write_json
+if __package__:
+    from .common import ROOT, digest, private_dir, private_json, require, safe_cli, write_json
+else:
+    from common import ROOT, digest, private_dir, private_json, require, safe_cli, write_json
 
 
 def _closed_source_binding(path):
