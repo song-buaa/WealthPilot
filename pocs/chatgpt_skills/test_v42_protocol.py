@@ -497,7 +497,7 @@ worker.main()
             assert 'No scope prefix' in description and 'Receipts are durable' in description
             assert not re.search(r'pa_[0-9a-f]{32}',description)
             scope='pa_'+'a'*32  # A cached description from an unrelated previous process.
-            assert len(tools)==12 and 'Synchronous compatibility' in tools['analyze_position'].description
+            assert len(tools)==16 and 'Synchronous compatibility' in tools['analyze_position'].description
             request_id=scope+':li_request_00000001' if cached_scope else 'client-unique-request-0001'
             arguments={'request_id':request_id,'request':{'symbol':'LI:US','question':'PRIVATE_SYNTHETIC_QUESTION'}}
             before=time.monotonic()

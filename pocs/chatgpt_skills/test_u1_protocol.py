@@ -46,8 +46,8 @@ def test_prepare_http_idempotency_and_original_read_tools(context):
         server=create_server(settings)
         async with Client(server,mode='legacy') as client:
             tools=(await client.list_tools()).tools
-            assert len(tools)==13
-            assert all(t.annotations.read_only_hint for t in tools if t.name!='prepare_asset_analysis')
+            assert len(tools)==17
+            assert all(t.annotations.read_only_hint for t in tools if t.name not in {'prepare_asset_analysis','save_research_evaluation','save_research_feedback'})
             prepare=next(t for t in tools if t.name=='prepare_asset_analysis')
             assert prepare.annotations.read_only_hint is False and prepare.annotations.idempotent_hint is True
             assert 'FIRST call prepare_asset_analysis' in server.instructions
