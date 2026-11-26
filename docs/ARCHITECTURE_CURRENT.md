@@ -325,3 +325,7 @@ S3 META权益资格候选沿原[method_applicability](../backend/services/market
 ### S3专业研究方法选择（P3候选）
 
 原MCP公司池的`request.method`向后兼容：默认`standard`复用原P1，`professional`沿同一PEER/Skill入口调用原P2.2经营模型。服务端版本化档案仅保存已评审研究假设，不成为财务或投资政策Owner；原SEC/Price/Evidence先资格化新采集，专业薄适配再核当前窗口、最新申报及研究上下文适用性，变化则逐公司UNKNOWN。META原权益门禁不因方法切换而解除。原归档保存完整父资格与参数/方法/来源，读回按冻结原Owner投影重算、无新网络/事实资格；漂移要求原版本，不静默改历史。无新MCP工具、Agent Runtime、数据库或交易权限；接口、年度原件快照复用与发布/验收边界见[P3合同](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。
+
+## L1质量样本与评测（开发候选）
+
+研究执行及不可变完整原件继续归PositionJobs/PositionStore；Research Evaluation仅拥有受限原请求、原件引用、报告版本与追加评分/反馈，存于同一私有边界的独立有界文件目录。MCP复用原访问控制；native/Reader/client draft/human-reported final分开留证。不持有资产、E1、政策或交易权威，不修改公开Job/report版本。容量满仅停归档，不停研究。[数据/权限/发布合同](L1_RESEARCH_EVALUATION.md)。

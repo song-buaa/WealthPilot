@@ -35,7 +35,7 @@ def test_original_18_tools_plus_one_policy_read_without_business_or_e1_writes(ac
                 original={t.name for t in (await c.list_tools()).tools}
         async with Client(create_server(settings(e1.path,config)),mode='legacy') as c:
             tools={t.name:t for t in (await c.list_tools()).tools}
-            assert len(original)==18 and len(tools)==19
+            assert len(original)==22 and len(tools)==23
             assert set(tools)-original=={'get_investment_policy_context'}
             tool=tools['get_investment_policy_context']
             assert tool.annotations.read_only_hint and not tool.annotations.destructive_hint

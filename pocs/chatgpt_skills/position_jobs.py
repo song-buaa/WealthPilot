@@ -173,6 +173,20 @@ class PositionJobs:
             raise ValueError('RETENTION_MUST_BE_POSITIVE')
         self.lock = threading.Lock()
 
+    def _capture_sample(self, row, request=None, request_id=None, envelope=None):
+        try:
+            from backend.services.research_evaluation import SampleStore
+            samples = SampleStore(self.root)
+            try:
+                return samples.capture(row, request, request_id, envelope)
+            finally:
+                samples.close()
+        except Exception:
+            # This optional quality archive cannot change research completion or
+            # durable idempotency. Queries can retry capture from the same artifact.
+            self._emit(row, 'SAMPLE_CAPTURE_UNAVAILABLE')
+            return None
+
     def _store(self):
         return PositionStore(self.root,self.quota)
 
@@ -215,6 +229,7 @@ class PositionJobs:
                 row.update(state='completed',issue=None,finished=envelope['finished_at'],business_status=full.status,artifact_sha256=envelope['result_sha256'],artifact_bytes=envelope['result_bytes'])
                 store.save_receipts(data)
                 self._emit(row,'recovered',envelope)
+            self._capture_sample(row, envelope=envelope)
             if time.time()-row['finished'] >= self.retention_seconds:
                 self._emit(row,'RESULT_EXPIRED',envelope)
                 return self._response(row,issue='RESULT_EXPIRED',envelope=envelope)
@@ -228,6 +243,7 @@ class PositionJobs:
                 row.update(state='unavailable',issue='ANALYSIS_INTERRUPTED',finished=time.time())
                 store.save_receipts(data)
                 self._emit(row,'ANALYSIS_INTERRUPTED')
+        self._capture_sample(row)
         return self._response(row)
 
     def start(self,request_id,request:AnalysisRequest):
@@ -258,6 +274,7 @@ class PositionJobs:
                         else:
                             previous.update(state='unavailable',issue='ANALYSIS_INTERRUPTED',finished=time.time())
                             store.save_receipts(data)
+                            self._capture_sample(previous)
                             self._emit(previous,'ANALYSIS_INTERRUPTED')
                 occupied=sum(r['state']=='completed' and time.time()-r['finished']<self.retention_seconds
                              for r in data['jobs'].values())
@@ -270,6 +287,7 @@ class PositionJobs:
                     owner_scope=self.scope,owner_pid=os.getpid(),request_key=key)
                 data['jobs'][row['job_id']]=row;data['requests'][key]=row['job_id']
                 store.save_receipts(data)  # durable claim BEFORE thread/Worker/model
+                self._capture_sample(row, request, request_id)
                 try:
                     thread=threading.Thread(target=self._run,args=(row,request.model_copy(deep=True),store,admission),
                         name='wp-position-analysis',daemon=True)
@@ -277,6 +295,7 @@ class PositionJobs:
                 except Exception:
                     row.update(state='unavailable',issue='JOB_START_FAILED',finished=time.time())
                     store.save_receipts(data)
+                    self._capture_sample(row)
                     return self._response(row)
                 store=None;admission=None;reserved=False  # ownership passed to thread
                 return self._response(row)
@@ -319,6 +338,7 @@ class PositionJobs:
                 saved.update(state='completed',issue=None,finished=envelope['finished_at'],business_status=full.status,artifact_sha256=envelope['result_sha256'],artifact_bytes=envelope['result_bytes'])
                 store.save_receipts(data)
                 row=saved
+            self._capture_sample(row, envelope=envelope)
             self._emit(row,'committed',envelope)
         except Exception as error:
             issue=self._category(error)
@@ -328,6 +348,7 @@ class PositionJobs:
                     saved.update(state='unavailable',issue=issue,finished=time.time(),business_status=row.get('business_status','UNKNOWN'))
                     store.save_receipts(data)
             except Exception:pass  # existing durable claim remains, never replay
+            self._capture_sample(dict(row,state='unavailable',issue=issue), envelope=envelope)
             self._emit(row,issue,envelope or serialized)
         finally:
             os.close(admission);store.close();self.slot.release()

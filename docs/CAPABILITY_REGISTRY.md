@@ -195,3 +195,7 @@ S3 P2.2本地候选沿[原经营研究](../backend/services/s3_operating_researc
 S3 P3专业入口候选：原[公司池服务](../backend/services/s3_research_entry.py)与[既有MCP工具](../pocs/chatgpt_skills/company_pool.py)增加可选`request.method=standard|professional`，默认P1；[专业适配](../backend/services/s3_professional_research.py)绑定服务端已评审P2.2档案和新时点原Owner资格，三公司场景参数不改，META保护优先，变更/缺证不静默P1回退。原start/get/read、冻结与独立复算复用，无新工具/Runtime/数据库/交易权限。合同及分阶段发布证据见[P3记录](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。
 
 L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_analysis.py)和[来源收据读取](../backend/services/market_data/l1_valuation.py)调用现有 S3 Binder。4.1 保持正式原件、时钟及来源资格责任，4.2 负责条件估值消费、终审和阅读输出。部署配置、降级及旧 Job 合同见[4.2 实施说明](V42_IMPLEMENTATION.md#117-l1-v2-估值来源与阅读合同)。
+
+### L1 研究质量评测（v1.0 开发候选）
+
+[Research Evaluation](../backend/services/research_evaluation.py)复用PositionJobs/PositionStore自动登记受限原请求、Job/Artifact不可变引用及原生/Reader版本；追加式五维评分、反馈、人工自报复评与私有分页查询/导出。原[MCP适配](../pocs/chatgpt_skills/research_evaluation.py)四项工具不运行研究、不授予E1/交易权限。工程回传不等于真实ChatGPT发布闭环；[合同及边界](L1_RESEARCH_EVALUATION.md)，[回归](../tests/test_research_evaluation.py)。历史业务FAIL与>=8分硬目标不变。

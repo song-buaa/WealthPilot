@@ -32,6 +32,8 @@ def encode(value):
 
 
 class PositionStore:
+    NAME_PATTERN = r'(?:receipts\.lock|active\.lock|receipts\.json|initialized\.json|[A-Za-z0-9_-]{32,64}\.result\.json|\.pending-[a-f0-9]{32})'
+
     def __init__(self, root, quota_bytes):
         if root is None or quota_bytes is None or quota_bytes <= 0:
             raise StoreError('RESULT_STORAGE_UNCONFIGURED')
@@ -73,7 +75,7 @@ class PositionStore:
             raise StoreError('RESULT_STORAGE_UNSAFE')
 
     def _open(self, name, flags):
-        if not re.fullmatch(r'(?:receipts\.lock|active\.lock|receipts\.json|initialized\.json|[A-Za-z0-9_-]{32,64}\.result\.json|\.pending-[a-f0-9]{32})', name):
+        if not re.fullmatch(self.NAME_PATTERN, name):
             raise StoreError('RESULT_STORAGE_UNSAFE')
         for attempt in range(3):
             try:

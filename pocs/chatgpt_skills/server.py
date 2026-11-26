@@ -407,10 +407,14 @@ def create_server(settings):
     configured=(result_root is not None,result_quota is not None,result_retention is not None)
     if any(configured) and not all(configured):
         raise ValueError('ANALYSIS_RESULTS_CONFIG_INCOMPLETE')
-    position_jobs = PositionJobs(execute_position_job, analysis_lock,
+    from backend.services.research_evaluation import code_revision
+    position_jobs = PositionJobs(execute_position_job, analysis_lock, source_revision=code_revision(),
         storage_root=result_root, quota_bytes=result_quota,
         retention_seconds=7200 if result_retention is None else result_retention,
         event=lambda value:overview.record_position_storage_event(settings,value))
+
+    from pocs.chatgpt_skills.research_evaluation import register as register_evaluation
+    register_evaluation(server, position_jobs, security_meta)
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=True),
@@ -428,7 +432,7 @@ def create_server(settings):
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=False),
-        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: display result.conclusion as the main server-written report, including its limits. Preserve the fiscal period, disclosure and evidence timestamps separately. Keep external supplements separately attributed and preserve stored holding, snapshot qualification, research intent and policy distinctions. Do not dump or paraphrase diagnostic JSON in the main reply. Use view=audit only when asked for citation mapping or technical receipts; it returns the original qualified conclusion and machine evidence in the same report schema; artifact metadata identifies the complete private wealthpilot.analysis.v1 result without exposing paths. Preserve report/full_artifact distinctions and original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Reports expire at configured retention; private artifacts and idempotency tombstones remain. Queries never start work.")
+        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: display result.conclusion as the main server-written report, including its limits. Preserve the fiscal period, disclosure and evidence timestamps separately. Keep external supplements separately attributed and preserve stored holding, snapshot qualification, research intent and policy distinctions. Do not dump or paraphrase diagnostic JSON in the main reply. Use view=audit only when asked for citation mapping or technical receipts; it returns the original qualified conclusion and machine evidence in the same report schema; artifact metadata identifies the complete private wealthpilot.analysis.v1 result without exposing paths. Preserve report/full_artifact distinctions and original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Reports expire at configured retention; private artifacts and idempotency tombstones remain. Queries never start work. After delivery, query_research_evaluations(job_id) returns the private sample and fixed five-dimension rubric; export the exact report if needed and save an explicitly labelled AI initial evaluation via save_research_evaluation. Evaluate actual content; report absence is N/R. Client draft submission never proves final user-visible delivery.")
     def get_position_analysis_result(job_id: Annotated[str, Field(min_length=32, max_length=64,
             pattern=r"^[A-Za-z0-9_-]+$")], view: Literal['reader', 'audit'] = 'reader') -> PositionAnalysisJob:
         return position_jobs.get(job_id, view=view)
