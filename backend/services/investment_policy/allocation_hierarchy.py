@@ -5,7 +5,7 @@ from fractions import Fraction
 import re
 
 from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
-from backend.services.instruments.issuers import IDENTITIES, ISSUERS, direct_issuer
+from backend.services.instruments.issuers import IDENTITIES, ISSUERS, direct_issuer, policy_target_identity
 from backend.utils.symbol import parse_symbol
 
 from .contracts import PolicyReference, Snapshot, SnapshotV2, digest
@@ -94,6 +94,8 @@ def _identity(ref, row, economic, coverage, direct_symbols):
     if vehicle == 'ETF' and claim == 'US_EQUITY_ETF':
         return 'us_etf', None, account_refs
     if economic == 'EQUITY' and vehicle in DIRECT_VEHICLES:
+        if ticker == 'ANT' and market == 'US' and direct_issuer(row) is None:
+            return None
         issuer = IDENTITIES.get((symbol, currency))
         if issuer and ISSUERS[issuer][1] == 'CN':
             return ('china', None, ISSUERS[issuer][2]) if claim in {None, 'CN_DIRECT_EQUITY'} else None
@@ -120,7 +122,7 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
     """Qualify the existing B3 calculation using the verified PolicyService context."""
     candidate = hierarchy["strategic_review"]
     if (not isinstance(snapshot, SnapshotV2) or hierarchy["status"] != "QUALIFIED"
-            or snapshot.strategic_review_scope.content_status != "APPROVED_CONTENT"
+            or snapshot.content_status != "APPROVED_CONTENT"
             or policy_context.get("status") != "ACTIVE" or policy_context.get("mode") != "POLICY_ACTIVE"):
         return candidate
 
@@ -174,12 +176,8 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
     for name, target in allocation.direct_equity.items():
         if name == 'unallocated':
             continue
-        label, _, qualifier = name.partition('（')
-        combined = re.fullmatch(r'([A-Z][A-Z0-9.-]*(?:、[A-Z][A-Z0-9.-]*)+)合并）', qualifier)
-        symbols = combined[1].split('、') if combined else label.split('/')
+        symbols, issuer = policy_target_identity(name)
         direct_symbols.update(symbols)
-        identities = [IDENTITIES.get((ticker + ':US', 'USD')) for ticker in symbols]
-        issuer = identities[0] if identities and all(key == identities[0] for key in identities) else None
         direct_targets[name] = (issuer, target)
     policy_issuers = {issuer for issuer, _ in direct_targets.values() if issuer}
     direct_symbols.update(symbol.removesuffix(':US') for (symbol, currency), issuer in IDENTITIES.items()

@@ -135,7 +135,7 @@ class PolicyStore:
         actual = derive(row["philosophy"], row["policy"], expected_hashes=value["source_hashes"], policy_version=value["bundle_version"],
                         expected_schema_version=frozen_snapshot.get("schema_version", ""))
         if (isinstance(actual, SnapshotV2)
-                and (value["content_status"] != actual.strategic_review_scope.content_status
+                and (value["content_status"] != actual.content_status
                      or value["content_approved_on"] != actual.content_approved_on
                      or value["bundle_version"] != row["version"])):
             raise PolicyError("B3_BUNDLE_METADATA_MISMATCH")
@@ -176,7 +176,7 @@ class PolicyStore:
                          source_files={k: p.name for k, p in paths.items()}, structured_sha256=digest(snapshot),
                          snapshot=snapshot.model_dump(mode="json"), created_at=created_at,
                          content_approved_on=snapshot.content_approved_on,
-                         content_status=(snapshot.strategic_review_scope.content_status
+                         content_status=(snapshot.content_status
                                          if isinstance(snapshot, SnapshotV2) else "APPROVED_CONTENT"),
                          deployment_status="NOT_DEPLOYED", effective_at=None, predecessor_version=head or None)
             db.execute("INSERT INTO policy_bundles VALUES(?,?,?,?,?,?,?,?,?)", (scope, version, bundle_id, request_id,

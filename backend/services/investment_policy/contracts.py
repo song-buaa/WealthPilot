@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import date
 import hashlib
 import json
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -174,9 +174,16 @@ class SnapshotV2(Snapshot):
     schema_version: Literal["wp.policy.v2"] = "wp.policy.v2"
     parser_version: Literal["approved-markdown-v2"] = "approved-markdown-v2"
     strategic_review_scope: StrategicReviewScope
+    direct_target_count: ClassVar[int] = 6
+
+    @property
+    def content_status(self):
+        return self.strategic_review_scope.content_status
 
     @model_validator(mode="after")
     def strategic_review_binding(self):
+        if len(self.allocation.direct_equity.keys() - {"unallocated"}) != self.direct_target_count:
+            raise ValueError("POLICY_SOURCE_TARGET_COUNT_MISMATCH")
         mapping = self.strategic_review_scope
         rule = next((r for r in self.rules if r.rule_id == mapping.rule_id), None)
         if (rule is None or (rule.metric, rule.scope, rule.operator, rule.threshold, rule.action, rule.subject)
@@ -190,10 +197,41 @@ class SnapshotV2(Snapshot):
         return self
 
 
+class PolicyAmendmentApproval(Contract):
+    status: Literal["DRAFT_CONTENT", "APPROVED_CONTENT"]
+    approved_on: date | None
+    reference: str | None
+
+    @model_validator(mode="after")
+    def approval_fields(self):
+        approved = self.status == "APPROVED_CONTENT"
+        if approved != (self.approved_on is not None) or approved != bool(self.reference):
+            raise ValueError("POLICY_AMENDMENT_APPROVAL_INCOMPLETE")
+        return self
+
+
+class SnapshotV2WithAmendment(SnapshotV2):
+    amendment_approval: PolicyAmendmentApproval
+    direct_target_count: ClassVar[int] = 8
+
+    @property
+    def content_status(self):
+        return self.amendment_approval.status
+
+    @model_validator(mode="after")
+    def amendment_binding(self):
+        if (self.strategic_review_scope.content_status != "APPROVED_CONTENT"
+                or (self.amendment_approval.approved_on is not None
+                    and self.amendment_approval.approved_on.isoformat() != self.content_approved_on)):
+            raise ValueError("POLICY_AMENDMENT_APPROVAL_MISMATCH")
+        return self
+
+
 def parse_snapshot(value) -> Snapshot:
     """Decode frozen versions explicitly; unknown formats fail closed."""
     if isinstance(value, dict) and value.get("schema_version") == "wp.policy.v2":
-        return SnapshotV2.model_validate(value)
+        model = SnapshotV2WithAmendment if "amendment_approval" in value else SnapshotV2
+        return model.model_validate(value)
     return Snapshot.model_validate(value)
 
 

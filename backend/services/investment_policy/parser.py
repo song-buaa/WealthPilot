@@ -6,11 +6,17 @@ parser version, not a manually maintained JSON policy.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 import hashlib
 import re
 
-from .contracts import Allocation, Rule, Snapshot, SnapshotV2, SourceClause, StrategicReviewScope
+from backend.services.instruments.issuers import policy_target_identity
+
+from .contracts import (
+    Allocation, PolicyAmendmentApproval, Rule, Snapshot, SnapshotV2, SnapshotV2WithAmendment,
+    SourceClause, StrategicReviewScope,
+)
 
 
 class PolicyError(ValueError):
@@ -115,7 +121,25 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
         if identity in direct:
             raise PolicyError("DUPLICATE_DIRECT_EQUITY")
         direct[identity] = pct(one(r"^(\d+(?:\.\d+)?%)$", row[1]))
-    specified = one(r"已指定六股合计([\d.]+)%", doc.text("3.2"))
+    equity_section = doc.text("3.2")
+    count, specified = one(r"已指定(六|八)股合计([\d.]+)%", equity_section)
+    amendment_lines = [line for line in doc.lines if line.startswith("美国核心股内容批准：")]
+    targets = {label: policy_target_identity(label)[1] for label in direct if label != "unallocated"}
+    if count == "八":
+        if len(amendment_lines) != 1 or amendment_lines[0] not in equity_section.splitlines():
+            raise PolicyError("POLICY_AMENDMENT_CONTENT_MARKER_REQUIRED")
+        amendment = amendment_lines[0].removeprefix("美国核心股内容批准：")
+        if (len(targets) != 8 or None in targets.values() or len(set(targets.values())) != 8
+                or direct.get("unallocated") != 0 or any(direct[label] <= 0 for label in targets)):
+            raise PolicyError("EIGHT_DISTINCT_QUALIFIED_DIRECT_TARGETS_REQUIRED")
+    elif (len(targets) != 6 or any(
+            ticker in {"NVDA", "ANT"} for label in targets for ticker in policy_target_identity(label)[0]
+    )):
+        raise PolicyError("POLICY_AMENDMENT_CONTENT_MARKER_REQUIRED")
+    elif amendment_lines:
+        raise PolicyError("UNEXPECTED_POLICY_AMENDMENT_CONTENT_MARKER")
+    else:
+        amendment = None
     flex = doc.text("2.2")
     china_max = one(r"0%\s*≤\s*C\s*<\s*([\d.]+)%", flex)
     alt_max = one(r"0%\s*≤\s*A\s*≤\s*([\d.]+)%", flex)
@@ -189,6 +213,8 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
     if schema_version is None:
         schema_version = "wp.policy.v2" if has_versioned_clause else "wp.policy.v1"
     if schema_version == "wp.policy.v1":
+        if amendment is not None:
+            raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
         return Snapshot(**fields)
     if schema_version != "wp.policy.v2" or not has_versioned_clause:
         raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
@@ -219,4 +245,24 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
     mapping = StrategicReviewScope(nodes=nodes, review_unit=review_unit, cash=cash_scope,
         product_decision_ref=decision_ref, content_status=content_status,
         content_approval_ref=approval_ref, source_clause=doc.ref("6.3"))
-    return SnapshotV2(**fields, strategic_review_scope=mapping)
+    if amendment is None:
+        return SnapshotV2(**fields, strategic_review_scope=mapping)
+    if mapping.content_status != "APPROVED_CONTENT":
+        raise PolicyError("B3_BASE_CONTENT_APPROVAL_REQUIRED")
+    approval_date, reference = None, None
+    if amendment != "DRAFT_CONTENT":
+        day, reference = one(
+            r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| "
+            r"(https://github\.com/song-buaa/WealthPilot/issues/[1-9]\d*#issuecomment-[1-9]\d*)$",
+            amendment,
+        )
+        issue_number = reference.split("/issues/")[1].split("#")[0]
+        approval_date = date.fromisoformat(day)
+        if (day < fields["content_approved_on"] or issue_number in {"111", "121", "124"}
+                or reference == mapping.content_approval_ref):
+            raise PolicyError("INDEPENDENT_POLICY_AMENDMENT_CONTENT_APPROVAL_REQUIRED")
+        fields["content_approved_on"] = day
+    return SnapshotV2WithAmendment(**fields, strategic_review_scope=mapping,
+        amendment_approval=PolicyAmendmentApproval(
+            status="APPROVED_CONTENT" if approval_date else "DRAFT_CONTENT",
+            approved_on=approval_date, reference=reference))
