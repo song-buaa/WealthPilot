@@ -224,11 +224,16 @@ def test_original_peer_cited_explanation_survives_final_mcp_without_snapshot(ana
 
 
 def test_portfolio_automatic_repayment_rechecks_full_loan_amount_scope(monkeypatch):
+    from functools import partial
+
     from backend.agents.contracts import ExpressionOutput
     from backend.services.market_data.output_policy import enforce_portfolio
     from backend.services import allocation_scenarios
-    from tests.test_v42_exit_plan import setup_case
     from tests.test_v42_account_candidates import auto_case
+    from tests.test_v42_scenarios import AT
+
+    monkeypatch.setattr(allocation_scenarios, 'target_context',
+                        partial(allocation_scenarios.target_context, at=AT))
     v, executed, _, t = auto_case('3690:HK')
     v['data_quality']['analysis_eligibility']['B']['allowed'] = True
     calls = []
