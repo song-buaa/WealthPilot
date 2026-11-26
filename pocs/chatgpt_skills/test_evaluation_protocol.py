@@ -41,3 +41,19 @@ def test_mcp_evaluation_roundtrip_no_research_or_account_calls(tmp_path,monkeypa
             assert bad.is_error
             assert str(tmp_path) not in str(bad.content)
     asyncio.run(run())
+
+from backend.services.research_evaluation import SampleStore
+
+
+def test_optional_capture_failure_reaches_existing_safe_private_event_sink(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from pocs.poc02_wealth_mcp.server import record_position_storage_event
+    events=tmp_path/'events.jsonl'
+    def failed(*a,**k):raise OSError('PRIVATE_CAPTURE_EXCEPTION')
+    monkeypatch.setattr(SampleStore,'capture',failed)
+    jobs=factory(tmp_path/'jobs',event=lambda value:record_position_storage_event(SimpleNamespace(events=str(events)),dict(value,prompt='PRIVATE_PROMPT')))
+    job=jobs.start('capture-failed',AnalysisRequest(question='PRIVATE_QUESTION'))
+    assert finish(jobs,job.job_id).state=='completed'
+    rows=[json.loads(line) for line in events.read_text().splitlines()]
+    assert any(r['storage_status']=='SAMPLE_CAPTURE_UNAVAILABLE' for r in rows)
+    assert 'PRIVATE' not in events.read_text()
