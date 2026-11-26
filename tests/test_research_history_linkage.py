@@ -129,13 +129,15 @@ def test_real_production_metadata_pin_cannot_be_satisfied_by_synthetic_report(tm
     finally:s.close()
 
 
-@pytest.mark.parametrize('tamper',['fingerprint','result','envelope_identity','missing'])
+@pytest.mark.parametrize('tamper',['fingerprint','missing_fingerprint','result','envelope_identity','missing'])
 def test_unknown_fingerprint_requires_real_durable_artifact_not_supplied_envelope(tmp_path,tamper):
     root,row,envelope,record,jobs=durable(tmp_path);s=SampleStore(root)
     import_reference(s,record)
     supplied=json.loads(json.dumps(envelope));claimed=dict(row)
     if tamper=='fingerprint':
         claimed['fingerprint']='d'*64;supplied['fingerprint']='d'*64
+    elif tamper=='missing_fingerprint':
+        claimed['fingerprint']=None;supplied['fingerprint']=None
     elif tamper=='result':
         supplied['result']['conclusion']='FORGED'
         raw=encode(supplied['result']);supplied['result_sha256']=sha256(raw).hexdigest();supplied['result_bytes']=len(raw)

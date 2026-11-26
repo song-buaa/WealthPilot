@@ -214,14 +214,16 @@ class SampleStore:
                 self.files.write(name, sample, immutable=True)
             else:
                 self.match_identity(existing, previous, dict(row,artifact_sha256=envelope['result_sha256'] if envelope else None))
-                if existing['request_fingerprint'] != row['fingerprint']:
-                    if existing['request_fingerprint'] is not None or existing.get('source')!='explicit_offline_historical_import':
+                if existing['request_fingerprint'] is None:
+                    if existing.get('source')!='explicit_offline_historical_import':
                         raise StoreError('SAMPLE_IDENTITY_CONFLICT')
                     if envelope is None:
                         return sid  # A metadata reference is not a verified result.
                     durable, verified = self.verified_artifact(row['job_id'])
                     if any(durable[k]!=row[k] for k in ('job_id','analysis_run_id','fingerprint')) or verified!=envelope:
                         raise StoreError('SAMPLE_IDENTITY_CONFLICT')
+                elif existing['request_fingerprint'] != row['fingerprint']:
+                    raise StoreError('SAMPLE_IDENTITY_CONFLICT')
             state = dict(job_state=row['state'], business_status=row.get('business_status','UNKNOWN'),
                          issue=row.get('issue'), observed_at=now())
             if envelope:
