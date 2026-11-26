@@ -258,3 +258,17 @@ def test_import_empty_or_other_target_cannot_create_native_score(tmp_path,target
 def test_whitespace_client_text_is_not_an_actual_report():
     with pytest.raises(ValidationError,match='CONTENT'):
         Feedback(request_id='empty',comment='No report',author_type='ai',report_text=' \n ')
+
+
+def test_optional_capture_failure_reaches_existing_safe_private_event_sink(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from pocs.poc02_wealth_mcp.server import record_position_storage_event
+    events=tmp_path/'events.jsonl'
+    def failed(*a,**k):raise OSError('PRIVATE_CAPTURE_EXCEPTION')
+    monkeypatch.setattr(SampleStore,'capture',failed)
+    jobs=factory(tmp_path/'jobs',event=lambda value:record_position_storage_event(SimpleNamespace(events=str(events)),dict(value,prompt='PRIVATE_PROMPT')))
+    job=jobs.start('capture-failed',AnalysisRequest(question='PRIVATE_QUESTION'))
+    assert finish(jobs,job.job_id).state=='completed'
+    rows=[json.loads(line) for line in events.read_text().splitlines()]
+    assert any(r['storage_status']=='SAMPLE_CAPTURE_UNAVAILABLE' for r in rows)
+    assert 'PRIVATE' not in events.read_text()

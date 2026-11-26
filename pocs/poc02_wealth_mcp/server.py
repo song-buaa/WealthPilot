@@ -90,7 +90,7 @@ def record_analysis_event(configuration, value):
 def record_position_storage_event(configuration, value):
     """Closed content-free L1 storage event, through the original private sink."""
     import re
-    categories={'serialization_completed','committed','recovered','RESULT_EXPIRED','ANALYSIS_INTERRUPTED','RESULT_STORAGE_UNAVAILABLE','RESULT_STORAGE_QUOTA',
+    categories={'SAMPLE_CAPTURE_UNAVAILABLE','serialization_completed','committed','recovered','RESULT_EXPIRED','ANALYSIS_INTERRUPTED','RESULT_STORAGE_UNAVAILABLE','RESULT_STORAGE_QUOTA',
         'RESULT_ARTIFACT_CORRUPT','RESULT_ARTIFACT_MISSING','RESULT_STORAGE_UNSAFE','RESULT_RECEIPTS_CORRUPT',
         'RESULT_SERIALIZATION_FAILED','ANALYSIS_RESULT_INVALID','ANALYSIS_WORKER_FAILED','ANALYSIS_JOB_FAILED',
         'ANALYSIS_IPC_TIMEOUT','ANALYSIS_WORKER_EXITED','ANALYSIS_WORKER_START_FAILED','ANALYSIS_JSON_INVALID'}
