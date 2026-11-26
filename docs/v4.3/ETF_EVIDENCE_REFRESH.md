@@ -9,7 +9,7 @@ ETF Data Owner 负责公开源原件、解析及证据签发。C 通过原 Alloc
 | 原固定 SHA 配置 | 继续校验 `WEALTHPILOT_ETF_EVIDENCE_FILE` 和 `WEALTHPILOT_ETF_EVIDENCE_SHA256`。 |
 | 新签名发布配置 | 从受控目录读取签名回执和独立字节 SHA 对应的不可变 manifest。所用公钥来自消费者的可信配置。 |
 
-程序记录实际落后交易日数。普通观察最多五个已完成交易日属于待审批的产品标准。当前观察供 Owner 检查，正式风控只使用合格记录。风险阈值由原 ACTIVE Policy 读取。
+普通观察最多落后五个已完成 XNYS 交易日，到第六个交易日收盘时单独失效。C 按已有冻结 ETF 市值乘官方披露权重，显示直接、逐只 ETF 观察金额和可得部分合计。缺项保留 UNKNOWN，资产分母未知时显示条件性金额。观察结果不参与正式阈值和政策命中，正式风控只使用合格记录。Web、MCP 和 PEER 共用原 C 投影。
 
 ## 隔离执行
 
@@ -22,7 +22,7 @@ python -m scripts.refresh_etf_evidence \
   --portfolio-id 7
 ```
 
-命令取得三个固定发行人来源。SPY 合格时另取固定 State Street NAV 及 Nasdaq 收盘。连接上限 20 秒，拒绝跨 URL 跳转。原件按 SHA 保存，解析结果按 parser 版本和来源 SHA 保存。单只来源不可用时继续其余来源。重复字节复用观察解析，保留最初观察日期和正式证据时钟。未获证的 SPY 若仍在合格日，可按需重试证明。收到更新后原子发布签名 `current.json`。回滚以新发布序列选取已验历史收据，原证据时钟保留，到期记录被略过。不要用系统命令覆盖 `current.json`。
+命令取得三个固定发行人来源。SPY 合格时另取固定 State Street NAV 及 Nasdaq 收盘。连接上限 20 秒，拒绝跨 URL 跳转。原件按 SHA 保存，解析结果按 parser 版本和来源 SHA 保存。单只来源不可用时继续其余来源。重复字节复用观察解析，保留最初观察日期和正式证据时钟。未获证的 SPY 若仍在合格日，可按需重试证明。合格观察可独立发布。分别报告 `current_release_sequence` 与本次 `published_event`。发布前先写好签名观察副本，其回执绑定正式签名收据 SHA 及观察副本 SHA。正式 `current.json` 字段保持兼容，完成全部写入后一次原子切换。回滚以新发布序列选取已验历史收据，原证据时钟保留，到期记录被略过。不要用系统命令覆盖 `current.json`。
 
 按需使用相同命令。加 `--watch` 可在专属 Owner 进程复用项目 APScheduler。美东 06:00 仅在前一日为 XNYS 交易日时检查，包括星期六检查周五披露。周末和节假日通过交易日历处理。4.1 负责确认获授权的作业承载与日志保留。应用主进程不持有 ETF 签名 seed。可通过 `--listing-file` 和独立 `--listing-sha256` 消费 4.3 Owner 导出的上市证券记录。上市日期区间和 CUSIP 必须一致。原 C 仍使用当前 PolicySession 内的原上市映射。
 

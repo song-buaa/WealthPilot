@@ -115,7 +115,8 @@ def test_explicit_risk_snapshot_uses_existing_readonly_tool(active, monkeypatch)
 
     def read(self, operation, arguments):
         calls.append((operation, arguments))
-        return {"concentration": {"status": "CONDITIONAL_RISK", "execution_authorized": False}}
+        return {"concentration": {"status": "CONDITIONAL_RISK", "execution_authorized": False,
+            "etf_observation": {"status": "CONDITIONAL", "basis": "OFFICIAL_DISCLOSURE_ESTIMATE"}}}
 
     monkeypatch.setattr(BusinessClient, 'call', read)
 
@@ -128,6 +129,41 @@ def test_explicit_risk_snapshot_uses_existing_readonly_tool(active, monkeypatch)
             args = {'scope':'risk', 'snapshot_id':'asset-view:v1:1'}
             result = await client.call_tool('get_investment_policy_context', args)
             assert not result.is_error
+            assert 'OFFICIAL_DISCLOSURE_ESTIMATE' in str(result.content)
             assert calls == [('get_investment_policy_context', args)]
 
     asyncio.run(run())
+
+
+def test_business_child_receives_only_etf_reader_settings(monkeypatch):
+    import subprocess
+
+    cfg = settings(None, None)
+    cfg.real_config = None
+    public = {
+        "WEALTHPILOT_ETF_RELEASE_DIRECTORY": "/isolated/not-opened",
+        "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY": "a"*64,
+        "WEALTHPILOT_ETF_RELEASE_OWNER_UID": "900",
+    }
+    for key, value in public.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("WEALTHPILOT_ETF_OWNER_PRIVATE_KEY", "TEST_ONLY")
+    spawn = subprocess.Popen
+
+    def inspect(command, **kwargs):
+        probe = """
+import json, os, sys
+json.loads(sys.stdin.readline())
+print(json.dumps({"ok": True, "result": {k: v for k, v in os.environ.items()
+      if k.startswith("WEALTHPILOT_ETF_")}}), flush=True)
+"""
+        return spawn([command[0], "-c", probe], **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", inspect)
+    client = BusinessClient(cfg)
+    try:
+        received = client.call("get_investment_policy_context", {"scope": "risk"})
+        assert all(received[key] == value for key, value in public.items())
+        assert "WEALTHPILOT_ETF_OWNER_PRIVATE_KEY" not in received
+    finally:
+        client.close()

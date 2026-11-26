@@ -161,7 +161,8 @@ def test_refresh_positive_repeated_bytes_and_single_fund_error(channel, key, mon
     assert len(manifest.records[0].rows) == 4 and manifest.records[0].valid_until.date() == date(2026, 11, 27)
     assert manifest.records[0].coverage < Decimal(".04")  # ETF premium handled conservatively.
     second = refresh.refresh(channel, key, 7, fetch=fixtures.__getitem__)
-    assert second["published"] == 1 and second["sources"]["SPY"]["formal"] == "UNCHANGED"
+    assert second["published"] is None and second["current_release_sequence"] == 1
+    assert not second["published_event"] and second["sources"]["SPY"]["formal"] == "UNCHANGED"
     assert second["sources"]["SPY"]["parsed"] is False
     assert len(list(channel.glob("receipt-*"))) == 1
 
@@ -237,3 +238,104 @@ def test_owner_schedule_only_after_completed_session(now, fires, utc_hour, monke
     assert job.trigger.get_next_fire_time(None, now).astimezone(timezone.utc).hour == utc_hour
     job.func()
     assert bool(observed) is fires
+
+
+def test_observation_only_release_legacy_read_and_observation_tamper_isolated(channel, key, monkeypatch):
+    from backend.services.investment_policy.etf_observation import ETFObservation
+
+    public = key.public_key().public_bytes_raw()
+    legacy = release.publish(channel, key, 7, {"SPY:US": record()}, AT)
+    assert "observation_sha256" not in json.loads((channel / "current.json").read_bytes())
+    assert release.read_release(channel, public, 7, AT)[0] == legacy
+    observation = ETFObservation(symbol="QQQ:US", holdings_as_of=DAY, known_at=AT_REFRESH,
+                                 source=refresh.SOURCES["QQQ"], source_sha256="9" * 64,
+                                 parser_version="fixture-v1", issuer_version="fixture-v1", listing_sha256="8"*64,
+                                 issuer_weights_pct={ALPHABET: ".5"}, unmapped_equity_weight_pct="80",
+                                 disclosure_rows=100, disclosed_weight_pct="100")
+    new, changed = release.publish(channel, key, 7, {}, AT_REFRESH, observations={"QQQ:US": observation},
+                                   with_event=True)
+    assert changed and new.sequence == 2 and new.manifest_sha256 == legacy.manifest_sha256
+    assert release.read_observations(channel, new, public)["QQQ:US"] == observation
+    assert set(json.loads((channel / "current.json").read_bytes())) == set(legacy.model_dump())
+    next(channel.glob("observation-manifest-*.json")).write_bytes(b"{}")
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_DIRECTORY", str(channel))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_OWNER_UID", str(os.getuid()))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY", public.hex())
+    monkeypatch.setattr(adapter, "consumer_directory", lambda path, uid: release.release_root(path))
+    records, _, issue, _, observations = adapter._read_etf_evidence(7, at=AT_REFRESH)
+    assert "SPY:US" in records and issue == "ETF_OBSERVATION_UNAVAILABLE" and not observations
+
+
+def test_observations_aggregate_all_three_and_leave_formal_rules_unchanged(channel, key, monkeypatch, frozen, active):
+    from backend.services.investment_policy.etf_observation import ETFObservation
+
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_DIRECTORY", str(channel))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_OWNER_UID", str(os.getuid()))
+    monkeypatch.setenv("WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY", key.public_key().public_bytes_raw().hex())
+    monkeypatch.setattr(adapter, "consumer_directory", lambda path, uid: release.release_root(path))
+    position(frozen, "GOOG:US", 35)
+    position(frozen, "GOOGL:US", 35)
+    for ticker in refresh.SOURCES:
+        position(frozen, f"{ticker}:US", 100, vehicle="ETF")
+    release.publish(channel, key, 7, {"SPY:US": record(value=".01")}, AT)
+
+    def calculate():
+        return adapter.allocation_concentration(frozen, projection=project(frozen), session=active, at=AT,
+                                                classified_assets=None)
+
+    def observed(ticker, weight, raw):
+        return ETFObservation(
+            symbol=f"{ticker}:US", holdings_as_of=refresh.latest_completed_session(AT), known_at=AT,
+            source=refresh.SOURCES[ticker], source_sha256=raw*64, parser_version="fixture-v1",
+            issuer_version="fixture-v1", listing_sha256="8"*64, issuer_weights_pct={ALPHABET: weight},
+            unmapped_equity_weight_pct="60", disclosure_rows=100, disclosed_weight_pct=100,
+        )
+
+    original = calculate()
+    all_records = {f"{ticker}:US": observed(ticker, str(i+10), "a") for i, ticker in enumerate(refresh.SOURCES)}
+    receipt, event = release.publish(channel, key, 7, {}, AT, observations=all_records, with_event=True)
+    assert receipt.sequence == 2 and event
+    result = calculate()
+    obs = result.pop("etf_observation")
+    assert result == original and result["issuers"][ALPHABET]["risk_status"] != "HUMAN_REVIEW"
+    row = obs["issuers"][ALPHABET]
+    assert row["direct_cny"] == "70"
+    assert list(map(Decimal, row["indirect_observed_cny"].values())) == [10, 11, 12]
+    assert Decimal(row["available_observed_cny"]) == 103 and row["coverage"] == "PARTIAL"
+    next_receipt, changed = release.publish(channel, key, 7, {}, AT, observations={"QQQ:US": observed("QQQ","15","b")},
+                                            with_event=True)
+    assert next_receipt.sequence == 3 and changed
+    assert Decimal(calculate()["etf_observation"]["issuers"][ALPHABET]["available_observed_cny"]) == 107
+    frozen["data_quality"].pop("investable_owner_evidence")
+    conditional = calculate()
+    assert conditional["status"] == "CONDITIONAL_RISK" and conditional["etf_observation"]["status"] == "CONDITIONAL"
+    assert conditional["issuers"][ALPHABET]["known_lower_bound_pct"] is None
+    assert conditional["issuers"][ALPHABET]["policy_hits"] == []
+
+
+def test_five_completed_sessions_boundary_and_rollback(channel, key):
+    from exchange_calendars import get_calendar
+    from backend.services.investment_policy.etf_observation import ETFObservation, freshness
+
+    calendar = get_calendar("XNYS")
+    value = ETFObservation(symbol="SPMO:US", holdings_as_of=DAY, known_at=AT_REFRESH,
+                           source=refresh.SOURCES["SPMO"], source_sha256="9"*64,
+                           parser_version="fixture-v1", issuer_version="fixture-v1", listing_sha256="8"*64,
+                           issuer_weights_pct={ALPHABET: "10"}, unmapped_equity_weight_pct="60",
+                           disclosure_rows=100, disclosed_weight_pct="100")
+    first, activated = release.publish(channel, key, 7, {}, AT_REFRESH,
+                                       observations={value.symbol: value}, with_event=True)
+    assert first.sequence == 1 and activated
+    rollback = f"receipt-{sha256((channel / 'current.json').read_bytes()).hexdigest()}.json"
+    fifth = calendar.session_close(calendar.session_offset(DAY, 5)).to_pydatetime()
+    sixth = calendar.session_close(calendar.session_offset(DAY, 6)).to_pydatetime()
+    assert freshness(value, fifth, refresh.latest_completed_session(fifth)) == ("OBSERVED", 5, sixth)
+    assert freshness(value, sixth, refresh.latest_completed_session(sixth)) == ("STALE", 6, sixth)
+    rolled = release.publish(channel, key, 7, {}, sixth, rollback_receipt=rollback)
+    assert rolled.sequence == 2 and not release.read_observations(channel, rolled, key.public_key().public_bytes_raw())
+
+
+def test_disclosed_null_weight_does_not_make_a_known_zero():
+    row = {"ticker": "GOOG", "cusip": "02079K107", "type": "COM", "currency": "USD"}
+    assert refresh.map_weights([row | {"observed_weight_pct": None}], DAY, {}) == ({}, 0)
+    assert refresh.map_weights([row | {"observed_weight_pct": "0"}], DAY, {}) == ({ALPHABET: 0}, 0)
