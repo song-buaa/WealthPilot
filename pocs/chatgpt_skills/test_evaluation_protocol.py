@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from mcp import Client
 from pocs.chatgpt_skills.server import create_server, BusinessClient
+from pocs.chatgpt_skills.analysis import AnalysisRequest
 from tests.test_position_jobs import factory, finish, request
 from tests.test_research_evaluation import evaluation
 
