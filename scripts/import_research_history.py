@@ -16,6 +16,8 @@ def import_reference(store, record):
     if not isinstance(symbol,str) or len(symbol)>80:raise ValueError('SYMBOL_INVALID')
     source_hash=record['source_record_sha256']
     if not re.fullmatch('[a-f0-9]{64}',source_hash):raise ValueError('SOURCE_HASH_REQUIRED')
+    if record.get('artifact_id') not in (None,'UNKNOWN') and record.get('job_id') not in (None,'UNKNOWN') and record['artifact_id']!=record['job_id']:
+        raise ValueError('HISTORICAL_ARTIFACT_ID_CONFLICT')
     identity=record.get('job_id') or 'historical:'+source_hash
     sid=store.sample_id(identity)
     reports={}
@@ -58,14 +60,38 @@ def import_reference(store, record):
         reports=reports,report_available=any(r['available'] for r in reports.values()),import_completeness='REPORT_AVAILABLE' if reports else 'METADATA_ONLY')
     with store.files.locked():
         old=store.files.read(f'sample-{sid}.json')
+        previous=store.files.read(f'state-{sid}.json') or {}
         if old:
-            # Creation time is not part of import idempotency.
-            sample['created_at']=old['created_at']
-            if old!=sample:raise ValueError('HISTORICAL_IMPORT_CONFLICT')
-        else:store.files.write(f'sample-{sid}.json',sample,immutable=True)
-        previous=store.files.read(f'state-{sid}.json')
-        if previous and previous!=state:raise ValueError('HISTORICAL_STATE_CONFLICT')
-        if previous is None:store.files.write(f'state-{sid}.json',state)
+            store.match_identity(old,previous,record)
+            if old.get('request_fingerprint') is not None or previous.get('durable_identity'):
+                actual,envelope=store.verified_artifact(identity)
+                actual_symbol=(envelope['result'].get('evidence',{}).get('position_evidence') or {}).get('symbol')
+                if record.get('symbol') not in (None,'UNKNOWN') and actual_symbol!=record['symbol']:
+                    raise ValueError('HISTORICAL_SYMBOL_UNVERIFIED_OR_CONFLICT')
+                store.match_identity(old,previous,dict(actual,symbol=record['symbol'],artifact_sha256=envelope['result_sha256']))
+                store.match_identity(dict(job_id=actual['job_id'],analysis_run_id=actual['analysis_run_id'],symbol=actual_symbol),
+                    dict(artifact=dict(artifact_id=actual['job_id'],sha256=envelope['result_sha256'])), record)
+            for target,report in reports.items():
+                if target in previous.get('reports',{}) and report['sha256']!=previous['reports'][target]['sha256']:
+                    raise ValueError('HISTORICAL_REPORT_CONFLICT')
+        payload={k:v for k,v in sample.items() if k!='created_at'}
+        payload['artifact_reference']=state['artifact']
+        payload['report_references']={k:{n:v for n,v in r.items() if n!='text'} for k,r in reports.items()}
+        hid=digest(['historical-reference.v1',sid,source_hash])
+        name=f'history-{hid}.json'
+        linked=store.files.read(name)
+        if linked and linked['input']!=payload:
+            raise ValueError('HISTORICAL_IMPORT_CONFLICT')
+        # Old imported samples predate separate references. Preserve their
+        # immutable metadata/score when the same source hash is re-submitted.
+        if old and old.get('source_record_sha256')==source_hash:
+            for key in ('historical_assessment_reference','job_id','analysis_run_id'):
+                if old.get(key)!=sample.get(key):raise ValueError('HISTORICAL_IMPORT_CONFLICT')
+        if old is None:store.files.write(f'sample-{sid}.json',sample,immutable=True)
+        if not previous:store.files.write(f'state-{sid}.json',state)
+        if linked is None:
+            store.files.write(name,dict(schema_version='wealthpilot.research-history-reference.v1',
+                history_id=hid,sample_id=sid,created_at=now(),input=payload),immutable=True)
     return sid
 
 

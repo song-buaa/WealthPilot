@@ -58,3 +58,36 @@ def test_optional_capture_failure_reaches_existing_safe_private_event_sink(tmp_p
     rows=[json.loads(line) for line in events.read_text().splitlines()]
     assert any(r['storage_status']=='SAMPLE_CAPTURE_UNAVAILABLE' for r in rows)
     assert 'PRIVATE' not in events.read_text()
+
+
+def test_imported_old_job_can_attach_expired_artifact_then_evaluate_over_mcp(tmp_path,monkeypatch):
+    from tests.test_research_history_linkage import durable, JOB, import_reference
+    root,row,envelope,record,jobs=durable(tmp_path)
+    store=SampleStore(root)
+    try:sid=import_reference(store,record)
+    finally:store.close()
+    def forbidden(*a,**k):raise AssertionError('NO_WORKER_RESEARCH_OR_PROVIDER')
+    monkeypatch.setattr(BusinessClient,'call',forbidden)
+    cfg=SimpleNamespace(real_config='not-opened',web_base_url='',analysis_results_dir=str(root),
+        analysis_results_quota_bytes=64*1024*1024,analysis_results_retention_seconds=1)
+    async def run():
+        async with Client(create_server(cfg),mode='legacy') as client:
+            async def call(name,args):
+                r=await client.call_tool(name,args)
+                assert not r.is_error,r.content
+                return r.structured_content or json.loads(r.content[0].text)
+            old=await call('get_position_analysis_result',{'job_id':JOB})
+            assert old['issue']=='RESULT_EXPIRED' and old['result'] is None
+            exported=await call('export_research_evaluations',{'job_id':JOB})
+            item=exported['items'][0]
+            assert item['sample']['sample_id']==sid and item['sample']['request_fingerprint'] is None
+            assert item['state']['artifact']['sha256']==envelope['result_sha256']
+            assert item['state']['reports']['reader']['available']
+            review=evaluation(item['state']['reports']['reader']['sha256']).model_copy(update={'target':'reader'})
+            await call('save_research_evaluation',dict(sample_id=sid,evaluation=review.model_dump(mode='json')))
+            queried=await call('query_research_evaluations',{'job_id':JOB})
+            assert queried['total_samples']==1
+            assert queried['distribution']=={'reader/ai/FAIL':1}
+            assert queried['historical_reference_distribution']=={'FAIL':1}
+            assert len(queried['items'][0]['historical_references'])==1
+    asyncio.run(run())

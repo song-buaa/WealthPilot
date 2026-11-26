@@ -130,7 +130,7 @@ class Feedback(Contract):
 
 
 class Files(PositionStore):
-    NAME_PATTERN = r'(?:receipts\.lock|(?:sample|state|evaluation|feedback)-[a-f0-9]{64}\.json|\.pending-[a-f0-9]{32})'
+    NAME_PATTERN = r'(?:receipts\.lock|(?:sample|state|evaluation|feedback|history)-[a-f0-9]{64}\.json|\.pending-[a-f0-9]{32})'
 
 
 class SampleStore:
@@ -154,11 +154,49 @@ class SampleStore:
     def sample_id(job_id):
         return digest(['l1-sample.v1', job_id])
 
+    @staticmethod
+    def match_identity(sample, state, incoming):
+        """Compare known identities only; missing historical fields stay missing."""
+        pairs = [(sample.get('job_id'), incoming.get('job_id')),
+                 (sample.get('analysis_run_id'), incoming.get('analysis_run_id')),
+                 (state.get('symbol') or sample.get('symbol'), incoming.get('symbol')),
+                 ((state.get('artifact') or {}).get('artifact_id'), incoming.get('job_id')),
+                 ((state.get('artifact') or {}).get('sha256'), incoming.get('artifact_sha256'))]
+        for key in ('job_id','analysis_run_id','fingerprint'):
+            pairs.append((state.get('durable_identity',{}).get(key), incoming.get(key)))
+        if any(a not in (None,'UNKNOWN') and b not in (None,'UNKNOWN') and a!=b for a,b in pairs):
+            raise StoreError('SAMPLE_IDENTITY_CONFLICT')
+
+    def verified_artifact(self, job_id):
+        # Immutable files/atomic receipts can be read without acquiring a second
+        # execution-store flock (capture may already be inside that lock).
+        source = PositionStore(self.artifact_root, self.files.quota)
+        try:
+            receipts = source.read('receipts.json')
+            if not isinstance(receipts,dict) or receipts.get('schema')!='wealthpilot.position-receipts.v1':
+                raise StoreError('RESULT_RECEIPTS_CORRUPT')
+            receipts = source.receipts()  # Original owner validates rows and the request index.
+            row = receipts.get('jobs',{}).get(job_id)
+            if not row or row.get('job_id')!=job_id:
+                raise StoreError('SAMPLE_IDENTITY_CONFLICT')
+            fd = source._open(job_id+'.result.json', os.O_RDONLY)
+            try:
+                source.quota = max(source.quota, os.fstat(fd).st_size)
+            finally:
+                os.close(fd)
+            envelope = source.load_result(row)
+            if envelope is None:
+                raise StoreError('RESULT_ARTIFACT_MISSING')
+            return row,envelope
+        finally:
+            source.close()
+
     def capture(self, row, request=None, request_id=None, envelope=None):
         sid = self.sample_id(row['job_id'])
         with self.files.locked():
             name = f'sample-{sid}.json'
             existing = self.files.read(name)
+            previous = self.files.read(f'state-{sid}.json') or {}
             if existing is None:
                 body = request.model_dump(mode='json') if request is not None else None
                 # Full unrelated history is deliberately excluded. Its count and
@@ -174,8 +212,16 @@ class SampleStore:
                     source_code_identity=row.get('source_revision', 'UNKNOWN'),
                     request_capture='CAPTURED_WITHOUT_HISTORY' if body else 'UNKNOWN')
                 self.files.write(name, sample, immutable=True)
-            elif existing['request_fingerprint'] != row['fingerprint']:
-                raise StoreError('SAMPLE_IDENTITY_CONFLICT')
+            else:
+                self.match_identity(existing, previous, dict(row,artifact_sha256=envelope['result_sha256'] if envelope else None))
+                if existing['request_fingerprint'] != row['fingerprint']:
+                    if existing['request_fingerprint'] is not None or existing.get('source')!='explicit_offline_historical_import':
+                        raise StoreError('SAMPLE_IDENTITY_CONFLICT')
+                    if envelope is None:
+                        return sid  # A metadata reference is not a verified result.
+                    durable, verified = self.verified_artifact(row['job_id'])
+                    if any(durable[k]!=row[k] for k in ('job_id','analysis_run_id','fingerprint')) or verified!=envelope:
+                        raise StoreError('SAMPLE_IDENTITY_CONFLICT')
             state = dict(job_state=row['state'], business_status=row.get('business_status','UNKNOWN'),
                          issue=row.get('issue'), observed_at=now())
             if envelope:
@@ -185,6 +231,10 @@ class SampleStore:
                 reader = report_projection(full).conclusion
                 native = full.conclusion
                 position = full.evidence.get('position_evidence') or {}
+                if existing and existing.get('source')=='explicit_offline_historical_import':
+                    self.match_identity(existing,previous,dict(row,symbol=position.get('symbol'),artifact_sha256=envelope['result_sha256']))
+                    if existing.get('request_fingerprint') is None and existing.get('symbol') not in (None,'UNKNOWN') and not position.get('symbol'):
+                        raise StoreError('SAMPLE_SYMBOL_UNVERIFIED')
                 result = full.professional_result.get('analysis_result') or {}
                 reports = {key: dict(available=bool(text.strip()),sha256=sha256(text.encode()).hexdigest(),
                             **({'text': text} if len(text.encode()) <= 128*1024 else {}),
@@ -202,10 +252,16 @@ class SampleStore:
                     data_quality={k:full.data_quality[k] for k in ('status','issues','limitations') if k in full.data_quality},
                     stage_diagnostics=full.stage_diagnostics, issues=full.issues,
                     llm_observation=full.llm_observation)
+                if existing and existing.get('request_fingerprint') is None:
+                    state['durable_identity'] = dict(job_id=row['job_id'],analysis_run_id=row['analysis_run_id'],
+                        fingerprint=row['fingerprint'],artifact_sha256=envelope['result_sha256'],
+                        provenance='VERIFIED_ORIGINAL_RECEIPT_AND_ARTIFACT')
+                for target, report in previous.get('reports',{}).items():
+                    if target in reports and report['sha256']!=reports[target]['sha256']:
+                        raise StoreError('SAMPLE_REPORT_CONFLICT')
             # Replace only derived lifecycle metadata. Request and review records
             # are immutable. Original Artifact is never copied or changed.
-            previous = self.files.read(f'state-{sid}.json')
-            if previous and previous.get('artifact'):
+            if previous and previous.get('artifact') and previous['artifact'].get('availability')!='REFERENCE_ONLY_NOT_COPIED':
                 if envelope and previous['artifact']['sha256'] != envelope['result_sha256']:
                     raise StoreError('SAMPLE_ARTIFACT_CONFLICT')
                 # Same immutable payload may recover from an interrupted receipt
@@ -318,14 +374,19 @@ class SampleStore:
                         or (symbol and (state.get('symbol') or sample['symbol'])!=symbol)):
                     continue
                 reviews=self._records('evaluation',sid)
-                rows.append(dict(sample=sample,state=state,evaluations=reviews,feedback=self._records('feedback',sid),
+                historical=self._records('history',sid)
+                if sample.get('historical_assessment_reference') and not any(r['input']['source_record_sha256']==sample['source_record_sha256'] for r in historical):
+                    historical.append(dict(history_id=digest(['legacy-history',sid]),sample_id=sid,created_at=sample['created_at'],input=sample))
+                rows.append(dict(sample=sample,state=state,evaluations=reviews,feedback=self._records('feedback',sid),historical_references=historical,
                                  evaluation_status='EVALUATED' if reviews else 'UNEVALUATED'))
             counts=Counter()
             historical_counts=Counter()
             for row in rows:
-                historical=row['sample'].get('historical_assessment_reference')
-                if historical:
-                    historical_counts[historical['quality_status']]+=1
+                references=sorted(row['historical_references'],key=lambda r:(r['created_at'],r['history_id']))
+                if references:
+                    historical=references[-1]['input'].get('historical_assessment_reference')
+                    if historical:
+                        historical_counts[historical['quality_status']]+=1
             for row in rows:
                 # Keep target/scorer groups separate and retain latest revisions.
                 groups={}
@@ -336,7 +397,7 @@ class SampleStore:
             # Histories have their own cursor: a frequently reviewed sample
             # must never turn a single MCP response into the whole archive.
             for row in rows:
-                history=sorted(row['evaluations']+row['feedback'],key=lambda r:(r['created_at'],r.get('evaluation_id') or r['feedback_id']))
+                history=sorted(row['evaluations']+row['feedback']+row['historical_references'],key=lambda r:(r['created_at'],r.get('evaluation_id') or r.get('feedback_id') or r['history_id']))
                 selected=[]
                 for entry in history[history_offset:history_offset+10]:
                     if selected and len(encode(selected+[entry]))>512*1024:
@@ -344,6 +405,7 @@ class SampleStore:
                     selected.append(entry)
                 row['evaluations']=[r for r in selected if 'evaluation_id' in r]
                 row['feedback']=[r for r in selected if 'feedback_id' in r]
+                row['historical_references']=[r for r in selected if 'history_id' in r]
                 row['history_total']=len(history)
                 nxt=history_offset+len(selected)
                 row['history_next_offset']=nxt if nxt<len(history) else None
