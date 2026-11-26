@@ -179,3 +179,21 @@ def resolve_sec_issuer(symbol, ticker_directory, submissions):
                 registered_equity_tickers=registered,  # Legacy key: not a security-type proof.
                 identity_source="https://www.sec.gov/files/company_tickers.json",
                 submissions_url="https://data.sec.gov/submissions/CIK"+cik+".json")
+
+
+def extended_common_issuer(item, listings):
+    """Apply Owner-admitted listings pinned to the PolicySession to canonical rows."""
+    existing = direct_issuer(item)
+    symbol = item.get("symbol")
+    listing = listings.get(symbol) if isinstance(symbol, str) else None
+    if listing is None:
+        return existing
+    if (item.get("economic_asset_class") != "EQUITY" or item.get("vehicle_type") != "COMMON_STOCK"
+            or (item.get("original_currency") or item.get("currency")) != "USD"
+            or item.get("security_symbol") not in (None, symbol)
+            or item.get("security_currency") not in (None, "USD")
+            or item.get("cusip") not in (None, listing.cusip)
+            or item.get("share_class") not in (None, listing.share_class)
+            or (existing is not None and existing != listing.issuer_id)):
+        return None
+    return listing.issuer_id

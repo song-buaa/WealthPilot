@@ -93,6 +93,9 @@ def verify_formal_release(store, db, bundle, release):
         if not all(bytes(source[k]).startswith(b"# SYNTHETIC ONLY") for k in ("philosophy", "policy")):
             raise PolicyError("REAL_SOURCE_CANNOT_USE_SYNTHETIC_RELEASE")
         return
+    if release.get("policy_config_proof") is not None:
+        from .fast_release import verify_config_release
+        return verify_config_release(store, db, bundle, release)
     auth = Authorization.model_validate(release["authorization"])
     install = Installation.model_validate(release["installation"])
     _bound(auth, store, bundle, "ROLLBACK" if release["action"] == "ROLLBACK" else "ACTIVATE", release["recorded_at"])

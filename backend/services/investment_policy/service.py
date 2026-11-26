@@ -51,7 +51,8 @@ class PolicyService:
                     bundle_sha256=bundle_sha, structured_sha256=value["structured_sha256"], scope=scope)
                 return {"status": "ACTIVE", "policy_reference": ref.model_dump(), "source_files": value["source_files"],
                         "source_hashes": value["source_hashes"], "snapshot": value["snapshot"],
-                        "effective_at": release["effective_at"], "release": release,
+                        "effective_at": release["effective_at"],
+                        "release": {key: item for key, item in release.items() if key != "policy_config_proof"},
                         "data_quality": "SOURCE_HASHES_AND_DETERMINISTIC_DERIVATIVE_VERIFIED",
                         "limitations": ["POLICY_IS_NOT_TRADE_AUTHORIZATION", "PORTFOLIO_DATA_NOT_EVALUATED", "ACTIVATION_RECEIPT_DOES_NOT_VERIFY_PORTFOLIO_DATA"]}
         except (PolicyError, OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:

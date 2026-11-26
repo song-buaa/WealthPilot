@@ -5,7 +5,7 @@ from fractions import Fraction
 import re
 
 from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
-from backend.services.instruments.issuers import IDENTITIES, ISSUERS, direct_issuer, policy_target_identity
+from backend.services.instruments.issuers import IDENTITIES, ISSUERS, extended_common_issuer, policy_target_identity
 from backend.utils.symbol import parse_symbol
 
 from .contracts import PolicyReference, Snapshot, SnapshotV2, digest
@@ -40,7 +40,7 @@ def _owner_attests(ref, fact, refs):
     )
 
 
-def _identity(ref, row, economic, coverage, direct_symbols):
+def _identity(ref, row, economic, coverage, direct_symbols, listings):
     """Return (policy bucket, optional ETF product, identity evidence)."""
     manual = ref.startswith('wealth:')
     vehicle = row.get('vehicle_type')
@@ -94,7 +94,8 @@ def _identity(ref, row, economic, coverage, direct_symbols):
     if vehicle == 'ETF' and claim == 'US_EQUITY_ETF':
         return 'us_etf', None, account_refs
     if economic == 'EQUITY' and vehicle in DIRECT_VEHICLES:
-        if ticker == 'ANT' and market == 'US' and direct_issuer(row) is None:
+        if ((symbol in listings or ticker == 'ANT' and market == 'US')
+                and extended_common_issuer(row, listings) is None):
             return None
         issuer = IDENTITIES.get((symbol, currency))
         if issuer and ISSUERS[issuer][1] == 'CN':
@@ -122,7 +123,9 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
     """Qualify the existing B3 calculation using the verified PolicyService context."""
     candidate = hierarchy["strategic_review"]
     if (not isinstance(snapshot, SnapshotV2) or hierarchy["status"] != "QUALIFIED"
-            or snapshot.content_status != "APPROVED_CONTENT"
+            or (snapshot.content_status != "APPROVED_CONTENT"
+                and not (snapshot.schema_version == "wp.policy.config.v1" and policy_context.get("release", {}).get("action")
+                         in {"RELEASE", "ROLLBACK"}))
             or policy_context.get("status") != "ACTIVE" or policy_context.get("mode") != "POLICY_ACTIVE"):
         return candidate
 
@@ -171,17 +174,22 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
 def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
     """Use B2-qualified CNY amounts and canonical economic classes from one freeze."""
     allocation = snapshot.allocation
+    listings = getattr(snapshot, "listings", {})
+    target_issuers = getattr(snapshot, "target_issuers", {})
     direct_symbols = set()
     direct_targets = {}
     for name, target in allocation.direct_equity.items():
         if name == 'unallocated':
             continue
         symbols, issuer = policy_target_identity(name)
+        issuer = target_issuers.get(name, issuer)
         direct_symbols.update(symbols)
         direct_targets[name] = (issuer, target)
     policy_issuers = {issuer for issuer, _ in direct_targets.values() if issuer}
     direct_symbols.update(symbol.removesuffix(':US') for (symbol, currency), issuer in IDENTITIES.items()
                           if symbol.endswith(':US') and currency == 'USD' and issuer in policy_issuers)
+    direct_symbols.update(symbol.removesuffix(":US") for symbol, listing in listings.items()
+                          if listing.issuer_id in policy_issuers)
     direct_amounts = dict.fromkeys(policy_issuers, Decimal(0))
     direct_complete = True
     amounts = dict.fromkeys(allocation.neutral, Decimal(0))
@@ -193,7 +201,7 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
         if item.amount_cny == 0:
             continue
         ref = item.source_ref
-        match = _identity(ref, row, economic, coverage, direct_symbols)
+        match = _identity(ref, row, economic, coverage, direct_symbols, listings)
         if match is None:
             unknown.append(ref)
             unclassified += item.amount_cny
@@ -203,7 +211,7 @@ def build_hierarchy(snapshot: Snapshot, *, denominator, included, coverage):
                          'evidence_sha256': digest([*classification_refs, *identity_refs])}
         amounts[bucket] += item.amount_cny
         if bucket == 'us_direct':
-            issuer = direct_issuer(row)
+            issuer = extended_common_issuer(row, listings)
             if issuer in direct_amounts:
                 direct_amounts[issuer] += item.amount_cny
             if issuer is None:
