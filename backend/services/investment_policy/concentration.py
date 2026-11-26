@@ -5,10 +5,11 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 
 from backend.services.instruments.classification import CLASSIFICATION_VERSION
-from backend.services.instruments.etf_holdings import ETFHoldings
+from backend.services.instruments.etf_holdings import ETFHoldings, ETF_IDENTITIES
 from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, extended_common_issuer
 
 from .contracts import PolicyReference, digest, parse_snapshot
+from .etf_observation import project_observations
 from .parser import PolicyError
 from .store import clock
 
@@ -135,7 +136,7 @@ def _critical(amount, denominator, threshold, complete):
 
 
 def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[str, ETFHoldings],
-                          evidence_pins: dict[str, str], classified_assets=None, close_caps_usd=None):
+                          evidence_pins: dict[str, str], classified_assets=None, close_caps_usd=None, observations=None):
     """C/D internal contract. Pass only the original U1/A-min result and pinned PolicySession.
 
     Evidence pins come from the source owner independently of the supplied records.
@@ -146,10 +147,10 @@ def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[s
         raise ValueError("CONCENTRATION_AWARE_CLOCK_REQUIRED")
     with localcontext() as ctx:
         ctx.prec = 60
-        return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd or {})
+        return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd or {}, observations or {})
 
 
-def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd):
+def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd, observations):
     reference, snapshot = _pinned_policy(session, view["portfolio_id"], at)
     listings = getattr(snapshot, "listings", {})
     listing_names = {item.issuer_id: item.issuer_name for item in listings.values()}
@@ -170,6 +171,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
         raise ValueError("CONCENTRATION_INVENTORY_BINDING_MISMATCH")
     direct, indirect = defaultdict(lambda: ZERO), defaultdict(lambda: ZERO)
     members, indirect_members, etfs = defaultdict(list), defaultdict(list), {}
+    observed_funds = {}
     coverage_issues = set()
     unknown_cny = ZERO
     btc_amount = ZERO
@@ -230,9 +232,13 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                 and (row.get("original_currency") or row.get("currency")) == "USD"):
             symbol = row.get("symbol")
             evidence = etf_evidence.get(symbol)
-            if ((classified_assets is not None and (not assignment or assignment["bucket"] != "us_etf"))
+            identity_conflict = ((classified_assets is not None and (not assignment or assignment["bucket"] != "us_etf"))
                     or row.get("security_symbol") not in (None, symbol)
-                    or row.get("security_currency") not in (None, "USD", "CNY")):
+                    or row.get("security_currency") not in (None, "USD", "CNY"))
+            if observations and symbol in ETF_IDENTITIES:
+                subtotal, qualified = observed_funds.get(symbol, (ZERO, True))
+                observed_funds[symbol] = (subtotal + amount, qualified and not identity_conflict)
+            if identity_conflict:
                 evidence = None
             status = (evidence.status(snapshot_at=clock(view["captured_at"]), at=at,
                                       expected_sha256=evidence_pins.get(symbol),
@@ -307,7 +313,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
             "repayment_threshold": _critical(lower, denominator, review.threshold, complete),
         }
     btc_risk, btc_hits = _risk(btc_rules, btc_amount, denominator, btc_complete)
-    return {
+    result = {
         "snapshot_id": view["snapshot_id"], "snapshot_sha256": projection.snapshot_sha256,
         "snapshot_at": view["captured_at"], "evaluated_at": at.isoformat(), "expires_at": expires_at,
         "policy_reference": reference.model_dump(), "issuer_mapping_version": VERSION,
@@ -321,3 +327,9 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                 "risk_status": btc_risk, "policy_hits": btc_hits, "unknown_coverage": not btc_complete},
         "execution_authorized": False,
     }
+    if observations:
+        result["etf_observation"] = project_observations(
+            observations, at=at, snapshot_at=view["captured_at"], denominator=denominator,
+            formal_issuers=issuer_rows, funds=observed_funds, listing_names=listing_names,
+        )
+    return result

@@ -85,7 +85,10 @@ class BusinessClient:
                     env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS | {"WEALTHPILOT_L1_RESEARCH_V2",
                                 "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT"} if k in os.environ})
                     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
-                    env.update({k:os.environ[k] for k in POLICY_ENV_KEYS | {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256"} if k in os.environ})
+                    evidence_keys = {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256",
+                                     "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
+                                     "WEALTHPILOT_ETF_RELEASE_OWNER_UID"}
+                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys if k in os.environ})
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
@@ -232,7 +235,7 @@ def create_server(settings):
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
     if os.environ.get('WEALTHPILOT_POLICY_DB_PATH'):
         @server.tool(meta=security_meta,annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=False),
-            description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. For scope=risk, an explicit snapshot_id adds a readonly concentration projection; no snapshot is generated. Explain structured thresholds, never redefine them.')
+            description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. For scope=risk, an explicit snapshot_id adds a readonly concentration projection; no snapshot is generated. ETF observation amounts are research estimates with unknown tails. Use only formal policy_hits for risk decisions. Explain structured thresholds, never redefine them.')
         def get_investment_policy_context(scope: Literal['portfolio','position','risk','full']='portfolio', symbol: str | None = None,
                 snapshot_id: Annotated[str, Field(pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')] | None = None) -> dict:
             if snapshot_id is not None:

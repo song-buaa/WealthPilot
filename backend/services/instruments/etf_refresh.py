@@ -8,12 +8,12 @@ import re
 from urllib.request import build_opener, HTTPRedirectHandler, Request
 from xml.etree.ElementTree import ParseError
 from zipfile import BadZipFile, ZipFile
-from zoneinfo import ZoneInfo
 
 from exchange_calendars import get_calendar
 from openpyxl import load_workbook
 
-from backend.services.investment_policy.contracts import canonical
+from backend.services.investment_policy.contracts import canonical, digest
+from backend.services.investment_policy.etf_observation import ET, MAX_LAG, ETFObservation, freshness, latest_completed_session
 from backend.services.investment_policy.etf_release import AUTOMATED_SPY_PROOF, MAX_BYTES, read_owned, write_version
 
 from .etf_holdings import ETFHoldings, ETF_IDENTITIES
@@ -27,7 +27,6 @@ SOURCES = {
 NAV_SOURCE = "https://www.ssga.com/library-content/products/fund-data/etfs/us/navhist-us-en-spy.xlsx"
 PARSER = "etf-disclosure-observation.v2"
 FORMAL_CUSIPS = {"AAPL": "037833100", "GOOG": "02079K107", "GOOGL": "02079K305", "NVDA": "67066G104"}
-ET = ZoneInfo("America/New_York")
 D = Decimal
 
 
@@ -149,6 +148,21 @@ def observed_issuer(row, day, listings):
                                    "economic_asset_class": "EQUITY", "vehicle_type": "COMMON_STOCK"}, listings)
 
 
+
+def map_weights(rows, day, listings):
+    mapped, unknown = {}, D(0)
+    for row in rows:
+        if row["observed_weight_pct"] is None:
+            continue
+        weight = D(row["observed_weight_pct"])
+        issuer = observed_issuer(row, day, listings or {})
+        if issuer:
+            mapped[issuer] = mapped.get(issuer, D(0)) + weight
+        elif row["type"] in {"COM", "EQUITY_UNTYPED", "ADR", "DRNY", "REIT"}:
+            unknown += weight
+    return mapped, unknown
+
+
 def price_url(ticker, day):
     previous = day - timedelta(days=1)
     kind = "etf" if ticker == "SPY" else "stocks"
@@ -214,14 +228,6 @@ def qualify_spy(day, rows, holdings, root, fetch):
                     "shares_outstanding": str(shares), "weight_denominator": str(denominator)}
 
 
-def latest_completed_session(at):
-    calendar = get_calendar("XNYS")
-    local = at.astimezone(ET)
-    day = calendar.date_to_session(local.date(), direction="previous")
-    if calendar.session_close(day) > at:
-        day = calendar.previous_session(day)
-    return day.date()
-
 
 def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
     """Fetch each official source once; serialize refreshes, retain independent last-good records."""
@@ -231,7 +237,7 @@ def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
 
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-    from backend.services.investment_policy.etf_release import publish, read_release, release_root
+    from backend.services.investment_policy.etf_release import publish, read_observations, read_release, release_root
 
     root = release_root(root)
     if root.stat().st_uid != os.getuid():
@@ -242,11 +248,13 @@ def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
         fcntl.flock(lock, fcntl.LOCK_EX)
         started = datetime.now(timezone.utc)
         latest = latest_completed_session(started)
-        previous = {}
+        previous, previous_observations = {}, {}
+        listing_sha = digest({s: r.model_dump(mode="json") for s, r in (listings or {}).items()})
         if os.path.lexists(root / "current.json"):
-            _, manifest = read_release(root, pub, portfolio_id, started)
+            prior_receipt, manifest = read_release(root, pub, portfolio_id, started)
+            previous_observations = read_observations(root, prior_receipt, pub)
             previous = {record.symbol: record for record in manifest.records}
-        diagnostics, updates, caps = {}, {}, {}
+        diagnostics, updates, caps, observations = {}, {}, {}, {}
         for ticker, url in SOURCES.items():
             phase = "capture"
             try:
@@ -272,15 +280,7 @@ def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
                 if day > latest or not get_calendar("XNYS").is_session(day):
                     raise ValueError("ETF_HOLDINGS_CLOCK_UNVERIFIED")
                 phase = "identity"
-                mapped = {}
-                unknown = D(0)
-                for row in rows:
-                    weight = D(row["observed_weight_pct"] or "0")
-                    issuer = observed_issuer(row, day, listings or {})
-                    if issuer:
-                        mapped[issuer] = mapped.get(issuer, D(0)) + weight
-                    elif row["type"] in {"COM", "EQUITY_UNTYPED", "ADR", "DRNY", "REIT"}:
-                        unknown += weight
+                mapped, unknown = map_weights(rows, day, listings)
                 lag = len(get_calendar("XNYS").sessions_in_range(day, latest)) - 1
                 diagnostic = {
                     "observed_as_of": day.isoformat(), "lag_sessions": lag, "receipt": receipt,
@@ -293,6 +293,30 @@ def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
                     "complex_rows": [row for row in rows if row["type"] not in {"COM", "EQUITY_UNTYPED"}],
                 }
                 diagnostics[ticker] = diagnostic
+                symbol = ticker + ":US"
+                old_observation = previous_observations.get(symbol)
+                same_observation = old_observation and (old_observation.source_sha256,
+                    old_observation.parser_version, old_observation.issuer_version, old_observation.listing_sha256
+                    ) == (receipt["sha256"], PARSER, ISSUER_VERSION, listing_sha)
+                lag_status = "STALE" if lag > MAX_LAG else "OBSERVED"
+                diagnostic["observation"] = lag_status
+                if not same_observation and lag_status == "OBSERVED":
+                    phase = "observation_qualification"
+                    # The cache is useful for diagnostics, but signing binds interpretation
+                    # to the downloaded bytes, never to mutable cached rows.
+                    verified_day, verified_rows = observation(ticker, raw) if cached else (day, rows)
+                    if verified_day != day:
+                        raise ValueError("ETF_OBSERVATION_CACHE_BINDING_INVALID")
+                    verified_weights, unmapped = map_weights(verified_rows, day, listings)
+                    observations[symbol] = ETFObservation(
+                        symbol=symbol, holdings_as_of=day, known_at=receipt["fetched_at"],
+                        source=url, source_sha256=receipt["sha256"], parser_version=PARSER,
+                        issuer_version=ISSUER_VERSION, listing_sha256=listing_sha,
+                        issuer_weights_pct=verified_weights, unmapped_equity_weight_pct=unmapped,
+                        disclosure_rows=len(verified_rows),
+                        missing_weight_rows=sum(r["observed_weight_pct"] is None for r in verified_rows),
+                        disclosed_weight_pct=sum(D(r["observed_weight_pct"] or "0") for r in verified_rows),
+                    )
                 old = previous.get(ticker + ":US")
                 if ticker != "SPY":
                     diagnostic["formal"] = "COMPLEX_EXPOSURE_UNVERIFIED"
@@ -317,11 +341,17 @@ def refresh(root, key, portfolio_id, *, fetch=download, listings=None):
                 diagnostics.setdefault(ticker, {})["failure"] = {"stage": phase, "reason": str(exc)[:240]}
         now = datetime.now(timezone.utc)
         updates = {symbol: record for symbol, record in updates.items() if record.valid_until >= now}
-        release = publish(root, key, portfolio_id, updates, now,
-                          close_caps={symbol: caps[symbol] for symbol in updates})
+        release, published_event = publish(
+            root, key, portfolio_id, updates, now, close_caps={symbol: caps[symbol] for symbol in updates},
+            observations={symbol: record for symbol, record in observations.items()
+                          if freshness(record, now, latest_completed_session(now))[0] == "OBSERVED"},
+            with_event=True,
+        )
         report = {"started_at": started.isoformat(), "completed_at": now.isoformat(),
                   "latest_completed_session": latest.isoformat(), "sources": diagnostics,
-                  "published": release.sequence if release else None}
+                  "published": release.sequence if published_event else None,
+                  "current_release_sequence": release.sequence if release else None,
+                  "published_event": published_event}
         raw = canonical(report).encode()
         write_version(root, f"refresh-{sha256(raw).hexdigest()}.json", raw)
         return report

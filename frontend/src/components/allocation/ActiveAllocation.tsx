@@ -38,10 +38,35 @@ interface Hierarchy {
   unclassified_amount_cny: string
 }
 
+type ObservedETF = 'SPY:US' | 'QQQ:US' | 'SPMO:US'
+const observedETFs: ObservedETF[] = ['SPY:US', 'QQQ:US', 'SPMO:US']
+
+interface ETFObservation {
+  status: string
+  snapshot_at: string
+  latest_completed_session: string
+  max_lag_sessions: number
+  sources: Record<ObservedETF, {
+    status: string
+    holdings_as_of: string | null
+    lag_sessions: number | null
+    expires_at: string | null
+    mapped_weight_pct: string | null
+    unmapped_equity_weight_pct: string | null
+  }>
+  issuers: Record<string, {
+    issuer_name: string
+    direct_cny: string | null
+    indirect_observed_cny: Record<ObservedETF, string | null>
+    available_observed_cny: string | null
+  }>
+}
+
 interface Concentration {
   status: string
   expires_at?: string | null
   unknown_coverage?: boolean
+  etf_observation?: ETFObservation
   issues: string[]
   issuers?: Record<string, {
     issuer_name: string
@@ -138,6 +163,58 @@ function PolicyHierarchy({ value, diagnostic }: { value: Hierarchy; diagnostic: 
   </section>
 }
 
+const observationState: Record<string, string> = {
+  OBSERVED: '可用', STALE: '已到期', UNAVAILABLE: '未知', UNVERIFIED: '待核验',
+  NOT_HELD_IN_QUALIFIED_SCOPE: '合格范围内未持有', SCOPE_UNKNOWN: '持仓范围未知',
+}
+
+function ETFObservationTable({ value }: { value: ETFObservation }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const future = observedETFs.map(symbol => Date.parse(value.sources[symbol].expires_at ?? ''))
+      .filter(expiry => expiry > now)
+    if (future.length === 0) return
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(...future) - now)
+    return () => clearTimeout(timer)
+  }, [value, now])
+  const expired = new Set(observedETFs.filter(symbol => {
+    const source = value.sources[symbol]
+    return source.status === 'OBSERVED' && Date.parse(source.expires_at ?? '') <= now
+  }))
+  const amount = (raw: string | null) => raw === null ? '未知' : fmtCny(Number(raw))
+  return <section aria-label="ETF 观察性敞口">
+    <h4>ETF 观察性敞口</h4>
+    <p>按官方披露权重估算，金额仅合计可得部分。近 {value.max_lag_sessions} 个完成交易日内可用，正式风险另行判定。</p>
+    {value.status === 'CONDITIONAL' && <p>可投资分母未知，仅显示条件性金额。</p>}
+    <table>
+      <caption>观察数据来源（最近完成交易日 {value.latest_completed_session}）</caption>
+      <thead><tr><th>ETF</th><th>成分日期</th><th>滞后交易日</th><th>映射权重</th><th>未映射权益</th><th>状态</th></tr></thead>
+      <tbody>{observedETFs.map(symbol => {
+        const row = value.sources[symbol]
+        const weight = (v: string | null) => v === null ? '未知' : Number(v).toFixed(2) + '%'
+        const status = expired.has(symbol) ? 'STALE' : row.status
+        return <tr key={symbol}><th scope="row">{symbol.split(':')[0]}</th>
+          <td>{row.holdings_as_of ?? '未知'}</td><td>{row.lag_sessions ?? '未知'}</td>
+          <td>{weight(row.mapped_weight_pct)}</td><td>{weight(row.unmapped_equity_weight_pct)}</td>
+          <td>{observationState[status] ?? '未知'}</td></tr>
+      })}</tbody>
+    </table>
+    <table>
+      <caption>发行人观察金额（CNY）</caption>
+      <thead><tr><th>发行人</th><th>直接</th>
+        {observedETFs.map(symbol => <th key={symbol}>{symbol.split(':')[0]} 观察</th>)}<th>可得部分合计</th>
+      </tr></thead>
+      <tbody>{Object.entries(value.issuers).map(([issuer, row]) => <tr key={issuer}>
+        <th scope="row">{row.issuer_name}</th><td>{amount(row.direct_cny)}</td>
+        {observedETFs.map(symbol => <td key={symbol}>
+          {expired.has(symbol) ? '已到期' : amount(row.indirect_observed_cny[symbol])}
+        </td>)}
+        <td>{expired.size ? '部分数据到期，待重新读取' : amount(row.available_observed_cny)}</td>
+      </tr>)}</tbody>
+    </table>
+  </section>
+}
+
 function ConcentrationRisk({ value }: { value: Concentration }) {
   const display = (ratio: string | null) => ratio === null ? '—' : Number(ratio).toFixed(2) + '%'
   return <section aria-label="发行人集中度">
@@ -163,15 +240,26 @@ function ConcentrationRisk({ value }: { value: Concentration }) {
 export default function ActiveAllocation({ policySha }: { policySha?: string }) {
   const [value, setValue] = useState<Diagnostic | null>(null)
   const [error, setError] = useState('')
+  const [conditional, setConditional] = useState<{ policySha: string; value: ETFObservation } | null>(null)
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let concentrationTimer: ReturnType<typeof setTimeout> | undefined
     fetch('/api/allocation/snapshot').then(async response => {
       const body = await response.json()
-      if (!response.ok) throw new Error(typeof body.detail === 'string'
-        ? body.detail + (Array.isArray(body.qualification?.issues) ? ' · ' + body.qualification.issues.join(' / ') : '')
-        : 'ALLOCATION_UNAVAILABLE')
+      if (!response.ok) {
+        const concentration = body.qualification?.concentration
+        const observation = concentration?.etf_observation as ETFObservation | undefined
+        const remaining = Date.parse(observation?.snapshot_at ?? '') + 300_000 - Date.now()
+        if (!cancelled && response.status === 409 && policySha && observation?.status === 'CONDITIONAL' &&
+            concentration.policy_reference?.bundle_sha256 === policySha && remaining > 0) {
+          setConditional({ policySha, value: observation })
+          timer = setTimeout(() => setConditional(null), remaining)
+        }
+        throw new Error(typeof body.detail === 'string'
+          ? body.detail + (Array.isArray(body.qualification?.issues) ? ' · ' + body.qualification.issues.join(' / ') : '')
+          : 'ALLOCATION_UNAVAILABLE')
+      }
       const diagnostic = body.policy_allocation as Diagnostic | undefined
       if (!diagnostic || diagnostic.status !== 'QUALIFIED_MAJOR_CLASSES' || !policySha ||
           diagnostic.policy_reference.bundle_sha256 !== policySha) throw new Error('POLICY_VERSION_CONFLICT')
@@ -182,12 +270,16 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
         const expiredRisk = { status: 'UNKNOWN', issues: ['CONCENTRATION_EVIDENCE_EXPIRED'] }
         if (expires) {
           const riskRemaining = Date.parse(expires) - Date.now()
-          if (!Number.isFinite(riskRemaining) || riskRemaining <= 0) diagnostic.concentration = expiredRisk
+          if (!Number.isFinite(riskRemaining) || riskRemaining <= 0) diagnostic.concentration = {
+            ...expiredRisk, etf_observation: diagnostic.concentration?.etf_observation,
+          }
           else if (riskRemaining < remaining) concentrationTimer = setTimeout(() => {
-            setValue(current => current && { ...current, concentration: expiredRisk })
+            setValue(current => current && { ...current, concentration: {
+              ...expiredRisk, etf_observation: current.concentration?.etf_observation,
+            } })
           }, riskRemaining)
         }
-        setValue(diagnostic); setError('')
+        setValue(diagnostic); setError(''); setConditional(null)
         timer = setTimeout(() => { setValue(null); setError('ASSET_VIEW_EXPIRED') }, remaining)
       }
     }).catch((reason: unknown) => {
@@ -195,7 +287,10 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     })
     return () => { cancelled = true; clearTimeout(timer); clearTimeout(concentrationTimer) }
   }, [policySha])
-  if (error) return <div role="alert">当前配置资格 UNKNOWN：{error}。需要已有合格资产快照及 Owner 用途、覆盖、养老金和 FX 证据；本读取不会触发同步，不提供调仓金额。</div>
+  if (error) return <>
+    <div role="alert">当前配置资格 UNKNOWN：{error}。需要已有合格资产快照及 Owner 用途、覆盖、养老金和 FX 证据；本读取不会触发同步，不提供调仓金额。</div>
+    {conditional && conditional.policySha === policySha && <ETFObservationTable value={conditional.value} />}
+  </>
   if (!value) return <p>正在读取已冻结的组合配置…</p>
   return <section aria-label="当前与目标配置">
     <h3>可投资资产 {fmtCny(Number(value.denominator_cny))}</h3>
@@ -209,6 +304,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     <p>主要偏差：{value.focus.map(key => `${labels[key]}${value.classes[key].direction === 'OVER' ? '超配' : '低配'}`).join('、') || '与目标一致'}。</p>
     {value.hierarchy && <PolicyHierarchy value={value.hierarchy} diagnostic={value} />}
     {value.concentration && <ConcentrationRisk value={value.concentration} />}
+    {value.concentration?.etf_observation && <ETFObservationTable value={value.concentration.etf_observation} />}
     <p>正差距表示超配，负差距表示低配。配置与风险诊断不构成交易或资金操作建议。</p>
   </section>
 }

@@ -187,3 +187,67 @@ test('ACTIVE concentration retains an 8% lower-bound review with missing upper b
   await expect(page.getByRole('region', { name: '当前与目标配置' })).toBeVisible()
   expect(writes).toBe(0)
 })
+
+
+test('ETF observation expires independently and preserves formal C and B', async ({ page }) => {
+  const sha = 'f'.repeat(64)
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: sha,
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {} } } })
+    } else if (path === '/api/allocation/snapshot') {
+      const source = { status: 'OBSERVED', holdings_as_of: '2026-11-24', lag_sessions: 5,
+        expires_at: new Date(Date.now() + 3000).toISOString(), mapped_weight_pct: '35.1',
+        unmapped_equity_weight_pct: '64.9' }
+      await route.fulfill({ json: { policy_allocation: {
+        status: 'QUALIFIED_MAJOR_CLASSES', as_of: new Date().toISOString(), snapshot_id: 'asset-view:v1:1',
+        expires_at: new Date(Date.now() + 30_000).toISOString(), denominator_cny: '1000',
+        policy_reference: { bundle_sha256: sha }, classes: {}, focus: [],
+        concentration: { status: 'DIAGNOSTIC', issues: [], issuers: {
+          alphabet: { issuer_name: 'Alphabet', direct_pct: '4', indirect_known_pct: '4',
+            known_lower_bound_pct: '8', proven_upper_bound_pct: null, risk_status: 'HUMAN_REVIEW' },
+        }, etf_observation: {
+          status: 'OBSERVATION_ONLY', latest_completed_session: '2026-12-02', max_lag_sessions: 5,
+          sources: { 'SPY:US': { ...source, expires_at: null }, 'QQQ:US': source,
+            'SPMO:US': { ...source, status: 'UNAVAILABLE', expires_at: null } },
+          issuers: { alphabet: { issuer_name: 'Alphabet', direct_cny: '40',
+            indirect_observed_cny: { 'SPY:US': '15', 'QQQ:US': '12', 'SPMO:US': null },
+            available_observed_cny: '67' } },
+        } },
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  const observations = page.getByRole('region', { name: 'ETF 观察性敞口' })
+  await expect(observations.getByRole('row', { name: /Alphabet/ })).toContainText('未知')
+  await expect(observations).toContainText('2026-11-24')
+  await expect(observations.getByRole('row', { name: /Alphabet/ })).toContainText('已到期')
+  await expect(page.getByRole('region', { name: '发行人集中度' })).toContainText('HUMAN_REVIEW')
+  await expect(page.getByRole('region', { name: '当前与目标配置' })).toBeVisible()
+})
+
+test('409 shows only conditional ETF amounts from the pinned policy', async ({ page }) => {
+  const sha = 'f'.repeat(64)
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: sha,
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {} } } })
+    } else if (path === '/api/allocation/snapshot') {
+      const source = { status: 'UNAVAILABLE', holdings_as_of: null, lag_sessions: null, expires_at: null,
+        mapped_weight_pct: null, unmapped_equity_weight_pct: null }
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { concentration: { policy_reference: { bundle_sha256: sha }, etf_observation: {
+          status: 'CONDITIONAL', snapshot_at: new Date().toISOString(),
+          latest_completed_session: '2026-11-25', max_lag_sessions: 5,
+          sources: { 'SPY:US': source, 'QQQ:US': source, 'SPMO:US': source }, issuers: {},
+        } } },
+      } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await expect(page.getByRole('alert')).toContainText('当前配置资格 UNKNOWN')
+  await expect(page.getByRole('region', { name: 'ETF 观察性敞口' })).toContainText('条件性金额')
+  await expect(page.getByRole('region', { name: '发行人集中度' })).toHaveCount(0)
+})

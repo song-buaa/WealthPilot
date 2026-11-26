@@ -99,6 +99,11 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             error = PolicyError(code)
             error.qualification = {'status':'UNKNOWN', 'snapshot_id':view['snapshot_id'],
                 'snapshot_sha256':digest(view), 'issues':issues, 'execution_authorized':False}
+            if (frozen_view is None and os.environ.get("WEALTHPILOT_ETF_RELEASE_DIRECTORY")
+                    and timedelta(0) <= clock(utc_now()) - clock(view["captured_at"]) < timedelta(minutes=5)):
+                research = _conditional_concentration(portfolio_id, view, pinned, code)
+                if "etf_observation" in research:
+                    error.qualification["concentration"] = research
             raise error
         owner = view['data_quality'].get('investable_owner_evidence', {})
         if not owner or clock(owner['valid_until']) < clock(utc_now()):
@@ -193,12 +198,8 @@ def read_frozen_concentration(database, portfolio_id, snapshot_id, contract=None
 
 def project_frozen_concentration(portfolio_id, view):
     """Original Allocation qualification for an explicitly selected server-owned U1 view."""
-    from backend.services.investable_assets import project_investable_assets
-    from backend.services.investment_policy.concentration_adapter import allocation_concentration
-    from backend.services.investment_policy.contracts import digest
     from backend.services.investment_policy.parser import PolicyError
     from backend.services.investment_policy.runtime import current
-    from backend.services.investment_policy.store import clock, utc_now
 
     session = current(portfolio_id)
     session.ensure_current()
@@ -211,6 +212,15 @@ def project_frozen_concentration(portfolio_id, view):
         reason = str(error)
         if reason not in {"POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED", "POLICY_BUCKET_CLASSIFICATION_UNVERIFIED"}:
             raise
+    return _conditional_concentration(portfolio_id, view, session, reason)
+
+
+def _conditional_concentration(portfolio_id, view, session, reason):
+    from backend.services.investable_assets import project_investable_assets
+    from backend.services.investment_policy.concentration_adapter import allocation_concentration
+    from backend.services.investment_policy.contracts import digest
+    from backend.services.investment_policy.store import clock, utc_now
+
     at = clock(utc_now())
     projection = project_investable_assets(view, portfolio_id=portfolio_id, snapshot_id=view["snapshot_id"],
                                             snapshot_sha256=digest(view), at=at)
