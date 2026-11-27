@@ -1,5 +1,23 @@
 # WealthPilot 4.2 P0.1 — Unified US financial sources
 
+## 三级财务来源 V2
+
+当前 L1 在原证据工具中显式选择 `official_disclosures.collect_current()`。SEC 目录及 Submissions 先建立发行人和已观察披露窗口。Tier 1 复用 AV 独立端点缓存，读取需要的 Income Statement 与 Earnings。Tier 2 读取 CompanyFacts，核实精确财政跨度并补齐官方字段。只有当前窗口或所需事实仍缺证时，Tier 3 才读取被选中 accession 的官方原件。最新披露元数据缓存 15 分钟，报表和已核准原件沿原财务缓存保存。缓存命中保留原观察时间。
+
+当前允许有供应商正式映射的营收、营业利润及归母净利字段直接进入当前研究，前提是确切发行人、USD 及财政跨度可证。对同一字段、期间和口径，官方值优先，双方差异有诊断。Earnings 只用于发现财季窗口和可能的发布日。来源明确后才接纳 GAAP EPS、现金流期间、股本等语义敏感数据。AV 的 reportedEPS、不明币种、月末代理日期和综合购置金额不会自动获得 GAAP、独立 PP&E 或财政期间资格。若较新披露仍缺证，旧 TTM 不会用作当前窗口。
+
+### 当前研究消费合同
+
+- 原 Evidence 输出内部的 `current_financial` 收据，与 `verified_field_records` / `historical_field_records` 并列。供应商记录保留字段定位、规范化载荷摘要、期间、币种、口径、fetched_at 和 known_at。无明确供应商发布时间时 published_at 为空。该收据由服务器来源 Owner 提供。
+- L1 调用 `financial_research.build_current(assessment)`，复用原四季连续窗口和金额计算。可用经营流量沿 `operating_ttm_bridge(..., current=True)`。计算仍要求同一 EPS 窗口和可核验的流量期间，缺字段可明确返回部分结果。
+- 4.5 当前 S3 可由 Owner 调用 collect_current，把收到的官方记录、独立 verifier 和 current_financial 交给 evidence.assess，再显式选择 build_current。#139 原 S3 模型、归档和线上消费独立验收。
+- 现有 collect、build 和默认 _evidence_index 保留严格路径。当前供应商观察及其衍生结果不进入默认 PIT、as-filed、投资政策或交易索引。历史重放继续使用原版本、发布时间和原件要求。美国多上市类别、外国发行人、ADS、IFRS 和非美股沿既有路径。
+
+### 首批真实验收
+
+- NVDA 的 AV 报表使用 2026-10-31，最新行币种缺失，AV Earnings 返回 2.68。CompanyFacts 在核验时尚无 2026-10-25 的一整季事实。声明的 8-K EX-99.3 准确三个月列提供 USD GAAP EPS、营收、营业利润、净利润、加权稀释股数与 CFO。合并购置单列并保留符号。最新归母净利桥仍缺少相同口径的证据。
+- TSLA 2025 年 Q4，AV Earnings 返回 0.50，CompanyFacts 仅有年度 GAAP EPS。已声明的 EX-99.1 文本中，GAAP 稀释普通股 EPS 为 0.24，另有非 GAAP 0.50。原年度及前季事实仅证明期间边界，EPS 直接取自披露。
+
 ## XPEV 季度财务桥接（2026-10-31 开发候选）
 
 复用现有 SEC `parse_filing`、`official_disclosures`、Evidence 与 `financial_research.build`。冻结的完整 XPEV 2026 Q2 6-K（CIK 1810997，accession `0001193125-26-364050`，EX-99.1，原文 SHA256 `9062a8f5df8da1f4e8f2e8734e6820315489ed3ea820b4ee1dbc33249d375152`）包含正式综合亏损表及比较列。解析器识别该正式表名和明确的日期加 RMB 列头，提取独立的 2025 Q2、2026 Q1、2026 Q2 集团收入、营业亏损、净亏损与车辆销售收入；车辆交付、车辆毛利率只取同表明确季度列。非 GAAP 调整表不作为正式 GAAP 字段。所有字段仍经原 SEC 附件身份、接受时钟、单位及 Evidence 校验。

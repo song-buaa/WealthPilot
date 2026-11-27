@@ -209,7 +209,7 @@ class ResearchRun:
 
     def prepare(self, groups, assessment):
         from .output_policy import _evidence_index
-        index = _evidence_index(assessment)
+        index = _evidence_index(assessment, current=True)
         self.visible = {row['evidence_ref']: digest(index[row['evidence_ref']])
                         for section in RECORD_SECTIONS for row in groups[section]}
         visible_ids = {index[ref].get('record_id') or index[ref].get('source_url') for ref in self.visible}
@@ -293,7 +293,7 @@ class ResearchRun:
     def qualify(self, assessment, *, narrow=False):
         from collections import Counter
         from .output_policy import _evidence_index, explanation_projection
-        index = _evidence_index(assessment)
+        index = _evidence_index(assessment, current=True)
         current_cells = _owner_cells(assessment, index)
         eligible_cells = {ref: cell for ref, (name, cell, _) in self.cells.items()
                           if (self.surviving_cells is None or ref in self.surviving_cells)

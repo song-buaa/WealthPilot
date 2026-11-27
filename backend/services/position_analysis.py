@@ -67,7 +67,7 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     research=research or getattr(loaded,"research",[]) or []
     # Event-tagged entries are taken only from the original research context.
     events=[r for r in research if mapping(r).get("metadata",{}).get("evidence_kind")=="event"]
-    assessment=invoke_skill("wp-assess-position-evidence",market_data=market,symbol=symbol,at=at,
+    assessment=invoke_skill("wp-assess-position-evidence",market_data=market,symbol=symbol,at=at,current_research=at is None,
         asset_view=qualification_view(asset_view,options.get("scenario_legs",[]),at=at) if asset_view else None,research=research,events=events,
         planner=plan.planner_trace,stored_price=native[0].get("current_price") if native else None,
         principles_available=bool(getattr(loaded,"retrieved_principles",[])))
@@ -147,8 +147,8 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
                     if candidate['scenario']:
                         candidate['scenario']['mode']='illustrative_unqualified'
                         candidate['scenario']['amount_blockers']=loan_b.get('blockers',[])
-    from backend.services.market_data.financial_research import build
-    assessment['financial_research']=build(assessment)
+    from backend.services.market_data.financial_research import build_current
+    assessment['financial_research']=build_current(assessment)
     assumptions=assessment['research_intent'].get('conditional_valuation')
     if assumptions:
         from backend.services.market_data.quality_valuation import foreign_ads_conditional_research
@@ -232,7 +232,7 @@ def research_intent(options):
 
 def research_plan(assessment, *, at):
     """Non-executable L1 planning, composed from original technical/financial facts."""
-    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.financial_research import build_current
     intent=assessment.get('research_intent') or research_intent({})
     objective=intent['objective'];user_exit=objective in {'exit','reduce'}
     day=(assessment.get('technical_levels') or {}).get('day')
@@ -252,7 +252,7 @@ def research_plan(assessment, *, at):
         fraction_basis='user_assumption' if intent['tranche_fractions'] else 'illustrative_research_draft',
         priority=i+1,condition=conditions[min(i,3)],observation_band=band,
         quantity=None,amount=None,execution_authorized=False) for i,f in enumerate(fractions)]
-    financial=build(assessment)
+    financial=build_current(assessment)
     return dict(mode='research_only',non_executable=True,objective=objective,
         objective_source=intent['sources'].get('objective','system_inference_evaluate'),
         assumption_context=intent,stages=stages,price_observation=band,
@@ -477,8 +477,8 @@ def fact_sections(assessment, *, include_scenarios=True):
         scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
         facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
-    from backend.services.market_data.financial_research import build,display
-    financial=build(assessment)
+    from backend.services.market_data.financial_research import build_current,display
+    financial=build_current(assessment)
     for metric in financial['records']:
         facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+'；计算口径：'+str(metric['details']))
     if include_scenarios and financial['valuation_sensitivity']:

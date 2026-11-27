@@ -506,7 +506,7 @@ def financial_source_conflicts(records):
 
 def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
            asset_view=None, planner=None, stored_price=None, principles_available=False,
-           disclosure_verifier=None):
+           disclosure_verifier=None, current_financial=None):
     at = at or datetime.now(timezone.utc)
     market = mapping(market_data)
     symbol = symbol or market.get("symbol")
@@ -693,7 +693,8 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         source_conflicts=source_conflicts,
         issues=sorted(set(issues)), planner=planner, qualification=levels,
         confidence_ceiling=ceiling, technical_levels=valid_series or None,
-        infoNeeded=sorted(set(l3)), execution_authorized=False)
+        infoNeeded=sorted(set(l3)), execution_authorized=False,
+        **({'current_financial': current_financial} if current_financial is not None else {}))
 
 
 def safe_market(market_data, assessment):

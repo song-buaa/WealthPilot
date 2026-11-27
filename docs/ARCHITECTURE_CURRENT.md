@@ -279,6 +279,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 ## 4.2 开发扩展：分析证据资格
 
+4.1 当前财务来源 V2 候选沿原 L1 证据工具接入。SEC 目录和 Submissions 锚定发行人及披露窗口后，原 AV 缓存优先提供可判明会计口径的结构化字段。缺口走 CompanyFacts，再按目标期间读取已声明原件。供应商观察单列在当前财务收据，原 Financial Research 通过显式当前模式计算。严格 PIT、旧 S3 冻结复算和投资政策仍使用原资格，详见[三级来源合同](V42_US_FINANCIAL_SOURCES.md#三级财务来源-v2)。
+
 P1研究内容沿原Owner扩展：独立核验的旧季度进入历史比较分区，不改变当前字段时钟或交易资格；[纯财务研究投影](../backend/services/market_data/financial_research.py)复用原AV窗口/求和、原FXService和已验证技术价格，按完整起止期间/币种/会计及ADS口径生成变化和静态估值。原Output Policy以字段绑定插入数字，研究段落可讨论非执行性价格观察与退出条件，不能补造数字或发出即时下单指令。原ExitPlan的research_plan与执行价量字段分开：用户意图/历史参考仅为假设，日期优先于默认值；L2–L4公式、E1库及PR56运行机制不变。合同与UNKNOWN见[来源说明](V42_US_FINANCIAL_SOURCES.md#p1-专业研究扩展2026-10-29-开发中)。
 P1.1仍在原纯投影内选择同原文比较列/明确精度相容值，保留不同披露原值和未解释差异；原表格修正列币种注记与EPS/股数分组，原Output Policy保留绑定数值并区分安全拒绝子原因，无新的来源或任务Owner。合同与生产待验收见[原记录](V42_IMPLEMENTATION.md#p11-多披露比较与数字解释2026-10-29-开发候选)。
 

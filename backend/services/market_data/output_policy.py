@@ -14,12 +14,15 @@ _TOPIC_LABELS = {"business":"经营变化", "investment_thesis":"投资逻辑", 
                  "risk":"风险情景", "exit_rationale":"减仓理由", "review_condition":"复核条件", "technical_trend":"技术趋势"}
 
 
-def _evidence_index(assessment):
+def _evidence_index(assessment, *, current=False):
     """Only the owner's current, usable records can support model inferences."""
     index = {}
-    from backend.services.market_data.financial_research import build
-    derived=build(assessment)['records'] if assessment.get('symbol') else []
-    for record in [*assessment.get("records", []), *assessment.get("verified_field_records", []), *assessment.get("quality_field_records", []),
+    from backend.services.market_data.financial_research import build, build_current
+    derived=(build_current if current else build)(assessment)['records'] if assessment.get('symbol') else []
+    vendor=(assessment.get('current_financial') or {}).get('vendor_records', []) if current else []
+    selected_refs={ref for metric in derived for ref in metric.get('evidence_refs', [])}
+    for record in [*(r for r in vendor if r.get('record_id') in selected_refs),
+                   *assessment.get("records", []), *assessment.get("verified_field_records", []), *assessment.get("quality_field_records", []),
                    *assessment.get('historical_field_records',[]), *assessment.get("verified_period_records", []),*derived]:
         if (record.get("quality") != "valid" or record.get("is_seed") or record.get("is_mock")
                 or record.get("kind") not in {"fundamentals", "fundamental_field", "research", "event", "technical", "research_metric", "quality_financial_field"}
@@ -106,10 +109,10 @@ def captured_facts(assessment, *, at, asset_view=None):
     # qualified and it remains qualified now. No quotes or trade plan is added.
     original['technical_levels']={p:v for p,v in (fresh.get('technical_levels') or {}).items()
                                   if (p,v.get('record_id')) in allowed_periods}
-    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.financial_research import build_current
     from backend.services.market_data.financial_research import build_valuation_inputs
     original['valuation_inputs']=build_valuation_inputs(original)
-    original['financial_research']=build(original)  # never retain a stale pre-Expression calculation cache
+    original['financial_research']=build_current(original)
     previous=assessment.get('conditional_valuation') or {}
     assumptions=previous.get('assumptions')
     from backend.services.market_data.quality_valuation import AUTOMATIC_ORIGINS
@@ -142,7 +145,7 @@ def captured_facts(assessment, *, at, asset_view=None):
                 original['l1_valuation_sources']['requalification'] = {
                     'status': 'UNKNOWN', 'reason': 'ORIGINAL_VALUATION_NO_LONGER_QUALIFIED',
                 }
-    facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original).values()}.values())
+    facts=list({row.get('record_id') or row['source_url']:row for row in _evidence_index(original, current=True).values()}.values())
     return original, facts
 
 
