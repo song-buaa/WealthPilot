@@ -17,7 +17,7 @@ interface View {
   views: {
     wealth_summary: { total_assets: number; total_liabilities: number; net_worth: number }
     get_investment_details: { items: { id: number; name: string; symbol: string; account_ref: string; quantity: number;
-      original_currency: string; cost_price: number; market_value_cny: number }[] }
+      original_currency: string; cost_price: number; market_value_cny: number | null }[] }
   }
   issuer_exposure: { companies: { issuer_id: string; name: string; market_value_cny: number; members: { id: number; symbol: string; quantity: number; cost_price: number; currency: string }[] }[] }
 }
@@ -110,7 +110,7 @@ function FixedAssetView({ snapshotId }: { snapshotId: string }) {
         <th>证券</th><th>账户</th><th>数量</th><th>原币成本单价</th><th>CNY 市值</th>
       </tr></thead><tbody>{view.views.get_investment_details.items.map(p => <tr key={p.id}>
         <td>{p.name} {p.symbol}</td><td>{p.account_ref}</td><td>{p.quantity}</td>
-        <td>{p.cost_price ?? 'UNKNOWN'} {p.original_currency}</td><td>{money(p.market_value_cny)}</td>
+        <td>{p.cost_price ?? 'UNKNOWN'} {p.original_currency}</td><td>{p.market_value_cny == null ? 'UNKNOWN' : money(p.market_value_cny)}</td>
       </tr>)}</tbody></table></div>
       <h2 className="font-semibold">有证据的公司经济敞口</h2>
       {view.issuer_exposure.companies.map(c => <div key={c.issuer_id}>

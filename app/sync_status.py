@@ -45,7 +45,7 @@ def _public_quality(run):
         "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count",
         "query_action_at","source_completeness","counter_status","publication_mode","reconciliation",
         "time_evidence","price_time_basis", "account_response_at", "account_update_time", "outside_scope",
-        "unsupported_assets", "retry_after_seconds", "price_pair", "price_quote_asset", "history_coverage", "usdt_relative_reference", "unvalued_assets", "asset_price_times",
+        "unsupported_assets", "retry_after_seconds", "price_pair", "price_quote_asset", "history_coverage", "history_reason_code", "usdt_relative_reference", "unvalued_assets", "asset_price_times",
         "account_permission_groups", "permission_semantics")}
     # Pre-D1 IBKR cash_as_of was a local download clock. Reusing that last-good
     # must not turn it into authoritative source time in a NEW analysis view.

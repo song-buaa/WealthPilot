@@ -171,9 +171,9 @@ export default function Dashboard() {
 
   // 持仓排序
   const platTotals: Record<string, number> = {}
-  positions.forEach(p => { platTotals[p.platform] = (platTotals[p.platform] ?? 0) + p.market_value_cny })
+  positions.forEach(p => { platTotals[p.platform] = (platTotals[p.platform] ?? 0) + (p.market_value_cny ?? 0) })
   const sortedPos = [...positions].sort(
-    (a, b) => (platTotals[b.platform] ?? 0) - (platTotals[a.platform] ?? 0) || b.market_value_cny - a.market_value_cny
+    (a, b) => (platTotals[b.platform] ?? 0) - (platTotals[a.platform] ?? 0) || (b.market_value_cny ?? 0) - (a.market_value_cny ?? 0)
   )
 
   // 资产明细 Tab 过滤
@@ -355,8 +355,8 @@ export default function Dashboard() {
                         <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? (p.original_currency === 'USDT' ? '≈' : '') + fmtFx(p.original_value,'USD') : '—'}</td>
                         <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isHKD ? fmtFx(p.original_value,'HKD') : '—'}</td>
                       </>}
-                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(p.market_value_cny)}</td>
-                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#6B7280', fontSize: 12 }}>{pct.toFixed(2)}%</td>
+                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{p.market_value_cny == null ? 'UNKNOWN' : fmtCny(p.market_value_cny)}</td>
+                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#6B7280', fontSize: 12 }}>{bs.valuation_complete === false ? 'UNKNOWN' : pct.toFixed(2) + '%'}</td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: posTab === 'domestic_fund' ? '#9CA3AF' : pnlV > 0 ? '#DC2626' : pnlV < 0 ? '#16A34A' : '#9CA3AF' }}>
                         {posTab === 'domestic_fund' || unknownPnl ? 'UNKNOWN' : pnlV === 0 ? '¥0' : pnlV > 0 ? `+${fmtCny(pnlV)}` : `-${fmtCny(-pnlV)}`}
                       </td>

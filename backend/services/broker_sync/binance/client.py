@@ -100,6 +100,11 @@ class BinanceReadonlyClient:
             raise ValueError("BINANCE_CLOCK_SKEW")
         return stamp
 
+    def exchange_time_ms(self):
+        if self.offset_ms is None:
+            raise ValueError("BINANCE_CLOCK_SKEW")
+        return int(self.clock() * 1000) + self.offset_ms
+
     def get(self, path, parameters=None):
         if path not in self.PUBLIC | self.SIGNED:
             raise ValueError("BINANCE_READONLY_ENDPOINT_REQUIRED")
@@ -125,7 +130,7 @@ class BinanceReadonlyClient:
             values = dict(params)
             headers = {"Accept": "application/json"}
             if signed:
-                values.update(timestamp=int(self.clock() * 1000) + self.offset_ms, recvWindow=5000)
+                values.update(timestamp=self.exchange_time_ms(), recvWindow=5000)
                 headers["X-MBX-APIKEY"] = self.config.api_key
             query = parse.urlencode(sorted(values.items()))
             if signed:

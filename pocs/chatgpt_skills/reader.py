@@ -108,7 +108,9 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                 serialized = portfolio_service.get_positions(portfolio_id, "投资")["items"]
                 by_id = {i["id"]: i for i in serialized}
                 aggregate, _ = position_aggregator.aggregate_investment_positions(portfolio_id)
-                weights = {i.symbol or i.ticker: i.weight for i in aggregate}
+                summary = portfolio_service.get_summary(portfolio_id)
+                weights = {} if summary.get("valuation_complete") is False else {
+                    i.symbol or i.ticker: i.weight for i in aggregate}
                 items, owner_map = [], {}
                 for row in rows:
                     ref = account_ref(portfolio_id, row)
@@ -129,8 +131,6 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                     accounts = [a for a in accounts if a["account_ref"] == arguments["account_ref"]]
                     if not accounts:
                         raise ReadError("ACCOUNT_NOT_FOUND")
-                # Portfolio summary reads the same stored native CASH as holdings.
-                summary = portfolio_service.get_summary(portfolio_id)
                 if any(i.get("id") == -1 for i in serialized):
                     issues.append("LIVE_CASH_VALUATION_DATE_UNKNOWN")
                 scope = "Stored investment holdings. CNY fields are yuan; prices/original_value use their stated currency. Weight is the existing cross-account symbol weight (0..1), not a new account balance. Accounts are stored ownership groups, not a live broker account inventory."
