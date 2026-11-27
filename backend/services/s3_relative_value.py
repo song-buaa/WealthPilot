@@ -51,6 +51,28 @@ def source(root, row, url, earliest, cutoff):
     return path.read_bytes(), row['fetched_at']
 
 
+def check_recent_filings(recent, parent_at):
+    """Use all recent SEC form dates, including forms outside the financial parser."""
+    accessions, dates, accepted = (recent.get(key) for key in
+        ('accessionNumber', 'filingDate', 'acceptanceDateTime'))
+    if not all(isinstance(rows, list) for rows in (accessions, dates, accepted)):
+        raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
+    if not accessions or len(accessions) != len(dates) or len(dates) != len(accepted):
+        raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
+    for day, accepted_at in zip(dates, accepted, strict=True):
+        filed = engine.stamp(day)
+        if filed is None:
+            raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
+        if filed.date() > parent_at.date():
+            raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
+        if filed.date() == parent_at.date():
+            acceptance = engine.stamp(accepted_at)
+            if acceptance is None:
+                raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
+            if acceptance > parent_at:
+                raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
+
+
 def qualify_price(root, manifest, payload, card, cutoff, *, live):
     from backend.services.execution_plan.kline_provider import decode_av_daily, decode_av_splits
     from backend.services.market_data.evidence import assess, mapping
@@ -80,15 +102,9 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
     parent_at = engine.stamp(payload['result']['decision_at'])
     # Also reject new amendments, registration, proxy and ownership events.
     # Use the raw recent list so a filing unrecognized by discover_filings cannot pass silently.
-    recent = submissions['filings']['recent']
-    if (not recent['accessionNumber'] or len(recent['accessionNumber']) != len(recent['filingDate'])
-            or latest != reviewed['latest_reviewed_filings']
-            or any(engine.stamp(day).date() > parent_at.date() or
-                   (engine.stamp(day).date() == parent_at.date() and
-                    (i >= len(recent.get('acceptanceDateTime', [])) or
-                     engine.stamp(recent['acceptanceDateTime'][i]) > parent_at))
-                   for i, day in enumerate(recent['filingDate']))):
+    if latest != reviewed['latest_reviewed_filings']:
         raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
+    check_recent_filings(submissions['filings']['recent'], parent_at)
 
     expected_ir = next(x for x in reviewed['sources'] if x['role'] == 'OFFICIAL_IR_CONTEXT')
     ir = entry['reprice_ir']

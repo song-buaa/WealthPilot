@@ -48,3 +48,22 @@ def test_independent_verifier_rejects_optimized_python():
     result = subprocess.run([sys.executable, '-O', str(script), '/nonexistent'], capture_output=True, text=True)
     assert result.returncode != 0
     assert 'OPTIMIZED_PYTHON_UNSAFE_FOR_VERIFICATION' in result.stderr
+
+
+@pytest.mark.parametrize(('day', 'acceptance', 'error'), [
+    ('bad date', '2026-11-26T16:00:00Z', 'S3_REPRICE_FILING_CLOCK_UNQUALIFIED'),
+    ('2026-11-26', None, 'S3_REPRICE_FILING_CLOCK_UNQUALIFIED'),
+    ('2026-11-26', '2026-11-26T16:00:00Z', 'S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH'),
+    ('2026-11-27', '2026-11-27T16:00:00Z', 'S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH'),
+    ('2026-11-26', '2026-11-26T14:00:00Z', None),
+])
+def test_recent_filing_clock_fails_closed(day, acceptance, error):
+    from backend.services.s3_relative_value import check_recent_filings
+
+    recent = {'accessionNumber': ['a'], 'filingDate': [day], 'acceptanceDateTime': [acceptance]}
+    parent_at = datetime(2026, 11, 26, 15, tzinfo=timezone.utc)
+    if error:
+        with pytest.raises(ValueError, match=error):
+            check_recent_filings(recent, parent_at)
+    else:
+        check_recent_filings(recent, parent_at)
