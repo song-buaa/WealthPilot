@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fmtCny } from '@/lib/fmt'
+import PortfolioTransition from './PortfolioTransition'
+
+const isHash = (hash?: string | null) => /^[a-f0-9]{64}$/.test(hash ?? '')
 
 interface Gap {
   amount_cny: string | null
@@ -124,7 +127,6 @@ function PolicyHierarchy({ value, diagnostic }: { value: Hierarchy; diagnostic: 
   const review = value.strategic_review
   const ref = review.policy_reference
   const parent = diagnostic.policy_reference
-  const isHash = (hash?: string | null) => /^[a-f0-9]{64}$/.test(hash ?? '')
   const verified = value.status === 'QUALIFIED' && review.policy_schema_version === 'wp.policy.v2' &&
     isHash(review.snapshot_sha256) && review.snapshot_sha256 === diagnostic.snapshot_sha256 &&
     ref?.bundle_id && ref.bundle_id === parent.bundle_id &&
@@ -240,6 +242,7 @@ function ConcentrationRisk({ value }: { value: Concentration }) {
 export default function ActiveAllocation({ policySha }: { policySha?: string }) {
   const [value, setValue] = useState<Diagnostic | null>(null)
   const [error, setError] = useState('')
+  const [research, setResearch] = useState<{ snapshot_id: string; snapshot_sha256: string } | null>(null)
   const [conditional, setConditional] = useState<{ policySha: string; value: ETFObservation } | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -248,6 +251,8 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     fetch('/api/allocation/snapshot').then(async response => {
       const body = await response.json()
       if (!response.ok) {
+        if (!cancelled && response.status === 409 && body.qualification?.snapshot_id &&
+            isHash(body.qualification?.snapshot_sha256)) setResearch(body.qualification)
         const concentration = body.qualification?.concentration
         const observation = concentration?.etf_observation as ETFObservation | undefined
         const remaining = Date.parse(observation?.snapshot_at ?? '') + 300_000 - Date.now()
@@ -279,6 +284,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
             } })
           }, riskRemaining)
         }
+        setResearch(diagnostic)
         setValue(diagnostic); setError(''); setConditional(null)
         timer = setTimeout(() => { setValue(null); setError('ASSET_VIEW_EXPIRED') }, remaining)
       }
@@ -287,12 +293,11 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     })
     return () => { cancelled = true; clearTimeout(timer); clearTimeout(concentrationTimer) }
   }, [policySha])
-  if (error) return <>
-    <div role="alert">当前配置资格 UNKNOWN：{error}。需要已有合格资产快照及 Owner 用途、覆盖、养老金和 FX 证据；本读取不会触发同步，不提供调仓金额。</div>
-    {conditional && conditional.policySha === policySha && <ETFObservationTable value={conditional.value} />}
-  </>
-  if (!value) return <p>正在读取已冻结的组合配置…</p>
-  return <section aria-label="当前与目标配置">
+  return <>
+    {error ? <>
+      <div role="alert">当前配置资格 UNKNOWN：{error}。需要已有合格资产快照及 Owner 用途、覆盖、养老金和 FX 证据。当前配置读取不会触发同步。</div>
+      {conditional && conditional.policySha === policySha && <ETFObservationTable value={conditional.value} />}
+    </> : !value ? <p>正在读取已冻结的组合配置…</p> : <section aria-label="当前与目标配置">
     <h3>可投资资产 {fmtCny(Number(value.denominator_cny))}</h3>
     <p>快照 {value.snapshot_id} · 来源时点 {value.as_of}</p>
     <table><thead><tr><th>类别</th><th>当前金额</th><th>当前</th><th>{targetLabel(value.classes, '目标')}</th><th>差距（百分点）</th><th>金额差距</th></tr></thead>
@@ -306,5 +311,8 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     {value.concentration && <ConcentrationRisk value={value.concentration} />}
     {value.concentration?.etf_observation && <ETFObservationTable value={value.concentration.etf_observation} />}
     <p>正差距表示超配，负差距表示低配。配置与风险诊断不构成交易或资金操作建议。</p>
-  </section>
+    </section>}
+    {research && policySha && <PortfolioTransition key={research.snapshot_sha256} policySha={policySha}
+      snapshotId={research.snapshot_id} snapshotSha={research.snapshot_sha256} />}
+  </>
 }

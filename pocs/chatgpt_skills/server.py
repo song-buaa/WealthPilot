@@ -27,6 +27,7 @@ from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, P
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
 from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
+from backend.services.allocation_scenarios import TransitionRequest
 from pocs.chatgpt_skills.position_jobs import PositionJobs, PositionAnalysisJob
 from pocs.poc02_wealth_mcp import server as overview
 from pocs.chatgpt_skills.diagnostics import (ANALYSIS_OPERATIONS, request_run, diagnostic,
@@ -248,6 +249,13 @@ def create_server(settings):
                 return context(settings.portfolio_id,consumer='mcp',view=scope,symbol=symbol)
             except PolicyError:
                 raise ToolError('POLICY_CONTEXT_UNAVAILABLE') from None
+        @server.tool(meta=security_meta,
+            annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False),
+            description=("Deterministic A/B portfolio simulation against one existing U1 and ACTIVE bundle. "
+                         "Amounts and fees use source currency (external salary is CNY). Transfer rate is destination "
+                         "units per source unit. Preserve scenario and uncertainty labels. No model, sync, orders or policy writes."))
+        def simulate_portfolio_transition(request: TransitionRequest) -> dict:
+            return client.call("simulate_portfolio_transition", request.model_dump(mode="json"))
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
     # 4.3 E1 research-only store: opt-in reads; original business DB stays read-only.
     e1_path = getattr(settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")

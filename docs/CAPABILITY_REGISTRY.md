@@ -201,3 +201,9 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 ### L1 研究质量评测（v1.0 开发候选）
 
 [Research Evaluation](../backend/services/research_evaluation.py)复用PositionJobs/PositionStore自动登记受限原请求、Job/Artifact不可变引用及原生/Reader版本；追加式五维评分、反馈、人工自报复评与私有分页查询/导出。原[MCP适配](../pocs/chatgpt_skills/research_evaluation.py)四项工具不运行研究、不授予E1/交易权限。工程回传不等于真实ChatGPT发布闭环；[合同及边界](L1_RESEARCH_EVALUATION.md)，[回归](../tests/test_research_evaluation.py)。历史业务FAIL与>=8分硬目标不变。
+
+### 4.4 D 多阶段组合模拟（隔离候选）
+
+- 场景 owner 继续为 `backend/services/allocation_scenarios.py`。原 `ScenarioLeg` 与单标消费保持兼容。D 通过 AllocationService 读取既有 U1、A-min 和同一 ACTIVE PolicyReference，按阶段复用 B3、C 及 ETF 观察投影。
+- Web 使用 `POST /api/allocation/simulate-transition`，MCP 和 PEER 使用 `simulate_portfolio_transition`。阶段动作按明确结算假设处理，金额和费率使用 Decimal。示例与限制见 [当前架构的 D 合同](ARCHITECTURE_CURRENT.md#44-d-多阶段模拟候选)。
+- 合成验收入口为 `tests/test_d_portfolio_transition.py`、MCP Policy 协议与 Web policy-boundary 测试。真实组合验收等待 A3。

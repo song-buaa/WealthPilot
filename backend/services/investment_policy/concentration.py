@@ -151,11 +151,26 @@ def analyze_concentration(view, *, projection, session, at, etf_evidence: dict[s
         return _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd or {}, observations or {})
 
 
-def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd, observations):
+def analyze_scenario_concentration(view, *, projection, session, at, evidence, classified_assets,
+                                   holdings, denominator, qualified_baseline, coverage):
+    """Run the C kernel on scenario holdings, with the original U1 kept intact."""
+    records, pins, issue, close_caps, observations = evidence
+    result = _analyze(view, projection, session, at, records, pins, classified_assets, close_caps, observations,
+                      scenario=(holdings, denominator, qualified_baseline, coverage))
+    if issue:
+        result["issues"].append(issue)
+    return result
+
+
+def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classified_assets, close_caps_usd,
+             observations, scenario=None):
     reference, snapshot = _pinned_policy(session, view["portfolio_id"], at)
     listings = getattr(snapshot, "listings", {})
     listing_names = {item.issuer_id: item.issuer_name for item in listings.values()}
-    denominator = _denominator(view, projection, at)
+    original_denominator = _denominator(view, projection, at)
+    denominator = original_denominator if scenario is None else scenario[1] if scenario[2] else None
+    if scenario is not None and scenario[2] and original_denominator is None:
+        raise ValueError("SCENARIO_BASELINE_DENOMINATOR_UNVERIFIED")
     issuer_rules, exceptions, review = _issuer_rules(snapshot)
     btc_rules = [r for r in snapshot.rules if r.metric == "btc_weight" and not r.subject
                  and r.scope == "ALL_INVESTABLE_ASSETS_ECONOMIC" and r.operator in {"gt", "gte"}]
@@ -177,10 +192,14 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
     unknown_cny = ZERO
     btc_amount = ZERO
     scope = quality.get("investable_scope_evidence", {})
-    coverage = scope.get("coverage", {})
+    coverage = scope.get("coverage", {}) if scenario is None else scenario[3]
+    if scenario is not None:
+        # Reject malformed source coverage in research mode without constructing
+        # a replacement frozen view. BTC's verifier needs only this coverage.
+        quality = {**quality, "investable_scope_evidence": {"coverage": coverage}}
     btc_coverage = coverage.get("btc", {})
     expires_at = None
-    if denominator is not None:
+    if denominator is not None and scenario is None:
         source_times = [view["captured_at"], scope["as_of"]]
         source_times += [coverage[key]["as_of"] for key in ("accounts", "manual_assets", "pensions", "gold", "btc", "deduplication")]
         source_times += [item["account_synced_at"] for item in quality.get("investable_accounts", quality.get("accounts", []))]
@@ -188,17 +207,19 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                          min(map(clock, source_times)) + timedelta(minutes=5))
     btc_complete = (denominator is not None and btc_coverage.get("status") in {"ABSENT", "PRESENT"})
     principal = ZERO
-    for item in projection.assets:
+    inputs = ((item, rows[item.source_ref], None) for item in projection.assets) if scenario is None else (
+        (holding, holding.identity, holding) for holding in scenario[0].values())
+    for item, row, derived in inputs:
         ref = item.source_ref
-        if item.state != "INCLUDED":
+        if derived is None and item.state != "INCLUDED":
             if item.state == "UNKNOWN":
                 coverage_issues.add("ASSET_SCOPE_UNVERIFIED")
             continue
-        amount, row = item.amount_cny, rows[ref]
+        amount = item.amount_cny
         if amount is None or not amount.is_finite() or amount < 0:
             raise ValueError("CONCENTRATION_INVALID_AMOUNT")
         principal += amount
-        position = ref.startswith("position:")
+        position = ref.startswith(("position:", "action:"))
         if expires_at is not None and position:
             source_field = "cash_as_of" if row.get("vehicle_type") == "CASH" else "positions_as_of"
             expires_at = min(expires_at, clock(row[source_field]) + timedelta(minutes=5))
@@ -215,8 +236,10 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
             continue
         if ref in btc_coverage.get("asset_refs", []):
             btc_complete = False
-        verified = position and _canonical(row)
-        if ((verified and row.get("vehicle_type") == "CASH" and row.get("economic_asset_class") == "CASH")
+        verified = position and (_canonical(row) if derived is None else derived.economic is not None)
+        new_security = derived is not None and derived.original_amount_cny is None
+        if ((derived is not None and derived.economic == "CASH")
+                or (verified and row.get("vehicle_type") == "CASH" and row.get("economic_asset_class") == "CASH")
                 or (not position and row.get("item_type") == "bank_cash")):
             continue
         issuer = extended_common_issuer(row, listings) if verified else None
@@ -239,7 +262,8 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
             if observations and symbol in ETF_IDENTITIES:
                 subtotal, qualified = observed_funds.get(symbol, (ZERO, True))
                 observed_funds[symbol] = (subtotal + amount, qualified and not identity_conflict)
-            if identity_conflict:
+            if identity_conflict or new_security:
+                # A hypothetical purchase has no verified share count or valuation.
                 evidence = None
             status = (evidence.status(snapshot_at=clock(view["captured_at"]), at=at,
                                       expected_sha256=evidence_pins.get(symbol),
@@ -252,8 +276,9 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
                 try:
                     quantity = Decimal(str(row["quantity"]))
                     fx = Decimal(str(row["fx_rate_to_cny"]))
+                    marked = derived.original_amount_cny if derived is not None else amount
                     if (not quantity.is_finite() or not fx.is_finite() or quantity <= 0 or fx <= 0
-                            or amount > quantity * fx * close_caps_usd[symbol]):
+                            or marked > quantity * fx * close_caps_usd[symbol]):
                         status = "VALUATION_BASIS_UNVERIFIED"
                 except (KeyError, ValueError, InvalidOperation):
                     status = "VALUATION_BASIS_UNVERIFIED"
@@ -314,20 +339,35 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
             "repayment_threshold": _critical(lower, denominator, review.threshold, complete),
         }
     btc_risk, btc_hits = _risk(btc_rules, btc_amount, denominator, btc_complete)
+    if scenario is not None:
+        for details in issuer_rows.values():
+            details["scenario_risk_status"] = details.pop("risk_status")
+            details["scenario_policy_hits"] = details.pop("policy_hits")
+            details["policy_hits"] = []
+        btc_scenario = {"scenario_risk_status": btc_risk, "scenario_policy_hits": btc_hits} if scenario[2] else {}
+        btc_hits = []
+    else:
+        btc_scenario = {}
     result = {
         "snapshot_id": view["snapshot_id"], "snapshot_sha256": projection.snapshot_sha256,
         "snapshot_at": view["captured_at"], "evaluated_at": at.isoformat(), "expires_at": expires_at,
         "policy_reference": reference.model_dump(), "issuer_mapping_version": VERSION,
         "classification_sha256": digest(classified_assets) if classified_assets is not None else None,
-        "denominator_cny": denominator, "status": "CONDITIONAL_RISK" if denominator is None else "DIAGNOSTIC",
+        "denominator_cny": denominator, "status": "CONDITIONAL_RISK" if denominator is None else "DIAGNOSTIC" if scenario is None else "SCENARIO_ONLY",
         "issues": sorted(coverage_issues | ({"DENOMINATOR_UNVERIFIED", *projection.policy_assets.issues}
                                             if denominator is None else set())),
         "unknown_coverage": not complete, "unresolved_principal_cny": unknown_cny if denominator is not None else None,
         "issuers": issuer_rows, "etfs": etfs,
         "btc": {"known_spot_cny": btc_amount, "known_lower_bound_pct": _percent(btc_amount, denominator),
-                "risk_status": btc_risk, "policy_hits": btc_hits, "unknown_coverage": not btc_complete},
+                "risk_status": btc_risk if scenario is None else "SCENARIO_ONLY", "policy_hits": btc_hits,
+                "unknown_coverage": not btc_complete, **btc_scenario},
         "execution_authorized": False,
     }
+    if scenario is not None:
+        result["basis"] = "SCENARIO_ONLY"
+        if scenario[1] is not None and not scenario[2]:
+            for details in issuer_rows.values():
+                details["illustrative_lower_bound_pct"] = _percent(details["known_lower_bound_cny"], scenario[1])
     if observations:
         result["etf_observation"] = project_observations(
             observations, at=at, snapshot_at=view["captured_at"], denominator=denominator,

@@ -21,7 +21,7 @@ def settings(path,prepare_path):
         e1_db_path=str(path),e1_enable_writes=True,prepare_config=str(prepare_path))
 
 
-def test_original_18_tools_plus_one_policy_read_without_business_or_e1_writes(active,tmp_path,monkeypatch):
+def test_existing_tools_plus_policy_read_and_transition_without_writes(active,tmp_path,monkeypatch):
     e1=ThesisStore(tmp_path/'e1'/'synthetic.sqlite',7);e1.init();migrate_monitoring(e1)
     token=tmp_path/'synthetic-token';token.write_text('TEST_ONLY_'+'x'*32);token.chmod(0o600)
     config=tmp_path/'synthetic-prepare.json';config.write_text(json.dumps({'base_url':'http://127.0.0.1:9','token_file':str(token)}));config.chmod(0o600)
@@ -35,8 +35,8 @@ def test_original_18_tools_plus_one_policy_read_without_business_or_e1_writes(ac
                 original={t.name for t in (await c.list_tools()).tools}
         async with Client(create_server(settings(e1.path,config)),mode='legacy') as c:
             tools={t.name:t for t in (await c.list_tools()).tools}
-            assert len(original)==22 and len(tools)==23
-            assert set(tools)-original=={'get_investment_policy_context'}
+            assert len(original)==22 and len(tools)==24
+            assert set(tools)-original=={'get_investment_policy_context', 'simulate_portfolio_transition'}
             tool=tools['get_investment_policy_context']
             assert tool.annotations.read_only_hint and not tool.annotations.destructive_hint
             assert 'database_path' not in str(tool.input_schema) and 'portfolio_id' not in str(tool.input_schema)
@@ -167,3 +167,56 @@ print(json.dumps({"ok": True, "result": {k: v for k, v in os.environ.items()
         assert "WEALTHPILOT_ETF_OWNER_PRIVATE_KEY" not in received
     finally:
         client.close()
+
+
+def test_transition_mcp_uses_readonly_frozen_worker(tmp_path, monkeypatch):
+    import sqlite3
+
+    from app.asset_views import VERSION, PIPELINE
+    from backend.services.investment_policy.contracts import digest
+    from tests import test_policy_integration as policy_fixtures
+
+    monkeypatch.setattr(policy_fixtures, "POLICY", policy_fixtures.POLICY.replace(b"SYN1", b"AAPL"))
+    active = policy_fixtures.active.__wrapped__(tmp_path, monkeypatch)
+    db = tmp_path / "mock-frozen.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE wealth_snapshots(id INTEGER, portfolio_id INTEGER, analysis_request_id TEXT, payload_json TEXT)")
+        frozen = dict(schema_version=VERSION, pipeline=PIPELINE, state="ready", snapshot_id="asset-view:v1:1",
+            captured_at="2001-01-01T15:00:00+00:00", portfolio_id=7, data_quality={},
+            views={"get_manual_wealth_items": {"items": []}})
+        conn.execute("INSERT INTO wealth_snapshots VALUES(1,7,'TEST_ONLY',?)", (json.dumps(frozen),))
+    db.chmod(0o400)
+    config = tmp_path / "read-only.json"
+    config.write_text(json.dumps({"database_path": str(db), "portfolio_id": 7}))
+    config.chmod(0o600)
+    cfg = settings(None, None)
+    cfg.e1_db_path = cfg.prepare_config = None
+    cfg.e1_enable_writes = False
+    cfg.real_config = str(config)
+    policy_before = active[0].path.read_bytes()
+    db_before = db.read_bytes()
+    payload = dict(snapshot_id=frozen["snapshot_id"], snapshot_sha256=digest(frozen),
+        policy_bundle_sha256=context(7)["policy_reference"]["bundle_sha256"],
+        paths={"A": [{"label": "Blocked transfer", "actions": [{
+            "kind": "TRANSFER_CASH", "action_id": "test", "cash_ref": "position:1", "amount": "5",
+            "fee": "0", "outcome": "FAILED", "assumption": "TEST_ONLY fixture",
+            "destination_account": "account_test", "destination_currency": "CNY", "destination_per_source": "1",
+        }]}]})
+
+    async def run():
+        async with Client(create_server(cfg), mode="legacy") as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            transition = tools["simulate_portfolio_transition"]
+            assert transition.annotations.read_only_hint and not transition.annotations.open_world_hint
+            result = await client.call_tool(transition.name, {"request": payload})
+            assert not result.is_error, result.content
+            value = result.structured_content or json.loads(result.content[0].text)
+            assert value["schema_version"] == "wealthpilot.portfolio-transition.v1"
+            assert value["paths"]["A"][0]["concentration"]["status"] == "CONDITIONAL_RISK"
+            assert value["paths"]["A"][1]["actions"][0]["blocked_reason"] == "SCENARIO_ACTION_FAILED"
+            assert not value["execution_authorized"]
+            rejected = await client.call_tool(transition.name, {"request": {**payload, "snapshot_sha256": "9"*64}})
+            assert rejected.is_error and "SCENARIO_SNAPSHOT_BINDING_MISMATCH" in str(rejected.content)
+
+    asyncio.run(run())
+    assert db.read_bytes() == db_before and active[0].path.read_bytes() == policy_before

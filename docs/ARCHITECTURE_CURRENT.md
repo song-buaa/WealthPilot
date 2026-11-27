@@ -331,3 +331,20 @@ S3 META权益资格候选沿原[method_applicability](../backend/services/market
 ## L1质量样本与评测（开发候选）
 
 研究执行及不可变完整原件继续归PositionJobs/PositionStore；Research Evaluation仅拥有受限原请求、原件引用、报告版本与追加评分/反馈，存于同一私有边界的独立有界文件目录。MCP复用原访问控制；native/Reader/client draft/human-reported final分开留证。不持有资产、E1、政策或交易权威，不修改公开Job/report版本。容量满仅停归档，不停研究。[数据/权限/发布合同](L1_RESEARCH_EVALUATION.md)。
+
+## 4.4 D 多阶段模拟（候选）
+
+D 读取同一 Portfolio 下既有 U1 快照，验证 U1 内容摘要和现役 ACTIVE Policy Bundle 摘要。每条路径从同一冻结基准复制计算。请求稿和本次评估各有独立摘要，评估摘要绑定评价时点和 ETF 证据。结果只存在于请求内存。四个动作可顺序组合出卖入现金、换仓、跨账户到账、偿债和失败路径。客户端声明属于假设，不能签发 Owner 证据。
+
+| 合同 | 含义 |
+| --- | --- |
+| `paths.A`、`paths.B` | 独立的有序阶段，每个阶段有一个或多个动作；`B` 可省略 |
+| `amount`、`fee` | 原币主单位的十进制字符串；售出费从收到的现金扣除，其他费用与支出之和不得超可用现金 |
+| `cash_ref` | U1 的 `position:<id>`、据实排除的还贷储备 `wealth:<id>`，或前序动作生成的 `action:<id>` |
+| `destination_per_source` | 目标币每一单位原币的到账假设，与冻结估值 FX 分开；在途留在单一资金批次，下一阶段可对该批次显式假设到账 |
+| `external_cashflow` | `SALARY_CASHFLOW_REPAY`，只减少指定贷款；工资结余独立于投资分母 |
+| `scenario_policy_hits` | 合格冻结基准的反事实越线。正式 `policy_hits` 保持空。真实分母 UNKNOWN 时仅给条件性金额及明确假设的研究比例 |
+
+D 保留买入失败或未结算现金原有归属。跨账户转移限冻结 Portfolio 账户。买入 MVP 支持有据的美元标的，保留原可信身份。假设买入 ETF 增加可得的观察性敞口，新头寸缺独立估值时不会提升正式 ETF 下限。未知尾部不赋零。净资产仅在总体财富有据时计算。临界净偿债额依赖敞口、估值、费用和其他资金流不变。
+
+Web 现有政策工作台复用同一只读模拟入口，支持编辑阶段输入及 A/B 并排显示。MCP 私有 Worker 与原 PEER 工具委托 AllocationService；无需新 U1、同步、模型或交易。A3 后使用真实 Owner/U1 和 ACTIVE 绑定验收，并继续保留隔离的合成 S0—S3 金样。

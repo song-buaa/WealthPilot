@@ -251,3 +251,38 @@ test('409 shows only conditional ETF amounts from the pinned policy', async ({ p
   await expect(page.getByRole('region', { name: 'ETF 观察性敞口' })).toContainText('条件性金额')
   await expect(page.getByRole('region', { name: '发行人集中度' })).toHaveCount(0)
 })
+
+test('D previews both paths from a frozen 409 baseline without other writes', async ({ page }) => {
+  const writes: string[] = []
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() !== 'GET') writes.push(path)
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64), issues: [] } } })
+    } else if (path === '/api/allocation/simulate-transition') {
+      const body = route.request().postDataJSON()
+      expect(body.snapshot_sha256).toBe('a'.repeat(64))
+      expect(body.policy_bundle_sha256).toBe('f'.repeat(64))
+      expect(Object.keys(body.paths)).toEqual(['A', 'B'])
+      const stage = { label: 'S1', investment_assets_cny: null, liabilities_cny: '150',
+        newly_breached_issuers: [], allocation: {}, concentration: {}, cash: {}, actions: [] }
+      await route.fulfill({ json: { basis: 'ILLUSTRATIVE_ASSUMPTION', paths: {
+        A: [stage], B: [{ ...stage, cash: { 'action:sale': {
+          account: 'account_fixture', currency: 'USD', amount: '100', state: 'UNSETTLED' } } }],
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('多阶段资产修复模拟', { exact: true }).click()
+  await page.getByRole('button', { name: '载入可编辑的 A/B 示例' }).click()
+  await page.getByRole('button', { name: '运行模拟' }).click()
+  await expect(page.getByText('假设基准 · 研究结果')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '路径 A' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '路径 B' })).toBeVisible()
+  await expect(page.getByText(/action:sale.*UNSETTLED/)).toBeVisible()
+  expect(writes).toEqual(['/api/allocation/simulate-transition'])
+})

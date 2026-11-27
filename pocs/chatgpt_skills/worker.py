@@ -21,6 +21,9 @@ from app.analysis_runtime import policy, budget_context, ENV_KEYS as TIME_ENV_KE
 from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
 SAFE_ERRORS |= ASSET_ERRORS
+from backend.services.allocation_scenarios import TRANSITION_REJECTION_CODES
+SAFE_ERRORS |= TRANSITION_REJECTION_CODES | {"POLICY_VERSION_CONFLICT", "POLICY_CONTEXT_UNAVAILABLE",
+                                             "CONCENTRATION_POLICY_BINDING_MISMATCH"}
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
 SAFE_ERRORS |= HISTORY_ERRORS
 SAFE_ERRORS |= {"S3_RESEARCH_UNAVAILABLE", "S3_ARTIFACT_UNAVAILABLE", "S3_ARCHIVE_INVALID", "S3_SYNTHETIC_SOURCE_REQUIRED"}
@@ -250,6 +253,13 @@ def main():
                                 result['concentration'] = read_frozen_concentration(
                                     config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
                                     config.get('database_contract_path') if config else None)
+                    elif operation == "simulate_portfolio_transition":
+                        from backend.services.allocation_service import read_frozen_transition
+                        from backend.services.allocation_scenarios import TransitionRequest
+                        if not config:
+                            raise ValueError("ASSET_VIEW_NOT_READY")
+                        result = read_frozen_transition(config["database_path"], config["portfolio_id"],
+                            TransitionRequest.model_validate(a), config.get("database_contract_path"))
                     elif operation == "capture_asset_view" and args.frozen_database:
                         from pocs.chatgpt_skills.asset_view import capture
                         import socket

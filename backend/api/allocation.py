@@ -18,7 +18,9 @@ from app.allocation.types import (
     DeviationSnapshot,
     DisciplineCheckResult,
 )
+from backend.services.allocation_scenarios import TransitionRejected, TransitionRequest
 from backend.services.allocation_service import (
+    read_frozen_transition,
     classify_asset,
     compute_increment_plan,
     compute_initial_plan,
@@ -61,6 +63,33 @@ def api_snapshot(snapshot_id: str | None = None) -> dict:
             raise HTTPException(409, detail=code) from None
         raise  # Unknown defects retain a 500; do not disclose arbitrary text.
     return snapshot.model_dump()
+
+
+@router.post("/simulate-transition")
+def api_simulate_transition(request: TransitionRequest) -> dict:
+    """Simulate against one explicitly selected private U1. No writes or refresh."""
+    import os
+
+    from app.asset_views import ERRORS
+    from app.database import DB_PATH
+    from backend.services.investment_policy.parser import PolicyError
+
+    try:
+        return read_frozen_transition(DB_PATH, state.portfolio_id, request,
+                                      os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+    except PolicyError as exc:
+        code = str(exc)
+        if code in {"POLICY_VERSION_CONFLICT", "POLICY_SCOPE_MISMATCH"}:
+            raise HTTPException(409, detail=code) from None
+        if code == "POLICY_CONTEXT_UNAVAILABLE" or code.startswith("CONCENTRATION_"):
+            raise HTTPException(503, detail=code) from None
+        raise
+    except TransitionRejected as exc:
+        raise HTTPException(409, detail=str(exc)) from None
+    except ValueError as exc:
+        if str(exc) in ERRORS:
+            raise HTTPException(409, detail=str(exc)) from None
+        raise
 
 
 @router.get("/deviation")
