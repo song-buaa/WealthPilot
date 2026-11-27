@@ -1114,10 +1114,10 @@ export interface Position {
   currency?: string
   quantity?: number
   cost_price?: number | null
-  current_price?: number
-  market_value_cny: number
+  current_price?: number | null
+  market_value_cny: number | null
   original_currency?: string   // USD / HKD / CNY
-  original_value?: number      // 原始货币金额
+  original_value?: number | null      // 原始货币金额
   fx_rate_to_cny?: number
   profit_loss_value?: number | null   // 盈亏金额（人民币）
   profit_loss_rate?: number | null    // 盈亏百分比

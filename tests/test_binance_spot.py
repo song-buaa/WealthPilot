@@ -111,7 +111,7 @@ class Source:
         self.fills = [fill()]
         self.error = None
         self.peg = "1"
-        self.price_age = 0
+        self.price_age = 0.25
 
     def transport(self, path, query, headers):
         pairs = dict(parse_qsl(query))
@@ -137,7 +137,7 @@ class Source:
             price = "100000" if pair == "BTCUSDT" else self.other_prices.get(pair)
             if price is None:
                 return 400, {}, b'{"code":-1121}'
-            data = [dict(a=1, p=price, q="0.001", T=now-self.price_age*1000)]
+            data = [dict(a=1, p=price, q="0.001", T=now-int(self.price_age*1000))]
         elif path == "/api/v3/myTrades":
             data = [r for r in self.fills if r["id"] >= int(pairs["fromId"])][:1000]
         else:
@@ -204,7 +204,7 @@ def test_balances_history_unknown_cost_and_fixed_consumers(context):
         assert db.query(HistoryEvent).count() == 1
 
 
-@pytest.mark.parametrize("problem", ["empty", "partial", "account", "duplicate", "permission", "rate", "malformed", "price"])
+@pytest.mark.parametrize("problem", ["empty", "partial", "account", "duplicate", "permission", "rate", "malformed"])
 def test_failure_preserves_last_good_and_reports_unsupported(context, problem):
     from app.models import Position
     from services.broker_sync.models import PositionSnapshotRun
@@ -227,8 +227,6 @@ def test_failure_preserves_last_good_and_reports_unsupported(context, problem):
         source.error = (429, dict(code=-1003))
     elif problem == "malformed":
         source.balances[0]["free"] = "NaN"
-    elif problem == "price":
-        source.price_age = 301
     with pytest.raises(ValueError):
         publish(c, source)
     with c.sessions() as db:
@@ -455,24 +453,38 @@ def test_environment_configuration_uses_existing_owner(context, monkeypatch):
     assert source.calls == []
 
 
-def test_rate_and_permission_failure_do_not_import_partial_history(context):
+def test_history_rate_limit_publishes_new_balance_without_unproven_history(context):
     from backend.services.portfolio_history.models import HistoryEvent
     from app.models import Position
-    c = context
+    from services.broker_sync.models import PositionSnapshotRun
+
     source = Source()
-    publish(c, source)
+    publish(context, source)
     source.fills.append(fill(1))
+    source.balances[1]["free"] = "70"
     original = source.transport
+
     def fail_history(path, query, headers):
         if path == "/api/v3/myTrades":
             return 429, {"Retry-After": "100"}, b'{"code":-1003}'
         return original(path, query, headers)
+
     source.transport = fail_history
-    with pytest.raises(ValueError, match="RATE_LIMITED"):
-        publish(c, source)
-    with c.sessions() as db:
+    run_id = publish(context, source)
+    with context.sessions() as db:
         assert db.query(HistoryEvent).count() == 1
-        assert db.query(Position).count() == 2
+        assert db.query(Position).filter_by(symbol="USDT:CRYPTO").one().quantity == 90
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        assert meta["complete"] is True
+        assert meta["history_coverage"] == "UNAVAILABLE_FOR_CURRENT_RUN"
+        assert meta["history_reason_code"] == "BINANCE_RATE_LIMITED"
+        assert meta["history_cursor"] == 0
+        assert meta["retry_after_seconds"] == 100
+    source.transport = original
+    publish(context, source)
+    publish(context, source)
+    with context.sessions() as db:
+        assert db.query(HistoryEvent).count() == 2
 
 
 def test_deviation_is_disclosed_without_claiming_actual_usd(context):
@@ -487,7 +499,7 @@ def test_deviation_is_disclosed_without_claiming_actual_usd(context):
         assert quality["currencies"] == ["USDT"]
 
 
-def test_reference_rate_limit_halts_without_followup_or_publish(context):
+def test_reference_rate_limit_halts_followup_and_publishes_verified_inventory(context):
     from services.broker_sync.models import PositionSnapshotRun
     from app.models import Position
     source = Source()
@@ -498,14 +510,17 @@ def test_reference_rate_limit_halts_without_followup_or_publish(context):
             return 429, {'Retry-After': '90'}, b'{"code":-1003}'
         return original(path, query, headers)
     source.transport = limited
-    with pytest.raises(ValueError, match='BINANCE_RATE_LIMITED'):
-        publish(context, source)
+    run_id = publish(context, source)
     assert [p for p, _ in source.calls] == ['/api/v3/time', '/api/v3/account', '/api/v3/ticker/price']
     with context.sessions() as db:
-        assert db.query(Position).count() == 0
-        run = db.query(PositionSnapshotRun).one()
-        assert run.status == 'failed'
-        assert json.loads(run.context_json)['retry_after_seconds'] == 90
+        btc = db.query(Position).filter_by(symbol="BTC:CRYPTO").one()
+        assert btc.quantity == pytest.approx(0.00123457)
+        assert btc.market_value_cny is None
+        run = db.get(PositionSnapshotRun, run_id)
+        assert run.status == 'success'
+        meta = json.loads(run.context_json)
+        assert meta['retry_after_seconds'] == 90
+        assert meta['history_coverage'] == 'UNAVAILABLE_FOR_CURRENT_RUN'
 
 
 def test_enabled_status_before_first_run(context, monkeypatch):
@@ -927,7 +942,7 @@ def test_extra_market_quotes_remain_bounded_and_history_is_btc_only(context):
         source.client().get('/api/v3/aggTrades', {'symbol': 'ETH/USDT'})
 
 
-def test_extra_asset_rate_limit_stops_before_history_and_keeps_last_good(context):
+def test_extra_asset_rate_limit_stops_before_history_and_retains_verified_cash(context):
     from app.models import Position
     source = cash_source()
     publish(context, source)
@@ -940,8 +955,7 @@ def test_extra_asset_rate_limit_stops_before_history_and_keeps_last_good(context
             return 429, {'Retry-After': '120'}, b'{"code":-1003}'
         return original(path, query, headers)
     source.transport = limited
-    with pytest.raises(ValueError, match='BINANCE_RATE_LIMITED'):
-        publish(context, source)
+    publish(context, source)
     assert not any(p == '/api/v3/myTrades' for p, _ in source.calls)
     with context.sessions() as db:
         assert db.query(Position).count() == 3
@@ -989,3 +1003,97 @@ def test_gap_projection_uses_original_portfolio_and_opaque_account_scope(context
     result = read_details(context.db, 7, 'get_investment_details', {'account_ref': selected['account_ref']}, synthetic=True)
     assert result['unvalued_assets'] == [selected]
     assert result['portfolio_summary']['unvalued_assets'] == [selected]
+
+
+@pytest.mark.parametrize(("price_age", "predicate"), [(301, "PRICE_TIME_STALE"), (-1, "PRICE_TIME_FUTURE")])
+def test_btc_unpriced_updates_existing_quantity_and_cash_through_frozen_views(context, price_age, predicate):
+    from app.models import Position
+    from backend.services import portfolio_service
+    from backend.services.portfolio_history.models import HistoryEvent
+    from pocs.chatgpt_skills.asset_view import capture
+    from services.broker_sync.models import PositionSnapshot, PositionSnapshotRun
+    from services.broker_sync.repository import publication_status
+
+    source = Source()
+    publish(context, source)
+    frozen = capture(context.db, 7, {}, synthetic=True)
+    source.balances[0]["free"] = "0.00200000"
+    source.balances[1]["free"] = "61.00"
+    source.fills.append(fill(1, asset="BTC", fee="0.00001000"))
+    source.price_age = price_age
+    run_id = publish(context, source)
+
+    with context.sessions() as db:
+        btc = db.query(Position).filter_by(symbol="BTC:CRYPTO").one()
+        assert btc.quantity == pytest.approx(0.00200001)
+        assert btc.economic_asset_class == "ALTERNATIVE"
+        assert btc.market_value_cny is btc.original_value is btc.current_price is None
+        assert db.query(Position).filter_by(symbol="USDT:CRYPTO").one().quantity == 81
+        assert db.query(HistoryEvent).count() == 2
+        assert db.query(PositionSnapshot).filter_by(run_id=run_id, symbol="BTC:CRYPTO").count() == 0
+        run = db.get(PositionSnapshotRun, run_id)
+        assert publication_status(db, run) == "matched"
+        meta = json.loads(run.context_json)
+        assert meta["complete"] is False
+        [gap] = meta["unvalued_assets"]
+        assert gap["quantity"] == "0.00200001" and gap["locked"] == "1E-8"
+        assert gap["valuation"] == "UNKNOWN" and gap["reason_code"] == predicate
+        assert not gap["last_good_retained"]
+
+    from pocs.chatgpt_skills.analysis import readonly_business_database
+    with readonly_business_database(context.db):
+        web = next(p for p in portfolio_service.get_positions(7)["items"] if p["symbol"] == "BTC:CRYPTO")
+    assert web["quantity"] == pytest.approx(0.00200001)
+    assert web["market_value_cny"] is None
+    view = capture(context.db, 7, {}, synthetic=True)
+    detail = next(i for i in view["views"]["get_investment_details"]["items"] if i["symbol"] == "BTC:CRYPTO")
+    assert detail["quantity"] == web["quantity"]
+    assert detail["market_value_cny"] is detail["symbol_weight_of_investments"] is None
+    selected = next(i for i in view["data_quality"]["security_inputs"] if i["symbol"] == "BTC:CRYPTO")
+    assert selected["quantity"] == web["quantity"]
+    assert selected["market_value_cny"] is None
+    assert view["views"]["portfolio_summary"]["valuation_complete"] is False
+    assert not view["data_quality"]["analysis_eligibility"]["C"]["allowed"]
+    prior = next(i for i in frozen["data_quality"]["security_inputs"] if i["symbol"] == "BTC:CRYPTO")
+    assert prior["quantity"] != web["quantity"] and prior["market_value_cny"] > 0
+
+    source.price_age = 0.25
+    publish(context, source)
+    with context.sessions() as db:
+        assert db.query(HistoryEvent).count() == 2
+        assert db.query(Position).filter_by(symbol="BTC:CRYPTO").one().market_value_cny > 0
+
+
+@pytest.mark.parametrize(("age_ms", "predicate"), [
+    (39, None), (0, None), (-1, "PRICE_TIME_FUTURE"),
+    (300_000, None), (300_001, "PRICE_TIME_STALE"),
+])
+def test_quote_age_uses_binance_clock_and_keeps_strict_window(age_ms, predicate):
+    from backend.services.broker_sync.binance.sync_service import PriceUnavailable
+
+    local_ms = 1_795_795_021_665
+    server_ms = local_ms + 608
+    execution_ms = server_ms - age_ms
+
+    def transport(path, query, headers):
+        if path == "/api/v3/time":
+            return 200, {}, json.dumps({"serverTime": server_ms}).encode()
+        assert path == "/api/v3/aggTrades"
+        return 200, {}, json.dumps([{"p": "60000", "T": execution_ms}]).encode()
+
+    client = BinanceReadonlyClient(CONFIG, transport=transport, clock=lambda: local_ms / 1000)
+    client.server_time()
+    service = BinanceSyncService(CONFIG, client=client)
+    service.metadata["asset_price_times"] = {}
+    if predicate:
+        with pytest.raises(PriceUnavailable) as error:
+            service._price("BTC")
+        assert error.value.predicate == predicate
+        assert not service.metadata["asset_price_times"]
+    else:
+        price, trade = service._price("BTC")
+        assert price == Decimal("60000")
+        assert trade["T"] == execution_ms
+        proof = service.metadata["asset_price_times"]["BTC:CRYPTO"]
+        assert proof["age_at_validation_ms"] == age_ms
+        assert proof["price_time_basis"] == "last_trade"

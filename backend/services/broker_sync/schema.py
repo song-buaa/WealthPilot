@@ -68,8 +68,8 @@ class Position(BaseModel):
     cost_basis: Decimal | None = Field(..., description="持仓总成本 = quantity * avg_cost")
 
     # ===== 行情 =====
-    current_price: Decimal
-    market_value: Decimal
+    current_price: Decimal | None
+    market_value: Decimal | None
     currency: Literal["USD", "HKD", "CNH", "CNY", "JPY", "SGD", "USDT"]
 
     # ===== 盈亏(原币种,不做汇率换算)=====
