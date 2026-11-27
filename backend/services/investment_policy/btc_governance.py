@@ -2,7 +2,7 @@
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, localcontext
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -133,14 +133,46 @@ class ValuedFact(Contract):
         return value
 
 
+CapitalId = Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
+CnyAmount = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
+Sleeve = Literal["LONG_TERM", "STRATEGY", "OTHER"]
+
+
 class Position(ValuedFact):
     asset: Literal["BTC", "USDT", "OTHER"]
-    sleeve: Literal["LONG_TERM", "STRATEGY", "OTHER"]
+    sleeve: Sleeve
+    capital_id: CapitalId | None = None
+
+
+class Funding(ValuedFact):
+    # Owner-assigned identity of a disjoint capital slice, stable across
+    # views. A strategy cash position may represent this same balance.
+    capital_id: CapitalId | None = None
+    sleeve: Literal["LONG_TERM", "STRATEGY"] | None = None
 
 
 class OpenOrder(ValuedFact):
     side: Literal["BUY", "SELL"]
     funding_id: str | None = None
+    sleeve: Sleeve | None = None
+
+
+class StrategyBudgetEvidence(Contract):
+    """Owner-verified authorization and reconciliation at the valuation clock.
+
+    Refs identify the approval and the ownership/balance receipt. Deployable
+    CNY includes cash reserved for buy orders. Occupied principal is ledger
+    capital, independent of marked BTC value. Funding keys are capital IDs,
+    not display or transport row IDs. Values are only the deployable portion.
+    """
+    as_of: datetime
+    authorization_ref: CapitalId
+    ownership_ref: CapitalId
+    authorized_cny: CnyAmount
+    occupied_principal_cny: CnyAmount
+    remaining_deployable_cny: CnyAmount
+    position_ids: frozenset[CapitalId]
+    funding_balances_cny: dict[CapitalId, CnyAmount]
 
 
 class ExposureEvidence(Contract):
@@ -151,9 +183,10 @@ class ExposureEvidence(Contract):
     funding_complete: bool
     orders_complete: bool
     positions: tuple[Position, ...] = ()
-    uninvested_funding: tuple[ValuedFact, ...] = ()
+    uninvested_funding: tuple[Funding, ...] = ()
     open_orders: tuple[OpenOrder, ...] = ()
     strategy_budget_cny: Decimal | None = None
+    strategy_budget_evidence: StrategyBudgetEvidence | None = None
 
     @model_validator(mode="after")
     def evidence_clock(self):
@@ -174,6 +207,50 @@ def _qualified_unique(rows):
             if len(values) == 1 and next(iter(values)).qualified}, complete
 
 
+def _funding_qualified(evidence, positions, funds):
+    by_capital = {row.capital_id: row for row in funds.values()}
+    if len(by_capital) != len(funds) or any(
+        row.capital_id is None or row.sleeve is None for row in funds.values()
+    ):
+        return False
+
+    # A deployable slice cannot already be invested or owned by the other
+    # sleeve. A same-sleeve USDT view is the cash backing, not another input.
+    strategy_positions = frozenset(row.identity for row in positions.values() if row.sleeve == "STRATEGY")
+    position_capital: set[str] = set()
+    for row in positions.values():
+        if row.capital_id is None:
+            if funds or strategy_positions:
+                return False
+            continue
+        if row.capital_id in position_capital:
+            return False
+        position_capital.add(row.capital_id)
+        funding = by_capital.get(row.capital_id)
+        if funding is None:
+            continue
+        if (row.asset != "USDT" or row.sleeve != funding.sleeve
+                or row.value_cny < funding.value_cny):
+            return False
+
+    strategy_funds = {row.capital_id: row.value_cny for row in funds.values() if row.sleeve == "STRATEGY"}
+    budget = evidence.strategy_budget_evidence
+    if not strategy_positions and not strategy_funds and budget is None:
+        # Zero explicitly represents no strategy allocation in this inventory.
+        return evidence.strategy_budget_cny == 0
+
+    return (
+        budget is not None
+        and budget.as_of == evidence.as_of
+        and budget.authorized_cny > 0
+        and budget.authorized_cny == evidence.strategy_budget_cny
+        and budget.position_ids == strategy_positions
+        and budget.funding_balances_cny == strategy_funds
+        and sum(strategy_funds.values()) == budget.remaining_deployable_cny
+        and budget.occupied_principal_cny + budget.remaining_deployable_cny <= budget.authorized_cny
+    )
+
+
 def exposure_diagnostic(evidence: ExposureEvidence):
     """Combine independently qualified, common-clock CNY facts without portfolio reads."""
     positions, pos_ok = _qualified_unique(evidence.positions)
@@ -186,16 +263,18 @@ def exposure_diagnostic(evidence: ExposureEvidence):
         zero = Decimal(0)
         btc = [row for row in positions.values() if row.asset == "BTC"]
         actual = sum((row.value_cny for row in btc), zero)
+        extra_ok = extra_ok and _funding_qualified(evidence, positions, funds)
         additional = sum((row.value_cny for row in funds.values()), zero)
         reservations = defaultdict(Decimal)
         for row in orders.values():
             if row.side == "SELL":
                 continue
-            if row.funding_id is not None:
+            funding = funds.get(row.funding_id)
+            if funding is not None and row.sleeve == funding.sleeve:
                 reservations[row.funding_id] += row.value_cny
             else:
                 extra_ok = False
-        if any(key not in funds or amount > funds[key].value_cny for key, amount in reservations.items()):
+        if any(amount > funds[key].value_cny for key, amount in reservations.items()):
             extra_ok = False
         possible = actual + additional if actual_ok and extra_ok else None
         denom = evidence.denominator_cny if evidence.denominator_qualified and evidence.denominator_cny else None
