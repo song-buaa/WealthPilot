@@ -290,10 +290,26 @@ def test_e_candidate_uses_actual_mcp_worker_and_private_e1(tmp_path, monkeypatch
             assert all(archived_input[key] == value for key, value in bound.items())
             assert not saved["execution_authorized"] and not readback["risk_events"]
 
+            # Publish a second TEST_ONLY receipt after the executed E fixture
+            # confirmation. The F tool reads through the actual read-only IPC.
+            latest = {**source,"snapshot_id":"asset-view:v1:2","captured_at":datetime.now(timezone.utc).isoformat()}
+            db.chmod(0o600)
+            with sqlite3.connect(db) as connection:
+                connection.execute("INSERT INTO wealth_snapshots VALUES(2,7,'TEST_ONLY',?)", (json.dumps(latest),))
+            db.chmod(0o400)
+            before_f = (db.read_bytes(), e1.path.read_bytes())
+            req = {"snapshot_id":latest["snapshot_id"],"snapshot_sha256":digest(latest)}
+            reviewed = await call("get_portfolio_review_followups", {"reconciliation":req})
+            assert reviewed["decision_revision_ref"] == "e-mcp-demo:1"
+            assert reviewed["checkpoints"][0]["observation_status"] == "COVERAGE_UNKNOWN"
+            assert reviewed["checkpoints"][0]["actions"][0]["execution"]["status"] == "EVIDENCE_PENDING"
+            assert await call("get_portfolio_review_followups", {"reconciliation":req}) == reviewed
+            assert before_f == (db.read_bytes(), e1.path.read_bytes())
+
         config.write_text(json.dumps({"database_path":str(db),"portfolio_id":8}))
         async with Client(create_server(cfg), mode="legacy") as client:
             wrong = await client.call_tool("get_portfolio_review_followups", {"source":bound})
             assert wrong.is_error and "E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH" in str(wrong.content)
 
     asyncio.run(run())
-    assert (db.read_bytes(), policy.path.read_bytes()) == before
+    assert policy.path.read_bytes() == before[1]

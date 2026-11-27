@@ -212,5 +212,10 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 ### 4.4 E 组合风险和人工决定（隔离候选）
 
 - 原 E1 私有 Owner 承载组合风险与人工决定。使用 `investment_thesis/portfolio.py` 和 `portfolio_store.py` 区分组合对象、单标 Thesis 及 Review，复用私有 SQLite、ResearchBridge、幂等与不可变历史。
-- Web `/api/allocation/governance`，MCP 组合预览/确认/待办及 PEER 只读待办共用后端。D 的完整原始依据和当期真实 B/C 分别冻结，检查点为计划。正式例外尚不可启用，F 对账未开始。
+- Web `/api/allocation/governance`，MCP 组合预览/确认/待办及 PEER 只读待办共用后端。D 的完整原始依据和当期真实 B/C 分别冻结，检查点为计划。正式例外尚不可启用，F 隔离复核见下节。
 - [组合治理合同与隔离迁移](ARCHITECTURE_CURRENT.md#44-e-组合人工治理隔离候选)。验收见 `tests/test_e_portfolio_governance.py`、MCP policy 协议及 Web policy-boundary。
+
+### 4.4 F 实际执行复核（隔离候选）
+
+- [F 复核服务](../backend/services/investment_thesis/reconciliation.py) 复用 E 归档、已有 U1、Portfolio、Wealth、Trade History 和原 Trade/Sync，分别输出状态观察与执行证明。当前政策与风险继续由 B/C 权威计算。
+- Web 组合复核及 MCP/PEER 原 `get_portfolio_review_followups` 扩展共用只读服务。测试用 [S0–S5 冻结闭环](../tests/test_f_portfolio_reconciliation.py)，生产启用和真实组合验收独立授权。

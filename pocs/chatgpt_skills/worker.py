@@ -21,7 +21,10 @@ from app.analysis_runtime import policy, budget_context, ENV_KEYS as TIME_ENV_KE
 from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
 from backend.services.investment_thesis.portfolio_sources import PORTFOLIO_SOURCE_ERRORS
-SAFE_ERRORS |= ASSET_ERRORS | PORTFOLIO_SOURCE_ERRORS
+SAFE_ERRORS |= ASSET_ERRORS | PORTFOLIO_SOURCE_ERRORS | {
+    "E1_PORTFOLIO_ORDER_LINK_OUTSIDE_PLAN", "E1_PORTFOLIO_NEWER_SNAPSHOT_REQUIRED",
+    "E1_PORTFOLIO_DECISION_NOT_FOUND", "E1_PORTFOLIO_SCENARIO_ARCHIVE_MISMATCH", "E1_RECORD_NOT_FOUND",
+}
 from backend.services.allocation_scenarios import TRANSITION_REJECTION_CODES
 SAFE_ERRORS |= TRANSITION_REJECTION_CODES | {"POLICY_VERSION_CONFLICT", "POLICY_CONTEXT_UNAVAILABLE",
                                              "CONCENTRATION_POLICY_BINDING_MISMATCH"}
@@ -254,6 +257,18 @@ def main():
                                 result['concentration'] = read_frozen_concentration(
                                     config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
                                     config.get('database_contract_path') if config else None)
+                    elif operation == "portfolio_reconciliation":
+                        from backend.services.investment_thesis.portfolio_access import require_isolation
+                        from backend.services.investment_thesis.reconciliation import reconcile_portfolio
+                        from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+                        from backend.services.investment_thesis.store import ThesisStore
+
+                        require_isolation()
+                        if not config or config.get("portfolio_id") != args.portfolio_id:
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        e1 = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), args.portfolio_id)
+                        result = reconcile_portfolio(e1, config["database_path"],
+                            ReconciliationRequest.model_validate(a), config.get("database_contract_path"))
                     elif operation == "portfolio_governance_sources":
                         from backend.services.investment_thesis.portfolio_access import require_isolation
                         from backend.services.investment_thesis.portfolio_contracts import PortfolioPreviewRequest, PortfolioSourceRequest

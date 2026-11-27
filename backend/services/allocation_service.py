@@ -215,19 +215,19 @@ def project_frozen_concentration(portfolio_id, view):
     return _conditional_concentration(portfolio_id, view, session, reason)
 
 
-def _conditional_concentration(portfolio_id, view, session, reason):
+def _conditional_concentration(portfolio_id, view, session, reason, *, at=None, etf_inputs=None):
     from backend.services.investable_assets import project_investable_assets
     from backend.services.investment_policy.concentration_adapter import allocation_concentration
     from backend.services.investment_policy.contracts import digest
     from backend.services.investment_policy.store import clock, utc_now
 
-    at = clock(utc_now())
+    at = at or clock(utc_now())
     projection = project_investable_assets(view, portfolio_id=portfolio_id, snapshot_id=view["snapshot_id"],
                                             snapshot_sha256=digest(view), at=at)
     # A failed Allocation qualification cannot be promoted by the research view.
     projection = projection.model_copy(update={"status": "UNKNOWN"})
     result = allocation_concentration(view, projection=projection, session=session,
-                                      at=at, classified_assets=None)
+                                      at=at, classified_assets=None, etf_inputs=etf_inputs)
     result["issues"] = sorted(set(result["issues"]) | {reason, "DENOMINATOR_UNVERIFIED"})
     result["assumptions"] = ["EXISTING_FROZEN_SOURCE_ONLY", "NO_QUALIFIED_DENOMINATOR",
                              "OBSERVED_AMOUNTS_DO_NOT_PROVE_PORTFOLIO_RISK"]
