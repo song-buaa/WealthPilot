@@ -1273,7 +1273,20 @@ def execute_compare_company_pool(**kwargs):
     return run_company_pool(**kwargs)
 
 
+def execute_simulate_portfolio_transition(*, request):
+    """PEER preview with server-owned database and portfolio binding."""
+    import os
+
+    from app import state
+    from app.database import DB_PATH
+    from backend.services.allocation_scenarios import TransitionRequest
+    from backend.services.allocation_service import read_frozen_transition
+    return read_frozen_transition(DB_PATH, state.portfolio_id, TransitionRequest.model_validate(request),
+                                  os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+
+
 TOOL_EXECUTORS = {
+    "simulate_portfolio_transition": execute_simulate_portfolio_transition,
     "compare_company_pool": execute_compare_company_pool,
     "assess_position_evidence": execute_assess_position_evidence,
     "fetch_holdings":             execute_fetch_holdings,

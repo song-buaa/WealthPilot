@@ -128,7 +128,7 @@ def _gap(amount, base, target):
             'amount_gap_cny': str(difference) if base else None}
 
 
-def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id, snapshot_sha256, denominator):
+def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id, snapshot_sha256, denominator, scenario=False):
     """Qualify the existing B3 calculation using the verified PolicyService context."""
     candidate = hierarchy["strategic_review"]
     if (not isinstance(snapshot, SnapshotV2) or hierarchy["status"] != "QUALIFIED"
@@ -167,6 +167,14 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
     rule = next(rule for rule in snapshot.rules if rule.rule_id == "allocation.deviation")
     hits = [node for node, target in nodes.items()
             if abs(totals[node] - base * Fraction(target)) > base * Fraction(rule.threshold)]
+    if scenario:
+        return {
+            **candidate,
+            "basis": "SCENARIO_ONLY",
+            "status": "SCENARIO_REVIEW_THRESHOLD_HIT" if hits else "NO_SCENARIO_RULE_TRIGGERED",
+            "scenario_hit_classes": hits,
+            "triggered_classes": [],
+        }
     identity = dict(policy_reference=reference.model_dump(), snapshot_sha256=snapshot_sha256,
                     rule_id=candidate["rule_id"])
     return {
