@@ -1,5 +1,8 @@
 """Read original History and Trade/Sync, keeping plan references separate from proof."""
 from datetime import timezone
+import re
+
+from backend.services.execution_batch.trusted_instruments import TRUSTED_INSTRUMENTS
 
 from .snapshot_delta import decimal, instant, symbol_key, ZERO
 
@@ -99,20 +102,32 @@ def execution_for_trade(links, evidence, action_id, key, side, amount_native, st
             or symbol_key(order["symbol"], currency) != symbol):
         return {"status": "COVERAGE_UNKNOWN", "issue": "ORDER_OWNER_LISTING_OR_SIDE_UNVERIFIED"}
     confirmed = []
-    seen = set()
+    seen, identities = set(), set()
+    trusted = next((row for row in TRUSTED_INSTRUMENTS.values()
+                    if f"{row.local_symbol}:LSE" == symbol and row.currency == currency), None)
     for row in evidence["history"]:
         if row["kind"] != "EXECUTION" or row.get("local_order_id") != order_id:
             continue
         executed_at = instant(row.get("executed_at"))
         qty, price, multiplier = (decimal(row.get(field)) for field in ("quantity", "price", "multiplier"))
+        native_key, security_type = row.get("instrument_key"), row.get("sec_type")
+        listing_identity = f"listing:{row.get('symbol')}:{currency}:{security_type}"
+        original_listing = native_key == listing_identity
+        known_contract = isinstance(native_key, str) and re.fullmatch(r"conid:[1-9][0-9]*", native_key)
+        valid_native_identity = (native_key == f"conid:{trusted.con_id}" if trusted
+                                 else bool(original_listing or known_contract))
         if (row.get("account_ref") != order["history_account_ref"] or row.get("broker") != order["broker"]
                 or row.get("currency") != currency or symbol_key(row.get("symbol"), currency) != symbol
                 or row.get("side") != side or row.get("time_precision") != "instant"
                 or not executed_at or not start <= executed_at < end or not qty or not price or not multiplier
-                or not row.get("evidence_sources") or row["external_id"] in seen):
+                or not row.get("evidence_sources") or row["external_id"] in seen
+                or security_type not in {"STK", "ETF"} or multiplier != 1 or not valid_native_identity):
             # Any contradictory relevant fill prevents exact plan proof.
             return {"status": "COVERAGE_UNKNOWN", "issue": "LINKED_EXECUTION_EVIDENCE_CONFLICT"}
         seen.add(row["external_id"])
+        identities.add((native_key, security_type))
+        if len(identities) > 1:
+            return {"status": "COVERAGE_UNKNOWN", "issue": "LINKED_EXECUTION_NATIVE_IDENTITY_CONFLICT"}
         confirmed.append({"execution_ref": row["external_id"], "instrument_key": row["instrument_key"],
                           "executed_at": executed_at.isoformat(), "quantity": qty, "gross_native": qty*price*multiplier,
                           "source": row["source"], "evidence_sources": row["evidence_sources"]})
