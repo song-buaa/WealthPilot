@@ -221,6 +221,16 @@
           "accession": "0001193125-26-259830",
           "locator": "8-K Items 1.01 and 3.03; Exhibits 4.3–4.6 and 5.1–5.2",
           "sha256": "0564227c40214d75adafe3247980d853f2baaeb04f48f18de073beafbcfb4ff3"
+        },
+        "eur_notes": {
+          "accession": "0001193125-26-449835",
+          "locator": "8-K completed post-quarter unsecured financing in EUR",
+          "sha256": "c04091929e533f45b7219cd81a406b72585bc6699f724fbbcec0f9c68b881d23"
+        },
+        "cad_notes": {
+          "accession": "0001193125-26-475973",
+          "locator": "8-K completed post-quarter unsecured financing in CAD",
+          "sha256": "1138ef7a10b85e5941a5b61d4a65414ab75ce9d7dd10b6ae492a6293d1acdf1c"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_CLASS_C_AFTER_ENTITLEMENT_BRIDGE",
@@ -276,7 +286,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-27T16:05:00Z",
       "valuation_blocker": "CLASS_C_Q4_EPS_AND_FORWARD_PREFERRED_ENTITLEMENTS_UNQUALIFIED",
       "entitlement_evidence": {
         "source_labels": [
@@ -1105,6 +1115,24 @@
           "url": "https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1",
           "visible_context_sha256": "5ba565574eed961c28b1dd3b44dee6e4b6b6e4d7475acb7771863e12ff05958a",
           "summary": "Current issuer IR visible context checked for company-specific filings and operating changes; no long-run forecast assumed."
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "6ef777cbf8450f72cbee578c44a4432484344651d766a38f76bb063b186ab4ec",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526027207/0001193125-26-027207.txt"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "59690f25c80996ae9195963717b8dbdfe388be7b9b3c4a158b1e20077da8337c",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526191507/0001193125-26-191507.txt"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "d5bf29b45bc42bf81154ac3adb2f33c0f003d1633e7ce5fc36f306072c9806b6",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323632/0001193125-26-323632.txt"
         }
       ],
       "annual_eps_snapshots": {

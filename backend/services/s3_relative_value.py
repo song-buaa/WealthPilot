@@ -12,6 +12,7 @@ from backend.services import quality_valuation_research as archive
 from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERSION, policy_target_identity
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
+from backend.services.s3_equity_bridges import ALPHABET_METHOD
 
 VERSION = 's3-relative-value.fixed-endpoint.v1.1'
 METHOD = 'backend/services/s3_relative_value.py'
@@ -92,6 +93,14 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0001067983.json',earliest,cutoff)
         check_identity(symbol,directory,sub,profile,cutoff)
         return listed_close(root,entry,symbol,profile['shares_as_of'],earliest,cutoff)
+    if card.get('valuation_method') == ALPHABET_METHOD:
+        review = require_review_clock(card['holder_equity_bridge']['reviewed_at'],cutoff)
+        sub = source(root,entry['submissions'],'https://data.sec.gov/submissions/CIK0001652044.json',earliest,cutoff)
+        issuer, _, _ = identity_projection(symbol,directory,sub)
+        if issuer['cik'] != '0001652044' or issuer['sec_ticker'] != 'GOOG':
+            raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
+        check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
+        return listed_close(root,entry,symbol,'2026-10-21',earliest,cutoff)
     reviewed = registry(relative=payload['professional_context'].get('relative_policy',False))['companies'][symbol]
     sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK'+reviewed['cik']+'.json',
                  earliest, cutoff)
@@ -227,7 +236,11 @@ def rank_comparisons(cards, request):
     engine._rank(cohort + [c for c in cards if not c['scenarios']], request)
     for card in cards:
         if card.get('scenarios') and card.get('holder_return_scope') == holder.BOUNDED:
-            engine._sensitivity_qualification(card)
+            if card.get('sensitivity_method') == 'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE':
+                card['sensitivity_qualification'] = dict(status='METHOD_SPECIFIC',
+                    computed_count=sum(bool(v.get('result')) for v in card['sensitivity']))
+            else:
+                engine._sensitivity_qualification(card)
             card.update(group=None, rank=None, rank_reason=card['holder_return_scope_reason'])
             for key in ('relative_return','tie_reason','classification_reasons'):
                 card.pop(key, None)
@@ -361,6 +374,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             observation = qualify_price(root, manifest, payload, card, cutoff, live=live)
             if card.get('nonoperating_asset_stress'):
                 card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
+            if card.get('nonoperating_materiality'):
+                card['nonoperating_materiality']['status'] = 'HISTORICAL_MATERIALITY_AT_ORIGIN'
             old_price = engine.dec(card['cross_checks']['observed_price']['values']['observed_price'])
             price = engine.dec(observation['price'])
             required = engine.dec(card['assumptions']['required_return'])
@@ -382,6 +397,13 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                 ['JOINT_STRESS_RETURN_THRESHOLD_CROSSING' if complete else 'JOINT_SENSITIVITY_INCOMPLETE'])
             values = [engine.dec(x['conditional_value']) for x in card['scenarios'].values()]
             card['conditional_value_range'] = [engine.text(min(values)), engine.text(max(values))]
+            if card.get('valuation_method') == ALPHABET_METHOD:
+                bridge = card['holder_equity_bridge']
+                base = bridge['components']['base']
+                bridge['base_required_operating_ev_usd_m'] = engine.text(
+                    engine.dec(card['scenarios']['base']['required_terminal_price_after_cash']) *
+                    engine.dec(base['forecast_shares_m']) - engine.dec(base['net_bridge_usd_m']))
+
             # Current quotes are distinct from price-dependent comparisons in the parent.
             if card.get('cash_return_contract'):
                 observation['decision_at'] = cutoff.isoformat()
@@ -389,7 +411,7 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
                 card['current_operating_earnings_multiple'] = engine.text(
                     price / engine.dec(card['operating_earnings_bridge']['earnings_per_b']))
-            else:
+            elif card.get('valuation_method') != ALPHABET_METHOD:
                 eps = engine.dec(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm'])
                 card['current_pe'] = engine.text(price / eps)
             card['price_qualification'] = dict(observation, eps_interval_start=card['price_qualification']['eps_interval_start'])
@@ -407,6 +429,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                 card['holder_return_scope_reason'] = reason
                 if card.get('nonoperating_asset_stress'):
                     card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
+                if card.get('holder_equity_bridge'):
+                    card['holder_equity_bridge']['status'] = 'HISTORICAL_HOLDER_ECONOMICS_NOT_REQUALIFIED'
                 if card.get('economic_claim_states'):
                     card['economic_claim_states']['reuse_status'] = 'HISTORICAL_TERMS_NOT_REVALIDATED'
                 if card.get('enterprise_research'):

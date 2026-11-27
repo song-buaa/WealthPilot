@@ -115,3 +115,27 @@ A price refresh never re-collects a full dossier or rewrites the schedule.
 A complete holder cohort gets formal ranks and pairwise stress. Bounded cards
 retain their conditional numbers without a mixed-scope rank. Archived artifacts
 use their original method version when source hashes differ.
+
+### Holder scope and incremental issuer value bridges
+
+Complete qualification uses reviewed ordinary-holder economic scope, source
+hashes and a separately evidenced residual envelope when relevant. Residuals
+are tested in decision space against the return threshold, cautious downside
+and relative comparison, without a fixed asset percentage. Historical
+transaction-scale sensitivity alone cannot supply a bounded residual envelope.
+
+MSFT uses issuer-reconciled quarterly OpenAI-adjusted EPS and the matched
+after-tax TTM earnings adjustment. Azure/royalty operating economics remain.
+A separate exit stress uses public transaction scales without inferring a
+realizable value from the as-converted stake. It retains the ordinary cash
+schedule and withholds full qualification pending the material cash waterfall.
+
+GOOG maps the existing operating EV to a conditional Class C value using the
+September balance snapshot, the two verified EUR/CAD financing events,
+implied cash retention, explicit tax/liquidity recoveries, ordinary share
+change and unadjusted preferred conversion. It excludes unavailable capped
+call offsets and does not treat unused ATM as realized proceeds. Withheld
+full status is specific to the unresolved hedge and financing residual.
+The Class C path requires a qualified listed close and no historical EPS
+substitute. Price-only replay verifies the issuer and filing clock again
+and reuses the fixed terminal bridge and its cash schedule.

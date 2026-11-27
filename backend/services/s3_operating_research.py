@@ -316,11 +316,11 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
         if professional_context.get('relative_policy'):
             from backend.services.s3_relative_profiles import BOOK
             from backend.services.s3_relative_value import METHOD, endpoint, listed_close, rank_comparisons, relative_stress
-            from backend.services import s3_holder_returns, s3_multimethod
+            from backend.services import s3_holder_returns, s3_multimethod, s3_equity_bridges
             from backend.services import s3_berkshire_research as berkshire
             methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
                         BOOK, METHOD, berkshire.CODE,
-                        'backend/services/instruments/issuers.py', s3_holder_returns.CODE, s3_multimethod.CODE, s3_multimethod.BOOK)
+                        'backend/services/instruments/issuers.py', s3_holder_returns.CODE, s3_multimethod.CODE, s3_multimethod.BOOK, s3_equity_bridges.CODE)
             result['quality_dossier'] = professional_context['quality_dossier']
             for index, card in enumerate(result['cards']):
                 if card['symbol'] == 'BRK.B:US':

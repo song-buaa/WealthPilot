@@ -102,3 +102,28 @@ def test_preferred_conversion_rounds_each_share_and_exercises_middle_band():
     cases = state['converted_shares_by_hypothetical_vwap']['A']
     assert [c['unadjusted_common_per_preferred'] for c in cases] == ['2.8160','2.3810','2.2520']
     assert cases[1]['unadjusted_common_shares']=='22917125.00000000'
+
+
+def test_economic_scope_uses_evidence_and_decision_materiality_not_ticker():
+    card = dict(symbol='UNRELATED:US',cash_return_contract={'schedule':[]})
+    profile = dict(sources=['q'],rationale='verified holder scope')
+    ev={'q':{'source_sha256':'q'}}
+    multimethod.qualify_economic_scope(card,profile,ev)
+    assert card['holder_return_scope'] == holder.FULL
+    card['nonoperating_materiality'] = dict(bounded_economic_range=False, decision_threshold_crossed=False)
+    multimethod.qualify_economic_scope(card,profile,ev)
+    assert card['holder_return_scope'] == holder.BOUNDED
+    card['nonoperating_materiality'] = dict(bounded_economic_range=True, decision_threshold_crossed=False,
+        relative_comparison_sensitive=False,cautious_downside_sensitive=False)
+    multimethod.qualify_economic_scope(card,profile,ev)
+    assert card['holder_return_scope'] == holder.FULL
+    multimethod.qualify_economic_scope(card,profile,{})
+    assert card['holder_return_scope'] == holder.BOUNDED
+
+
+def test_required_residual_envelope_cannot_be_omitted():
+    card = dict(symbol='ANY:US', cash_return_contract={'schedule':[]})
+    multimethod.qualify_economic_scope(card,
+        dict(sources=['q'], rationale='requires financial ownership bridge', residual_required=True),
+        {'q':{'source_sha256':'q'}})
+    assert card['holder_return_scope'] == holder.BOUNDED

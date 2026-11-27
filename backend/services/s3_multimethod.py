@@ -1,4 +1,5 @@
 """Reviewed issuer-specific extensions over the existing professional pool."""
+from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 import json
@@ -7,6 +8,7 @@ from backend.services.quality_valuation_research import ROOT
 
 from backend.services.market_data.quality_valuation import dec, stamp, text
 from backend.services.s3_holder_returns import BOUNDED, FULL, UNKNOWN, attach_cash
+from backend.services import s3_equity_bridges as bridges
 
 CODE = 'backend/services/s3_multimethod.py'
 BOOK = 'research_v2/s3_profiles/multimethod-v1.json'
@@ -126,9 +128,17 @@ def apply(cards, dossier, professional_checks, start, end):
 
     for card in cards:
         symbol = card['symbol']
+        profile = profiles.get(symbol,{})
         card['holder_return_scope'] = UNKNOWN
         if not card['scenarios']:
             issuer_dossier = dossier.get(symbol,{})
+            if event := profile.get('owner_declared_cash_event'):
+                proof = next((item for item in issuer_dossier.get('sources',{}).values()
+                    if item.get('source_sha256') == event['source_document_sha256']),None)
+                if proof:
+                    card['observed_dividend'] = dict(event,source=proof,owner_version=profile['owner_source_version'],
+                        scope='DECLARED_ONLY_NOT_AN_ELIGIBLE_OR_PAID_CASH_FLOW')
+
             if claims := equity_components(symbol,issuer_dossier):
                 card['economic_claim_states'] = claims
             if symbol == 'GOOG:US':
@@ -136,26 +146,65 @@ def apply(cards, dossier, professional_checks, start, end):
                 if operating:
                     card['enterprise_research'] = operating
                     card['failure_reason'] = 'GOOG_CLASS_C_ORDINARY_ECONOMIC_BRIDGE_UNQUALIFIED'
+                    scoped_sources = _review_sources(issuer_dossier,profile['holder_bridge'],start)
+                    if scoped_sources:
+                        candidate = deepcopy(card)
+                        if bridges.alphabet_equity(candidate,operating,claims,profile['holder_bridge'],
+                                {**operating['sources'],**scoped_sources},start,end):
+                            candidate['holder_equity_bridge']['reviewed_at'] = operating['reviewed_at']
+                            _set_bounded(candidate,'UNMODELED_CAPPED_CALL_SETTLEMENT_AND_FINANCING_RESIDUAL')
+                            card.update(candidate)
             continue
         if symbol == 'TSLA:US':
             stress = tesla_investment_stress(card,dossier.get(symbol,{}),profiles[symbol],start)
             if stress:
                 card['nonoperating_asset_stress'] = stress
-        card['holder_return_scope'] = BOUNDED
-        card['comparison_status'] = 'BOUNDED_NOT_FORMALLY_COMPARABLE'
+        _set_bounded(card,'LIMITED_OPERATING_VALUE_OR_UNMODELED_MATERIAL_DISTRIBUTION')
         if symbol not in DIVIDEND_ANCHORS:
-            card['holder_return_scope_reason'] = 'LIMITED_OPERATING_VALUE_OR_UNMODELED_MATERIAL_DISTRIBUTION'
             continue
         amount, digest, locator = DIVIDEND_ANCHORS[symbol]
-        proof = next((item for item in professional_checks.get(symbol,{}).get('evidence',[])
-                      if item.get('source_sha256') == digest),None)
+        evidence = bridges.evidence_by_digest(professional_checks.get(symbol,{}))
+        proof = evidence.get(digest)
         if not proof:
-            card['holder_return_scope_reason'] = 'REVIEWED_COMMON_CASH_ANCHOR_UNAVAILABLE'
+            _set_bounded(card,'REVIEWED_COMMON_CASH_ANCHOR_UNAVAILABLE')
             continue
+        if 'adjusted_quarter_sources' in profile:
+            with localcontext() as context:
+                context.prec=34
+                bridges.normalize_openai(card, profile, evidence)
         attach_cash(card, dict(quarterly_usd=amount,locator=locator,source=proof),start,end)
-        if symbol == 'AAPL:US':
-            card['holder_return_scope'] = FULL
-            card['comparison_status'] = 'COMPARABLE'
-            card['holder_return_scope_reason'] = 'LISTED_ORDINARY_OPERATING_EQUITY_AND_ORDINARY_CASH_CONDITIONAL'
-        else:
-            card['holder_return_scope_reason'] = 'NONOPERATING_INVESTMENT_ECONOMICS_UNQUANTIFIED'
+        if card.get('nonoperating_normalization'):
+            card['nonoperating_materiality'] = bridges.investment_materiality(card,profile,start,end)
+        qualify_economic_scope(card,profile.get('closed_ordinary_scope'),evidence)
+
+
+def _set_bounded(card, reason):
+    card.update(holder_return_scope=BOUNDED,comparison_status='BOUNDED_NOT_FORMALLY_COMPARABLE',
+                holder_return_scope_reason=reason)
+
+
+def qualify_economic_scope(card, reviewed_scope, evidence):
+    """Evidence coverage, not the company ticker, controls full qualification."""
+    if (not reviewed_scope or not reviewed_scope.get('sources')
+            or not set(reviewed_scope['sources']) <= evidence.keys()
+            or not card.get('cash_return_contract')
+            or card.get('economic_claim_states')
+            or (reviewed_scope.get('residual_required') and not card.get('nonoperating_materiality'))
+            or (card.get('nonoperating_materiality')
+                and not residual_immaterial(card['nonoperating_materiality']))):
+        _set_bounded(card,'ORDINARY_ECONOMIC_SCOPE_NOT_CLOSED')
+        return
+    card.update(holder_return_scope=FULL,comparison_status='COMPARABLE',
+        holder_return_scope_reason='REVIEWED_ORDINARY_ECONOMIC_SCOPE_CLOSED',
+        reviewed_holder_economic_scope=dict(rationale=reviewed_scope['rationale'],
+            sources=[evidence[d] for d in reviewed_scope['sources']]))
+
+
+
+def residual_immaterial(chart):
+    # Research gates are applied in return space. Illustrative transaction
+    # stresses alone never give a reliable envelope for the actual claim.
+    return (chart.get('bounded_economic_range') is True
+            and chart.get('decision_threshold_crossed') is False
+            and chart.get('relative_comparison_sensitive') is False
+            and chart.get('cautious_downside_sensitive') is False)
