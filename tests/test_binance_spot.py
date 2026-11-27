@@ -619,6 +619,56 @@ def cash_source():
     return source
 
 
+def test_spot_inventory_accepts_single_character_zero_rows_without_quotes(context):
+    from services.broker_sync.models import PositionSnapshotRun
+    from backend.services.portfolio_history.models import HistoryEvent
+
+    source = cash_source()
+    # Eleven synthetic one-character rows, plus numeric and length boundaries.
+    codes = (*"TWGABCDEFX7", "1INCH", "Z" * 20)
+    source.balances.extend(dict(asset=code, free="0.00000000", locked="0.00000000")
+                           for code in codes)
+    source.fills = [fill(asset="T")]
+    run_id = publish(context, source)
+    assert all(path != "/api/v3/aggTrades" for path, _ in source.calls)
+    with context.sessions() as db:
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        assert meta["complete"] is True
+        assert {row["asset"] for row in meta["balance_inventory"]} == {*codes, "BTC", "USDT", "USD"}
+        assert json.loads(db.query(HistoryEvent).one().payload_json)["commission_currency"] == "T"
+
+
+def test_nonzero_short_spot_codes_reuse_quote_unknown_and_last_good(context):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+
+    source = cash_source()
+    source.balances.extend([dict(asset="T", free="2", locked="1"), dict(asset="W", free="1", locked="0")])
+    source.other_prices = {"TUSDT": "5"}
+    publish(context, source)
+    source.other_prices.clear()
+    source.balances[-2]["free"] = "4"
+    run_id = publish(context, source)
+    with context.sessions() as db:
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        assert not meta["complete"]
+        assets = {row["asset"]: row for row in meta["unvalued_assets"]}
+        assert assets["T"]["quantity"] == "5"
+        assert assets["T"]["valuation"] == "UNKNOWN"
+        assert assets["W"]["market_value_cny"] is None
+        assert assets["T"]["last_good_retained"]
+        assert db.query(Position).filter_by(symbol="T:CRYPTO").one().quantity == 3
+
+
+@pytest.mark.parametrize("code", [12, None, "", "t", "Ｔ", "T/USDT", "A" * 21])
+def test_spot_asset_codes_reject_invalid_types_and_characters(code):
+    source = cash_source()
+    source.balances.append(dict(asset=code, free="0", locked="0"))
+    service = BinanceSyncService(CONFIG, client=source.client())
+    with pytest.raises(ValueError, match="BINANCE_RESPONSE_INVALID"):
+        service._balances()
+
+
 def test_account_group_and_native_usd_are_not_key_permissions(context, monkeypatch):
     from app.models import Position
     from services.broker_sync.models import PositionSnapshotRun, PositionSnapshot

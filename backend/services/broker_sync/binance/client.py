@@ -12,6 +12,7 @@ import time
 from urllib import error, parse, request
 
 from backend.core.env import normalized_optional_env
+from . import valid_asset_code
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,7 @@ class BinanceReadonlyClient:
         if "symbol" in params:
             symbol = params["symbol"]
             allowed_symbol = isinstance(symbol, str) and (
-                re.fullmatch(r"[A-Z0-9]{2,20}USDT", symbol) if path == "/api/v3/aggTrades"
+                (symbol.endswith("USDT") and valid_asset_code(symbol[:-4])) if path == "/api/v3/aggTrades"
                 else symbol in {"BTCUSDT", "USDCUSDT"})
             if not allowed_symbol or path == "/api/v3/myTrades" and symbol != "BTCUSDT":
                 raise ValueError("BINANCE_SYMBOL_UNSUPPORTED")
