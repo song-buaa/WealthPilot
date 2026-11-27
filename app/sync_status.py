@@ -67,7 +67,7 @@ def unvalued_source_assets(connection, portfolio_id):
         return []
     rows = connection.execute(text(
         "SELECT account_id, context_json FROM position_snapshot_runs WHERE portfolio_id=:pid "
-        "AND broker='binance' AND sync_source='api' AND status='success' ORDER BY id DESC"),
+        "AND broker='binance' AND sync_source='api' AND status='success' ORDER BY rowid DESC"),
         {"pid": portfolio_id}).mappings()
     import json
     seen, result = set(), []
