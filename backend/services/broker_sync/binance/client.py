@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 import hmac
+import http.client
 import json
 import re
+import ssl
 import time
 from urllib import error, parse, request
 
@@ -17,6 +19,7 @@ class Configuration:
     account_id: str
     api_key: str = field(repr=False)
     api_secret: str = field(repr=False)
+    https_connect_port: int | None = None
 
 
 def configuration():
@@ -29,7 +32,10 @@ def configuration():
     if (not re.fullmatch(r"[1-9][0-9]{0,29}", uid)
             or not all(re.fullmatch(r"[A-Za-z0-9]{16,256}", v) for v in (key, secret))):
         raise ValueError("BINANCE_CONFIGURATION_INVALID")
-    return Configuration(uid, key, secret)
+    port = normalized_optional_env("BINANCE_HTTPS_CONNECT_PORT")
+    if port is not None and (not re.fullmatch(r"[1-9][0-9]{0,4}", port) or int(port) > 65535):
+        raise ValueError("BINANCE_CONNECT_PROXY_INVALID")
+    return Configuration(uid, key, secret, int(port) if port is not None else None)
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -50,6 +56,8 @@ class BinanceReadonlyClient:
         self.retry_after = None
 
     def _send(self, path, query, headers):
+        if self.config.https_connect_port is not None:
+            return self._send_via_connect(path, query, headers)
         # urllib's non-debug transport does not log authenticated request URLs.
         opener = request.build_opener(request.ProxyHandler({}), NoRedirect())
         req = request.Request(self.HOST + path + ("?" + query if query else ""),
@@ -61,6 +69,25 @@ class BinanceReadonlyClient:
             return exc.code, dict(exc.headers), exc.read(65536)
         except (OSError, error.URLError):
             raise ConnectionError("BINANCE_CONNECTION_UNAVAILABLE") from None
+
+    def _send_via_connect(self, path, query, headers):
+        # CONNECT sends only the destination to the local proxy. HTTPSConnection
+        # verifies the official endpoint before sending the signed request.
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        tls.load_default_certs()
+        conn = http.client.HTTPSConnection(
+            "127.0.0.1", self.config.https_connect_port, timeout=6, context=tls,
+        )
+        conn.set_tunnel(parse.urlsplit(self.HOST).hostname, 443)
+        try:
+            conn.request("GET", path + ("?" + query if query else ""), headers=headers)
+            with conn.getresponse() as response:
+                limit = 65536 if response.status >= 300 else 4 * 1024 * 1024
+                return response.status, dict(response.getheaders()), response.read(limit)
+        except (OSError, http.client.HTTPException):
+            raise ConnectionError("BINANCE_CONNECTION_UNAVAILABLE") from None
+        finally:
+            conn.close()
 
     def server_time(self):
         value = self.get("/api/v3/time")
