@@ -85,8 +85,8 @@ def _sync_account(db, broker):
     if broker == "binance":
         from services.broker_sync.binance.client import configuration
         try:
-            config = configuration()
-            return config.account_id if config.portfolio_id == _portfolio_scope(db) else None
+            _portfolio_scope(db)
+            return configuration().account_id
         except ValueError:
             return None
     from core.config import settings

@@ -9,35 +9,27 @@ import re
 import time
 from urllib import error, parse, request
 
-from app.shared_sqlite import private_file
+from backend.core.env import normalized_optional_env
 
 
 @dataclass(frozen=True)
 class Configuration:
-    portfolio_id: int
     account_id: str
     api_key: str = field(repr=False)
     api_secret: str = field(repr=False)
 
 
 def configuration():
-    import os
-    from pathlib import Path
-
-    path = os.environ.get("BINANCE_CONFIG_FILE")
-    if not path or not Path(path).is_absolute():
+    """Consume the existing startup-loaded environment; never open .env here."""
+    values = [normalized_optional_env(name) for name in
+              ("BINANCE_UID", "BINANCE_API_KEY", "BINANCE_API_SECRET")]
+    if not all(values):
         raise ValueError("BINANCE_NOT_CONFIGURED")
-    try:
-        raw = json.loads(private_file(Path(path)).read_text())
-        if (set(raw) != {"portfolio_id", "uid", "api_key", "api_secret"}
-                or type(raw["portfolio_id"]) is not int or raw["portfolio_id"] <= 0
-                or not re.fullmatch(r"[1-9][0-9]{0,29}", str(raw["uid"]))
-                or not all(isinstance(raw[k], str) and re.fullmatch(r"[A-Za-z0-9]{16,256}", raw[k])
-                           for k in ("api_key", "api_secret"))):
-            raise ValueError()
-        return Configuration(raw["portfolio_id"], str(raw["uid"]), raw["api_key"], raw["api_secret"])
-    except (OSError, ValueError, TypeError, KeyError):
-        raise ValueError("BINANCE_CONFIGURATION_INVALID") from None
+    uid, key, secret = values
+    if (not re.fullmatch(r"[1-9][0-9]{0,29}", uid)
+            or not all(re.fullmatch(r"[A-Za-z0-9]{16,256}", v) for v in (key, secret))):
+        raise ValueError("BINANCE_CONFIGURATION_INVALID")
+    return Configuration(uid, key, secret)
 
 
 class NoRedirect(request.HTTPRedirectHandler):

@@ -11,7 +11,7 @@ import pytest
 from backend.services.broker_sync.binance.client import Configuration, BinanceReadonlyClient
 from backend.services.broker_sync.binance.sync_service import BinanceSyncService, trade_events
 
-CONFIG = Configuration(7, "12345", "synthetickey123456", "syntheticsecret123456")
+CONFIG = Configuration("12345", "synthetickey123456", "syntheticsecret123456")
 
 
 def fill(identifier=0, *, buyer=True, asset="USDT", fee="0.1", qty="0.001"):
@@ -255,7 +255,7 @@ def test_identity_costs_and_key_rotation(context):
     with c.sessions() as db:
         row = db.query(Position).filter_by(symbol="BTC:CRYPTO").one()
         ref, identifier = stored_account_ref(7, row), row.id
-    rotated = Configuration(7, CONFIG.account_id, "rotatedkey12345678", "rotatedsecret123456")
+    rotated = Configuration(CONFIG.account_id, "rotatedkey12345678", "rotatedsecret123456")
     assert rotated.account_id == CONFIG.account_id
     assert CONFIG.api_key not in repr(CONFIG) and CONFIG.api_secret not in repr(CONFIG)
     source.config = rotated
@@ -331,20 +331,49 @@ def test_binance_btc_policy_identity_requires_original_owner_attestation():
     assert not _btc_identity(ref, row, quality)
 
 
-def test_disabled_and_private_configuration(tmp_path, monkeypatch):
+@pytest.mark.parametrize("missing", ["BINANCE_UID", "BINANCE_API_KEY", "BINANCE_API_SECRET"])
+def test_missing_environment_configuration(monkeypatch, missing):
     from backend.services.broker_sync.binance.client import configuration
-    monkeypatch.delenv("BINANCE_CONFIG_FILE", raising=False)
-    with pytest.raises(ValueError, match="NOT_CONFIGURED"):
+    for name, value in zip(("BINANCE_UID", "BINANCE_API_KEY", "BINANCE_API_SECRET"),
+                           (CONFIG.account_id, CONFIG.api_key, CONFIG.api_secret)):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(missing, "  ")
+    with pytest.raises(ValueError, match="^BINANCE_NOT_CONFIGURED$"):
         configuration()
-    path = tmp_path / "binance.json"
-    path.write_text(json.dumps(dict(portfolio_id=7, uid=CONFIG.account_id,
-                                   api_key=CONFIG.api_key, api_secret=CONFIG.api_secret)))
-    path.chmod(0o600)
-    monkeypatch.setenv("BINANCE_CONFIG_FILE", str(path))
-    assert configuration() == CONFIG
-    path.chmod(0o644)
-    with pytest.raises(ValueError, match="CONFIGURATION_INVALID"):
+
+
+@pytest.mark.parametrize("field,value", [("BINANCE_UID", "not-a-uid"),
+    ("BINANCE_UID", "0"), ("BINANCE_API_KEY", "bad-key"), ("BINANCE_API_SECRET", "short")])
+def test_invalid_environment_configuration_is_redacted(monkeypatch, field, value):
+    from backend.services.broker_sync.binance.client import configuration
+    for name, credential in zip(("BINANCE_UID", "BINANCE_API_KEY", "BINANCE_API_SECRET"),
+                                (CONFIG.account_id, CONFIG.api_key, CONFIG.api_secret)):
+        monkeypatch.setenv(name, credential)
+    monkeypatch.setenv(field, value)
+    with pytest.raises(ValueError, match="^BINANCE_CONFIGURATION_INVALID$") as caught:
         configuration()
+    assert CONFIG.api_key not in str(caught.value) and CONFIG.api_secret not in str(caught.value)
+
+
+def test_environment_configuration_uses_existing_owner(context, monkeypatch):
+    from backend.services.broker_sync.binance.client import configuration
+    from backend.api import broker_sync
+    for name, value in zip(("BINANCE_UID", "BINANCE_API_KEY", "BINANCE_API_SECRET"),
+                           (CONFIG.account_id, CONFIG.api_key, CONFIG.api_secret)):
+        monkeypatch.setenv(name, value)
+    config = configuration()
+    assert config == CONFIG
+    assert CONFIG.api_key not in repr(config) and CONFIG.api_secret not in repr(config)
+    source = Source()
+    with context.sessions() as db:
+        assert broker_sync._sync_account(db, "binance") == CONFIG.account_id
+        BinanceSyncService(client=source.client()).sync_and_persist(db)
+    source.calls.clear()
+    with context.sessions() as db:
+        db.info["portfolio_id"] = 8
+        with pytest.raises(ValueError, match="ACCOUNT_PORTFOLIO_AMBIGUOUS"):
+            BinanceSyncService(client=source.client()).sync_and_persist(db)
+    assert source.calls == []
 
 
 def test_rate_and_permission_failure_do_not_import_partial_history(context):
@@ -473,3 +502,28 @@ def test_zero_balance_unknown_cost_is_not_economic_exposure():
     state = _build_portfolio_state([row], portfolio_drawdown_pct=0)
     assert state.positions == []
     assert row['profit_loss_rate'] is None
+
+
+@pytest.mark.parametrize('shell_value', [None, '', '   ', 'existing-runtime'])
+def test_binance_reuses_original_dotenv_loader(tmp_path, monkeypatch, shell_value):
+    from backend.core.env import BINANCE_CREDENTIAL_ENV_KEYS, TIGER_CREDENTIAL_ENV_KEYS, load_project_environment
+    from backend.services.broker_sync.binance.client import configuration
+    # Only the explicitly created synthetic file is read; never discover real .env.
+    monkeypatch.delenv('PYTHON_DOTENV_DISABLED', raising=False)
+    for key in TIGER_CREDENTIAL_ENV_KEYS:
+        monkeypatch.setenv(key, '')
+    expected = ('12345', 'synthetickey123456', 'syntheticsecret123456')
+    path = tmp_path / '.env'
+    path.write_text(''.join(k + '=' + v + '\n' for k, v in zip(BINANCE_CREDENTIAL_ENV_KEYS, expected)))
+    for key, value in zip(BINANCE_CREDENTIAL_ENV_KEYS, expected):
+        if shell_value is None:
+            monkeypatch.setenv(key, '')  # Track dotenv's later direct os.environ writes for teardown.
+            monkeypatch.delenv(key)
+        elif shell_value == 'existing-runtime':
+            monkeypatch.setenv(key, value + '9')
+        else:
+            monkeypatch.setenv(key, shell_value)
+    load_project_environment(path)
+    result = configuration()
+    assert (result.account_id, result.api_key, result.api_secret) == (
+        tuple(v + '9' for v in expected) if shell_value == 'existing-runtime' else expected)
