@@ -11,7 +11,7 @@ import subprocess
 from .colocated import configured_store
 from .configuration import from_snapshot
 from .contracts import canonical, digest, parse_snapshot
-from .fast_release import fast_store_identity, preview, publish
+from .fast_release import _candidate_content, _verify_receipts, fast_store_identity, preview, preview_content, publish
 from .formal_publisher import CONSUMERS, PolicyPublisher
 from .parser import PolicyError
 from .publish_cli import private_artifact
@@ -135,6 +135,27 @@ def _backup(store, directory, candidate):
     return {"status": "VERIFIED_CONSISTENT_BACKUP", "sha256": manifest["sha256"]}
 
 
+def _operator_approval(trust, candidate, reference):
+    """The protected operator checks the real PO record before signing."""
+    argv = trust.get("approval_command")
+    if (not isinstance(argv, list) or not argv or any(not isinstance(x, str) for x in argv)
+            or not Path(argv[0]).is_absolute()):
+        raise PolicyError("TRUSTED_APPROVAL_OPERATOR_NOT_CONFIGURED")
+    request = {key:candidate[key] for key in ("contract","operation","environment","scope","store_identity")}
+    request |= {"candidate_sha256":digest(candidate), "approval_id":reference}
+    try:
+        process = subprocess.run(argv, input=canonical(request).encode(), capture_output=True,
+                                 check=True, timeout=30)
+        response = _json(process.stdout)
+        approval, signature = response["approval"], response["signature"]
+        if approval["approval_id"] != reference:
+            raise ValueError("approval reference")
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError) as exc:
+        raise PolicyError("TRUSTED_APPROVAL_OPERATOR_REJECTED") from exc
+    return approval, signature
+
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True)
@@ -145,16 +166,22 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     status = commands.add_parser("status")
     status.add_argument("--config-out")
+    export = commands.add_parser("export-content")
+    export.add_argument("--out", required=True)
     preview_cmd = commands.add_parser("preview")
     selection = preview_cmd.add_mutually_exclusive_group(required=True)
     selection.add_argument("--config")
+    selection.add_argument("--philosophy")
+    preview_cmd.add_argument("--policy")
     selection.add_argument("--rollback-to")
     preview_cmd.add_argument("--out", required=True)
     for name in ("publish", "rollback"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--candidate", required=True)
-        cmd.add_argument("--approval", required=True)
-        cmd.add_argument("--signature", required=True)
+        auth = cmd.add_mutually_exclusive_group(required=True)
+        auth.add_argument("--approval")
+        auth.add_argument("--confirmed-ref")
+        cmd.add_argument("--signature")
     args = parser.parse_args(argv)
 
     store = configured_store(args.db, shared_contract=args.shared_contract)
@@ -172,7 +199,6 @@ def main(argv=None):
         proof = releases[-1].get("policy_config_proof") if releases else None
         if proof and active["status"] == "ACTIVE":
             try:
-                from .fast_release import _verify_receipts
                 trust = _trust(args, store)
                 receipts = _probes(trust, "ACTIVE", proof["candidate"])
                 _verify_receipts(receipts, proof["candidate"], "ACTIVE", active["policy_reference"])
@@ -182,32 +208,69 @@ def main(argv=None):
                 result["consumers"] = receipts
             except (OSError, ValueError, KeyError):
                 result["readback"] = "ACTIVATED_READBACK_PENDING"
+    elif args.command == "export-content":
+        from .external_content import content_only
+        active = PolicyService(store).get_active_policy_context(args.scope)
+        if active["status"] != "ACTIVE":
+            raise PolicyError("ACTIVE_POLICY_REQUIRED")
+        with store.connection() as db:
+            row = db.execute("SELECT philosophy, policy FROM policy_bundles WHERE scope=? AND bundle_id=?",
+                (args.scope, active["policy_reference"]["bundle_id"])).fetchone()
+        for role in ("philosophy", "policy"):
+            _write(f"{args.out}.{role}.md", content_only(bytes(row[role])))
+        result = {"status":"CONTENT_EXPORTED", "from":active["policy_reference"]}
     else:
         trust = _trust(args, store)
         if args.command == "preview":
-            config = _json(private_artifact(args.config)) if args.config else None
-            candidate, sources = preview(publisher, args.scope, config, trust["listings"],
-                                         code_sha=trust["code_sha"], rollback_to=args.rollback_to)
+            if bool(args.philosophy) != bool(args.policy):
+                raise PolicyError("TWO_FROZEN_CONTENT_SOURCES_REQUIRED")
+            if args.philosophy:
+                sources = {"philosophy.md":private_artifact(args.philosophy), "policy.md":private_artifact(args.policy)}
+                candidate = preview_content(publisher, args.scope, tuple(sources.values()), code_sha=trust["code_sha"])
+            else:
+                config = _json(private_artifact(args.config)) if args.config else None
+                candidate, sources = preview(publisher, args.scope, config, trust["listings"],
+                                             code_sha=trust["code_sha"], rollback_to=args.rollback_to)
+            if args.philosophy:
+                with store.connection() as db:
+                    bundle = _candidate_content(store, db, candidate, tuple(sources.values()))
+                _verify_receipts(_probes(trust, "CANDIDATE", candidate, bundle), candidate, "CANDIDATE")
             output = Path(args.out)
-            _write(output, canonical(candidate).encode())
             for name, data in (sources or {}).items():
                 _write(output.with_name(f"{output.name}.{name}"), data)
+            _write(output, canonical(candidate).encode())
             result = {"status": "PREVIEW_ONLY", "candidate_sha256": digest(candidate),
                       "target": candidate["target"], "operation": candidate["operation"],
+                      "source_hashes":candidate.get("source_hashes"), "changes":candidate.get("changes"),
                       "before": candidate["before"], "code_sha": candidate["code_sha"]}
         else:
             candidate = _json(private_artifact(args.candidate))
-            if candidate["operation"] != ("ROLLBACK" if args.command == "rollback" else "PUBLISH_L1"):
+            allowed = {"ROLLBACK"} if args.command == "rollback" else {"PUBLISH_L1", "PUBLISH_L2"}
+            if candidate["operation"] not in allowed:
                 raise PolicyError("EXPLICIT_OPERATION_MISMATCH")
-            approval = _json(private_artifact(args.approval))
-            signature = private_artifact(args.signature).hex()
+            if args.confirmed_ref:
+                if args.signature:
+                    raise PolicyError("AMBIGUOUS_APPROVAL_INPUT")
+                approval, signature = _operator_approval(trust, candidate, args.confirmed_ref)
+            else:
+                if not args.signature:
+                    raise PolicyError("SIGNED_USER_APPROVAL_REQUIRED")
+                approval = _json(private_artifact(args.approval))
+                signature = private_artifact(args.signature).hex()
+            sources = None
+            if candidate["operation"] == "PUBLISH_L2":
+                sources = tuple(private_artifact(f"{args.candidate}.{role}.md") for role in ("philosophy","policy"))
             receipt = publish(publisher, candidate, approval, signature, trust,
                 check_candidates=lambda c,b: _probes(trust, "CANDIDATE", c, b),
                 read_consumers=lambda c: _probes(trust, "ACTIVE", c),
-                backup=lambda c: _backup(store, trust["backup_dir"], c))
-            result = {"status":receipt["status"], "bundle_id":receipt["release"]["bundle_id"],
-                      "recorded_at":receipt["release"]["recorded_at"],
-                      "candidate_sha256":receipt["release"]["request_sha256"],
+                backup=lambda c: _backup(store, trust["backup_dir"], c), sources=sources)
+            release = receipt["release"]
+            result = {"status":receipt["status"], "bundle_id":release["bundle_id"],
+                      "recorded_at":release["recorded_at"], "approval_ref":release["release_approval_ref"],
+                      "approved_at":release["policy_config_proof"]["approval"]["approved_at"],
+                      "release_sequence":release["predecessor_sequence"]+1, "target":candidate["target"],
+                      "source_hashes":candidate.get("source_hashes"),
+                      "candidate_sha256":release["request_sha256"],
                       "reason":receipt.get("reason"), "consumers":receipt.get("consumers", {})}
     print(canonical(result | {"execution_authorized": False}))
     return 2 if result.get("status") == "ACTIVATED_READBACK_PENDING" else 0

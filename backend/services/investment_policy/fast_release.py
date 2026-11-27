@@ -1,4 +1,6 @@
 """One authorized transaction over the original policy tables and release owner."""
+from datetime import timedelta
+import re
 from typing import Literal
 
 from cryptography.exceptions import InvalidSignature
@@ -14,6 +16,7 @@ from .store import clock
 
 HASH = r"^[0-9a-f]{64}$"
 CANDIDATE_VERSION = "wp.policy.fast-release.v1"
+CONTENT_VERSION = "wp.policy.fast-release.v1.1"
 
 
 class Approval(Contract):
@@ -26,6 +29,12 @@ class Approval(Contract):
     approved_by: str
     approved_at: str
     approval_id: str
+
+
+class ContentApproval(Approval):
+    contract: Literal["wp.policy.fast-release.v1.1"]
+    operation: Literal["PUBLISH_L2"]
+
 
 
 def _state(store, db, scope):
@@ -42,7 +51,7 @@ def _state(store, db, scope):
 def _base(store, db, scope, bundle_id):
     row = db.execute("SELECT * FROM policy_bundles WHERE scope=? AND bundle_id=?", (scope, bundle_id)).fetchone()
     base = store._read(row)
-    if base["snapshot"]["schema_version"] != "wp.policy.v2":
+    if base["snapshot"]["schema_version"] not in {"wp.policy.v2", "wp.policy.external.v1"}:
         raise PolicyError("APPROVED_MARKDOWN_POLICY_BASE_REQUIRED")
     bundle = store._bundle(db, scope, bundle_id)
     return parse_snapshot(bundle["snapshot"]), bytes(row["philosophy"]), bytes(row["policy"])
@@ -75,7 +84,7 @@ def verify_config_bundle(store, db, scope, bundle_id, row, value):
 
 
 def _approval(approval, signature, key_hex, expected, *, at):
-    auth = Approval.model_validate(approval)
+    auth = (ContentApproval if expected["operation"] == "PUBLISH_L2" else Approval).model_validate(approval)
     checked = {key: getattr(auth, key) for key in expected}
     if checked != expected or not auth.approved_by.strip() or not auth.approval_id.strip():
         raise PolicyError("APPROVAL_TARGET_MISMATCH")
@@ -148,6 +157,50 @@ def preview(publisher, scope, config, listings, *, code_sha, rollback_to=None):
         return candidate, {"policy.md":markdown, "philosophy.md":ph}
 
 
+def preview_content(publisher, scope, sources, *, code_sha):
+    from .external_content import make_bundle, source_bindings
+    if not re.fullmatch(r"[0-9a-f]{40}", code_sha):
+        raise PolicyError("INSTALLED_CODE_SHA_REQUIRED")
+    store = publisher.store
+    at = publisher.now()
+    with store.connection() as db:
+        head, releases, active = _state(store, db, scope)
+        if not active or any(row["environment"] != publisher.environment or row.get("synthetic")
+                             for row in releases):
+            raise PolicyError("FORMAL_PREDECESSOR_REQUIRED")
+        candidate = dict(contract=CONTENT_VERSION, operation="PUBLISH_L2", change_level="L2",
+            environment=publisher.environment, scope=scope, store_identity=fast_store_identity(store),
+            before=_before(head, releases, active), code_sha=code_sha, created_at=at)
+        source_hashes = dict(zip(("philosophy", "policy"), (digest_bytes(x) for x in sources), strict=True))
+        candidate["bindings"] = source_bindings(parse_snapshot(active["snapshot"]))
+        candidate["request_id"] = "content-" + digest(candidate | {"source_hashes":source_hashes})
+        bundle, changes = make_bundle(store, db, scope, active["bundle_id"], sources,
+            candidate["request_id"], head, at, candidate["bindings"])
+        return candidate | dict(target=_reference(bundle), source_hashes=source_hashes, changes=changes)
+
+
+def digest_bytes(data):
+    from hashlib import sha256
+    return sha256(data).hexdigest()
+
+
+def _candidate_content(store, db, candidate, sources):
+    from .external_content import make_bundle, source_bindings
+    if sources is None:
+        raise PolicyError("FROZEN_CONTENT_SOURCES_REQUIRED")
+    parent = candidate["before"]["active"]["bundle_id"]
+    active = store._bundle(db, candidate["scope"], parent)
+    if candidate["bindings"] != source_bindings(parse_snapshot(active["snapshot"])):
+        raise PolicyError("TARGET_OWNER_BINDING_CHANGED")
+    bundle, changes = make_bundle(store, db, candidate["scope"], parent, sources,
+        candidate["request_id"], candidate["before"]["head"], candidate["created_at"], candidate["bindings"])
+    if (candidate["target"] != _reference(bundle) or candidate["source_hashes"] != bundle["source_hashes"]
+            or candidate["changes"] != changes or candidate["change_level"] != "L2"):
+        raise PolicyError("FROZEN_CONTENT_CANDIDATE_MISMATCH")
+    return bundle
+
+
+
 def semantic_diff(old, new):
     changes = {}
     for key in ("neutral", "etf_internal", "direct_issuer_targets", "unallocated"):
@@ -173,7 +226,7 @@ def _verify_receipts(receipts, candidate, phase, reference=None):
 def verify_config_release(store, db, bundle, release):
     proof = release["policy_config_proof"]
     candidate = proof["candidate"]
-    if (candidate["contract"] != CANDIDATE_VERSION or candidate["target"] != _reference(bundle)
+    if (candidate["contract"] != (CONTENT_VERSION if candidate["operation"] == "PUBLISH_L2" else CANDIDATE_VERSION) or candidate["target"] != _reference(bundle)
             or _identity_keys(candidate) != {k: release[k] for k in ("scope", "environment", "store_identity")}
             or fast_store_identity(store) != candidate["store_identity"]
             or release["action"] != ("ROLLBACK" if candidate["operation"] == "ROLLBACK" else "RELEASE")
@@ -183,6 +236,12 @@ def verify_config_release(store, db, bundle, release):
             or release["request_sha256"] != _sealed_digest(candidate)
             or release["bundle_sha256"] != digest(bundle)):
         raise PolicyError("CONFIG_RELEASE_PROOF_INVALID")
+    if candidate["operation"] == "PUBLISH_L2" and (
+            bundle.get("external_predecessor") != candidate["before"]["active"]["bundle_id"]
+            or bundle["external_bindings"] != candidate["bindings"]
+            or bundle["source_hashes"] != candidate["source_hashes"]
+            or clock(release["recorded_at"]) - clock(candidate["created_at"]) > timedelta(hours=24)):
+        raise PolicyError("EXTERNAL_POLICY_RELEASE_PROOF_INVALID")
     auth = _approval(proof["approval"], proof["signature"], proof["key"], _identity_keys(candidate) | {
         "operation":candidate["operation"], "candidate_sha256":_sealed_digest(candidate)}, at=release["recorded_at"])
     if clock(auth.approved_at) < clock(candidate["created_at"]) or auth.approval_id != release["release_approval_ref"]:
@@ -227,7 +286,7 @@ def _compare_live(publisher, candidate):
     return prior
 
 
-def publish(publisher, candidate, approval, signature, trust, *, check_candidates, read_consumers, backup):
+def publish(publisher, candidate, approval, signature, trust, *, check_candidates, read_consumers, backup, sources=None):
     """Precheck then append DRAFT/VALIDATED/APPROVED/RELEASE in one CAS transaction."""
     store = publisher.store
     if publisher.environment == "PRODUCTION":
@@ -240,10 +299,10 @@ def publish(publisher, candidate, approval, signature, trust, *, check_candidate
     code_sha = trust["code_sha"]
     if (_identity_keys(candidate) != dict(scope=trust["scope"], environment=publisher.environment,
                 store_identity=fast_store_identity(store)) or candidate["code_sha"] != code_sha
-            or candidate["contract"] != CANDIDATE_VERSION
+            or candidate["contract"] != (CONTENT_VERSION if candidate["operation"] == "PUBLISH_L2" else CANDIDATE_VERSION)
             or trust["environment"] != publisher.environment
             or trust["store_identity"] != fast_store_identity(store)
-            or candidate["operation"] not in {"PUBLISH_L1", "ROLLBACK"}):
+            or candidate["operation"] not in {"PUBLISH_L1", "PUBLISH_L2", "ROLLBACK"}):
         raise PolicyError("FAST_RELEASE_INSTALLATION_BINDING_MISMATCH")
     now = publisher.now()
     key = trust["approval_key"]
@@ -251,8 +310,16 @@ def publish(publisher, candidate, approval, signature, trust, *, check_candidate
         "operation":candidate["operation"], "candidate_sha256":_sealed_digest(candidate)}, at=now)
     if auth.approved_by != trust["approved_by"] or clock(auth.approved_at) < clock(candidate["created_at"]):
         raise PolicyError("APPROVAL_SUBJECT_OR_CLOCK_INVALID")
+    if candidate["operation"] == "PUBLISH_L2" and (sources is None or len(sources) != 2 or
+            candidate["source_hashes"] != dict(zip(("philosophy","policy"), map(digest_bytes,sources), strict=True))):
+        raise PolicyError("FROZEN_CONTENT_CANDIDATE_MISMATCH")
     prior = _compare_live(publisher, candidate)
+    if candidate["operation"] == "PUBLISH_L2" and publisher.environment == "PRODUCTION" and not re.fullmatch(
+            r"https://github\.com/song-buaa/WealthPilot/issues/[1-9][0-9]*#issuecomment-[1-9][0-9]*", auth.approval_id):
+        raise PolicyError("FORMAL_APPROVAL_RECORD_REQUIRED")
     if not prior:
+        if candidate["operation"] == "PUBLISH_L2" and clock(now) - clock(candidate["created_at"]) > timedelta(hours=24):
+            raise PolicyError("POLICY_CANDIDATE_EXPIRED")
         scope = candidate["scope"]
         effective_date = clock(now).date()
         if candidate["operation"] == "PUBLISH_L1":
@@ -266,6 +333,9 @@ def publish(publisher, candidate, approval, signature, trust, *, check_candidate
                     raise PolicyError("TARGET_OWNER_BINDING_CHANGED")
                 bundle, _, _ = _make_bundle(store, db, scope, candidate["inputs"], candidate["request_id"],
                                              candidate["before"]["head"], candidate["created_at"])
+        elif candidate["operation"] == "PUBLISH_L2":
+            with store.connection() as db:
+                bundle = _candidate_content(store, db, candidate, sources)
         else:
             bundle = store.read_bundle(scope, candidate["target"]["bundle_id"])
         if candidate["target"] != _reference(bundle):
@@ -281,7 +351,7 @@ def publish(publisher, candidate, approval, signature, trust, *, check_candidate
             if not prior:
                 if _before(head, releases, active) != candidate["before"]:
                     raise PolicyError("STALE_POLICY_CANDIDATE")
-                prior = _commit(publisher, db, candidate, auth, key, signature, evidence, backup_receipt)
+                prior = _commit(publisher, db, candidate, auth, key, signature, evidence, backup_receipt, sources)
     if prior["policy_config_proof"]["approval"] != auth.model_dump() or prior["policy_config_proof"]["signature"] != signature:
         raise PolicyError("APPROVAL_REPLAY_MISMATCH")
     try:
@@ -300,7 +370,7 @@ def publish(publisher, candidate, approval, signature, trust, *, check_candidate
     return dict(status="ACTIVE_READBACK_PASS", release=prior, consumers=receipts)
 
 
-def _commit(publisher, db, candidate, auth, key, signature, evidence, backup_receipt):
+def _commit(publisher, db, candidate, auth, key, signature, evidence, backup_receipt, sources):
     store = publisher.store
     scope = candidate["scope"]
     at = publisher.now()
@@ -319,6 +389,11 @@ def _commit(publisher, db, candidate, auth, key, signature, evidence, backup_rec
         if (base != candidate["inputs"]["base_id"] or candidate["changes"] != semantic_diff(
                 from_snapshot(parse_snapshot(predecessor["snapshot"])), TargetConfig.model_validate(candidate["inputs"]["config"]))):
             raise PolicyError("CANDIDATE_SEMANTIC_DIFF_INVALID")
+    elif candidate["operation"] == "PUBLISH_L2":
+        request_id = candidate["request_id"]
+        bundle = _candidate_content(store, db, candidate, sources)
+        ph, policy = sources
+    if candidate["operation"] != "ROLLBACK":
         db.execute("INSERT INTO policy_bundles VALUES(?,?,?,?,?,?,?,?,?)",
             (scope, head+1, bundle["bundle_id"], request_id, digest(bundle), canonical(bundle), digest(bundle), ph, policy))
         store._append(db, scope, bundle["bundle_id"], "DRAFT", request_id, candidate["created_at"], None)

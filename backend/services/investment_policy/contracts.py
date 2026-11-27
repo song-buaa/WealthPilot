@@ -242,6 +242,10 @@ def parse_snapshot(value) -> Snapshot:
         if isinstance(clauses, dict) and any(
                 "BTC治理合同：" in str(clauses.get(section, "")) for section in ("4.3", "9.3")):
             raise ValueError("BTC_GOVERNANCE_DERIVATIVE_MISSING")
+    if value.get("schema_version") == "wp.policy.external.v1":
+        from .external_content import ExternalBtcSnapshot, ExternalSnapshot
+        model = ExternalBtcSnapshot if "btc_governance" in value else ExternalSnapshot
+        return model.model_validate(value)
     if value.get("schema_version") == "wp.policy.config.v1":
         from .configuration import ConfiguredSnapshot, ConfiguredSnapshotWithBtcGovernance
         model = ConfiguredSnapshotWithBtcGovernance if "btc_governance" in value else ConfiguredSnapshot
