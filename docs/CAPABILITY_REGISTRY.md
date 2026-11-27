@@ -208,3 +208,6 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 - 场景 owner 继续为 `backend/services/allocation_scenarios.py`。原 `ScenarioLeg` 与单标消费保持兼容。D 通过 AllocationService 读取既有 U1、A-min 和同一 ACTIVE PolicyReference，按阶段复用 B3、C 及 ETF 观察投影。
 - Web 使用 `POST /api/allocation/simulate-transition`，MCP 和 PEER 使用 `simulate_portfolio_transition`。阶段动作按明确结算假设处理，金额和费率使用 Decimal。示例与限制见 [当前架构的 D 合同](ARCHITECTURE_CURRENT.md#44-d-多阶段模拟候选)。
 - 合成验收入口为 `tests/test_d_portfolio_transition.py`、MCP Policy 协议与 Web policy-boundary 测试。真实组合验收等待 A3。
+
+
+S3 4.5 Phase 1 policy-scoped relative valuation and fixed-endpoint price revaluation extend the existing Company Pool. Limits, archive lineage and opt-in request contract are in [S3 relative value](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).

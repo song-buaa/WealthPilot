@@ -348,3 +348,6 @@ D 读取同一 Portfolio 下既有 U1 快照，验证 U1 内容摘要和现役 A
 D 保留买入失败或未结算现金原有归属。跨账户转移限冻结 Portfolio 账户。买入 MVP 支持有据的美元标的，保留原可信身份。假设买入 ETF 增加可得的观察性敞口，新头寸缺独立估值时不会提升正式 ETF 下限。未知尾部不赋零。净资产仅在总体财富有据时计算。临界净偿债额依赖敞口、估值、费用和其他资金流不变。
 
 Web 现有政策工作台复用同一只读模拟入口，支持编辑阶段输入及 A/B 并排显示。MCP 私有 Worker 与原 PEER 工具委托 AllocationService；无需新 U1、同步、模型或交易。A3 后使用真实 Owner/U1 和 ACTIVE 绑定验收，并继续保留隔离的合成 S0—S3 金样。
+
+
+S3 4.5 policy-scoped company research uses the read-only ACTIVE Policy Owner and the existing Company Pool Worker. The price revaluation child references the prior professional artifact and preserves its terminal date. See the [Phase 1 contract](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).
