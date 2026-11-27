@@ -67,3 +67,16 @@ def test_recent_filing_clock_fails_closed(day, acceptance, error):
             check_recent_filings(recent, parent_at)
     else:
         check_recent_filings(recent, parent_at)
+
+
+def test_independent_verifier_keeps_card_with_no_quality_evidence(monkeypatch, tmp_path):
+    from scripts import s3_relative_value_verify as verifier
+
+    parent = {'result': {'decision_at': '2026-11-03T10:00:00+00:00',
+                         'cards': [{'symbol': 'UNKNOWN:US', 'scenarios': {}, 'rank': None}]}}
+    child = {'parent_artifact_id': 'parent', 'parent_result_sha256': verifier.digest(parent['result']),
+             'result': dict(parent['result'], original_decision_at=parent['result']['decision_at'],
+                            forecast_endpoint='2031-11-03T10:00:00+00:00',
+                            method_version='s3-relative-value.fixed-endpoint.v1', remaining_years='5')}
+    monkeypatch.setattr(verifier, 'load', lambda path: parent if path.parent.name == 'parent' else child)
+    assert verifier.verify(tmp_path / 'child' / 'bundle.json')['status'] == 'NO_QUALIFIED_CASES'

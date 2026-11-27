@@ -49,7 +49,7 @@ def verify(path):
         ctx.prec = 34
         for card in r['cards']:
             old = original.pop(card['symbol'])
-            assert card['quality'] == old['quality']
+            assert card.get('quality') == old.get('quality')
             if not card['scenarios']:
                 assert card['rank'] is None and 'conditional_value_range' not in card
                 continue
@@ -58,8 +58,9 @@ def verify(path):
             cases = [(a, old['scenarios'][k], card['assumptions']['required_return'])
                      for k,a in card['scenarios'].items()]
             for key in ('sensitivity', 'joint_sensitivity'):
+                assert len(card[key]) == len(old[key])
                 cases += [(a['result'], b['result'], a.get('required_return', card['assumptions']['required_return']))
-                          for a,b in zip(card[key], old[key], strict=True) if a['result']]
+                          for a, b in zip(card[key], old[key]) if a['result']]
             for actual, prior, rate in cases:
                 total = D(prior['terminal_wealth'])
                 assert actual['terminal_wealth'] == prior['terminal_wealth'] and D(actual['dividends_cash']) == 0
