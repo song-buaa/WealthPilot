@@ -2,14 +2,17 @@
 from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
+from http.client import HTTPConnection
 import json
 import os
 from pathlib import Path
 import plistlib
+import socket
 import sqlite3
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -415,17 +418,61 @@ def test_runner_excludes_inherited_credentials_and_disabled_broker_env(shared,mo
     monkeypatch.setenv('OPENAI_API_KEY','synthetic-inherited-secret')
     _,config,environment=web_runner.settings(root)
     assert config['portfolio_id']==7
+    assert config['listen_port']==8790
     assert 'OPENAI_API_KEY' not in environment and 'GUOJIN_GATEWAY_SECRET' not in environment
     assert environment['IBKR_READ_ONLY_MODE']=='true' and environment['ENABLE_IBKR_LIVE_TRADING']=='false'
-    common.write_json(root/'config/web.json',{'revision':release.name,'enabled_brokers':['guojin']})
+    common.write_json(root/'config/web.json',{'revision':release.name,'enabled_brokers':['guojin'],'listen_port':8791})
     common.write_json(root/'config/web-brokers.json',{'GUOJIN_NATIVE_CONFIG':'/private/synthetic-native.json',
         'GUOJIN_ACCOUNT':'fixture-owner','GUOJIN_GATEWAY_SECRET':'synthetic-unused-secret'})
-    _,_,environment=web_runner.settings(root)
+    _,config,environment=web_runner.settings(root)
+    assert config['listen_port']==8791
     assert environment['GUOJIN_NATIVE_CONFIG']=='/private/synthetic-native.json'
     assert environment['GUOJIN_ACCOUNT']=='fixture-owner' and 'GUOJIN_GATEWAY_SECRET' not in environment
     common.write_json(root/'config/web-brokers.json',{'OPENAI_API_KEY':'forbidden'})
     with pytest.raises(ValueError,match='BROKER_ENV_INVALID'):
         web_runner.settings(root)
+
+
+@pytest.mark.parametrize("port", [None, True, "8791", 0, 1023, 65536])
+def test_invalid_web_listen_port_is_refused(port):
+    with pytest.raises(ValueError, match="WEB_LISTEN_PORT_INVALID"):
+        web_deploy.validate_listen_port(port)
+
+
+def test_private_listener_can_coexist_and_refuses_an_occupied_port(web):
+    import uvicorn
+
+    with socket.create_server(("127.0.0.1", 0)) as full_web:
+        occupied_port = full_web.getsockname()[1]
+        with pytest.raises(ValueError, match="WEB_LISTEN_PORT_UNAVAILABLE"):
+            web_runner.open_listener(occupied_port)
+        with web_runner.open_listener(0) as private_web:
+            host, port = private_web.getsockname()
+            assert host == "127.0.0.1" and port != occupied_port
+            app = create_app(*web, factory=fake_service)
+            server = uvicorn.Server(uvicorn.Config(app, proxy_headers=False, log_config=None))
+            thread = threading.Thread(target=server.run, kwargs={"sockets": [private_web]}, daemon=True)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 5
+                while not server.started and thread.is_alive() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert server.started
+                client = HTTPConnection(host, port, timeout=2)
+                try:
+                    client.request("GET", "/api/demo/status", headers={"Origin": f"http://{host}:{port}"})
+                    reply = client.getresponse()
+                    assert reply.status == 200 and json.loads(reply.read())["restricted_web"]
+                    client.request("GET", "/api/demo/status", headers={"Origin": f"http://{host}:{occupied_port}"})
+                    reply = client.getresponse()
+                    assert reply.status == 403
+                    reply.read()
+                finally:
+                    client.close()
+            finally:
+                server.should_exit = True
+                thread.join(timeout=5)
+                assert not thread.is_alive()
 
 
 def test_web_sync_wal_backup_and_web_restart(shared,web):
@@ -523,11 +570,14 @@ def test_ef_production_allowlist_uses_existing_private_web_boundary(web, monkeyp
         else:
             monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", access)
         app = create_app(config, directory, factory=fake_service)
-        with TestClient(app, base_url="http://127.0.0.1:8790") as client:
+        origin = "http://127.0.0.1:8791"
+        with TestClient(app, base_url=origin) as client:
             assert client.get(prefix).status_code == status
             if access is None:
                 continue
             assert client.get(prefix, headers={"host": "host.invalid"}).status_code == 403
             assert client.get(prefix, headers={"origin": "https://host.invalid"}).status_code == 403
+            assert client.post(prefix + "/commit", json={}, headers={"origin": "http://127.0.0.1:8790"}).status_code == 403
+            assert client.get(prefix, headers={"origin": origin}).status_code == 200
             assert client.post("/api/action/orders", json={}).status_code == 404
     assert store.path.read_bytes() == before
