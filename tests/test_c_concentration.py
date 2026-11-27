@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services.investable_assets import project_investable_assets
+from backend.services.investable_assets import ACCOUNT_INVENTORY_MAX_AGE, project_investable_assets
 from backend.services.instruments.etf_holdings import ETFHoldings, ETF_IDENTITIES
 from backend.services.investment_policy.concentration import analyze_concentration
 from backend.services.investment_policy.contracts import digest
@@ -287,7 +287,7 @@ def test_diagnostic_does_not_reach_broker_orders_or_asset_preparation(frozen, ac
 
 def test_older_projection_cannot_carry_expired_position_qualification(frozen, active):
     row = position(frozen, "TSLA:US", 80)
-    row["positions_as_of"] = (AT-timedelta(seconds=299)).isoformat()
+    row["positions_as_of"] = (AT-timedelta(seconds=ACCOUNT_INVENTORY_MAX_AGE-1)).isoformat()
     receipt = project(frozen)
     assert receipt.status == "QUALIFIED"
     assert run(frozen, active, projection=receipt)["expires_at"] == AT+timedelta(seconds=1)

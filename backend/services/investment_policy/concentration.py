@@ -1,7 +1,6 @@
 """C issuer and BTC diagnostics on an already frozen Portfolio and ACTIVE policy."""
 
 from collections import defaultdict
-from datetime import timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 
 from backend.services.instruments.classification import CLASSIFICATION_VERSION
@@ -42,7 +41,7 @@ def _denominator(view, projection, at):
     if (projection.status == "QUALIFIED" and assets.denominator_qualified
             and assets.denominator_cny is not None and assets.denominator_cny > 0
             and evaluated == at
-            and at - captured <= timedelta(minutes=5) and owner
+            and projection.valid_until is not None and at <= projection.valid_until and owner
             and clock(owner["confirmed_at"]) <= captured <= at <= clock(owner["valid_until"])):
         return assets.denominator_cny
     return None
@@ -200,11 +199,7 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
     btc_coverage = coverage.get("btc", {})
     expires_at = None
     if denominator is not None and scenario is None:
-        source_times = [view["captured_at"], scope["as_of"]]
-        source_times += [coverage[key]["as_of"] for key in ("accounts", "manual_assets", "pensions", "gold", "btc", "deduplication")]
-        source_times += [item["account_synced_at"] for item in quality.get("investable_accounts", quality.get("accounts", []))]
-        expires_at = min(clock(quality["investable_owner_evidence"]["valid_until"]),
-                         min(map(clock, source_times)) + timedelta(minutes=5))
+        expires_at = min(clock(quality["investable_owner_evidence"]["valid_until"]), projection.valid_until)
     btc_complete = (denominator is not None and btc_coverage.get("status") in {"ABSENT", "PRESENT"})
     principal = ZERO
     inputs = ((item, rows[item.source_ref], None) for item in projection.assets) if scenario is None else (
@@ -220,9 +215,6 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
             raise ValueError("CONCENTRATION_INVALID_AMOUNT")
         principal += amount
         position = ref.startswith(("position:", "action:"))
-        if expires_at is not None and position:
-            source_field = "cash_as_of" if row.get("vehicle_type") == "CASH" else "positions_as_of"
-            expires_at = min(expires_at, clock(row[source_field]) + timedelta(minutes=5))
         if not amount:
             continue
         assignment = classified_assets.get(ref) if classified_assets is not None else None

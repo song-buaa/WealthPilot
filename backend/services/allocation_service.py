@@ -107,9 +107,11 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             raise error
         evaluated_at = evaluation_at or clock(utc_now())
         owner = view['data_quality'].get('investable_owner_evidence', {})
-        if not owner or clock(owner['valid_until']) < evaluated_at:
+        owner_issue = ('INVESTABLE_OWNER_EVIDENCE_MISSING' if not owner else
+                       'INVESTABLE_OWNER_EVIDENCE_EXPIRED' if clock(owner['valid_until']) < evaluated_at else None)
+        if owner_issue:
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
-                ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
+                ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED', owner_issue,
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
             snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
@@ -118,6 +120,13 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
         session = PolicySession(portfolio_id, assets=projection.policy_assets)
         if session.context.get('policy_reference') != pinned.context.get('policy_reference'):
             raise PolicyError('POLICY_VERSION_CONFLICT')
+        if projection.valid_until is None:
+            reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
+        session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
+            'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
+            'expires_at':min(projection.valid_until, clock(owner['valid_until'])).isoformat(),
+            'owner_evidence_sha256':view['data_quality'].get('investable_owner_evidence', {}).get('sha256'),
+            'issues':projection.policy_assets.issues}
         if not assets_qualified(session, complete=True):
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
         amounts = {k:Decimal(0) for k in ('cash', 'fixed', 'equity', 'alt', 'deriv')}
@@ -172,11 +181,6 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             portfolio_id=portfolio_id, snapshot_sha256=projection.snapshot_sha256, denominator=denominator)
         session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
             at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'], etf_inputs=etf_inputs)
-        session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
-            'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
-            'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),
-            'owner_evidence_sha256':view['data_quality'].get('investable_owner_evidence', {}).get('sha256'),
-            'issues':projection.policy_assets.issues}
         with bind(session):
             session.ensure_current()
             yield session
