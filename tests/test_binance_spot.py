@@ -619,6 +619,107 @@ def cash_source():
     return source
 
 
+def test_cjk_zero_balances_preserve_identifiers_without_quotes(context):
+    from services.broker_sync.models import PositionSnapshotRun
+
+    source = cash_source()
+    source.balances[2].update(free="0.00000000", locked="0.00000000")
+    source.balances.extend(dict(asset=f"FIX{i}", free="0.00000000", locked="0.00000000")
+                           for i in range(881))
+    for index, label in ((742, "合成样本"), (838, "样本")):
+        source.balances[index]["asset"] = label
+    run_id = publish(context, source)
+    assert all(path != "/api/v3/aggTrades" for path, _ in source.calls)
+    with context.sessions() as db:
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        inventory = {row["asset"]: row for row in meta["balance_inventory"]}
+        assert meta["complete"] is True and not meta["unvalued_assets"]
+        assert len(inventory) == 884
+        for label in ("合成样本", "样本"):
+            assert inventory[label]["free"] == inventory[label]["locked"] == "0E-8"
+
+
+def test_nonzero_cjk_balance_preserves_quantity_and_other_holdings(context):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+
+    source = cash_source()
+    source.balances.append(dict(asset="ETH", free="2", locked="0"))
+    source.other_prices = {"ETHUSDT": "5"}
+    publish(context, source)
+    source.balances.pop()
+    source.balances.append(dict(asset="合成样本", free="2.25", locked="0.75"))
+    source.calls.clear()
+    run_id = publish(context, source)
+    assert all(path != "/api/v3/aggTrades" for path, _ in source.calls)
+    with context.sessions() as db:
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        assert meta["complete"] is False and meta["publication_mode"] == "observed_rows"
+        gap = next(x for x in meta["unvalued_assets"] if x["asset"] == "合成样本")
+        assert (gap["free"], gap["locked"], gap["quantity"]) == ("2.25", "0.75", "3.00")
+        assert gap["valuation"] == "UNKNOWN"
+        assert gap["market_value"] is None and gap["market_value_cny"] is None
+        assert {p.symbol for p in db.query(Position)} == {
+            "BTC:CRYPTO", "USDT:CRYPTO", "CASH-USD:US", "ETH:CRYPTO"
+        }
+        assert db.query(Position).filter_by(symbol="ETH:CRYPTO").one().quantity == 2
+
+
+def test_cjk_identifier_remains_invalid_for_quotes_and_history():
+    from backend.services.broker_sync.binance.sync_service import trade_events
+
+    source = cash_source()
+    with pytest.raises(ValueError, match="BINANCE_SYMBOL_UNSUPPORTED"):
+        source.client().get("/api/v3/aggTrades", {"symbol": "样本USDT"})
+    assert not source.calls
+    with pytest.raises(ValueError, match="BINANCE_RESPONSE_INVALID"):
+        trade_events([fill(asset="样本")])
+
+
+@pytest.mark.parametrize("row,field,data_type,predicate,code", [
+    (None, "row", "NoneType", "ROW_NOT_OBJECT", "BINANCE_RESPONSE_INVALID"),
+    ({"free": "0", "locked": "0"}, "asset", "missing", "REQUIRED_FIELD", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "locked": "0"}, "free", "missing", "REQUIRED_FIELD", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": 0, "locked": "0"}, "free", "int", "AMOUNT_NOT_STRING", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": "0", "locked": "PRIVATE"}, "locked", "str", "DECIMAL_PARSE", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": "NaN", "locked": "0"}, "free", "str", "AMOUNT_NOT_FINITE", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": "0", "locked": "-1"}, "locked", "str", "AMOUNT_OUT_OF_RANGE", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": "1e12", "locked": "0"}, "free", "str", "AMOUNT_OUT_OF_RANGE", "BINANCE_RESPONSE_INVALID"),
+    ({"asset": "样本", "free": "0", "locked": "0"}, "asset", "str", "DUPLICATE_IDENTIFIER", "DUPLICATE_SNAPSHOT_IDENTITY"),
+])
+def test_balance_failure_records_only_safe_coordinates(row, field, data_type, predicate, code):
+    source = cash_source()
+    prior_asset = "样本" if predicate == "DUPLICATE_IDENTIFIER" else "合成样本"
+    source.balances.append(dict(asset=prior_asset, free="0", locked="0"))
+    source.balances.append(row)
+    service = BinanceSyncService(CONFIG, client=source.client())
+    with pytest.raises(ValueError, match=f"^{code}$"):
+        service._balances()
+    assert service.metadata == {"balance_validation_error": {
+        "row_index": 4, "field": field, "data_type": data_type, "predicate": predicate,
+    }}
+
+
+def test_balance_failure_persists_diagnostic_and_keeps_last_good(context):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+
+    source = cash_source()
+    good_id = publish(context, source)
+    source.balances[2]["locked"] = "0.000000001"
+    with pytest.raises(ValueError, match="^BINANCE_PRECISION_UNSUPPORTED$"):
+        publish(context, source)
+    with context.sessions() as db:
+        failed = db.query(PositionSnapshotRun).filter_by(status="failed").one()
+        meta = json.loads(failed.context_json)
+        assert meta["balance_validation_error"] == {
+            "row_index": 2, "field": "locked", "data_type": "str", "predicate": "CORE_ASSET_SCALE",
+        }
+        assert "balance_inventory" not in meta
+        assert db.get(PositionSnapshotRun, good_id).status == "success"
+        assert db.query(Position).filter_by(symbol="CASH-USD:US").one().quantity == 33
+
+
 def test_spot_inventory_accepts_single_character_zero_rows_without_quotes(context):
     from services.broker_sync.models import PositionSnapshotRun
     from backend.services.portfolio_history.models import HistoryEvent
@@ -660,7 +761,10 @@ def test_nonzero_short_spot_codes_reuse_quote_unknown_and_last_good(context):
         assert db.query(Position).filter_by(symbol="T:CRYPTO").one().quantity == 3
 
 
-@pytest.mark.parametrize("code", [12, None, "", "t", "Ｔ", "T/USDT", "A" * 21])
+@pytest.mark.parametrize("code", [
+    12, None, "", "t", "Ｔ", "T/USDT", "A" * 21, "样/本", "样\\本", "样\n本",
+    "样\u202e本", "样本A", "㐀", "样" * 21,
+])
 def test_spot_asset_codes_reject_invalid_types_and_characters(code):
     source = cash_source()
     source.balances.append(dict(asset=code, free="0", locked="0"))

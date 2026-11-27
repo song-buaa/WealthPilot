@@ -14,7 +14,7 @@
 
 ## 身份、覆盖和时间
 
-资产代码及成交手续费资产接受 1–20 位 ASCII 大写字母或数字。其他资产的明确零余额保留在原 Run 库存证据中，无需查询报价。
+账户余额标识接受 1–20 位 ASCII 大写字母或数字，或 1–20 个 CJK 基本区汉字（U+4E00–U+9FFF），按原字符串判重。交易对和成交手续费继续使用原 ASCII 规则。其他资产的明确零余额保留在原 Run 库存证据中，无需查询报价。非零中文标识保留数量和原身份，走 UNKNOWN/partial，无交易对请求。余额校验失败时，失败 Run 的 `balance_validation_error` 记录零基行索引、字段、类型与失败谓词，不记录原值。
 
 `BINANCE_UID`为稳定账户身份；Portfolio由原`portfolio_scope()`（共享库合同/原Portfolio配置及Owner）解析，并由原Repository拒绝跨Portfolio账户冲突，不另配Binance专属portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、accountType=SPOT及显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
 

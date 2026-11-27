@@ -229,7 +229,7 @@ class PositionSnapshotRepository:
         meta.update(quality="unavailable", issues=[error_message.split(":",1)[0]])
         if source_metadata:
             meta.update({k:source_metadata[k] for k in ("unsupported_assets", "retry_after_seconds", "unvalued_assets", "balance_inventory",
-                         "account_permission_groups", "permission_semantics")
+                         "account_permission_groups", "permission_semantics", "balance_validation_error")
                          if k in source_metadata})
         run.context_json = json.dumps(meta)
         run.finished_at, run.status = datetime.now(timezone.utc), "failed"
