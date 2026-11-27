@@ -5,6 +5,7 @@ rank owners settle returns/gates. Research inputs are explicit private dossiers;
 no automatic predictions, model calls, holdings, policy, database or network.
 """
 from copy import deepcopy
+from datetime import timedelta
 from decimal import Decimal, localcontext
 from pathlib import Path
 import hashlib
@@ -14,7 +15,7 @@ from pydantic import AwareDatetime, Field, model_validator
 from backend.services import quality_valuation_research as archive
 from backend.services import s3_pool_research as pool
 from backend.services.market_data import quality_valuation as engine
-from backend.services.market_data.financial_research import operating_ttm_bridge
+from backend.services.s3_current_financial import operating_bridge
 
 VERSION='s3-p2.operating-earnings.v1.3'
 STRESS=('-.03', '0', '.03')
@@ -166,6 +167,8 @@ def evaluate(qualified,dossier,assessments,qualification_failures=None):
             symbol=old['symbol']
             try:
                 if qualification_failures is not None:
+                    if symbol in qualification_failures and assessments.get(symbol,{}).get('s3_current_owner'):
+                        raise ValueError(qualification_failures[symbol])
                     if old['comparison_status']!='COMPARABLE':
                         raise ValueError(old.get('failure_reason') or 'P2_PARENT_NOT_COMPARABLE')
                     if symbol in qualification_failures:raise ValueError(qualification_failures[symbol])
@@ -177,7 +180,7 @@ def evaluate(qualified,dossier,assessments,qualification_failures=None):
                 for field in ('revenue','operating_margin','conversion','shares','terminal_pe'):
                     note=profile.notes.get(field)
                     if not note or not set(note.evidence_refs)<=catalog:raise ValueError('P2_ASSUMPTION_EVIDENCE_REJECTED')
-                baseline=operating_ttm_bridge(assessments[symbol])
+                baseline=operating_bridge(assessments[symbol])
                 baselines[symbol]=baseline
                 cards.append(project_card(old,baseline,profile))
             except (ValueError,KeyError,TypeError,ArithmeticError) as exc:
@@ -306,9 +309,50 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
     files={'baseline/bundle.json':parent_path}
     files.update({'baseline/'+name:archive.safe_file(parent_path.parent,name) for name in p['view_hashes']})
     files.update({'baseline/sources/'+name:archive.safe_file(parent_path.parent/'sources',name) for name in p['source_files']})
-    methods=tuple(q['method_files'])+('backend/services/s3_operating_research.py','scripts/s3_operating_verify.py')
+    methods=tuple(dict.fromkeys((*q['method_files'], 'backend/services/s3_operating_research.py',
+        'backend/services/s3_current_financial.py', 'scripts/s3_operating_verify.py')))
     if professional_context is not None:
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
+        if professional_context.get('relative_policy'):
+            from backend.services.s3_relative_profiles import BOOK
+            from backend.services.s3_relative_value import METHOD, listed_close, rank_comparisons, relative_stress
+            from backend.services import s3_berkshire_research as berkshire
+            methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
+                        BOOK, METHOD, berkshire.CODE,
+                        'backend/services/instruments/issuers.py')
+            result['quality_dossier'] = professional_context['quality_dossier']
+            for index, card in enumerate(result['cards']):
+                if card['symbol'] == 'BRK.B:US':
+                    try:
+                        result['cards'][index] = berkshire.build(card, root, manifest, request['decision_at'],
+                            result['quality_dossier'].get(card['symbol'],{}))
+                    except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError) as error:
+                        card['failure_reason'] = pool._error_code(error,'S3_BRK_METHOD_INPUT_UNAVAILABLE')
+            at = engine.stamp(request['decision_at'])
+            for card in result['cards']:
+                symbol = card['symbol']
+                dossier_card = result['quality_dossier'].get(symbol,{})
+                if card['scenarios'] or not dossier_card.get('sources'):
+                    continue
+                if (dossier_card.get('valuation_blocker') and symbol not in
+                        professional_context.get('current_financial_qualification',{})):
+                    card['owner_qualification_reason'] = card['failure_reason']
+                    card['failure_reason'] = dossier_card['valuation_blocker']
+                try:
+                    quote = listed_close(root, manifest['companies'][symbol], symbol, at.date().isoformat(),
+                                         at-timedelta(days=2), at)
+                    card['reference_close'] = dict(quote, scope='LISTED_CLOSE_ONLY_NO_EPS_OR_ENTITLEMENT_QUALIFICATION')
+                except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError):
+                    pass
+            relative_request = pool.PoolRequest.model_validate(request)
+            result['comparable_count'] = rank_comparisons(result['cards'], relative_request)
+            result['not_comparable'] = [dict(symbol=c['symbol'], reason=c['failure_reason'])
+                                        for c in result['cards'] if not c['scenarios']]
+            stress = relative_stress(result['cards'],relative_request)
+            result['relative_stress'] = stress
+            previous_rank = result['ranking']
+            result['ranking'] = {k:v for k,v in previous_rank.items() if k not in ('stable','changes')}
+            result['ranking'].update(stable=stress['stable'], changes_status=stress['status'])
         result['professional_qualification']=professional_context
         result['assumption_profile_version']=professional_context['profile_version']
         result['research_scope']='CURRENT_EVIDENCE_CONDITIONAL_RESEARCH_NOT_VALIDATED_FORECAST'

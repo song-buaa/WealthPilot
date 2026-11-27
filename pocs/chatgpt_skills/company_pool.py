@@ -39,6 +39,8 @@ def register_pool_tools(server, settings, slot, meta, client_class):
         'request.method is optional: standard (default, original P1) or professional (reviewed P2 operating model, initially AAPL/MSFT/NVDA). '
         'Use professional when the user asks for professional company-specific earnings/valuation research; no client growth rates or PE inputs. '
         'Professional assumptions are server-versioned and must requalify current sources/windows; changed or unsupported evidence remains UNKNOWN. '
+        'For the latest ACTIVE US direct-issuer pool set scope=active_us_direct, method=professional, and omit symbols. '
+        'Supply the prior policy-scoped professional parent_artifact_id to reprice its fixed endpoint; no full research fallback. '
         'META original entitlement protection applies to both methods. '
         'Reuses original SEC/Price/Evidence/S3 via existing Skill and isolated Worker. Writes only the private frozen research archive. '
         'Research Only: automatic candidates are assumptions, not verified forecasts or Investment Policy. Preserve UNKNOWN, '
