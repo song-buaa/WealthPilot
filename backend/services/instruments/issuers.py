@@ -135,7 +135,7 @@ def sec_ticker_matches(symbol, ticker_directory):
     return [r for r in ticker_directory.values() if isinstance(r,dict) and r.get('ticker') in {ticker,ticker.replace('.', '-')}]
 
 
-def resolve_sec_issuer(symbol, ticker_directory, submissions):
+def resolve_sec_issuer(symbol, ticker_directory, submissions, *, allow_registration_only=False):
     """Exact official ticker -> CIK -> Submissions identity, never name matching.
 
     Inputs must be read independently by the research source owner from SEC.
@@ -168,13 +168,16 @@ def resolve_sec_issuer(symbol, ticker_directory, submissions):
     forms = set(recent["form"])
     domestic = bool(forms & {"10-K", "10-Q"})
     foreign = bool(forms & {"20-F", "6-K"})
-    if domestic == foreign:
+    registration_only = (allow_registration_only and not domestic and not foreign and ticker == 'ANT'
+                         and 'SEC_CIK_'+cik == ANT_SECURITY['issuer_id']
+                         and {'8-A12B', '424B4', '8-K'} <= forms)
+    if domestic == foreign and not registration_only:
         return None
     registered = sorted({row['ticker'] for row in ticker_directory.values()
                          if isinstance(row, dict) and isinstance(row.get('ticker'), str)
                          and str(row.get('cik_str', '')).zfill(10) == cik})
     return dict(symbol=symbol, issuer_id=IDENTITIES.get((symbol, "USD"), "SEC_CIK_"+cik),
-                cik=cik, name=submissions["name"], issuer_type="foreign_private" if foreign else "domestic",
+                cik=cik, name=submissions["name"], issuer_type=("registration_only" if registration_only else ("foreign_private" if foreign else "domestic")),
                 sec_ticker=ticker, registered_tickers=registered,
                 registered_equity_tickers=registered,  # Legacy key: not a security-type proof.
                 identity_source="https://www.sec.gov/files/company_tickers.json",

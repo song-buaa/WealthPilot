@@ -74,13 +74,36 @@ def _continuous(rows):
     return len(rows)==4 and all(spans) and all(a[1]+timedelta(days=1)==b[0] for a,b in zip(spans,spans[1:]))
 
 
-def build(assessment):
+def build(assessment, *, current=False):
     """All calculations consume unique exact-basis evidence; incomplete stays unknown."""
     symbol=assessment.get('symbol')
     source=[r for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[])
             if r.get('quality')=='valid' and not r.get('is_seed') and not r.get('is_mock') and r.get('symbol')==symbol
             and isinstance(r.get('field'),str) and isinstance(r.get('values'),dict) and stamp(r.get('period'))]
     metrics=[];missing=[]
+    current_window = assessment.get('current_financial') if current else None
+    current_refs = set()
+    if current_window:
+        at = stamp(assessment.get('as_of'))
+        official_slots = {(r['field'],r['period']) for r in source
+                          if r.get('source') == 'official_disclosure' and r.get('scope') == 'quarterly'}
+        for row in current_window.get('vendor_records', []):
+            period, known = stamp(row.get('period')), stamp(row.get('known_at'))
+            if (not at or not period or not known or not period <= known <= at
+                    or row.get('qualification') != 'CURRENT_RESEARCH_ONLY'
+                    or row.get('source') != 'alphavantage' or row.get('symbol') != symbol
+                    or row.get('is_seed') or row.get('is_mock') or not _span(row)):
+                continue
+            if (row['field'],row['period']) in official_slots:
+                comparable = [r for r in source if r.get('source') == 'official_disclosure'
+                              and r['field'] == row['field'] and _same_span(r,row)
+                              and r.get('currency') == row['currency'] and r.get('scope') == 'quarterly'
+                              and r.get('accounting_basis') == row['accounting_basis']]
+                if comparable and any(r['values'][row['field']] != row['values'][row['field']] for r in comparable):
+                    missing.append('AV_OFFICIAL_FIELD_DISAGREEMENT:'+row['field']+':'+row['period'])
+                continue
+            source.append(dict(row, historical_only=(at-period).days>150))
+            current_refs.add(row['record_id'])
     def add(field,value,refs,*,period,currency=None,unit='ratio',details=None):
         if number(value) is None or not math.isfinite(value):return None
         refs=list(dict.fromkeys(refs))
@@ -90,6 +113,8 @@ def build(assessment):
             source_url=None,period=period,data_as_of=period,published_at=None,fetched_at=None,
             values={field:value},currency=currency,unit=unit,evidence_refs=refs,details=details or {},
             historical_only=False,is_seed=False,is_mock=False)
+        if current_refs.intersection(refs):
+            row['qualification']='CURRENT_RESEARCH_ONLY'
         metrics.append(row);return row
     selections=[]
     def document_keys(row):
@@ -150,8 +175,16 @@ def build(assessment):
         elif paired:
             chosen=paired
         return sorted(chosen,key=lambda r:r['record_id'])[0],list(dict.fromkeys(r['record_id'] for r in chosen))
-    current=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
-    latest=current[0] if current else None
+    current_periods=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
+    latest=current_periods[0] if current_periods else None
+    if current_window:
+        latest = current_window.get('latest_period')
+        observed = stamp(latest)
+        at = stamp(assessment.get('as_of'))
+        if (not observed or not at or not 0 <= (at-observed).days <= 150
+                or current_window.get('pending_latest_release')):
+            latest = None
+            missing.append('LATEST_DISCLOSED_FISCAL_PERIOD_UNRESOLVED')
     for field,growth in [('revenue_quarter','revenue_yoy_pct'),('net_income_quarter','net_income_yoy_pct'),
                          ('net_income_attributable_parent_quarter','parent_income_yoy_pct'),
                          ('net_income_available_to_ordinary_shareholders_quarter','ordinary_income_yoy_pct')]:
@@ -409,7 +442,14 @@ def build(assessment):
     return dict(records=metrics,limitations=sorted(set(missing)),valuation_sensitivity=sensitivity,comparative_selections=selections)
 
 
-def operating_ttm_bridge(assessment, eps=None):
+def build_current(assessment):
+    """Current-only consumer opt-in; old assessments keep the original contract."""
+    if assessment.get('current_financial'):
+        return build(assessment, current=True)
+    return build(assessment)
+
+
+def operating_ttm_bridge(assessment, eps=None, *, current=False):
     """Opt-in operating flows on the *existing* qualified EPS window.
 
     FY + current YTD - comparable prior YTD is a flow bridge, never an EPS
@@ -417,7 +457,8 @@ def operating_ttm_bridge(assessment, eps=None):
     Missing/conflicting boundaries fail closed; no end-share EPS estimate.
     """
     from decimal import localcontext
-    owned = next((r for r in build(assessment)['records'] if r['field']=='diluted_eps_ttm'), None)
+    financial = build_current(assessment) if current else build(assessment)
+    owned = next((r for r in financial['records'] if r['field']=='diluted_eps_ttm'), None)
     if not owned or (eps is not None and eps != owned):
         raise ValueError('OPERATING_BRIDGE_OWNER_EPS_REQUIRED')
     eps = owned
@@ -434,9 +475,12 @@ def operating_ttm_bridge(assessment, eps=None):
     if not 350 <= (stamp(end)-stamp(start)).days+1 <= 380:
         raise ValueError('OPERATING_BRIDGE_WINDOW_INVALID')
     facts=q['facts']; output={}
+    required = ('revenue','operating_income','net_income')
+    fields = required + ('cfo',) if current else required
+    missing = []
     with localcontext() as ctx:
         ctx.prec=34
-        for field in ('revenue','operating_income','net_income'):
+        for field in fields:
             rows=[r for r in facts if r['field']==field]
             direct=[r for r in rows if r['start']==start and r['period']==end and r['scope']=='annual']
             matches=[]
@@ -453,11 +497,17 @@ def operating_ttm_bridge(assessment, eps=None):
                             value=Decimal(fy['value'])+Decimal(cur['value'])-Decimal(prior['value'])
                             matches.append((value,[fy,cur,prior],'FY + current YTD - comparable prior YTD; not EPS subtraction'))
             if not matches or len({v for v,_,_ in matches})!=1:
+                if current:
+                    missing.append(field)
+                    continue
                 raise ValueError('OPERATING_BRIDGE_PERIOD_OR_INPUT_MISSING')
             value,components,formula=matches[0]
             output[field]=dict(value=format(value,'f'),components=components,formula=formula,
                 evidence_refs=sorted({ref for row in components for ref in row['evidence_refs']}))
-        revenue,op,net=[Decimal(output[f]['value']) for f in ('revenue','operating_income','net_income')]
+        if current and missing:
+            return dict(status='PARTIAL_GAAP_OPERATING_TTM',start=start,period=end,
+                        currency='USD',unit='currency_units',flows=output,eps=eps,missing_fields=missing)
+        revenue,op,net=[Decimal(output[f]['value']) for f in required]
         if min(revenue,op,net)<=0: raise ValueError('OPERATING_BRIDGE_NONPOSITIVE_BASE')
         return dict(status='QUALIFIED_GAAP_OPERATING_TTM_NOT_NORMALIZED',start=start,period=end,
             currency='USD',unit='currency_units',flows=output,

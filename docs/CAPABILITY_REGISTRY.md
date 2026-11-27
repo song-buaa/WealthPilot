@@ -174,6 +174,8 @@ N1已发布 [有界SEC自然扫描](../backend/services/investment_thesis/natura
 
 ### 4.2 第一轮质量修正（开发候选）
 
+三级财务来源 V2 候选由原 AV、SEC、Evidence 和 Financial Research Owner 实施。美国本土发行人当前研究使用 AV 结构化记录、SEC 结构化核验与按需原件。当前观察、官方财务事实、严格 PIT 分开。L1 已接入当前合同，4.5 S3 新来源消费待独立复验，详见[三级来源合同](V42_US_FINANCIAL_SOURCES.md#三级财务来源-v2)。
+
 复用原 [SEC/披露 Owner](../research_v2/sec_disclosures.py)、[表格解析](../research_v2/official_disclosures.py)、[周期证据](../backend/services/market_data/technical_evidence.py)及 [Skill 工具](../backend/graph/tools.py)。通用正式附件标题/断行字段可进入原 Evidence Registry；日周线按各自完整窗口校验，真实缺口给出日期；默认纪律与关键词信号不再声明个人纪律或已验证基本面 PASS。原风控数值、PEER 和交易权限不变。范围与未恢复项见[来源说明](V42_US_FINANCIAL_SOURCES.md#第一轮集中质量修正-p0)。HK 官方财报/半年度合同仍缺失，不将 AKShare 公司概况当作财务；生产实际 K 线缺口须取得原日期集再核验。
 
 正常异步L1可靠性候选：原[PEER阶段回调](../backend/services/decision_service_v3.py)、[分析适配](../pocs/chatgpt_skills/analysis.py)、[一次性Worker](../pocs/chatgpt_skills/worker.py)/[父进程](../pocs/chatgpt_skills/server.py)共用[小型运行期限](../app/analysis_runtime.py)，SDK重试计入同一deadline；已有合格事实按原Evidence/Output Policy纯内存重核并复用确定性报告，模型失败可返回明确facts-only partial。无新队列/数据库/研究引擎/资格或交易权限，原E1与同步入口保留。机制、时间策略、事件计数与生产待验收见[原4.2记录](V42_IMPLEMENTATION.md#正常异步-l1-可靠性2026-10-29-开发候选)；专项见[可靠性回归](../tests/test_l1_reliability.py)和[真实Worker/IPC](../pocs/chatgpt_skills/test_v42_protocol.py)。
@@ -224,3 +226,5 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 ### 4.4 E/F 最小生产启用候选
 
 - [启用合同与显式迁移](ARCHITECTURE_CURRENT.md#44-ef-最小生产启用合同) 复用现有私有访问、正式 ACTIVE/U1 及 E1 数据库。默认关闭，按读取、预览、私有 Web 人工确认分权。真实发布、迁移及启用由统一发布批次另行授权。
+
+S3 4.5 Phase 1 policy-scoped relative valuation and fixed-endpoint price revaluation extend the existing Company Pool. Limits, archive lineage and opt-in request contract are in [S3 relative value](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).

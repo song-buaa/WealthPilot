@@ -1224,12 +1224,22 @@ def execute_assess_position_evidence(**kwargs):
     from backend.services.market_data.evidence import assess, mapping
     diagnostics=[]
     rows=[]
+    kwargs.pop("current_financial", None)  # Only the server source owner supplies this receipt.
+    current_research = kwargs.pop("current_research", False)
     # Original-source verification is a server dependency, never request/card trust.
     if (kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or "").endswith(":US"):
-        from research_v2.official_disclosures import collect
+        from research_v2.official_disclosures import collect, collect_current
         from research_v2.sec_disclosures import source_diagnostics
-        rows, verifier = collect(kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol"),
-                                 kwargs.get("research", ()))
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        import os
+        symbol=kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol")
+        candidates=kwargs.get("research", ())
+        if current_research and kwargs.get("at") is None and not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
+            rows, verifier, current = collect_current(symbol, candidates)
+            if current is not None:
+                kwargs["current_financial"] = current
+        else:
+            rows, verifier = collect(symbol, candidates)
         diagnostics=source_diagnostics()
         if rows:
             kwargs["research"] = [*kwargs.get("research", ()), *rows]
@@ -1240,8 +1250,8 @@ def execute_assess_position_evidence(**kwargs):
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     import os
     if not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
-        from backend.services.market_data.financial_research import build
-        calculated=build(result)['records']
+        from backend.services.market_data.financial_research import build_current
+        calculated=build_current(result)['records']
         eps=next((r for r in calculated if r['field']=='diluted_eps_ttm'),None)
         observed=next((r for r in calculated if r['field']=='observed_price'),None)
         if eps and observed and eps['currency']!=observed['currency']:
