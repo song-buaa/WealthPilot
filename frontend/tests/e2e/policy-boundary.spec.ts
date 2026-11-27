@@ -343,3 +343,39 @@ test('E previews, cancels and confirms exactly one checked item', async ({ page 
   await expect(page.getByText('已保存并读回确认版本。')).toBeVisible()
   expect(saved).toBe(1)
 })
+
+test('F reads the last plan and keeps observation distinct from execution proof', async ({ page }) => {
+  const followups = '/api/allocation/governance'
+  const writes: string[] = []
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() !== 'GET') writes.push(path)
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:2', snapshot_sha256: 'a'.repeat(64) } } })
+    } else if (path === followups) {
+      await route.fulfill({ json: { records: [], followups: [], risk_events: [] } })
+    } else if (path === followups + '/reconcile') {
+      expect(route.request().postDataJSON()).toEqual({ snapshot_id: 'asset-view:v1:2',
+        snapshot_sha256: 'a'.repeat(64), bundle_id: null, order_links: {} })
+      await route.fulfill({ json: { decision_revision_ref: 'plan:1', decision_state: 'REVIEW_REQUIRED',
+        policy_changed: true, review_due_at: '2026-12-01T00:00:00Z',
+        checkpoints: [{ item_id: 'S1', stage_label: 'S1', observation_status: 'CHECKPOINT_REACHED',
+          actions: [{ action_id: 'PDD', observation_status: 'CHECKPOINT_REACHED',
+            execution: { status: 'EVIDENCE_PENDING' }, target_amount_cny: '0', current: { current_amount_cny: '0' } }] }],
+        next_review: 'REOPEN_E_PREVIEW_FOR_HUMAN_REVIEW',
+      } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('组合人工决策与复核', { exact: true }).click()
+  await page.getByRole('button', { name: '复核上次方案' }).click()
+  const row = page.getByRole('row').filter({ hasText: 'PDD' })
+  await expect(row).toContainText('CHECKPOINT_REACHED')
+  await expect(row).toContainText('EVIDENCE_PENDING')
+  await expect(page.getByText(/ACTIVE 政策已变化/)).toBeVisible()
+  expect(writes).toEqual([followups + '/reconcile'])
+})

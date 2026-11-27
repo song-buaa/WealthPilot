@@ -1285,8 +1285,8 @@ def execute_simulate_portfolio_transition(*, request):
                                   os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
 
 
-def execute_get_portfolio_review_followups(*, request=None):
-    """PEER can read the same private governance projection. No commit tool."""
+def execute_get_portfolio_review_followups(*, request=None, reconciliation=None):
+    """PEER reads the same private governance and reconciliation projection."""
     import os
 
     from app import state
@@ -1296,6 +1296,15 @@ def execute_get_portfolio_review_followups(*, request=None):
 
     require_isolation()
     store = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), state.portfolio_id)
+    if reconciliation is not None:
+        from app.database import DB_PATH
+        from backend.services.investment_thesis.reconciliation import reconcile_portfolio
+        from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+
+        if request is not None:
+            raise ValueError("E1_PORTFOLIO_QUERY_INVALID")
+        return reconcile_portfolio(store, DB_PATH, ReconciliationRequest.model_validate(reconciliation),
+                                   os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
     return read_portfolio_records(store, PortfolioQuery.model_validate(request or {}))
 
 

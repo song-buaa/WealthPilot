@@ -113,6 +113,8 @@ def register_portfolio_tools(server, path, portfolio_id, security_meta, client):
         PortfolioConfirmation, PortfolioPreviewRequest, PortfolioQuery, PortfolioSourceRequest,
     )
 
+    from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+
     store = ThesisStore(path, portfolio_id)
     bridge = PortfolioGovernance(store, lambda req: client.call("portfolio_governance_sources",
                                                                 req.model_dump(mode="json")))
@@ -129,11 +131,16 @@ def register_portfolio_tools(server, path, portfolio_id, security_meta, client):
     @server.tool(meta=security_meta, annotations=read,
         description="Read private immutable combination decisions, historical revisions, due followups and persisted risks. "
                     "For formal risk candidates pass source with an existing snapshot ID/hash and ACTIVE bundle hash. "
-                    "No broker sync, trade or write. Keep actual risks separate from simulation and ETF observations.")
+                    "For reconciliation specify an existing newer U1 ID and hash; the last confirmed plan is read "
+                    "automatically if its bundle is omitted. Only link existing exact stored order IDs for proof. "
+                    "Report checkpoint observation and execution proof separately. No refresh, trade or write.")
     def get_portfolio_review_followups(request: PortfolioQuery | None = None,
-                                       source: PortfolioSourceRequest | None = None) -> dict:
-        if source is not None and request is not None:
+                                       source: PortfolioSourceRequest | None = None,
+                                       reconciliation: ReconciliationRequest | None = None) -> dict:
+        if sum(value is not None for value in (request, source, reconciliation)) > 1:
             raise ToolError("E1_PORTFOLIO_QUERY_INVALID")
+        if reconciliation is not None:
+            return invoke(lambda: client.call("portfolio_reconciliation", reconciliation.model_dump(mode="json")))
         if source is not None:
             return invoke(lambda: risk_preview(bridge.source_reader(source)))
         return invoke(lambda: read_portfolio_records(store, request or PortfolioQuery()))
