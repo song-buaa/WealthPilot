@@ -61,10 +61,10 @@ def collect_policy_risks(portfolio_id, policy, allocation, concentration):
     return facts
 
 
-def read_portfolio_sources(database, portfolio_id, request, contract=None):
+def read_portfolio_sources(database, portfolio_id, request, contract=None, *, include_conditional=False):
     """Resolve trusted sources using only explicitly named stored U1 and active owner."""
     from app.asset_views import load_view
-    from backend.services.allocation_service import _assembled_policy_assets, project_frozen_transition
+    from backend.services.allocation_service import _assembled_policy_assets, _conditional_concentration, project_frozen_transition
     from backend.services.investment_policy.concentration_adapter import _read_etf_evidence
     from backend.services.investment_policy.store import clock, utc_now
     from backend.services.investment_policy.contracts import digest as policy_digest, parse_snapshot
@@ -98,12 +98,15 @@ def read_portfolio_sources(database, portfolio_id, request, contract=None):
                 concentration = assembled.allocation_concentration
                 allocation = assembled.allocation_hierarchy
                 qualification = {"status": "QUALIFIED", "issues": [],
+                                 "investable_denominator_cny": str(assembled.assets.denominator_cny),
                                  "source_expires_at": assembled.allocation_source["expires_at"]}
         except PolicyError as error:
             if str(error) not in {"POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED",
                                   "POLICY_BUCKET_CLASSIFICATION_UNVERIFIED"}:
                 raise ValueError("E1_PORTFOLIO_SOURCE_CHANGED") from error
             concentration, allocation = {}, {}
+            if include_conditional:
+                concentration = _conditional_concentration(portfolio_id, view, pinned, str(error), at=at, etf_inputs=evidence)
             qualification = {"status": "UNKNOWN",
                              "issues": getattr(error, "qualification", {}).get("issues", [str(error)])}
         scenario = (project_frozen_transition(portfolio_id, view, request.scenario, session=pinned, at=at,

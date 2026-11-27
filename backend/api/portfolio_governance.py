@@ -13,6 +13,8 @@ from backend.services.investment_thesis.portfolio_contracts import (
     PortfolioConfirmation, PortfolioPreviewRequest, PortfolioQuery, PortfolioSourceRequest,
 )
 from backend.services.investment_thesis.portfolio_sources import read_portfolio_sources
+from backend.services.investment_thesis.reconciliation import reconcile_portfolio
+from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
 from backend.services.investment_thesis.store import ThesisStore
 
 router = APIRouter(prefix="/governance")
@@ -61,3 +63,10 @@ def preview_decision(request: PortfolioPreviewRequest):
 @router.post("/commit")
 def commit_decision(request: PortfolioConfirmation):
     return _dispatch(lambda bridge: bridge.commit(request))
+
+
+@router.post("/reconcile")
+def reconcile_decision(request: ReconciliationRequest):
+    from app.database import DB_PATH
+    return _dispatch(lambda bridge: reconcile_portfolio(bridge.store.thesis_store, DB_PATH, request,
+                                                        os.environ.get("WEALTHPILOT_SQLITE_CONTRACT")))

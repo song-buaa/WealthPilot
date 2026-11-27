@@ -90,6 +90,10 @@ class BusinessClient:
                                      "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
                                      "WEALTHPILOT_ETF_RELEASE_OWNER_UID"}
                     env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | {"WEALTHPILOT_E1_PORTFOLIO_MODE"} if k in os.environ})
+                    if env.get("WEALTHPILOT_E1_PORTFOLIO_MODE") == "ISOLATED":
+                        e1_path = getattr(self.settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
+                        if e1_path:
+                            env["WEALTHPILOT_E1_DB_PATH"] = str(e1_path)
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")

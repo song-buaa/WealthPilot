@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import PortfolioReconciliation from './PortfolioReconciliation'
 
 type Item = {
   item_id: string; kind: string; reason: string; review_due_at: string; expires_at: string; revoke_when: string
@@ -156,6 +157,7 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
       })}>查看历史</button>
     </p>)}
     {history.map(row => <p key={row.bundle_id + row.revision}>{row.bundle_id} · 历史 v{row.revision} · {row.bundle_state}</p>)}
+    <PortfolioReconciliation key={snapshotSha} snapshotId={snapshotId} snapshotSha={snapshotSha} />
     <h4>到期复核</h4>
     {records.followups.map(row => <p key={row.decision_revision_ref}>{row.decision_revision_ref} · {row.review_due_at}</p>)}
   </details>
