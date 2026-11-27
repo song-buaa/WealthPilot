@@ -1,5 +1,5 @@
 """Human preview/commit over original E1. Never issues orders or policy changes."""
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import secrets
 
 from .bridge import ResearchBridge
@@ -12,6 +12,16 @@ from .store import digest
 
 def timestamp(value):
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _require_unexpired_evidence(source, at):
+    qualification = source["qualification"]
+    if qualification["status"] != "QUALIFIED":
+        return
+    absolute_cutoffs = (qualification["source_expires_at"], source["actual_concentration"].get("expires_at"))
+    if any(value is not None and at >= datetime.fromisoformat(value.replace("Z", "+00:00"))
+           for value in absolute_cutoffs):
+        raise ValueError("E1_PORTFOLIO_EVIDENCE_EXPIRED_REPREVIEW")
 
 
 def _checkpoint(scenario, path, item):
@@ -101,6 +111,7 @@ class PortfolioGovernance(ResearchBridge):
         if len(canonical(source).encode()) > 16 * 1024 * 1024:
             raise ValueError("E1_PORTFOLIO_EVIDENCE_TOO_LARGE")
         at = self.wall_clock()
+        _require_unexpired_evidence(source, at)
         normalized = request.model_dump(mode="json")
         request_fingerprint = digest(normalized)
         policy_ref = source["policy"]["reference"]
@@ -201,6 +212,7 @@ class PortfolioGovernance(ResearchBridge):
             risk_heads = self.store.risk_heads(db)
             decisions, events = self._selected(request, selected, payload, risk_heads, at)
             record = self._record(request, payload, pending, decisions, events, at, confirmation_fingerprint, token_sha256)
+            _require_unexpired_evidence(fresh, self.wall_clock())
             self.store.insert(db, record, events)
         readback = self.store.query(bundle_id=request.bundle_id, revision=record["revision"], include_evidence=True)["records"]
         if len(readback) != 1 or readback[0]["sha256"] != digest(record):

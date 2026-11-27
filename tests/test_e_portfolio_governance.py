@@ -246,3 +246,26 @@ def test_missing_issuer_clearance_requires_bounded_real_inventory():
     source["actual_concentration"]["unknown_coverage"] = True
     assert clear_absent_risk(source, prior) is None
 
+
+
+
+def test_formal_evidence_expiring_during_confirmation_requires_fresh_preview(isolated):
+    store, _, db, _, _, binding, _ = isolated
+    wall = [AT]
+    advance_during_source_read = [False]
+
+    def source_reader(request):
+        value = read_portfolio_sources(db, 7, request)
+        if advance_during_source_read[0]:
+            wall[0] = AT + timedelta(minutes=6)
+        return value
+
+    bridge = PortfolioGovernance(store, source_reader, wall_clock=lambda: wall[0])
+    request = {**binding, "bundle_id":"expiry", "request_id":"expiry", "expected_revision":0,
+               "items":[item("review","FORMAL_POLICY_EXCEPTION", risk_key=policy_digest(
+                   {"portfolio_id":7,"rule_id":"allocation.deviation","subject":"STRATEGIC_ALLOCATION"}))]}
+    preview = bridge.preview(request)
+    advance_during_source_read[0] = True
+    with pytest.raises(ValueError, match="EVIDENCE_EXPIRED_REPREVIEW"):
+        bridge.commit(confirm(preview, "review"))
+    assert bridge.store.query()["records"] == bridge.store.query()["risk_events"] == []
