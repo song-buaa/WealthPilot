@@ -2,11 +2,12 @@
 
 Not an asset/loan ledger or trading planner. Nothing is persisted or synchronized.
 """
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, localcontext
 import hashlib
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -271,3 +272,305 @@ def simulate(view, legs, *, amount_qualified=False, target=None):
         unit="CNY major",before=before,steps=rows,order_created=False,execution_authorized=False,
         limitations=["Static marked-value assumptions, not future returns or a trade instruction.",
                      "FX, fees, taxes, transfer eligibility and timing are explicit user assumptions, not verified execution facts."]))
+
+
+# V2 consumes derived scenario balances. ScenarioLeg and its callers retain V1.
+Money = Annotated[Decimal, Field(ge=0, max_digits=24, decimal_places=8)]
+PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=24, decimal_places=8)]
+Ref = Annotated[str, Field(min_length=1, max_length=110)]
+CashState = Literal["AVAILABLE", "UNSETTLED", "SETTLED_RESTRICTED", "TRANSFER_IN_FLIGHT",
+                    "APPLIED_TO_PURCHASE", "APPLIED_TO_REPAYMENT", "FAILED", "UNKNOWN"]
+ZERO = Decimal(0)
+
+
+class TransitionModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class Action(TransitionModel):
+    action_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")]
+    amount: PositiveMoney
+    fee: Money
+    outcome: Literal["APPLIED", "UNSETTLED", "RESTRICTED", "IN_FLIGHT", "FAILED", "UNKNOWN"]
+    assumption: Annotated[str, Field(min_length=1, max_length=500)]
+
+
+class Sell(Action):
+    kind: Literal["SELL_TO_CASH"]
+    position_ref: Ref
+
+
+class Buy(Action):
+    kind: Literal["BUY_WITH_CASH"]
+    cash_ref: Ref
+    symbol: Ref
+
+
+class Transfer(Action):
+    kind: Literal["TRANSFER_CASH"]
+    cash_ref: Ref
+    destination_account: Ref
+    destination_currency: Annotated[str, Field(pattern=r"^[A-Z]{3,5}$")]
+    # Explicit receiving units per source unit. Frozen valuation rates are
+    # separate. Their difference from this quote is the FX gain/loss.
+    destination_per_source: PositiveMoney
+
+
+class Repay(Action):
+    kind: Literal["REPAY_DEBT_FROM_CASH"]
+    loan_ref: Ref
+    cash_ref: Ref | None = None
+    external_cashflow: Literal["SALARY_CASHFLOW_REPAY"] | None = None
+
+    @model_validator(mode="after")
+    def funding_source(self):
+        if (self.cash_ref is None) == (self.external_cashflow is None):
+            raise ValueError("EXACTLY_ONE_REPAYMENT_SOURCE_REQUIRED")
+        return self
+
+
+TransitionAction = Annotated[Sell | Buy | Transfer | Repay, Field(discriminator="kind")]
+
+
+class TransitionStage(TransitionModel):
+    label: Annotated[str, Field(min_length=1, max_length=80)]
+    actions: list[TransitionAction] = Field(min_length=1, max_length=12)
+
+
+class TransitionRequest(TransitionModel):
+    snapshot_id: Annotated[str, Field(pattern=r"^asset-view:v1:[1-9][0-9]{0,17}$")]
+    snapshot_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    policy_bundle_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    paths: dict[Literal["A", "B"], list[TransitionStage]]
+    assumed_denominator_cny: PositiveMoney | None = None
+    assumed_amounts_cny: dict[Ref, Money] = Field(default_factory=dict, max_length=100)
+    assumed_loan_principal_cny: dict[Ref, Money] = Field(default_factory=dict, max_length=30)
+    assumed_fx_to_cny: dict[str, PositiveMoney] = Field(default_factory=dict, max_length=12)
+
+    @model_validator(mode="after")
+    def bounded_paths(self):
+        if "A" not in self.paths or any(not 1 <= len(stages) <= 8 for stages in self.paths.values()):
+            raise ValueError("SCENARIO_PATH_LENGTH_INVALID")
+        for stages in self.paths.values():
+            ids = [action.action_id for stage in stages for action in stage.actions]
+            if len(ids) != len(set(ids)):
+                raise ValueError("SCENARIO_ACTION_ID_DUPLICATE")
+        return self
+
+
+@dataclass(frozen=True)
+class ScenarioHolding:
+    source_ref: str
+    amount_cny: Decimal
+    account: str | None
+    currency: str
+    identity: dict
+    economic: str | None
+    evidence: tuple[str, ...]
+    original_amount_cny: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class CashLot:
+    account: str | None
+    currency: str
+    amount: Decimal | None
+    rate: Decimal | None
+    included: bool
+    state: CashState
+    pending_account: str | None = None
+    pending_currency: str | None = None
+    frozen_cny: Decimal | None = None
+    availability_basis: Literal["SCENARIO_ACTION_OUTCOME", "ASSUMED_FROM_FROZEN_BALANCE", "UNKNOWN"] = "SCENARIO_ACTION_OUTCOME"
+
+    @property
+    def cny(self):
+        return self.frozen_cny if self.frozen_cny is not None else self.amount * self.rate
+
+
+TRANSITION_REJECTION_CODES = {
+    "SCENARIO_ASSUMED_ASSET_NOT_FOUND",
+    "SCENARIO_ASSUMED_ASSET_NOT_UNCLASSIFIED_POSITION",
+    "SCENARIO_ASSUMED_DENOMINATOR_INVALID",
+    "SCENARIO_ASSUMED_FX_CONFLICT",
+    "SCENARIO_ASSUMED_LOAN_CONFLICT",
+    "SCENARIO_ASSUMED_LOAN_NOT_FOUND",
+    "SCENARIO_ASSUMPTIONS_REQUIRE_UNQUALIFIED_BASELINE",
+    "SCENARIO_BASELINE_NOT_CLOSED",
+    "SCENARIO_BUY_IDENTITY_OR_CASH_INVALID",
+    "SCENARIO_INSUFFICIENT_CASH",
+    "SCENARIO_INVESTMENT_CONSERVATION_FAILED",
+    "SCENARIO_LOAN_TOTAL_NOT_CLOSED",
+    "SCENARIO_NONPOSITIVE_DENOMINATOR",
+    "SCENARIO_POSITION_UNAVAILABLE",
+    "SCENARIO_REPAYMENT_EXCEEDS_OR_LACKS_DEBT",
+    "SCENARIO_REPAYMENT_REQUIRES_APPLIED_CNY",
+    "SCENARIO_SALE_AMOUNT_OR_FX_INVALID",
+    "SCENARIO_SALE_OUTCOME_INVALID",
+    "SCENARIO_SAME_CURRENCY_FX_INVALID",
+    "SCENARIO_SNAPSHOT_BINDING_MISMATCH",
+    "SCENARIO_TRANSFER_DESTINATION_OR_FX_INVALID",
+    "SCENARIO_TRANSFER_SOURCE_INVALID",
+}
+
+
+class TransitionRejected(ValueError):
+    """Expected scenario-domain rejection. Never signals a real operation."""
+
+
+def simulate_transition(request, *, holdings, cash, loans, total_debt, net_assets,
+                        denominator, rates, accounts, instruments, evaluate):
+    """Evaluate independent paths from one immutable baseline. All money is Decimal."""
+    with localcontext() as ctx:
+        ctx.prec = 60
+        return _simulate_transition(request, holdings, cash, loans, total_debt, net_assets,
+                                    denominator, rates, accounts, instruments, evaluate)
+
+
+def _simulate_transition(request, holdings, cash, loans, total_debt, net_assets,
+                         denominator, rates, accounts, instruments, evaluate):
+    def investable(securities, balances):
+        return (sum((row.amount_cny for row in securities.values()), ZERO)
+                + sum((lot.cny for lot in balances.values() if lot.included), ZERO))
+
+    visible = investable(holdings, cash)
+    if denominator is not None and denominator != visible:
+        raise TransitionRejected("SCENARIO_BASELINE_NOT_CLOSED")
+    assumed = request.assumed_denominator_cny
+    if assumed is not None and (denominator is not None or assumed < visible):
+        raise TransitionRejected("SCENARIO_ASSUMED_DENOMINATOR_INVALID")
+    baseline = denominator if denominator is not None else assumed
+    paths = {}
+    for name, stages in request.paths.items():
+        securities, balances, debts = dict(holdings), dict(cash), dict(loans)
+        debt, nw, costs, fx = total_debt, net_assets, ZERO, ZERO
+        prior_hits = {}
+        output = []
+        for stage in [None, *stages]:
+            events = []
+            opening = investable(securities, balances)
+            for action in stage.actions if stage else ():
+                event = _transition_action(action, securities, balances, debts, rates, accounts, instruments)
+                events.append(event)
+                debt = debt - event["principal_repaid_cny"] if debt is not None else None
+                if nw is not None:
+                    nw += event["fx_effect_cny"] - event["cost_cny"] + event["external_contribution_cny"]
+                costs += event["cost_cny"]
+                fx += event["fx_effect_cny"]
+            current = investable(securities, balances)
+            if current != opening + sum((event["investment_change_cny"] for event in events), ZERO):
+                raise TransitionRejected("SCENARIO_INVESTMENT_CONSERVATION_FAILED")
+            projected = baseline + current - visible if baseline is not None else None
+            if projected is not None and projected <= 0:
+                raise TransitionRejected("SCENARIO_NONPOSITIVE_DENOMINATOR")
+            allocation, concentration = evaluate(securities, balances, projected, denominator is not None)
+            severity = {"WARNING": 1, "HUMAN_REVIEW": 2}
+            hits = {issuer: severity.get(result.get("scenario_risk_status"), 0)
+                    for issuer, result in concentration.get("issuers", {}).items()}
+            output.append({
+                "label": stage.label if stage else "S0", "investment_assets_cny": projected,
+                "visible_investment_assets_cny": current, "liabilities_cny": debt, "loan_balances_cny": dict(debts),
+                "known_principal_repaid_cny": sum(loans.values(), ZERO) - sum(debts.values(), ZERO),
+                "net_assets_cny": nw, "cash": {ref: vars(lot) for ref, lot in balances.items() if lot.cny},
+                "allocation": allocation, "concentration": concentration,
+                "newly_breached_issuers": sorted(issuer for issuer, level in hits.items()
+                                                 if level > prior_hits.get(issuer, 0)) if stage else [],
+                "cash_flow_conservation_verified": True,
+                "cumulative_cost_cny": costs, "cumulative_fx_effect_cny": fx, "actions": events,
+            })
+            prior_hits = hits
+        paths[name] = output
+    return paths
+
+
+def _transition_action(action, securities, balances, debts, rates, accounts, instruments):
+    result = {"action_id": action.action_id, "kind": action.kind, "assumption": action.assumption,
+              "outcome": action.outcome, "cash_state": action.outcome, "cost_cny": ZERO,
+              "fx_effect_cny": ZERO, "investment_change_cny": ZERO, "principal_repaid_cny": ZERO, "external_contribution_cny": ZERO,
+              "inputs": action.model_dump(mode="json"), "net_cny": None, "blocked_reason": None}
+    if action.outcome in {"FAILED", "UNKNOWN"}:
+        result["blocked_reason"] = "SCENARIO_ACTION_" + action.outcome
+        return result
+    fee = action.fee
+    amount = action.amount
+    cash_id = "action:" + action.action_id
+    if isinstance(action, Sell):
+        holding = securities.get(action.position_ref)
+        if holding is None or holding.account not in accounts:
+            raise TransitionRejected("SCENARIO_POSITION_UNAVAILABLE")
+        rate = rates.get(holding.currency)
+        if rate is None or fee >= amount or amount * rate > holding.amount_cny:
+            raise TransitionRejected("SCENARIO_SALE_AMOUNT_OR_FX_INVALID")
+        states = {"APPLIED": "AVAILABLE", "UNSETTLED": "UNSETTLED", "RESTRICTED": "SETTLED_RESTRICTED"}
+        if action.outcome not in states:
+            raise TransitionRejected("SCENARIO_SALE_OUTCOME_INVALID")
+        securities[action.position_ref] = replace(holding, amount_cny=holding.amount_cny - amount * rate)
+        balances[cash_id] = CashLot(holding.account, holding.currency, amount - fee, rate,
+                                    True, states[action.outcome])
+        result.update(cost_cny=fee * rate, investment_change_cny=-fee * rate,
+                      net_cny=(amount - fee) * rate, cash_state=states[action.outcome])
+        return result
+
+    external = isinstance(action, Repay) and action.external_cashflow is not None
+    lot = None if external else balances.get(action.cash_ref)
+    completing = (isinstance(action, Transfer) and lot is not None
+                  and lot.state in {"UNSETTLED", "SETTLED_RESTRICTED", "TRANSFER_IN_FLIGHT"}
+                  and action.outcome == "APPLIED" and amount == lot.amount and fee == 0
+                  and (action.destination_account, action.destination_currency) ==
+                      (lot.pending_account or lot.account, lot.pending_currency or lot.currency))
+    if not external and (lot is None or (lot.state != "AVAILABLE" and not completing)):
+        result.update(cash_state=lot.state if lot else "UNKNOWN", blocked_reason="SCENARIO_CASH_NOT_AVAILABLE")
+        return result
+    if lot is not None and (amount + fee > lot.amount or (amount + fee) * lot.rate > lot.cny):
+        raise TransitionRejected("SCENARIO_INSUFFICIENT_CASH")
+    rate = lot.rate if lot else Decimal(1)  # External payroll assumption is CNY.
+    if isinstance(action, Buy):
+        instrument = instruments.get(action.symbol)
+        if action.outcome != "APPLIED" or lot.currency != "USD" or not lot.included or lot.account not in accounts or instrument is None:
+            raise TransitionRejected("SCENARIO_BUY_IDENTITY_OR_CASH_INVALID")
+        row, economic, evidence = instrument
+        securities[cash_id] = ScenarioHolding(cash_id, amount * rate, lot.account, lot.currency,
+                                               row, economic, evidence)
+        result["cash_state"] = "APPLIED_TO_PURCHASE"
+    elif isinstance(action, Transfer):
+        destination_rate = rates.get(action.destination_currency)
+        if action.destination_currency == lot.currency and action.destination_per_source != 1:
+            raise TransitionRejected("SCENARIO_SAME_CURRENCY_FX_INVALID")
+        if (action.outcome not in {"APPLIED", "IN_FLIGHT", "RESTRICTED"} or destination_rate is None
+                or action.destination_account not in accounts
+                or ((action.destination_account, action.destination_currency) == (lot.account, lot.currency) and not completing)):
+            raise TransitionRejected("SCENARIO_TRANSFER_DESTINATION_OR_FX_INVALID")
+        if lot.account not in accounts or not lot.included:
+            raise TransitionRejected("SCENARIO_TRANSFER_SOURCE_INVALID")
+        if action.outcome == "IN_FLIGHT":
+            # Keep source currency while in flight. No conversion proceeds
+            # or destination balance exists until explicit simulated arrival.
+            balances[cash_id] = replace(lot, amount=amount, state="TRANSFER_IN_FLIGHT",
+                                         pending_account=action.destination_account,
+                                         pending_currency=action.destination_currency, frozen_cny=None,
+                                         availability_basis="SCENARIO_ACTION_OUTCOME")
+            result["cash_state"] = "TRANSFER_IN_FLIGHT"
+        else:
+            converted = amount * action.destination_per_source
+            state = "AVAILABLE" if action.outcome == "APPLIED" else "SETTLED_RESTRICTED"
+            balances[cash_id] = CashLot(action.destination_account, action.destination_currency, converted,
+                                        destination_rate, lot.included, state)
+            result.update(cash_state=state, fx_effect_cny=converted * destination_rate - amount * rate)
+    else:
+        if action.outcome != "APPLIED" or (lot and lot.currency != "CNY"):
+            raise TransitionRejected("SCENARIO_REPAYMENT_REQUIRES_APPLIED_CNY")
+        if action.loan_ref not in debts or amount > debts[action.loan_ref]:
+            raise TransitionRejected("SCENARIO_REPAYMENT_EXCEEDS_OR_LACKS_DEBT")
+        debts[action.loan_ref] -= amount
+        result.update(principal_repaid_cny=amount, cash_state="APPLIED_TO_REPAYMENT",
+                      external_contribution_cny=amount + fee if external else ZERO)
+
+    if lot:
+        balances[action.cash_ref] = replace(lot, amount=lot.amount - amount - fee,
+                                            frozen_cny=lot.cny - (amount + fee) * lot.rate)
+    investment_change = ZERO
+    if lot and lot.included:
+        investment_change = result["fx_effect_cny"] - fee * rate - result["principal_repaid_cny"]
+    result.update(cost_cny=fee * rate, investment_change_cny=investment_change,
+                  net_cny=amount * rate + result["fx_effect_cny"])
+    return result
