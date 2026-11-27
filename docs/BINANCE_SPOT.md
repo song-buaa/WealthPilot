@@ -14,6 +14,8 @@
 
 ## 身份、覆盖和时间
 
+资产代码及成交手续费资产接受 1–20 位 ASCII 大写字母或数字。其他资产的明确零余额保留在原 Run 库存证据中，无需查询报价。
+
 `BINANCE_UID`为稳定账户身份；Portfolio由原`portfolio_scope()`（共享库合同/原Portfolio配置及Owner）解析，并由原Repository拒绝跨Portfolio账户冲突，不另配Binance专属portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、accountType=SPOT及显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
 
 账户permissions是交易资格组（如TRD_GRP_236），不是API Key权限，不要求包含字面SPOT，也不从canTrade/permissions推导Key可写。既有只读Key预检及应用GET白名单不变。身份失败脱敏区分BINANCE_ACCOUNT_RESPONSE_INVALID、BINANCE_UID_MISSING、BINANCE_UID_MISMATCH、BINANCE_ACCOUNT_TYPE_NOT_SPOT，不输出UID或密钥。
