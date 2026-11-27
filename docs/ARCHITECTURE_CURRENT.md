@@ -370,3 +370,19 @@ F 只读原 E1 当前确认版或指定历史 revision，核对原 U1 摘要，�
 - 执行证据复用原 Trade History、OrderRecord 及 Trade/Sync 查询。可显式绑定计划动作与已存订单 ID，只有同组合、账户、券商、证券、方向、时段和计划金额一致的原始成交证据才能确认对应交易。成交和持仓同步单独呈现。MVP 不自动匹配转账与还贷；缺独立 Owner 证据时保持待证。
 - 当前分母、B3 差距和 C 风险沿用原解析。正式新增/持续/有证可解除风险与观察估计分开。只读复核不会更改 E 风险/历史或批准下一腿。续办沿用 E 的预览及确认。
 - Web `POST /api/allocation/governance/reconcile`、MCP 与 PEER 继续使用原隔离组合治理入口，依赖未变。下一次复核时间由用户人工确定。无额外迁移、后台扫描、券商入口或生产启用。
+
+## 4.4 E/F 最小生产启用合同
+
+默认关闭。正式环境配置 `WEALTHPILOT_E1_PORTFOLIO_MODE=PRODUCTION`、`WEALTHPILOT_E1_PORTFOLIO_ACCESS=READ|PREVIEW|CONFIRM`。三档依次允许读历史/风险候选/复核、增加无落盘预览、增加明确确认保存。Public Demo 和未配置的进程不开放生产合同。`ISOLATED` 沿用原隔离入口。
+
+- Web 沿现有私有回环访问保护。授权发布时在现有私有 `web.json` 加入 `"e1_portfolio":{"store":"<已存在的E1库绝对路径>","access":"READ"}`，按已批准的档位递进。Web runner 绑定现有共库、scope、Policy 和 SQLite 契约。确认写入仅在此私有 Web 入口，同源 POST 使用原预览令牌、指纹、选项及明确确认。MCP 沿既有私有真实配置、同一 SQLite 契约与 E1 路径设置上述变量，提供读取及按权限预览。生产 MCP 预览提示到 Web 重新预览并确认。PEER 可读同一复核结果，沿原宿主的访问边界。
+- 现有 U1 由服务器按快照 ID、SHA 和 Portfolio scope 读取。生产拒绝合成快照或隔离版 Policy。当前正式 ACTIVE Bundle 原样复用。资产资格不足保留 UNKNOWN，观察与执行证据仍分层。
+- 授权维护窗口先停止 E1 客户端，使用现有 Python 显式运行以下命令。它验证原 E1、通过原 SQLite Backup API 创建并验证新备份，在原库单一事务新增组合表及保护，检查 FK。不迁移业务库，不在服务启动时迁移。
+
+```sh
+"$EXISTING_PYTHON" -m backend.services.investment_thesis.cli --store "$E1_DB" \
+  --portfolio-id "$PORTFOLIO_ID" migrate-portfolio-production \
+  --backup "$NEW_PRIVATE_E1_BACKUP" --services-stopped
+```
+
+统一发布先验收关闭态。启用 READ 后对照同一现存 U1、ACTIVE PolicyReference、旧单标 Thesis/Review 和 Web/MCP/PEER，确认 UNKNOWN 及历史一致。随后按发布授权开放预览与私有 Web 确认。确认真实写入需有独立的用户实际选择。故障时优先撤回配置，新增表可留存。若需恢复库，按原 [SQLite 快照备份恢复](../pocs/poc03_mac_mini/snapshot.py) 停止客户端、校验备份及保留当前库，再恢复；恢复后按 E1 原 Owner 权限设 0600。恢复前核对备份后产生的记录，避免遗失真实决定。

@@ -313,3 +313,43 @@ def test_e_candidate_uses_actual_mcp_worker_and_private_e1(tmp_path, monkeypatch
 
     asyncio.run(run())
     assert policy.path.read_bytes() == before[1]
+
+
+def test_ef_production_mcp_uses_private_read_and_never_registers_confirmation(tmp_path, monkeypatch):
+    from backend.services.investment_thesis.portfolio_store import migrate_portfolio_governance
+
+    e1 = ThesisStore(tmp_path / "e1-private" / "e1.sqlite", 7)
+    e1.init()
+    migrate_portfolio_governance(e1)
+    cfg = settings(e1.path, None)
+    real_config = tmp_path / "fixture-real-config.json"
+    real_config.write_text(json.dumps({"portfolio_id": 7, "database_path": "test-db", "database_contract_path": "fixture"}))
+    cfg.real_config = str(real_config)
+    from app import shared_sqlite
+    monkeypatch.setattr(shared_sqlite, "verify", lambda path, contract: {"portfolio_id": 7})
+    cfg.prepare_config = None
+    cfg.e1_enable_writes = False
+    monkeypatch.setenv("PUBLIC_DEMO_MODE", "false")
+    monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_MODE", "PRODUCTION")
+    before = e1.path.read_bytes()
+
+    async def run():
+        for access in (None, "READ", "PREVIEW", "CONFIRM"):
+            if access is None:
+                monkeypatch.delenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", raising=False)
+            else:
+                monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", access)
+            async with Client(create_server(cfg), mode="legacy") as client:
+                tools = {tool.name for tool in (await client.list_tools()).tools}
+                assert "get_investment_thesis" in tools and "get_investment_reviews" in tools
+                assert ("get_portfolio_review_followups" in tools) == bool(access)
+                assert ("preview_portfolio_review_decision" in tools) == (access in {"PREVIEW", "CONFIRM"})
+                assert "commit_portfolio_review_decision" not in tools
+                if access:
+                    result = await client.call_tool("get_portfolio_review_followups", {})
+                    assert not result.is_error
+                    payload = result.structured_content or json.loads(result.content[0].text)
+                    assert payload["records"] == [] and payload["execution_authorized"] is False
+
+    asyncio.run(run())
+    assert e1.path.read_bytes() == before

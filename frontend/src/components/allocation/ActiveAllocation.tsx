@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fmtCny } from '@/lib/fmt'
 import PortfolioTransition from './PortfolioTransition'
+import PortfolioGovernanceCard from './PortfolioGovernanceCard'
 
 const isHash = (hash?: string | null) => /^[a-f0-9]{64}$/.test(hash ?? '')
 
@@ -312,7 +313,7 @@ export default function ActiveAllocation({ policySha }: { policySha?: string }) 
     {value.concentration?.etf_observation && <ETFObservationTable value={value.concentration.etf_observation} />}
     <p>正差距表示超配，负差距表示低配。配置与风险诊断不构成交易或资金操作建议。</p>
     </section>}
-    {research && policySha && <PortfolioTransition key={research.snapshot_sha256} policySha={policySha}
-      snapshotId={research.snapshot_id} snapshotSha={research.snapshot_sha256} />}
+    {research && policySha ? <PortfolioTransition key={research.snapshot_sha256} policySha={policySha}
+      snapshotId={research.snapshot_id} snapshotSha={research.snapshot_sha256} /> : <PortfolioGovernanceCard />}
   </>
 }
