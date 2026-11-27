@@ -388,3 +388,5 @@ F 只读原 E1 当前确认版或指定历史 revision，核对原 U1 摘要，�
 ```
 
 统一发布先验收关闭态。启用 READ 后对照同一现存 U1、ACTIVE PolicyReference、旧单标 Thesis/Review 和 Web/MCP/PEER，确认 UNKNOWN 及历史一致。随后按发布授权开放预览与私有 Web 确认。确认真实写入需有独立的用户实际选择。故障时优先撤回配置，新增表可留存。若需恢复库，按原 [SQLite 快照备份恢复](../pocs/poc03_mac_mini/snapshot.py) 停止客户端、校验备份及保留当前库，再恢复；恢复后按 E1 原 Owner 权限设 0600。恢复前核对备份后产生的记录，避免遗失真实决定。
+
+S3 4.5 policy-scoped company research uses the read-only ACTIVE Policy Owner and the existing Company Pool Worker. The price revaluation child references the prior professional artifact and preserves its terminal date. See the [Phase 1 contract](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).

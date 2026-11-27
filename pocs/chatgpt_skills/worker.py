@@ -166,7 +166,8 @@ def pool_worker(args):
                 from backend.services.decision_service_v3 import run_company_pool_research
                 result = run_company_pool_research(arguments, archive_root=args.s3_archive_root,
                     source_root=args.s3_source_root, reuse_sources=args.s3_reuse_sources,
-                    synthetic=args.synthetic_input)
+                    synthetic=args.synthetic_input, **({'portfolio_id': args.portfolio_id}
+                        if arguments.get('scope') == 'active_us_direct' else {}))
         response = dict(ok=True, result=result)
     except Exception as error:
         code = str(error) if str(error) in SAFE_ERRORS else (

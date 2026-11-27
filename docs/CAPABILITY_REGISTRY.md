@@ -226,3 +226,5 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 ### 4.4 E/F 最小生产启用候选
 
 - [启用合同与显式迁移](ARCHITECTURE_CURRENT.md#44-ef-最小生产启用合同) 复用现有私有访问、正式 ACTIVE/U1 及 E1 数据库。默认关闭，按读取、预览、私有 Web 人工确认分权。真实发布、迁移及启用由统一发布批次另行授权。
+
+S3 4.5 Phase 1 policy-scoped relative valuation and fixed-endpoint price revaluation extend the existing Company Pool. Limits, archive lineage and opt-in request contract are in [S3 relative value](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).

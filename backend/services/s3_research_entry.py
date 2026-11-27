@@ -7,19 +7,23 @@ import re
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from backend.utils.symbol import normalize_symbol, parse_symbol
 
 
 class CompanyPoolRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    symbols: list[str] = Field(min_length=1, max_length=20)
+    symbols: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    scope: Literal['explicit', 'active_us_direct'] = 'explicit'
+    parent_artifact_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     purpose: str = Field(min_length=1, max_length=1000)
     method: Literal['standard','professional'] = 'standard'
 
     @field_validator('symbols')
     @classmethod
     def canonical_symbols(cls, values):
+        if values is None:
+            return None
         result = []
         for value in values:
             ticker, market = parse_symbol(value.strip().upper() if ':' in value else value.strip().upper()+':US')
@@ -36,6 +40,15 @@ class CompanyPoolRequest(BaseModel):
         if not value.strip():
             raise ValueError('S3_PURPOSE_REQUIRED')
         return value
+
+    @model_validator(mode='after')
+    def scope_contract(self):
+        if self.scope == 'explicit':
+            if not self.symbols or self.parent_artifact_id:
+                raise ValueError('S3_EXPLICIT_SYMBOLS_REQUIRED')
+        elif self.symbols is not None or self.method != 'professional':
+            raise ValueError('S3_ACTIVE_SCOPE_REQUIRES_PROFESSIONAL_WITHOUT_SYMBOLS')
+        return self
 
 
 def private_archive(path, *, create=True):
@@ -131,18 +144,29 @@ def project(bundle, verification):
     if type(provenance.get('synthetic')) is not bool:
         raise ValueError('S3_ARTIFACT_UNAVAILABLE')
     synthetic = provenance['synthetic']
+    policy = provenance.get('policy_pool')
+    presented = transport_result(result)
+    summary = report_summary(result)
+    if policy:
+        from backend.services.s3_relative_value import product_view
+        summary, relative = product_view(result, policy)
+        presented['relative_value'] = relative
     prices = {symbol: [{k: record.get('values', {}).get('provenance', {}).get(k, record.get(k))
         for k in ('record_id', 'source_url', 'raw_sha256', 'data_as_of', 'fetched_at', 'price_basis')}
         for record in assessment.get('records', []) if record.get('kind') == 'technical']
         for symbol, assessment in payload['assessments'].items()}
+    if payload.get('execution'):
+        prices = {card['symbol']: [card['current_price_evidence']] for card in result['cards']
+                  if card.get('current_price_evidence')}
+    execution = {'execution': payload['execution']} if payload.get('execution') else {}
     return dict(synthetic=synthetic, scenario='company_pool_research', status=result['status'],
         issues=result.get('issues', []), queried_at=result['decision_at'],
-        conclusion=report_summary(result),
+        conclusion=summary,
         intent=dict(symbols=provenance['symbols'], purpose=payload['request']['purpose'],
             method=provenance.get('research_method','standard')),
-        professional_result=transport_result(result),
+        professional_result=presented,
         evidence=dict(artifact_id=bundle['artifact_id'], verification=verification,
-            entry_provenance=provenance, price_sources=prices, full_result_sha256=store.digest(result), method_files=payload['method_files'], source_manifest_sha256=payload['request']['source_manifest_sha256']),
+            entry_provenance=provenance, price_sources=prices, **execution, full_result_sha256=store.digest(result), method_files=payload['method_files'], source_manifest_sha256=payload['request']['source_manifest_sha256']),
         data_quality=dict(maturity='RESEARCH_ONLY', comparable_count=result['comparable_count']),
         scope=dict(mode='DETERMINISTIC_RESEARCH_SKILL', holdings_used=False,
             configuration_priority='UNKNOWN_NOT_EVALUATED', company_priority_is_not_portfolio_allocation=True),
@@ -154,11 +178,21 @@ def project(bundle, verification):
         professional_analysis_complete=False, execution_authorized=False, order_created=False)
 
 
-def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=None, synthetic=False):
+def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=None, synthetic=False, portfolio_id=None, frozen_at=None):
     from backend.services import s3_pool_research as engine
     from backend.services import quality_valuation_research as store
     request = CompanyPoolRequest.model_validate(request)
     root = private_archive(archive_root)
+    if frozen_at is not None and source_root is None:
+        raise ValueError('S3_FROZEN_CLOCK_REQUIRES_FROZEN_SOURCE')
+    policy = None
+    if request.scope == 'active_us_direct':
+        from backend.services.investment_policy.runtime import resolve
+        from backend.services.s3_relative_value import policy_pool, run
+        policy = policy_pool(resolve(portfolio_id))
+        if request.parent_artifact_id:
+            return run(root, request.parent_artifact_id, policy, source_root=source_root, frozen_at=frozen_at)
+    symbols = [row['symbol'] for row in policy['issuers'].values()] if policy else request.symbols
     source_mode = 'FROZEN_REQUALIFICATION' if source_root is not None else 'PUBLIC_CAPTURE'
     if source_root is None:
         if synthetic:
@@ -167,20 +201,22 @@ def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=N
         source_root = root / '.captures' / uuid.uuid4().hex
         # A new professional clock must refresh mutable SEC metadata as well
         # as issuer context; an old submissions list cannot prove no new filing.
-        capture_pool(request.symbols, source_root,
-            reuse=None if request.method=='professional' else reuse_sources)
+        capture_pool(symbols, source_root,
+            reuse=None if request.method=='professional' else reuse_sources, **({'listed_prices': True} if policy else {}))
     source_root = Path(source_root)
     if request.method=='professional' and source_mode=='PUBLIC_CAPTURE':
         from backend.services.s3_professional_research import capture_context
-        capture_context(source_root,request.symbols)
+        capture_context(source_root,symbols,**({'relative': True} if policy else {}))
     # Capture/load first; never accept a client-supplied or backdated clock.
-    decision_at = datetime.now(timezone.utc).isoformat()
+    decision_at = frozen_at or datetime.now(timezone.utc).isoformat()
     raw = dict(pool_id='chatgpt_company_pool', pool_version='v1', purpose=request.purpose,
-        companies={s: None for s in request.symbols}, decision_at=decision_at,
+        companies={s: None for s in symbols}, decision_at=decision_at,
         source_manifest_sha256=store.file_hash(source_root / 'manifest.json'))
     bundle, files = engine.make_bundle(source_root, raw)
     bundle['payload']['entry_provenance'] = dict(version='s3-mcp.entry.v1', synthetic=synthetic,
-        source_mode=source_mode, symbols=request.symbols,research_method='standard',requested_method=request.method)
+        source_mode=source_mode, symbols=symbols,research_method='standard',requested_method=request.method)
+    if policy:
+        bundle['payload']['entry_provenance']['policy_pool'] = policy
     bundle['artifact_id'] = store.digest(bundle['payload'])
     target = store.save_bundle(root, bundle, files)
     if request.method=='professional':
@@ -205,7 +241,10 @@ def read_company_pool(artifact_id, *, archive_root, synthetic=False):
     if bundle['artifact_id'] != artifact_id:
         raise ValueError('S3_ARTIFACT_INVALID')
     try:
-        if bundle['payload']['result']['method_version'].startswith('s3-p2.'):
+        if bundle['payload'].get('entry_provenance', {}).get('operation') == 'price_revaluation':
+            from backend.services.s3_relative_value import verify
+            verification = verify(path.parent.parent, path, bundle)
+        elif bundle['payload']['result']['method_version'].startswith('s3-p2.'):
             from backend.services.s3_operating_research import replay as professional_replay
             verification=professional_replay(path)
         else:verification = engine.replay(path)

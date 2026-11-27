@@ -15,7 +15,7 @@ from backend.services import quality_valuation_research as archive
 def now():return datetime.now(timezone.utc).isoformat()
 
 
-def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
+def capture_pool(symbols,output,*,reuse=None,av_env_file=None, prices_only=False, listed_prices=False):
     from research_v2 import sec_disclosures as sec
     from backend.services.s3_method_research import identity_projection
     from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES,get_next_av_key,_av_get,_response_status,response_diagnostic
@@ -37,6 +37,10 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
     os.environ['PYTHON_DOTENV_DISABLED']='1'
     output.mkdir(parents=True)
     manifest=dict(schema_version='s3-d.sources.v1',companies={},requests=[],started_at=now())
+    if prices_only and reuse:
+        raise ValueError('REPRICE_REQUIRES_FRESH_SOURCES')
+    if prices_only:
+        manifest['provider_requests'] = {'sec': 0, 'av': 0}
     previous=archive._load(reuse,'manifest.json') if reuse else {}
     def save():
         (output/'manifest.json').write_text(json.dumps(manifest,indent=2))
@@ -77,6 +81,8 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
         return store(path.read_bytes(),entry['url'],symbol.replace(':','_')+'-'+kind+'.json',entry['fetched_at'],
             **{k:v for k,v in entry.items() if k not in {'url','path','sha256','fetched_at'}})
     def sec_get(url,name):
+        if prices_only:
+            manifest['provider_requests']['sec'] += 1
         source=sec._fetch(url)
         if source:return store(source[0],url,name,source[1],owner='SEC',status='RAW_NOT_YET_QUALIFIED')
         entry=dict(url=url,status='FAILED',diagnostics=sec.source_diagnostics());manifest['requests'].append(entry);save();return entry
@@ -90,6 +96,8 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
                 raise ValueError('UNEXPECTED_CAPTURE_REQUEST')
             ticker=symbol[:-3]
             if query.get('symbol')!=[ticker]:raise ValueError('AV_CAPTURE_SYMBOL_MISMATCH')
+            if prices_only:
+                manifest['provider_requests']['av'] += 1
             try:
                 with native(url,*args,**kwargs) as response:
                     if urllib.parse.urlparse(response.geturl()).hostname!='www.alphavantage.co':raise ValueError('AV_REDIRECT_REJECTED')
@@ -143,14 +151,24 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
             cik=str(int(matches[0]['cik_str'])).zfill(10)
             entry['submissions']=retained(symbol,'submissions') or sec_get('https://data.sec.gov/submissions/CIK'+cik+'.json',cik+'-submissions.json')
             sub=archive.safe_file(output,entry['submissions']['path']).read_bytes()
-            issuer,scope,_=identity_projection(symbol,(json.dumps(directory).encode(),entry['directory']['fetched_at']),(sub,entry['submissions']['fetched_at']))
-            entry['companyfacts']=retained(symbol,'companyfacts') or sec_get('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json',cik+'-companyfacts.json')
-            entry['originals']=[]
-            for original in previous.get('companies',{}).get(symbol,{}).get('originals',[]):
-                path=archive.safe_file(reuse,original['path'])
-                if archive.file_hash(path)!=original['sha256']:raise ValueError('REUSE_ORIGINAL_HASH_MISMATCH')
-                entry['originals'].append(store(path.read_bytes(),original['url'],symbol[:-3]+'-'+Path(original['path']).name,original['fetched_at'],owner='SEC'))
-            if scope['issuer_type']=='domestic' and not 6000<=int(scope['sic'])<=6999:
+            registration_only = listed_prices and symbol == 'ANT:US'
+            if registration_only:
+                from backend.services.instruments.issuers import resolve_sec_issuer
+                issuer = resolve_sec_issuer(symbol, directory, json.loads(sub), allow_registration_only=True)
+                if not issuer:
+                    raise ValueError('OFFICIAL_ISSUER_IDENTITY_UNRESOLVED')
+                scope = dict(issuer_type=issuer['issuer_type'], sic=json.loads(sub).get('sic'))
+            else:
+                issuer,scope,_=identity_projection(symbol,(json.dumps(directory).encode(),entry['directory']['fetched_at']),(sub,entry['submissions']['fetched_at']))
+            if not prices_only:
+                entry['companyfacts']=retained(symbol,'companyfacts') or sec_get('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json',cik+'-companyfacts.json')
+                entry['originals']=[]
+                for original in previous.get('companies',{}).get(symbol,{}).get('originals',[]):
+                    path=archive.safe_file(reuse,original['path'])
+                    if archive.file_hash(path)!=original['sha256']:raise ValueError('REUSE_ORIGINAL_HASH_MISMATCH')
+                    entry['originals'].append(store(path.read_bytes(),original['url'],symbol[:-3]+'-'+Path(original['path']).name,original['fetched_at'],owner='SEC'))
+            if ((scope['issuer_type']=='domestic' and not 6000<=int(scope['sic'])<=6999)
+                    or (listed_prices and symbol in {'BRK.B:US','ANT:US'})):
                 entry['price']=retained(symbol,'price');entry['splits']=retained(symbol,'splits')
                 if (not entry['price'] or not entry['splits'] or not entry['splits'].get('path')) and get_next_av_key()=='demo':
                     raise ValueError('AV_IDENTITY_UNCONFIGURED')
@@ -166,6 +184,9 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None):
                             diagnostic = response_diagnostic('SPLITS',payload,get_next_av_key())
                             entry['splits_diagnostic'] = diagnostic
                             entry['splits'] = dict(status=diagnostic['status'], diagnostics=[diagnostic])
+            if prices_only:
+                save()
+                continue
             # Existing SEC Owner handles any needed Q4 original. Bounded official
             # annual-neighbor earnings events; never derive Q4 by S3 subtraction.
             if scope['issuer_type']!='domestic' or 6000<=int(scope['sic'])<=6999:
