@@ -53,6 +53,8 @@ def source(root, row, url, earliest, cutoff):
 
 def check_recent_filings(recent, parent_at):
     """Use all recent SEC form dates, including forms outside the financial parser."""
+    if not isinstance(recent, dict):
+        raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
     accessions, dates, accepted = (recent.get(key) for key in
         ('accessionNumber', 'filingDate', 'acceptanceDateTime'))
     if not all(isinstance(rows, list) for rows in (accessions, dates, accepted)):
@@ -61,13 +63,13 @@ def check_recent_filings(recent, parent_at):
         raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
     for day, accepted_at in zip(dates, accepted, strict=True):
         filed = engine.stamp(day)
-        if filed is None:
+        if filed is None or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(day)):
             raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
         if filed.date() > parent_at.date():
             raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
         if filed.date() == parent_at.date():
             acceptance = engine.stamp(accepted_at)
-            if acceptance is None:
+            if acceptance is None or 'T' not in str(accepted_at):
                 raise ValueError('S3_REPRICE_FILING_CLOCK_UNQUALIFIED')
             if acceptance > parent_at:
                 raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
