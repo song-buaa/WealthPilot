@@ -202,11 +202,11 @@ def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=N
         # A new professional clock must refresh mutable SEC metadata as well
         # as issuer context; an old submissions list cannot prove no new filing.
         capture_pool(symbols, source_root,
-            reuse=None if request.method=='professional' else reuse_sources)
+            reuse=None if request.method=='professional' else reuse_sources, **({'listed_prices': True} if policy else {}))
     source_root = Path(source_root)
     if request.method=='professional' and source_mode=='PUBLIC_CAPTURE':
         from backend.services.s3_professional_research import capture_context
-        capture_context(source_root,symbols)
+        capture_context(source_root,symbols,**({'relative': True} if policy else {}))
     # Capture/load first; never accept a client-supplied or backdated clock.
     decision_at = frozen_at or datetime.now(timezone.utc).isoformat()
     raw = dict(pool_id='chatgpt_company_pool', pool_version='v1', purpose=request.purpose,

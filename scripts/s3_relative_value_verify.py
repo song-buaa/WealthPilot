@@ -31,7 +31,7 @@ def verify(path):
     parent = load(path.parent.parent / child['parent_artifact_id'] / 'bundle.json')
     assert digest(parent['result']) == child['parent_result_sha256']
     r = child['result']
-    assert r['method_version'] == 's3-relative-value.fixed-endpoint.v1'
+    assert r['method_version'] in ('s3-relative-value.fixed-endpoint.v1','s3-relative-value.fixed-endpoint.v1.1')
     start = datetime.fromisoformat(parent['result']['decision_at'])
     at = datetime.fromisoformat(r['decision_at'])
     end = datetime.fromisoformat(r['forecast_endpoint'])

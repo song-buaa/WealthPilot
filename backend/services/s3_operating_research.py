@@ -5,6 +5,7 @@ rank owners settle returns/gates. Research inputs are explicit private dossiers;
 no automatic predictions, model calls, holdings, policy, database or network.
 """
 from copy import deepcopy
+from datetime import timedelta
 from decimal import Decimal, localcontext
 from pathlib import Path
 import hashlib
@@ -309,6 +310,40 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
     methods=tuple(q['method_files'])+('backend/services/s3_operating_research.py','scripts/s3_operating_verify.py')
     if professional_context is not None:
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
+        if professional_context.get('relative_policy'):
+            from backend.services.s3_relative_profiles import BOOK
+            from backend.services.s3_relative_value import METHOD, listed_close, rank_comparisons, relative_stress
+            from backend.services import s3_berkshire_research as berkshire
+            methods += ('backend/services/s3_relative_profiles.py', BOOK, METHOD, berkshire.CODE,
+                        'backend/services/instruments/issuers.py')
+            result['quality_dossier'] = professional_context['quality_dossier']
+            for index, card in enumerate(result['cards']):
+                if card['symbol'] == 'BRK.B:US':
+                    try:
+                        result['cards'][index] = berkshire.build(card, root, manifest, request['decision_at'],
+                            result['quality_dossier'].get(card['symbol'],{}))
+                    except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError) as error:
+                        card['failure_reason'] = pool._error_code(error,'S3_BRK_METHOD_INPUT_UNAVAILABLE')
+            at = engine.stamp(request['decision_at'])
+            for card in result['cards']:
+                symbol = card['symbol']
+                if card['scenarios'] or not result['quality_dossier'].get(symbol,{}).get('sources'):
+                    continue
+                try:
+                    quote = listed_close(root, manifest['companies'][symbol], symbol, at.date().isoformat(),
+                                         at-timedelta(days=2), at)
+                    card['reference_close'] = dict(quote, scope='LISTED_CLOSE_ONLY_NO_EPS_OR_ENTITLEMENT_QUALIFICATION')
+                except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError):
+                    pass
+            relative_request = pool.PoolRequest.model_validate(request)
+            result['comparable_count'] = rank_comparisons(result['cards'], relative_request)
+            result['not_comparable'] = [dict(symbol=c['symbol'], reason=c['failure_reason'])
+                                        for c in result['cards'] if not c['scenarios']]
+            stress = relative_stress(result['cards'],relative_request)
+            result['relative_stress'] = stress
+            previous_rank = result['ranking']
+            result['ranking'] = {k:v for k,v in previous_rank.items() if k not in ('stable','changes')}
+            result['ranking'].update(stable=stress['stable'], changes_status=stress['status'])
         result['professional_qualification']=professional_context
         result['assumption_profile_version']=professional_context['profile_version']
         result['research_scope']='CURRENT_EVIDENCE_CONDITIONAL_RESEARCH_NOT_VALIDATED_FORECAST'

@@ -15,7 +15,7 @@ from backend.services import quality_valuation_research as archive
 def now():return datetime.now(timezone.utc).isoformat()
 
 
-def capture_pool(symbols,output,*,reuse=None,av_env_file=None, prices_only=False):
+def capture_pool(symbols,output,*,reuse=None,av_env_file=None, prices_only=False, listed_prices=False):
     from research_v2 import sec_disclosures as sec
     from backend.services.s3_method_research import identity_projection
     from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES,get_next_av_key,_av_get,_response_status,response_diagnostic
@@ -151,7 +151,15 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None, prices_only=False
             cik=str(int(matches[0]['cik_str'])).zfill(10)
             entry['submissions']=retained(symbol,'submissions') or sec_get('https://data.sec.gov/submissions/CIK'+cik+'.json',cik+'-submissions.json')
             sub=archive.safe_file(output,entry['submissions']['path']).read_bytes()
-            issuer,scope,_=identity_projection(symbol,(json.dumps(directory).encode(),entry['directory']['fetched_at']),(sub,entry['submissions']['fetched_at']))
+            registration_only = listed_prices and symbol == 'ANT:US'
+            if registration_only:
+                from backend.services.instruments.issuers import resolve_sec_issuer
+                issuer = resolve_sec_issuer(symbol, directory, json.loads(sub), allow_registration_only=True)
+                if not issuer:
+                    raise ValueError('OFFICIAL_ISSUER_IDENTITY_UNRESOLVED')
+                scope = dict(issuer_type=issuer['issuer_type'], sic=json.loads(sub).get('sic'))
+            else:
+                issuer,scope,_=identity_projection(symbol,(json.dumps(directory).encode(),entry['directory']['fetched_at']),(sub,entry['submissions']['fetched_at']))
             if not prices_only:
                 entry['companyfacts']=retained(symbol,'companyfacts') or sec_get('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json',cik+'-companyfacts.json')
                 entry['originals']=[]
@@ -159,7 +167,8 @@ def capture_pool(symbols,output,*,reuse=None,av_env_file=None, prices_only=False
                     path=archive.safe_file(reuse,original['path'])
                     if archive.file_hash(path)!=original['sha256']:raise ValueError('REUSE_ORIGINAL_HASH_MISMATCH')
                     entry['originals'].append(store(path.read_bytes(),original['url'],symbol[:-3]+'-'+Path(original['path']).name,original['fetched_at'],owner='SEC'))
-            if scope['issuer_type']=='domestic' and not 6000<=int(scope['sic'])<=6999:
+            if ((scope['issuer_type']=='domestic' and not 6000<=int(scope['sic'])<=6999)
+                    or (listed_prices and symbol in {'BRK.B:US','ANT:US'})):
                 entry['price']=retained(symbol,'price');entry['splits']=retained(symbol,'splits')
                 if (not entry['price'] or not entry['splits'] or not entry['splits'].get('path')) and get_next_av_key()=='demo':
                     raise ValueError('AV_IDENTITY_UNCONFIGURED')

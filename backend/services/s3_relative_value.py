@@ -13,7 +13,7 @@ from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERS
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
 
-VERSION = 's3-relative-value.fixed-endpoint.v1'
+VERSION = 's3-relative-value.fixed-endpoint.v1.1'
 METHOD = 'backend/services/s3_relative_value.py'
 AV_URL = 'https://www.alphavantage.co/query'
 MAX_REVIEW_AGE = timedelta(days=30)
@@ -76,14 +76,9 @@ def check_recent_filings(recent, parent_at):
 
 
 def qualify_price(root, manifest, payload, card, cutoff, *, live):
-    from backend.services.execution_plan.kline_provider import decode_av_daily, decode_av_splits
-    from backend.services.market_data.evidence import assess, mapping
-    from backend.services.market_data.financial_research import build
-    from backend.services.market_data.technical_evidence import from_bars
     from backend.services.s3_method_research import identity_projection
     from backend.services.s3_professional_research import registry
     from research_v2 import sec_disclosures as sec, official_disclosures as official
-    import exchange_calendars as calendars
 
     symbol = card['symbol']
     earliest = cutoff - timedelta(days=2)
@@ -91,7 +86,13 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         earliest = max(engine.stamp(payload['result']['decision_at']), earliest)
     entry = manifest['companies'][symbol]
     directory = source(root, entry['directory'], sec.DIRECTORY, earliest, cutoff)
-    reviewed = registry()['companies'][symbol]
+    if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
+        from backend.services.s3_berkshire_research import frozen_profile, check_identity
+        profile = frozen_profile()
+        sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0001067983.json',earliest,cutoff)
+        check_identity(symbol,directory,sub,profile,cutoff)
+        return listed_close(root,entry,symbol,profile['shares_as_of'],earliest,cutoff)
+    reviewed = registry(relative=payload['professional_context'].get('relative_policy',False))['companies'][symbol]
     sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK'+reviewed['cik']+'.json',
                  earliest, cutoff)
     issuer, _, _ = identity_projection(symbol, directory, sub)
@@ -101,7 +102,7 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
     filings = sec.discover_filings(issuer, submissions)
     latest = {form: next((row['accession'] for row in filings if row['form'] == form), None)
               for form in ('10-K', '10-Q', '8-K')}
-    parent_at = engine.stamp(payload['result']['decision_at'])
+    parent_at = require_review_clock(reviewed.get('reviewed_at', payload['professional_context']['reviewed_at']),cutoff)
     # Also reject new amendments, registration, proxy and ownership events.
     # Use the raw recent list so a filing unrecognized by discover_filings cannot pass silently.
     if latest != reviewed['latest_reviewed_filings']:
@@ -114,6 +115,17 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
     official.verify_current_issuer_context(body, ir, issuer, cutoff.isoformat())
     if official.research_context_fingerprint(body, issuer['cik']) != expected_ir['visible_context_sha256']:
         raise ValueError('S3_REPRICE_CONTEXT_CHANGED_REQUIRES_RESEARCH')
+
+    return dict(listed_close(root, entry, symbol, card['price_qualification']['eps_interval_start'],
+                            earliest, cutoff), ir_sha256=ir['sha256'])
+
+
+def listed_close(root, entry, symbol, interval_start, earliest, cutoff):
+    from backend.services.execution_plan.kline_provider import decode_av_daily, decode_av_splits
+    from backend.services.market_data.evidence import assess, mapping
+    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.technical_evidence import from_bars
+    import exchange_calendars as calendars
 
     price, splits = entry['price'], entry['splits']
     for record, function in ((price, 'TIME_SERIES_DAILY'), (splits, 'SPLITS')):
@@ -135,14 +147,22 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
     if not observed or observed['currency'] != 'USD' or technical['data_as_of'] != latest_close:
         raise ValueError('S3_REPRICE_PRICE_STALE_OR_UNQUALIFIED')
     events = decode_av_splits(json.loads(source(root, splits, AV_URL, earliest, cutoff)[0]), symbol)
-    old_price = card['price_qualification']
-    if any(e['effective_date'] >= old_price['eps_interval_start'] and
+    if any(e['effective_date'] >= interval_start and
            engine.dec(e['split_factor']) != 1 for e in events):
         raise ValueError('S3_REPRICE_SPLIT_REQUIRES_RESEARCH')
     return dict(price=str(observed['values']['observed_price']), price_date=latest_close, currency='USD',
                 raw_price_sha256=price['sha256'], split_sha256=splits['sha256'],
-                filings_sha256=entry['submissions']['sha256'], ir_sha256=ir['sha256'],
+                filings_sha256=entry['submissions']['sha256'],
                 fetched_at=price['fetched_at'], price_basis='RAW_AS_TRADED_NOT_ADJUSTED')
+
+
+def require_review_clock(value, cutoff):
+    reviewed = engine.stamp(value)
+    if not reviewed or reviewed > cutoff:
+        raise ValueError('S3_REPRICE_REVIEW_CLOCK_UNQUALIFIED')
+    if cutoff - reviewed > MAX_REVIEW_AGE:
+        raise ValueError('S3_REPRICE_REVIEW_WINDOW_EXPIRED')
+    return reviewed
 
 
 def endpoint(start):
@@ -198,6 +218,85 @@ def rank_comparisons(cards, request):
     return len(comparable)
 
 
+def relative_stress(cards, request, *, remaining=Decimal(5)):
+    """Re-rank a finite common and issuer-specific stress set; assign no probabilities."""
+    eligible = [card for card in cards if card.get('scenarios')]
+    if len(eligible) < 2:
+        return dict(status='INSUFFICIENT_COMPARABLE_ISSUERS', stable=None, cells=[], pairs=[])
+    grid = {}
+    missing = []
+    for card in eligible:
+        symbol = card['symbol']
+        points = {}
+        for row in card.get('joint_sensitivity', []):
+            if row['result']:
+                axis = row.get('stress_axis','REVENUE_PE')
+                points[(axis,row['revenue_growth_shift'],row['terminal_pe_shift'])] = row['result']
+        for shift in ('-.02','.02'):
+            try:
+                params = dict(card['operating_assumptions']['base'])
+                params['terminal_operating_margin'] = engine.dec(params['terminal_operating_margin']) + Decimal(shift)
+                if not 0 < params['terminal_operating_margin'] <= Decimal('.8'):
+                    raise ValueError('S3_MARGIN_STRESS_OUT_OF_RANGE')
+                base = card['operating_baseline']
+                current = card.get('current_price_evidence')
+                historical = card.get('historical_cross_checks',card.get('cross_checks',{}))
+                price = engine.dec(historical['observed_price']['values']['observed_price'])
+                rate = engine.dec(card['assumptions']['required_return'])
+                eps = base['eps']['values']['diluted_eps_ttm']
+                scenario, _ = engine.operating_scenario(eps, price, base, params, rate)
+                if current:
+                    scenario = reprice_case(scenario,price,engine.dec(current['price']),remaining,rate)
+                points[('OPERATING_MARGIN',shift,'0')] = scenario
+            except (ValueError, KeyError, TypeError, ArithmeticError):
+                continue
+        grid[symbol] = points
+        expected = 9 if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1' else 11
+        if len(points) < expected:
+            missing.append(symbol)
+    baseline = {c['symbol']: [c['group'],c['rank']] for c in eligible}
+    base_return = {c['symbol']: engine.dec(c['scenarios']['base']['annualized_return']) for c in eligible}
+    cases = []
+    for key in sorted(set().union(*grid.values())):
+        variants = {symbol: v[key] for symbol,v in grid.items() if key in v}
+        if len(variants) > 1:
+            cases.append(('COMMON' if len(variants)==len(grid) else 'COMMON_METHOD_SUBSET', key, variants))
+    for shift in ('-.2','.2'):
+        variants = {symbol: value for symbol,points in grid.items()
+                    for (axis,growth,multiple),value in points.items()
+                    if axis in ('REVENUE_PE','OPERATING_EARNINGS_PE') and growth=='0' and multiple==shift}
+        if len(variants) > 1:
+            cases.append(('COMMON_EXIT_MULTIPLE', ('EXIT_MULTIPLE','0',shift), variants))
+    cases.extend((symbol,key,{symbol: scenario}) for symbol,points in grid.items()
+                 for key, scenario in sorted(points.items()))
+    outcomes = []
+    for scope, key, variants in cases:
+        trial = [dict(card, scenarios=dict(card['scenarios'],
+                 base=variants.get(card['symbol'],card['scenarios']['base']))) for card in eligible]
+        engine._rank(trial,request)
+        outcomes.append(dict(scope=scope,axis=list(key),
+            ranks={c['symbol']: [c['group'],c['rank']] for c in trial},
+            returns={c['symbol']: c['scenarios']['base']['annualized_return'] for c in trial}))
+    pairs = []
+    for i,left in enumerate(base_return):
+        for right in list(base_return)[i+1:]:
+            spread = base_return[left]-base_return[right]
+            spreads = [engine.dec(o['returns'][left])-engine.dec(o['returns'][right]) for o in outcomes]
+            low,high = min([spread]+spreads),max([spread]+spreads)
+            if low < -request.tie_band and high > request.tie_band:
+                status = 'REVERSAL'
+            elif low > request.tie_band or high < -request.tie_band:
+                status = 'TESTED_ADVANTAGE' if not missing else 'PARTIAL_GRID'
+            else:
+                status = 'NO_ROBUST_ADVANTAGE'
+            pairs.append(dict(left=left,right=right,baseline_spread=engine.text(spread),
+                min_spread=engine.text(low),max_spread=engine.text(high),status=status))
+    return dict(status='PARTIAL_STRESS_GRID' if missing else 'FINITE_STRESS_GRID',
+                stable=None if missing else all(o['ranks']==baseline for o in outcomes),
+                missing=missing, cells=outcomes, pairs=pairs,
+                scope='BASE_RETURN_PERTURBATION_WITH_FIXED_CAUTIOUS_CASE_AND_EVIDENCE; NO_PROBABILITIES')
+
+
 def calculate(payload, root, manifest, cutoff, *, live):
     with localcontext() as ctx:
         ctx.prec = 34
@@ -219,8 +318,9 @@ def _calculate(payload, root, manifest, cutoff, *, live):
         try:
             if not card['scenarios']:
                 raise ValueError(card.get('failure_reason') or 'S3_REPRICE_PROFILE_UNAVAILABLE')
-            if cutoff-start > MAX_REVIEW_AGE:
-                raise ValueError('S3_REPRICE_REVIEW_WINDOW_EXPIRED')
+            context = payload['professional_context']
+            review_clock = context['companies'].get(symbol, {}).get('reviewed_at', context['reviewed_at'])
+            card['operating_reviewed_at'] = require_review_clock(review_clock, cutoff).isoformat()
             observation = qualify_price(root, manifest, payload, card, cutoff, live=live)
             old_price = engine.dec(card['cross_checks']['observed_price']['values']['observed_price'])
             price = engine.dec(observation['price'])
@@ -245,8 +345,12 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             card['conditional_value_range'] = [engine.text(min(values)), engine.text(max(values))]
             # Current quotes are distinct from price-dependent comparisons in the parent.
             card['current_price_evidence'] = observation
-            eps = engine.dec(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm'])
-            card['current_pe'] = engine.text(price / eps)
+            if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
+                card['current_operating_earnings_multiple'] = engine.text(
+                    price / engine.dec(card['operating_earnings_bridge']['earnings_per_b']))
+            else:
+                eps = engine.dec(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm'])
+                card['current_pe'] = engine.text(price / eps)
             card['price_qualification'] = dict(observation, eps_interval_start=card['price_qualification']['eps_interval_start'])
             card['comparison_status'] = 'COMPARABLE'
             card['profile_reuse_status'] = 'REQUALIFIED_WITHIN_OBSERVED_SOURCE_SCOPE'
@@ -256,21 +360,28 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                         failure_reason=reason, comparison_status='NOT_COMPARABLE', valuation_status='UNKNOWN',
                         profile_reuse_status=('REQUIRES_RESEARCH' if 'RESEARCH' in reason or 'EXPIRED' in reason
                                               else 'UNKNOWN'))
-            for key in ('conditional_value_range', 'assumptions', 'joint_qualification', 'formula'):
+            if 'current_price_evidence' in card:
+                card['historical_price_evidence'] = card.pop('current_price_evidence')
+            for key in ('conditional_value_range', 'assumptions', 'joint_qualification', 'formula',
+                        'current_operating_earnings_multiple', 'current_pe', 'price_qualification'):
                 card.pop(key, None)
         if 'current_price_evidence' not in card:
             card.pop('price_qualification', None)
         card['historical_cross_checks'] = card.pop('cross_checks', {})
+        if 'reference_close' in card:
+            card['historical_reference_close'] = card.pop('reference_close')
         for key in ('p1_comparison', 'valuation_context', 'rank_reason', 'tie_reason'):
             card.pop(key, None)
         card['ranking_unstable'] = None
     request = PoolRequest.model_validate(payload['request'])
     count = rank_comparisons(cards, request)
+    stress = relative_stress(cards, request, remaining=remaining)
     historical_eligibility = result.pop('professional_qualification', None)
     result.update(original_professional_qualification=historical_eligibility, decision_at=cutoff.isoformat(), original_decision_at=start.isoformat(),
                   forecast_endpoint=end.isoformat(), remaining_years=str(remaining), method_version=VERSION,
                   status='ok' if count == len(cards) else 'partial', comparable_count=count,
-                  ranking=dict(stable=None, changes_status='JOINT_RANK_STABILITY_NOT_REPLAYED',
+                  relative_stress=stress,
+                  ranking=dict(stable=stress['stable'], changes_status=stress['status'],
                                previous={c['symbol']: [c['group'], c['rank']] for c in old['cards']},
                                current={c['symbol']: [c['group'], c['rank']] for c in cards}),
                   not_comparable=[dict(symbol=c['symbol'], reason=c['failure_reason']) for c in cards if not c['scenarios']])
@@ -292,16 +403,16 @@ def verified_parent(root, artifact_id):
     return parent
 
 
-def capture(root, symbols):
+def capture(root, symbols, *, relative=False):
     from backend.services.s3_pool_capture import capture_pool, now
     from backend.services.s3_professional_research import registry
     from research_v2 import official_disclosures as official
 
-    path = capture_pool(symbols, root, prices_only=True)
+    path = capture_pool(symbols, root, prices_only=True, listed_prices=relative)
     manifest = json.loads(path.read_text())
     for symbol in symbols:
         try:
-            cik = registry()['companies'][symbol]['cik']
+            cik = registry(relative)['companies'][symbol]['cik']
             manifest['provider_requests']['issuer_ir'] = manifest['provider_requests'].get('issuer_ir', 0) + 1
             body, receipt = official.fetch_current_issuer_context(cik)
             filename = symbol[:-3]+'-reprice-ir.html'
@@ -330,7 +441,7 @@ def run(root, parent_id, policy, *, source_root=None, frozen_at=None):
         source_root = root / '.captures' / uuid.uuid4().hex
         if not eligible:
             raise ValueError('S3_REPRICE_NO_ELIGIBLE_PROFILES')
-        capture(source_root, eligible)
+        capture(source_root, eligible, relative=p['professional_context'].get('relative_policy',False))
     source_root = Path(source_root)
     manifest = archive._load(source_root, 'manifest.json')
     cutoff = engine.stamp(frozen_at or now())
@@ -405,19 +516,24 @@ def product_view(result, policy):
             if 'observed_price' in metric.get('values', {}):
                 price = dict(price=metric['values']['observed_price'], price_date=metric.get('period'),
                              currency=metric.get('currency'))
+        reference = c.get('reference_close')
         formatted = f"{price['price']} / {price['price_date']}" if price else 'UNKNOWN'
+        if not price and reference:
+            formatted = f"{reference['price']} / {reference['price_date']}（仅行情）"
         returns = ' / '.join(f"{engine.dec(scenarios[k]['annualized_return'])*100:.2f}%"
                              for k in ('cautious', 'base', 'optimistic')) if scenarios else 'UNKNOWN'
         reason = (c['group'] or '研究') if scenarios else c.get('failure_reason', 'INSUFFICIENT_EVIDENCE')
         lines.append(f"| {symbol} | {engine.dec(row['target'])*100:g}% | {formatted} | {returns} | {reason} |")
+        dossier = result.get('quality_dossier', {}).get(symbol, {})
         profiles[symbol] = dict(issuer_id=issuer, listed_return_security=symbol, listed_classes=row['classes'],
             valuation_status=c['comparison_status'],
+            valuation_method=c.get('valuation_method',dossier.get('valuation_method')),
             research_profile=dict(id=issuer, version=result.get('assumption_profile_version'),
                 status=c.get('profile_reuse_status', c['comparison_status']),
                 original_assumption_clock=c.get('historical_quality_as_of', result.get('research_recorded_at')),
                 financial_window={k: c.get('operating_baseline', {}).get(k) for k in ('start', 'period')}, model_version=result.get('valuation_method_version'),
                 invalidation_conditions=c.get('change_conditions', [])),
-            quality_dimensions={
+            quality_dimensions=dossier.get('dimensions') or {
                 'business_model': dict(status='SEE_REVIEWED_SOURCE_CONTEXT' if c.get('calibration_evidence') else 'UNKNOWN'),
                 'competitive_advantage': dict(status='UNKNOWN_NO_INDEPENDENT_DURABILITY_REVIEW'),
                 'growth_runway': dict(status='CONDITIONAL_ASSUMPTIONS' if scenarios else 'UNKNOWN',
@@ -427,9 +543,14 @@ def product_view(result, policy):
                 'certainty_risks_and_counterevidence': dict(warnings=quality.get('warnings', []),
                     major_risks=quality.get('major_risks', []), limitations=c.get('limitations', [])),
             },
+            evidence_bound_quality=dossier,
             current_price=price,
+            reference_close=reference,
             investment_opportunity=dict(group=c['group'], rank=c['rank'], status='RESEARCH_ONLY'),
             strategic_target_review=dict(status='INSUFFICIENT_FOR_POLICY_CHANGE',
-                target_direction='OWNER_JUDGMENT_REQUIRED'),
+                target_direction='OWNER_JUDGMENT_REQUIRED',
+                evidence_gap=dossier.get('equity_bridge') if not scenarios else None,
+                finite_stress=result.get('relative_stress',{}).get('status')),
             configuration_direction='CONDITIONAL_RESEARCH_ONLY_NO_PORTFOLIO_EVIDENCE')
-    return '\n'.join(lines), dict(policy=policy, profiles=profiles, actual_position_priority='UNKNOWN')
+    return '\n'.join(lines), dict(policy=policy, profiles=profiles,
+        relative_stress=result.get('relative_stress'), actual_position_priority='UNKNOWN')

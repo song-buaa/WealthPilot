@@ -1,0 +1,1144 @@
+{
+  "version": "s3-relative-reviewed-dossier.v1",
+  "companies": {
+    "AAPL:US": {
+      "cik": "0000320193",
+      "sources": {
+        "annual": {
+          "accession": "0000320193-26-000026",
+          "locator": "Form 10-K Items 1, 1A, 7, 8; FY ended 2026-09-26",
+          "sha256": "edd39e7620e992bf51f3a8e82e383cc3d2faf931bdebf41b2d22dd50b872d380"
+        },
+        "update": {
+          "accession": "0001140361-26-042798",
+          "locator": "2026-11-09 Form 8-K; subsequent disclosure check",
+          "sha256": "384eb347f36378f48cd44c4b2cfeaec411d65736097c12b705e600fd96cfe4d2"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_PE",
+      "equity_bridge": "US listed common; scale qualified diluted EPS and model buyback separately",
+      "dimensions": {
+        "business_model": {
+          "fact": "iPhone、Mac、iPad、可穿戴及 Services 构成产品和服务组合。",
+          "judgment": "硬件销售与后续服务变现是两个现金驱动。",
+          "counterevidence": "换机延后和硬件促销会同时压低设备收入与附着率。",
+          "evidence": [
+            "annual"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "公司设计设备、操作系统和相关服务，也通过第三方分销。",
+          "judgment": "软硬件整合可能提高用户留存，留存因果没有由报表直接验证。",
+          "counterevidence": "第三方分发规则、平台监管或替代设备可能削弱该优势。",
+          "evidence": [
+            "annual"
+          ]
+        },
+        "growth_runway": {
+          "fact": "报告将 iPhone 和 Services 分列，Pro 产品带动 iPhone 年度销售。",
+          "judgment": "服务收入和设备组合支撑温和增长，不能外推近期双位数季增长。",
+          "counterevidence": "服务类监管、外汇与设备需求下降会限制复利。",
+          "evidence": [
+            "annual"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "产品与服务有分别披露的毛利，现金流表列经营现金与设备购置。",
+          "judgment": "服务组合有助毛利，现金兑现还取决于营运资本与投资。",
+          "counterevidence": "服务毛利下降、库存增加或研发/设备支出上升会切断桥。",
+          "evidence": [
+            "annual"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "年度表列股东回购、股息和股权激励。",
+          "judgment": "需用净稀释与回购价格评价每股收益影响。",
+          "counterevidence": "若回购定价高于可支持的价值或 SBC 抵消回购，增益会低于预期。",
+          "evidence": [
+            "annual"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "年度风险披露包括供应链、竞争、监管与渠道依赖。",
+          "judgment": "盈利基数明确但高倍数需要持续现金转化。",
+          "counterevidence": "分部利润下降、现金转化下行或重大监管变化，应重新评估经营路径。",
+          "evidence": [
+            "annual",
+            "update"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "MSFT:US": {
+      "cik": "0000789019",
+      "sources": {
+        "quarter": {
+          "accession": "0001193125-26-436133",
+          "locator": "2026-09-30 10-Q MD&A Results of Operations、cash flows",
+          "sha256": "ffccb87dda210fd462f177077620c3a15436b4aabf9ee8ff6f2baf0b929ead82"
+        },
+        "update": {
+          "accession": "0001193125-26-448357",
+          "locator": "2026-11-05 Form 8-K; subsequent disclosure check",
+          "sha256": "4c42fd8d637033376135f5eeb151d3a14fc3ce9817318adf8395050554e8d49e"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_PE",
+      "equity_bridge": "US listed common; use same-window EPS and operating bridge",
+      "dimensions": {
+        "business_model": {
+          "fact": "Microsoft Cloud 季度收入 $63.9bn，对照 $49.1bn，包含 Azure 等业务。",
+          "judgment": "企业云、席位和按使用量收费分散收入来源。",
+          "counterevidence": "云需求与 AI 使用增长不保证固定合同或回款。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "Azure 同比增长 48%，Microsoft 365 云使用量及高端席位贡献增长。",
+          "judgment": "企业工作流集成和既有分销支持跨售，边际议价能力仍待订单与留存检验。",
+          "counterevidence": "更低成本的独立工具、云替代及客户自建会压低经济优势。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "growth_runway": {
+          "fact": "Agents and Infra 季度分部收入增长 25%，营业收入增长 24%。",
+          "judgment": "新增算力允许云收入成长，但远期增速应收敛。",
+          "counterevidence": "若容量供需错配、模型运算效率或价格大降，资本回收会延后。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "Agents and Infra 收入成本增加 35%，公司归因于云数据中心投入。",
+          "judgment": "检验折旧、租赁现金和新增云收入的转化，应先于依赖会计利润。",
+          "counterevidence": "CapEx、融资租赁或较短实际资产寿命可拉低可分配现金。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "原件分列经营现金、设备购置、融资租赁和股票回购。",
+          "judgment": "算力资本回报与回购应在资金占用之后衡量。",
+          "counterevidence": "现金投入长期快于增量云毛利，或者股本持续稀释。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "10-Q 披露研发算力投入、增长与 Azure 业务结构带来的成本压力。",
+          "judgment": "云增长确定性高于其对自由现金流的转化确定性。",
+          "counterevidence": "利润率回落、租赁增长及订单期限变化均要求重评。",
+          "evidence": [
+            "quarter",
+            "update"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "NVDA:US": {
+      "cik": "0001045810",
+      "sources": {
+        "results": {
+          "accession": "0001045810-26-000088",
+          "locator": "11-17 Form 8-K Ex.99 earnings, CFO commentary and cash flow",
+          "sha256": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038"
+        },
+        "update": {
+          "accession": "0001045810-26-000090",
+          "locator": "2026-11-23 Form 8-K; subsequent disclosure check",
+          "sha256": "a53c2e57e76808b437349e7bd05dfd0228b4e17ca8a138775c8fd8d439703407"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_PE_IF_CURRENT_EXACT_TTM_QUALIFIES",
+      "equity_bridge": "US listed common; updated quarter, cash conversion and increased dividends require explicit scope",
+      "dimensions": {
+        "business_model": {
+          "fact": "Q3 FY27 Data Center $107.6bn，占 $115.8bn 集团收入绝大部分。",
+          "judgment": "加速算力平台是主要盈利驱动，而非泛化半导体周期。",
+          "counterevidence": "大客户资本支出变化会同时改变数量和定价。",
+          "evidence": [
+            "results"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "披露 Vera Rubin 已出货，系统、网络与开发软件共同支撑部署。",
+          "judgment": "软硬件协同和迁移成本可能维持毛利，须跟踪实用替代。",
+          "counterevidence": "定制 ASIC、低价替代或系统导入困难可侵蚀优势。",
+          "evidence": [
+            "results"
+          ]
+        },
+        "growth_runway": {
+          "fact": "最新季度营收同比增长 103%，公司指引下一季度约 $130bn 且多一周。",
+          "judgment": "短期计算需求强，五年情景需要显式减速。",
+          "counterevidence": "指引未假定中国 Data Center compute 收入，不能把出口恢复作为基准。",
+          "evidence": [
+            "results"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "季度 GAAP 毛利率 74.8%，营业利润约 $77.5bn，稀释 EPS $2.70。",
+          "judgment": "现金兑现要同时检查客户应收、供应承诺和营运资本，利润率非常态保证。",
+          "counterevidence": "客户付款延期或库存增加可削弱现金转换，投资活动收益需独立识别。",
+          "evidence": [
+            "results"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "公司披露新增 $150bn 回购授权及每股 $0.25 的下一季现金股息。",
+          "judgment": "授权不等于已执行，待年内稀释和现金分配证明后才能评价。",
+          "counterevidence": "高价回购和股权激励会抵消部分回报，股息增加不可当作确定五年水平。",
+          "evidence": [
+            "results"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "Q4 指引的毛利率区间约 71%–72%，低于 Q3 观察。",
+          "judgment": "把增长情景与毛利正常化联动，不能用前季档案直接滚动。",
+          "counterevidence": "产品转换、供给和客户集中度变化可使收入和利润率同向下行。",
+          "evidence": [
+            "results",
+            "update"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "GOOG:US": {
+      "cik": "0001652044",
+      "sources": {
+        "quarter": {
+          "accession": "0001652044-26-000084",
+          "locator": "Form 10-Q 2026-09-30 MD&A and notes on EPS and equity",
+          "sha256": "b74e29c9e29e1287ddfb71da78577fcf7f1d26dd0aad599dbea9b778b465a6b1"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_CLASS_C_AFTER_ENTITLEMENT_BRIDGE",
+      "equity_bridge": "Class C Q3 diluted EPS $2.11 identifiable; requires five-year A/B preferred dividends/conversion, Class C capped calls and ATM/equity bridge",
+      "dimensions": {
+        "business_model": {
+          "fact": "搜索、YouTube 广告和订阅、Google Cloud 有独立收入披露。",
+          "judgment": "流量广告和云有不同增长驱动，分别检查。",
+          "counterevidence": "广告周期、流量重分配或云价格压力会同时降低两类现金流。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "搜索与 YouTube 的流量及广告主基础与营收相关。",
+          "judgment": "分发和数据规模支持变现，未证明生成式搜索还能保持同等单位经济。",
+          "counterevidence": "流量获取成本或监管限制可能削弱分发优势。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "growth_runway": {
+          "fact": "业务扩张伴随 AI 基础设施投资，云为独立分部。",
+          "judgment": "增量云利润及 AI 搜索变现应与资本强度同步核验。",
+          "counterevidence": "算力利用率、广告转化率或基础设施寿命低于预期。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "截至季度末，10-Q 有分部营业盈利及集团现金流；Class C Q3 稀释 EPS $2.11。",
+          "judgment": "Q3 优先股转换具反稀释性而未计入该期 Class C EPS，未来转换和现金分红需另建证券权益桥。",
+          "counterevidence": "高 CapEx 或权益融资成本使集团利润不等于 Class C 可分配收益。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "两系列强制可转优先股累计股息 6.25%，ATM 尚有 $27.6bn。",
+          "judgment": "融资用途与长期增量利润需要并验，不能沿用旧净回购假设。",
+          "counterevidence": "Series B 类股转换、capped calls 与 ATM 可导致可比终值变化。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "披露 AI 建设支出及法律、监管和竞争因素。",
+          "judgment": "可评估企业质量，普通股条件价格仍待资格化。",
+          "counterevidence": "业绩反证包括 AI 查询变现变差与资本增量回收不足。",
+          "evidence": [
+            "quarter"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "META:US": {
+      "cik": "0001326801",
+      "sources": {
+        "quarter": {
+          "accession": "0001628280-26-066773",
+          "locator": "Form 10-Q 2026-09-30 MD&A, Family of Apps, liquidity and EPS",
+          "sha256": "3de6e48369ae5c088752ea78ac414fc59a6e8434972993ebdf8fa149edfdff50"
+        },
+        "equity": {
+          "accession": "0001628280-26-066700",
+          "locator": "Form 8-K and exhibits on proposed Class C distribution",
+          "sha256": "b1ae151aa9f1892f85b46d812c483b5244b83e1e72f1e2a2fc9fa923f81bb31a"
+        },
+        "finance": {
+          "accession": "0001193125-26-438017",
+          "locator": "Form 8-K and exhibits covering preferred/depositary financing",
+          "sha256": "6706007b84f7af678f881e9f8750507bd34379b0f3abb13613a0bd9c3b794191"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
+      "equity_bridge": "Class A/C economic claims, depositary preferred and forward settlement remain unresolved; existing guard remains active",
+      "dimensions": {
+        "business_model": {
+          "fact": "Family of Apps 包括 Facebook、Instagram、Messenger、WhatsApp；集团另报 Reality Labs。",
+          "judgment": "广告现金来源与长期创新投资应单列。",
+          "counterevidence": "跨平台参与度下滑可同时影响触达及单价。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "原件分列广告展示变化和平均广告价格。",
+          "judgment": "规模、推荐和广告投放工具可能强化广告效率。",
+          "counterevidence": "获客限制、隐私政策或外部短视频平台可能使效率下降。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "growth_runway": {
+          "fact": "FoA 季度营业利润同比下降约 $7.85bn，基础设施、法律和人员成本均有影响。",
+          "judgment": "AI 推荐带来的长期增长需要能覆盖新增技术成本。",
+          "counterevidence": "流量增长与获利增长背离，应下调经营杠杆。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "原件披露现金流、数据中心支出和非主营业务亏损。",
+          "judgment": "营收韧性不能单独支撑净现金增长判断。",
+          "counterevidence": "CapEx、一次性法律费用和第三方推理支出可能延长现金回收。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "已披露 Class C 派发及优先股/存托股份融资。",
+          "judgment": "优先权益、远期出售与潜在稀释要与回购同时建桥。",
+          "counterevidence": "转换条款或结算改变时，现有 Class A 单股份额不得自动外推。",
+          "evidence": [
+            "quarter",
+            "equity",
+            "finance"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "原件披露融资、法律和投入增加。",
+          "judgment": "保持经营研究，权益桥未验合格前无法检验是否降低战略目标。",
+          "counterevidence": "若股东权益澄清再结合广告和现金增长重评。",
+          "evidence": [
+            "quarter",
+            "equity",
+            "finance"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "TSLA:US": {
+      "cik": "0001318605",
+      "sources": {
+        "quarter": {
+          "accession": "0001628280-26-066775",
+          "locator": "Form 10-Q 2026-09-30 MD&A, segments, GAAP EPS and cash flow",
+          "sha256": "613e1de9d5eb101a840cd65acdb3bcc393aec1318772c5df8f9df61c1dc33611"
+        }
+      },
+      "valuation_method": "OPERATING_EARNINGS_PE_EXCLUDING_UNPROVEN_FUTURE_ADJACENCIES",
+      "equity_bridge": "Ordinary common; qualify exact TTM and reconcile non-operating equity gains before normalizing",
+      "dimensions": {
+        "business_model": {
+          "fact": "汽车、能源发电和储能、服务及其他分列。",
+          "judgment": "汽车盈利与能源增长不能用同一历史增速合成。",
+          "counterevidence": "汽车价量和能源设备订单受不同周期影响。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "制造、充电及软件投入与现有交付体系共同运营。",
+          "judgment": "一体化可能降低单位成本，需用各业务毛利和资本周转验证。",
+          "counterevidence": "车型竞争、换机周期及制造良率可削弱优势。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "growth_runway": {
+          "fact": "公司披露扩产、自动化和 SI 投资计划。",
+          "judgment": "基础情景使用已营业业务，自动驾驶和机器人成本与收入必须各自核验。",
+          "counterevidence": "无可验证的规模收费和合规准入时，基准情景不资本化这些远期业务。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "9M CFO $14.897bn，CapEx 约 $13.01bn；现金流包含有利营运资本变化。",
+          "judgment": "观察性现金差额较薄，不能把 CFO 增长等同反复可兑现的盈利。",
+          "counterevidence": "营运资本反转及设备投入增长可消耗现金；当期股权投资未实现收益需剔离经营解释。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "9M CapEx 较上年约 $6.13bn 增加，SBC 同比上升。",
+          "judgment": "分开跟踪制造、算力与投资资产用途。",
+          "counterevidence": "若投入没有带来经证实的单位回报，资本配置质量判断下降。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "其 10-Q 给出大型资本投入计划及竞争和运营不确定性。",
+          "judgment": "近期财务足以评估高波动，长期经营终值仍需档案资格。",
+          "counterevidence": "收入放缓、汽车利润率转弱和投资增长共同出现时下修。",
+          "evidence": [
+            "quarter"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "BRK.B:US": {
+      "cik": "0001067983",
+      "sources": {
+        "quarter": {
+          "accession": "0001193125-26-452412",
+          "locator": "Form 10-Q 2026-09-30 MD&A insurance earnings/float/BNSF/BHE; Note 22 share classes",
+          "sha256": "0cf42920b0abc830c7b2801aa6f152a39afdb6b5a626f8964fe282da9d00060e"
+        },
+        "annual_earnings": {
+          "accession": "0001193125-26-085801",
+          "locator": "FY25 operating earnings reconciliation, Exhibit 99.1",
+          "sha256": "e19171a2c7e4b5177e0f91f9b995a46fb931b0d806be9d2fdfb997c30161d027"
+        },
+        "quarter_earnings": {
+          "accession": "0001193125-26-452530",
+          "locator": "2026-09-30 nine-month operating earnings reconciliation, Exhibit 99.1",
+          "sha256": "1ecfcf109bd982a90eb08d78f3cb57b95992ff355617b297552f11a9cebc1631"
+        },
+        "financing": {
+          "accession": "0001193125-26-468549",
+          "locator": "2026-11-19 Form 8-K yen notes; debt used in scenario risk",
+          "sha256": "a60a1ad92286d5b9a9b27da0a0010498fbee9de6d3cf18fc60b8706aca56dad4"
+        }
+      },
+      "valuation_method": "INSURANCE_HOLDING_NORMALIZED_OPERATING_EARNINGS_CLASS_B_RESEARCH_CANDIDATE",
+      "equity_bridge": "Class B economic 1/1500 of Class A; 2026-09-30 B-equivalent 2,128,350,000. The 2026-10-28 cover share count is used in the operating profile: 2,124,519,594. Ordinary nonfinancial PE disallowed",
+      "dimensions": {
+        "business_model": {
+          "fact": "保险、铁路、能源、制造零售和投资资产并存。",
+          "judgment": "经营利润应区分保险承保、保险投资收入和非保险子公司。",
+          "counterevidence": "不同业务的资本要求和周期不同，合并 GAAP EPS 含投资波动。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "保险承保有多险种规模，同时持有监管约束的资产。",
+          "judgment": "可投资浮存金可能有价值，但前提是长期承保纪律可持续。",
+          "counterevidence": "赔付频率、承保定价或监管资本可降低可持续优势。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "growth_runway": {
+          "fact": "非保险子公司包含铁路及公用事业等。",
+          "judgment": "成长更可能来自资本再投入、定价和现金再配置，避免投射科技增长率。",
+          "counterevidence": "监管回报、铁路货运、能源项目资本回收均会变动。",
+          "evidence": [
+            "quarter"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "Q3 税后承保收益 $1.352bn，对照 $2.369bn；报告强调巨灾与赔付估计。",
+          "judgment": "使用多年正常化承保与经常性投资收入，资本化收益不再加计产生这些收益的资产。",
+          "counterevidence": "灾损和低利率同时出现会压缩可持续现金。",
+          "evidence": [
+            "quarter",
+            "annual_earnings",
+            "quarter_earnings"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "Note 22 列 1,418,900 份 Class A 等效股。",
+          "judgment": "每股终值以 Class B 等价权益计，母公司可调配现金应扣保障资本要求。",
+          "counterevidence": "未证实可自由分配的保险资产不能当作母公司额外现金。",
+          "evidence": [
+            "quarter",
+            "financing"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "投资市值波动和保险浮存金各有报告口径。",
+          "judgment": "原非金融筛查不适用，替代方法仍需初始报价、分部经营桥和已评审参数。",
+          "counterevidence": "巨灾频率、资产久期和分部资本强度无法靠报告一个市盈率消除。",
+          "evidence": [
+            "quarter"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    },
+    "ANT:US": {
+      "cik": "0002130357",
+      "sources": {
+        "prospectus": {
+          "accession": "0001628280-26-074944",
+          "locator": "Final 424B4, operations, charters, compute commitments and liquidity",
+          "primary": "anthropicpbc-424b4.htm",
+          "sha256": "9a674665d93ca04d1dc27e4644ec9ac7c8fb5f3e4d9c7b9c3623ace227d64cf9"
+        },
+        "listing": {
+          "accession": "0001628280-26-075973",
+          "locator": "IPO close 8-K, Class A listing and concurrent Class N private placement",
+          "sha256": "f85715f84d1d69545f5c036e19116db44364be745f427ef91b5283c1ff0a185f"
+        }
+      },
+      "valuation_method": "EQUITY_CASH_FLOW_RECOVERY_ONLY_AFTER_POST_IPO_ENTITLEMENT_BRIDGE",
+      "equity_bridge": "Nasdaq Class A; remaining share-equivalent bridge includes A/N/B, award exercises, convertible funding and post-IPO claims",
+      "dimensions": {
+        "business_model": {
+          "fact": "Claude 通过订阅、用量及云分销商业化；IPO 已完成 Class A 交割。",
+          "judgment": "消费型收入增长与算力合同负债期限不同。",
+          "counterevidence": "使用量不足或渠道条款变化会挤压单位毛利。",
+          "evidence": [
+            "prospectus",
+            "listing"
+          ]
+        },
+        "competitive_advantage": {
+          "fact": "招股书披露主要云分销渠道及性能、安全和推理效率为竞争因素。",
+          "judgment": "渠道覆盖和模型能力可促进采用，长期转移成本尚不明确。",
+          "counterevidence": "模型能力趋同、价格竞争及集中分销可能弱化优势。",
+          "evidence": [
+            "prospectus"
+          ]
+        },
+        "growth_runway": {
+          "fact": "招股书披露基于使用量的收入及长期算力合同。",
+          "judgment": "只有实际付费量、价格与推理成本一起改善才支持经营恢复情景。",
+          "counterevidence": "需求未锁定而供给承诺长期固定，算力利用率不足可导致经营去杠杆。",
+          "evidence": [
+            "prospectus"
+          ]
+        },
+        "earnings_and_cash": {
+          "fact": "招股书报告 2026 年前九月约 $6.6bn CFO，并披露未来大量算力和基础设施现金需求。",
+          "judgment": "先桥接从 CFO 到租赁、前置 CapEx 和可分配现金，再评估普通股回报。",
+          "counterevidence": "正经营现金不能替代含长期承诺的现金流模型。",
+          "evidence": [
+            "prospectus"
+          ]
+        },
+        "capital_allocation": {
+          "fact": "IPO 8-K 记录 Class A 1.127bn 股完成发行及并行 Class N 定向融资。",
+          "judgment": "分别核对发行后股数、预留激励、可转融资与治理权；发行价不等于研究报价。",
+          "counterevidence": "新融资或激励兑现可能改变持有人权益，稀释未闭合前不上调战略研究结论。",
+          "evidence": [
+            "prospectus",
+            "listing"
+          ]
+        },
+        "certainty_risks_and_counterevidence": {
+          "fact": "招股书披露业务高度依赖算力采购和建设里程碑。",
+          "judgment": "风险敞口来自现金义务与收入期限差，不适用正 EPS 倍数。",
+          "counterevidence": "采购成本不降、客户集中或需要追加融资时，现金流恢复情景应下修。",
+          "evidence": [
+            "prospectus",
+            "listing"
+          ]
+        }
+      },
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+    }
+  },
+  "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+  "operating_companies": {
+    "AAPL:US": {
+      "cik": "0000320193",
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "latest_reviewed_filings": {
+        "10-K": "0000320193-26-000026",
+        "10-Q": "0000320193-26-000020",
+        "8-K": "0001140361-26-042798"
+      },
+      "financial_signature": {
+        "start": "2025-09-28",
+        "period": "2026-09-26",
+        "flows": {
+          "revenue": "4.78834E+11",
+          "operating_income": "1.58063E+11",
+          "net_income": "1.32175E+11"
+        },
+        "eps": "8.969999999999999"
+      },
+      "profile": {
+        "base": {
+          "annual_share_change": "-0.015",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.07",
+            "0.065",
+            "0.06",
+            "0.055",
+            "0.05"
+          ],
+          "terminal_conversion": "0.82",
+          "terminal_operating_margin": "0.325",
+          "terminal_pe": "24"
+        },
+        "business_thesis": "FY26 10-K establishes the new earnings window. Keep the existing 7%-to-5% base revenue taper as a conditional hypothesis given device replacement cycles and Services support. Test premium multiple against a decelerating mix and discounted per-share cash results.",
+        "cautious": {
+          "annual_share_change": "0",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.02",
+            "0.02",
+            "0.025",
+            "0.025",
+            "0.025"
+          ],
+          "terminal_conversion": "0.8",
+          "terminal_operating_margin": "0.28",
+          "terminal_pe": "18"
+        },
+        "current_guidance": "UNKNOWN_NO_QUALIFIED_CURRENT_GUIDANCE",
+        "notes": {
+          "conversion": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Base net/op .82 versus .83 is a researcher fade for tax/nonoperating uncertainty; Q4 EPS2.10 includes .05 tariff refund, a disclosed discrete benefit. Do not subtract that amount from the older TTM or also normalize the starting GAAP EPS. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "operating_margin": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Base terminal margin32.5% versus P2 33% and qualified TTM33.17%. New Q4 gross margin47.9% includes about1pp tariff-refund benefit; gross is not operating margin, so do not subtract1pp mechanically or extrapolate the refund. A half-point terminal compression is a conservative researcher stress choice. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "revenue": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Retain7/6.5/6/5.5/5% sales path: latest quarter+12% and Services strength are near-term context, not five-year guidance; hardware maturity/China risk still justify fade. Qualified TTM remains June pending corroboration of the November release. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "shares": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Annual shares 0/-1.5/-2% are explicit possible net diluted-share paths informed by observed repurchases and dilution. They are not a guaranteed buyback yield; no separate repurchase return or cash distribution is added. No announced repurchase authorization is converted into a guaranteed executed buyback yield; SBC and net dilution remain scenario assumptions. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "terminal_pe": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "18/24/30x terminal range is unchanged. As-filed annual anchors29.24/36.51/36.07x are not a TTM distribution; base24x is below all three, conditional on a mature hardware/Services franchise fading to5% sales growth and32.5% margin. Optimistic30x needs durable Services mix; the high FY2024 annual PE may be inflated by that fiscal year tax effects. No automatic mean reversion or fair multiple claim. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          }
+        },
+        "optimistic": {
+          "annual_share_change": "-0.02",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.11",
+            "0.105",
+            "0.095",
+            "0.085",
+            "0.075"
+          ],
+          "terminal_conversion": "0.85",
+          "terminal_operating_margin": "0.36",
+          "terminal_pe": "30"
+        },
+        "return_unit_qualification": "NO_KNOWN_UNRESOLVED_DISTRIBUTION",
+        "review_conditions": [
+          "Revisit if two comparable quarters revenue is nonpositive or operating margin falls below the 28% cautious endpoint.",
+          "Recompute if Services/installed-base evidence fails to support 5-7% medium-term group revenue, or diluted shares stop declining.",
+          "Recalibrate after the next comparable official filing; reject the return basis if a disclosed entitlement/capital action cannot be bridged; do not infer causal persistence from one quarter.",
+          "Recheck new comparable actuals against near-term guide, cash/lease definitions, depreciation and any capital changes before reusing this dossier on a new research clock."
+        ],
+        "risks": [
+          "Hardware replacement/China competition and concentration can defeat the Services-led revenue path.",
+          "Services regulation and mix/pricing could reduce both growth and operating margin; capital returns are not guaranteed.",
+          "GAAP tax/base effects and historical EPS source-vintage make normalized earnings UNKNOWN.",
+          "FY2026 Q4 ended2026-09-26 disclosed2026-11-02: revenue114.5bn(+12%), Services record, gross margin47.9% includes approximately1pp tariff-refund benefit; diluted EPS2.10 includes0.05 refund benefit. These are latest release observations, not current qualified TTM inputs or five-year guidance. FY2026 10-K/CompanyFacts corroboration is not yet available in this capture; qualified TTM still ends2026-06-27.",
+          "Use the Price Owner data_as_of and this card’s decision_at for the actual close snapshot; frozen closing prices are research observations, not executable quotes. AAPL disclosed FY2026 results after the Nov 2, 2026 regular-session close; a Nov 2 closing price does not include subsequent post-release repricing.",
+          "No complete normalized earnings/FCF capitalization proof; terminal PE is conditional, not objective fair value."
+        ]
+      },
+      "sources": [
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/0000320193-25-000079.txt",
+          "sha256": "60f22bb90bb8e46894019fd57c27df69abd192f3f0f4183c4345d786426f3391",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue416161, prior391035, operating133050, net112010; calculated revenue growth6.425512%, operating margin31.970800%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/0000320193-24-000123.txt",
+          "sha256": "347c28e05fd61467c0ce9f4c0b8a264670011b9afb07930e2233a46dbb73914b",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue391035, prior383285, operating123216, net93736; calculated revenue growth2.021994%, operating margin31.510223%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Tax29749m vs16741m and Ireland state-aid decision charge affect EPS; no normalized EPS substituted. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106.txt",
+          "sha256": "a3bea4a328315b94271d83ef4e183884458a277c317c3d0b4f82ccc6a09c6c76",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue383285, prior394328, operating114301, net96995; calculated revenue growth-2.800461%, operating margin29.821412%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019322000108/0000320193-22-000108.txt",
+          "sha256": "b109cc5fadcd44a709ba28f5d379b83e68a2fec966ad1ab88df6b1fe9e2feab9",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue394328, prior365817, operating119437, net99803; calculated revenue growth7.793788%, operating margin30.288744%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019321000105/0000320193-21-000105.txt",
+          "sha256": "fc28841903236990d6f79b9ffab95ebce1f86983221b3128173c1a1d3ecaecd0",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue365817, prior274515, operating108949, net94680; calculated revenue growth33.259385%, operating margin29.782378%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/0000320193-26-000026.txt",
+          "sha256": "edd39e7620e992bf51f3a8e82e383cc3d2faf931bdebf41b2d22dd50b872d380",
+          "summary": "Analyst reviewed SEC envelope and issuer timeline; Form 10-K Items 1, 1A, 7, 8; FY ended 2026-09-26. Statement qualification remains with original Owners."
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "url": "https://www.sec.gov/Archives/edgar/data/320193/000114036126042798/0001140361-26-042798.txt",
+          "sha256": "384eb347f36378f48cd44c4b2cfeaec411d65736097c12b705e600fd96cfe4d2",
+          "summary": "Analyst reviewed SEC envelope and issuer timeline; 2026-11-09 Form 8-K; subsequent disclosure check. Statement qualification remains with original Owners."
+        },
+        {
+          "role": "OFFICIAL_IR_CONTEXT",
+          "url": "https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/",
+          "visible_context_sha256": "70b37c44a3759d4b537b75e58d3442649d98494037fcead6e777a6a875429245",
+          "summary": "Current issuer IR visible context checked for company-specific filings and operating changes; no long-run forecast assumed."
+        }
+      ],
+      "annual_eps_snapshots": {
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/0000320193-25-000079.txt": {
+          "source_sha256": "60f22bb90bb8e46894019fd57c27df69abd192f3f0f4183c4345d786426f3391",
+          "accession": "0000320193-25-000079",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/0000320193-25-000079.txt",
+            "source_sha256": "60f22bb90bb8e46894019fd57c27df69abd192f3f0f4183c4345d786426f3391",
+            "fetched_at": "2026-11-03T04:01:23.275961+00:00",
+            "published_at": "2025-10-31T10:01:26+00:00",
+            "start": "2024-09-29",
+            "period": "2025-09-27",
+            "diluted_eps": "7.46",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000320193-25-000079",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/0000320193-24-000123.txt": {
+          "source_sha256": "347c28e05fd61467c0ce9f4c0b8a264670011b9afb07930e2233a46dbb73914b",
+          "accession": "0000320193-24-000123",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/0000320193-24-000123.txt",
+            "source_sha256": "347c28e05fd61467c0ce9f4c0b8a264670011b9afb07930e2233a46dbb73914b",
+            "fetched_at": "2026-11-03T04:01:24.128412+00:00",
+            "published_at": "2024-11-01T10:01:36+00:00",
+            "start": "2023-10-01",
+            "period": "2024-09-28",
+            "diluted_eps": "6.08",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000320193-24-000123",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106.txt": {
+          "source_sha256": "a3bea4a328315b94271d83ef4e183884458a277c317c3d0b4f82ccc6a09c6c76",
+          "accession": "0000320193-23-000106",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/0000320193-23-000106.txt",
+            "source_sha256": "a3bea4a328315b94271d83ef4e183884458a277c317c3d0b4f82ccc6a09c6c76",
+            "fetched_at": "2026-11-03T04:01:25.224328+00:00",
+            "published_at": "2023-11-03T23:59:59.999999-04:00",
+            "start": "2022-09-25",
+            "period": "2023-09-30",
+            "diluted_eps": "6.13",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000320193-23-000106",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019322000108/0000320193-22-000108.txt": {
+          "source_sha256": "b109cc5fadcd44a709ba28f5d379b83e68a2fec966ad1ab88df6b1fe9e2feab9",
+          "accession": "0000320193-22-000108",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/320193/000032019322000108/0000320193-22-000108.txt",
+            "source_sha256": "b109cc5fadcd44a709ba28f5d379b83e68a2fec966ad1ab88df6b1fe9e2feab9",
+            "fetched_at": "2026-11-03T09:13:34.627637+00:00",
+            "published_at": "2022-10-28T23:59:59.999999-04:00",
+            "start": "2021-09-26",
+            "period": "2022-09-24",
+            "diluted_eps": "6.11",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000320193-22-000108",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019321000105/0000320193-21-000105.txt": {
+          "source_sha256": "fc28841903236990d6f79b9ffab95ebce1f86983221b3128173c1a1d3ecaecd0",
+          "accession": "0000320193-21-000105",
+          "error": "ASFILED_ANNUAL_EPS_MISSING_OR_CONFLICT"
+        }
+      }
+    },
+    "MSFT:US": {
+      "cik": "0000789019",
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "latest_reviewed_filings": {
+        "10-K": "0001193125-26-323660",
+        "10-Q": "0001193125-26-436133",
+        "8-K": "0001193125-26-448357"
+      },
+      "financial_signature": {
+        "start": "2025-10-01",
+        "period": "2026-09-30",
+        "flows": {
+          "revenue": "3.46445E+11",
+          "operating_income": "1.63191E+11",
+          "net_income": "1.42631E+11"
+        },
+        "eps": "19.16"
+      },
+      "profile": {
+        "base": {
+          "annual_share_change": "0",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.16",
+            "0.14",
+            "0.12",
+            "0.11",
+            "0.10"
+          ],
+          "terminal_conversion": "0.82",
+          "terminal_operating_margin": "0.43",
+          "terminal_pe": "25"
+        },
+        "business_thesis": "September 10-Q shows Azure growth of 48% and Agents and Infra cost growth of 35%. Retain the base revenue taper and declining terminal margin/conversion as conditional assumptions, with capital utilization, depreciation and lease cash payments as falsifiers.",
+        "cautious": {
+          "annual_share_change": "0.005",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.06",
+            "0.055",
+            "0.05",
+            "0.05",
+            "0.045"
+          ],
+          "terminal_conversion": "0.75",
+          "terminal_operating_margin": "0.36",
+          "terminal_pe": "18"
+        },
+        "current_guidance": "QUALIFIED_NEAR_TERM_NOT_FIVE_YEAR_GUIDANCE",
+        "notes": {
+          "conversion": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Retain .75/.82/.86 endpoints. OpenAI current207m gain versus prior3.086bn loss explains part of GAAP comparison, not durable recurring conversion; do not add back an investment loss and then also expand the margin bridge. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "operating_margin": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Base terminal43% versus P2 44%, below current quarter approximately49.76% and TTM47.10%; cloud infrastructure/depreciation and business-mix risks offset stronger sales. No precise qualified forward capex/operating-margin guide is loaded; endpoint is an explicit stress choice. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "revenue": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Base16/14/12/11/10% versus P2 14/13/12/11/10%; current group revenue+19%, Azure+48% and cloud+30% support a stronger early path with fade. New segment definitions prohibit inventing a comparable old-segment growth series; capacity conversion and five-year demand remain assumptions. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "shares": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Annual net diluted shares +.5/0/-.3% distinguish SBC dilution risk from possible repurchases. No repurchase yield or dividend is independently added; zero modeled dividends omits actual potential distributions. No announced repurchase authorization is converted into a guaranteed executed buyback yield; SBC and net dilution remain scenario assumptions. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          },
+          "terminal_pe": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "18/25/32x is unchanged. Own-filing annual anchors35.45/39.11/25.13x span very different EPS/growth regimes, including OpenAI effects. Base25x is near the low anchor, conditional on terminal10% sales growth and43% operating margin after investment/depreciation; optimistic32x needs sustained cloud/software economics. Historical39x is not automatically deserved for a slower terminal franchise. P2.2 retains all numerical parameters: source-qualified business/IR context and own-filing PE regimes improve interpretation but do not establish a different five-year endpoint; no return-target fitting. See frozen source_notes and calibration_evidence."
+          }
+        },
+        "optimistic": {
+          "annual_share_change": "-0.003",
+          "dividend_payout": "0",
+          "revenue_growth": [
+            "0.2",
+            "0.19",
+            "0.17",
+            "0.15",
+            "0.13"
+          ],
+          "terminal_conversion": "0.86",
+          "terminal_operating_margin": "0.49",
+          "terminal_pe": "32"
+        },
+        "return_unit_qualification": "NO_KNOWN_UNRESOLVED_DISTRIBUTION",
+        "review_conditions": [
+          "Revisit if revenue fades below 10% while operating margin declines toward36%, or AI CapEx stays high without a cash-conversion recovery.",
+          "Demand exact gain/tax and depreciation evidence before treating current GAAP conversion or terminal32x as sustainable.",
+          "Recalibrate after the next comparable official filing; reject the return basis if a disclosed entitlement/capital action cannot be bridged; do not infer causal persistence from one quarter.",
+          "Recheck new comparable actuals against near-term guide, cash/lease definitions, depreciation and any capital changes before reusing this dossier on a new research clock."
+        ],
+        "risks": [
+          "AI CapEx/depreciation and utility/capacity constraints can make revenue growth fail to translate into profits or cash.",
+          "Cloud/AI competition, pricing and concentration of investment returns are not measured as durable-moat facts.",
+          "Nonoperating investment/tax gains can inflate GAAP EPS; normalized conversion is not verified.",
+          "FY2027 Q1 ended2026-09-30 disclosed2026-10-28: revenue92.279bn, operating income45.915bn, net36.629bn, EPS4.92. OpenAI investment benefit207m/0.03EPS vs prior loss3.086bn/0.41EPS. New Agents and Infra / Devices and Consumer definitions break direct legacy-segment continuity; cloud63.9bn+30%, Azure+48%, Agents and Infra76.8bn+25%. No qualified numeric forward quarter guidance in this release.",
+          "Use the Price Owner data_as_of and this card’s decision_at for the actual close snapshot; frozen closing prices are research observations, not executable quotes.",
+          "No complete normalized earnings/FCF capitalization proof; terminal PE is conditional, not objective fair value."
+        ]
+      },
+      "sources": [
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/0001193125-26-323660.txt",
+          "sha256": "a4cef60615c42685dcf0c080a56cd1be85ce09071c97050c78589a5167e26bff",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue331839, prior281724, operating155237, net133749; calculated revenue growth17.788687%, operating margin46.780818%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Company adjusted EPS17.28 vsGAAP17.95 flags investment/other differences; not verified normalized fair earnings. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/0000950170-25-100235.txt",
+          "sha256": "37e72a2b7e332899a583fe0655e1b45ec7dc53ea9b07c089bbbc78f1098e931f",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue281724, prior245122, operating128528, net101832; calculated revenue growth14.932156%, operating margin45.621956%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/0000950170-24-087843.txt",
+          "sha256": "56c7efc2d90a2372035653cc9fd873829b83f4adb178c1f32e484a48e0d809bb",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue245122, prior211915, operating109433, net88136; calculated revenue growth15.669962%, operating margin44.644300%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017023035122/0000950170-23-035122.txt",
+          "sha256": "25643504869832e040eb3c2716af7609dd7289854381fa847be2eeebe4c9f5b2",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue211915, prior198270, operating88523, net72361; calculated revenue growth6.882030%, operating margin41.772881%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000156459022026876/0001564590-22-026876.txt",
+          "sha256": "6c37d5fa9a3ebbe0188c5f0f0f37e6c1cfe713d704f035c557ccb18cd14ea93f",
+          "summary": "Human-checked original own-year annual statement, USDm: revenue198270, prior168088, operating83383, net72738; calculated revenue growth17.956071%, operating margin42.055278%. EPS remains original current-year 10-K only, never a later restated comparative; annual PE is not TTM. Five-year exit PE remains a research hypothesis, not the historical average.",
+          "role": "HISTORICAL_PE_ANCHOR"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526436133/0001193125-26-436133.txt",
+          "sha256": "ffccb87dda210fd462f177077620c3a15436b4aabf9ee8ff6f2baf0b929ead82",
+          "summary": "Analyst reviewed SEC envelope and issuer timeline; 2026-09-30 10-Q MD&A Results of Operations、cash flows. Statement qualification remains with original Owners."
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526448357/0001193125-26-448357.txt",
+          "sha256": "4c42fd8d637033376135f5eeb151d3a14fc3ce9817318adf8395050554e8d49e",
+          "summary": "Analyst reviewed SEC envelope and issuer timeline; 2026-11-05 Form 8-K; subsequent disclosure check. Statement qualification remains with original Owners."
+        },
+        {
+          "role": "OFFICIAL_IR_CONTEXT",
+          "url": "https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1",
+          "visible_context_sha256": "5ba565574eed961c28b1dd3b44dee6e4b6b6e4d7475acb7771863e12ff05958a",
+          "summary": "Current issuer IR visible context checked for company-specific filings and operating changes; no long-run forecast assumed."
+        }
+      ],
+      "annual_eps_snapshots": {
+        "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/0001193125-26-323660.txt": {
+          "source_sha256": "a4cef60615c42685dcf0c080a56cd1be85ce09071c97050c78589a5167e26bff",
+          "accession": "0001193125-26-323660",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/0001193125-26-323660.txt",
+            "source_sha256": "a4cef60615c42685dcf0c080a56cd1be85ce09071c97050c78589a5167e26bff",
+            "fetched_at": "2026-11-03T04:01:28.142047+00:00",
+            "published_at": "2026-07-29T20:08:01+00:00",
+            "start": "2025-07-01",
+            "period": "2026-06-30",
+            "diluted_eps": "17.95",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0001193125-26-323660",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/0000950170-25-100235.txt": {
+          "source_sha256": "37e72a2b7e332899a583fe0655e1b45ec7dc53ea9b07c089bbbc78f1098e931f",
+          "accession": "0000950170-25-100235",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/0000950170-25-100235.txt",
+            "source_sha256": "37e72a2b7e332899a583fe0655e1b45ec7dc53ea9b07c089bbbc78f1098e931f",
+            "fetched_at": "2026-11-03T04:01:29.725580+00:00",
+            "published_at": "2025-07-30T20:11:40+00:00",
+            "start": "2024-07-01",
+            "period": "2025-06-30",
+            "diluted_eps": "13.64",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000950170-25-100235",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/0000950170-24-087843.txt": {
+          "source_sha256": "56c7efc2d90a2372035653cc9fd873829b83f4adb178c1f32e484a48e0d809bb",
+          "accession": "0000950170-24-087843",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/0000950170-24-087843.txt",
+            "source_sha256": "56c7efc2d90a2372035653cc9fd873829b83f4adb178c1f32e484a48e0d809bb",
+            "fetched_at": "2026-11-03T04:01:30.711526+00:00",
+            "published_at": "2024-07-30T20:06:22+00:00",
+            "start": "2023-07-01",
+            "period": "2024-06-30",
+            "diluted_eps": "11.80",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000950170-24-087843",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/789019/000095017023035122/0000950170-23-035122.txt": {
+          "source_sha256": "25643504869832e040eb3c2716af7609dd7289854381fa847be2eeebe4c9f5b2",
+          "accession": "0000950170-23-035122",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/789019/000095017023035122/0000950170-23-035122.txt",
+            "source_sha256": "25643504869832e040eb3c2716af7609dd7289854381fa847be2eeebe4c9f5b2",
+            "fetched_at": "2026-11-03T09:13:43.990099+00:00",
+            "published_at": "2023-07-27T20:01:56+00:00",
+            "start": "2022-07-01",
+            "period": "2023-06-30",
+            "diluted_eps": "9.68",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0000950170-23-035122",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        },
+        "https://www.sec.gov/Archives/edgar/data/789019/000156459022026876/0001564590-22-026876.txt": {
+          "source_sha256": "6c37d5fa9a3ebbe0188c5f0f0f37e6c1cfe713d704f035c557ccb18cd14ea93f",
+          "accession": "0001564590-22-026876",
+          "record": {
+            "source_ref": "https://www.sec.gov/Archives/edgar/data/789019/000156459022026876/0001564590-22-026876.txt",
+            "source_sha256": "6c37d5fa9a3ebbe0188c5f0f0f37e6c1cfe713d704f035c557ccb18cd14ea93f",
+            "fetched_at": "2026-11-03T09:13:48.228414+00:00",
+            "published_at": "2022-07-28T20:06:19+00:00",
+            "start": "2021-07-01",
+            "period": "2022-06-30",
+            "diluted_eps": "9.65",
+            "currency": "USD",
+            "unit": "USD_PER_LISTED_SHARE_SINGLE_LISTED_CLASS",
+            "accession": "0001564590-22-026876",
+            "status": "ASFILED_ANNUAL_NOT_TTM_OR_NORMALIZED",
+            "rule_version": "sec.asfiled-annual-eps.v1"
+          }
+        }
+      }
+    }
+  },
+  "berkshire_operating": {
+    "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+    "latest_reviewed_filings": {
+      "10-K": "0001193125-26-083899",
+      "10-Q": "0001193125-26-452412",
+      "8-K": "0001193125-26-468549"
+    },
+    "shares_as_of": "2026-10-28",
+    "class_a_outstanding": 480476,
+    "class_b_outstanding": 1403805594,
+    "operating_millions": {
+      "underwriting": [
+        7258,
+        4800,
+        5697
+      ],
+      "insurance_investment": [
+        12513,
+        8472,
+        9441
+      ],
+      "rail": [
+        5476,
+        4664,
+        4129
+      ],
+      "energy": [
+        3979,
+        3617,
+        3288
+      ],
+      "manufacturing_retail": [
+        13647,
+        11711,
+        10277
+      ],
+      "other": [
+        1613,
+        3770,
+        1454
+      ]
+    },
+    "reported_totals_millions": [
+      44486,
+      37034,
+      34286
+    ],
+    "scenarios": {
+      "cautious": {
+        "growth": {
+          "underwriting": "-.04",
+          "insurance_investment": "-.03",
+          "rail": "0",
+          "energy": ".01",
+          "manufacturing_retail": ".01",
+          "other": "-.10"
+        },
+        "multiple": "14",
+        "annual_share_change": "0"
+      },
+      "base": {
+        "growth": {
+          "underwriting": ".02",
+          "insurance_investment": "0",
+          "rail": ".04",
+          "energy": ".045",
+          "manufacturing_retail": ".04",
+          "other": "-.02"
+        },
+        "multiple": "18",
+        "annual_share_change": "-.005"
+      },
+      "optimistic": {
+        "growth": {
+          "underwriting": ".06",
+          "insurance_investment": ".025",
+          "rail": ".06",
+          "energy": ".07",
+          "manufacturing_retail": ".07",
+          "other": ".035"
+        },
+        "multiple": "22",
+        "annual_share_change": "-.01"
+      }
+    },
+    "periods": [
+      "FY ended 2025-12-31",
+      "YTD ended 2026-09-30",
+      "YTD ended 2025-09-30"
+    ],
+    "basis": "Analyst scenarios, not official forecast. Apply one consolidated after-tax operating earnings multiple, with no separate additive NAV/float/treasury value. Exit multiples 14/18/22 represent broad cash quality and rate conditions, not reconstructed historical multiples.",
+    "risks": [
+      "Simultaneous catastrophe loss and cash yield compression reduces insurance earnings.",
+      "Regulated utility and rail reinvestment may convert materially less income to distributable cash.",
+      "Other includes parent investment income and non-USD debt FX; no persistence of observed outperformance assumed.",
+      "Share repurchases are conditional and have no separate return term."
+    ]
+  }
+}

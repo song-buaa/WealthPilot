@@ -86,3 +86,52 @@ def test_independent_verifier_keeps_card_with_no_quality_evidence(monkeypatch, t
                             method_version='s3-relative-value.fixed-endpoint.v1', remaining_years='5')}
     monkeypatch.setattr(verifier, 'load', lambda path: parent if path.parent.name == 'parent' else child)
     assert verifier.verify(tmp_path / 'child' / 'bundle.json')['status'] == 'NO_QUALIFIED_CASES'
+
+
+def test_reuse_age_uses_profile_review_clock_and_rejects_future():
+    from datetime import timedelta
+    from backend.services.s3_relative_value import require_review_clock
+
+    cutoff = datetime(2026, 11, 27, tzinfo=timezone.utc)
+    assert require_review_clock(cutoff - timedelta(days=30), cutoff) == cutoff - timedelta(days=30)
+    with pytest.raises(ValueError, match='S3_REPRICE_REVIEW_WINDOW_EXPIRED'):
+        require_review_clock(cutoff - timedelta(days=30, seconds=1), cutoff)
+    with pytest.raises(ValueError, match='S3_REPRICE_REVIEW_CLOCK_UNQUALIFIED'):
+        require_review_clock(cutoff + timedelta(seconds=1), cutoff)
+
+
+def test_berkshire_uses_reported_operating_components_and_class_b_equivalents():
+    from copy import deepcopy
+    from backend.services.s3_berkshire_research import earnings_bridge, frozen_profile
+
+    profile = frozen_profile()
+    value = earnings_bridge(profile)
+    assert value['basis'] == 'AS_REPORTED_NON_GAAP_OPERATING_EARNINGS_PER_B_EQUIVALENT'
+    assert value['ttm_usd_millions'] == '47234'
+    assert value['b_equivalent_shares'] == 2124519594
+    assert D(value['earnings_per_b']).quantize(D('.01')) == D('22.23')
+    bad = deepcopy(profile)
+    bad['operating_millions']['other'][1] += 1
+    with pytest.raises(ValueError, match='S3_BRK_OPERATING_EARNINGS_RECONCILIATION_FAILED'):
+        earnings_bridge(bad)
+
+
+def test_relative_stress_detects_reversal_and_leaves_company_base_intact(monkeypatch):
+    from types import SimpleNamespace
+    from backend.services import s3_relative_value as relative
+
+    def card(symbol, value, stressed):
+        return dict(symbol=symbol, group='继续观察', rank=1,
+                    scenarios={'base':dict(annualized_return=value)},
+                    joint_sensitivity=[dict(revenue_growth_shift='-.03', terminal_pe_shift='-.2',
+                                            result=dict(annualized_return=stressed))])
+
+    def rank(rows, _request):
+        for i,row in enumerate(sorted(rows,key=lambda c:-D(c['scenarios']['base']['annualized_return'])),1):
+            row['rank']=i
+    monkeypatch.setattr(relative.engine,'_rank',rank)
+    cards = [card('AAPL:US','.12','.01'),card('MSFT:US','.10','.08')]
+    result = relative.relative_stress(cards, SimpleNamespace(tie_band=D('.01')))
+    assert result['pairs'][0]['status'] == 'REVERSAL'
+    assert all(any(c['scope']==scope for c in result['cells']) for scope in ('COMMON','AAPL:US','MSFT:US'))
+    assert cards[0]['scenarios']['base']['annualized_return'] == '.12'
