@@ -8,6 +8,7 @@ WealthPilot 券商同步 API 路由。
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
+import os
 import pytz
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
@@ -48,6 +49,8 @@ class SyncStatusItem(BaseModel):
     last_successful_position_count: Optional[int] = None
     last_successful_run_id: Optional[int] = None
     data_quality: Optional[dict] = None
+    last_attempt_data_quality: Optional[dict] = None
+    enabled: Optional[bool] = None
 
 
 class SyncStatusResponse(BaseModel):
@@ -55,7 +58,7 @@ class SyncStatusResponse(BaseModel):
 
 
 class TriggerRequest(BaseModel):
-    broker: Literal["tiger", "futu", "snowball", "guojin", "all"] = "all"
+    broker: Literal["tiger", "futu", "snowball", "guojin", "binance", "all"] = "all"
     triggered_by: str = "manual"
 
 
@@ -69,6 +72,7 @@ BROKER_PLATFORM_MAP = {
     "futu": "富途证券",
     "snowball": "雪盈证券",
     "guojin": "国金证券",
+    "binance": "Binance Spot",
 }
 
 
@@ -78,6 +82,13 @@ def _portfolio_scope(db):
 
 
 def _sync_account(db, broker):
+    if broker == "binance":
+        from services.broker_sync.binance.client import configuration
+        try:
+            config = configuration()
+            return config.account_id if config.portfolio_id == _portfolio_scope(db) else None
+        except ValueError:
+            return None
     from core.config import settings
     configured = {"tiger": settings.tiger_account, "futu": settings.futu_account,
                   "snowball": settings.ibkr_account or settings.snowball_account}.get(broker)
@@ -140,6 +151,11 @@ def _get_last_successful_run(db, broker: str):
     )
 
 
+def _binance_enabled(db):
+    enabled = {b.strip() for b in os.environ.get("WEALTHPILOT_ENABLED_SYNC_BROKERS", "").split(",")}
+    return "binance" in enabled and _sync_account(db, "binance") is not None
+
+
 def get_sync_status(db_session=None):
     """查询各 broker 最近同步状态。"""
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
@@ -166,6 +182,7 @@ def get_sync_status(db_session=None):
                 brokers.append(SyncStatusItem(
                     broker=broker,
                     platform=platform,
+                    enabled=_binance_enabled(db) if broker == "binance" else None,
                     last_sync_time=_format_beijing_time(attempt.started_at),
                     last_sync_status=attempt.status,
                     last_position_count=attempt.position_count,
@@ -181,12 +198,14 @@ def get_sync_status(db_session=None):
                     last_successful_position_count=(successful_run.position_count if successful_run else None),
                     last_successful_run_id=successful_run.id if successful_run else None,
                     data_quality=_public_quality(successful_run),
+                    last_attempt_data_quality=_public_quality(attempt),
                 ))
             else:
                 brokers.append(SyncStatusItem(
                     broker=broker,
                     platform=platform,
                     last_sync_status="never",
+                    enabled=_binance_enabled(db) if broker == "binance" else None,
                 ))
         return SyncStatusResponse(brokers=brokers)
     finally:
@@ -200,7 +219,7 @@ def _executor():
         pid = _portfolio_scope(db)
     import os
     configured = os.environ.get("WEALTHPILOT_ENABLED_SYNC_BROKERS")
-    enabled = tuple(b.strip() for b in configured.split(",") if b.strip()) if configured is not None else tuple(BROKER_PLATFORM_MAP)
+    enabled = tuple(b.strip() for b in configured.split(",") if b.strip()) if configured is not None else tuple(b for b in BROKER_PLATFORM_MAP if b != "binance")
     return SyncExecutor(enabled, pid, factory=ServiceFactory(restricted=False))
 
 

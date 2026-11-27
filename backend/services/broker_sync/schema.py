@@ -29,7 +29,7 @@ class Position(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # ===== 标识 =====
-    broker: Literal["tiger", "futu", "snowball", "guojin"]
+    broker: Literal["tiger", "futu", "snowball", "guojin", "binance"]
     account_id: str
     symbol: str  # 归一化代码: AAPL:US / 0068:HK (TICKER:MARKET 格式)
     raw_symbol: str  # 券商原始代码,去掉前导 ' 后的形态
@@ -44,7 +44,7 @@ class Position(BaseModel):
     broker_security_type: str = ""
     vehicle_type: Literal[
         "COMMON_STOCK", "ADR", "ETF", "BOND", "FUND", "REIT", "ETN", "CASH",
-        "OPTION", "FUTURE", "WARRANT", "OTHER", "UNKNOWN",
+        "OPTION", "FUTURE", "WARRANT", "CRYPTO", "OTHER", "UNKNOWN",
     ] = "UNKNOWN"
     economic_asset_class: Literal[
         "EQUITY", "FIXED_INCOME", "CASH", "COMMODITY", "MULTI_ASSET",
@@ -61,20 +61,20 @@ class Position(BaseModel):
     # ===== 数量与成本 =====
     quantity: Decimal = Field(..., description="持仓数量")
     available_quantity: Decimal | None = Field(None, description="可用数量,部分券商无此字段")
-    avg_cost: Decimal = Field(..., description="平均成本价")
+    avg_cost: Decimal | None = Field(..., description="平均成本价")
     cost_method: Literal["fifo", "weighted_average"] = Field(
         ..., description="成本计算方式: 老虎 fifo, 富途 weighted_average"
     )
-    cost_basis: Decimal = Field(..., description="持仓总成本 = quantity * avg_cost")
+    cost_basis: Decimal | None = Field(..., description="持仓总成本 = quantity * avg_cost")
 
     # ===== 行情 =====
     current_price: Decimal
     market_value: Decimal
-    currency: Literal["USD", "HKD", "CNH", "CNY", "JPY", "SGD"]
+    currency: Literal["USD", "HKD", "CNH", "CNY", "JPY", "SGD", "USDT"]
 
     # ===== 盈亏(原币种,不做汇率换算)=====
-    unrealized_pnl: Decimal = Field(..., description="未实现盈亏(原币种)")
-    unrealized_pnl_pct: Decimal = Field(
+    unrealized_pnl: Decimal | None = Field(..., description="未实现盈亏(原币种)")
+    unrealized_pnl_pct: Decimal | None = Field(
         ..., description="浮盈比例,用小数表示(0.305 表示 +30.5%)"
     )
     realized_pnl: Decimal | None = Field(None, description="已实现盈亏,部分券商无")

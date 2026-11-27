@@ -73,6 +73,13 @@ def evaluate_trade(text: str, portfolio_id: int) -> dict:
 
     parsed = _parse_trade_intent(text, raw, total_assets)
 
+    if any(row["profit_loss_rate"] is None for row in raw):
+        return {"parsed_intent": parsed, "execution_authorized": False,
+                "evaluation": {"blocked": True, "risk_status": "UNKNOWN",
+                    "block_reason": "POSITION_COST_UNKNOWN",
+                    "block_reasons": ["POSITION_COST_UNKNOWN"],
+                    "decision_recommendation": None}}
+
     # 构建 PortfolioState（基于聚合后数据）
     portfolio_state = _build_portfolio_state(raw, portfolio_drawdown_pct=0.0)
 

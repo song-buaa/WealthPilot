@@ -217,7 +217,7 @@ class PositionSnapshotRepository:
         self.session.commit()
         self.session.info.pop("sync_publish_run_id", None)
 
-    def mark_run_failed(self, run_id, error_message, retry_count=0):
+    def mark_run_failed(self, run_id, error_message, retry_count=0, source_metadata=None):
         self.session.rollback()
         self._begin()
         run = self.session.get(PositionSnapshotRun, run_id)
@@ -227,6 +227,9 @@ class PositionSnapshotRepository:
             return  # a late old worker cannot fail a completed/replaced task
         meta = context(run)
         meta.update(quality="unavailable", issues=[error_message.split(":",1)[0]])
+        if source_metadata:
+            meta.update({k:source_metadata[k] for k in ("unsupported_assets", "retry_after_seconds")
+                         if k in source_metadata})
         run.context_json = json.dumps(meta)
         run.finished_at, run.status = datetime.now(timezone.utc), "failed"
         run.error_message, run.retry_count = error_message[:5000], retry_count
@@ -253,9 +256,12 @@ class PositionSnapshotRepository:
                            and info.get("publication_mode") == "observed_rows" and info.get("complete") is False)
                 if info.get("complete") is False and not partial:
                     raise ValueError("INCOMPLETE_SOURCE")
-                quotes = {ccy:fx_service.get_quote(ccy,"CNY").to_dict() for ccy in {p.currency for p in positions}}
+                quotes = {ccy:fx_service.get_quote("USD" if broker == "binance" and ccy == "USDT" else ccy,
+                    "CNY").to_dict() for ccy in {p.currency for p in positions}}
+                if broker == "binance" and "USDT" in quotes:
+                    quotes["USDT"].update(valuation_currency="USD", convention="USDT_USD_PARITY_APPROVED")
                 if any(quotes[p.currency]["rate"] is None and
-                       (p.market_value != 0 or p.unrealized_pnl != 0) for p in positions):
+                       (p.market_value != 0 or p.unrealized_pnl not in (None, 0)) for p in positions):
                     raise FXRateUnavailable("FX_RATE_UNAVAILABLE")
                 issues = set(info.get("issues", []))
                 if not info.get("source"):
@@ -301,8 +307,8 @@ class PositionSnapshotRepository:
                     "SYNC_CLAIM_EXPIRED_OR_REPLACED", "ACCOUNT_PORTFOLIO_AMBIGUOUS",
                     "SOURCE_ACCOUNT_UNPROVEN", "CASH_IDENTITY_COLLISION_REQUIRES_REVIEW",
                     "NATIVE_BATCH_INCOMPLETE", "NATIVE_BATCH_INVALID", "NATIVE_ACCOUNT_UNPROVEN",
-                    "NATIVE_RECONCILIATION_FAILED", "NATIVE_BATCH_STALE", "NATIVE_LEGACY_REVIEW_REQUIRED"} else "SYNC_SOURCE_FAILED"
-                self.mark_run_failed(run_id, code, attempt)
+                    "NATIVE_RECONCILIATION_FAILED", "NATIVE_BATCH_STALE", "NATIVE_LEGACY_REVIEW_REQUIRED", 'BINANCE_UNSUPPORTED_ASSETS', 'BINANCE_PRICE_UNAVAILABLE', 'BINANCE_CONNECTION_UNAVAILABLE', 'BINANCE_PERMISSION_DENIED', 'BINANCE_SIGNATURE_INVALID', 'BINANCE_CLOCK_SKEW', 'BINANCE_RATE_LIMITED', 'BINANCE_SOURCE_UNAVAILABLE', 'BINANCE_RESPONSE_INVALID', 'BINANCE_PRECISION_UNSUPPORTED', 'BINANCE_HISTORY_LIMIT', 'BINANCE_TRADE_VALUE_CONFLICT', 'BINANCE_HISTORY_PAGE_INVALID', 'BINANCE_SCHEMA_REQUIRED'} else "SYNC_SOURCE_FAILED"
+                self.mark_run_failed(run_id, code, attempt, metadata() if broker == "binance" and metadata else None)
                 raise ValueError(code) from None
 
     def get_latest_successful_run(self, broker, account_id):

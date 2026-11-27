@@ -9,6 +9,7 @@ from backend.services.instruments.etf_holdings import ETFHoldings, ETF_IDENTITIE
 from backend.services.instruments.issuers import IDENTITIES, ISSUERS, VERSION, extended_common_issuer
 
 from .contracts import PolicyReference, digest, parse_snapshot
+from .allocation_hierarchy import _binance_btc
 from .etf_observation import project_observations
 from .parser import PolicyError
 from .store import clock
@@ -62,11 +63,11 @@ def _btc_identity(ref, row, quality):
     refs = btc.get("evidence_refs", [])
     classes = quality.get("investable_owner_evidence", {}).get("manual_classes", {})
     classification = classes.get(ref, {})
-    return (ref.startswith("wealth:") and row.get("item_type") == "other_asset"
+    return ((ref.startswith("wealth:") and row.get("item_type") == "other_asset" or _binance_btc(row))
             and btc.get("status") == "PRESENT" and ref in btc.get("asset_refs", [])
             and ref not in coverage.get("gold", {}).get("asset_refs", [])
-            and classification.get("economic_asset_class") == "ALTERNATIVE"
-            and bool(classification.get("evidence_refs")) and marker in refs
+            and (classification.get("economic_asset_class") == "ALTERNATIVE" and bool(classification.get("evidence_refs"))
+                 or _binance_btc(row)) and marker in refs
             and not any(f"{ref}:{fact}" in coverage.get("accounts", {}).get("evidence_refs", [])
                         for fact in ("US_EQUITY_ETF", "US_DIRECT_EQUITY", "CN_DIRECT_EQUITY"))
             and any(r.startswith(prefix) and r[len(prefix):].strip()

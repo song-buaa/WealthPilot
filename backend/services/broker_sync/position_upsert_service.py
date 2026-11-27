@@ -31,6 +31,7 @@ BROKER_TO_PLATFORM = {
     "futu": "富途证券",
     "snowball": "雪盈证券",
     "guojin": "国金证券",
+    "binance": "Binance Spot",
 }
 
 # 受保护字段(首次写入,后续不覆盖)
@@ -429,10 +430,10 @@ class PositionUpsertService:
                 ).first()
 
         # 3. 计算盈亏
-        pnl_original = float(snap.unrealized_pnl)
-        pnl_cny = pnl_original * fx_rate if fx_rate is not None else 0.0
+        pnl_original = float(snap.unrealized_pnl) if snap.unrealized_pnl is not None else None
+        pnl_cny = pnl_original * fx_rate if pnl_original is not None and fx_rate is not None else None
         # Position 表 profit_loss_rate 存百分数(如 30.5 表示 +30.5%)
-        pnl_pct = float(snap.unrealized_pnl_pct) * 100
+        pnl_pct = float(snap.unrealized_pnl_pct) * 100 if snap.unrealized_pnl_pct is not None else None
 
         # 4. 由唯一 canonical authority 解析 vehicle 与经济资产类别。
         classification, classification_evidence = _snapshot_classification(snap)
@@ -455,23 +456,23 @@ class PositionUpsertService:
                 segment="投资",
                 currency=snap.currency,  # v3.4 修复: 存原币种(USD/HKD),不是 CNY
                 quantity=float(snap.quantity),
-                cost_price=float(snap.avg_cost),
+                cost_price=float(snap.avg_cost) if snap.avg_cost is not None else null(),
                 current_price=float(snap.current_price),
                 market_value_cny=market_value_cny,
                 original_currency=snap.currency,
                 original_value=float(snap.market_value),
                 fx_rate_to_cny=fx_rate if fx_rate is not None else null(),
                 fx_rate_date=fx_date,
-                profit_loss_value=pnl_cny,
-                profit_loss_rate=pnl_pct,
-                profit_loss_original_value=pnl_original,
+                profit_loss_value=pnl_cny if pnl_cny is not None else null(),
+                profit_loss_rate=pnl_pct if pnl_pct is not None else null(),
+                profit_loss_original_value=pnl_original if pnl_original is not None else null(),
             )
             self.session.add(new_pos)
             return True
         else:
             # 更新:只覆盖非保护字段
             existing.quantity = float(snap.quantity)
-            existing.cost_price = float(snap.avg_cost)
+            existing.cost_price = float(snap.avg_cost) if snap.avg_cost is not None else None
             existing.current_price = float(snap.current_price)
             existing.market_value_cny = market_value_cny
             existing.original_currency = snap.currency

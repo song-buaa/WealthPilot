@@ -30,6 +30,8 @@ def is_market_open(market: str, dt_utc: datetime | None = None) -> bool:
         market: "US" / "HK"
         dt_utc: UTC 时间，默认当前
     """
+    if market == "CRYPTO":
+        return True
     if dt_utc is None:
         dt_utc = datetime.now(timezone.utc)
 
@@ -68,6 +70,13 @@ def valuation_quality(value, market, *, at=None, basis=None):
     if not value:
         return result
     try:
+        if market == "CRYPTO":
+            stamp = datetime.fromisoformat(value)
+            if stamp.tzinfo is None or at.tzinfo is None:
+                return result
+            age = (at - stamp).total_seconds()
+            return {**result, "status":"intraday" if 0 <= age <= 300 else "stale",
+                    "reason_code":None if 0 <= age <= 300 else "PRICE_STALE", "calendar":"24/7"}
         import exchange_calendars as calendars
         import pandas as pd
         code = {"US":"XNYS", "HK":"XHKG", "SH":"XSHG", "SZ":"XSHG",

@@ -471,9 +471,9 @@ def _get_candidate_positions(user_input: str, positions: list) -> tuple[list, st
     """根据用户描述特征从持仓里筛选候选标的，最多3条。返回 (candidates, feature_type)。"""
     ft = _detect_feature_type(user_input)
     if ft == "gain":
-        cands = sorted([p for p in positions if p.pl_rate > 0], key=lambda x: x.pl_rate, reverse=True)[:3]
+        cands = sorted([p for p in positions if p.pl_rate is not None and p.pl_rate > 0], key=lambda x: x.pl_rate, reverse=True)[:3]
     elif ft == "loss":
-        cands = sorted([p for p in positions if p.pl_rate < 0], key=lambda x: x.pl_rate)[:3]
+        cands = sorted([p for p in positions if p.pl_rate is not None and p.pl_rate < 0], key=lambda x: x.pl_rate)[:3]
     elif ft == "heavy":
         cands = sorted(positions, key=lambda x: x.weight, reverse=True)[:3]
     else:
