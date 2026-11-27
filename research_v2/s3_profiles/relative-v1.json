@@ -206,7 +206,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "reviewed_at": "2026-11-27T11:31:00Z",
       "valuation_blocker": "CURRENT_OCTOBER_QUARTER_SEC_FINANCIAL_WINDOW_NOT_QUALIFIED"
     },
     "GOOG:US": {
@@ -216,6 +216,11 @@
           "accession": "0001652044-26-000084",
           "locator": "Form 10-Q 2026-09-30 MD&A and notes on EPS and equity",
           "sha256": "b74e29c9e29e1287ddfb71da78577fcf7f1d26dd0aad599dbea9b778b465a6b1"
+        },
+        "preferred_terms": {
+          "accession": "0001193125-26-259830",
+          "locator": "8-K Items 1.01 and 3.03; Exhibits 4.3–4.6 and 5.1–5.2",
+          "sha256": "0564227c40214d75adafe3247980d853f2baaeb04f48f18de073beafbcfb4ff3"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_CLASS_C_AFTER_ENTITLEMENT_BRIDGE",
@@ -258,7 +263,8 @@
           "judgment": "融资用途与长期增量利润需要并验，不能沿用旧净回购假设。",
           "counterevidence": "Series B 类股转换、capped calls 与 ATM 可导致可比终值变化。",
           "evidence": [
-            "quarter"
+            "quarter",
+            "preferred_terms"
           ]
         },
         "certainty_risks_and_counterevidence": {
@@ -270,8 +276,47 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
-      "valuation_blocker": "CLASS_C_Q4_EPS_AND_FORWARD_PREFERRED_ENTITLEMENTS_UNQUALIFIED"
+      "reviewed_at": "2026-11-27T11:31:00Z",
+      "valuation_blocker": "CLASS_C_Q4_EPS_AND_FORWARD_PREFERRED_ENTITLEMENTS_UNQUALIFIED",
+      "entitlement_evidence": {
+        "source_labels": [
+          "quarter",
+          "preferred_terms"
+        ],
+        "inputs": {
+          "preferred": {
+            "series_a": {
+              "depositary_units": 192500000,
+              "units_per_preferred": 20,
+              "liquidation_usd": "1000",
+              "annual_rate": ".0625",
+              "conversion_min": "2.2520",
+              "conversion_max": "2.8160",
+              "common_class": "A",
+              "size_basis": "CLOSED_JUNE_5_DISCLOSED_UNITS"
+            },
+            "series_b": {
+              "depositary_units": 192500000,
+              "units_per_preferred": 20,
+              "liquidation_usd": "1000",
+              "annual_rate": ".0625",
+              "conversion_min": "2.2740",
+              "conversion_max": "2.8420",
+              "common_class": "C",
+              "size_basis": "CLOSED_JUNE_5_DISCLOSED_UNITS"
+            }
+          },
+          "settlement_reference_date": "2029-05-15",
+          "class_c_capped_call_strike_cap_usd": "527.7974",
+          "unexecuted_atm_capacity_as_of_2026_09_30_usd": 27600000000
+        },
+        "remaining_requirements": [
+          "Direct 2025 Q4 Class C standalone EPS from shared Finance Owner",
+          "Preferred quarterly cash-vs-stock election and state-dependent conversion/anti-dilution settlement",
+          "Capped calls payoff timing and share offsets; ATM executed shares and proceeds, not unused authorization",
+          "Ordinary operating earnings normalized for non-operating investment gains"
+        ]
+      }
     },
     "META:US": {
       "cik": "0001326801",
@@ -290,10 +335,20 @@
           "accession": "0001193125-26-438017",
           "locator": "Form 8-K and exhibits covering preferred/depositary financing",
           "sha256": "6706007b84f7af678f881e9f8750507bd34379b0f3abb13613a0bd9c3b794191"
+        },
+        "forward_expansion": {
+          "accession": "0001193125-26-450074",
+          "locator": "8-K Item 8.01 and Exhibits 10.1–10.2; option exercised",
+          "sha256": "8bc0bc99067ab2c82b324bda5d36f439117a4c76050ad8c91b8536285a3f0354"
+        },
+        "class_c_litigation": {
+          "accession": "0001628280-26-075541",
+          "locator": "8-K Item 8.01; issuance standstill, founder waiver and deferred ATM",
+          "sha256": "6a1871e005887c2256e0fa0fe7f7c358e7ddf37f1bdccd7224f6d8298bdb985f"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
-      "equity_bridge": "Class A/C economic claims, depositary preferred and forward settlement remain unresolved; existing guard remains active",
+      "equity_bridge": "Class C issuance and related ATM are deferred while proceedings are pending; no cancellation inferred. Forty-six million contracted forward reference shares including the exercised option still need actual settlement and holding-period entitlement states.",
       "dimensions": {
         "business_model": {
           "fact": "Family of Apps 包括 Facebook、Instagram、Messenger、WhatsApp；集团另报 Reality Labs。",
@@ -334,7 +389,9 @@
           "evidence": [
             "quarter",
             "equity",
-            "finance"
+            "finance",
+            "forward_expansion",
+            "class_c_litigation"
           ]
         },
         "certainty_risks_and_counterevidence": {
@@ -348,7 +405,53 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T11:31:00Z",
+      "entitlement_evidence": {
+        "source_labels": [
+          "equity",
+          "finance",
+          "forward_expansion",
+          "class_c_litigation"
+        ],
+        "inputs": {
+          "preferred": {
+            "firm_offer": {
+              "depositary_units": 250000000,
+              "units_per_preferred": 20,
+              "liquidation_usd": "1000",
+              "annual_rate": ".065",
+              "conversion_min": "1.3620",
+              "conversion_max": "1.6000",
+              "common_class": "A_IF_NO_CLASS_C_TRIGGER",
+              "size_basis": "FIRM_OFFER_ON_OCT_29_CLOSE"
+            },
+            "full_option_hypothesis": {
+              "depositary_units": 287500000,
+              "units_per_preferred": 20,
+              "liquidation_usd": "1000",
+              "annual_rate": ".065",
+              "conversion_min": "1.3620",
+              "conversion_max": "1.6000",
+              "common_class": "A_IF_NO_CLASS_C_TRIGGER",
+              "size_basis": "HYPOTHETICAL_FULL_OPTION_NOT_VERIFIED_OUTSTANDING"
+            }
+          },
+          "forward_contracts_shares": [
+            40000000,
+            6000000
+          ],
+          "original_forward_price_usd": "622.91875",
+          "original_forward_latest_contractual_settlement": "2027-11-19",
+          "stock_dividend_original_terms": "ONE_CLASS_C_FOR_EACH_ELIGIBLE_A_OR_B_IF_EFFECTIVE",
+          "as_of_2026_11_23": "CLASS_C_ISSUANCE_STANDSTILL_AND_CLASS_C_ATM_DELAYED_NOT_CANCELED"
+        },
+        "remaining_requirements": [
+          "Observed litigation/charter/distribution state and holder A plus C economic package",
+          "Preferred cash-vs-stock coupons, actual depositary units, conversion class and anti-dilution",
+          "Forward issuance and cash settlement with class-dependent price adjustments",
+          "Net ordinary dilution with actual ATM, buyback and SBC roll-forward"
+        ]
+      }
     },
     "TSLA:US": {
       "cik": "0001318605",
@@ -357,10 +460,15 @@
           "accession": "0001628280-26-066775",
           "locator": "Form 10-Q 2026-09-30 MD&A, segments, GAAP EPS and cash flow",
           "sha256": "613e1de9d5eb101a840cd65acdb3bcc393aec1318772c5df8f9df61c1dc33611"
+        },
+        "q4_2025_disclosure": {
+          "accession": "0001628280-26-003837",
+          "locator": "Exhibit 99.1 HTML embedded disclosure text, GAAP diluted common EPS row and Q4-2025 column",
+          "sha256": "00178bf9d927550ae16ef0cb88e985f243ac35dba66589f8297f1ac15c9ad549"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_EXCLUDING_UNPROVEN_FUTURE_ADJACENCIES",
-      "equity_bridge": "Ordinary common; qualify exact TTM and reconcile non-operating equity gains before normalizing",
+      "equity_bridge": "Original SEC Exhibit 99.1 presents $0.24 FY25 Q4 GAAP diluted EPS as text. Original financial Owner emits no Q4 observation; $0.50 non-GAAP is excluded. Non-operating equity gains remain outside the operating asset thesis.",
       "dimensions": {
         "business_model": {
           "fact": "汽车、能源发电和储能、服务及其他分列。",
@@ -391,7 +499,8 @@
           "judgment": "观察性现金差额较薄，不能把 CFO 增长等同反复可兑现的盈利。",
           "counterevidence": "营运资本反转及设备投入增长可消耗现金；当期股权投资未实现收益需剔离经营解释。",
           "evidence": [
-            "quarter"
+            "quarter",
+            "q4_2025_disclosure"
           ]
         },
         "capital_allocation": {
@@ -411,8 +520,8 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
-      "valuation_blocker": "EXACT_2025_Q4_ORDINARY_EPS_MISSING"
+      "reviewed_at": "2026-11-27T11:31:00Z",
+      "valuation_blocker": "OFFICIAL_2025_Q4_GAAP_EPS_DISCLOSED_OWNER_ADMISSION_PENDING"
     },
     "BRK.B:US": {
       "cik": "0001067983",
@@ -565,8 +674,53 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
-      "valuation_blocker": "POST_IPO_CLASS_A_DILUTION_AND_RECOVERY_CASH_FLOW_UNQUALIFIED"
+      "reviewed_at": "2026-11-27T11:31:00Z",
+      "valuation_blocker": "POST_IPO_CLASS_A_DILUTION_AND_RECOVERY_CASH_FLOW_UNQUALIFIED",
+      "entitlement_evidence": {
+        "source_labels": [
+          "prospectus",
+          "listing"
+        ],
+        "inputs": {
+          "shares": {
+            "pre_deal_pro_forma_a": 6626752642,
+            "pre_deal_pro_forma_accounting_n": 4476444311,
+            "issuer_primary_a": 1103351354,
+            "secondary_a_excluded": 23648646,
+            "placement_n": 313253007,
+            "public_benefit_subsidiary_n": 846840960
+          },
+          "cash_millions": {
+            "period": "NINE_MONTHS_ENDED_2026_09_30",
+            "revenue": 33242,
+            "operating_loss": 1260,
+            "infrastructure_expense": 18808,
+            "cfo": 6569,
+            "capex": 925,
+            "prepaid_leased_assets": 1955,
+            "finance_lease_principal": 88
+          },
+          "disclosed_claims": {
+            "potential_remaining_capped_amazon_note_shares": 1547676309,
+            "gross_options": 1774342693,
+            "legacy_rsus": 1026660010,
+            "subsequent_rsus": 47041287
+          },
+          "infrastructure_obligations_usd_millions": {
+            "committed": 900900,
+            "through_2030": 451600,
+            "next_12_months": 70700,
+            "table_subset": 319993
+          },
+          "value_method": "CONDITIONAL_EQUITY_CASH_FLOW_RECOVERY_ON_A_N_ECONOMIC_BASIS"
+        },
+        "remaining_requirements": [
+          "Actual post-close economic common/divisor and net cash, debt and contingent financing balance",
+          "Award/RSU, conditional subsidiary shares and convertible debt-vs-equity branch schedule",
+          "All-in annual compute/lease cash timing and operating-lease versus CFO overlap, not the incomplete fixed table",
+          "Net ordinary cash flow after funding and dilution; historical subtotal is not distributable FCFE"
+        ]
+      }
     }
   },
   "reviewed_at": "2026-11-27T09:59:13.926379+00:00",

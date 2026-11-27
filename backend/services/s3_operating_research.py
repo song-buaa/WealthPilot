@@ -314,7 +314,8 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
             from backend.services.s3_relative_profiles import BOOK
             from backend.services.s3_relative_value import METHOD, listed_close, rank_comparisons, relative_stress
             from backend.services import s3_berkshire_research as berkshire
-            methods += ('backend/services/s3_relative_profiles.py', BOOK, METHOD, berkshire.CODE,
+            methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
+                        BOOK, METHOD, berkshire.CODE,
                         'backend/services/instruments/issuers.py')
             result['quality_dossier'] = professional_context['quality_dossier']
             for index, card in enumerate(result['cards']):

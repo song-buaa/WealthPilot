@@ -146,3 +146,35 @@ def test_rank_drops_parent_spread_if_issuer_is_no_longer_qualified(monkeypatch):
     assert relative.rank_comparisons([card], None) == 0
     assert 'relative_return' not in card
     assert card['rank'] is None
+
+
+def test_preferred_entitlement_endpoints_preserve_depositary_and_share_classes():
+    from backend.services.s3_entitlement_evidence import preferred_bounds
+
+    terms = dict(depositary_units=192500000, units_per_preferred=20, conversion_min='2.274',
+                 conversion_max='2.842', liquidation_usd='1000', annual_rate='.0625',
+                 common_class='C', size_basis='DISCLOSED')
+    got = preferred_bounds(terms)
+    assert got['underlying_preferred_shares'] == 9_625_000
+    assert [D(v) for v in got['gross_conversion_share_endpoints']] == [D('21887250'), D('27354250')]
+    assert D(got['annual_coupon_equivalent_usd']) == D('601562500')
+    assert got['common_class'] == 'C'
+    with pytest.raises(ValueError, match='DEPOSITARY_BASIS_REJECTED'):
+        preferred_bounds(dict(terms, depositary_units=192500001))
+    with pytest.raises(ValueError, match='NONFINITE_TERMS'):
+        preferred_bounds(dict(terms, annual_rate='NaN'))
+
+
+def test_entitlement_components_reproduce_ant_without_admitting_equity_valuation():
+    from backend.services.s3_entitlement_evidence import qualification_components
+    from backend.services.s3_relative_profiles import registry
+
+    spec=registry()['companies']['ANT:US']['entitlement_evidence']
+    with pytest.raises(ValueError, match='SOURCE_NOT_QUALIFIED'):
+        qualification_components(spec, {'prospectus': {}})
+    out=qualification_components(spec, {'prospectus': {}, 'listing': {}})
+    assert out['status']=='COMPONENTS_ONLY_RETURN_QUALIFICATION_WITHHELD'
+    assert out['derived']['accounting_pro_forma_a_plus_n']==12_519_801_314
+    assert out['derived']['legal_pro_forma_a_plus_n']==13_366_642_274
+    assert out['derived']['cfo_less_named_capital_cash_outflows_usd_millions']==3601
+    assert not {'scenarios', 'conditional_price', 'rank'} & out.keys()

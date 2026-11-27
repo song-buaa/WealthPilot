@@ -132,6 +132,13 @@ def quality_cards(root, manifest, cutoff, book):
                                   valuation_method=profile['valuation_method'],
                                   equity_bridge=profile['equity_bridge'],
                                   valuation_blocker=profile.get('valuation_blocker'))
+            if 'entitlement_evidence' in profile:
+                from backend.services.s3_entitlement_evidence import qualification_components
+                try:
+                    result[symbol]['qualification_components'] = qualification_components(
+                        profile['entitlement_evidence'], evidence)
+                except (KeyError, TypeError, ValueError, ArithmeticError):
+                    result[symbol]['qualification_components'] = dict(status='INSUFFICIENT_EVIDENCE')
         except (KeyError, TypeError, ValueError, OSError, StopIteration) as exc:
             from backend.services.s3_pool_research import _error_code
             result[symbol] = dict(status='INSUFFICIENT_EVIDENCE',
