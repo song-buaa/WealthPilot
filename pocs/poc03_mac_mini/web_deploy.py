@@ -11,6 +11,12 @@ import uuid
 from common import check_revision, digest, host_guard, private_json, require, run, safe_cli, write_json
 
 LABEL = "com.wealthpilot.restricted-web"
+DEFAULT_LISTEN_PORT = 8790
+
+
+def validate_listen_port(port):
+    require(type(port) is int and 1024 <= port <= 65535, "WEB_LISTEN_PORT_INVALID")
+    return port
 
 
 def verify_dist(release):
@@ -46,7 +52,7 @@ def build_web(release):
     verify_dist(release)
 
 
-def configure(root, revision, enabled=(), gateways_verified=False):
+def configure(root, revision, enabled=(), gateways_verified=False, *, listen_port=None):
     root = Path(root)
     check_revision(root / "releases" / revision / "code", revision)
     require("web" in private_json(root / "releases" / revision / "installed.json").get("environments", []),
@@ -56,7 +62,10 @@ def configure(root, revision, enabled=(), gateways_verified=False):
     require(not enabled or gateways_verified, "DEVICE_GATEWAY_VERIFICATION_REQUIRED")
     require(not (root / "config/web.json").exists(), "EXISTING_WEB_CONFIGURATION_REFUSED")
     require(os.geteuid() != 0, "CONFIGURE_AS_NONROOT_SERVICE_USER")
-    write_json(root / "config/web.json", {"revision": revision, "enabled_brokers": list(enabled)})
+    config = {"revision": revision, "enabled_brokers": list(enabled)}
+    if listen_port is not None:
+        config["listen_port"] = validate_listen_port(listen_port)
+    write_json(root / "config/web.json", config)
 
 
 def render_plist(root):
@@ -160,6 +169,7 @@ def main():
     p = commands.add_parser("build"); p.add_argument("--revision", required=True)
     p = commands.add_parser("configure"); p.add_argument("--revision", required=True)
     p.add_argument("--enabled-brokers", default=""); p.add_argument("--gateways-verified", action="store_true")
+    p.add_argument("--listen-port", type=int)
     p = commands.add_parser("services"); p.add_argument("action", choices=("install", "start", "stop", "restart")); p.add_argument("--apply", action="store_true")
     p = commands.add_parser("select"); p.add_argument("--revision", required=True)
     p.add_argument("--apply", action="store_true"); p.add_argument("--services-stopped", action="store_true")
@@ -173,7 +183,8 @@ def main():
     if args.command == "build":
         build_web(root / "releases" / args.revision)
     elif args.command == "configure":
-        configure(root, args.revision, [b for b in args.enabled_brokers.split(",") if b], args.gateways_verified)
+        configure(root, args.revision, [b for b in args.enabled_brokers.split(",") if b], args.gateways_verified,
+                  listen_port=args.listen_port)
     elif args.command == "select":
         result.update(select_version(root, args.revision, args.services_stopped, args.apply))
     elif args.command == "brokers":
