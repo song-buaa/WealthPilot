@@ -22,9 +22,9 @@
 
 BTC/USDT可明确为0；USD存在时按独立原币现金保存free、locked及总量，包括明确0，不与USDT合并。空响应、缺少核心余额行、账户不符、重复资产、非法数值仍拒绝并保留Last-good。其他非零资产不因代码未知拒绝整批：原aggTrades只读端点最多补8个USDT计价、带真实成交T的可靠报价；超预算/缺报价/超出持仓精度的数量保存在原Run的unvalued_assets，估值UNKNOWN/NULL，发布complete=false。其他资产不增加历史成交、研究或交易能力。
 
-复用原observed_rows短事务发布：仅更新有可靠估值的行；不删除未覆盖行，不覆盖未能重估行的Last-good。上次已知资产本次未返回时，也记录缺证而不推断0。完整来源明确归零后按原机制处理。原始余额（包括0）保存在同一Run的balance_inventory，无需新表或额外nullable列。未知资产不伪造market_value=0的Position，而通过原Run收据、原Web总览/同步卡、MCP及U1质量清单显示数量和UNKNOWN；既有Position保留已知/Last-good估值。总额明确是已记录估值小计，不代表完整账户现值。新来源恢复后，原最新成功Run替换缺口投影，无第二套账本。Funding/Earn/Margin/Futures未查询，仍不声称全钱包覆盖。
+复用原observed_rows短事务发布：不删除未覆盖行，其他未能重估资产保留其原有效估值。已核实的 BTC 余额遇到报价失败时，同批更新 BTC 数量及交易现金，BTC 当前价格及价值存为 NULL。原 Run 保留精确 free/locked/total 与原因，数值必填的历史估值快照不生成缺报价行。上次已知资产本次未返回时，也记录缺证而不推断0。完整来源明确归零后按原机制处理。原始余额（包括0）保存在同一Run的balance_inventory，无需新表或额外nullable列。未知资产不伪造market_value=0的Position，而通过原Run收据、原Web总览/同步卡、MCP及U1质量清单显示数量和UNKNOWN；其他未知资产的既有Position保留已知/Last-good估值。总额明确是已记录估值小计，不代表完整账户现值。新来源恢复后，原最新成功Run替换缺口投影，无第二套账本。Funding/Earn/Margin/Futures未查询，仍不声称全钱包覆盖。
 
-账户HTTP响应本地接收时间与原始 `updateTime` 分别保存；后者不等于持仓/现金有效时间，`positions_as_of`、`cash_as_of`保持UNKNOWN。BTC价格取官方 `aggTrades` 的最新成交p/T，最多300秒且拒绝未来时点，明确last_trade，不声称LIVE bid/ask或可交易报价。按24/7估值，不套用股票周末休市。BTC/USDT/USD沿原8位持仓精度；其他资产超精度时保留原始数量、估值UNKNOWN，不四舍五入。每份有效报价时点独立保留，不能把新BTC时点套到其他保留的旧持仓。
+账户HTTP响应本地接收时间与原始 `updateTime` 分别保存；后者不等于持仓/现金有效时间，`positions_as_of`、`cash_as_of`保持UNKNOWN。BTC价格取官方 `aggTrades` 的最新成交p/T，最多300秒且拒绝未来时点，明确last_trade，不声称LIVE bid/ask或可交易报价。按24/7估值，不套用股票周末休市。BTC/USDT/USD沿原8位持仓精度；其他资产超精度时保留原始数量、估值UNKNOWN，不四舍五入。每份有效报价时点独立保留，不能把新BTC时点套到其他保留的旧持仓。时效校验使用同次请求已校准的 Binance serverTime 偏移量，保留 0–300 秒边界及原始成交 T。
 
 ## 估值、成本及费用
 
@@ -32,11 +32,13 @@ BTC/USDT可明确为0；USD存在时按独立原币现金保存free、locked及�
 
 BTC人民币市值 = BTC总量 × BTCUSDT成交价 × 1 USD等值/USDT × 原FXService USD/CNY。USDT原始资产、数量及原币仍是USDT，不改写成真实USD现金，不并入其他账户。FX的rate/date/source/quality和估值约定随Run保存；缺少有效汇率时拒绝发布，现有陈旧/质量规则不放宽。
 
-USDT=USD为批准的估值约定，非兑付或真实美元资金证明。一个最小USDCUSDT公开参考只用于披露已观察到的相对偏离：超过1%标记 `USDT_RELATIVE_STABLECOIN_DEVIATION`，参考不可用标记UNKNOWN；不据此声称USDT实际美元兑付合格。418/429立即停止整个同步，记录Retry-After，不继续请求或自动循环重试。
+USDT=USD为批准的估值约定，非兑付或真实美元资金证明。一个最小USDCUSDT公开参考只用于披露已观察到的相对偏离：超过1%标记 `USDT_RELATIVE_STABLECOIN_DEVIATION`，参考不可用标记UNKNOWN；不据此声称USDT实际美元兑付合格。418/429立即停止向 Binance 发出后续请求并保留 Retry-After。账户余额尚未验真时同步失败并保留 Last-good，验真后的行情或成交历史限流按受限证据发布该批库存。
 
 BTC首次纳管成本、转入与期初库存未证，因此Position、原快照、Web、MCP、汇总均保持NULL/UNKNOWN。USDT按单位1的估值约定展示零估值差，不声称实际投资收益。BTCUSDT成交从fromId=0开始、每页1000、游标max(id)+1，每次最多10页，超限拒绝而不伪称完整；下一次按原B2中已保存trade ID增量。稳定身份为portfolio + UID + pair + trade ID，保留UTC毫秒、方向、数量、价格、成交额、原手续费资产与金额。库存按BTC扣费调整，USDT扣费按批准等值约定处理，其他手续费币种无可靠换算保持UNKNOWN。成交币种USD为B2估值层约定，原始quote_asset=USDT、quote_quantity及约定明确保留，非真实USD交割。
 
-仅有myTrades不证明转入、兑换、期初或完整历史。B2覆盖始终partial；税费缺证及成本未知不会生成盈亏。成交与Snapshot/Position在原受fence保护的同一事务发布；任一步失败全部回滚，失败Run与Last-good区分。原LEGACY纪律消费者遇UNKNOWN成本明确受限，不以零回撤代入；ACTIVE政策规则不变。Binance没有交易Adapter，读取不能获得交易权限。
+仅有myTrades不证明转入、兑换、期初或完整历史。B2覆盖始终partial；税费缺证及成本未知不会生成盈亏。行情和成交历史来源失败分别记录。历史读取不完整时不推进成交游标，已核实余额仍可发布；可靠成交与 Snapshot/Position 仍在原受 fence 保护的同一事务发布，写入失败整体回滚。原LEGACY纪律消费者遇UNKNOWN成本明确受限，不以零回撤代入；ACTIVE政策规则不变。Binance没有交易Adapter，读取不能获得交易权限。
+
+BTC 缺报价时使用 Position 已有 nullable 列。本次没有迁移。切换期间所有读取该表的在线组件须使用兼容 NULL 的版本，再运行正式同步。若缺报价的 Position 已提交，回退前确认目标制品能处理该行；避免让旧版汇总直接读取 NULL 市值或用旧库覆盖已提交的新事实。
 
 ## Schema及生产迁移边界
 
@@ -65,7 +67,7 @@ BTC首次纳管成本、转入与期初库存未证，因此Position、原快照
 
 - 项目管理核准Draft PR、exact SHA四项CI、独立Review及4.4 BTC消费者合同；按原install-github安装已合并SHA，保留原完整制品。
 - 复用已封存的环境、UID及只读权限预检，保留原Portfolio/共享库Owner；不重复独立网络/权限探针，不要求IP白名单，不新增JSON凭据；一致性备份并完成上述显式Schema演练与批准，禁止DDL随启动隐式执行。
-- 本候选经批准发布后，另行授权原入口首次正式同步；同步本身仍逐次校验UID与accountType，不重复单独网络/TLS/权限研究。先展示范围（Spot余额、USD/USDT现金、BTCUSDT历史及最多8项其他资产只读报价）、请求预算/成本和停止条件；账户冲突、限流、核心价格/FX失败仍停止并保留Last-good。其他缺报价资产保留数量/UNKNOWN并partial，不删除或覆盖原有效估值。
+- 本候选经批准发布后，另行授权原入口首次正式同步；同步本身仍逐次校验UID与accountType，不重复单独网络/TLS/权限研究。先展示范围（Spot余额、USD/USDT现金、BTCUSDT历史及最多8项其他资产只读报价）、请求预算/成本和停止条件；账户冲突、余额验真失败、所需FX失败仍停止并保留Last-good；已验真的BTC余额遇缺价按数量发布。其他缺报价资产保留数量/UNKNOWN并partial，不删除或覆盖原有效估值。
 - 核对真实free/locked/总量、原币、交易ID/手续费、快照/Position/B2原子一致性及Web/MCP读回；首次纳管成本仍UNKNOWN。未授权不能执行生产U1 prepare或Owner签发。
 - 4.4业务验收取得来源Run、原始账户覆盖与时间质量、BTC明确现货身份、USDT约定、冻结FX及必要Owner覆盖/养老金去重证据。正式分母不足仍UNKNOWN，不以此次同步成功替代A3资格。
 - 验收通过后另行批准调度启用；失败撤销启用并恢复已验证组件，已有真实新事实提交后禁止用旧数据库覆盖并发业务写入；走原定向修正流程。

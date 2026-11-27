@@ -59,3 +59,29 @@ test('source gaps show exact quantities and a subtotal without inventing zero va
   await expect(page.getByText(/来源 partial · MYSTERY 数量 1.234567891 · 估值 UNKNOWN/)).toBeVisible()
   expect(errors).toEqual([])
 })
+
+
+test('unpriced BTC shows the current quantity with unknown value and weight', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/api/portfolio/positions', async route => {
+    const { items, total } = await (await route.fetch()).json()
+    await route.fulfill({ json: { total, items: items.map((item: { symbol: string }) => (
+      item.symbol === 'BTC:CRYPTO'
+        ? { ...item, quantity: 0.00200001, market_value_cny: null, original_value: null, current_price: null }
+        : item
+    )) } })
+  })
+  await page.route('**/api/portfolio/summary', async route => {
+    const summary = await (await route.fetch()).json()
+    const gap = { asset: 'BTC', symbol: 'BTC:CRYPTO', quantity: '0.00200001', valuation: 'UNKNOWN' }
+    await route.fulfill({ json: { ...summary, valuation_complete: false, unvalued_assets: [gap] } })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(base + '/#/dashboard')
+  await expect(page.getByRole('status')).toContainText('BTC：数量 0.00200001；估值 UNKNOWN')
+  const row = page.getByRole('row').filter({ hasText: 'BTC 现货' })
+  await expect(row.getByText('0.00200001', { exact: true })).toBeVisible()
+  await expect(row.getByText('UNKNOWN', { exact: true })).toHaveCount(4)
+  expect(errors).toEqual([])
+})

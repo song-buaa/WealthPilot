@@ -25,6 +25,12 @@ class InvalidAmount(ValueError):
         self.predicate = predicate
 
 
+class PriceUnavailable(ValueError):
+    def __init__(self, predicate):
+        super().__init__("BINANCE_PRICE_UNAVAILABLE")
+        self.predicate = predicate
+
+
 def amount(value):
     if not isinstance(value, str):
         raise InvalidAmount("AMOUNT_NOT_STRING")
@@ -103,6 +109,7 @@ class BinanceSyncService:
 
     def _balances(self):
         self.metadata = {}
+        self.market_data_limited = False
         self.client.server_time()
         response = self.client.get("/api/v3/account", {"omitZeroBalances": "false"})
         received = datetime.now(timezone.utc)
@@ -173,7 +180,7 @@ class BinanceSyncService:
         except ValueError as exc:
             self.metadata["retry_after_seconds"] = self.client.retry_after
             if str(exc) == "BINANCE_RATE_LIMITED":
-                raise
+                self.market_data_limited = True
             self.metadata["issues"].append("USDT_PARITY_REFERENCE_UNVERIFIED")
         return balances, received
 
@@ -183,24 +190,34 @@ class BinanceSyncService:
             locked=str(locked) if locked is not None else None,
             quantity=str(free + locked) if free is not None else None,
             valuation="UNKNOWN", market_value=None, market_value_cny=None, reason_code=reason,
-            last_good_retained=asset in getattr(self, "valued_assets", set())))
+            last_good_retained=asset != "BTC" and asset in getattr(self, "valued_assets", set())))
         self.metadata.update(complete=False, publication_mode="observed_rows")
         self.metadata["issues"].append("BINANCE_UNVALUED_ASSETS")
 
     def _price(self, asset):
         trades = self.client.get("/api/v3/aggTrades", {"symbol": asset + "USDT", "limit": 1})
         if not isinstance(trades, list) or len(trades) != 1 or not isinstance(trades[0], dict):
-            raise ValueError("BINANCE_PRICE_UNAVAILABLE")
+            raise PriceUnavailable("PRICE_RESPONSE_SHAPE")
         proof = trades[0]
-        price, stamp = amount(proof.get("p")), instant(proof.get("T"))
-        if not price or not 0 <= (datetime.now(timezone.utc) - stamp).total_seconds() <= 300:
-            raise ValueError("BINANCE_PRICE_UNAVAILABLE")
+        try:
+            price, stamp = amount(proof.get("p")), instant(proof.get("T"))
+        except ValueError:
+            raise PriceUnavailable("PRICE_FIELDS_INVALID") from None
+        age_ms = self.client.exchange_time_ms() - proof["T"]
+        if not price:
+            raise PriceUnavailable("PRICE_NOT_POSITIVE")
+        if age_ms < 0:
+            raise PriceUnavailable("PRICE_TIME_FUTURE")
+        if age_ms > 300_000:
+            raise PriceUnavailable("PRICE_TIME_STALE")
         self.metadata["asset_price_times"][asset + ":CRYPTO"] = dict(
-            price_as_of=stamp.isoformat(), price_time_basis="last_trade", pair=asset + "USDT")
+            price_as_of=stamp.isoformat(), price_time_basis="last_trade", pair=asset + "USDT",
+            age_at_validation_ms=age_ms, validation_clock="binance_server_offset")
         return price, proof
 
     def _positions(self, balances, received):
         result = []
+        self.unpriced_btc = None
         extra_quotes = 0
         assets = ["BTC", "USDT"] + sorted(a for a in balances if a not in {"BTC", "USDT"})
         for asset in assets:
@@ -229,12 +246,18 @@ class BinanceSyncService:
                         continue
                     extra_quotes += 1
                 try:
+                    if self.market_data_limited:
+                        raise PriceUnavailable("BINANCE_RATE_LIMITED")
                     price, proof = self._price(asset)
                 except ValueError as exc:
-                    if asset == "BTC" or str(exc) == "BINANCE_RATE_LIMITED":
-                        raise
-                    self._unvalued(asset, free, locked, "QUOTE_UNAVAILABLE")
-                    continue
+                    reason = getattr(exc, "predicate", "QUOTE_UNAVAILABLE")
+                    if str(exc) == "BINANCE_RATE_LIMITED":
+                        self.market_data_limited = True
+                        reason = "BINANCE_RATE_LIMITED"
+                    self._unvalued(asset, free, locked, reason)
+                    if asset != "BTC":
+                        continue
+                    price = None
             evidence = AssetClassificationEvidence(broker="binance",
                 broker_security_type="STABLECOIN" if cash else "CRYPTO_SPOT" if asset == "BTC" else "SPOT_ASSET",
                 vehicle_type_hint="CASH" if cash else "CRYPTO" if asset == "BTC" else "UNKNOWN", currency="USDT",
@@ -242,19 +265,24 @@ class BinanceSyncService:
             classification = classify_instrument(evidence)
             if classification.economic_asset_class.value == "UNKNOWN":
                 self.metadata["issues"].append("BINANCE_ASSET_CLASSIFICATION_UNKNOWN")
-            result.append(Position(broker="binance", account_id=self.account_id,
+            position = Position(broker="binance", account_id=self.account_id,
                 symbol=asset + ":CRYPTO", raw_symbol=asset,
                 name=asset + ("（美元等值交易现金）" if cash else " 现货"),
                 **broker_position_classification_fields(classification, evidence=evidence),
                 market="CRYPTO", quantity=total, available_quantity=free,
                 avg_cost=Decimal(1) if cash else None, cost_method="weighted_average",
-                cost_basis=total if cash else None, current_price=price, market_value=total * price,
+                cost_basis=total if cash else None, current_price=price,
+                market_value=total * price if price is not None else None,
                 currency="USDT", unrealized_pnl=Decimal(0) if cash else None,
                 unrealized_pnl_pct=Decimal(0) if cash else None, snapshot_time=received, sync_source="api",
                 raw_data=dict(asset=asset, free=str(free), locked=str(locked), quantity=str(total),
                     account_response_at=received.isoformat(), price_quote_asset="USDT",
                     valuation_convention="USDT_USD_PARITY_APPROVED",
-                    cost_quality="PARITY_CARRYING_VALUE" if cash else "UNKNOWN", price_evidence=proof)))
+                    cost_quality="PARITY_CARRYING_VALUE" if cash else "UNKNOWN", price_evidence=proof))
+            if price is None:
+                self.unpriced_btc = position
+            else:
+                result.append(position)
         times = self.metadata["asset_price_times"].values()
         if times:
             self.metadata.update(price_as_of=min(t["price_as_of"] for t in times), price_time_basis="last_trade")
@@ -310,17 +338,31 @@ class BinanceSyncService:
         def fetch():
             balances, received = self._balances()
             positions = self._positions(balances, received)
-            self.events = self._history(cursor)
-            self.metadata["history_cursor"] = max([cursor - 1] + [e["source_trade_id"] for e in self.events])
+            self.events = []
             self.metadata["history_coverage"] = "BTCUSDT_EXECUTIONS_ONLY_NO_TRANSFERS_OR_OPENING"
+            try:
+                if self.market_data_limited:
+                    raise ValueError("BINANCE_RATE_LIMITED")
+                self.events = self._history(cursor)
+            except ValueError as exc:
+                self.metadata["history_coverage"] = "UNAVAILABLE_FOR_CURRENT_RUN"
+                self.metadata["issues"].append("BINANCE_HISTORY_UNAVAILABLE")
+                if str(exc) in {"BINANCE_RATE_LIMITED", "BINANCE_HISTORY_PAGE_INVALID", "BINANCE_HISTORY_LIMIT",
+                                "BINANCE_TRADE_VALUE_CONFLICT", "BINANCE_RESPONSE_INVALID"}:
+                    self.metadata["history_reason_code"] = str(exc)
+            self.metadata["history_cursor"] = max([cursor - 1] + [e["source_trade_id"] for e in self.events])
             return positions
 
         def reconcile(session, upsert, snapshots):
             if self.metadata.get("complete") is False:
-                # Same observed-row publication as Guojin: no stale deletion or
-                # overwrite of a row whose current valuation is unavailable.
+                # No stale deletion. BTC's verified balance is a current fact even
+                # when the priced-snapshot table cannot represent its valuation.
                 for snap in snapshots:
                     upsert._upsert_single(snap, allow_legacy_claim=False)
+                if self.unpriced_btc is not None:
+                    run = session.get(PositionSnapshotRun, snapshots[0].run_id)
+                    quantity_only = PositionSnapshotRepository._position_to_snapshot(run, self.unpriced_btc)
+                    upsert._upsert_single(quantity_only, allow_legacy_claim=False)
             else:
                 report = upsert.upsert_from_snapshots(snapshots, broker="binance", account_id=self.account_id,
                     sync_source="api", commit=False, complete_snapshot=True, run_id=snapshots[0].run_id)
