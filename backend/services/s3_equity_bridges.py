@@ -117,9 +117,14 @@ def alphabet_option_overlay(vwap, overlay, state, coupon):
                       for units,strike,cap in overlay['capped_calls'].values())/10**6
     cash_hedge = gross_hedge if settlement=='CASH' else Decimal(0)
     share_hedge = gross_hedge/vwap if settlement=='NET_SHARES' else Decimal(0)
+    dividend_share_price = vwap * Decimal('.97')
+    # The current cases price above both series' floors. A lower scenario needs the
+    # contractual per-series share caps and cash shortfall rather than this proxy.
+    if stock_coupon and dividend_share_price < Decimal('124.29'):
+        raise ValueError('GOOG_STOCK_DIVIDEND_BELOW_CONTRACT_CASE_RANGE')
     return dict(atm_gross=atm_size,atm_net_retained=atm_size*atm_keep,atm_shares=atm_size/vwap,
         waymo_draw=waymo,waymo_net_claim=waymo*(1-waymo_keep),coupon_cash=coupon*(1-stock_coupon),
-        coupon_shares=coupon*stock_coupon/vwap,hedge_cash=cash_hedge,hedge_shares=share_hedge)
+        coupon_shares=coupon*stock_coupon/dividend_share_price,hedge_cash=cash_hedge,hedge_shares=share_hedge)
 
 
 def alphabet_equity(card, research, claims, profile, sources, start, end):

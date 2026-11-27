@@ -175,7 +175,7 @@ def test_alphabet_overlay_never_pays_hedge_twice():
     assert cash['hedge_shares']==stock['hedge_cash']==0
     assert abs(cash['hedge_cash']-stock['hedge_shares']*600)<Decimal('.0000001')
     assert cash['atm_shares']==46 and cash['atm_net_retained']==20700 and cash['waymo_net_claim']==2500
-    assert cash['coupon_shares']==Decimal('2.5') and cash['coupon_cash']==1500
+    assert cash['coupon_shares']==Decimal(1500)/582 and cash['coupon_cash']==1500
 
 
 def test_nvda_forecast_uses_direct_eps_not_missing_parent_income():
