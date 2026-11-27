@@ -88,19 +88,43 @@ def verify(path):
                 cases += [(a['result'], b['result'], a.get('required_return', card['assumptions']['required_return']))
                           for a, b in zip(card[key], old[key]) if a['result']]
             for actual, prior, rate in cases:
-                total = D(prior['terminal_wealth'])
-                assert actual['terminal_wealth'] == prior['terminal_wealth'] and D(actual['dividends_cash']) == 0
+                if 'cash_return_contract' in old:
+                    terminal = D(prior['terminal_price'])
+                    assert D(actual['terminal_price']) == terminal
+                    contract = old['cash_return_contract']
+                    assert contract == card['cash_return_contract']
+                    assert datetime.fromisoformat(contract['start']) == start
+                    assert datetime.fromisoformat(contract['end']) == end
+                    events = [event for event in contract['schedule']
+                              if at < datetime.fromisoformat(event['eligibility_at'])]
+                    assert actual['included_cash_distributions'] == events
+                    cash = sum(D(event['per_share_usd']) for event in events)
+                    assert D(actual['dividends_cash']) == cash
+                    assert D(actual['terminal_wealth']) == terminal+cash
+                    pv = terminal/(1+D(rate))**years
+                    for event in events:
+                        payment = datetime.fromisoformat(event['paid_at'])
+                        payment_years = D(5)*D(str((payment-at).total_seconds()))/D(str((end-start).total_seconds()))
+                        pv += D(event['per_share_usd'])/(1+D(rate))**payment_years
+                    total = terminal+cash
+                else:
+                    total = D(prior['terminal_wealth'])
+                    assert actual['terminal_wealth'] == prior['terminal_wealth'] and D(actual['dividends_cash']) == 0
+                    pv = total/(1+D(rate))**years
                 checks = dict(total_return=total/price-1, annualized_return=(total/price)**(1/years)-1,
-                              conditional_value=total/(1+D(rate))**years)
+                              conditional_value=pv)
                 checks['margin_to_conditional_value'] = 1-price/checks['conditional_value']
                 if prev == price and years == 5:
                     assert actual == prior
                 for field, value in checks.items():
                     assert abs(D(actual[field])-value) < D('0.00000002'), (card['symbol'], field)
                 checked += 1
+            if card.get('holder_return_scope') == 'BOUNDED_CONDITIONAL':
+                assert card['rank'] is None and not card.get('relative_return')
+                continue
             pairs = {x['against']: x for x in card['relative_return']}
             for other in r['cards']:
-                if other is card or not other['scenarios']:
+                if other is card or not other['scenarios'] or other.get('holder_return_scope') == 'BOUNDED_CONDITIONAL':
                     continue
                 expected = D(card['scenarios']['base']['annualized_return'])-D(other['scenarios']['base']['annualized_return'])
                 assert D(pairs[other['symbol']]['annualized_base_difference']) == expected

@@ -1,0 +1,36 @@
+{
+  "GOOG:US": {
+    "sources": {
+      "quarter": "b74e29c9e29e1287ddfb71da78577fcf7f1d26dd0aad599dbea9b778b465a6b1",
+      "preferred_terms": "0564227c40214d75adafe3247980d853f2baaeb04f48f18de073beafbcfb4ff3"
+    },
+    "reported_usd_m": {
+      "period": "NINE_MONTHS_ENDED_2026_09_30",
+      "revenue": "357269",
+      "ebit": "121042",
+      "cfo": "127149",
+      "capex": "131953",
+      "cash_and_marketable_securities": "265098",
+      "long_term_debt": "125102",
+      "outstanding_common_millions": {"A": "5888", "B": "827", "C": "5579"},
+      "share_observation_date": "2026-10-21",
+      "executed_atm_millions": {"A": "12", "C": "24"},
+      "historical_atm_net_proceeds_usd_m": {"A": "4300", "C": "8100"},
+      "unused_atm_capacity_usd_m": "27600"
+    },
+    "field_locators": {
+      "revenue_ebit": "10-Q Consolidated Statements of Income, nine months ended September 30, 2026",
+      "cfo_capex": "10-Q Consolidated Statements of Cash Flows, nine months ended September 30, 2026",
+      "cash_debt": "10-Q Consolidated Balance Sheets, September 30, 2026",
+      "shares_atm": "10-Q cover as of October 21, 2026 and Note 11 common shares / ATM program"
+    },
+    "cases": {"cautious": [".04", ".28", "14"], "base": [".09", ".34", "19"], "optimistic": [".13", ".37", "25"]}
+  },
+  "TSLA:US": {
+    "sources": {"quarter": "613e1de9d5eb101a840cd65acdb3bcc393aec1318772c5df8f9df61c1dc33611"},
+    "source_locator": "Third-quarter 10-Q cover and Note 3 fair value of financial instruments",
+    "spacex_carrying_usd": "2865000000",
+    "outstanding_common_shares": "3952757946",
+    "hypothetical_retention_fractions": ["0", ".5", "1"]
+  }
+}

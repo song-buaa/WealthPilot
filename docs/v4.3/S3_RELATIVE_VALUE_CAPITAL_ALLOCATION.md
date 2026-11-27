@@ -76,3 +76,42 @@ and fixed endpoint. This scope lacks issuer IR and continuous event monitoring.
 Dependency for PM3 integration: preserve PR #149 as the shared Owner and
 PR #139 as the existing relative value candidate. The consumer delta needs
 both reviewed histories. No changes to policy activation or execution rights.
+## 4.5 多方法估值后继候选
+
+方法应独立证明自身的现金与证券输入。完整持有人回报、限定经营回报和无数值资格分别展示；冻结的历史路径继续以原版本复算。
+
+| 发行人 | 优先方法 | 当前证据及最小缺口 |
+| --- | --- | --- |
+| NVDA | 保留 GAAP 经营桥和 PE，显式现金分配 | 4.1 current V2 同窗 EPS、营业利润、CFO 可用，归母流量仍缺来源资格。FCFE 替代需要同窗完整资本现金支出、利息/净融资和基本普通股经济权益。11 月 17 日已宣告的 $0.25 属独立真实分配。 |
+| GOOG | 正常化 EBIT 与 EV/EBIT；再桥接 Class C | 9M 及单季营业利润和集团现金披露可用于企业级情景，不依赖 Class C Q4 EPS。4.1 确认同窗 EBIT、已发生资产/债务、普通股股本与已发生 ATM；4.5 建立分状态优先股、Capped Calls 及普通股分配桥。 |
+| META | 正常化经营价值或 FCFE；Class A 持有包价值 | 分派暂缓及 46m 远期合同已证实。4.1 提供已发行股份、优先股关闭及后续融资变动；4.5 需要 A 与 A+C 状态、各状态现金/股数调整、融资结算和最终每份 A 持有权益。 |
+| ANT | 条件现金流恢复与融资稀释 | SEC 424B4 和交割证据支持收入、历史现金桥及 pro forma 股本。4.1 核实实际交割后经济股数、现金债务及合同；4.5 建立算力和租赁付款不重复、融资需求及剩余归属现金流。 |
+| TSLA | 保留已运营业务，选择性独立建模 | 需自治和机器人可核验商业化与资本路径、已披露非经营投资的经济归属、税和退出限制；估计项可单列压力，不得混入既有估值基准。 |
+| BRK.B | 保留 B 股经营盈利，研究避免重复计价的分部桥 | 需要可调配母公司现金、分部净债务/资本要求、承保与投资资产归属及剔除相关投资收益；继续保留原有限方法。 |
+| AAPL | 现有经营盈利模型及普通股分配 | 保留合格经营档案；官方股息为未来条件分配假设的可追溯锚。 |
+| MSFT | 现有经营盈利模型及普通股分配 | 保留合格经营档案；非经营投资价值仍有重要未知，分配以合格宣告为锚。 |
+
+The candidate freezes modeled holder cash separately from operating profitability.
+It uses one listed unit, USD, an unchanged five-year endpoint, pre-tax cash retained
+without reinvestment and payment-date present value. A purchase at or after the
+eligibility instant receives no pending historical distribution. AAPL and MSFT
+use flat research schedules anchored to existing reviewed cash declarations; the
+future schedule is illustrative. MSFT remains bounded because the professional
+projection has no separate value for material nonoperating investments. TSLA and
+BRK.B remain bounded; they have no formal position in the complete holder cohort.
+
+GOOG's separate enterprise model uses nine-month revenue annualized as a
+scenario convention and stresses revenue, EBIT margin and exit EV/EBIT. It never
+uses the unqualified Class C EPS. Its preferred conversion states are gross
+contract components, with no net common-share value until actual claims and
+cash bridge reconcile. META's standstill and post-distribution packages are
+distinct; no 50/50 split and no prebooking physical forward settlement. The
+TSLA asset stress uses disclosed carrying value and cover shares plus existing
+future share assumptions, separately from operating returns. It does not add
+autonomy or robotics value. GOOG/META enterprise or claim states only describe
+the original review on a price refresh.
+
+A price refresh never re-collects a full dossier or rewrites the schedule.
+A complete holder cohort gets formal ranks and pairwise stress. Bounded cards
+retain their conditional numbers without a mixed-scope rank. Archived artifacts
+use their original method version when source hashes differ.

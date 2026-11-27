@@ -315,11 +315,12 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
         if professional_context.get('relative_policy'):
             from backend.services.s3_relative_profiles import BOOK
-            from backend.services.s3_relative_value import METHOD, listed_close, rank_comparisons, relative_stress
+            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, rank_comparisons, relative_stress
+            from backend.services import s3_holder_returns, s3_multimethod
             from backend.services import s3_berkshire_research as berkshire
             methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
                         BOOK, METHOD, berkshire.CODE,
-                        'backend/services/instruments/issuers.py')
+                        'backend/services/instruments/issuers.py', s3_holder_returns.CODE, s3_multimethod.CODE, s3_multimethod.BOOK)
             result['quality_dossier'] = professional_context['quality_dossier']
             for index, card in enumerate(result['cards']):
                 if card['symbol'] == 'BRK.B:US':
@@ -344,10 +345,15 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
                     card['reference_close'] = dict(quote, scope='LISTED_CLOSE_ONLY_NO_EPS_OR_ENTITLEMENT_QUALIFICATION')
                 except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError):
                     pass
+            s3_multimethod.apply(result['cards'], result['quality_dossier'],
+                professional_context['companies'], at, endpoint(at))
+            result.update(s3_holder_returns.counts(result['cards']))
             relative_request = pool.PoolRequest.model_validate(request)
             result['comparable_count'] = rank_comparisons(result['cards'], relative_request)
             result['not_comparable'] = [dict(symbol=c['symbol'], reason=c['failure_reason'])
                                         for c in result['cards'] if not c['scenarios']]
+            result['bounded_valuations'] = [dict(symbol=c['symbol'],reason=c['holder_return_scope_reason'])
+                for c in result['cards'] if c['holder_return_scope']==s3_holder_returns.BOUNDED]
             stress = relative_stress(result['cards'],relative_request)
             result['relative_stress'] = stress
             previous_rank = result['ranking']
