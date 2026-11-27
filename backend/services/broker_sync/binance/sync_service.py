@@ -192,9 +192,8 @@ class BinanceSyncService:
         from backend.services.portfolio_history.imports import import_batch
 
         verify(db.connection().connection.driver_connection)
-        if portfolio_scope(db) != self.config.portfolio_id:
-            raise ValueError("SOURCE_ACCOUNT_UNPROVEN")
-        previous = db.query(HistoryEvent.external_id).filter_by(portfolio_id=self.config.portfolio_id,
+        portfolio_id = portfolio_scope(db)
+        previous = db.query(HistoryEvent.external_id).filter_by(portfolio_id=portfolio_id,
             broker="binance", account_id=self.account_id, kind="EXECUTION").all()
         ids = [int(row[0].split(":")[1]) for row in previous if re.fullmatch(r"BTCUSDT:[0-9]+", row[0])]
         cursor = max(ids) + 1 if ids else 0
@@ -221,7 +220,7 @@ class BinanceSyncService:
                     instrument_keys=["listing:BTC:CRYPTO:USD:CRYPTO_SPOT"],
                     evidence_ref="Binance Spot BTCUSDT executions; transfers and opening unproven")
                 raw = json.dumps(self.events, sort_keys=True).encode()
-                import_batch(session, self.config.portfolio_id, "binance", self.account_id,
+                import_batch(session, portfolio_id, "binance", self.account_id,
                     "binance_spot", hashlib.sha256(raw).hexdigest(), self.events, coverage,
                     source_metadata=dict(account_id=self.account_id, source_timezone="UTC",
                         issues=["OPENING_AND_TRANSFERS_UNPROVEN"]), commit=False)

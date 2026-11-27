@@ -1,6 +1,6 @@
 # Binance Spot 只读账户接入
 
-状态：开发候选；仅合成隔离验收，真实账户、生产迁移、启用与同步均待独立授权。研发基线 `7621f2437fc94ad779e5584b70ebd6f50e33be8e`。不提供 Binance 下单、测试下单、撤单、提现或划转能力。
+状态：4.1 Chat主体功能业务验收已认可，凭据配置统一收口候选；真实账户、生产迁移、启用与同步均待独立授权。研发基线 `7621f2437fc94ad779e5584b70ebd6f50e33be8e`。不提供 Binance 下单、测试下单、撤单、提现或划转能力。
 
 ## 复用与最小差量
 
@@ -14,7 +14,7 @@
 
 ## 身份、覆盖和时间
 
-配置用稳定 Binance UID 绑定现有 portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、SPOT账户和SPOT权限、显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
+`BINANCE_UID`为稳定账户身份；Portfolio由原`portfolio_scope()`（共享库合同/原Portfolio配置及Owner）解析，并由原Repository拒绝跨Portfolio账户冲突，不另配Binance专属portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、SPOT账户和SPOT权限、显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
 
 BTC与USDT两行可全部明确为0；空列表、缺少任一行、身份错误、未知非零资产或畸形响应拒绝发布，保留Last-good。未知非零资产的代码/free/locked/总量及UNKNOWN估值保留于失败Run，并通过原同步状态质量投影读取。此为一期支持资产覆盖限制，不能将遗漏资产计为0。Funding、Earn、Margin、Futures等钱包未查询，始终披露非Spot覆盖未知。
 
@@ -39,21 +39,24 @@ BTC首次纳管成本、转入与期初库存未证，因此Position、原快照
 ## API Key一次性准备（由用户在本机操作）
 
 1. Binance官方账户「API Management」创建系统生成HMAC Key，名称建议 `WealthPilot-ReadOnly`。仅Enable Reading；关闭Spot/Margin交易、Futures、提现、内部划转及其他写权限。账户返回canTrade/permissions不是API Key权限证明，须独立核对Key管理页。
-2. 如平台支持IP白名单，仅加入已核实且稳定的Mini实际公网出口。Tailnet地址不是公网出口；本轮未查询出口，保持UNKNOWN。如出口变化需按官方流程更新；不使用代理、VPN或其他地域/资格绕过方案。
-3. 在原生产私有配置根由既有Owner安装，例如 `~/Library/Application Support/WealthPilotProd/config/binance-spot.json`（实际以Mini Runbook为准），父目录0700、文件0600、同一运行用户持有，不使用软链接，不放Git或聊天。设置绝对路径 `BINANCE_CONFIG_FILE`。文件格式：
+2. 复用现有私有`.env`及原启动环境加载机制，由用户在本机填写以下三项；不新建独立凭据文件或加载器。下例仅变量名，真实值不得发Chat或上传Git：
 
-   ```json
-   {"portfolio_id": 1, "uid": "USER_VERIFIED_UID", "api_key": "LOCAL_ONLY", "api_secret": "LOCAL_ONLY"}
+   ```dotenv
+   BINANCE_UID=
+   BINANCE_API_KEY=
+   BINANCE_API_SECRET=
    ```
 
-   示例为占位符，不能直接用于真实连接。使用原Portfolio Owner确定portfolio_id，不新建影子账户。客户端验证文件Owner/权限及UID格式；本地离线检查配置只输出配置是否合格，禁止打印对象字典、认证URL、签名或Secret。
-4. 保持 `WEALTHPILOT_ENABLED_SYNC_BROKERS` 原值不变，生产未验收前不添加binance。正式授权后在原启用列表追加binance（保留原账户），原Web同步卡/手动触发和原日调度共用SyncExecutor，不新建任务。
-5. 轮换：先创建同权限新Key、在私有文件原子替换key/secret、确认UID不变；经单独授权验证，再撤销旧Key。泄露时立即在官方管理页撤销，停用原启用列表中的binance。不要把Secret发给Chat。
+   原`backend.main`经`load_project_environment()`加载已有`.env`；Adapter只消费已加载环境，不自行寻找/打开`.env`。空shell变量与Tiger一样让位给`.env`，有效运行环境变量优先。沿原私有配置Owner、受保护位置和文件权限管理，既有Portfolio选择与账户隔离不变。离线校验仅输出PASS/稳定错误码，禁止打印配置对象字典、认证URL、签名或Secret。缺少任一值返回`BINANCE_NOT_CONFIGURED`，格式非法返回脱敏`BINANCE_CONFIGURATION_INVALID`。
+3. Product Owner已确认当前只读Key不设IP限制，固定IP白名单不是上线前置条件；以后若自行启用，沿官方Key管理处理。实现只需要正常DNS和官方`https://api.binance.com:443`的TLS出网，不要求额外Tunnel或代理服务。客户端沿原官方主机/TLS与无重定向保护，不新增代理或地域/资格绕过。普通HTTPS能力不证明该域名在Mini上已可达；本轮未向Mini或真实API发请求，实际DNS/TLS/API连通性为PENDING，留待生产验收一次有界验证。
+4. 保持`WEALTHPILOT_ENABLED_SYNC_BROKERS`原有效配置，生产未验收前不添加binance。正式授权后在原启用列表追加binance（保留原账户），原Web同步卡/手动触发和每天22:00（含周末）调度共用SyncExecutor，不新建任务。凭据存在不等于同步任务获准启用。
+5. 轮换：在原`.env`或现有运行环境安全替换`BINANCE_API_KEY`/`BINANCE_API_SECRET`，保持UID不变，按既有服务环境重载流程由Owner操作；经单独授权验证，再在官方管理页撤销旧Key。泄露时撤销Key并停用原启用列表中的binance，不在聊天处理Secret。
+
 
 ## 首次Mini接入清单（本轮不执行）
 
 - 项目管理核准Draft PR、exact SHA四项CI、独立Review及4.4 BTC消费者合同；按原install-github安装已合并SHA，保留原完整制品。
-- 核查私有配置Owner、UID、实际账户范围/读取权限/白名单及原共享库身份；一致性备份并完成上述显式Schema演练与批准，禁止DDL随启动隐式执行。
+- 核查原私有`.env`加载与运行Owner、UID、原Portfolio/共享库身份、实际账户范围及只读权限；当前不要求IP白名单，不新增独立JSON凭据；一致性备份并完成上述显式Schema演练与批准，禁止DDL随启动隐式执行。
 - 独立授权一次真实只读来源调用及原正式同步写入。先展示范围（仅Spot BTC/USDT+BTCUSDT历史）、请求预算/成本、停止条件；有其他非零资产、账户冲突、限流、精度/价格/FX不合格时停止并保留Last-good。
 - 核对真实free/locked/总量、原币、交易ID/手续费、快照/Position/B2原子一致性及Web/MCP读回；首次纳管成本仍UNKNOWN。未授权不能执行生产U1 prepare或Owner签发。
 - 4.4业务验收取得来源Run、原始账户覆盖与时间质量、BTC明确现货身份、USDT约定、冻结FX及必要Owner覆盖/养老金去重证据。正式分母不足仍UNKNOWN，不以此次同步成功替代A3资格。
@@ -61,7 +64,7 @@ BTC首次纳管成本、转入与期初库存未证，因此Position、原快照
 
 ## 验证入口及官方合同
 
-合成回归：`tests/test_binance_spot.py`；原U0/B2/B3/C回归；实际React+临时SQLite：`frontend/tests/e2e/binance-spot.spec.ts`。CI仍为原四项。真实账户、ARM、网络可达、Key权限、生产迁移及自然调度待验收，Mock不等于生产PASS。
+配置收口仅定向验证原dotenv优先级、脱敏、缺失/非法凭据及原Owner/UID绑定（`backend/core/tests/test_env.py`、`tests/test_binance_spot.py`），不重复浏览器专项或主体业务验收。原合成回归：`tests/test_binance_spot.py`；原U0/B2/B3/C回归；实际React+临时SQLite：`frontend/tests/e2e/binance-spot.spec.ts`。CI仍为原四项。真实账户、ARM、网络可达、Key权限、生产迁移及自然调度待验收，Mock不等于生产PASS。
 
 - [官方REST概述及错误/限流](https://developers.binance.com/en/docs/products/spot/rest-api)
 - [账户与成交接口](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/account)
