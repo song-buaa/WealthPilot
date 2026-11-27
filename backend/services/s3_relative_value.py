@@ -227,6 +227,7 @@ def rank_comparisons(cards, request):
     engine._rank(cohort + [c for c in cards if not c['scenarios']], request)
     for card in cards:
         if card.get('scenarios') and card.get('holder_return_scope') == holder.BOUNDED:
+            engine._sensitivity_qualification(card)
             card.update(group=None, rank=None, rank_reason=card['holder_return_scope_reason'])
             for key in ('relative_return','tie_reason','classification_reasons'):
                 card.pop(key, None)

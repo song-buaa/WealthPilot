@@ -92,3 +92,13 @@ def test_observed_tesla_asset_overlay_does_not_change_base_projection():
     assert results['cases'][0]['terminal_increment_per_share_usd']=='0.00000000'
     assert 0 < Decimal(results['cases'][2]['terminal_increment_per_share_usd']) < 1
     assert card['scenarios']['base']['terminal_wealth'] == '105'
+
+def test_preferred_conversion_rounds_each_share_and_exercises_middle_band():
+    terms = dict(conversion_min='2.2520', conversion_max='2.8160', liquidation_usd='1000')
+    components = dict(status='COMPONENTS_ONLY_RETURN_QUALIFICATION_WITHHELD',
+        published_inputs={'preferred':{'A':terms}},evidence={},
+        derived={'preferred':{'A':{'underlying_preferred_shares':9_625_000}}})
+    state = multimethod.equity_components('GOOG:US', {'qualification_components':components})
+    cases = state['converted_shares_by_hypothetical_vwap']['A']
+    assert [c['unadjusted_common_per_preferred'] for c in cases] == ['2.8160','2.3810','2.2520']
+    assert cases[1]['unadjusted_common_shares']=='22917125.00000000'

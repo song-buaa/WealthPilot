@@ -1,6 +1,6 @@
 """Reviewed issuer-specific extensions over the existing professional pool."""
 from datetime import timedelta
-from decimal import Decimal, localcontext
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 import json
 
 from backend.services.quality_valuation_research import ROOT
@@ -72,9 +72,14 @@ def equity_components(symbol, dossier):
             for name, terms in components['published_inputs']['preferred'].items():
                 minimum, maximum = map(dec,(terms['conversion_min'],terms['conversion_max']))
                 units = components['derived']['preferred'][name]['underlying_preferred_shares']
-                output[name] = [dict(hypothetical_class_vwap_usd=str(vwap),unadjusted_common_shares=text(
-                    Decimal(units)*max(minimum,min(maximum,dec(terms['liquidation_usd'])/Decimal(vwap)))))
-                    for vwap in (300,450,600)]
+                output[name] = []
+                for vwap in ('300','420','600'):
+                    conversion = (dec(terms['liquidation_usd'])/dec(vwap)).quantize(
+                        Decimal('.0001'),rounding=ROUND_HALF_UP)
+                    per_preferred = max(minimum,min(maximum,conversion))
+                    output[name].append(dict(hypothetical_class_vwap_usd=vwap,
+                        unadjusted_common_per_preferred=str(per_preferred),
+                        unadjusted_common_shares=text(Decimal(units)*per_preferred)))
         return dict(status='CONTRACT_COMPONENT_STRESS_ONLY', converted_shares_by_hypothetical_vwap=output,
             exclusions=['ANTI_DILUTION', 'COUPON_PAID_IN_SHARES', 'CAPPED_CALL_SETTLEMENT', 'FUTURE_ATM'],
             sources=components['evidence'])
