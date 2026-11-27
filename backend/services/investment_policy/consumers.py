@@ -4,7 +4,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from .contracts import canonical
-from .runtime import context, current, diagnose, assets_qualified
+from .runtime import context, current, diagnose, assets_qualified, peer_context, _includes_btc_governance
 from .parser import PolicyError
 
 
@@ -60,8 +60,11 @@ def deviation(portfolio_id):
         buckets: dict = Field(default_factory=dict)
         risk_diagnostic: dict = Field(default_factory=dict)
         execution_authorized: bool = False
+    risk = diagnose(portfolio_id)
+    if "btc_governance" in c:
+        risk["btc_governance"] = c["btc_governance"]
     if not assets_qualified(session,complete=True):
-        return Diagnostic(status='UNKNOWN',policy_reference=c['policy_reference'],risk_diagnostic=diagnose(portfolio_id))
+        return Diagnostic(status='UNKNOWN',policy_reference=c['policy_reference'],risk_diagnostic=risk)
     rows={}
     for key,evidence in session.assets.bucket_weights.items():
         if key not in c['targets']['neutral'] or not qualified_bucket(evidence):
@@ -70,7 +73,7 @@ def deviation(portfolio_id):
                    'deviation':str(evidence.value-Decimal(c['targets']['neutral'][key])),
                    'action':'INFORMATION_ONLY_NOT_MAJOR_CLASS_TRIGGER'}
     return Diagnostic(status='QUALIFIED_SCOPE_DIAGNOSTIC' if len(rows)==len(c['targets']['neutral']) and sum(Decimal(row['current']) for row in rows.values())==1 else 'UNKNOWN',
-        policy_reference=c['policy_reference'],buckets=rows,risk_diagnostic=diagnose(portfolio_id))
+        policy_reference=c['policy_reference'],buckets=rows,risk_diagnostic=risk)
 
 
 def snapshot(portfolio_id):
@@ -102,6 +105,8 @@ def snapshot(portfolio_id):
             'focus':sorted([k for k in rows if rows[k]['direction']!='AT_TARGET'],
                 key=lambda k:abs(Decimal(rows[k]['gap_pp'])), reverse=True),
             'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
+        if 'btc_governance' in c:
+            meta['btc_governance'] = c['btc_governance']
         if hasattr(session, 'allocation_hierarchy'):
             meta['hierarchy'] = session.allocation_hierarchy
         if hasattr(session, 'allocation_concentration'):
@@ -127,6 +132,9 @@ def discipline_tool(asset_name, portfolio_id):
     value = diagnose(portfolio_id, issuer_symbol=asset_name)
     # Never guess issuer ID from a display name. Source-owner keyed evidence only.
     session = current(portfolio_id)
+    governance = session.context.get("snapshot", {}).get("btc_governance")
+    if governance and _includes_btc_governance("position", asset_name):
+        value["btc_governance"] = governance
     evidence = session.assets.issuer_weights.get(asset_name) if session.assets else None
     weight = float(evidence.value) if evidence and evidence.value is not None else 0.0
     # Stored weight remains only a compatibility field; diagnostic quality carries
@@ -142,7 +150,9 @@ def finalize_output(plan, executed, expressed):
     if session.mode == 'LEGACY':
         return
     session.ensure_current()
-    value = context(plan.portfolio_id,consumer='peer',view='portfolio')
+    loaded = getattr(executed, "loaded_data", None)
+    value = peer_context(plan.portfolio_id, position_only=getattr(plan, "route", None) == "position_single",
+                         loaded=loaded)
     expressed.actionable = False
     expressed.actionable_hint = None
     # Reuse the original evidence-qualified renderer. Arbitrary model prose and
@@ -193,7 +203,6 @@ def finalize_output(plan, executed, expressed):
     else:
         expressed.chat_answer += render_explanation(explanations)
     expressed.raw_text=''
-    loaded = getattr(executed,'loaded_data',None)
     if loaded:
         loaded.policy_context = value
     ref = value.get('policy_reference') or {}

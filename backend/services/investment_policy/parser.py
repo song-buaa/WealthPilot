@@ -209,11 +209,16 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
     markers = ("B3节点合同：", "B3节点 growth_and_alternatives：", "B3节点 stable_pool：",
                "B3节点复核单位：", "B3节点现金范围：", "B3节点产品决定：", "B3节点内容批准：")
     has_versioned_clause = any(line.startswith(markers) for line in doc.lines)
+    btc_sections = {"4.3", "9.3"} & doc.sections.keys()
+    btc_markers = [line for line in doc.lines if line.startswith(("BTC治理合同：", "BTC治理内容批准："))]
+    has_btc_governance = bool(btc_sections or btc_markers)
+    if has_btc_governance and (amendment is None or not has_versioned_clause):
+        raise PolicyError("BTC_GOVERNANCE_REQUIRES_AMENDMENT_BASE")
     schema_version = expected_schema_version
     if schema_version is None:
         schema_version = "wp.policy.v2" if has_versioned_clause else "wp.policy.v1"
     if schema_version == "wp.policy.v1":
-        if amendment is not None:
+        if amendment is not None or has_btc_governance:
             raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
         return Snapshot(**fields)
     if schema_version != "wp.policy.v2" or not has_versioned_clause:
@@ -262,7 +267,69 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
                 or reference == mapping.content_approval_ref):
             raise PolicyError("INDEPENDENT_POLICY_AMENDMENT_CONTENT_APPROVAL_REQUIRED")
         fields["content_approved_on"] = day
-    return SnapshotV2WithAmendment(**fields, strategic_review_scope=mapping,
+    snapshot = SnapshotV2WithAmendment(**fields, strategic_review_scope=mapping,
         amendment_approval=PolicyAmendmentApproval(
             status="APPROVED_CONTENT" if approval_date else "DRAFT_CONTENT",
             approved_on=approval_date, reference=reference))
+    if has_btc_governance:
+        return _derive_btc_governance(snapshot, doc, btc_markers)
+    return snapshot
+
+
+# Digests of the reviewed BTC additions in this contract version. A change to
+# the machine-interpreted prose requires an explicit contract revision.
+BTC_SOURCE_FRAGMENT_SHA256 = {
+    "4.3": "9edb48d64020171def4b5012e08c661afd9ac7b1cc79dde143497c867f6e9fc9",
+    "5.1": "b5a9551ed7175ce16076c2529b69993cf1ea290460bb604a991a9580d0ded340",
+    "5.2": "a87d829711b66432f288eb45e14c817dec05d701fe53646c756504d76e86f0e2",
+    "5.3": "f26963a674bb51e6c7ca57ff2e068afb07aa27efbbbf2614a31da7645eebec05",
+    "6.2": "1a89af4d2ada2e71408fdb526ee35a5f66a83b7b26c0549d99d407fd7aa82e04",
+    "9.3": "405aa7fd7a85247953256175f6c2a4c42d02be39b90e0a146ff583c86de34cb9",
+}
+BTC_APPENDED_PARAGRAPHS = {"5.1": 2, "5.2": 1, "5.3": 1, "6.2": 4}
+
+
+def _btc_source_fragment(doc, section):
+    text = doc.ref(section).text.rstrip("\n")
+    if section in BTC_APPENDED_PARAGRAPHS:
+        paragraphs = text.split("\n\n")
+        return "\n\n".join(paragraphs[-BTC_APPENDED_PARAGRAPHS[section]:])
+    lines = text.splitlines()[1:]
+    return "\n".join(line for line in lines if not line.startswith(
+        ("BTC治理合同：", "BTC治理内容批准："))).strip("\n")
+
+
+def _derive_btc_governance(base, doc, markers):
+    from .btc_governance import BtcGovernance, SECTIONS, SnapshotV2WithBtcGovernance, VERSION
+
+    if len(markers) != 2 or any(line not in doc.text("9.3").splitlines() for line in markers):
+        raise PolicyError("BTC_GOVERNANCE_SOURCE_LAYOUT_INVALID")
+    one(rf"^BTC治理合同：{re.escape(VERSION)}$", doc.text("9.3"))
+    stamp = one(r"^BTC治理内容批准：([^\n]+)$", doc.text("9.3"))
+    # Bind the structured interpretation to the reviewed L2 prose, without
+    # storing private Markdown in the repository. L1 edits may alter the
+    # preceding cash paragraph, while the reviewed BTC additions stay fixed.
+    for section, expected in BTC_SOURCE_FRAGMENT_SHA256.items():
+        fragment = _btc_source_fragment(doc, section)
+        if hashlib.sha256(fragment.encode()).hexdigest() != expected:
+            raise PolicyError("BTC_GOVERNANCE_SOURCE_FRAGMENT_MISMATCH: " + section)
+    approved_on, ref = None, None
+    if stamp != "DRAFT_CONTENT":
+        day, ref, issue = _btc_approval(stamp)
+        approved_on = date.fromisoformat(day)
+        if issue in {"111", "121", "124", "126", "127"}:
+            raise PolicyError("BTC_INDEPENDENT_CONTENT_APPROVAL_REQUIRED")
+    governance = BtcGovernance(content_approval=PolicyAmendmentApproval(
+        status="APPROVED_CONTENT" if approved_on else "DRAFT_CONTENT", approved_on=approved_on, reference=ref),
+        source_clauses={key:doc.ref(key) for key in SECTIONS})
+    return SnapshotV2WithBtcGovernance(**(base.model_dump() | {
+        "btc_governance":governance,
+        "content_approved_on":approved_on.isoformat() if approved_on else base.content_approved_on}))
+
+
+def _btc_approval(stamp):
+    return one(
+        r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| "
+        r"(https://github\.com/song-buaa/WealthPilot/issues/([1-9]\d*)(?:#issuecomment-[1-9]\d*)?)$",
+        stamp,
+    )

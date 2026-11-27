@@ -153,3 +153,13 @@ B3 复用同一冻结快照、原分母及资产资格，按两节点绝对偏�
 新增 `§3.2` 行 `美国核心股内容批准：DRAFT_CONTENT` 控制整份修订的内容资格。原 §6.3 批准仍只适用于历史 B3 条款。正式格式为 `美国核心股内容批准：APPROVED_CONTENT | YYYY-MM-DD | <独立内容批准评论 URL>`。审批前将确切待审字节及两份 SHA 交 Product Owner，历史 B3 批准和产品范围裁决不代用。技术校验只核对格式、独立性及日期顺序，实际批准收据与精确字节必须由正式 Policy Owner 核验。草案即使继承合格 §6.3，也不能取得结构化批准。无数据库迁移。若以后发布八股修订，回退旧代码前按独立授权先通过原 Publisher 回滚到旧 Bundle，旧解析器不支持八股来源。
 
 验证入口见 [八股定向回归](../../tests/test_policy_v3_targets.py)。本节记录开发候选。
+
+## BTC L2 治理补充
+
+BTC 治理由 `wp.policy.btc.v1` 子合同承载。Markdown 路径沿用 `wp.policy.v2`，P1 后继沿用 `wp.policy.config.v1`。无 SQLite DDL。历史无 BTC 子合同的快照及哈希沿用旧格式。Web、MCP、Backend、Discipline、PEER 与 Allocation 从同一 PolicyReference 读取新增规则。股票单标不增加 BTC 专项诊断或行为事实缺失。
+
+BTC 工具资格限无杠杆现货；研究、策略独立准入、实盘预算和具体交易授权分别判断。USDT 仅为结算交易现金，按原资格门槛判断临时现金。合并实际 BTC 敞口保留原两条检查。潜在敞口是只读事前估算，已保留买单共享其唯一资金账户时不叠加，未成交卖单不减实际。已批准且未投入金额覆盖全部资金池，包括其中已占用的买单。资金归属、订单、估值或覆盖不全时保持 UNKNOWN。合成参考计算不接资产源，现有冻结浓度投影仍按原证据边界运行。新子合同不给策略预算、杠杆、衍生品或订单执行权限。
+
+来源包含明确的 `BTC治理合同：wp.policy.btc.v1` 及独立 `BTC治理内容批准`。草案为 `DRAFT_CONTENT`，原 B3 及八股批准继续保存在其各自范围。正式 Policy Owner 对两份完整来源 SHA、真实日期和独立批准记录核验后，按原正式 Publisher Stage/Validate、结构化签发、ACTIVATE 和消费者读回。上线授权与候选内容批准遵守原流程。旧解析器无法读取新子合同，版本回退前须先按授权用兼容代码恢复旧 Bundle。
+
+P1 继承完整 BTC 子合同与原文来源绑定。配置候选不能提交新的治理值或抹除 BTC 子合同。资产支持与证据缺口仍由现有 Owner 处理。见 [BTC 合同与合成回归](../../tests/test_policy_btc_governance.py)。
