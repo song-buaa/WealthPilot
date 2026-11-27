@@ -89,6 +89,8 @@ def equity_components(symbol, dossier):
         inputs = components['published_inputs']
         return dict(status='HOLDER_PACKAGE_STATES_ONLY', forward_reference_shares=sum(inputs['forward_contracts_shares']),
             preferred=components['derived']['preferred'],
+            **({'observed_preferred_option_close':inputs['preferred_option_close']}
+               if 'preferred_option_close' in inputs else {}),
             cases=[
                 dict(state='STANDSTILL',security_package='A', outstanding_c='NOT_ISSUED_UNDER_PROPOSAL'),
                 dict(state='DISTRIBUTION_IF_EFFECTIVE_AND_HELD_THROUGH_ENTITLEMENT',

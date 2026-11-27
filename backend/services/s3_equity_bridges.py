@@ -125,7 +125,9 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
             forecast_shares_m=text(shares),new_debt_gross_usd_m=text(gross_new_debt),cash_retained_fraction=str(retained),
             preferred_cash_cost_usd_m=text(preferred_cash),preferred_converted_shares_m=text(preferred_shares))
     card['holder_equity_bridge'] = dict(status='CONDITIONAL_ORDINARY_VALUE_BOUNDED',
-        observation_date='2026-09-30',financial_inputs=profile['quarter_balance_usd_m'],
+        observation_date='2026-09-30',
+        ordinary_share_basis='October 21 cover; A/B/C liquidation and common dividend rights are identical except voting under the reviewed 10-Q.',
+        financial_inputs=profile['quarter_balance_usd_m'],
         post_quarter_origin_currency=profile['post_quarter_gross_m'],
         scenario_parameter_columns=profile['scenario_columns'],scenario_parameters=profile['contract_states'],
         components=components,source_evidence=sources,

@@ -34,7 +34,8 @@ def _prospectus_proof(filing, submissions, body, row):
     # financial facts and does not accept a prospectus as a quarterly statement.
     recent = submissions['filings']['recent']
     index = recent['accessionNumber'].index(filing['accession'])
-    if (recent['form'][index] != '424B4'
+    required = filing.get('form','424B4')
+    if (required not in ('424B4','424B5') or recent['form'][index] != required
             or recent['primaryDocument'][index] != row['url'].rsplit('/', 1)[-1]
             or sec.allowed_url(row['url']) is False
             or not body or b'<html' not in body[:4000].lower()):

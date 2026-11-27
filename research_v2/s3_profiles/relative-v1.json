@@ -355,6 +355,13 @@
           "accession": "0001628280-26-075541",
           "locator": "8-K Item 8.01; issuance standstill, founder waiver and deferred ATM",
           "sha256": "6a1871e005887c2256e0fa0fe7f7c358e7ddf37f1bdccd7224f6d8298bdb985f"
+        },
+        "preferred_option_close": {
+          "accession": "0001193125-26-450754",
+          "primary": "d44678d424b5.htm",
+          "form": "424B5",
+          "locator": "Recent Developments: November 2 completed depositary option, 37.5m shares and $1.869bn net proceeds",
+          "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
@@ -421,7 +428,8 @@
           "equity",
           "finance",
           "forward_expansion",
-          "class_c_litigation"
+          "class_c_litigation",
+          "preferred_option_close"
         ],
         "inputs": {
           "preferred": {
@@ -435,7 +443,7 @@
               "common_class": "A_IF_NO_CLASS_C_TRIGGER",
               "size_basis": "FIRM_OFFER_ON_OCT_29_CLOSE"
             },
-            "full_option_hypothesis": {
+            "actual_aggregate_issued": {
               "depositary_units": 287500000,
               "units_per_preferred": 20,
               "liquidation_usd": "1000",
@@ -443,7 +451,7 @@
               "conversion_min": "1.3620",
               "conversion_max": "1.6000",
               "common_class": "A_IF_NO_CLASS_C_TRIGGER",
-              "size_basis": "HYPOTHETICAL_FULL_OPTION_NOT_VERIFIED_OUTSTANDING"
+              "size_basis": "ISSUED_AGGREGATE_INCLUDING_NOVEMBER_2_OPTION_CLOSE"
             }
           },
           "forward_contracts_shares": [
@@ -453,11 +461,17 @@
           "original_forward_price_usd": "622.91875",
           "original_forward_latest_contractual_settlement": "2027-11-19",
           "stock_dividend_original_terms": "ONE_CLASS_C_FOR_EACH_ELIGIBLE_A_OR_B_IF_EFFECTIVE",
-          "as_of_2026_11_23": "CLASS_C_ISSUANCE_STANDSTILL_AND_CLASS_C_ATM_DELAYED_NOT_CANCELED"
+          "as_of_2026_11_23": "CLASS_C_ISSUANCE_STANDSTILL_AND_CLASS_C_ATM_DELAYED_NOT_CANCELED",
+          "preferred_option_close": {
+            "depositary_units": 37500000,
+            "underlying_preferred": 1875000,
+            "incremental_net_proceeds_usd": "1869000000",
+            "settlement_date": "2026-11-02"
+          }
         },
         "remaining_requirements": [
           "Observed litigation/charter/distribution state and holder A plus C economic package",
-          "Preferred cash-vs-stock coupons, actual depositary units, conversion class and anti-dilution",
+          "Preferred cash-vs-stock coupons, subsequent changes to confirmed issued units, conversion class and anti-dilution",
           "Forward issuance and cash settlement with class-dependent price adjustments",
           "Net ordinary dilution with actual ATM, buyback and SBC roll-forward"
         ]
