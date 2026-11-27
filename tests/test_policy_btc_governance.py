@@ -141,13 +141,18 @@ def exposure(**overrides):
     values = dict(as_of="2026-11-27T10:00:00+08:00", denominator_cny="10000",
         denominator_qualified=True, positions_complete=True, funding_complete=True, orders_complete=True,
         positions=[
-            dict(identity="long",value_cny="1000",qualified=True,asset="BTC",sleeve="LONG_TERM"),
-            dict(identity="bot-btc",value_cny="200",qualified=True,asset="BTC",sleeve="STRATEGY"),
-            dict(identity="bot-cash",value_cny="300",qualified=True,asset="USDT",sleeve="STRATEGY"),
+            dict(identity="long",capital_id="long-lot",value_cny="1000",qualified=True,asset="BTC",sleeve="LONG_TERM"),
+            dict(identity="bot-btc",capital_id="strategy-lot",value_cny="200",qualified=True,asset="BTC",sleeve="STRATEGY"),
+            dict(identity="bot-cash",capital_id="strategy-cash",value_cny="300",qualified=True,asset="USDT",sleeve="STRATEGY"),
         ], strategy_budget_cny="500",
-        uninvested_funding=[dict(identity="cash-1",value_cny="300",qualified=True)],
+        strategy_budget_evidence=dict(as_of="2026-11-27T10:00:00+08:00",
+            authorization_ref="TEST-approval", ownership_ref="TEST-ledger",
+            authorized_cny="500", occupied_principal_cny="200", remaining_deployable_cny="300",
+            position_ids=["bot-btc", "bot-cash"], funding_balances_cny={"strategy-cash":"300"}),
+        uninvested_funding=[dict(identity="cash-1",capital_id="strategy-cash",
+                                 sleeve="STRATEGY",value_cny="300",qualified=True)],
         open_orders=[
-            dict(identity="buy",value_cny="100",qualified=True,side="BUY",funding_id="cash-1"),
+            dict(identity="buy",value_cny="100",qualified=True,side="BUY",sleeve="STRATEGY",funding_id="cash-1"),
             dict(identity="sell",value_cny="50",qualified=True,side="SELL")])
     return ExposureEvidence.model_validate(values | overrides)
 
@@ -176,6 +181,73 @@ def test_coverage_conflicts_stay_unknown_and_sells_do_not_clear_risk():
     result = exposure_diagnostic(exposure(positions=data.positions + (conflict,)))
     assert result["actual_cny"] is None and result["actual_known_lower_bound_cny"] == 1000
     assert result["potential_cny"] is None
+
+
+@pytest.mark.parametrize("update", [
+    {"strategy_budget_evidence":None},
+    {"strategy_budget_cny":None},
+    {"strategy_budget_cny":"100"},
+])
+def test_strategy_requires_budget_evidence_independent_of_qualified_cash(update):
+    result = exposure_diagnostic(exposure(**update))
+    assert result["actual_cny"] == 1200
+    assert result["potential_status"] == "UNKNOWN" and result["potential_cny"] is None
+
+
+@pytest.mark.parametrize("conflict", [
+    {"authorized_cny":"100"},
+    {"occupied_principal_cny":"201"},
+    {"remaining_deployable_cny":"299"},
+    {"remaining_deployable_cny":"301", "occupied_principal_cny":"199"},
+    {"position_ids":["bot-cash"]},
+    {"funding_balances_cny":{"other-cash":"300"}},
+    {"as_of":"2026-11-27T09:59:00+08:00"},
+])
+def test_inconsistent_owner_budget_receipt_keeps_only_actual(conflict):
+    data = exposure()
+    receipt = data.strategy_budget_evidence.model_dump() | conflict
+    result = exposure_diagnostic(exposure(strategy_budget_evidence=receipt))
+    assert result["actual_cny"] == 1200
+    assert result["potential_cny"] is None
+
+
+def test_same_capital_cannot_be_allocated_across_sleeves_or_reused_from_a_position():
+    data = exposure()
+    strategy_cash = data.uninvested_funding[0]
+    # A different row ID cannot make the same cash available twice.
+    alias = strategy_cash.model_copy(update={"identity":"cash-alias", "sleeve":"LONG_TERM"})
+    deployed = alias.model_copy(update={"capital_id":"long-lot"})
+    stolen = strategy_cash.model_copy(update={"sleeve":"LONG_TERM"})
+    for funding in ((strategy_cash, alias), (strategy_cash, deployed), (stolen,)):
+        result = exposure_diagnostic(exposure(uninvested_funding=funding))
+        assert result["actual_cny"] == 1200 and result["potential_cny"] is None
+    collision = data.positions[0].model_copy(update={"capital_id":"strategy-lot"})
+    result = exposure_diagnostic(exposure(positions=(collision, *data.positions[1:])))
+    assert result["actual_cny"] == 1200 and result["potential_cny"] is None
+    wrong_sleeve = data.open_orders[0].model_copy(update={"sleeve":"LONG_TERM"})
+    overbook = data.open_orders[0].model_copy(update={"identity":"buy-2", "value_cny":D(250)})
+    for orders in ((wrong_sleeve,), (data.open_orders[0], overbook)):
+        assert exposure_diagnostic(exposure(open_orders=orders))["potential_cny"] is None
+
+
+def test_zero_strategy_allocation_keeps_long_term_potential():
+    data = exposure()
+    available = data.uninvested_funding[0].model_copy(
+        update={"capital_id":"long-cash", "sleeve":"LONG_TERM"})
+    buy = data.open_orders[0].model_copy(update={"sleeve":"LONG_TERM"})
+    result = exposure_diagnostic(exposure(positions=data.positions[:1],
+        strategy_budget_cny=0, strategy_budget_evidence=None,
+        uninvested_funding=[available], open_orders=[buy]))
+    assert result["actual_cny"] == 1000 and result["potential_cny"] == 1300
+
+
+def test_passive_price_gain_does_not_consume_fresh_budget_or_authorize_execution():
+    data = exposure()
+    appreciated = data.positions[1].model_copy(update={"value_cny":D(700)})
+    result = exposure_diagnostic(exposure(positions=(data.positions[0], appreciated, data.positions[2])))
+    assert result["strategy_btc_known_cny"] == 700 > result["strategy_budget_cny"]
+    assert result["actual_cny"] == 1700 and result["potential_cny"] == 2000
+    assert not result["execution_authorized"]
 
 
 @pytest.mark.parametrize(("weight","expected"), [(".03", []), (".03001", ["btc.warning"]),
