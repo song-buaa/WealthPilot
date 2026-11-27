@@ -258,23 +258,27 @@ def main():
                                     config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
                                     config.get('database_contract_path') if config else None)
                     elif operation == "portfolio_reconciliation":
-                        from backend.services.investment_thesis.portfolio_access import require_isolation
+                        from backend.services.investment_thesis.portfolio_access import production_enabled, require_portfolio_access
                         from backend.services.investment_thesis.reconciliation import reconcile_portfolio
                         from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
                         from backend.services.investment_thesis.store import ThesisStore
 
-                        require_isolation()
+                        require_portfolio_access("read")
+                        if production_enabled() and (not args.real_config or args.mock_database):
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
                         if not config or config.get("portfolio_id") != args.portfolio_id:
                             raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
                         e1 = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), args.portfolio_id)
                         result = reconcile_portfolio(e1, config["database_path"],
                             ReconciliationRequest.model_validate(a), config.get("database_contract_path"))
                     elif operation == "portfolio_governance_sources":
-                        from backend.services.investment_thesis.portfolio_access import require_isolation
+                        from backend.services.investment_thesis.portfolio_access import production_enabled, require_portfolio_access
                         from backend.services.investment_thesis.portfolio_contracts import PortfolioPreviewRequest, PortfolioSourceRequest
                         from backend.services.investment_thesis.portfolio_sources import read_portfolio_sources
 
-                        require_isolation()
+                        require_portfolio_access("preview" if "items" in a else "read")
+                        if production_enabled() and (not args.real_config or args.mock_database):
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
                         if not config:
                             raise ValueError("ASSET_VIEW_NOT_READY")
                         if config.get("portfolio_id") != args.portfolio_id:

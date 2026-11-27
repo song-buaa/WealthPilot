@@ -233,11 +233,10 @@ def _risks(record, risk_heads, current, same_policy):
 
 
 def reconcile_portfolio(thesis_store, database, request, contract=None, *, at=None):
-    from app.asset_views import load_view
     from .contracts import now
-    from .portfolio_access import require_isolation
+    from .portfolio_access import load_portfolio_view, require_portfolio_access, validate_view_origin
 
-    require_isolation()
+    require_portfolio_access("read")
     at = at or now()
     store = PortfolioStore(thesis_store)
     portfolio_id = store.portfolio_id
@@ -250,7 +249,8 @@ def reconcile_portfolio(thesis_store, database, request, contract=None, *, at=No
     if (archived["portfolio_id"] != portfolio_id or archived["snapshot_id"] != base_ref["id"]
             or digest(archived) != base_ref["sha256"]):
         raise ValueError("E1_PORTFOLIO_SCENARIO_ARCHIVE_MISMATCH")
-    view = load_view(database, portfolio_id, request.snapshot_id, contract)
+    validate_view_origin(archived)
+    view = load_portfolio_view(database, portfolio_id, request.snapshot_id, contract)
     if digest(view) != request.snapshot_sha256:
         raise ValueError("E1_PORTFOLIO_SNAPSHOT_CHANGED")
     old, new = SnapshotFacts(archived), SnapshotFacts(view, at=at)

@@ -50,6 +50,18 @@ def settings(root):
            "ENABLE_IBKR_LIVE_TRADING": "false", "ENABLE_TIGER_LIVE_TRADING": "false",
            "FUTU_READ_ONLY_MODE": "true", "WEALTHPILOT_DB_PATH": wealth["database_path"],
            "WEALTHPILOT_SQLITE_CONTRACT": wealth["database_contract_path"], **wealth.get("tiger_cash", {}), **extra}
+    e1_portfolio = web.get("e1_portfolio")
+    if e1_portfolio is not None:
+        from backend.services.investment_thesis.portfolio_access import PRODUCTION_ACCESS
+
+        require(isinstance(e1_portfolio, dict) and set(e1_portfolio) == {"store", "access"}
+                and isinstance(e1_portfolio["access"], str) and e1_portfolio["access"] in PRODUCTION_ACCESS
+                and isinstance(e1_portfolio["store"], str) and Path(e1_portfolio["store"]).is_absolute(),
+                "WEB_E1_PORTFOLIO_CONFIG_INVALID")
+        env.update(WEALTHPILOT_E1_PORTFOLIO_MODE="PRODUCTION", WEALTHPILOT_E1_PORTFOLIO_ACCESS=e1_portfolio["access"],
+                   WEALTHPILOT_E1_DB_PATH=e1_portfolio["store"], WEALTHPILOT_POLICY_DB_PATH=wealth["database_path"],
+                   WEALTHPILOT_POLICY_SHARED_CONTRACT=wealth["database_contract_path"],
+                   WEALTHPILOT_POLICY_SCOPE=f"portfolio:{wealth['portfolio_id']}")
     config = {**wealth, "enabled_brokers": web["enabled_brokers"], "revision": web["revision"],
               "lock_path": str(root / "run/restricted-web.lock")}
     return release, config, env
@@ -67,11 +79,11 @@ def main():
     handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
     lifecycle.addHandler(handler)
     try:
+        sys.path.insert(0, str(ROOT))
         release, config, environment = settings(args.root)
         os.environ.clear()
         os.environ.update(environment)
         logging.getLogger().handlers = [logging.NullHandler()]
-        sys.path.insert(0, str(ROOT))
         from backend.restricted_web import create_app
         import uvicorn
         app = create_app(config, release / "web-dist")

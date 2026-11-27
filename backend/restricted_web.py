@@ -112,6 +112,16 @@ def create_app(config, static_dir, *, factory=None):
         from backend.services.allocation_service import get_targets
         return [t.model_dump() for t in get_targets()]
 
+    from backend.services.investment_thesis.portfolio_access import portfolio_capabilities, production_enabled
+    if production_enabled() and portfolio_capabilities() and os.environ.get("WEALTHPILOT_E1_DB_PATH"):
+        from backend.api.allocation import api_simulate_transition
+        from backend.api.portfolio_governance import router as governance_router
+
+        app.state.portfolio_governance_scope = contract["portfolio_id"]
+        app.include_router(governance_router, prefix="/api/allocation")
+        if "preview" in portfolio_capabilities():
+            app.add_api_route("/api/allocation/simulate-transition", api_simulate_transition, methods=["POST"])
+
     app.add_api_route("/api/broker-sync/status", executor.status, methods=["GET"])
 
     @app.post("/api/broker-sync/trigger", status_code=202)

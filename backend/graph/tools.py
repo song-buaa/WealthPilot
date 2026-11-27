@@ -1290,11 +1290,16 @@ def execute_get_portfolio_review_followups(*, request=None, reconciliation=None)
     import os
 
     from app import state
-    from backend.services.investment_thesis.portfolio_access import require_isolation, read_portfolio_records
+    from backend.services.investment_thesis.portfolio_access import (
+        production_enabled, read_portfolio_records, require_portfolio_access, require_production_scope,
+    )
     from backend.services.investment_thesis.portfolio_contracts import PortfolioQuery
     from backend.services.investment_thesis.store import ThesisStore
 
-    require_isolation()
+    require_portfolio_access("read")
+    if production_enabled():
+        from app.database import DB_PATH
+        require_production_scope(DB_PATH, state.portfolio_id, os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
     store = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), state.portfolio_id)
     if reconciliation is not None:
         from app.database import DB_PATH

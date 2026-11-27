@@ -15,14 +15,14 @@ type Preview = {
   }
 }
 type RecordSummary = { bundle_id: string; revision: number; review_due_at: string; bundle_state: string }
-type Records = { records: RecordSummary[]; followups: { decision_revision_ref: string; review_due_at: string }[]
+type Records = { capabilities?: string[]; records: RecordSummary[]; followups: { decision_revision_ref: string; review_due_at: string }[]
   risk_events: { risk_key: string; state: string }[] }
 type Risk = { subject: string; rule: { rule_id: string; action: string }; triggered_classes?: string[] }
 
 const route = '/api/allocation/governance'
 
 export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, policySha, scenarioInput }:
-  { snapshotId: string; snapshotSha: string; policySha: string; scenarioInput?: object }) {
+  { snapshotId?: string; snapshotSha?: string; policySha?: string; scenarioInput?: object }) {
   const [records, setRecords] = useState<Records | null>(null)
   const [input, setInput] = useState('')
   const [risks, setRisks] = useState<Record<string, Risk> | null>(null)
@@ -32,7 +32,7 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const source = { snapshot_id: snapshotId, snapshot_sha256: snapshotSha, policy_bundle_sha256: policySha }
+  const source = snapshotId && snapshotSha && policySha ? { snapshot_id: snapshotId, snapshot_sha256: snapshotSha, policy_bundle_sha256: policySha } : null
 
   useEffect(() => {
     const abort = new AbortController()
@@ -62,6 +62,8 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
   }
 
   if (!records) return null
+  const canPreview = records.capabilities?.includes('preview') ?? true
+  const canConfirm = records.capabilities?.includes('confirm') ?? true
   const stageRows = preview?.payload.request.selected_path && preview.payload.simulation
     ? preview.payload.simulation.paths[preview.payload.request.selected_path] : []
 
@@ -86,7 +88,7 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
   }
 
   function confirm(cancel: boolean) {
-    if (!preview) return
+    if (!preview || !canConfirm) return
     void perform(async () => {
       const saved = await request('/commit', { request_id: preview.request_id, preview_token: preview.preview_token,
         preview_fingerprint: preview.preview_fingerprint, selected_item_ids: cancel ? [] : checked,
@@ -101,7 +103,11 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
 
   return <details className="my-4">
     <summary>组合人工决策与复核</summary>
-    <p>按选中事项保存人工判断。场景阶段和检查点用于后续复核。</p>
+    {canConfirm
+      ? <p>按选中事项保存人工判断。场景阶段和检查点用于后续复核。</p>
+      : <p>{canPreview ? '可预览组合决定，保存权限未开启。' : '当前仅可读取组合决定和复核结果。'}</p>}
+    {!source && <p>暂无可用于当前配置复核的快照。历史决定仍可查看。</p>}
+    {source && <>
     <button type="button" disabled={busy} onClick={() => void perform(async () => {
       const result = await request('/risk-preview', source)
       setRisks(result.actual_risk_candidates)
@@ -110,6 +116,8 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
     {risks && Object.entries(risks).map(([key, risk]) => <p key={key}>
       {risk.subject} · {risk.rule.rule_id} · {risk.rule.action} {risk.triggered_classes?.join('、')}
     </p>)}
+    </>}
+    {canPreview && source && <>
     <button type="button" disabled={busy} onClick={loadExample}>载入可编辑草案</button>
     <label className="block">决策草案 JSON
       <textarea className="block w-full rounded border p-2 font-mono text-sm" rows={8} value={input} disabled={busy}
@@ -120,7 +128,8 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
       const draft = JSON.parse(input)
       setPreview(await request('/preview', { ...draft, ...source }) as Preview)
     })}>预览组合决定</button>
-    {preview && <section aria-label="组合决定预览">
+    </>}
+    {preview && canPreview && source && <section aria-label="组合决定预览">
       <h4>选择本次保存事项</h4>
       <p>政策 v{preview.payload.policy_reference.bundle_version} · 数据 {preview.payload.qualification.status}
         {' · '}预览到期 {preview.expires_at}</p>
@@ -129,7 +138,7 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
         场景 {row.label} · 分母 {row.investment_assets_cny ?? 'UNKNOWN'} · 债务 {row.liabilities_cny ?? 'UNKNOWN'}
       </p>)}
       {preview.payload.items.map(entry => <div className="my-2 border p-2" key={entry.proposal.item_id}>
-        <label><input type="checkbox" disabled={busy} checked={checked.includes(entry.proposal.item_id)}
+        <label><input type="checkbox" disabled={busy || !canConfirm} checked={checked.includes(entry.proposal.item_id)}
           onChange={event => setChecked(old => event.target.checked ? [...old, entry.proposal.item_id]
             : old.filter(id => id !== entry.proposal.item_id))} />
         {' '}{entry.proposal.item_id} · {entry.proposal.kind} · {entry.disposition_state}</label>
@@ -141,10 +150,12 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
             { actual: entry.actual_risk, states: entry.event_states, checkpoint: entry.checkpoint }, null, 2)}</pre>
         </details>
       </div>)}
+      {canConfirm && <>
       <button type="button" disabled={!checked.length || busy} onClick={() => confirm(false)}>
         保存这次组合决定（{checked.length} 项）
       </button>
       <button type="button" disabled={busy} onClick={() => confirm(true)}>取消预览</button>
+      </>}
     </section>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
@@ -157,7 +168,7 @@ export default function PortfolioGovernanceCard({ snapshotId, snapshotSha, polic
       })}>查看历史</button>
     </p>)}
     {history.map(row => <p key={row.bundle_id + row.revision}>{row.bundle_id} · 历史 v{row.revision} · {row.bundle_state}</p>)}
-    <PortfolioReconciliation key={snapshotSha} snapshotId={snapshotId} snapshotSha={snapshotSha} />
+    {snapshotId && snapshotSha && <PortfolioReconciliation key={snapshotSha} snapshotId={snapshotId} snapshotSha={snapshotSha} />}
     <h4>到期复核</h4>
     {records.followups.map(row => <p key={row.decision_revision_ref}>{row.decision_revision_ref} · {row.review_due_at}</p>)}
   </details>
