@@ -117,3 +117,68 @@ def test_current_same_basis_official_fact_wins_and_preserves_disagreement():
     ttm = next(r for r in result['records'] if r['field']=='revenue_ttm')
     assert ttm['values']['revenue_ttm'] == 494 and 'official-fact' in ttm['evidence_refs']
     assert 'AV_OFFICIAL_FIELD_DISAGREEMENT:revenue_quarter:2026-09-30' in result['limitations']
+
+
+def test_current_operating_bridge_consumes_exact_current_quarters_without_touching_pit():
+    from copy import deepcopy
+    from decimal import Decimal
+    import pytest
+    from backend.services.market_data.financial_research import build_quality, operating_ttm_bridge
+    from tests.test_s3_p2_operating_model import sources
+
+    a = sources()
+    a['quality_field_records'] = [r for r in a['quality_field_records']
+        if not (r['field'] == 'net_income' and r['period'] == '2026-06-30')]
+    baseline_quality = build_quality(a)
+    baseline_eps = build(a)['records']
+    windows = [('2025-07-01','2025-09-30'), ('2025-10-01','2025-12-31'),
+               ('2026-01-01','2026-03-31'), ('2026-04-01','2026-06-30')]
+    issuer = {**ISSUER, 'symbol':a['symbol'], 'sec_ticker':'AAA'}
+    observed = '2026-10-01T00:00:00+00:00'
+    statements = {'INCOME_STATEMENT': {
+        'payload': {'symbol':'AAA', 'quarterlyReports': [
+            {'fiscalDateEnding':end, 'reportedCurrency':'USD', 'netIncome':str(40+i)}
+            for i, (_,end) in enumerate(windows)]},
+        'diagnostics': {'status':'available','fetched_at':observed}}}
+    records = current_income_records(statements, issuer,
+        {end:dict(start=start, refs=['exact-fiscal-source'], known_at=observed) for start,end in windows},
+        at=datetime.fromisoformat(a['as_of']))
+    assert len(records) == 4
+    a['current_financial'] = dict(latest_period=windows[-1][1],vendor_records=records)
+
+    bridge = operating_ttm_bridge(a,current=True)
+    net = bridge['flows']['net_income']
+    assert Decimal(net['value']) == Decimal(166)
+    assert bridge['qualification'] == net['qualification'] == 'CURRENT_RESEARCH_ONLY'
+    assert [r['source_locator'] for r in net['components']] == [r['source_locator'] for r in records]
+    assert all(r['known_at'] == observed for r in net['components'])
+    assert build(a)['records'] == baseline_eps and build_quality(a) == baseline_quality
+    with pytest.raises(ValueError, match='OPERATING_BRIDGE_PERIOD_OR_INPUT_MISSING'):
+        operating_ttm_bridge(a)
+
+    for mutation in (dict(currency='CNY'), dict(known_at='2027-06-01T00:00:00Z'),
+                     dict(fiscal_period_start='2026-04-02'), dict(accounting_basis='consolidated_net_income')):
+        invalid = deepcopy(a)
+        invalid['current_financial']['vendor_records'][-1].update(mutation)
+        assert 'net_income' in operating_ttm_bridge(invalid,current=True)['missing_fields']
+    duplicate = deepcopy(a)
+    duplicate['current_financial']['vendor_records'].append(
+        dict(records[-1], record_id='conflict', values={records[-1]['field']:99}))
+    assert 'net_income' in operating_ttm_bridge(duplicate,current=True)['missing_fields']
+
+
+def test_nvidia_dividend_retains_announcement_and_scheduled_dates_only():
+    from research_v2.official_disclosures import parse_nvidia_dividend_declaration
+
+    phrase = ('NVIDIA will pay its next quarterly cash dividend of $0.25 per share on December 23, 2026, '
+              'to all shareholders of record on December 2, 2026.')
+    parse = lambda markup: parse_nvidia_dividend_declaration(BeautifulSoup(markup,'html.parser'),'2026-11-17')
+    event = parse(phrase)
+    assert event['status'] == 'DECLARED'
+    assert event['amount_per_share'] == '0.25' and event['currency'] == 'USD'
+    assert event['announced_on'] == '2026-11-17'
+    assert event['record_date'] == '2026-12-02' and event['scheduled_payment_date'] == '2026-12-23'
+    assert event['ex_date'] is event['actual_paid_on'] is None
+    assert parse(phrase.replace('will pay','paid')) is None
+    assert parse(phrase.replace('December 2,','December 24,')) is None
+    assert parse(phrase + phrase) is None

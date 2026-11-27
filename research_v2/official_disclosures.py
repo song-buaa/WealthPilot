@@ -668,6 +668,26 @@ def parse_tesla_summary_eps(soup, period_context):
         source_locator='Financial summary/GAAP diluted common-stockholder EPS/Q4 column')]
 
 
+def parse_nvidia_dividend_declaration(soup, announced_on):
+    """Exact common-share cash declaration in NVIDIA's declared earnings exhibit."""
+    text = ' '.join(soup.stripped_strings)
+    matches = re.findall(
+        r'NVIDIA will pay its next quarterly cash dividend of \$([0-9]+\.[0-9]+) per share on '
+        r'([A-Za-z]+ [0-9]{1,2}, 20[0-9]{2}), to all shareholders of record on '
+        r'([A-Za-z]+ [0-9]{1,2}, 20[0-9]{2})\.', text,
+    )
+    if len(matches) != 1 or not announced_on:
+        return None
+    amount, payment, record = matches[0]
+    pay_date, record_date = _date(payment), _date(record)
+    if not pay_date or not record_date or not announced_on <= record_date <= pay_date or Decimal(amount) <= 0:
+        return None
+    return dict(kind='CASH_DIVIDEND', status='DECLARED', share_basis='LISTED_COMMON_SHARE',
+        amount_per_share=amount, currency='USD', announced_on=announced_on, record_date=record_date,
+        ex_date=None, scheduled_payment_date=pay_date, actual_paid_on=None,
+        source_locator='earnings release opening cash-dividend declaration')
+
+
 def parse_nvidia_supplement(soup, periods):
     """Read independently bounded three-month columns in two exact statements."""
     from bs4 import NavigableString

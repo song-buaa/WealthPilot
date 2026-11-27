@@ -809,6 +809,7 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
     cover=BeautifulSoup(primary[0][4],'html.parser')
     observations=[]
     statement_issues=[]
+    shareholder_events=[]
     # Contexts and external statement headings are document-scoped. An exhibit
     # must be declared by the original primary document with its actual identity.
     for doc_index,kind,filename,sequence,document in documents:
@@ -826,6 +827,13 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if current_structure is not None and is_exhibit and filing['form'] == '8-K':
+                if (issuer['cik'] == '0001045810' and kind == 'EX-99.1'
+                        and re.fullmatch(r'q[1-4]fy[0-9]{2}pr\.htm', filename)):
+                    from research_v2.official_disclosures import parse_nvidia_dividend_declaration
+                    declaration = parse_nvidia_dividend_declaration(soup, filing['report_date'])
+                    if declaration:
+                        declaration['source_locator'] = f'DOCUMENT[{doc_index}]/{filename}/'+declaration['source_locator']
+                        shareholder_events.append(declaration)
                 if issuer['cik'] == '0001045810' and kind == 'EX-99.3' and filename == 'supplementalfinancialinfor.htm':
                     from research_v2.official_disclosures import parse_nvidia_supplement
                     table_observations += parse_nvidia_supplement(soup, _nvidia_supplement_periods(soup, current_structure))
@@ -925,6 +933,13 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
     record=_record(issuer, filing, observations, body, filing['full_url'], fetched_at, identity_digest=identity_digest)
     if record:
         record['financial_observation_issues']=statement_issues
+        if shareholder_events:
+            record['shareholder_events'] = [dict(event, symbol=issuer['symbol'], issuer_cik=issuer['cik'],
+                source='official_disclosure', source_url=record['source_url'],
+                published_at=record['published_at'], fetched_at=record['fetched_at'], known_at=record['fetched_at'],
+                evidence_ref=record['record_id'],
+                source_document_sha256=record['source_verification']['document_sha256'])
+                for event in shareholder_events]
     return record
 
 
@@ -1252,7 +1267,9 @@ def _current_window(issuer, rows, filings, submissions, capture, *, at):
     missing = [end for end in window if not (
         {'dilutedEPSOrdinary', 'totalRevenue', 'operatingIncome', 'operatingCashflow'} <= by_end.get(end,set())
         and {'netIncome', 'parentNetIncome'} & by_end.get(end,set()))]
+    events = [event for record in known for event in record.get('shareholder_events', [])]
     return dict(latest_period=latest, pending_latest_release=pending, vendor_records=vendor,
+                **({'shareholder_events': events} if events else {}),
                 missing_periods=missing, eps_missing_periods=eps_missing, window=window,
                 earnings_release_dates={e.date().isoformat(): d.date().isoformat()
                                         for d,e in vendor_releases if e.date().isoformat() in window}), regular, release, new
