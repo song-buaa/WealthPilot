@@ -256,7 +256,7 @@ def test_apple_to_alphabet_and_malformed_scope_remains_research(oracle):
     assert D(after["concentration"]["issuers"]["SEC_CIK_0001652044"]["direct_cny"]) == 100
     assert D(after["concentration"]["issuers"]["SEC_CIK_0000320193"]["direct_cny"]) == D("288218.80")
 
-    source["data_quality"]["investable_scope_evidence"]["coverage"]["accounts"].pop("evidence_refs")
+    source["data_quality"]["investable_scope_evidence"]["coverage"]["accounts"]["evidence_refs"] = "invalid-list"
     unknown = run(oracle, assumed_denominator_cny="1191400", assumed_fx_to_cny={"USD": "1"},
                   assumed_amounts_cny={"position:7": "288318.80"})["paths"]["A"][-1]
     assert unknown["allocation"]["status"] == "PARTIAL"
