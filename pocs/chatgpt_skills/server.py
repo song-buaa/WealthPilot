@@ -89,8 +89,9 @@ class BusinessClient:
                     evidence_keys = {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256",
                                      "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
                                      "WEALTHPILOT_ETF_RELEASE_OWNER_UID"}
-                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | {"WEALTHPILOT_E1_PORTFOLIO_MODE"} if k in os.environ})
-                    if env.get("WEALTHPILOT_E1_PORTFOLIO_MODE") == "ISOLATED":
+                    from backend.services.investment_thesis.portfolio_access import PORTFOLIO_ENV_KEYS, portfolio_capabilities
+                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | PORTFOLIO_ENV_KEYS if k in os.environ})
+                    if "read" in portfolio_capabilities():
                         e1_path = getattr(self.settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
                         if e1_path:
                             env["WEALTHPILOT_E1_DB_PATH"] = str(e1_path)
@@ -273,10 +274,26 @@ def create_server(settings):
         from pocs.chatgpt_skills.investment_thesis import register_write_tools
         register_write_tools(server, e1_path, settings.portfolio_id, security_meta)
 
-    from backend.services.investment_thesis.portfolio_access import isolation_enabled
-    if e1_path and isolation_enabled() and settings.real_config:
-        from pocs.chatgpt_skills.investment_thesis import register_portfolio_tools
-        register_portfolio_tools(server, e1_path, settings.portfolio_id, security_meta, client)
+    from backend.services.investment_thesis.portfolio_access import (
+        portfolio_capabilities, production_enabled, require_production_scope,
+    )
+    if e1_path and portfolio_capabilities() and settings.real_config:
+        if production_enabled():
+            import sqlite3
+            try:
+                source = json.loads(Path(settings.real_config).read_text())
+                if source["portfolio_id"] != settings.portfolio_id or getattr(settings, "mock_database", None):
+                    raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                require_production_scope(source["database_path"], settings.portfolio_id,
+                                         source.get("database_contract_path"))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error):
+                # An invalid E/F binding leaves all original MCP tools intact.
+                source = None
+        else:
+            source = settings.real_config
+        if source:
+            from pocs.chatgpt_skills.investment_thesis import register_portfolio_tools
+            register_portfolio_tools(server, e1_path, settings.portfolio_id, security_meta, client)
 
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
     if prepare_config:

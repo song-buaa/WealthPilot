@@ -29,9 +29,11 @@ SCHEMA = (
 )
 
 
-def migrate_portfolio_governance(store):
+def migrate_portfolio_governance(store, *, verify_before=None):
     """Explicit opt-in, additive DDL in an already-initialized private E1 store."""
     with store.connection(write=True) as db:
+        if verify_before is not None:
+            verify_before(db)
         for statement in SCHEMA:
             db.execute(statement)
         for table in TABLES:

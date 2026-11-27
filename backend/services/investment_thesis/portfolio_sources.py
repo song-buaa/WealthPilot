@@ -8,7 +8,8 @@ from .store import digest
 PORTFOLIO_SOURCE_ERRORS = {
     "E1_PORTFOLIO_SOURCE_UNAVAILABLE", "E1_PORTFOLIO_SNAPSHOT_CHANGED", "E1_PORTFOLIO_POLICY_CHANGED",
     "E1_PORTFOLIO_ISOLATION_REQUIRED", "E1_PORTFOLIO_SOURCE_CHANGED", "E1_PORTFOLIO_RISK_RULE_MISMATCH",
-    "E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH",
+    "E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH", "E1_PORTFOLIO_PRODUCTION_EVIDENCE_REQUIRED",
+    "E1_PORTFOLIO_ACCESS_DENIED", "E1_PORTFOLIO_GOVERNANCE_DISABLED",
 }
 
 
@@ -64,6 +65,7 @@ def collect_policy_risks(portfolio_id, policy, allocation, concentration):
 def read_portfolio_sources(database, portfolio_id, request, contract=None, *, include_conditional=False):
     """Resolve trusted sources using only explicitly named stored U1 and active owner."""
     from app.asset_views import load_view
+    from .portfolio_access import load_portfolio_view, production_enabled, validate_policy_origin
     from backend.services.allocation_service import _assembled_policy_assets, _conditional_concentration, project_frozen_transition
     from backend.services.investment_policy.concentration_adapter import _read_etf_evidence
     from backend.services.investment_policy.store import clock, utc_now
@@ -72,10 +74,13 @@ def read_portfolio_sources(database, portfolio_id, request, contract=None, *, in
     from backend.services.investment_policy.runtime import bind, current
 
     try:
-        view = load_view(database, portfolio_id, request.snapshot_id, contract)
+        view = (load_portfolio_view if production_enabled() else load_view)(
+            database, portfolio_id, request.snapshot_id, contract)
         pinned = current(portfolio_id)
         context = pinned.consumer("allocation")
     except (PolicyError, ValueError) as error:
+        if str(error) in PORTFOLIO_SOURCE_ERRORS:
+            raise
         raise ValueError("E1_PORTFOLIO_SOURCE_UNAVAILABLE") from error
     if policy_digest(view) != request.snapshot_sha256:
         raise ValueError("E1_PORTFOLIO_SNAPSHOT_CHANGED")
@@ -83,9 +88,7 @@ def read_portfolio_sources(database, portfolio_id, request, contract=None, *, in
     if (context.get("mode") != "POLICY_ACTIVE" or context.get("status") != "ACTIVE"
             or reference.get("bundle_sha256") != request.policy_bundle_sha256):
         raise ValueError("E1_PORTFOLIO_POLICY_CHANGED")
-    release = context.get("release") or {}
-    if release.get("synthetic") is not True and release.get("environment") != "ISOLATED_REHEARSAL":
-        raise ValueError("E1_PORTFOLIO_ISOLATION_REQUIRED")
+    validate_policy_origin(context)
     policy = parse_snapshot(context["snapshot"])
     at = clock(utc_now())
     evidence = _read_etf_evidence(portfolio_id, at=at)

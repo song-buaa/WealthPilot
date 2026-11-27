@@ -219,3 +219,7 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 
 - [F 复核服务](../backend/services/investment_thesis/reconciliation.py) 复用 E 归档、已有 U1、Portfolio、Wealth、Trade History 和原 Trade/Sync，分别输出状态观察与执行证明。当前政策与风险继续由 B/C 权威计算。
 - Web 组合复核及 MCP/PEER 原 `get_portfolio_review_followups` 扩展共用只读服务。测试用 [S0–S5 冻结闭环](../tests/test_f_portfolio_reconciliation.py)，生产启用和真实组合验收独立授权。
+
+### 4.4 E/F 最小生产启用候选
+
+- [启用合同与显式迁移](ARCHITECTURE_CURRENT.md#44-ef-最小生产启用合同) 复用现有私有访问、正式 ACTIVE/U1 及 E1 数据库。默认关闭，按读取、预览、私有 Web 人工确认分权。真实发布、迁移及启用由统一发布批次另行授权。

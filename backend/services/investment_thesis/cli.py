@@ -18,6 +18,10 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init")
     commands.add_parser("migrate-portfolio-isolated")
+    production = commands.add_parser("migrate-portfolio-production")
+    production.add_argument("--backup", required=True, help="New private backup destination, original backup API")
+    production.add_argument("--services-stopped", action="store_true", required=True,
+                            help="Operator confirms every E1 reader/writer is stopped")
     save = commands.add_parser("save")
     save.add_argument("--input", required=True)
     save.add_argument("--expected-revision", type=int, required=True)
@@ -51,6 +55,10 @@ def main(argv=None):
 
             require_isolation()
             result = migrate_portfolio_governance(store)
+        elif args.command == "migrate-portfolio-production":
+            from .portfolio_migration import migrate_with_backup
+
+            result = migrate_with_backup(store, args.backup)
         elif args.command == "save":
             result = store.save(load_json(args.input), args.expected_revision, args.request_id)
         elif args.command == "review":

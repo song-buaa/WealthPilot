@@ -500,3 +500,34 @@ def test_concurrent_web_refreshes_do_not_fail_during_wal_cleanup(web,caplog):
         with ThreadPoolExecutor(max_workers=8) as pool:
             results=list(pool.map(lambda i:client.get(paths[i%len(paths)]).status_code,range(90)))
     assert all(status==200 for status in results),caplog.text
+
+
+def test_ef_production_allowlist_uses_existing_private_web_boundary(web, monkeypatch, tmp_path):
+    from backend.api.portfolio_governance import _bridge
+    from backend.services.investment_thesis.portfolio_store import migrate_portfolio_governance
+    from backend.services.investment_thesis.store import ThesisStore
+
+    store = ThesisStore(tmp_path / "e1-private" / "e1.sqlite", 7)
+    store.init()
+    migrate_portfolio_governance(store)
+    monkeypatch.setenv("PUBLIC_DEMO_MODE", "false")
+    monkeypatch.setenv("WEALTHPILOT_E1_DB_PATH", str(store.path))
+    monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_MODE", "PRODUCTION")
+    _bridge.cache_clear()
+    config, directory = web
+    prefix = "/api/allocation/governance"
+    before = store.path.read_bytes()
+    for access, status in ((None, 404), ("READ", 200), ("PREVIEW", 200), ("CONFIRM", 200)):
+        if access is None:
+            monkeypatch.delenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", raising=False)
+        else:
+            monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", access)
+        app = create_app(config, directory, factory=fake_service)
+        with TestClient(app, base_url="http://127.0.0.1:8790") as client:
+            assert client.get(prefix).status_code == status
+            if access is None:
+                continue
+            assert client.get(prefix, headers={"host": "host.invalid"}).status_code == 403
+            assert client.get(prefix, headers={"origin": "https://host.invalid"}).status_code == 403
+            assert client.post("/api/action/orders", json={}).status_code == 404
+    assert store.path.read_bytes() == before
