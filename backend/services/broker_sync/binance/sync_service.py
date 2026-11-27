@@ -13,15 +13,29 @@ from backend.services.instruments.classification import (
 )
 
 
+def valid_balance_identifier(value: object) -> bool:
+    return valid_asset_code(value) or (
+        isinstance(value, str) and re.fullmatch(r"[\u4e00-\u9fff]{1,20}", value) is not None
+    )
+
+
+class InvalidAmount(ValueError):
+    def __init__(self, predicate):
+        super().__init__("BINANCE_RESPONSE_INVALID")
+        self.predicate = predicate
+
+
 def amount(value):
     if not isinstance(value, str):
-        raise ValueError("BINANCE_RESPONSE_INVALID")
+        raise InvalidAmount("AMOUNT_NOT_STRING")
     try:
         result = Decimal(value)
     except InvalidOperation:
-        raise ValueError("BINANCE_RESPONSE_INVALID") from None
-    if not result.is_finite() or result < 0 or result >= Decimal("1e12"):
-        raise ValueError("BINANCE_RESPONSE_INVALID")
+        raise InvalidAmount("DECIMAL_PARSE") from None
+    if not result.is_finite():
+        raise InvalidAmount("AMOUNT_NOT_FINITE")
+    if result < 0 or result >= Decimal("1e12"):
+        raise InvalidAmount("AMOUNT_OUT_OF_RANGE")
     return result
 
 
@@ -72,7 +86,23 @@ class BinanceSyncService:
         self.metadata = {}
         self.events = []
 
+    def _reject_balance(self, index, field, value_type, predicate, code="BINANCE_RESPONSE_INVALID"):
+        self.metadata["balance_validation_error"] = dict(
+            row_index=index, field=field, data_type=value_type, predicate=predicate,
+        )
+        raise ValueError(code) from None
+
+    def _balance_amount(self, index, row, field):
+        if field not in row:
+            self._reject_balance(index, field, "missing", "REQUIRED_FIELD")
+        value = row[field]
+        try:
+            return amount(value)
+        except InvalidAmount as exc:
+            self._reject_balance(index, field, type(value).__name__, exc.predicate)
+
     def _balances(self):
+        self.metadata = {}
         self.client.server_time()
         response = self.client.get("/api/v3/account", {"omitZeroBalances": "false"})
         received = datetime.now(timezone.utc)
@@ -90,17 +120,27 @@ class BinanceSyncService:
                   re.fullmatch(r"(?:SPOT|MARGIN|LEVERAGED|TRD_GRP_[0-9]{1,9})", v)] if isinstance(groups, list) else []
         rows = response.get("balances")
         if not isinstance(rows, list) or not rows:
-            raise ValueError("INCOMPLETE_SOURCE")
+            value_type = type(rows).__name__ if "balances" in response else "missing"
+            self._reject_balance(None, "balances", value_type, "NONEMPTY_ARRAY_REQUIRED", "INCOMPLETE_SOURCE")
         balances = {}
-        for row in rows:
-            if not isinstance(row, dict) or not valid_asset_code(row.get("asset")):
-                raise ValueError("BINANCE_RESPONSE_INVALID")
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                self._reject_balance(index, "row", type(row).__name__, "ROW_NOT_OBJECT")
+            if "asset" not in row:
+                self._reject_balance(index, "asset", "missing", "REQUIRED_FIELD")
             asset = row["asset"]
+            if not valid_balance_identifier(asset):
+                self._reject_balance(index, "asset", type(asset).__name__, "BALANCE_IDENTIFIER_FORMAT")
             if asset in balances:
-                raise ValueError("DUPLICATE_SNAPSHOT_IDENTITY")
-            free, locked = amount(row.get("free")), amount(row.get("locked"))
-            if asset in {"BTC", "USDT", "USD"} and max(-free.as_tuple().exponent, -locked.as_tuple().exponent) > 8:
-                raise ValueError("BINANCE_PRECISION_UNSUPPORTED")
+                self._reject_balance(index, "asset", "str", "DUPLICATE_IDENTIFIER", "DUPLICATE_SNAPSHOT_IDENTITY")
+            free = self._balance_amount(index, row, "free")
+            locked = self._balance_amount(index, row, "locked")
+            if asset in {"BTC", "USDT", "USD"}:
+                for field, quantity in (("free", free), ("locked", locked)):
+                    if -quantity.as_tuple().exponent > 8:
+                        self._reject_balance(
+                            index, field, "str", "CORE_ASSET_SCALE", "BINANCE_PRECISION_UNSUPPORTED"
+                        )
             balances[asset] = (free, locked)
         if not {"BTC", "USDT"} <= balances.keys():
             raise ValueError("INCOMPLETE_SOURCE")
@@ -173,6 +213,9 @@ class BinanceSyncService:
                 result.append(cash.model_copy(update={"available_quantity": free, "raw_data": raw}))
                 continue
             if asset not in {"BTC", "USDT"} and not total:
+                continue
+            if not valid_asset_code(asset):
+                self._unvalued(asset, free, locked, "NO_ASCII_QUOTE_IDENTIFIER")
                 continue
             cash = asset == "USDT"
             price, proof = Decimal(1) if cash else Decimal(0), None
