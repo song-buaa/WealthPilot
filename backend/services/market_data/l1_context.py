@@ -104,7 +104,7 @@ def _record_tables(groups):
 
 def project(assessment):
     from backend.services.market_data.output_policy import _evidence_index
-    index = _evidence_index(assessment)
+    index = _evidence_index(assessment, current=True)
     records = {(r.get('record_id') or r['source_url']): r for r in index.values()}
     canonical = {ref: (r.get('record_id') or r['source_url']) for ref, r in index.items()}
     quarters = sorted({r.get('period') for r in records.values()
@@ -298,7 +298,7 @@ def compact_facts_text(assessment):
     """Display only; all qualified records/calculations stay in the full artifact."""
     from backend.services.market_data.output_policy import _evidence_index
     from backend.services.market_data.financial_research import display
-    rows = {(r.get('record_id') or r['source_url']):r for r in _evidence_index(assessment).values()}
+    rows = {(r.get('record_id') or r['source_url']):r for r in _evidence_index(assessment, current=True).values()}
     priorities = ('revenue_quarter','revenue','net_income_quarter','net_income','operating_income_quarter',
         'operating_income','gross_margin_pct','operating_cash_flow_quarter','ocf_quarter','operating_cash_flow','capital_expenditures_quarter','capex_quarter','free_cash_flow_quarter','fcf_quarter',
         'revenue_yoy_pct','net_income_yoy_pct','ocf_to_net_income_pct','diluted_eps_ttm')
