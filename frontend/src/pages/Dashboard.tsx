@@ -134,6 +134,15 @@ export default function Dashboard() {
     return (
       <div>
         <PageHeader />
+        {Boolean(summary?.unvalued_assets?.length) && (
+          <div role="status" style={{ padding: 12, marginBottom: 12, background: '#FFFBEB', color: '#92400E' }}>
+            存在未估值资产；以下总额仅为已记录与Last-good估值小计，不是完整账户总值。
+            {summary?.unvalued_assets?.map((asset, i) => (
+              <div key={`${asset.symbol}:${i}`}>{asset.asset}：数量 {asset.quantity ?? 'UNKNOWN'}；估值 UNKNOWN
+                {asset.last_good_retained ? '（原有效估值保留）' : ''}</div>
+            ))}
+          </div>
+        )}
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
           <EmptyState icon={Upload} title="暂无持仓数据" desc={RESTRICTED_WEB ? '请先核实并启用券商，再手动同步。' : '请通过导入 CSV 添加持仓，导入后数据将自动刷新'} />
         </div>
@@ -188,6 +197,15 @@ export default function Dashboard() {
       <DataTip />
       {/* ── 页面标题 ── */}
       <PageHeader />
+        {Boolean(summary?.unvalued_assets?.length) && (
+          <div role="status" style={{ padding: 12, marginBottom: 12, background: '#FFFBEB', color: '#92400E' }}>
+            存在未估值资产；以下总额仅为已记录与Last-good估值小计，不是完整账户总值。
+            {summary?.unvalued_assets?.map((asset, i) => (
+              <div key={`${asset.symbol}:${i}`}>{asset.asset}：数量 {asset.quantity ?? 'UNKNOWN'}；估值 UNKNOWN
+                {asset.last_good_retained ? '（原有效估值保留）' : ''}</div>
+            ))}
+          </div>
+        )}
 
 
       {/* ── KPI 三卡 ── */}

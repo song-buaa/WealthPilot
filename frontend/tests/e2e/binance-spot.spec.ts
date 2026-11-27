@@ -38,3 +38,24 @@ test('original dashboard shows exact BTC units, UNKNOWN P&L and one USDT balance
   await expect(page.getByText('Binance Spot', { exact: true }).first()).toBeVisible()
   expect(errors).toEqual([])
 })
+
+test('source gaps show exact quantities and a subtotal without inventing zero value', async ({ page }) => {
+  const gap = { asset: 'MYSTERY', symbol: 'MYSTERY:CRYPTO', quantity: '1.234567891', valuation: 'UNKNOWN' }
+  await page.route('**/api/portfolio/summary', async route => {
+    const response = await route.fetch()
+    await route.fulfill({ json: { ...await response.json(), valuation_complete: false, unvalued_assets: [gap] } })
+  })
+  await page.route('**/api/broker-sync/status', route => route.fulfill({ json: { brokers: [{
+    broker: 'binance', platform: 'Binance Spot', enabled: true, last_sync_status: 'success',
+    data_quality: { complete: false, unvalued_assets: [gap] },
+  }] } }))
+  const errors: string[] = []
+  page.on('pageerror', e => errors.push(e.message))
+  await page.goto(base + '/#/dashboard')
+  await expect(page.getByRole('status')).toContainText('估值小计')
+  await expect(page.getByRole('status')).toContainText('1.234567891；估值 UNKNOWN')
+  await page.getByRole('button', { name: /导入 \/ 导出数据（持仓）/ }).click()
+  await page.getByRole('button', { name: '同步', exact: true }).click()
+  await expect(page.getByText(/来源 partial · MYSTERY 数量 1.234567891 · 估值 UNKNOWN/)).toBeVisible()
+  expect(errors).toEqual([])
+})

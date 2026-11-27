@@ -1076,7 +1076,17 @@ export interface OrderResponse {
 
 // ── 类型定义 ─────────────────────────────────────────────
 
+export interface UnvaluedAsset {
+  asset: string
+  symbol: string
+  quantity: string | null
+  valuation: 'UNKNOWN'
+  last_good_retained?: boolean
+}
+
 export interface PortfolioSummary {
+  valuation_complete?: boolean
+  unvalued_assets?: UnvaluedAsset[]
   total_assets: number
   total_liabilities: number
   net_worth: number

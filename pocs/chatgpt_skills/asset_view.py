@@ -138,7 +138,10 @@ def capture(path, portfolio_id, internal, *, synthetic=False):
                 "vehicle_type","economic_asset_class","market_value_cny","currency","original_currency","security_currency","fx_rate_date","fx_rate_to_cny",
                 "quantity","current_price","price_basis","segment")},
                 "fx_quality":(a.get("fx") or {}).get(item.get("original_currency") or item.get("currency"),{}).get("quality","unverified"),
-                **{k:a.get(k) for k in ("positions_as_of","cash_as_of","price_as_of","price_time_basis","time_evidence")}})
+                **{k:a.get(k) for k in ("positions_as_of","cash_as_of","price_as_of","price_time_basis","time_evidence")},
+                **({"price_as_of": (a.get("asset_price_times") or {}).get(item.get("symbol"), {}).get("price_as_of"),
+                    "price_time_basis": (a.get("asset_price_times") or {}).get(item.get("symbol"), {}).get("price_time_basis")}
+                   if item.get("broker") == "binance" and isinstance(a.get("asset_price_times"), dict) else {})})
         quality = dict(status="partial" if issues else "ok", issues=sorted(issues), policy_version="d1.1",
             can_propose_rebalance=not issues, accounts=accounts,
             security_inputs=security_inputs,
