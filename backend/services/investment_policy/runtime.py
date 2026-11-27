@@ -162,7 +162,20 @@ def current(portfolio_id=None):
     return PolicySession(portfolio_id)
 
 
-def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
+def _includes_btc_governance(view, symbol):
+    if view == "philosophy":
+        return False
+    if not symbol:
+        return view != "position"
+    ticker, _, market = symbol.partition(":")
+    if view == "full":
+        return True
+    return (market.upper() in {"CRYPTO", "DIGITAL_ASSET"}
+            or (not market and ticker.upper() in {"BTC", "USDT", "ETH", "SOL", "BNB", "USDC"}))
+
+
+
+def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None, btc_position_symbol=None):
     if view not in {"full", "portfolio", "position", "risk", "philosophy"}:
         raise PolicyError("POLICY_VIEW_INVALID")
     session = current(portfolio_id)
@@ -178,6 +191,11 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
     value['synthetic']=value.get('release',{}).get('synthetic',False) is True
     value['obligations'] = {k: v for k,v in snap['contextual_clauses'].items()
                             if k in {'5.2','5.3','6.3','7.1','7.2','7.3','8','9.2','10'}}
+    btc_view, btc_symbol = (view, symbol) if btc_position_symbol is None else ("position", btc_position_symbol)
+    if "btc_governance" in snap and _includes_btc_governance(btc_view, btc_symbol):
+        governance = snap["btc_governance"]
+        value["btc_governance"] = governance
+        value["obligations"].update(governance["source_clauses"])
     if view == "position":
         ticker = symbol.removesuffix(":US") if symbol else None
         direct = snap["allocation"]["direct_equity"]
@@ -285,8 +303,14 @@ def assert_editable(portfolio_id=None):
         raise PolicyError("POLICY_BUNDLE_READ_ONLY_USE_CONTROLLED_RELEASE")
 
 
-def prompt(portfolio_id):
-    value = context(portfolio_id, consumer="peer", view="portfolio")
+def peer_context(portfolio_id, *, position_only=False, loaded=None):
+    symbol = getattr(getattr(loaded, "target_position", None), "symbol", None)
+    return context(portfolio_id, consumer="peer", view="portfolio",
+                   btc_position_symbol=(symbol or "") if position_only else None)
+
+
+def prompt(portfolio_id, *, position_only=False, loaded=None):
+    value = peer_context(portfolio_id, position_only=position_only, loaded=loaded)
     if value["mode"] == "LEGACY":
         return ""
     return "\n[唯一生效政策，数值只使用本结构；政策不是交易授权；旧索引和旧数值字段不适用。仓位/分母缺失为UNKNOWN，禁止生成精确交易数量。]\n" + canonical(value)
@@ -311,6 +335,7 @@ def sanitize_loaded(loaded, portfolio_id):
     loaded.rules = InvestmentRules(*[AbsentLegacyThreshold() for _ in range(4)])
     loaded.full_discipline_rules = {}
     loaded.retrieved_principles = []  # Unversioned Chroma is not formal policy.
-    loaded.policy_context = context(portfolio_id, consumer="peer", view="portfolio")
+    loaded.policy_context = peer_context(portfolio_id,
+        position_only=getattr(loaded, "target_position", None) is not None, loaded=loaded)
     loaded.rules_provenance = raw.get("policy_reference") or {"status": "UNAVAILABLE"}
     return loaded

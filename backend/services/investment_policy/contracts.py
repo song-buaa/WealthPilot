@@ -235,10 +235,21 @@ class SnapshotV2WithAmendment(SnapshotV2):
 
 def parse_snapshot(value) -> Snapshot:
     """Decode frozen versions explicitly; unknown formats fail closed."""
-    if isinstance(value, dict) and value.get("schema_version") == "wp.policy.config.v1":
-        from .configuration import ConfiguredSnapshot
-        return ConfiguredSnapshot.model_validate(value)
-    if isinstance(value, dict) and value.get("schema_version") == "wp.policy.v2":
+    if not isinstance(value, dict):
+        return Snapshot.model_validate(value)
+    if "btc_governance" not in value:
+        clauses = value.get("contextual_clauses") or {}
+        if isinstance(clauses, dict) and any(
+                "BTC治理合同：" in str(clauses.get(section, "")) for section in ("4.3", "9.3")):
+            raise ValueError("BTC_GOVERNANCE_DERIVATIVE_MISSING")
+    if value.get("schema_version") == "wp.policy.config.v1":
+        from .configuration import ConfiguredSnapshot, ConfiguredSnapshotWithBtcGovernance
+        model = ConfiguredSnapshotWithBtcGovernance if "btc_governance" in value else ConfiguredSnapshot
+        return model.model_validate(value)
+    if value.get("schema_version") == "wp.policy.v2":
+        if "btc_governance" in value:
+            from .btc_governance import SnapshotV2WithBtcGovernance
+            return SnapshotV2WithBtcGovernance.model_validate(value)
         model = SnapshotV2WithAmendment if "amendment_approval" in value else SnapshotV2
         return model.model_validate(value)
     return Snapshot.model_validate(value)

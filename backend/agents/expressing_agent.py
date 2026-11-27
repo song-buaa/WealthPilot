@@ -424,7 +424,9 @@ class ExpressingAgent:
             intent_type = _resolve_intent_type(planning_output)
             from backend.services.investment_policy.runtime import prompt
             if getattr(execution_output,"analysis_mode","") != "l1_research":
-                user_query += prompt(planning_output.portfolio_id)
+                user_query += prompt(planning_output.portfolio_id,
+                    position_only=planning_output.route == "position_single",
+                    loaded=getattr(execution_output, "loaded_data", None))
             out.prompt_template_id = self._intent_to_template_id(intent_type)
             out.citation_rules_applied = ["wp-citation-rules"]
 

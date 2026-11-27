@@ -9,6 +9,7 @@ from pydantic import Field, field_serializer, field_validator, model_validator
 
 from backend.services.instruments.issuers import IDENTITIES, policy_target_identity
 
+from .btc_governance import BtcGovernance, SECTIONS, verify_btc_scope
 from .contracts import Allocation, Contract, Rule, SnapshotV2, StrategicReviewScope, digest
 from .parser import Document, PolicyError
 from .store import clock
@@ -82,7 +83,7 @@ class TargetConfig(Contract):
         if isinstance(value, dict):
             unknown = set(value) - set(cls.model_fields)
             if unknown:
-                rule_fields = {"rules", "risk_rules", "constraints", "discipline", "thresholds", "repayment"}
+                rule_fields = {"rules", "risk_rules", "constraints", "discipline", "thresholds", "repayment", "btc_governance"}
                 if unknown & rule_fields:
                     raise ValueError("L2_RULE_CHANGE_REQUIRES_SEPARATE_APPROVAL")
                 raise ValueError("L3_UNKNOWN_CONFIGURATION_CAPABILITY")
@@ -138,6 +139,17 @@ class ConfiguredSnapshot(SnapshotV2):
     @property
     def content_status(self):
         return "EXTERNAL_APPROVAL_REQUIRED"
+
+
+class ConfiguredSnapshotWithBtcGovernance(ConfiguredSnapshot):
+    btc_governance: BtcGovernance
+
+    @model_validator(mode="after")
+    def inherited_btc_approval(self):
+        if self.btc_governance.content_approval.status != "APPROVED_CONTENT":
+            raise ValueError("BTC_APPROVED_BASE_REQUIRED")
+        verify_btc_scope(self)
+        return self
 
 
 def owner_listings(values, as_of, *, verify_owner=False):
@@ -287,13 +299,18 @@ def target_bindings(base, config, admitted):
 
 
 def inherited_policy(base):
-    return {
+    inputs = {
         "source_hashes":base.source_hashes,
         "rules":[rule.model_dump(mode="json", exclude={"source_clause", "policy_version"}) for rule in base.rules],
         "constraints":base.allocation.model_dump(mode="json", exclude={
             "neutral", "etf_internal", "direct_equity", "specified_equity_total",
             "growth_total", "stable_total", "source_clauses"}),
     }
+
+    governance = getattr(base, "btc_governance", None)
+    if governance is not None:
+        inputs["btc_governance"] = governance.model_dump(mode="json")
+    return inputs
 
 
 def compile_config(base, philosophy, template, config, listing_values, *, version, created_at, bindings):
@@ -333,8 +350,24 @@ def compile_config(base, philosophy, template, config, listing_values, *, versio
         "source_clause": refs[rule.source_clause.section], "policy_version": version})) for rule in base.rules]
     scope = ConfiguredStrategicScope(**(base.strategic_review_scope.model_dump() | {
         "nodes": {"growth_and_alternatives": growth, "stable_pool": stable}, "source_clause": refs["6.3"]}))
-    snapshot = ConfiguredSnapshot(policy_version=version, allocation=allocation, rules=rules,
+    fields = dict(policy_version=version, allocation=allocation, rules=rules,
         content_approved_on=base.content_approved_on,
-        source_hashes={"policy": source_hash, "philosophy": hashlib.sha256(philosophy).hexdigest()},
+        source_hashes={"policy":source_hash, "philosophy":hashlib.sha256(philosophy).hexdigest()},
         contextual_clauses=refs, strategic_review_scope=scope, listings=admitted, target_issuers=labels, target_symbols=symbols)
+    if hasattr(base, "btc_governance"):
+        governance = base.btc_governance.model_dump() | {"source_clauses":{key:refs[key] for key in SECTIONS}}
+        if any(refs[key].text != base.contextual_clauses[key].text for key in SECTIONS):
+            # Section 5.1 contains an existing dynamic stable-pool percentage.
+            # Only the previously allowed target rendering can change there.
+            for key in SECTIONS:
+                if key == "5.1":
+                    source = re.sub(r"占用[\d.]+%的稳健预算", "占用<目标>的稳健预算", base.contextual_clauses[key].text)
+                    rendered = re.sub(r"占用[\d.]+%的稳健预算", "占用<目标>的稳健预算", refs[key].text)
+                    if source == rendered:
+                        continue
+                if refs[key].text != base.contextual_clauses[key].text:
+                    raise PolicyError("L2_BTC_SOURCE_CLAUSE_CHANGED")
+        snapshot = ConfiguredSnapshotWithBtcGovernance(**fields, btc_governance=governance)
+    else:
+        snapshot = ConfiguredSnapshot(**fields)
     return markdown, snapshot

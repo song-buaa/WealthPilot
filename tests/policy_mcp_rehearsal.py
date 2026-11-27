@@ -21,9 +21,10 @@ async def main():
             projection = bind(candidate_session(7, "portfolio:7", candidate)) if candidate else nullcontext()
             with projection:
                 result = await client.call_tool("get_investment_policy_context", {"scope":"portfolio"})
-            assert not result.is_error
+            assert not result.is_error, result.content[0].text
             value = result.structured_content or json.loads(result.content[0].text)
-            print(json.dumps({"policy_reference":value["policy_reference"], "pid":os.getpid()}), flush=True)
+            print(json.dumps({"policy_reference":value["policy_reference"], "pid":os.getpid(),
+                              "btc_governance":value.get("btc_governance")}), flush=True)
 
 
 if __name__ == "__main__":
