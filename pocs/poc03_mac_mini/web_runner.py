@@ -4,6 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import socket
 import sys
 
 from common import ROOT, check_revision, host_guard, private_json, require, safe_cli
@@ -26,7 +27,8 @@ def settings(root):
     require(ROOT.resolve() == (release / "code").resolve(), "WEB_RUNNER_REVISION_MISMATCH")
     require("web" in private_json(release / "installed.json").get("environments", []), "WEB_ENVIRONMENT_NOT_INSTALLED")
     check_revision(release / "code", web["revision"])
-    from web_deploy import verify_dist
+    from web_deploy import DEFAULT_LISTEN_PORT, validate_listen_port, verify_dist
+    listen_port = validate_listen_port(web.get("listen_port", DEFAULT_LISTEN_PORT))
     verify_dist(release)
     wealth = private_json(root / "config/wealth.json")
     require(Path(wealth["database_path"]) == root / "data/wealthpilot.db" and
@@ -63,8 +65,16 @@ def settings(root):
                    WEALTHPILOT_POLICY_SHARED_CONTRACT=wealth["database_contract_path"],
                    WEALTHPILOT_POLICY_SCOPE=f"portfolio:{wealth['portfolio_id']}")
     config = {**wealth, "enabled_brokers": web["enabled_brokers"], "revision": web["revision"],
+              "listen_port": listen_port,
               "lock_path": str(root / "run/restricted-web.lock")}
     return release, config, env
+
+
+def open_listener(port):
+    try:
+        return socket.create_server(("127.0.0.1", port))
+    except OSError as exc:
+        raise ValueError("WEB_LISTEN_PORT_UNAVAILABLE") from exc
 
 
 def main():
@@ -81,15 +91,20 @@ def main():
     try:
         sys.path.insert(0, str(ROOT))
         release, config, environment = settings(args.root)
-        os.environ.clear()
-        os.environ.update(environment)
-        logging.getLogger().handlers = [logging.NullHandler()]
-        from backend.restricted_web import create_app
-        import uvicorn
-        app = create_app(config, release / "web-dist")
-        lifecycle.info('{"event":"web_starting"}')
-        uvicorn.run(app, host="127.0.0.1", port=8790, workers=1,
-                    proxy_headers=False, access_log=False, log_config=None)
+        # Reserve the exact loopback socket before the app can enter its lifespan.
+        with open_listener(config["listen_port"]) as listener:
+            os.environ.clear()
+            os.environ.update(environment)
+            logging.getLogger().handlers = [logging.NullHandler()]
+            from backend.restricted_web import create_app
+            import uvicorn
+            app = create_app(config, release / "web-dist")
+            server = uvicorn.Server(uvicorn.Config(
+                app, host="127.0.0.1", port=config["listen_port"], workers=1,
+                proxy_headers=False, access_log=False, log_config=None,
+            ))
+            lifecycle.info('{"event":"web_starting"}')
+            server.run(sockets=[listener])
         lifecycle.info('{"event":"web_exited"}')
     except Exception:
         lifecycle.error('{"event":"web_start_refused"}')
