@@ -1,6 +1,6 @@
 # Binance Spot 只读账户接入
 
-状态：4.1 Chat主体功能业务验收已认可，凭据配置统一收口候选；真实账户、生产迁移、启用与同步均待独立授权。研发基线 `7621f2437fc94ad779e5584b70ebd6f50e33be8e`。不提供 Binance 下单、测试下单、撤单、提现或划转能力。
+状态：原PR #133已集成；生产Owner已确认网络/TLS/签名、环境加载、Key只读权限及UID预检。本次兼容候选基于d89b32226da83689f97f6f96c90def5a0ee95069，仅隔离修复权限组误判、USD现金和未知资产partial；不重复真实预检，不迁移/部署/同步。不提供交易或资金操作。
 
 ## 复用与最小差量
 
@@ -8,19 +8,25 @@
 |---|---|---|
 | EXISTING | restricted_sync / SyncExecutor / Repository / PositionUpsertService | 原 claim/fence、事务、Owner、Last-good、手动入口及每天22:00北京时间调度；Binance默认不启用，启用后周末同样执行 |
 | EXTEND | broker_sync/binance | 标准库 GET/HMAC 客户端、UID绑定、Spot余额及BTCUSDT成交分页；无重型SDK或独立scheduler |
-| EXTEND | Classification / FXService / U0/U1 / 原Web与MCP | BTC=CRYPTO/ALTERNATIVE；USDT=CASH；保留USDT原币，以批准的美元等值约定消费原USD/CNY FX；冻结原输入及质量 |
+| EXTEND | Classification / FXService / U0/U1 / 原Web与MCP | BTC=CRYPTO/ALTERNATIVE；USD走原生现金，USDT保留原币并用批准的美元等值约定消费原USD/CNY FX；其他资产的分类沿原Owner，无法证明仍UNKNOWN；未估值数量保留于原Run |
 | FIX | 原快照/B2/持仓聚合 | 成本和盈亏允许UNKNOWN，外部成交复用B2，不伪造本地下单；原消费端显示UNKNOWN而非0 |
 | EXTEND | 原B3/C | 严格识别Binance BTC现货，仍要求原Owner BTC覆盖证明；不签发Owner、不改变ACTIVE政策、阈值或正式分母资格 |
 
 ## 身份、覆盖和时间
 
-`BINANCE_UID`为稳定账户身份；Portfolio由原`portfolio_scope()`（共享库合同/原Portfolio配置及Owner）解析，并由原Repository拒绝跨Portfolio账户冲突，不另配Binance专属portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、SPOT账户和SPOT权限、显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
+`BINANCE_UID`为稳定账户身份；Portfolio由原`portfolio_scope()`（共享库合同/原Portfolio配置及Owner）解析，并由原Repository拒绝跨Portfolio账户冲突，不另配Binance专属portfolio_id；API Key轮换不变更账户/Position身份。`GET /api/v3/account` 必须返回相同UID、accountType=SPOT及显式BTC/USDT余额行，且不存在重复资产。请求明确 `omitZeroBalances=false`。`quantity=free+locked`，`available_quantity=free`，原始free/locked在原快照raw保存；二者不拆成两份资产。
 
-BTC与USDT两行可全部明确为0；空列表、缺少任一行、身份错误、未知非零资产或畸形响应拒绝发布，保留Last-good。未知非零资产的代码/free/locked/总量及UNKNOWN估值保留于失败Run，并通过原同步状态质量投影读取。此为一期支持资产覆盖限制，不能将遗漏资产计为0。Funding、Earn、Margin、Futures等钱包未查询，始终披露非Spot覆盖未知。
+账户permissions是交易资格组（如TRD_GRP_236），不是API Key权限，不要求包含字面SPOT，也不从canTrade/permissions推导Key可写。既有只读Key预检及应用GET白名单不变。身份失败脱敏区分BINANCE_ACCOUNT_RESPONSE_INVALID、BINANCE_UID_MISSING、BINANCE_UID_MISMATCH、BINANCE_ACCOUNT_TYPE_NOT_SPOT，不输出UID或密钥。
 
-账户HTTP响应本地接收时间与原始 `updateTime` 分别保存；后者不等于持仓/现金有效时间，`positions_as_of`、`cash_as_of`保持UNKNOWN。BTC价格取官方 `aggTrades` 的最新成交p/T，最多300秒且拒绝未来时点，明确last_trade，不声称LIVE bid/ask或可交易报价。按24/7估值，不套用股票周末休市。仅BTC/USDT总量到8位小数；超过支持精度拒绝，不四舍五入。
+BTC/USDT可明确为0；USD存在时按独立原币现金保存free、locked及总量，包括明确0，不与USDT合并。空响应、缺少核心余额行、账户不符、重复资产、非法数值仍拒绝并保留Last-good。其他非零资产不因代码未知拒绝整批：原aggTrades只读端点最多补8个USDT计价、带真实成交T的可靠报价；超预算/缺报价/超出持仓精度的数量保存在原Run的unvalued_assets，估值UNKNOWN/NULL，发布complete=false。其他资产不增加历史成交、研究或交易能力。
+
+复用原observed_rows短事务发布：仅更新有可靠估值的行；不删除未覆盖行，不覆盖未能重估行的Last-good。上次已知资产本次未返回时，也记录缺证而不推断0。完整来源明确归零后按原机制处理。原始余额（包括0）保存在同一Run的balance_inventory，无需新表或额外nullable列。未知资产不伪造market_value=0的Position，而通过原Run收据、原Web总览/同步卡、MCP及U1质量清单显示数量和UNKNOWN；既有Position保留已知/Last-good估值。总额明确是已记录估值小计，不代表完整账户现值。新来源恢复后，原最新成功Run替换缺口投影，无第二套账本。Funding/Earn/Margin/Futures未查询，仍不声称全钱包覆盖。
+
+账户HTTP响应本地接收时间与原始 `updateTime` 分别保存；后者不等于持仓/现金有效时间，`positions_as_of`、`cash_as_of`保持UNKNOWN。BTC价格取官方 `aggTrades` 的最新成交p/T，最多300秒且拒绝未来时点，明确last_trade，不声称LIVE bid/ask或可交易报价。按24/7估值，不套用股票周末休市。BTC/USDT/USD沿原8位持仓精度；其他资产超精度时保留原始数量、估值UNKNOWN，不四舍五入。每份有效报价时点独立保留，不能把新BTC时点套到其他保留的旧持仓。
 
 ## 估值、成本及费用
+
+原币USD现金人民币市值 = USD总量 × 原FXService USD/CNY；复用cash_position、原Classification和现金身份，不套用USDT约定。USD/USDT的FX及资产分别保存，不覆盖、不重复。
 
 BTC人民币市值 = BTC总量 × BTCUSDT成交价 × 1 USD等值/USDT × 原FXService USD/CNY。USDT原始资产、数量及原币仍是USDT，不改写成真实USD现金，不并入其他账户。FX的rate/date/source/quality和估值约定随Run保存；缺少有效汇率时拒绝发布，现有陈旧/质量规则不放宽。
 
@@ -56,15 +62,15 @@ BTC首次纳管成本、转入与期初库存未证，因此Position、原快照
 ## 首次Mini接入清单（本轮不执行）
 
 - 项目管理核准Draft PR、exact SHA四项CI、独立Review及4.4 BTC消费者合同；按原install-github安装已合并SHA，保留原完整制品。
-- 核查原私有`.env`加载与运行Owner、UID、原Portfolio/共享库身份、实际账户范围及只读权限；当前不要求IP白名单，不新增独立JSON凭据；一致性备份并完成上述显式Schema演练与批准，禁止DDL随启动隐式执行。
-- 独立授权一次真实只读来源调用及原正式同步写入。先展示范围（仅Spot BTC/USDT+BTCUSDT历史）、请求预算/成本、停止条件；有其他非零资产、账户冲突、限流、精度/价格/FX不合格时停止并保留Last-good。
+- 复用已封存的环境、UID及只读权限预检，保留原Portfolio/共享库Owner；不重复独立网络/权限探针，不要求IP白名单，不新增JSON凭据；一致性备份并完成上述显式Schema演练与批准，禁止DDL随启动隐式执行。
+- 本候选经批准发布后，另行授权原入口首次正式同步；同步本身仍逐次校验UID与accountType，不重复单独网络/TLS/权限研究。先展示范围（Spot余额、USD/USDT现金、BTCUSDT历史及最多8项其他资产只读报价）、请求预算/成本和停止条件；账户冲突、限流、核心价格/FX失败仍停止并保留Last-good。其他缺报价资产保留数量/UNKNOWN并partial，不删除或覆盖原有效估值。
 - 核对真实free/locked/总量、原币、交易ID/手续费、快照/Position/B2原子一致性及Web/MCP读回；首次纳管成本仍UNKNOWN。未授权不能执行生产U1 prepare或Owner签发。
 - 4.4业务验收取得来源Run、原始账户覆盖与时间质量、BTC明确现货身份、USDT约定、冻结FX及必要Owner覆盖/养老金去重证据。正式分母不足仍UNKNOWN，不以此次同步成功替代A3资格。
 - 验收通过后另行批准调度启用；失败撤销启用并恢复已验证组件，已有真实新事实提交后禁止用旧数据库覆盖并发业务写入；走原定向修正流程。
 
 ## 验证入口及官方合同
 
-配置收口仅定向验证原dotenv优先级、脱敏、缺失/非法凭据及原Owner/UID绑定（`backend/core/tests/test_env.py`、`tests/test_binance_spot.py`），不重复浏览器专项或主体业务验收。原合成回归：`tests/test_binance_spot.py`；原U0/B2/B3/C回归；实际React+临时SQLite：`frontend/tests/e2e/binance-spot.spec.ts`。CI仍为原四项。真实账户、ARM、网络可达、Key权限、生产迁移及自然调度待验收，Mock不等于生产PASS。
+本次真实兼容定向覆盖TRD_GRP身份、USD/USDT、未知资产数量与partial、原Run/B2事务及Last-good、Web/MCP只读投影。此前配置收口验证原dotenv优先级、脱敏、缺失/非法凭据及原Owner/UID绑定（`backend/core/tests/test_env.py`、`tests/test_binance_spot.py`），不重复浏览器专项或主体业务验收。原合成回归：`tests/test_binance_spot.py`；原U0/B2/B3/C回归；实际React+临时SQLite：`frontend/tests/e2e/binance-spot.spec.ts`。CI仍为原四项。已由生产Owner确认的预检事实不重复研究；本候选的生产迁移、正式同步及自然调度仍待授权验收，Mock不等于生产PASS。
 
 - [官方REST概述及错误/限流](https://developers.binance.com/en/docs/products/spot/rest-api)
 - [账户与成交接口](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/account)

@@ -110,8 +110,13 @@ class BinanceReadonlyClient:
         }[path]
         if set(params) - allowed:
             raise ValueError("BINANCE_PARAMETER_REJECTED")
-        if "symbol" in params and params["symbol"] not in {"BTCUSDT", "USDCUSDT"}:
-            raise ValueError("BINANCE_SYMBOL_UNSUPPORTED")
+        if "symbol" in params:
+            symbol = params["symbol"]
+            allowed_symbol = isinstance(symbol, str) and (
+                re.fullmatch(r"[A-Z0-9]{2,20}USDT", symbol) if path == "/api/v3/aggTrades"
+                else symbol in {"BTCUSDT", "USDCUSDT"})
+            if not allowed_symbol or path == "/api/v3/myTrades" and symbol != "BTCUSDT":
+                raise ValueError("BINANCE_SYMBOL_UNSUPPORTED")
         signed = path in self.SIGNED
         if signed and self.offset_ms is None:
             self.server_time()

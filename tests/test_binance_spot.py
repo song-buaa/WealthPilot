@@ -101,6 +101,9 @@ class Source:
         self.calls = []
         self.config = CONFIG
         self.uid = "12345"
+        self.account_type = "SPOT"
+        self.permissions = ["SPOT"]
+        self.other_prices = {}
         self.balances = [
             dict(asset="BTC", free="0.00123456", locked="0.00000001"),
             dict(asset="USDT", free="100.00", locked="20.00"),
@@ -125,12 +128,16 @@ class Source:
         if path == "/api/v3/time":
             data = dict(serverTime=now)
         elif path == "/api/v3/account":
-            data = dict(uid=self.uid, accountType="SPOT", permissions=["SPOT"],
+            data = dict(uid=self.uid, accountType=self.account_type, permissions=self.permissions,
                         updateTime=1, balances=self.balances)
         elif path == "/api/v3/ticker/price":
             data = dict(symbol="USDCUSDT", price=self.peg)
         elif path == "/api/v3/aggTrades":
-            data = [dict(a=1, p="100000", q="0.001", T=now-self.price_age*1000)]
+            pair = pairs["symbol"]
+            price = "100000" if pair == "BTCUSDT" else self.other_prices.get(pair)
+            if price is None:
+                return 400, {}, b'{"code":-1121}'
+            data = [dict(a=1, p=price, q="0.001", T=now-self.price_age*1000)]
         elif path == "/api/v3/myTrades":
             data = [r for r in self.fills if r["id"] >= int(pairs["fromId"])][:1000]
         else:
@@ -197,7 +204,7 @@ def test_balances_history_unknown_cost_and_fixed_consumers(context):
         assert db.query(HistoryEvent).count() == 1
 
 
-@pytest.mark.parametrize("problem", ["empty", "partial", "account", "duplicate", "unknown", "permission", "rate", "malformed", "price"])
+@pytest.mark.parametrize("problem", ["empty", "partial", "account", "duplicate", "permission", "rate", "malformed", "price"])
 def test_failure_preserves_last_good_and_reports_unsupported(context, problem):
     from app.models import Position
     from services.broker_sync.models import PositionSnapshotRun
@@ -214,8 +221,6 @@ def test_failure_preserves_last_good_and_reports_unsupported(context, problem):
         source.uid = "99999"
     elif problem == "duplicate":
         source.balances.append(source.balances[0])
-    elif problem == "unknown":
-        source.balances.append(dict(asset="DOGE", free="2.5", locked="0"))
     elif problem == "permission":
         source.error = (403, dict(code=-2015, msg="PRIVATE_SECRET"))
     elif problem == "rate":
@@ -230,8 +235,6 @@ def test_failure_preserves_last_good_and_reports_unsupported(context, problem):
         assert [(p.id, p.quantity, p.market_value_cny) for p in db.query(Position).all()] == previous
         runs = db.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id).all()
         assert runs[0].id == good and runs[0].status == "success" and runs[-1].status == "failed"
-        if problem == "unknown":
-            assert json.loads(runs[-1].context_json)["unsupported_assets"][0]["quantity"] == "2.5"
 
 
 def test_complete_zero_balance_and_incremental_cursor(context):
@@ -603,3 +606,232 @@ def test_binance_reuses_original_dotenv_loader(tmp_path, monkeypatch, shell_valu
     result = configuration()
     assert (result.account_id, result.api_key, result.api_secret) == (
         tuple(v + '9' for v in expected) if shell_value == 'existing-runtime' else expected)
+
+
+def cash_source():
+    """Production shape only; UID, amounts and trades are synthetic."""
+    source = Source()
+    source.permissions = ['TRD_GRP_236']
+    source.balances = [dict(asset='BTC', free='0', locked='0'),
+        dict(asset='USDT', free='23.45678901', locked='0.1'),
+        dict(asset='USD', free='31.50', locked='1.50')]
+    source.fills = []
+    return source
+
+
+def test_account_group_and_native_usd_are_not_key_permissions(context, monkeypatch):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun, PositionSnapshot
+    from app.fx_service import fx_service, FXQuote
+    from backend.services import portfolio_service
+    source = cash_source()
+    monkeypatch.setattr(fx_service, 'get_quote', lambda a, b: FXQuote(7, '2026-11-27', 'fixture', 'fixture', 'current'))
+    run_id = publish(context, source)
+    with context.sessions() as db:
+        rows = {r.symbol: r for r in db.query(Position).all()}
+        assert set(rows) == {'BTC:CRYPTO', 'USDT:CRYPTO', 'CASH-USD:US'}
+        assert rows['CASH-USD:US'].quantity == 33
+        assert rows['CASH-USD:US'].currency == 'USD'
+        assert rows['CASH-USD:US'].economic_asset_class == 'CASH'
+        assert rows['USDT:CRYPTO'].currency == 'USDT'
+        assert rows['USDT:CRYPTO'].economic_asset_class == 'CASH'
+        assert rows['BTC:CRYPTO'].economic_asset_class == 'ALTERNATIVE'
+        usd = db.query(PositionSnapshot).filter_by(run_id=run_id, currency='USD').one()
+        assert usd.available_quantity == Decimal('31.5')
+        assert json.loads(usd.raw_data_json)['locked'] == '1.50'
+        meta = json.loads(db.get(PositionSnapshotRun, run_id).context_json)
+        assert meta['account_permission_groups'] == ['TRD_GRP_236']
+        assert meta['permission_semantics'] == 'ACCOUNT_TRADING_GROUPS_NOT_API_KEY_SCOPES'
+        assert meta['fx']['USD']['rate'] == meta['fx']['USDT']['rate'] == 7
+        assert 'convention' not in meta['fx']['USD']
+        assert meta['fx']['USDT']['convention'] == 'USDT_USD_PARITY_APPROVED'
+    monkeypatch.setattr(portfolio_service, 'get_session', context.sessions)
+    import app.analyzer
+    monkeypatch.setattr(app.analyzer, 'get_session', context.sessions)
+    summary = portfolio_service.get_summary(7)
+    assert summary['total_assets'] == pytest.approx((33 + 23.55678901) * 7)
+    assert 'unvalued_assets' not in summary
+    publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).count() == 3
+    for balance in source.balances:
+        balance.update(free='0', locked='0')
+    publish(context, source)
+    with context.sessions() as db:
+        assert all(r.quantity == 0 and r.market_value_cny == 0 for r in db.query(Position).all())
+
+
+@pytest.mark.parametrize('field,value,code', [('uid', '99999', 'BINANCE_UID_MISMATCH'),
+    ('uid', None, 'BINANCE_UID_MISSING'), ('account_type', 'MARGIN', 'BINANCE_ACCOUNT_TYPE_NOT_SPOT'),
+    ('account_type', None, 'BINANCE_ACCOUNT_TYPE_NOT_SPOT')])
+def test_identity_failure_names_the_field_without_leaking_values(context, field, value, code):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+    source = cash_source()
+    publish(context, source)
+    setattr(source, field, value)
+    with pytest.raises(ValueError, match='^' + code + '$'):
+        publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).filter_by(currency='USD').one().quantity == 33
+        run = db.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id.desc()).first()
+        assert run.status == 'failed' and run.error_message == code
+        assert CONFIG.account_id not in run.error_message and CONFIG.api_key not in run.error_message
+
+
+def test_unquoted_assets_keep_quantity_unknown_and_existing_valuation(context, monkeypatch):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+    from backend.services import portfolio_service
+    from app.sync_status import _public_quality
+    from pocs.chatgpt_skills.asset_view import capture
+    source = cash_source()
+    source.balances.append(dict(asset='ETH', free='2', locked='0.25'))
+    source.other_prices['ETHUSDT'] = '2500'
+    publish(context, source)
+    with context.sessions() as db:
+        old = db.query(Position).filter_by(symbol='ETH:CRYPTO').one()
+        old_facts = (old.id, old.quantity, old.current_price, old.market_value_cny)
+    source.other_prices.clear()
+    source.balances[-1].update(free='1.25', locked='0.5')
+    source.balances.append(dict(asset='MYSTERY', free='1.234567891', locked='0'))
+    run_id = publish(context, source)
+    with context.sessions() as db:
+        old = db.query(Position).filter_by(symbol='ETH:CRYPTO').one()
+        assert (old.id, old.quantity, old.current_price, old.market_value_cny) == old_facts
+        assert db.query(Position).filter_by(symbol='MYSTERY:CRYPTO').count() == 0
+        meta = _public_quality(db.get(PositionSnapshotRun, run_id))
+        assert meta['complete'] is False and meta['publication_mode'] == 'observed_rows'
+        gaps = {g['asset']: g for g in meta['unvalued_assets']}
+        assert gaps['ETH']['quantity'] == '1.75' and gaps['ETH']['last_good_retained']
+        assert gaps['ETH']['valuation'] == 'UNKNOWN' and gaps['ETH']['market_value_cny'] is None
+        assert gaps['MYSTERY']['quantity'] == '1.234567891'
+        assert gaps['MYSTERY']['reason_code'] == 'PRECISION_UNSUPPORTED'
+    monkeypatch.setattr(portfolio_service, 'get_session', context.sessions)
+    import app.analyzer
+    monkeypatch.setattr(app.analyzer, 'get_session', context.sessions)
+    summary = portfolio_service.get_summary(7)
+    assert summary['valuation_complete'] is False and len(summary['unvalued_assets']) == 2
+    assert summary['valuation_scope'] == 'STORED_KNOWN_AND_LAST_GOOD_SUBTOTAL'
+    view = capture(context.db, 7, {}, synthetic=True)
+    accounts = view['data_quality']['accounts']
+    assert any(a.get('unvalued_assets') for a in accounts)
+    assert not view['data_quality']['analysis_eligibility']['C']['allowed']
+    details = view['views']['get_investment_details']
+    assert details['valuation_complete'] is False and len(details['unvalued_assets']) == 2
+    overview = view['views']['get_wealth_overview']
+    assert overview['valuation_complete'] is False
+    assert overview['status'] == 'partial'
+    eth = next(p for p in view['data_quality']['security_inputs'] if p['symbol'] == 'ETH:CRYPTO')
+    assert eth['price_as_of'] is None
+    # Restore authoritative quote: source gaps retire without a new asset store.
+    source.other_prices['ETHUSDT'] = '2400'
+    source.balances.pop()
+    source.balances[-1].update(free='1.5', locked='0')
+    publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).filter_by(symbol='ETH:CRYPTO').one().quantity == 1.5
+        run = db.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id.desc()).first()
+        # MYSTERY disappeared without an explicit zero, so coverage remains partial.
+        assert _public_quality(run)['unvalued_assets'][0]['asset'] == 'MYSTERY'
+    source.balances.append(dict(asset='MYSTERY', free='0', locked='0'))
+    publish(context, source)
+    assert 'unvalued_assets' not in portfolio_service.get_summary(7)
+
+
+def test_absent_usd_is_not_zero_during_partial_account_publication(context):
+    from app.models import Position
+    from services.broker_sync.models import PositionSnapshotRun
+    source = cash_source()
+    publish(context, source)
+    source.balances.pop()
+    publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).filter_by(symbol='CASH-USD:US').one().quantity == 33
+        run = db.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id.desc()).first()
+        gap = json.loads(run.context_json)['unvalued_assets'][0]
+        assert gap['asset'] == 'USD' and gap['quantity'] is None
+        assert gap['reason_code'] == 'PREVIOUS_BALANCE_MISSING'
+
+
+def test_extra_market_quotes_remain_bounded_and_history_is_btc_only(context):
+    from services.broker_sync.models import PositionSnapshotRun
+    source = cash_source()
+    for i in range(10):
+        asset = 'COIN' + str(i)
+        source.balances.append(dict(asset=asset, free='1', locked='0'))
+        source.other_prices[asset + 'USDT'] = '2'
+    run_id = publish(context, source)
+    assert len([p for p, _ in source.calls if p == '/api/v3/aggTrades']) == 8
+    assert [q['symbol'] for p, q in source.calls if p == '/api/v3/myTrades'] == ['BTCUSDT']
+    with context.sessions() as db:
+        gaps = json.loads(db.get(PositionSnapshotRun, run_id).context_json)['unvalued_assets']
+        assert len(gaps) == 2 and all(g['reason_code'] == 'QUOTE_BUDGET_EXHAUSTED' for g in gaps)
+    with pytest.raises(ValueError, match='BINANCE_SYMBOL_UNSUPPORTED'):
+        source.client().get('/api/v3/myTrades', {'symbol': 'ETHUSDT'})
+    with pytest.raises(ValueError, match='BINANCE_SYMBOL_UNSUPPORTED'):
+        source.client().get('/api/v3/aggTrades', {'symbol': 'ETH/USDT'})
+
+
+def test_extra_asset_rate_limit_stops_before_history_and_keeps_last_good(context):
+    from app.models import Position
+    source = cash_source()
+    publish(context, source)
+    source.balances.append(dict(asset='ETH', free='1', locked='0'))
+    source.calls.clear()
+    original = source.transport
+    def limited(path, query, headers):
+        if path == '/api/v3/aggTrades':
+            source.calls.append((path, {}))
+            return 429, {'Retry-After': '120'}, b'{"code":-1003}'
+        return original(path, query, headers)
+    source.transport = limited
+    with pytest.raises(ValueError, match='BINANCE_RATE_LIMITED'):
+        publish(context, source)
+    assert not any(p == '/api/v3/myTrades' for p, _ in source.calls)
+    with context.sessions() as db:
+        assert db.query(Position).count() == 3
+        assert db.query(Position).filter_by(currency='USD').one().quantity == 33
+
+
+def test_partial_publication_and_b2_failure_are_one_transaction(context, monkeypatch):
+    from app.models import Position
+    from backend.services.portfolio_history import imports
+    from services.broker_sync.models import PositionSnapshotRun
+    source = cash_source()
+    publish(context, source)
+    source.balances[1]['free'] = '1'
+    source.balances.append(dict(asset='MYSTERY', free='5', locked='0'))
+    source.fills = [fill()]
+    def fail(*args, **kwargs):
+        raise ValueError('SYNTHETIC_IMPORT_FAILURE')
+    monkeypatch.setattr(imports, 'import_batch', fail)
+    with pytest.raises(ValueError, match='SYNC_SOURCE_FAILED'):
+        publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).filter_by(symbol='USDT:CRYPTO').one().quantity == pytest.approx(23.55678901)
+        assert db.query(Position).filter_by(currency='USD').one().quantity == 33
+        run = db.query(PositionSnapshotRun).order_by(PositionSnapshotRun.id.desc()).first()
+        assert run.status == 'failed'
+
+
+def test_gap_projection_uses_original_portfolio_and_opaque_account_scope(context):
+    from app.sync_status import unvalued_source_assets
+    from pocs.chatgpt_skills.reader import read_details
+    source = cash_source()
+    source.balances.append(dict(asset='MYSTERY', free='7', locked='0'))
+    publish(context, source)
+    other = cash_source()
+    other.uid = '98765'
+    other.config = replace(CONFIG, account_id=other.uid)
+    other.balances.append(dict(asset='MYSTERY', free='9', locked='0'))
+    with context.sessions() as db:
+        BinanceSyncService(other.config, client=other.client()).sync_and_persist(db)
+        gaps = unvalued_source_assets(db.connection(), 7)
+        assert len(gaps) == 2
+        selected = next(g for g in gaps if g['quantity'] == '7')
+        assert unvalued_source_assets(db.connection(), 8) == []
+        assert all(CONFIG.account_id not in json.dumps(g) and other.uid not in json.dumps(g) for g in gaps)
+    result = read_details(context.db, 7, 'get_investment_details', {'account_ref': selected['account_ref']}, synthetic=True)
+    assert result['unvalued_assets'] == [selected]
+    assert result['portfolio_summary']['unvalued_assets'] == [selected]

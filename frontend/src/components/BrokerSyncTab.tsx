@@ -163,6 +163,12 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                     最近成功: {item.last_successful_sync_time}{item.last_successful_position_count != null ? ` · ${item.last_successful_position_count} 条` : ''}
                   </div>
                 )}
+                {item.data_quality?.unvalued_assets?.map((asset, i) => (
+                  <div key={`${asset.symbol}:${i}`} style={{ fontSize: 11, color: '#92400E', marginTop: 3 }}>
+                    来源 partial · {asset.asset} 数量 {asset.quantity ?? 'UNKNOWN'} · 估值 UNKNOWN
+                    {asset.last_good_retained ? ' · 原有效估值保留' : ''}
+                  </div>
+                ))}
                 {attemptError && (
                   <div style={{ fontSize: 11, color: '#DC2626', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     同步失败：{attemptError}
