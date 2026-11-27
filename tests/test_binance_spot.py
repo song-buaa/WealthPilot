@@ -464,3 +464,12 @@ def test_missing_fx_cannot_publish_assets_but_explicit_zero_needs_no_conversion(
     with context.sessions() as db:
         assert all(p.quantity == 0 and p.market_value_cny == 0 for p in db.query(Position).all())
         assert db.query(Position).filter_by(symbol='BTC:CRYPTO').one().profit_loss_value is None
+
+
+def test_zero_balance_unknown_cost_is_not_economic_exposure():
+    from backend.services.discipline_service import _build_portfolio_state
+    row = dict(name='BTC', ticker='BTC:CRYPTO', market_value_cny=0, asset_class='另类',
+               profit_loss_rate=None, is_leverage_etf=False)
+    state = _build_portfolio_state([row], portfolio_drawdown_pct=0)
+    assert state.positions == []
+    assert row['profit_loss_rate'] is None
