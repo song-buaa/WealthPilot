@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text, inspect
+from backend.services.broker_sync.binance import valid_asset_code
 from .models import HistoryImport, HistoryEvent
 from .sources import dumps, timestamp, number, MAX_EVENTS, fail, cashflow_fx_date, window_membership
 
@@ -151,7 +152,11 @@ def validate_events(events, coverage):
             if Decimal(e['quantity'])*Decimal(e['price'])*Decimal(e['multiplier'])>Decimal('1e20'):fail()
             for field in ('commission','taxes','broker_realized_pnl','broker_cost_basis'):
                 if e.get(field) is not None:e[field]=number(e[field])
-            if e.get('commission_currency') and not re.fullmatch(r'[A-Z0-9]{2,20}' if e.get('source_channel') == 'binance_spot' else r'[A-Z]{3}',e['commission_currency']):fail()
+            commission_currency = e.get('commission_currency')
+            if commission_currency:
+                if e.get('source_channel') == 'binance_spot':
+                    if not valid_asset_code(commission_currency):fail()
+                elif not re.fullmatch(r'[A-Z]{3}', commission_currency):fail()
         else:e['amount']=number(e.get('amount'))
         if not re.fullmatch(r'[A-Z]{3}',e.get('currency','')):fail()
         if not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}',e.get('external_id','')):fail()

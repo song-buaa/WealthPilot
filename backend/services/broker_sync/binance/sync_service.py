@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 
+from . import valid_asset_code
 from .client import BinanceReadonlyClient, configuration
 from backend.services.broker_sync.schema import Position, cash_position
 from backend.services.instruments.classification import (
@@ -38,8 +39,7 @@ def trade_events(rows):
     for row in rows:
         if (row.get("symbol") != "BTCUSDT" or type(row.get("id")) is not int or row["id"] < 0
                 or type(row.get("isBuyer")) is not bool
-                or not isinstance(row.get("commissionAsset"), str)
-                or not re.fullmatch(r"[A-Z0-9]{2,20}", row["commissionAsset"])):
+                or not valid_asset_code(row.get("commissionAsset"))):
             raise ValueError("BINANCE_RESPONSE_INVALID")
         qty, price = amount(row.get("qty")), amount(row.get("price"))
         if not qty or not price:
@@ -93,7 +93,7 @@ class BinanceSyncService:
             raise ValueError("INCOMPLETE_SOURCE")
         balances = {}
         for row in rows:
-            if not isinstance(row, dict) or not re.fullmatch(r"[A-Z0-9]{2,20}", str(row.get("asset", ""))):
+            if not isinstance(row, dict) or not valid_asset_code(row.get("asset")):
                 raise ValueError("BINANCE_RESPONSE_INVALID")
             asset = row["asset"]
             if asset in balances:
