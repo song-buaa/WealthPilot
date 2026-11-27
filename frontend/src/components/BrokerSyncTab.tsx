@@ -15,10 +15,11 @@ interface Props {
   onRefresh: () => void
 }
 
-type VisibleBroker = 'tiger' | 'snowball' | 'guojin'
-const VISIBLE_BROKERS: readonly VisibleBroker[] = ['tiger', 'snowball', 'guojin']
+type VisibleBroker = 'tiger' | 'snowball' | 'guojin' | 'binance'
+const VISIBLE_BROKERS: readonly VisibleBroker[] = ['tiger', 'snowball', 'guojin', 'binance']
 function visibleSyncStatus(items: SyncStatusItem[]): SyncStatusItem[] {
-  return items.filter(item => VISIBLE_BROKERS.includes(item.broker as VisibleBroker))
+  return items.filter(item => VISIBLE_BROKERS.includes(item.broker as VisibleBroker)
+    && (item.broker !== 'binance' || item.enabled === true))
 }
 
 const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
@@ -66,7 +67,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
     try {
       // UI “all” means only the visible brokers, not the backend's broader all.
-      const targets = RESTRICTED_WEB ? [broker] : broker === 'all' ? VISIBLE_BROKERS : [broker]
+      const targets = RESTRICTED_WEB ? [broker] : broker === 'all' ? status.map(item => item.broker as VisibleBroker) : [broker]
       const results = await Promise.all(targets.map(target => triggerSync(target)))
       const brokersToCheck = [...new Set(results.flatMap(result => result.brokers_triggered))]
       if (!brokersToCheck.length) {

@@ -32,7 +32,7 @@ class HoldingItem(BaseModel):
     ticker: str
     asset_class: str
     market_value_cny: float
-    pl_rate: float          # 百分比数值，如 99.9 = +99.9%
+    pl_rate: Optional[float]  # UNKNOWN when original cost is unproven; 百分比数值，如 99.9 = +99.9%
     weight: float           # 0~1 小数
     platforms: list[str]
 

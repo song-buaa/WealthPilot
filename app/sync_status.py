@@ -10,7 +10,7 @@ SAFE_SYNC_CODES = {"SYNC_LEASE_EXPIRED","SYNC_ACCOUNT_UNCONFIGURED","SYNC_SOURCE
     "ACCOUNT_PORTFOLIO_AMBIGUOUS","SYNC_RESERVATION_FAILED",
     "SOURCE_ACCOUNT_UNPROVEN","CASH_IDENTITY_COLLISION_REQUIRES_REVIEW",
     "NATIVE_BATCH_INCOMPLETE","NATIVE_BATCH_INVALID","NATIVE_ACCOUNT_UNPROVEN",
-    "NATIVE_RECONCILIATION_FAILED","NATIVE_BATCH_STALE","NATIVE_LEGACY_REVIEW_REQUIRED"}
+    "NATIVE_RECONCILIATION_FAILED","NATIVE_BATCH_STALE","NATIVE_LEGACY_REVIEW_REQUIRED", 'BINANCE_UNSUPPORTED_ASSETS', 'BINANCE_PRICE_UNAVAILABLE', 'BINANCE_CONNECTION_UNAVAILABLE', 'BINANCE_PERMISSION_DENIED', 'BINANCE_SIGNATURE_INVALID', 'BINANCE_CLOCK_SKEW', 'BINANCE_RATE_LIMITED', 'BINANCE_SOURCE_UNAVAILABLE', 'BINANCE_RESPONSE_INVALID', 'BINANCE_PRECISION_UNSUPPORTED', 'BINANCE_HISTORY_LIMIT', 'BINANCE_TRADE_VALUE_CONFLICT', 'BINANCE_HISTORY_PAGE_INVALID', 'BINANCE_SCHEMA_REQUIRED'}
 
 
 def safe_sync_reason(run):
@@ -42,7 +42,8 @@ def _public_quality(run):
         "positions_as_of","cash_as_of","price_as_of","currencies","row_count","fx",
         "queried_at","native_batch_id","account_total_assets_cny","cash_balance_cny","security_count",
         "query_action_at","source_completeness","counter_status","publication_mode","reconciliation",
-        "time_evidence","price_time_basis")}
+        "time_evidence","price_time_basis", "account_response_at", "account_update_time", "outside_scope",
+        "unsupported_assets", "retry_after_seconds", "price_pair", "price_quote_asset", "history_coverage", "usdt_relative_reference")}
     # Pre-D1 IBKR cash_as_of was a local download clock. Reusing that last-good
     # must not turn it into authoritative source time in a NEW analysis view.
     # Preserve stored Run/history; only the current quality projection degrades.

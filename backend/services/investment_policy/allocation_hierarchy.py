@@ -40,6 +40,15 @@ def _owner_attests(ref, fact, refs):
     )
 
 
+def _binance_btc(row):
+    return (row.get("broker") == "binance" and row.get("symbol") == "BTC:CRYPTO"
+            and row.get("broker_security_type") == "CRYPTO_SPOT" and row.get("vehicle_type") == "CRYPTO"
+            and row.get("economic_asset_class") == "ALTERNATIVE"
+            and row.get("classification_source") == "BINANCE_SPOT_NATIVE_IDENTITY"
+            and row.get("classification_verification_status") == "DETERMINISTIC"
+            and row.get("original_currency") == "USDT")
+
+
 def _identity(ref, row, economic, coverage, direct_symbols, listings):
     """Return (policy bucket, optional ETF product, identity evidence)."""
     manual = ref.startswith('wealth:')
@@ -64,7 +73,7 @@ def _identity(ref, row, economic, coverage, direct_symbols, listings):
             return None
         if key == 'gold' and economic == 'COMMODITY' and (manual or vehicle in {'ETF', 'OTHER'}):
             return key, None, refs
-        if key == 'btc' and economic == 'ALTERNATIVE' and manual and row.get('item_type') == 'other_asset':
+        if key == 'btc' and economic == 'ALTERNATIVE' and (manual and row.get('item_type') == 'other_asset' or _binance_btc(row)):
             return key, None, refs
         return None
     if economic == 'CASH' and (row.get('item_type') == 'bank_cash' if manual else vehicle == 'CASH'):

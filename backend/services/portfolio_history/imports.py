@@ -121,7 +121,7 @@ def qualified_coverage(proof):
 
 
 def owner_scope(db, portfolio_id, broker, account):
-    if broker not in {'ibkr','tiger','guojin'} or not account or account.lower() in {'unknown','pending','__unconfigured__'}:
+    if broker not in {'ibkr','tiger','guojin','binance'} or not account or account.lower() in {'unknown','pending','__unconfigured__'}:
         fail('HISTORY_OWNER_UNPROVEN')
     aliases = ('ibkr','snowball') if broker=='ibkr' else (broker,broker)
     params=dict(a=account,b=aliases[0],c=aliases[1])
@@ -151,7 +151,7 @@ def validate_events(events, coverage):
             if Decimal(e['quantity'])*Decimal(e['price'])*Decimal(e['multiplier'])>Decimal('1e20'):fail()
             for field in ('commission','taxes','broker_realized_pnl','broker_cost_basis'):
                 if e.get(field) is not None:e[field]=number(e[field])
-            if e.get('commission_currency') and not re.fullmatch(r'[A-Z]{3}',e['commission_currency']):fail()
+            if e.get('commission_currency') and not re.fullmatch(r'[A-Z0-9]{2,20}' if e.get('source_channel') == 'binance_spot' else r'[A-Z]{3}',e['commission_currency']):fail()
         else:e['amount']=number(e.get('amount'))
         if not re.fullmatch(r'[A-Z]{3}',e.get('currency','')):fail()
         if not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}',e.get('external_id','')):fail()
@@ -191,7 +191,7 @@ def build_evidence(broker, account, source, source_sha256, events, coverage, sou
     return coverage, events, evidence
 
 
-def import_batch(db, portfolio_id, broker, account, source, source_sha256, events, coverage, source_metadata=None, *, evidence_documents=()):
+def import_batch(db, portfolio_id, broker, account, source, source_sha256, events, coverage, source_metadata=None, *, evidence_documents=(), commit=True):
     """Parse/FX I/O must be finished BEFORE calling; one short durable transaction.
 
     Existing known fields cannot be corrected silently. Missing actual fee/FX
@@ -200,14 +200,18 @@ def import_batch(db, portfolio_id, broker, account, source, source_sha256, event
     coverage,events,evidence=build_evidence(broker,account,source,source_sha256,events,coverage,source_metadata,
         evidence_documents=evidence_documents)
     digest=hashlib.sha256(dumps(dict(evidence=evidence,events=events)).encode()).hexdigest()
-    if db.in_transaction():raise ValueError('HISTORY_IMPORT_REQUIRES_NEW_TRANSACTION')
-    db.execute(text('BEGIN IMMEDIATE'))
+    if commit:
+        if db.in_transaction():raise ValueError('HISTORY_IMPORT_REQUIRES_NEW_TRANSACTION')
+        db.execute(text('BEGIN IMMEDIATE'))
+    elif not db.info.get('sync_publish_run_id'):
+        raise ValueError('HISTORY_SYNC_TRANSACTION_REQUIRED')
     try:
         owner_scope(db,portfolio_id,broker,account)
         existing=db.query(HistoryImport).filter_by(broker=broker,account_id=account,source=source,digest=digest).one_or_none()
         if existing:
             if existing.portfolio_id!=portfolio_id:fail('HISTORY_OWNER_UNPROVEN')
-            db.rollback();return dict(status='unchanged',import_id=existing.id,events=0)
+            if commit:db.rollback()
+            return dict(status='unchanged',import_id=existing.id,events=0)
         record=HistoryImport(id=uuid.uuid4().hex,portfolio_id=portfolio_id,broker=broker,account_id=account,
             source=source,digest=digest,imported_at=datetime.now(timezone.utc).isoformat(),
             coverage_start=coverage.coverage_start,coverage_end=coverage.coverage_end,evidence_json=dumps(evidence))
@@ -247,7 +251,7 @@ def import_batch(db, portfolio_id, broker, account, source, source_sha256, event
                 currency=e['currency'],executed_at=e['executed_at'],import_id=record.id,payload_json=dumps(payload))
             db.add(row);by_id[(e['kind'],e['external_id'])]=row
             if len(by_id)>MAX_EVENTS:fail('HISTORY_QUERY_LIMIT')
-        db.commit()
+        db.commit() if commit else db.flush()
         return dict(status='imported',import_id=record.id,events=len(events))
     except Exception:
         db.rollback();raise

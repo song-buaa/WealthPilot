@@ -59,9 +59,9 @@ class AggregatedPosition:
     ticker: str                  # 主要 ticker（来自第一个有 ticker 的持仓）
     asset_class: str             # 资产分类（来自第一个持仓）
     market_value_cny: float      # 聚合市值（所有平台之和）
-    profit_loss_value: float     # 聚合盈亏金额
-    cost_value: float            # 聚合成本价值
-    pl_rate: float               # 加权盈亏率（%，注意是百分比数值，不是小数）
+    profit_loss_value: Optional[float]     # 聚合盈亏金额
+    cost_value: Optional[float]            # 聚合成本价值
+    pl_rate: Optional[float]               # 加权盈亏率（%，注意是百分比数值，不是小数）
     weight: float                # 占投资组合总市值比例（0~1 小数）
     platforms: list[str] = field(default_factory=list)   # 持仓平台列表
     is_leverage_etf: bool = False
@@ -72,9 +72,9 @@ class AggregatedPosition:
         return " / ".join(self.platforms)
 
     @property
-    def profit_loss_rate(self) -> float:
+    def profit_loss_rate(self) -> Optional[float]:
         """返回小数形式的盈亏率，兼容 PositionInfo.profit_loss_rate 的调用方。"""
-        return self.pl_rate / 100.0
+        return self.pl_rate / 100.0 if self.pl_rate is not None else None
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -97,8 +97,10 @@ def _norm(name: str) -> str:
 
 # ── 核心公共函数 ───────────────────────────────────────────────────────────────
 
-def stored_cost_value_cny(position: Position) -> float:
+def stored_cost_value_cny(position: Position) -> Optional[float]:
     """Native broker cost and reference P&L are independent source facts."""
+    if position.broker == "binance" and position.cost_price is None:
+        return None
     if (position.broker == "guojin" and position.broker_security_type == "QNX_NATIVE_POSITION"
             and position.currency == "CNY"):
         return (position.quantity or 0.0) * (position.cost_price or 0.0)
@@ -131,9 +133,9 @@ def load_raw_positions(pid: int, segment: str = "投资") -> list[dict]:
                     getattr(p, "economic_asset_class", None) or "UNKNOWN"
                 ),
                 "market_value_cny": p.market_value_cny or 0.0,
-                "profit_loss_rate": p.profit_loss_rate or 0.0,
-                "profit_loss_value": p.profit_loss_value or 0.0,
-                "cost_price": p.cost_price or 0.0,
+                "profit_loss_rate": p.profit_loss_rate if p.broker == "binance" else p.profit_loss_rate or 0.0,
+                "profit_loss_value": p.profit_loss_value if p.broker == "binance" else p.profit_loss_value or 0.0,
+                "cost_price": p.cost_price if p.broker == "binance" else p.cost_price or 0.0,
                 "cost_value_cny": stored_cost_value_cny(p),
                 "current_price": p.current_price or 0.0,
                 "is_leverage_etf": _is_leverage_etf(p.name or "", p.ticker or ""),
@@ -201,8 +203,12 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
 
         b = buckets[key]
         b["market_value_cny"] += r["market_value_cny"]
-        b["profit_loss_value"] += r.get("profit_loss_value", 0.0)
-        b["cost_value"] += r.get("cost_value_cny", r["market_value_cny"] - r.get("profit_loss_value", 0.0))
+        pnl = r.get("profit_loss_value", 0.0)
+        cost = r.get("cost_value_cny")
+        if "cost_value_cny" not in r:
+            cost = r["market_value_cny"] - pnl if pnl is not None else None
+        b["profit_loss_value"] = b["profit_loss_value"] + pnl if b["profit_loss_value"] is not None and pnl is not None else None
+        b["cost_value"] = b["cost_value"] + cost if b["cost_value"] is not None and cost is not None else None
         if r["platform"] and r["platform"] not in b["platforms"]:
             b["platforms"].append(r["platform"])
 
@@ -213,8 +219,8 @@ def aggregate(raw: list[dict]) -> tuple[list[AggregatedPosition], float]:
     for b in buckets.values():
         pl_rate = (
             b["profit_loss_value"] / b["cost_value"] * 100
-            if b["cost_value"] > 0
-            else 0.0
+            if b["cost_value"] is not None and b["cost_value"] > 0 and b["profit_loss_value"] is not None
+            else None if b["cost_value"] is None or b["profit_loss_value"] is None else 0.0
         )
         result.append(AggregatedPosition(
             name=b["name"],

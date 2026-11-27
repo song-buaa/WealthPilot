@@ -28,6 +28,8 @@
 
 P1–P5 均 DONE：资产负债查询、明确交易预填链接、单标决策、组合评估、当前持仓收益分析。Web/iOS 读取与分析、MacBook/iPhone 交易预填均已实际验收；P2 新入口首次真实券商提交/成交仍未验收。P5 完成的是现有持仓账面盈亏能力，不包含完整历史收益归因。
 
+Binance Spot只读开发候选沿原SyncExecutor → Repository → PositionUpsertService/B2事务 → U0/U1 → 原Web/MCP，不另建同步或财富Owner。UID绑定原Portfolio，BTC现货与USDT原币分开；USDT仅用批准美元等值约定，成本与源有效时间缺证保持UNKNOWN。四列nullable快照迁移为原CLI显式stage，默认不启用、不自动DDL。配置、证据、B3/C身份及首次接入边界见[Binance合同](BINANCE_SPOT.md)。生产接入尚未验收。
+
 ## 2. 生产调用关系
 
 ```mermaid

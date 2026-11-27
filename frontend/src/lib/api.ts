@@ -1081,7 +1081,7 @@ export interface PortfolioSummary {
   total_liabilities: number
   net_worth: number
   leverage_ratio: number
-  total_profit_loss: number
+  total_profit_loss: number | null
   allocation: Record<string, { value: number; pct: number }>
   platform_distribution: Record<string, number>
   concentration: Record<string, number>

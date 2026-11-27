@@ -32,6 +32,7 @@ class VehicleType(StrEnum):
     OPTION = "OPTION"
     FUTURE = "FUTURE"
     WARRANT = "WARRANT"
+    CRYPTO = "CRYPTO"
     OTHER = "OTHER"
     UNKNOWN = "UNKNOWN"
 
@@ -219,6 +220,17 @@ def _metadata_exposure(
 def classify_instrument(evidence: AssetClassificationEvidence) -> AssetClassification:
     """Resolve canonical vehicle and economic exposure using fixed priority."""
     broker_security_type = str(evidence.broker_security_type or "").strip().upper()
+    if (evidence.broker == "binance" and evidence.currency == "USDT"
+            and evidence.listing_market == "CRYPTO"
+            and (evidence.listing_symbol, broker_security_type) in {
+                ("BTC:CRYPTO", "CRYPTO_SPOT"), ("USDT:CRYPTO", "STABLECOIN")}):
+        cash = evidence.listing_symbol == "USDT:CRYPTO"
+        return AssetClassification(broker_security_type=broker_security_type,
+            vehicle_type=VehicleType.CASH if cash else VehicleType.CRYPTO,
+            economic_asset_class=EconomicAssetClass.CASH if cash else EconomicAssetClass.ALTERNATIVE,
+            economic_asset_subclass="USDT_USD_EQUIVALENT_CONVENTION" if cash else "BTC_SPOT_UNLEVERED",
+            classification_source="BINANCE_SPOT_NATIVE_IDENTITY",
+            classification_confidence="HIGH", verification_status="DETERMINISTIC")
     vehicle = _resolve_vehicle(evidence)
 
     verified, identity_conflict = find_verified_classification(
