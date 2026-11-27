@@ -379,7 +379,7 @@ class PositionUpsertService:
         meta = _json.loads(run.context_json or "{}")
         quote = meta.get("fx", {}).get(snap.currency)
         if quote:
-            if quote.get("rate") is None and (snap.market_value != 0 or snap.unrealized_pnl != 0):
+            if quote.get("rate") is None and (snap.market_value != 0 or snap.unrealized_pnl not in (None, 0)):
                 raise ValueError("FX_RATE_UNAVAILABLE")
             fx_rate = quote["rate"]
             fx_date = quote.get("rate_date") if quote.get("quality") in {"current","historical"} else quote.get("quality")

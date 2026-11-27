@@ -447,3 +447,20 @@ def test_balance_precision_boundary(context, free, accepted):
     else:
         with pytest.raises(ValueError, match='BINANCE_PRECISION_UNSUPPORTED'):
             publish(context, source)
+
+
+def test_missing_fx_cannot_publish_assets_but_explicit_zero_needs_no_conversion(context, monkeypatch):
+    from app.fx_service import fx_service, FXQuote
+    from app.models import Position
+    source = Source()
+    publish(context, source)
+    monkeypatch.setattr(fx_service, 'get_quote', lambda *_: FXQuote(None, None, 'none', 'none', 'unavailable'))
+    with pytest.raises(ValueError, match='FX_RATE_UNAVAILABLE'):
+        publish(context, source)
+    with context.sessions() as db:
+        assert db.query(Position).filter_by(symbol='USDT:CRYPTO').one().quantity == 120
+    source.balances = [dict(asset=asset, free='0', locked='0') for asset in ('BTC', 'USDT')]
+    publish(context, source)
+    with context.sessions() as db:
+        assert all(p.quantity == 0 and p.market_value_cny == 0 for p in db.query(Position).all())
+        assert db.query(Position).filter_by(symbol='BTC:CRYPTO').one().profit_loss_value is None
