@@ -133,7 +133,7 @@ def formal_strategic_review(snapshot, hierarchy, *, policy_context, portfolio_id
     candidate = hierarchy["strategic_review"]
     if (not isinstance(snapshot, SnapshotV2) or hierarchy["status"] != "QUALIFIED"
             or (snapshot.content_status != "APPROVED_CONTENT"
-                and not (snapshot.schema_version == "wp.policy.config.v1" and policy_context.get("release", {}).get("action")
+                and not (snapshot.schema_version in {"wp.policy.config.v1", "wp.policy.external.v1"} and policy_context.get("release", {}).get("action")
                          in {"RELEASE", "ROLLBACK"}))
             or policy_context.get("status") != "ACTIVE" or policy_context.get("mode") != "POLICY_ACTIVE"):
         return candidate

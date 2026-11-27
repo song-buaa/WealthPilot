@@ -138,6 +138,15 @@ class PolicyStore:
             from .fast_release import verify_config_bundle
             verify_config_bundle(self, db, scope, bundle_id, row, value)
             return value
+        if frozen_snapshot.get("schema_version") == "wp.policy.external.v1":
+            from .external_content import make_bundle
+            expected, _ = make_bundle(self, db, scope, value["external_predecessor"],
+                (bytes(row["philosophy"]), bytes(row["policy"])), row["request_id"],
+                row["version"]-1, value["created_at"], value["external_bindings"])
+            if (expected != value or bundle_id != expected["bundle_id"]
+                    or row["request_sha"] != digest(expected)):
+                raise PolicyError("EXTERNAL_CONTENT_DERIVATIVE_MISMATCH")
+            return value
         actual = derive(row["philosophy"], row["policy"], expected_hashes=value["source_hashes"], policy_version=value["bundle_version"],
                         expected_schema_version=frozen_snapshot.get("schema_version", ""))
         if (isinstance(actual, SnapshotV2)

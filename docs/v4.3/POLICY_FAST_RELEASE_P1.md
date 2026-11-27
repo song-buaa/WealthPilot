@@ -34,3 +34,23 @@ python -m backend.services.investment_policy.config_cli \
 探针通过 stdin 收到 phase 及 scope。CANDIDATE 另含冻结 Bundle，探针绑定已安装代码并检查对应消费者兼容。ACTIVE 通过各自的实际只读入口取回当前引用，返回 consumer、phase、code_sha、runtime_id 和 policy_reference。ACTIVE 探针不接收目标 Bundle。可用本仓 `python -m backend.services.investment_policy.config_probe --consumer <名称>` 绑定六个原入口，读取现有 Mini `installed.json`。Web 和 MCP 的 ACTIVE 探针需由安装者指定现役 127.0.0.1 端点，Web 如需鉴权可指定 0600 headers 文件。内嵌候选探针不启用完整后端、不启动持续服务。生产安装清单和运行实例的实际接线属于首次安装验收。激活前后收据各自检查，任一路径失败不产生最终 PASS。
 
 隔离运行使用 `--environment ISOLATED_REHEARSAL --rehearsal-trust <私有清单路径>`。不使用生产密钥、进程或政策库。现有 MCP 仍仅提供政策读取。本期没有远程政策写入入口。
+
+## v1.1 单次批准与正文修订
+
+| 操作 | P1 | v1.1 |
+| --- | --- | --- |
+| 权重 | 配置预览、独立签名、原子发布 | 沿用 P1，可用同一个可信操作入口 |
+| 正文 | 源内批准标记、分开预检和发布 | 一次冻结双来源及结构化差量，批准凭据单独绑定 |
+| 上线 | 分阶段保留审计 | 预检及备份后，在一个事务内追加 Stage、Validate、Approve 和 Release，再读回六路 |
+
+可信操作员使用原 `config_cli` 入口及私有 0700 工作目录。以下命令均继承既有数据库、scope、环境参数。
+
+1. `export-content --out /private/path/editor` 导出编辑底稿。此时剥离历史源内批准标记，旧版不写入。
+2. 编辑理念及政策的 `## 11. 非执行政策说明`，或在不改变规则运算符、范围、动作的前提下修改 §6.1 已支持的发行人阈值及对应引用。BTC 子合同、B3 和其他结构化条款沿用旧版。需要改变现有未支持的结构化语义或增加计算能力时，使用原 Policy Owner 发布路径或先完成代码研发。自由文本按描述性内容处理。
+3. `preview --philosophy /private/path/editor.philosophy.md --policy /private/path/editor.policy.md --out /private/path/candidate.json` 冻结文件及候选。L1 仍使用 `preview --config ...`。向 PO 呈现原文、语义差量、两份来源 SHA、结构化 SHA、候选 SHA 和前驱。
+4. PO 仅在对话中明确批准完整候选 SHA 及发布。可信操作员随后运行 `publish --candidate /private/path/candidate.json --confirmed-ref <正式批准评论链接>`。可以沿用原 `--approval ... --signature ...`。批准后原文及候选不再改动。
+5. 一个回执包含 PolicyReference、来源 SHA、序号、批准引用和六路读回。若已提交但读回待完成，使用同一候选及同一审批记录续办。并发前驱变化、新的候选或过期需重新预览及批准。回滚仍有独立批准。
+
+`--confirmed-ref` 调用既有受保护信任文件中配置的 `approval_command`。签名操作员须核验真实 PO 授权，签名对象包含候选 SHA、动作、scope、环境和数据库身份。命令接收标准输入 JSON，返回 `{"approval": {...}, "signature": "<Ed25519 hex>"}`。续办必须取得同一签名和批准时刻。评论 URL 本身不构成授权。部署前须核实现有可信签名操作员适配，本次开发不安装生产接线。MCP 仍只读。
+
+隔离验收通过旧版确切 v4 金样重新派生，先以旧合同回放历史，再通过 v1.1 重发同一 BTC 内容并验证后续 L1 继承。新合同不会把任意新 BTC 治理正文自动识别为可执行规则。

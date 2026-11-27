@@ -253,7 +253,10 @@ def display_policy(template, snapshot, config, targets, growth, stable):
         body.extend(adjusted)
         lines[start+1:end] = ["", *("\n\n".join(body)).splitlines(), ""]
     # Keep historical B3 approval and policy scope; project only the effective node targets.
-    for i, line in enumerate(lines):
+    end = next((i for i, line in enumerate(lines) if line == "## 11. 非执行政策说明"), len(lines))
+    if snapshot.schema_version != "wp.policy.external.v1":
+        end = len(lines)  # Preserve the historic renderer for immutable old configurations.
+    for i, line in enumerate(lines[:end]):
         for node, value in (("growth_and_alternatives", growth), ("stable_pool", stable)):
             if line.startswith(f"B3节点 {node}："):
                 lines[i] = f"B3节点 {node}：{pct(value)}"
@@ -314,7 +317,8 @@ def inherited_policy(base):
 
 
 def compile_config(base, philosophy, template, config, listing_values, *, version, created_at, bindings):
-    if not isinstance(base, SnapshotV2) or isinstance(base, ConfiguredSnapshot) or base.content_status != "APPROVED_CONTENT":
+    if not isinstance(base, SnapshotV2) or (base.schema_version != "wp.policy.external.v1" and
+            (isinstance(base, ConfiguredSnapshot) or base.content_status != "APPROVED_CONTENT")):
         raise PolicyError("APPROVED_MARKDOWN_POLICY_BASE_REQUIRED")
     admitted = owner_listings(listing_values, clock(created_at).date())
     labels = bindings["labels"]
@@ -351,7 +355,7 @@ def compile_config(base, philosophy, template, config, listing_values, *, versio
     scope = ConfiguredStrategicScope(**(base.strategic_review_scope.model_dump() | {
         "nodes": {"growth_and_alternatives": growth, "stable_pool": stable}, "source_clause": refs["6.3"]}))
     fields = dict(policy_version=version, allocation=allocation, rules=rules,
-        content_approved_on=base.content_approved_on,
+        content_approved_on=base.content_approved_on or base.inherited_content_approval_date,
         source_hashes={"policy":source_hash, "philosophy":hashlib.sha256(philosophy).hexdigest()},
         contextual_clauses=refs, strategic_review_scope=scope, listings=admitted, target_issuers=labels, target_symbols=symbols)
     if hasattr(base, "btc_governance"):
