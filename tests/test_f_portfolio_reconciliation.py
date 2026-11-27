@@ -188,7 +188,7 @@ def test_exact_linked_fills_and_sync_are_separate():
     row = {"kind":"EXECUTION", "local_order_id":"old-order", "account_ref":"history-x", "broker":"tiger",
         "symbol":"PDD:US", "currency":"USD", "side":"SELL", "time_precision":"instant",
         "executed_at":(at-timedelta(minutes=10)).isoformat(), "quantity":"100", "price":"774", "multiplier":"1",
-        "external_id":"EX-A", "instrument_key":"listing:pdd", "source":"broker_fixture",
+        "external_id":"EX-A", "instrument_key":"listing:PDD:US:USD:STK", "sec_type":"STK", "source":"broker_fixture",
         "evidence_sources":[{"source_sha256":"a"*64}]}
     order = {"account_ref":"account_fixture","history_account_ref":"history-x","broker":"tiger",
         "symbol":"PDD:US","side":"SELL","status":"filled","filled_qty":100,
@@ -198,6 +198,10 @@ def test_exact_linked_fills_and_sync_are_separate():
     def verify():
         return execution_for_trade({"pdd":"old-order"},evidence,"pdd",key,"SELL",D(77400),AT,at)
     assert verify()["status"] == "VERIFIED_EXECUTED" and verify()["sync_status_at_readback"] == "SYNC_PENDING"
+    second_identity = {**row, "external_id":"EX-B", "instrument_key":"conid:123"}
+    evidence["history"].append(second_identity)
+    assert verify()["issue"] == "LINKED_EXECUTION_NATIVE_IDENTITY_CONFLICT"
+    evidence["history"].pop()
     order["filled_qty"] = 0
     assert verify()["issue"] == "LINKED_EXECUTION_OWNER_CONFLICT"
     order["filled_qty"] = 50
@@ -256,6 +260,10 @@ def test_original_history_and_order_owner_read_only(history_db):
     assert proof["executions"][0]["execution_ref"] == trade["external_id"]
     assert proof["sync_status_at_readback"] != "SYNCED"
     assert history_db.path.read_bytes() == before
+    evidence["history"][0]["instrument_key"] = "conid:123"
+    mismatched = execution_for_trade({"buy":"proof-order"}, evidence, "buy", (account,"IB01:LSE","USD"), "BUY",
+                                     D(1000), start, end)
+    assert mismatched["issue"] == "LINKED_EXECUTION_EVIDENCE_CONFLICT"
 
 
 def test_outside_plan_and_duplicate_order_references_rejected(chain):
