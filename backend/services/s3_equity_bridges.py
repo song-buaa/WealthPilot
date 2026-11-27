@@ -20,6 +20,8 @@ def normalize_openai(card, profile, evidence):
     from backend.services.s3_operating_research import Profile, _joint_qualify, project_card
     assumptions = Profile.model_validate(card['operating_assumptions'])
     baseline = deepcopy(card['operating_baseline'])
+    if (baseline['start'],baseline['period']) != tuple(profile['window']):
+        return None
     observed = dec(baseline['flows']['net_income']['value'])
     figures = profile['openai_gaap_after_tax_usd_m']
     adjustment = (dec(figures['fy26'])-dec(figures['fy26_q1'])+dec(figures['fy27_q1']))*10**6
@@ -42,7 +44,8 @@ def normalize_openai(card, profile, evidence):
     refreshed['nonoperating_normalization'] = dict(
         gaap_eps=original_checks['diluted_eps_ttm'], model_adjusted_eps=adjusts,
         reported_gaap_parent_income_usd=str(observed), adjusted_parent_income_usd=str(adjusted),
-        openai_after_tax_contribution_usd=str(adjustment), source_evidence=[evidence[k] for k in refs],
+        openai_after_tax_contribution_usd=str(adjustment), source_evidence=[evidence[k] for k in [*refs,profile['annual_source_sha256']]],
+        model_window=profile['window'],
         scope='OPENAI_INVESTMENT_GAINS_REMOVED; AZURE, COMMERCIAL_REVENUE_AND_ROYALTIES_RETAINED; OTHER_INVESTMENTS_NOT_RESTATED')
     card.update(refreshed)
     return True
@@ -74,10 +77,12 @@ def investment_materiality(card, profile, start, end, *, cutoff=None, price=None
     return dict(status='DECISION_THRESHOLD_SENSITIVE' if switches else 'NO_THRESHOLD_CROSSING_IN_TESTED_STRESS',
         obligation_adjusted_net_terminal_proceeds_needed_usd_m=text(hurdle*shares+obligation),
         bounded_economic_range=False, decision_threshold_crossed=switches, cases=rows,
+        tested_scope='BASE_ANNUALIZED_RETURN_HURDLE_ONLY',
+        relative_comparison_sensitive=None,cautious_downside_sensitive=None,
         frozen_stress_inputs={key:profile[key] for key in ('reported_diluted_shares_m',
             'commitment_remaining_usd_m','gross_reference_usd_m','official_transaction_anchors')},
         checked_at=cutoff.isoformat(),
-        terms='Funding reference amounts are historical transaction-scale stresses. Tax basis, transfer rights, preferences, timing and residual equity are not quantified.',
+        terms='Funding reference amounts are historical transaction-scale stresses. 204,480m is 24% times the investee historical 852,000m funding scale; it is neither a cap nor distributable value. Tax basis, transfer rights, preferences, timing and residual equity are not quantified.',
         reference_sources=profile['official_transaction_anchors'])
 
 

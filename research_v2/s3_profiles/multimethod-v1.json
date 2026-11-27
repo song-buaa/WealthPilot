@@ -157,6 +157,7 @@
     "commitment_remaining_usd_m": "1000",
     "reported_diluted_shares_m": "7446",
     "as_converted": "0.24",
+    "window": ["2025-10-01", "2026-09-30"],
     "gross_reference_usd_m": [
       "0",
       "135000",
