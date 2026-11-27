@@ -92,6 +92,8 @@ QUALITY_CONCEPTS.update({
     ('wp-disclosure', 'OrdinarySharesPerADS'): ('quality_ads_ratio', 'ordinary_shares_per_ads'),
     ('wp-disclosure', 'WeightedDilutedADS'): ('quality_diluted_ads_shares', 'weighted_diluted_ads'),
     ('wp-disclosure', 'CashFlowChangeInMerchantPayables'): ('quality_merchant_float_change', 'signed_merchant_payables_cash_flow_contribution'),
+    ('wp-disclosure', 'CombinedPropertyEquipmentIntangiblePurchases'): (
+        'quality_combined_acquisitions', 'signed_property_equipment_and_intangible_purchases'),
 })
 QUALITY_INSTANT = {'quality_finance_lease_liability', 'quality_operating_lease_liability', 'quality_current_debt', 'quality_current_assets', 'quality_current_long_term_debt', 'quality_shares', 'quality_cash_including_restricted', 'quality_commercial_paper', 'quality_noncurrent_debt', 'quality_equity', 'quality_cash', 'quality_current_liabilities', 'quality_assets', 'quality_liabilities'}
 QUALITY_INSTANT |= {'quality_restricted_cash', 'quality_deposits_investments', 'quality_ads_ratio', 'quality_total_equity', 'quality_noncontrolling'}
@@ -740,7 +742,34 @@ def _domestic_fiscal_eps_context(rows, issuer):
     return context
 
 
-def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=None):
+def _nvidia_supplement_periods(soup, source_rows):
+    """Bind an explicitly labelled quarter to independently known SEC fiscal boundaries."""
+    from research_v2.official_disclosures import _date
+    labels = re.findall(r'For the Quarter Ended ([A-Za-z]+ \d{1,2}, 20\d{2})',
+                        ' '.join(' '.join(soup.stripped_strings).split()))
+    if not labels or len(set(labels)) != 1:
+        return {}
+    end = _day(_date(labels[0]))
+    observations = [(r, o) for r in source_rows if r.get('official_disclosure', {}).get('cik') == '0001045810'
+                    for o in r['financial_observations'] if o['source_field'] == 'dilutedEPSOrdinary'
+                    and o['currency'] == 'USD' and o['fiscal_period_end'] < end.isoformat()]
+    periods = {}
+    for scope, reference_scope, low, high in (('quarterly', 'quarterly', 70, 105),
+                                              ('year_to_date', 'annual', 245, 300)):
+        matches = [(r,o) for r,o in observations if o['period_basis'] == reference_scope
+                   and low <= (end-_day(o['fiscal_period_end'])).days <= high]
+        ends = {o['fiscal_period_end'] for _,o in matches}
+        if len(ends) != 1:
+            continue
+        record, obs = min(matches, key=lambda p: (p[0]['published_at'], p[0]['record_id']))
+        start = _day(obs['fiscal_period_end']) + timedelta(days=1)
+        periods[end.isoformat(), scope] = dict(start=start.isoformat(), ref=record['record_id'],
+                                                at=record['published_at'])
+    return periods
+
+
+def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=None,
+                 current_structure=None):
     """Restricted full-submission envelope and inline XBRL, including exhibits.
 
     Never fetch an attachment named by untrusted HTML. The SEC full submission
@@ -796,6 +825,13 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
             table_observations += parse_valuation_statement_inputs(soup, filing['published_at'])
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
+            if current_structure is not None and is_exhibit and filing['form'] == '8-K':
+                if issuer['cik'] == '0001045810' and kind == 'EX-99.3' and filename == 'supplementalfinancialinfor.htm':
+                    from research_v2.official_disclosures import parse_nvidia_supplement
+                    table_observations += parse_nvidia_supplement(soup, _nvidia_supplement_periods(soup, current_structure))
+                if issuer['cik'] == '0001318605' and kind == 'EX-99.1' and filename == 'exhibit991.htm' and fiscal_eps_context:
+                    from research_v2.official_disclosures import parse_tesla_summary_eps
+                    table_observations += parse_tesla_summary_eps(soup, fiscal_eps_context)
             if is_exhibit and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
                 operating = parse_vehicle_operating(soup,filing['published_at'])
                 for summary in operating:
@@ -1108,24 +1144,152 @@ def revalidate_asfiled_snapshot(source, issuer, filing, snapshot):
     return dict(record, **proof)
 
 
-def _append_original(rows, issuer, filing, identity_digest):
+def _append_original(rows, issuer, filing, identity_digest, *, current=False, at=None):
     try:
-        original = _fetch(filing['full_url'])
+        url = filing['full_url']
+        if current:
+            from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
+            key = 'sec-current-original:v1:'+url
+            original = get_cached(key)
+            if original:
+                _diagnose(url, 'cache_hit')
+            else:
+                original = _fetch(url)
+        else:
+            original = _fetch(url)
         if not original:
             return
+        proof_rows = rows
+        if current and at is not None:
+            from backend.services.market_data.evidence import stamp
+            proof_rows = [row for row in rows if stamp(row['fetched_at']) <= at]
         record = parse_filing(original, issuer, filing, identity_digest=identity_digest,
-                              fiscal_eps_context=_domestic_fiscal_eps_context(rows, issuer))
+                              fiscal_eps_context=_domestic_fiscal_eps_context(proof_rows, issuer),
+                              **({'current_structure': proof_rows} if current else {}))
     except (ValueError, TypeError, KeyError, UnicodeError, OSError, InvalidOperation, OverflowError):
         _diagnose(filing['full_url'], 'parse_error')
         return
     if record and record['financial_observations']:
+        if current:
+            set_cached(key, original, FUNDAMENTALS_TTL)
         # The evidence owner resolves overlapping facts and actual conflicts.
         rows.append(record)
     elif filing['form'] == '20-F':
         _diagnose(filing['full_url'], 'annual_original_unqualified')
 
 
-def collect(symbol):
+def _current_window(issuer, rows, filings, submissions, capture, *, at):
+    """Current fiscal bounds and the exact releases that still require originals."""
+    from backend.services.market_data.av_fundamentals_service import current_income_records
+    from backend.services.market_data.evidence import stamp
+    filings = [f for f in filings if stamp(f['published_at']) <= at]
+    known = [r for r in rows if stamp(r['fetched_at']) <= at and stamp(r['published_at']) <= at]
+    pairs = [(r, o) for r in known for o in r['financial_observations']
+             if o['period_basis'] == 'quarterly' and o['currency'] == 'USD'
+             and (not o.get('period_start_source_refs') or (
+                 stamp(o.get('proof_available_at')) and stamp(o['proof_available_at']) <= at))
+             and o.get('fiscal_period_start') and _period(o['fiscal_period_start'], o['fiscal_period_end']) == 'quarterly']
+    spans = {}
+    for record, item in pairs:
+        spans.setdefault(item['fiscal_period_end'], {})[item['fiscal_period_start']] = record
+    periods = {end: dict(start=start, refs=[r['record_id']], known_at=r['published_at'])
+               for end, alternatives in spans.items() if len(alternatives) == 1
+               for start, r in alternatives.items()}
+    fiscal_q4 = _domestic_fiscal_eps_context(known, issuer)
+    for end, proof in fiscal_q4.items():
+        periods.setdefault(end, dict(start=proof['start'], refs=[proof['prior_ref'], proof['annual_ref']],
+                                     known_at=proof['proof_available_at']))
+    regular = sorted((f for f in filings if f['form'] in {'10-Q', '10-K'} and f['report_date']),
+                     key=lambda f: f['report_date'], reverse=True)
+    latest = max([f['report_date'] for f in regular[:1]] + list(spans), default=None)
+    recent = submissions['filings']['recent']
+    items = recent.get('items') or []
+    by_accession = {a: str(items[i]) for i, a in enumerate(recent['accessionNumber']) if i < len(items)}
+    release = [f for f in filings if f['form'] == '8-K'
+               and '2.02' in re.split(r'[,;]\s*', by_accession.get(f['accession'], ''))]
+    disclosed = {r['official_disclosure']['accession'] for r, o in pairs if o['fiscal_period_end'] == latest}
+    new = next((f for f in release if regular and f['filed'] > regular[0]['filed']), None)
+    pending = bool(new and new['accession'] not in disclosed)
+    earnings_source = capture.get('EARNINGS', {})
+    earnings_observed_at = stamp(earnings_source.get('diagnostics', {}).get('fetched_at'))
+    earnings_payload = earnings_source.get('payload', {})
+    earnings = (earnings_payload.get('quarterlyEarnings', [])
+                if earnings_observed_at and earnings_observed_at <= at
+                and earnings_source.get('diagnostics', {}).get('status') == 'available'
+                and earnings_payload.get('symbol') == issuer['sec_ticker'] else [])
+    vendor_releases = [(d, e) for r in earnings if isinstance(r, dict)
+                       and (d := stamp(r.get('reportedDate'))) and (e := stamp(r.get('fiscalDateEnding')))
+                       and e <= d <= earnings_observed_at] if isinstance(earnings, list) else []
+    if latest and vendor_releases:
+        release_at, vendor_end = max(vendor_releases)
+        if vendor_end.date() > _day(latest):
+            # A calendar-month label can alert discovery, never rename a vendor fiscal period.
+            pending |= not (new and new['accession'] in disclosed
+                            and stamp(new['accepted_at']).date() == release_at.date()
+                            and _day(latest).strftime('%Y-%m') == vendor_end.strftime('%Y-%m'))
+    vendor = current_income_records(capture, issuer, periods, at=at)
+    official = {}
+    for _, item in pairs:
+        if item['fiscal_period_end'] not in periods or item['fiscal_period_start'] != periods[item['fiscal_period_end']]['start']:
+            continue
+        field = item['source_field']
+        if field == 'netIncome' and item['accounting_basis'] == 'net_income_attributable_parent':
+            field = 'parentNetIncome'
+        official.setdefault((item['fiscal_period_end'],field), set()).add(
+            (Decimal(str(item['value']))*Decimal(str(item['unit_scale'])), item['accounting_basis']))
+    by_end = {}
+    for (end, field), values in official.items():
+        if len(values) == 1:
+            by_end.setdefault(end,set()).add(field)
+    vendor_keys = {'revenue_quarter':'totalRevenue', 'operating_income_quarter':'operatingIncome',
+                   'net_income_attributable_parent_quarter':'parentNetIncome'}
+    for row in vendor:
+        slot = row['period'], vendor_keys[row['field']]
+        if slot not in official:
+            by_end.setdefault(slot[0], set()).add(slot[1])
+    window = sorted(({f['report_date'] for f in regular} | set(periods)), reverse=True)[:4]
+    eps_missing = [end for end in window if 'dilutedEPSOrdinary' not in by_end.get(end,set())]
+    missing = [end for end in window if not (
+        {'dilutedEPSOrdinary', 'totalRevenue', 'operatingIncome', 'operatingCashflow'} <= by_end.get(end,set())
+        and {'netIncome', 'parentNetIncome'} & by_end.get(end,set()))]
+    return dict(latest_period=latest, pending_latest_release=pending, vendor_records=vendor,
+                missing_periods=missing, eps_missing_periods=eps_missing, window=window,
+                earnings_release_dates={e.date().isoformat(): d.date().isoformat()
+                                        for d,e in vendor_releases if e.date().isoformat() in window}), regular, release, new
+
+
+def _collect_current_originals(rows, issuer, filings, submissions, digest, current):
+    attempts = set()
+    for _ in range(MAX_FILINGS + 1):
+        at = current['at'] or datetime.now(timezone.utc)
+        status, regular, releases, new = _current_window(issuer, rows, filings, submissions, current['capture'], at=at)
+        current['result'] = status
+        if len(attempts) >= MAX_FILINGS:
+            break
+        targets = [new] if status['pending_latest_release'] and new else []
+        ends = list(dict.fromkeys(status['eps_missing_periods'] + status['missing_periods']))
+        for end in ends:
+            # Calendar Q4 presentations often precede the annual filing by a day.
+            release_day = status['earnings_release_dates'].get(end)
+            candidates = [f for f in releases if 0 <= (_day(f['filed'])-_day(end)).days <= 63]
+            targets += sorted(candidates, key=lambda f: (
+                f['accepted_at'][:10] != release_day, f['filed']))[:1]
+            targets += [f for f in regular if f['report_date'] == end][:1]
+        target = next((f for f in targets if f['accession'] not in attempts), None)
+        if not target:
+            break
+        attempts.add(target['accession'])
+        _append_original(rows, issuer, target, digest, current=True, at=current['at'])
+    current['result']['original_attempts'] = len(attempts)
+
+
+def _current_domestic_issuer(issuer):
+    # The existing listed-class original path owns EPS for multi-class issuers.
+    tickers = issuer.get('registered_tickers', issuer.get('registered_equity_tickers', []))
+    return issuer.get('issuer_type') == 'domestic' and len(tickers) == 1
+
+
+def collect(symbol, *, current=None):
     """Current-cycle discovery: cached directory + Submissions + facts + originals.
 
     No network in demo/mock. Successful original reads retain original fetched_at.
@@ -1138,6 +1302,11 @@ def collect(symbol):
         return [], {}.get
     cache_key = 'sec-disclosures:v3-annual-original:'+symbol
     cached = get_cached(cache_key)
+    if cached and current is not None and not all(
+        not _current_domestic_issuer(r.get('source_verification', {}).get('issuer_identity', {}))
+        for r in cached['rows']
+    ):
+        cached = None
     if cached is not None:
         _diagnostics.set(tuple(dict(row, request_attempted=False) for row in cached['diagnostics']))
         rows = cached['rows']
@@ -1155,11 +1324,24 @@ def collect(symbol):
     if len(matches) != 1:
         _diagnose(DIRECTORY,'identity_unresolved')
         return [], {}.get
+    def structured(url):
+        if current is None:
+            return _fetch(url)
+        key = 'sec-current-structured:v1:'+url
+        cached = get_cached(key)
+        if cached:
+            _diagnose(url, 'cache_hit')
+            return cached
+        value = _fetch(url)
+        if _json(value):
+            from backend.services.market_data.av_fundamentals_service import RELEASE_METADATA_TTL
+            set_cached(key, value, RELEASE_METADATA_TTL if '/submissions/' in url else FUNDAMENTALS_TTL)
+        return value
     try:
         cik = str(int(matches[0]['cik_str'])).zfill(10)
         if not re.fullmatch(r'\d{10}', cik) or int(cik) <= 0:
             return [], {}.get
-        submissions_source = _fetch('https://data.sec.gov/submissions/CIK'+cik+'.json')
+        submissions_source = structured('https://data.sec.gov/submissions/CIK'+cik+'.json')
         submissions = _json(submissions_source)
         issuer = resolve_sec_issuer(symbol, directory, submissions)
         if not issuer:
@@ -1167,7 +1349,14 @@ def collect(symbol):
             return [], {}.get
         filings = discover_filings(issuer, submissions)
         identity_digest = hashlib.sha256(directory_source[0]+submissions_source[0]).hexdigest()
-        facts = _fetch('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json')
+        # Establish issuer scope first. Foreign/ADS keep their reviewed source path.
+        use_current = current is not None and _current_domestic_issuer(issuer)
+        if use_current:
+            current['result'] = dict(latest_period=None, pending_latest_release=True, vendor_records=[])
+            if current['capture'] is None:
+                from backend.services.market_data.av_fundamentals_service import collect_current_statements
+                current['capture'] = collect_current_statements(symbol)
+        facts = structured('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json')
         if not facts and _access_failed():
             return [], {}.get
         rows = parse_companyfacts(facts, issuer, filings, identity_digest=identity_digest, quality="all")
@@ -1176,6 +1365,9 @@ def collect(symbol):
             _diagnose('https://data.sec.gov/api/xbrl/companyfacts/CIK'+cik+'.json','invalid_json' if invalid else 'data_missing')
             if invalid:
                 return [], {}.get
+        if use_current:
+            _collect_current_originals(rows, issuer, filings, submissions, identity_digest, current)
+            return deepcopy(rows), {r['record_id']:deepcopy(r) for r in rows}.get
         # Search current-cycle events newest-first. For foreign issuers the
         # latest eligible annual original is a separate, bounded source read:
         # quarterly coverage cannot establish the audited annual cash bridge.

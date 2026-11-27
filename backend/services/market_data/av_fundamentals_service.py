@@ -19,6 +19,7 @@ from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENT
 logger = logging.getLogger(__name__)
 
 AV_BASE = "https://www.alphavantage.co/query"
+RELEASE_METADATA_TTL = 15 * 60
 
 # One live selection shared by financials, market data and stored-research adapters.
 AV_KEY_NAMES = ("ALPHA_VANTAGE_API_KEY", "ALPHAVANTAGE_API_KEY", "AV_API_KEY",
@@ -163,7 +164,8 @@ def _endpoint(function, ticker, api_key, *, pace=False):
     diagnostic = response_diagnostic(function, payload, api_key)
     diagnostic["status"] = status
     if status == "available":
-        set_cached(key, dict(payload=payload, diagnostic=diagnostic, credential_token=hash(api_key)), FUNDAMENTALS_TTL)
+        ttl = RELEASE_METADATA_TTL if function == 'EARNINGS' else FUNDAMENTALS_TTL
+        set_cached(key, dict(payload=payload, diagnostic=diagnostic, credential_token=hash(api_key)), ttl)
     else:
         logger.info("AV endpoint unavailable: %s/%s status=%s", function, ticker, status)
         payload = None
@@ -231,6 +233,73 @@ def _report_provenance(ticker, function, rows, fetched_at):
         fetched_at=fetched_at, valuation_observed_at=None,
         observations=[{key:row[key] for key in ("fiscalDateEnding", "reportedCurrency", "totalRevenue", "netIncome",
             "netIncomeFromContinuingOperations", "operatingCashflow", "capitalExpenditures") if key in row} for row in rows])
+
+
+def collect_current_statements(symbol):
+    """Fetch only current income and earnings coverage, reusing per-endpoint cache."""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
+    ticker = _wp_symbol_to_av_ticker(symbol)
+    key = get_next_av_key()
+    if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not ticker or key == 'demo':
+        return {}
+    results = {}
+    for function in ('INCOME_STATEMENT', 'EARNINGS'):
+        payload, diagnostic = _endpoint(function, ticker, key, pace=bool(results))
+        if payload and payload.get('symbol') == ticker:
+            results[function] = dict(payload=payload, diagnostics=diagnostic)
+    return results
+
+
+def current_income_records(capture, issuer, periods, *, at):
+    """Current observations on exact SEC fiscal spans. No amount matching or PIT authority."""
+    from backend.services.market_data.evidence import stamp
+    source = capture.get('INCOME_STATEMENT', {})
+    body, diag = source.get('payload', {}), source.get('diagnostics', {})
+    fetched = stamp(diag.get('fetched_at'))
+    if (issuer['issuer_type'] != 'domestic' or body.get('symbol') != issuer['sec_ticker']
+            or diag.get('status') != 'available' or not fetched or fetched > at):
+        return []
+    mapping = {
+        'totalRevenue': ('revenue_quarter', 'total_revenue'),
+        'operatingIncome': ('operating_income_quarter', 'operating_income'),
+        'netIncome': ('net_income_attributable_parent_quarter', 'net_income_attributable_parent'),
+    }
+    rows = body.get('quarterlyReports')
+    if not isinstance(rows, list):
+        return []
+    counts = {}
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get('fiscalDateEnding'), str):
+            end = row['fiscalDateEnding']
+            counts[end] = counts.get(end, 0) + 1
+    result = []
+    import hashlib
+    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        end = row.get('fiscalDateEnding')
+        if (not isinstance(end, str) or counts.get(end) != 1 or end not in periods
+                or row.get('reportedCurrency') != 'USD' or stamp(end) > fetched):
+            continue
+        proof = periods[end]
+        if stamp(proof['known_at']) > fetched:
+            continue
+        for raw_field, (field, basis) in mapping.items():
+            raw = row.get(raw_field)
+            value = _safe_float(raw) if isinstance(raw, str) else None
+            if value is None or abs(value) > 1e20:
+                continue
+            result.append(dict(kind='fundamental_field', symbol=issuer['symbol'], field=field,
+                source='alphavantage', source_url='https://www.alphavantage.co/documentation/#income-statement',
+                record_id=f'AV:INCOME_STATEMENT:{issuer["sec_ticker"]}:{digest}:{index}:{field}',
+                canonical_payload_sha256=digest, source_locator=f'/quarterlyReports/{index}/{raw_field}',
+                fiscal_period_start=proof['start'], period=end, data_as_of=end, scope='quarterly',
+                period_source_refs=proof['refs'], issuer_type='domestic', issuer_cik=issuer['cik'],
+                currency='USD', unit='currency_units', accounting_basis=basis, published_at=None,
+                fetched_at=fetched.isoformat(), known_at=fetched.isoformat(), qualification='CURRENT_RESEARCH_ONLY',
+                quality='valid', values={field:value}, issues=[], is_seed=False, is_mock=False))
+    return result
 
 
 def statement_metrics(ticker, income, cashflow, *, fetched_at):

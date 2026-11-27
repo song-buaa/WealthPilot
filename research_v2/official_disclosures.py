@@ -633,6 +633,120 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
     return result
 
 
+def parse_tesla_summary_eps(soup, period_context):
+    """Read the declared financial summary's explicit GAAP row and Q4 column."""
+    if soup.find('table'):
+        return []
+    body = ' '.join(' '.join(soup.stripped_strings).split())
+    headers = list(re.finditer(
+        r'F I N A N C I A L S U M M A R Y \(Unaudited\) '
+        r'\(\$ in millions, except percentages and per share data\) '
+        r'Q4-(20\d{2}) Q1-(20\d{2}) Q2-\2 Q3-\2 Q4-\2 YoY Total automotive revenues',
+        body,
+    ))
+    if len(headers) != 1:
+        return []
+    header = headers[0]
+    if int(header[1]) + 1 != int(header[2]):
+        return []
+    end = header[2] + '-12-31'
+    proof = period_context.get(end)
+    if not proof or proof['start'] != header[2] + '-10-01':
+        return []
+    rows = re.findall(
+        r'EPS attributable to common stockholders, diluted \(GAAP\) \(1\) '
+        r'((?:-?\d+\.\d{2} ){5})-?\d+% EPS attributable to common stockholders, diluted \(non-GAAP\)',
+        body[header.end():].split('Net cash provided by operating activities', 1)[0],
+    )
+    if len(rows) != 1:
+        return []
+    return [dict(source_field='dilutedEPSOrdinary', value=float(Decimal(rows[0].split()[4])),
+        currency='USD', unit='currency_per_ordinary_share', unit_scale=1, period_basis='quarterly',
+        fiscal_period_start=proof['start'], fiscal_period_end=end, accounting_basis='diluted_eps_ordinary',
+        period_start_source_refs=[proof['prior_ref'], proof['annual_ref']],
+        proof_available_at=proof['proof_available_at'],
+        source_locator='Financial summary/GAAP diluted common-stockholder EPS/Q4 column')]
+
+
+def parse_nvidia_supplement(soup, periods):
+    """Read independently bounded three-month columns in two exact statements."""
+    from bs4 import NavigableString
+    result = []
+    income = 'CONDENSED CONSOLIDATED STATEMENTS OF INCOME'
+    cash = 'CONDENSED CONSOLIDATED STATEMENTS OF CASH FLOWS'
+    for ti, table in enumerate(soup.find_all('table')):
+        try:
+            rows = _grid(table)
+        except ValueError:
+            continue
+        labels = [next((v.strip() for v in row if v.strip()), '') for row in rows]
+        prior = []
+        for node in table.previous_elements:
+            if getattr(node, 'name', None) == 'table':
+                break
+            if isinstance(node, NavigableString) and str(node).strip():
+                prior.append(' '.join(str(node).split()))
+                if len(prior) == 3:
+                    break
+        statement = (income if prior == ['(Unaudited)', '(In millions, except per share data)', income]
+                     else cash if labels[:5] == ['', '', cash, '(In millions)', '(Unaudited)']
+                     else None)
+        if not statement:
+            continue
+        boundary = next((i for i, label in enumerate(labels) if label == 'Three Months Ended'), None)
+        if boundary is None or boundary + 3 >= len(rows):
+            continue
+        header_end = boundary + 3
+        dollar_row = 'Revenue' if statement == income else 'Net income'
+        anchors = [row for row, label in zip(rows, labels) if label == dollar_row]
+        if len(anchors) != 1:
+            continue
+        heading = None
+        for ri in range(header_end, len(rows)):
+            label = labels[ri]
+            if label.endswith(':'):
+                heading = label
+            fields = {
+                'Revenue': [('totalRevenue', 'total_revenue'), ('quality_revenue', 'total_revenue')],
+                'Operating income': [('operatingIncome', 'operating_income'), ('quality_operating_income', 'operating_income')],
+                'Net income': [('netIncome', 'consolidated_net_income')],
+            } if statement == income else {
+                'Net cash provided by operating activities': [('operatingCashflow', 'operating_cash_flow'), ('quality_cfo', 'operating_cash_flow')],
+                'Purchases related to property and equipment and intangible assets': [
+                    ('quality_combined_acquisitions', 'signed_property_equipment_and_intangible_purchases')],
+            }
+            if statement == income and label == 'Diluted':
+                fields = {'Diluted': [('dilutedEPSOrdinary', 'diluted_eps_ordinary')]} if heading == 'Net income per share:' else (
+                    {'Diluted': [('quality_diluted_shares', 'weighted_diluted_shares')]}
+                    if heading == 'Weighted average shares used in per share computation:' else {})
+            for key, basis in fields.get(label, []):
+                for col in range(1, min(len(rows[ri]), len(anchors[0]))):
+                    # The anchor identifies numeric columns when colspan repeats a number.
+                    if anchors[0][col-1] != '$' or _amount(anchors[0][col]) is None:
+                        continue
+                    header = _column_header(rows[boundary:header_end], header_end-boundary, col).strip()
+                    match = re.fullmatch(r'(Three|Nine) Months Ended ([A-Za-z]+ \d{1,2},\s+20\d{2})', header)
+                    if not match:
+                        continue
+                    end = _date(match[2])
+                    scope = 'quarterly' if match[1] == 'Three' else 'year_to_date'
+                    proof = periods.get((end, scope))
+                    if not proof or (scope != 'quarterly' and not key.startswith('quality_')):
+                        continue
+                    value = _amount(rows[ri][col])
+                    if value is None or (key == 'quality_combined_acquisitions' and value > 0):
+                        continue
+                    eps, shares = key == 'dilutedEPSOrdinary', key == 'quality_diluted_shares'
+                    result.append(dict(source_field=key, value=float(value),
+                        currency=None if shares else 'USD',
+                        unit='shares' if shares else 'currency_per_ordinary_share' if eps else 'currency_units',
+                        unit_scale=1 if eps else 1000000, period_basis=scope,
+                        fiscal_period_start=proof['start'], fiscal_period_end=end, accounting_basis=basis,
+                        period_start_source_refs=[proof['ref']], proof_available_at=proof['at'],
+                        source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{label}'))
+    return result
+
+
 def parse_original(body, url, fetched_at):
     """Strict original-source parser. No card metadata or AV numbers as input."""
     if (not isinstance(body, bytes) or not allowed_url(url)
@@ -748,6 +862,19 @@ def collect(symbol, candidates=()):
     ir_rows, _ = _collect_li(symbol, candidates)
     rows = [*sec_rows, *ir_rows]
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get
+
+
+def collect_current(symbol, candidates=(), *, at=None):
+    """Production L1/current S3 source entry. Historical callers retain collect()."""
+    from research_v2.sec_disclosures import collect as collect_sec
+    current = dict(capture=None, at=at)
+    sec_rows, _ = collect_sec(symbol, current=current)
+    ir_rows, _ = _collect_li(symbol, candidates)
+    rows = [*sec_rows, *ir_rows]
+    receipt = current.get('result')
+    if receipt is not None:
+        receipt['av_endpoints'] = {key:value['diagnostics'] for key,value in (current['capture'] or {}).items()}
+    return rows, {r['record_id']:deepcopy(r) for r in rows}.get, receipt
 
 
 def parse_valuation_statement_inputs(soup, published):
