@@ -1144,10 +1144,12 @@ def revalidate_asfiled_snapshot(source, issuer, filing, snapshot):
     return dict(record, **proof)
 
 
-def _append_original(rows, issuer, filing, identity_digest, *, current=False, at=None):
+def _append_original(rows, issuer, filing, identity_digest, *, current=False, at=None, fetch=None):
     try:
         url = filing['full_url']
-        if current:
+        if fetch is not None:
+            original = fetch(url)
+        elif current:
             from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
             key = 'sec-current-original:v1:'+url
             original = get_cached(key)
@@ -1170,7 +1172,7 @@ def _append_original(rows, issuer, filing, identity_digest, *, current=False, at
         _diagnose(filing['full_url'], 'parse_error')
         return
     if record and record['financial_observations']:
-        if current:
+        if current and fetch is None:
             set_cached(key, original, FUNDAMENTALS_TTL)
         # The evidence owner resolves overlapping facts and actual conflicts.
         rows.append(record)
@@ -1279,7 +1281,7 @@ def _collect_current_originals(rows, issuer, filings, submissions, digest, curre
         if not target:
             break
         attempts.add(target['accession'])
-        _append_original(rows, issuer, target, digest, current=True, at=current['at'])
+        _append_original(rows, issuer, target, digest, current=True, at=current['at'], fetch=current.get('frozen_fetch'))
     current['result']['original_attempts'] = len(attempts)
 
 
@@ -1301,7 +1303,9 @@ def collect(symbol, *, current=None):
     if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
         return [], {}.get
     cache_key = 'sec-disclosures:v3-annual-original:'+symbol
-    cached = get_cached(cache_key)
+    frozen_fetch = current.get('frozen_fetch') if current is not None else None
+    fetch = _fetch if frozen_fetch is None else frozen_fetch
+    cached = get_cached(cache_key) if frozen_fetch is None else None
     if cached and current is not None and not all(
         not _current_domestic_issuer(r.get('source_verification', {}).get('issuer_identity', {}))
         for r in cached['rows']
@@ -1311,10 +1315,10 @@ def collect(symbol, *, current=None):
         _diagnostics.set(tuple(dict(row, request_attempted=False) for row in cached['diagnostics']))
         rows = cached['rows']
         return deepcopy(rows), {r['record_id']:deepcopy(r) for r in rows}.get
-    directory_source = get_cached('sec-directory:v1')
+    directory_source = get_cached('sec-directory:v1') if frozen_fetch is None else None
     if directory_source is None:
-        directory_source = _fetch(DIRECTORY)
-        if directory_source:
+        directory_source = fetch(DIRECTORY)
+        if directory_source and frozen_fetch is None:
             set_cached('sec-directory:v1', directory_source, FUNDAMENTALS_TTL)
     directory = _json(directory_source)
     if not directory:
@@ -1325,6 +1329,8 @@ def collect(symbol, *, current=None):
         _diagnose(DIRECTORY,'identity_unresolved')
         return [], {}.get
     def structured(url):
+        if frozen_fetch is not None:
+            return frozen_fetch(url)
         if current is None:
             return _fetch(url)
         key = 'sec-current-structured:v1:'+url
@@ -1368,6 +1374,8 @@ def collect(symbol, *, current=None):
         if use_current:
             _collect_current_originals(rows, issuer, filings, submissions, identity_digest, current)
             return deepcopy(rows), {r['record_id']:deepcopy(r) for r in rows}.get
+        if frozen_fetch is not None:
+            return [], {}.get  # A frozen current request cannot fall back to live SEC.
         # Search current-cycle events newest-first. For foreign issuers the
         # latest eligible annual original is a separate, bounded source read:
         # quarterly coverage cannot establish the audited annual cash bridge.

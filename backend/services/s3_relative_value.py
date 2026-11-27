@@ -109,6 +109,10 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         raise ValueError('S3_REPRICE_NEW_FILING_REQUIRES_RESEARCH')
     check_recent_filings(submissions['filings']['recent'], parent_at)
 
+    if reviewed.get('issuer_context_scope') == 'SEC_ONLY':
+        return dict(listed_close(root, entry, symbol, card['price_qualification']['eps_interval_start'],
+                                 earliest, cutoff), issuer_context_scope='SEC_RECENT_FILINGS_ONLY')
+
     expected_ir = next(x for x in reviewed['sources'] if x['role'] == 'OFFICIAL_IR_CONTEXT')
     ir = entry['reprice_ir']
     body, _ = source(root, ir, expected_ir['url'], earliest, cutoff)
@@ -413,7 +417,10 @@ def capture(root, symbols, *, relative=False):
     manifest = json.loads(path.read_text())
     for symbol in symbols:
         try:
-            cik = registry(relative)['companies'][symbol]['cik']
+            reviewed = registry(relative)['companies'][symbol]
+            if reviewed.get('issuer_context_scope') == 'SEC_ONLY':
+                continue
+            cik = reviewed['cik']
             manifest['provider_requests']['issuer_ir'] = manifest['provider_requests'].get('issuer_ir', 0) + 1
             body, receipt = official.fetch_current_issuer_context(cik)
             filename = symbol[:-3]+'-reprice-ir.html'

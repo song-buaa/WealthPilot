@@ -468,7 +468,7 @@
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_EXCLUDING_UNPROVEN_FUTURE_ADJACENCIES",
-      "equity_bridge": "Original SEC Exhibit 99.1 presents $0.24 FY25 Q4 GAAP diluted EPS as text. Original financial Owner emits no Q4 observation; $0.50 non-GAAP is excluded. Non-operating equity gains remain outside the operating asset thesis.",
+      "equity_bridge": "Original SEC Exhibit 99.1 presents $0.24 FY25 Q4 GAAP diluted EPS. The legacy path could not admit that quarter. V2 current Owner qualification is reported separately; $0.50 non-GAAP is excluded. Non-operating equity gains remain outside the operating asset thesis.",
       "dimensions": {
         "business_model": {
           "fact": "汽车、能源发电和储能、服务及其他分列。",
@@ -1199,6 +1199,122 @@
           }
         }
       }
+    },
+    "TSLA:US": {
+      "cik": "0001318605",
+      "reviewed_at": "2026-11-27T13:12:43.277197+00:00",
+      "latest_reviewed_filings": {
+        "10-K": "0001628280-26-003952",
+        "10-Q": "0001628280-26-066775",
+        "8-K": "0001628280-26-066738"
+      },
+      "financial_signature": {
+        "start": "2025-10-01",
+        "period": "2026-09-30",
+        "eps": ".91",
+        "flows": {
+          "revenue": "103570000000",
+          "operating_income": "3466000000",
+          "net_income": "3218000000",
+          "cfo": "18710000000"
+        }
+      },
+      "issuer_context_scope": "SEC_ONLY",
+      "annual_eps_snapshots": [],
+      "profile": {
+        "cautious": {
+          "revenue_growth": [
+            "0",
+            ".02",
+            ".03",
+            ".04",
+            ".04"
+          ],
+          "terminal_operating_margin": ".04",
+          "terminal_conversion": ".62",
+          "annual_share_change": ".025",
+          "terminal_pe": "15",
+          "dividend_payout": "0"
+        },
+        "base": {
+          "revenue_growth": [
+            ".06",
+            ".08",
+            ".08",
+            ".075",
+            ".07"
+          ],
+          "terminal_operating_margin": ".075",
+          "terminal_conversion": ".72",
+          "annual_share_change": ".015",
+          "terminal_pe": "22",
+          "dividend_payout": "0"
+        },
+        "optimistic": {
+          "revenue_growth": [
+            ".11",
+            ".15",
+            ".14",
+            ".12",
+            ".10"
+          ],
+          "terminal_operating_margin": ".12",
+          "terminal_conversion": ".78",
+          "annual_share_change": ".008",
+          "terminal_pe": "30",
+          "dividend_payout": "0"
+        },
+        "business_thesis": "Operating-business-only scenario: autos, energy and services retain separately observed drivers, then aggregate at the consolidated level. No incremental Robotaxi or robotics payoff is modeled. Unmodeled business option and investment asset values remain unknown.",
+        "current_guidance": "UNKNOWN_NO_QUALIFIED_CURRENT_GUIDANCE",
+        "return_unit_qualification": "NO_KNOWN_UNRESOLVED_DISTRIBUTION",
+        "notes": {
+          "revenue": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Q3 revenue was $28.046bn vs $28.095bn. Autos were $20.560bn vs $21.205bn, energy $2.881bn vs $3.415bn, and services $4.605bn vs $3.475bn. Nine-month consolidated revenue increased from $69.926bn to $78.669bn. Aggregate scenario paths stress auto volume/pricing and energy/services mix without including new unproved commercialization."
+          },
+          "operating_margin": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "TTM operating margin is near 3.35%. Endpoints 4/7.5/12% express thin incremental margin, restored operating leverage or sustained higher contribution; 9M CapEx rising to $13.01bn from $6.13bn is a cash and future depreciation constraint. No automated FCF conversion."
+          },
+          "conversion": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Current GAAP EPS and parent net income remain unchanged and unnormalized. The SEC cash flow statement identifies an $863m unrealized SpaceX investment gain for nine months; 62/72/78% projected net-to-operating ratios use operating profit and allow for tax and ordinary below-line costs. No extrapolation of unrealized investment gains or explicit capitalization of the investment; no unproved tax adjustment."
+          },
+          "shares": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "Annual incremental net diluted share paths 2.5/1.5/0.8% are conditional post-baseline dilution stresses, not forecasts of vesting or authorization. The 10-Q identifies the approximately 423.7m share 2025 CEO performance award. Do not re-add grants already included in diluted EPS; subsidiary, performance and regulatory conditions can move outcomes outside these cases."
+          },
+          "terminal_pe": {
+            "kind": "RESEARCH_ASSUMPTION",
+            "rationale": "15/22/30x terminal operating scenarios distinguish low-margin auto/energy economics from a stronger mix and better demonstrated cash conversion. No qualified historical PIT PE distribution supports a statistical estimate; 30x requires lasting growth and 12% operating margin rather than implied gains from unpriced optionality."
+          }
+        },
+        "risks": [
+          "Operating earnings start from GAAP; neither realized non-operating cash nor durable normalized taxes can be inferred from the current quarter.",
+          "SBC, performance vesting and cash CapEx pressure can coexist with higher revenue and weaker shareholder cash returns.",
+          "Unmodeled autonomous driving, robots and investment assets may materially change whole-company value. Conditional returns only describe the specified operating scenario.",
+          "Reviewed SEC filings cover the frozen disclosure window. They do not provide continuous market or issuer-event monitoring."
+        ],
+        "review_conditions": [
+          "Review changes in unit economics, battery deployments, customer tariff refunds and retail price elasticity against additional official filings.",
+          "Requalify if a new nonordinary distribution or equity class event arises, or if incremental dilution, cash needs and GAAP below-line gains can no longer be kept separate.",
+          "Revisit any incremental commercial autonomy or robotics contribution only when unit economics, commercial scope, and required capital are evidenced."
+        ]
+      },
+      "sources": [
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/1318605/000162828026066775/0001628280-26-066775.txt",
+          "sha256": "613e1de9d5eb101a840cd65acdb3bcc393aec1318772c5df8f9df61c1dc33611",
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "summary": "Form 10-Q 2026-09-30 MD&A, segments, GAAP EPS and cash flow; filed-source anchor for TSLA operating and listed GAAP evidence."
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003837/0001628280-26-003837.txt",
+          "sha256": "00178bf9d927550ae16ef0cb88e985f243ac35dba66589f8297f1ac15c9ad549",
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "summary": "Exhibit 99.1 HTML embedded disclosure text, GAAP diluted common EPS row and Q4-2025 column; filed-source anchor for TSLA operating and listed GAAP evidence."
+        }
+      ]
     }
   },
   "berkshire_operating": {

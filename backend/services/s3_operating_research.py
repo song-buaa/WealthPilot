@@ -15,7 +15,7 @@ from pydantic import AwareDatetime, Field, model_validator
 from backend.services import quality_valuation_research as archive
 from backend.services import s3_pool_research as pool
 from backend.services.market_data import quality_valuation as engine
-from backend.services.market_data.financial_research import operating_ttm_bridge
+from backend.services.s3_current_financial import operating_bridge
 
 VERSION='s3-p2.operating-earnings.v1.3'
 STRESS=('-.03', '0', '.03')
@@ -167,6 +167,8 @@ def evaluate(qualified,dossier,assessments,qualification_failures=None):
             symbol=old['symbol']
             try:
                 if qualification_failures is not None:
+                    if symbol in qualification_failures and assessments.get(symbol,{}).get('s3_current_owner'):
+                        raise ValueError(qualification_failures[symbol])
                     if old['comparison_status']!='COMPARABLE':
                         raise ValueError(old.get('failure_reason') or 'P2_PARENT_NOT_COMPARABLE')
                     if symbol in qualification_failures:raise ValueError(qualification_failures[symbol])
@@ -178,7 +180,7 @@ def evaluate(qualified,dossier,assessments,qualification_failures=None):
                 for field in ('revenue','operating_margin','conversion','shares','terminal_pe'):
                     note=profile.notes.get(field)
                     if not note or not set(note.evidence_refs)<=catalog:raise ValueError('P2_ASSUMPTION_EVIDENCE_REJECTED')
-                baseline=operating_ttm_bridge(assessments[symbol])
+                baseline=operating_bridge(assessments[symbol])
                 baselines[symbol]=baseline
                 cards.append(project_card(old,baseline,profile))
             except (ValueError,KeyError,TypeError,ArithmeticError) as exc:
@@ -307,7 +309,8 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
     files={'baseline/bundle.json':parent_path}
     files.update({'baseline/'+name:archive.safe_file(parent_path.parent,name) for name in p['view_hashes']})
     files.update({'baseline/sources/'+name:archive.safe_file(parent_path.parent/'sources',name) for name in p['source_files']})
-    methods=tuple(q['method_files'])+('backend/services/s3_operating_research.py','scripts/s3_operating_verify.py')
+    methods=tuple(dict.fromkeys((*q['method_files'], 'backend/services/s3_operating_research.py',
+        'backend/services/s3_current_financial.py', 'scripts/s3_operating_verify.py')))
     if professional_context is not None:
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
         if professional_context.get('relative_policy'):
@@ -331,7 +334,8 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
                 dossier_card = result['quality_dossier'].get(symbol,{})
                 if card['scenarios'] or not dossier_card.get('sources'):
                     continue
-                if dossier_card.get('valuation_blocker'):
+                if (dossier_card.get('valuation_blocker') and symbol not in
+                        professional_context.get('current_financial_qualification',{})):
                     card['owner_qualification_reason'] = card['failure_reason']
                     card['failure_reason'] = dossier_card['valuation_blocker']
                 try:

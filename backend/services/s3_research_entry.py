@@ -1,6 +1,7 @@
 """Thin public-company research entry. No account, policy or trading authority."""
 from copy import deepcopy
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import re
@@ -207,6 +208,12 @@ def run_company_pool(request, *, archive_root, source_root=None, reuse_sources=N
     if request.method=='professional' and source_mode=='PUBLIC_CAPTURE':
         from backend.services.s3_professional_research import capture_context
         capture_context(source_root,symbols,**({'relative': True} if policy else {}))
+        if policy:
+            from backend.services import s3_current_financial
+            manifest_file = source_root / 'manifest.json'
+            manifest = json.loads(manifest_file.read_text())
+            s3_current_financial.capture(source_root, manifest, symbols)
+            manifest_file.write_text(json.dumps(manifest, indent=2))
     # Capture/load first; never accept a client-supplied or backdated clock.
     decision_at = frozen_at or datetime.now(timezone.utc).isoformat()
     raw = dict(pool_id='chatgpt_company_pool', pool_version='v1', purpose=request.purpose,

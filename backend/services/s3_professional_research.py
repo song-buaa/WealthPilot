@@ -8,7 +8,7 @@ import json
 
 from backend.services import quality_valuation_research as archive
 from backend.services.market_data import quality_valuation as engine
-from backend.services.market_data.financial_research import operating_ttm_bridge
+from backend.services.s3_current_financial import blocker, operating_bridge
 from backend.services.s3_method_research import identity_projection
 from research_v2 import sec_disclosures as sec
 from research_v2 import official_disclosures as official
@@ -24,7 +24,7 @@ def registry(relative=False):
         from backend.services import s3_relative_profiles as relative_profiles
         updated = relative_profiles.registry()
         value['version'] = updated['version']
-        value['companies'] = {symbol: dict(value['companies'][symbol], **profile)
+        value['companies'] = {symbol: dict(value['companies'].get(symbol,{}), **profile)
                               for symbol, profile in updated['operating_companies'].items()}
         value['reviewed_at'] = updated['reviewed_at']
     return value
@@ -80,6 +80,8 @@ def capture_context(root,symbols,*,relative=False):
                     entry.setdefault('originals',[]).append(rec)
                 else:entry.setdefault('professional_capture_failures',[]).append(dict(kind='SEC',accession=filing['accession'],
                     status='SOURCE_UNAVAILABLE',diagnostics=sec.source_diagnostics()[-1:]))
+            if book['companies'][symbol].get('issuer_context_scope') == 'SEC_ONLY':
+                continue
             body,rec=official.fetch_current_issuer_context(issuer['cik'])
             store(body,rec,symbol[:-3]+'-professional-context.html')
         except (OSError,ValueError,KeyError,TypeError) as exc:
@@ -109,6 +111,7 @@ def prepare(parent_path):
         context['quality_dossier'] = relative_profiles.quality_cards(root, manifest, cutoff, relative_profiles.registry())
         context['profile_sha256'] = archive.file_hash(archive.ROOT/relative_profiles.BOOK)
         context['relative_policy'] = True
+    current_checks = {}
     def read(rec):
         f=archive.safe_file(root,rec['path'])
         if archive.file_hash(f)!=rec['sha256'] or engine.stamp(rec['fetched_at'])>engine.stamp(cutoff):
@@ -117,12 +120,30 @@ def prepare(parent_path):
     for card in p['result']['cards']:
         symbol=card['symbol']
         try:
+            assessment = p['assessments'].get(symbol,{})
+            if relative and assessment.get('s3_current_owner'):
+                from backend.services.market_data.financial_research import build_current
+                if not assessment.get('current_financial'):
+                    reason = assessment.get('s3_current_failure','S3_CURRENT_OWNER_RECEIPT_UNAVAILABLE')
+                    current_checks[symbol] = dict(status='INSUFFICIENT_EVIDENCE', reason=reason)
+                    raise ValueError(reason)
+                current_checks[symbol] = dict(receipt=assessment['current_financial'],
+                    metrics=[row for row in build_current(assessment)['records'] if row['field'] == 'diluted_eps_ttm'])
+                bridge = operating_bridge(assessment)
+                refs = set(bridge['eps']['evidence_refs'])
+                current_checks[symbol].update(bridge=bridge, eps_components=[
+                    row for row in assessment['verified_field_records'] + assessment['historical_field_records']
+                    if row['record_id'] in refs and row['field'] == 'diluted_eps_ordinary_quarter'])
+                if reason := blocker(symbol, bridge):
+                    raise ValueError(reason)
             if card['comparison_status']!='COMPARABLE':
                 raise ValueError(card.get('failure_reason') or 'P2_PARENT_NOT_COMPARABLE')
             if symbol not in book['companies']:raise ValueError('PROFESSIONAL_PROFILE_NOT_SUPPORTED')
             if engine.stamp(book['reviewed_at'])>engine.stamp(cutoff):
                 raise ValueError('PROFESSIONAL_PROFILE_NOT_YET_REVIEWED')
             reviewed=book['companies'][symbol];entry=manifest['companies'][symbol]
+            if reviewed.get('issuer_context_scope') == 'SEC_ONLY' and not assessment.get('s3_current_owner'):
+                raise ValueError('PROFESSIONAL_CURRENT_OWNER_RECEIPT_REQUIRED')
             if relative and context['quality_dossier'].get(symbol,{}).get('status') != 'EVIDENCE_BOUND_RESEARCH_JUDGMENTS_NOT_VALUATION_QUALIFICATION':
                 raise ValueError('PROFESSIONAL_RELATIVE_REVIEW_NOT_QUALIFIED')
             if relative:
@@ -145,7 +166,7 @@ def prepare(parent_path):
                 check_recent_filings(submissions['filings']['recent'], review_clock)
             latest={form:next((f['accession'] for f in filings if f['form']==form),None) for form in ['10-K','10-Q','8-K']}
             if latest!=reviewed['latest_reviewed_filings']:raise ValueError('PROFESSIONAL_NEW_DISCLOSURE_REQUIRES_REVIEW')
-            actual=signature(operating_ttm_bridge(p['assessments'][symbol]))
+            actual=signature(operating_bridge(assessment))
             if actual!=expected_signature(reviewed['financial_signature']):raise ValueError('PROFESSIONAL_FINANCIAL_WINDOW_REQUIRES_REVIEW')
             profile=deepcopy(reviewed['profile']);notes=[];proofs=[]
             for source in reviewed['sources']:
@@ -181,6 +202,10 @@ def prepare(parent_path):
             reason=str(exc) if type(exc) is ValueError and str(exc).isupper() else 'PROFESSIONAL_EVIDENCE_REQUIRES_REVIEW'
             failures[symbol]=reason;checks[symbol]=dict(status='INSUFFICIENT_EVIDENCE',reason=reason,
                 capture_diagnostics=manifest['companies'].get(symbol,{}).get('professional_capture_failures',[]))
+    if current_checks:
+        context['current_financial_qualification'] = current_checks
+        for symbol in current_checks.keys() & context['quality_dossier'].keys():
+            context['quality_dossier'][symbol]['valuation_blocker'] = failures.get(symbol)
     return dict(version='s3-p2.research-dossier.v1',parent_artifact_id=parent['artifact_id'],
         research_recorded_at=cutoff,companies=profiles),context
 

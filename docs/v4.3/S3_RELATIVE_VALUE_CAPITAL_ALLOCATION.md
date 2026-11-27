@@ -49,3 +49,30 @@ The existing versioned dossier can attach `qualification_components` to a withhe
 For ANT the branch reconciles disclosed pre-deal pro forma A/N shares and primary closing issuance, excludes secondary transfers from issuance, and separately shows the subsidiary-held legal shares. Its historical CFO-minus-specified-capital-outlays subtotal does not replace ordinary FCFE. Actual post-IPO dilution, net liquidity and all-in annual infrastructure cash timings remain unresolved. No whole-equity or stock-price valuation runs on these components.
 
 Comparability and reprice paths are otherwise unchanged. Existing frozen bundles retain their original snapshots and read rules. Phase 1.2 neither adds recurring cash-flow settlement nor expands Policy or production access.
+
+## 4.1 Financial Sources V2 consumer candidate
+
+The professional ACTIVE US direct pool opts in to the existing current source
+Owner for NVDA and TSLA. The frozen input stores AV observations and SEC
+identity, metadata and original bytes with their true source clocks. The
+official-disclosures current collector replays over those bytes, returns its
+receipt to Evidence, and Financial Research derives the four-quarter EPS and
+current operating bridge. Vendor-only observations stay in the current
+receipt. Explicit standard and professional requests continue to use their
+existing source contract. Older bundle bytes are immutable and method-drift
+receipts still point to original-version replay.
+
+NVDA's current GAAP EPS and partial operating bridge are reportable. A missing
+parent-attributable net-income flow still withholds professional return.
+TSLA uses the existing operating earnings method with listed GAAP EPS and an
+issuer-specific reviewed scenario. Return is conditional on its specified
+operating path against the entire listed close. Potential autonomous driving,
+robotics and nonoperating investment asset values are unquantified. Projected
+conversion does not repeat unrealized SpaceX gains. Current GAAP is retained
+rather than adjusted without a qualifying tax/earnings bridge. Its bounded
+price-only revalidation checks SEC submissions, listed class, split interval
+and fixed endpoint. This scope lacks issuer IR and continuous event monitoring.
+
+Dependency for PM3 integration: preserve PR #149 as the shared Owner and
+PR #139 as the existing relative value candidate. The consumer delta needs
+both reviewed histories. No changes to policy activation or execution rights.

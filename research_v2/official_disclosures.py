@@ -864,12 +864,14 @@ def collect(symbol, candidates=()):
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get
 
 
-def collect_current(symbol, candidates=(), *, at=None):
+def collect_current(symbol, candidates=(), *, at=None, frozen_fetch=None, frozen_vendor=None):
     """Production L1/current S3 source entry. Historical callers retain collect()."""
     from research_v2.sec_disclosures import collect as collect_sec
-    current = dict(capture=None, at=at)
+    if frozen_fetch is not None and frozen_vendor is None:
+        raise ValueError('CURRENT_FROZEN_TRANSPORT_INCOMPLETE')
+    current = dict(capture=frozen_vendor, at=at, frozen_fetch=frozen_fetch)
     sec_rows, _ = collect_sec(symbol, current=current)
-    ir_rows, _ = _collect_li(symbol, candidates)
+    ir_rows, _ = _collect_li(symbol, candidates) if frozen_fetch is None else ([], None)
     rows = [*sec_rows, *ir_rows]
     receipt = current.get('result')
     if receipt is not None:

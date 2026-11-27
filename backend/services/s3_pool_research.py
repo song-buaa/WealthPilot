@@ -8,7 +8,7 @@ from pydantic import Field
 from backend.services import quality_valuation_research as archive
 from backend.services.s3_method_research import MethodRequest, compare_methods, identity_projection
 from backend.services.market_data.evidence import assess, assess_quality_facts, mapping, stamp
-from backend.services.market_data.financial_research import build
+from backend.services.market_data.financial_research import build, build_current
 from backend.services.market_data.method_applicability import applicability, APPLICABLE, notice_assets
 from backend.services.market_data.quality_valuation import Assumptions
 
@@ -188,6 +188,8 @@ def frozen_assessments(root, request):
             # diagnostics rather than erase this company from the pool.
             pending=assess({},symbol=symbol,at=request.decision_at)
             pending['capture_diagnostics']=_capture_diagnostics(entry)
+            if entry.get('current_financial'):
+                pending['s3_current_owner'] = 'REQUESTED'
             assessments[symbol]=pending
             directory=source(entry['directory'],sec.DIRECTORY);sub=source(entry['submissions'])
             issuer,scope,identity=identity_projection(symbol,directory,sub)
@@ -196,20 +198,28 @@ def frozen_assessments(root, request):
             a.update(quality_scope=scope,method_identity=identity,quality_field_records=[])
             a['capture_diagnostics']=_capture_diagnostics(entry)
             assessments[symbol]=a
+            if entry.get('current_financial'):
+                a['s3_current_owner'] = 'REQUESTED'
             if applicability(a)['earnings_model']['status']=='NOT_APPLICABLE':
                 prices[symbol]=dict(status='NOT_APPLICABLE',reason='VALUATION_METHOD_NOT_APPLICABLE')
                 continue
             raw=source(entry['companyfacts'],'https://data.sec.gov/api/xbrl/companyfacts/CIK'+issuer['cik']+'.json')
             filings=sec.discover_filings(issuer,json.loads(sub[0]));identity_hash=hashlib.sha256(directory[0]+sub[0]).hexdigest()
-            rows=sec.parse_companyfacts(raw,issuer,filings,identity_digest=identity_hash)
-            qr=sec.parse_companyfacts(raw,issuer,filings,identity_digest=identity_hash,quality=True)
-            for original in entry.get('originals',[]):
-                filing=next((f for f in filings if f['full_url']==original.get('url')),None)
-                if not filing:raise ValueError('ORIGINAL_FILING_NOT_DISCOVERED')
-                r=sec.parse_filing(source(original,filing['full_url']),issuer,filing,identity_digest=identity_hash,
-                    fiscal_eps_context=sec._domestic_fiscal_eps_context(rows,issuer))
-                if r:rows.append(r)
-            by_id={r['record_id']:r for r in rows};qi={r['record_id']:r for r in qr}
+            current = None
+            if entry.get('current_financial'):
+                from backend.services.s3_current_financial import frozen
+                rows, verifier, current = frozen(symbol, entry, source, request.decision_at)
+            else:
+                rows=sec.parse_companyfacts(raw,issuer,filings,identity_digest=identity_hash)
+                qr=sec.parse_companyfacts(raw,issuer,filings,identity_digest=identity_hash,quality=True)
+                for original in entry.get('originals',[]):
+                    filing=next((f for f in filings if f['full_url']==original.get('url')),None)
+                    if not filing:raise ValueError('ORIGINAL_FILING_NOT_DISCOVERED')
+                    r=sec.parse_filing(source(original,filing['full_url']),issuer,filing,identity_digest=identity_hash,
+                        fiscal_eps_context=sec._domestic_fiscal_eps_context(rows,issuer))
+                    if r:rows.append(r)
+                by_id={r['record_id']:r for r in rows};qi={r['record_id']:r for r in qr}
+                verifier = by_id.get
             market={};price_error=None
             try:
                 p=entry.get('price',{});data=json.loads(source(p,'https://www.alphavantage.co/query')[0])
@@ -228,22 +238,27 @@ def frozen_assessments(root, request):
                     split_source_sha256=splits['sha256'],price_fetched_at=p['fetched_at'],split_fetched_at=splits['fetched_at'])
             except (ValueError,KeyError,TypeError,ArithmeticError,OSError) as exc:
                 price_error=_error_code(exc,'PRICE_SOURCE_OR_SPLITS_MISSING')
-            a=assess(market,symbol=symbol,research=rows,disclosure_verifier=by_id.get,at=request.decision_at)
-            a.update(quality_scope=scope,method_identity=identity,
-                quality_field_records=assess_quality_facts(qr,symbol=symbol,at=request.decision_at,disclosure_verifier=qi.get))
+            a=assess(market,symbol=symbol,research=rows,disclosure_verifier=verifier,at=request.decision_at,
+                **({'current_financial': current} if current is not None else {}))
+            a.update(quality_scope=scope,method_identity=identity)
+            if current is not None:
+                a['s3_current_owner'] = entry['current_financial']['schema_version']
+            else:
+                a['quality_field_records'] = assess_quality_facts(qr,symbol=symbol,
+                    at=request.decision_at,disclosure_verifier=qi.get)
             a['capture_diagnostics']=_capture_diagnostics(entry)
             assessments[symbol]=a
             if price_error:
                 prices[symbol]=dict(status='UNKNOWN',reason=price_error)
             else:
-                metrics=build(a)['records']
+                metrics=(build_current(a) if a.get('s3_current_owner') else build(a))['records']
                 if not any(r['field']=='observed_price' for r in metrics):raise ValueError('PRICE_EVIDENCE_NOT_QUALIFIED')
                 eps=next((r for r in metrics if r['field']=='diluted_eps_ttm'),None)
                 observations=a['verified_field_records']+a['historical_field_records']
                 starts=[r['fiscal_period_start'] for r in observations if eps and r['record_id'] in eps['evidence_refs']]
                 if not starts:
                     prices[symbol]['available_quarter_eps_periods']=sorted({r['period'] for r in observations if r['field']=='diluted_eps_ordinary_quarter'})
-                    prices[symbol]['financial_owner_gaps']=build(a)['limitations']
+                    prices[symbol]['financial_owner_gaps']=(build_current(a) if current is not None else build(a))['limitations']
                     raise ValueError('LISTED_EPS_INTERVAL_UNKNOWN')
                 begin=min(starts);end=prices[symbol]['price_date']
                 intervening=[e for e in prices[symbol]['split_events'] if begin<=e['effective_date']<=end and Decimal(e['split_factor'])!=1]
@@ -253,6 +268,8 @@ def frozen_assessments(root, request):
                     'Vendor historical split response shows no intervening split within selected EPS interval; no conversion applied. Not a guarantee of complete corporate-action coverage.')
         except (ValueError,KeyError,TypeError,ArithmeticError,OSError) as exc:
             failures[symbol]=_error_code(exc,'COMPANY_SOURCE_OR_QUALIFICATION_MISSING')
+            if assessments.get(symbol,{}).get('s3_current_owner') == 'REQUESTED':
+                assessments[symbol]['s3_current_failure'] = failures[symbol]
             prices.setdefault(symbol,{})
             prices[symbol].update(status='UNKNOWN',reason=failures[symbol])
     return assessments,failures,prices,files
@@ -276,6 +293,8 @@ def _make_bundle(root,raw_request):
         'backend/services/s3_pool_research.py','backend/services/execution_plan/kline_provider.py')
     methods += ('backend/services/s3_pool_capture.py','scripts/s3_quality_valuation.py')
     methods += notice_assets()
+    if any(row.get('s3_current_owner') for row in assessments.values()):
+        methods += ('backend/services/s3_current_financial.py',)
     files.update({'methods/'+n:archive.ROOT/n for n in methods})
     payload=dict(request=resolved.model_dump(mode='json'),assessments=assessments,input_failures=failures,
         price_qualification=prices,method_files={n:archive.file_hash(archive.ROOT/n) for n in methods},

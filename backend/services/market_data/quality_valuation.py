@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from backend.services.market_data.evidence import stamp
-from backend.services.market_data.financial_research import build
+from backend.services.market_data.financial_research import build, build_current
 
 METHOD_VERSION = "s3-b.quality-evidence.v1.1"
 VALUATION_METHOD_VERSION = "s3-a.earnings-scenarios.v1.1"
@@ -911,7 +911,7 @@ def company(assessment, assumptions, decision_at):
     if assessment.get("conflicts") or assessment.get("source_conflicts"):
         raise ValueError("UNRESOLVED_SOURCE_CONFLICT")
     rows = _facts(assessment, at)
-    derived = build(assessment)  # Original owner performs all TTM/EPS/price arithmetic.
+    derived = build_current(assessment) if assessment.get('s3_current_owner') else build(assessment)
     metrics = {r["field"]: r for r in derived["records"]}
     from backend.services.market_data.quality_evaluation import evaluate
     quality = evaluate(assessment, _quality(rows, metrics))
