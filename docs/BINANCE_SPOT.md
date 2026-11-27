@@ -48,7 +48,7 @@ BTC首次纳管成本、转入与期初库存未证，因此Position、原快照
    ```
 
    原`backend.main`经`load_project_environment()`加载已有`.env`；Adapter只消费已加载环境，不自行寻找/打开`.env`。空shell变量与Tiger一样让位给`.env`，有效运行环境变量优先。沿原私有配置Owner、受保护位置和文件权限管理，既有Portfolio选择与账户隔离不变。离线校验仅输出PASS/稳定错误码，禁止打印配置对象字典、认证URL、签名或Secret。缺少任一值返回`BINANCE_NOT_CONFIGURED`，格式非法返回脱敏`BINANCE_CONFIGURATION_INVALID`。
-3. Product Owner已确认当前只读Key不设IP限制，固定IP白名单不是上线前置条件；以后若自行启用，沿官方Key管理处理。实现只需要正常DNS和官方`https://api.binance.com:443`的TLS出网，不要求额外Tunnel或代理服务。客户端沿原官方主机/TLS与无重定向保护，不新增代理或地域/资格绕过。普通HTTPS能力不证明该域名在Mini上已可达；本轮未向Mini或真实API发请求，实际DNS/TLS/API连通性为PENDING，留待生产验收一次有界验证。
+3. Product Owner已确认当前只读Key不设IP限制，固定IP白名单不是上线前置条件；以后若自行启用，沿官方Key管理处理。默认直接连接官方 `https://api.binance.com:443`，忽略系统和通用代理变量。只有确认账户、设备实际所在地和既有出口符合适用的 Binance 服务规则时，才可在已受保护的运行配置中设置 `BINANCE_HTTPS_CONNECT_PORT` 为现有 `127.0.0.1` HTTP CONNECT 监听端口（1–65535）。此选项仅作用于 Binance，禁止使用匿名代理、TLS 解密代理或用来规避访问限制。CONNECT 仅发送官方目标地址，完成端到端 TLS 校验后才发送 API 请求；失败时保持原错误处理，不切换出口、不跟随重定向。发布前在服务身份下用选定路径验证公开时间接口，再按原授权验证只读账户。
 4. 保持`WEALTHPILOT_ENABLED_SYNC_BROKERS`原有效配置，生产未验收前不添加binance。正式授权后在原启用列表追加binance（保留原账户），原Web同步卡/手动触发和每天22:00（含周末）调度共用SyncExecutor，不新建任务。凭据存在不等于同步任务获准启用。
 5. 轮换：在原`.env`或现有运行环境安全替换`BINANCE_API_KEY`/`BINANCE_API_SECRET`，保持UID不变，按既有服务环境重载流程由Owner操作；经单独授权验证，再在官方管理页撤销旧Key。泄露时撤销Key并停用原启用列表中的binance，不在聊天处理Secret。
 

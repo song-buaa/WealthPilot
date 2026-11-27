@@ -1,10 +1,14 @@
 """Isolated Binance Spot signatures, source failures and original U0/B2/U1 consumers."""
+from contextlib import nullcontext
+from dataclasses import replace
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import hashlib
 import hmac
 import json
+import ssl
 from types import SimpleNamespace
+from unittest.mock import Mock
 from urllib.parse import parse_qsl, urlencode
 import pytest
 
@@ -12,6 +16,78 @@ from backend.services.broker_sync.binance.client import Configuration, BinanceRe
 from backend.services.broker_sync.binance.sync_service import BinanceSyncService, trade_events
 
 CONFIG = Configuration("12345", "synthetickey123456", "syntheticsecret123456")
+
+
+@pytest.mark.parametrize("value,expected", [(None, None), ("7892", 7892)])
+def test_binance_connect_port_is_explicit(monkeypatch, value, expected):
+    from backend.services.broker_sync.binance.client import configuration
+
+    monkeypatch.setenv("BINANCE_UID", CONFIG.account_id)
+    monkeypatch.setenv("BINANCE_API_KEY", CONFIG.api_key)
+    monkeypatch.setenv("BINANCE_API_SECRET", CONFIG.api_secret)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:9876")
+    if value is None:
+        monkeypatch.delenv("BINANCE_HTTPS_CONNECT_PORT", raising=False)
+    else:
+        monkeypatch.setenv("BINANCE_HTTPS_CONNECT_PORT", value)
+    assert configuration().https_connect_port == expected
+
+
+@pytest.mark.parametrize("value", ["0", "65536", "proxy.invalid:7892", "http://127.0.0.1:7892"])
+def test_binance_rejects_invalid_connect_port(monkeypatch, value):
+    from backend.services.broker_sync.binance.client import configuration
+
+    monkeypatch.setenv("BINANCE_UID", CONFIG.account_id)
+    monkeypatch.setenv("BINANCE_API_KEY", CONFIG.api_key)
+    monkeypatch.setenv("BINANCE_API_SECRET", CONFIG.api_secret)
+    monkeypatch.setenv("BINANCE_HTTPS_CONNECT_PORT", value)
+    with pytest.raises(ValueError, match="^BINANCE_CONNECT_PROXY_INVALID$"):
+        configuration()
+
+
+def test_binance_connect_uses_official_tls_and_never_follows_redirect(monkeypatch):
+    from backend.services.broker_sync.binance import client as module
+
+    response = Mock(status=302)
+    response.getheaders.return_value = [("Location", "https://untrusted.invalid")]
+    response.read.return_value = b"{}"
+    connection = Mock()
+    connection.getresponse.return_value = nullcontext(response)
+    factory = Mock(return_value=connection)
+    monkeypatch.setattr(module.http.client, "HTTPSConnection", factory)
+    session = BinanceReadonlyClient(replace(CONFIG, https_connect_port=7892), clock=lambda: 1000)
+    session.offset_ms = 0
+
+    with pytest.raises(ValueError, match="^BINANCE_SOURCE_UNAVAILABLE$"):
+        session.get("/api/v3/account")
+
+    assert factory.call_args.args == ("127.0.0.1", 7892)
+    tls = factory.call_args.kwargs["context"]
+    assert tls.check_hostname and tls.verify_mode == ssl.CERT_REQUIRED
+    connection.set_tunnel.assert_called_once_with("api.binance.com", 443)
+    connection.request.assert_called_once()
+    method, path = connection.request.call_args.args
+    assert method == "GET" and path.startswith("/api/v3/account?")
+    assert connection.request.call_args.kwargs["headers"]["X-MBX-APIKEY"] == CONFIG.api_key
+    assert CONFIG.api_secret not in path
+    connection.close.assert_called_once()
+
+
+def test_binance_connect_tls_error_preserves_last_path_and_redacts(monkeypatch):
+    from backend.services.broker_sync.binance import client as module
+
+    connection = Mock()
+    connection.request.side_effect = ssl.SSLCertVerificationError("synthetic sensitive diagnostic")
+    monkeypatch.setattr(module.http.client, "HTTPSConnection", Mock(return_value=connection))
+    direct = Mock(side_effect=AssertionError("must not fall back to direct"))
+    monkeypatch.setattr(module.request, "build_opener", direct)
+    session = BinanceReadonlyClient(replace(CONFIG, https_connect_port=7892), sleep=lambda _: None)
+
+    with pytest.raises(ValueError, match="^BINANCE_CONNECTION_UNAVAILABLE$"):
+        session.server_time()
+
+    direct.assert_not_called()
+    assert connection.close.call_count == 2
 
 
 def fill(identifier=0, *, buyer=True, asset="USDT", fee="0.1", qty="0.001"):
