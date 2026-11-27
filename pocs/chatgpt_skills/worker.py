@@ -331,7 +331,7 @@ def main():
                                     config["portfolio_id"] if config else args.portfolio_id, operation, a,
                                     contract=config.get("database_contract_path") if config else None,
                                     synthetic=args.synthetic_input or config is None, worker_process=True,
-                                    _analysis_run_id=request.get("analysis_run_id"), async_l1=args.single_analysis,
+                                    async_l1=args.single_analysis,
                                     deadline_monotonic=request.get("analysis_deadline_monotonic") if args.single_analysis else None)
                             if operation == 'review_portfolio' and value.get('status') != 'unavailable':
                                 selected = value.get('snapshot_id')

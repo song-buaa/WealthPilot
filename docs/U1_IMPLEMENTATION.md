@@ -117,6 +117,14 @@
 
 测试入口：`tests/test_investable_assets.py`，合成隔离、I/O阻断、hash/scope/时钟、负债与分母、FX/来源、用途排除和养老金负面边界。
 
+### A3 普通组合分析（2026-11-28）
+
+Product Owner 确认 2026-11-28 北京时间的生产资产负债整体基线。经发布 Owner 在现有私有 `wealthpilot.owner-scope.v1` 文件登记 `confirmation_mode: EVENT_DRIVEN`、`manual_baseline_confirmed_on: "2026-11-28"` 与实际 `confirmed_at`，沿用用途、覆盖及养老金关联，使用 `investable_inventory_identity(view, include_liabilities=True)` 绑定 `inventory_sha256`；事件模式省略 `valid_until`，持仓身份变化使绑定失效。缺证域或用途保留 UNKNOWN。整体确认不改金额、原披露/更新时间或券商原生时点。历史带截止日凭据继续按原合同读取。E1 保留原严格期限与正式来源资格。
+
+普通 Allocation 在正式证据不足时返回带范围和遗漏原因的 `PARTIAL` 投资子集估算；未指定 U1 时读取原库的只读一致性副本，无写入或券商请求。明确指定的历史 U1 保持原事实和观察时间。MCP 普通组合读取可消费同一估算，含正式分母/风险 UNKNOWN 及不可执行标记。已有 UI 只接受正式资格，按 #119 冻结保持不变。
+
+手工资产、基金和银行余额按月或按需，负债每月维护；养老金、公积金按实际披露周期。普通分析保留 Last-good 并提示陈旧，正式分母、风险及交易仍独立验证。
+
 ## 4.4 B2 Owner凭据与ACTIVE配置接线
 
 B2沿原`AssetAnalysisPreparation.run`，在原只读副本capture返回并取得snapshot_id之后、原WealthSnapshot JSON发布之前，由原Wealth Owner调用`freeze_investable_scope`。原Portfolio的全部Position进入可投资范围输入`data_quality.investable_security_inputs`，原账户发布证明进入`investable_accounts`；原`security_inputs/accounts`的投资分析范围保留。均来自同一冻结库，没有第二份持仓权威或共享DDL。A-min优先消费这份完整范围扩展；旧视图没有扩展时保守处理，已知Portfolio行若不在输入内则`INVESTABLE_POSITION_SCOPE_INCOMPLETE`，不能靠用途文件隐藏。

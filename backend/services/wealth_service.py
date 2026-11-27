@@ -35,7 +35,7 @@ PENSION_SECURITY_ITEM_TYPES = frozenset({
 })
 
 
-def investable_inventory_identity(view):
+def investable_inventory_identity(view, *, include_liabilities=False):
     """Identity only, no new amount ledger. Changes require renewed owner evidence."""
     from backend.services.investment_policy.contracts import digest
     rows = view['data_quality'].get('investable_security_inputs', view['data_quality'].get('security_inputs', []))
@@ -47,7 +47,17 @@ def investable_inventory_identity(view):
             'vehicle_type', 'currency', 'economic_asset_class', 'segment', 'classification_source',
             'classification_verification_status','classification_version')} for r in rows], key=lambda r:r['id']),
         'manual': sorted([{k:r.get(k) for k in ('id', 'kind', 'item_type', 'currency',
-            'already_investment_accounted')} for r in manual if r.get('kind') == 'asset'], key=lambda r:r['id'])})
+            'already_investment_accounted')} for r in manual if r.get('kind') == 'asset'
+            or (include_liabilities and r.get('kind') == 'liability')], key=lambda r:r['id'])})
+
+
+def owner_confirmation_expiry(owner, *, strategic):
+    from datetime import timedelta
+    from backend.services.investment_policy.store import clock
+
+    if owner.get('confirmation_mode') == 'EVENT_DRIVEN':
+        return None if strategic else clock(owner['confirmed_at']) + timedelta(days=30)
+    return clock(owner['valid_until'])
 
 
 def freeze_investable_scope(view):
@@ -78,14 +88,27 @@ def freeze_investable_scope(view):
             raise ValueError('bounded evidence file required')
         raw = json.loads(file.read_text())
         allowed = {'schema_version', 'portfolio_id', 'inventory_sha256', 'confirmed_at',
-                   'valid_until', 'dispositions', 'coverage', 'pension_links', 'manual_classes'}
+                   'valid_until', 'dispositions', 'coverage', 'pension_links', 'manual_classes',
+                   'confirmation_mode', 'manual_baseline_confirmed_on'}
         if set(raw) - allowed or raw['schema_version'] != 'wealthpilot.owner-scope.v1':
             raise ValueError('invalid owner evidence')
         at = clock(view['captured_at'])
-        confirmed, until = clock(raw['confirmed_at']), clock(raw['valid_until'])
-        if not confirmed <= at <= until <= confirmed + timedelta(days=30):
-            raise ValueError('expired owner evidence')
-        if raw['portfolio_id'] != view['portfolio_id'] or raw['inventory_sha256'] != investable_inventory_identity(view):
+        confirmed = clock(raw['confirmed_at'])
+        mode = raw.get('confirmation_mode')
+        baseline = raw.get('manual_baseline_confirmed_on')
+        if mode == 'EVENT_DRIVEN':
+            from zoneinfo import ZoneInfo
+            if ('valid_until' in raw or not isinstance(baseline, str)
+                    or date.fromisoformat(baseline).isoformat() != baseline
+                    or confirmed.astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat() < baseline):
+                raise ValueError('invalid event-driven owner evidence')
+        elif (mode is not None or baseline is not None
+              or not at <= clock(raw['valid_until']) <= confirmed + timedelta(days=30)):
+            raise ValueError('invalid or expired owner evidence')
+        if confirmed > at:
+            raise ValueError('future owner evidence')
+        inventory = investable_inventory_identity(view, include_liabilities=mode == 'EVENT_DRIVEN')
+        if raw['portfolio_id'] != view['portfolio_id'] or raw['inventory_sha256'] != inventory:
             raise ValueError('inventory identity changed')
         # The old U1 investment reader can omit retirement/other segments.
         # An inventory assertion cannot silently hide those known source rows.
@@ -123,7 +146,9 @@ def freeze_investable_scope(view):
         view['data_quality']['investable_scope_evidence'] = scope.model_dump(mode='json')
         view['data_quality']['investable_owner_evidence'] = {
             'sha256':digest(raw), 'inventory_sha256':raw['inventory_sha256'],
-            'confirmed_at':raw['confirmed_at'], 'valid_until':raw['valid_until'],
+            'confirmed_at':raw['confirmed_at'],
+            **({'confirmation_mode':mode, 'manual_baseline_confirmed_on':baseline}
+                if mode else {'valid_until':raw['valid_until']}),
             'manual_classes':raw.get('manual_classes', {})}
     except (OSError, ValueError, KeyError, TypeError, ValidationError):
         view['data_quality'].setdefault('issues', []).append('INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE')

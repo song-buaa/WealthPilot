@@ -302,6 +302,28 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 raise PolicyError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
             if research_delivery is None:
                 research_delivery = {}
+            if (asset_view is None and session.mode == 'POLICY_ACTIVE' and scenario == 'review_portfolio'
+                    and not arguments.get('scenario_legs')
+                    and arguments.get('analysis_scope', 'investments') == 'investments'):
+                from backend.services.allocation_service import read_allocation_estimate
+                request = AnalysisRequest.model_validate(arguments)
+                from app.asset_views import VIEW_TTL, _source_current, load_view, now
+                view = load_view(path, portfolio_id, request.snapshot_id, contract) if request.snapshot_id else None
+                estimate = None
+                if view is None or not _source_current(view['captured_at'], now(), VIEW_TTL):
+                    estimate = read_allocation_estimate(portfolio_id, snapshot_id=request.snapshot_id,
+                                                        database=path, contract=contract)
+                if estimate is not None:
+                    session.ensure_current()
+                    return AnalysisResult(synthetic=synthetic, scenario=scenario, status='partial',
+                        queried_at=datetime.now(timezone.utc).isoformat(), snapshot_id=request.snapshot_id,
+                        scope={'policy_reference': session.context['policy_reference'],
+                               'snapshot_id': request.snapshot_id, 'analysis_scope': 'investments'},
+                        conclusion=('按可核对的已存投资子集估算，人民币小计 ' + estimate['observed_subtotal_cny']
+                                    + ' 元。来源可能陈旧或仍缺时点，正式分母和风险资格为 UNKNOWN。'),
+                        evidence={'allocation': estimate}, issues=estimate['issues'],
+                        limitations=['各类别占比以可核对小计为分母，资产范围或身份缺证会影响结果。']
+                    ).model_dump(mode='json')
             result=await _analyze_owned(path,portfolio_id,scenario,arguments,contract=contract,synthetic=synthetic,
                 worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic,
                 research_delivery=research_delivery)
@@ -528,6 +550,15 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.data_quality['asset_view'] = asset_view['data_quality']
             result.data_quality['context_current'] = asset_view['context_current']
             result.scope['snapshot_id'] = request.snapshot_id
+            if (scenario == 'review_portfolio' and not request.scenario_legs
+                    and request.analysis_scope == 'investments'
+                    and policy_current(portfolio_id).mode == 'POLICY_ACTIVE'):
+                from backend.services.allocation_service import estimate_allocation
+                estimate = estimate_allocation(asset_view, snapshot_id=request.snapshot_id)
+                if estimate is not None:
+                    # Bind the calculation to the source at read time, not the requalified public projection.
+                    estimate.pop('snapshot_sha256', None)
+                    result.evidence['allocation_estimate'] = estimate
             result.evidence['asset_view'] = dict(wealth_summary=asset_view['views']['wealth_summary'],
                 portfolio_summary=asset_view['views']['portfolio_summary'], issuer_exposure=asset_view['issuer_exposure'])
             result.issues = sorted(set(result.issues + asset_view['data_quality']['issues']))
@@ -539,6 +570,9 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 result.professional_result = {}
                 result.issues = sorted(set(result.issues + ['ANALYSIS_CONTEXT_EXPIRED']))
                 result.conclusion = '分析上下文已到期，请重新准备资产数据；本次结果不可用于精确调仓。'
+                if result.evidence.get('allocation_estimate'):
+                    result.status = 'partial'
+                    result.conclusion = '专业分析的固定上下文已到期。现仅返回已存投资子集估算，正式分母和风险资格为 UNKNOWN。'
         if (scenario == 'review_portfolio' and policy_current(portfolio_id).mode=='LEGACY' and result.status != 'unavailable'
                 and (not asset_view or asset_view['context_current'])):
             # D1 precision is a holdings-quality gate, not L3 research/technical

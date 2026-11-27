@@ -38,11 +38,13 @@ def _denominator(view, projection, at):
             or not captured <= evaluated <= at):
         raise ValueError("CONCENTRATION_SNAPSHOT_BINDING_MISMATCH")
     owner = view["data_quality"].get("investable_owner_evidence")
+    from backend.services.wealth_service import owner_confirmation_expiry
+    owner_until = owner_confirmation_expiry(owner, strategic=True) if owner else None
     if (projection.status == "QUALIFIED" and assets.denominator_qualified
             and assets.denominator_cny is not None and assets.denominator_cny > 0
             and evaluated == at
             and projection.valid_until is not None and at <= projection.valid_until and owner
-            and clock(owner["confirmed_at"]) <= captured <= at <= clock(owner["valid_until"])):
+            and clock(owner["confirmed_at"]) <= captured <= at and (owner_until is None or at <= owner_until)):
         return assets.denominator_cny
     return None
 
@@ -199,7 +201,9 @@ def _analyze(view, projection, session, at, etf_evidence, evidence_pins, classif
     btc_coverage = coverage.get("btc", {})
     expires_at = None
     if denominator is not None and scenario is None:
-        expires_at = min(clock(quality["investable_owner_evidence"]["valid_until"]), projection.valid_until)
+        from backend.services.wealth_service import owner_confirmation_expiry
+        owner_until = owner_confirmation_expiry(quality["investable_owner_evidence"], strategic=True)
+        expires_at = min(owner_until or projection.valid_until, projection.valid_until)
     btc_complete = (denominator is not None and btc_coverage.get("status") in {"ABSENT", "PRESENT"})
     principal = ZERO
     inputs = ((item, rows[item.source_ref], None) for item in projection.assets) if scenario is None else (
