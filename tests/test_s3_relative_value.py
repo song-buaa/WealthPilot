@@ -135,3 +135,14 @@ def test_relative_stress_detects_reversal_and_leaves_company_base_intact(monkeyp
     assert result['pairs'][0]['status'] == 'REVERSAL'
     assert all(any(c['scope']==scope for c in result['cells']) for scope in ('COMMON','AAPL:US','MSFT:US'))
     assert cards[0]['scenarios']['base']['annualized_return'] == '.12'
+
+
+def test_rank_drops_parent_spread_if_issuer_is_no_longer_qualified(monkeypatch):
+    from backend.services import s3_relative_value as relative
+
+    monkeypatch.setattr(relative.engine,'_rank',lambda cards, request: None)
+    card = dict(symbol='BRK.B:US', scenarios={}, relative_return=[{'against':'AAPL:US'}],
+                failure_reason='S3_BRK_NEW_FILING_REQUIRES_RESEARCH')
+    assert relative.rank_comparisons([card], None) == 0
+    assert 'relative_return' not in card
+    assert card['rank'] is None

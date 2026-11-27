@@ -204,6 +204,7 @@ def rank_comparisons(cards, request):
     engine._rank(cards, request)
     for card in cards:
         if not card['scenarios']:
+            card.pop('relative_return', None)
             card.update(group=None, rank=None, rank_reason=card['failure_reason'])
     comparable = [c for c in cards if c['scenarios']]
     for card in comparable:
