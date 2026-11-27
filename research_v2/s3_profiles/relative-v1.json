@@ -472,7 +472,7 @@
         "remaining_requirements": [
           "Observed litigation/charter/distribution state and holder A plus C economic package",
           "Preferred cash-vs-stock coupons, subsequent changes to confirmed issued units, conversion class and anti-dilution",
-          "Forward issuance and cash settlement with class-dependent price adjustments",
+          "Forward physical share delivery against adjusted cash proceeds with class-dependent terms",
           "Net ordinary dilution with actual ATM, buyback and SBC roll-forward"
         ]
       }

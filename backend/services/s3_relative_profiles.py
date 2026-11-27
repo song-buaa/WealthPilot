@@ -42,7 +42,8 @@ def _prospectus_proof(filing, submissions, body, row):
         return None
     return dict(source_ref=row['url'], source_sha256=row['sha256'],
                 fetched_at=row['fetched_at'], published_at=recent['acceptanceDateTime'][index],
-                scope='SEC_PRIMARY_PROSPECTUS_WITH_SUBMISSIONS_CLOCK_QUALITATIVE_ONLY')
+                scope=('SEC_PROSPECTUS_EVENT_RESEARCH_NOT_QUARTERLY_FACTS' if required=='424B5'
+                    else 'SEC_PRIMARY_PROSPECTUS_WITH_SUBMISSIONS_CLOCK_QUALITATIVE_ONLY'))
 
 
 def _filing_url(cik, source):
@@ -108,7 +109,11 @@ def quality_cards(root, manifest, cutoff, book):
             evidence = {}
             for label, expected in profile['sources'].items():
                 url = _filing_url(profile['cik'], expected)
-                row = next(r for r in manifest['requests'] if r.get('url') == url and r.get('path'))
+                row = next((r for r in manifest['requests'] if r.get('url') == url and r.get('path')),None)
+                if row is None:
+                    if expected.get('optional'):
+                        continue
+                    raise ValueError('S3_QUALITY_REVIEWED_SOURCE_UNAVAILABLE')
                 if row['sha256'] != expected['sha256']:
                     raise ValueError('S3_QUALITY_REVIEWED_BYTES_CHANGED')
                 body, fetched = _receipt(root, row, cutoff)
