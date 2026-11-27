@@ -53,7 +53,7 @@ def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
         return build_allocation_snapshot(positions, segment="投资")
 
 
-def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None):
+def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None, evaluation_at=None, etf_inputs=None):
     """Server-owned read only: pin policy, original stored U1 bytes and A-min.
 
     Never call prepare, live Portfolio, FX providers or broker synchronization.
@@ -105,12 +105,12 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
                 if "etf_observation" in research:
                     error.qualification["concentration"] = research
             raise error
+        evaluated_at = evaluation_at or clock(utc_now())
         owner = view['data_quality'].get('investable_owner_evidence', {})
-        if not owner or clock(owner['valid_until']) < clock(utc_now()):
+        if not owner or clock(owner['valid_until']) < evaluated_at:
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
                 ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
-        evaluated_at = clock(utc_now())
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
             snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
         # A new request-local session; never mutate a caller's pinned assets.
@@ -171,7 +171,7 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             policy_snapshot, session.allocation_hierarchy, policy_context=context,
             portfolio_id=portfolio_id, snapshot_sha256=projection.snapshot_sha256, denominator=denominator)
         session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
-            at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'])
+            at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'], etf_inputs=etf_inputs)
         session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
             'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
             'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),
@@ -417,7 +417,7 @@ def read_frozen_transition(database, portfolio_id, request, contract=None):
     return project_frozen_transition(portfolio_id, view, request, session=session)
 
 
-def project_frozen_transition(portfolio_id, view, request, *, session, at=None):
+def project_frozen_transition(portfolio_id, view, request, *, session, at=None, freeze_evidence=False, etf_inputs=None):
     from datetime import timedelta
     from decimal import Decimal, localcontext
     from pydantic import TypeAdapter, ValidationError
@@ -580,7 +580,7 @@ def project_frozen_transition(portfolio_id, view, request, *, session, at=None):
         symbol = f"{product.local_symbol}:LSE"
         instruments[symbol] = ({"symbol": symbol, "currency": "USD", "vehicle_type": "ETF",
                                 "economic_asset_class": "FIXED_INCOME"}, "FIXED_INCOME", (product.verification_source,))
-    evidence = _read_etf_evidence(portfolio_id, at=at)
+    evidence = _read_etf_evidence(portfolio_id, at=at) if etf_inputs is None else etf_inputs
 
     def evaluate(securities, balances, scenario_d, qualified_baseline):
         holdings = dict(securities)
@@ -624,16 +624,41 @@ def project_frozen_transition(portfolio_id, view, request, *, session, at=None):
         raise TransitionRejected("SCENARIO_LOAN_TOTAL_NOT_CLOSED")
     paths = simulate_transition(request, holdings=holdings, cash=cash, loans=loans,
         total_debt=debt, net_assets=projection.net_assets_cny if wealth_observed and denominator is not None else None,
-        denominator=denominator, rates=rates, accounts=accounts, instruments=instruments, evaluate=evaluate)
+        denominator=denominator, rates=rates, accounts=accounts, instruments=instruments, evaluate=evaluate,
+        archive_stage_holdings=freeze_evidence)
     session.ensure_current()
-    _, pins, source_issue, caps, observations = evidence
+    records, pins, source_issue, caps, observations = evidence
     evaluation_sha256 = digest({
         "request_sha256": digest(request), "evaluated_at": at.isoformat(),
         "policy_reference": reference.model_dump(), "etf_records": pins, "close_caps": {symbol: str(cap) for symbol, cap in caps.items()},
         "etf_source_issue": source_issue, "etf_observations": {key: digest(row) for key, row in observations.items()},
     })
+    archive = {}
+    if freeze_evidence:
+        from pathlib import Path
+        import hashlib
+
+        # Hash the actual loaded implementation family. An installed runtime
+        # also carries the original deployment revision when available.
+        from backend.services.investment_policy.runtime import _INSTALLED_RUNTIME
+        base = Path(__file__).resolve().parent
+        methods = ("allocation_service.py", "allocation_scenarios.py", "investable_assets.py",
+                   "investment_policy/allocation_hierarchy.py", "investment_policy/concentration.py",
+                   "investment_policy/etf_observation.py", "investment_policy/etf_release.py",
+                   "investment_policy/concentration_adapter.py", "instruments/issuers.py",
+                   "instruments/classification.py", "instruments/etf_holdings.py")
+        archive = {"evidence_archive": {
+            "normalized_input": request.model_dump(mode="json"),
+            "method": "wealthpilot.portfolio-transition.v1",
+            "code_revision": (_INSTALLED_RUNTIME or {}).get("code_sha"),
+            "code_sha256": {name: hashlib.sha256((base / name).read_bytes()).hexdigest() for name in methods},
+            "frozen_etf_evidence": {"formal": {key: item.model_dump(mode="json") for key, item in records.items()},
+                "formal_pins": pins, "source_issue": source_issue,
+                "close_caps_usd": {key: str(value) for key, value in caps.items()},
+                "observations": {key: item.model_dump(mode="json") for key, item in observations.items()}},
+        }}
     return TypeAdapter(dict).dump_python({
-        "schema_version": "wealthpilot.portfolio-transition.v1", "scenario_revision_sha256": digest(request),
+        **archive, "schema_version": "wealthpilot.portfolio-transition.v1", "scenario_revision_sha256": digest(request),
         "evaluated_at": at.isoformat(), "evaluation_sha256": evaluation_sha256,
         "snapshot_id": request.snapshot_id, "snapshot_sha256": request.snapshot_sha256,
         "policy_reference": reference.model_dump(),

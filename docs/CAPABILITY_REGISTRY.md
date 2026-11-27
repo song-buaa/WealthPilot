@@ -208,3 +208,9 @@ L1 v2 单标条件估值沿[原 4.2 研究准备](../backend/services/position_a
 - 场景 owner 继续为 `backend/services/allocation_scenarios.py`。原 `ScenarioLeg` 与单标消费保持兼容。D 通过 AllocationService 读取既有 U1、A-min 和同一 ACTIVE PolicyReference，按阶段复用 B3、C 及 ETF 观察投影。
 - Web 使用 `POST /api/allocation/simulate-transition`，MCP 和 PEER 使用 `simulate_portfolio_transition`。阶段动作按明确结算假设处理，金额和费率使用 Decimal。示例与限制见 [当前架构的 D 合同](ARCHITECTURE_CURRENT.md#44-d-多阶段模拟候选)。
 - 合成验收入口为 `tests/test_d_portfolio_transition.py`、MCP Policy 协议与 Web policy-boundary 测试。真实组合验收等待 A3。
+
+### 4.4 E 组合风险和人工决定（隔离候选）
+
+- 原 E1 私有 Owner 承载组合风险与人工决定。使用 `investment_thesis/portfolio.py` 和 `portfolio_store.py` 区分组合对象、单标 Thesis 及 Review，复用私有 SQLite、ResearchBridge、幂等与不可变历史。
+- Web `/api/allocation/governance`，MCP 组合预览/确认/待办及 PEER 只读待办共用后端。D 的完整原始依据和当期真实 B/C 分别冻结，检查点为计划。正式例外尚不可启用，F 对账未开始。
+- [组合治理合同与隔离迁移](ARCHITECTURE_CURRENT.md#44-e-组合人工治理隔离候选)。验收见 `tests/test_e_portfolio_governance.py`、MCP policy 协议及 Web policy-boundary。

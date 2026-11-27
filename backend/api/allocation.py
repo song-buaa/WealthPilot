@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional
 
 from app import state
+from backend.api.portfolio_governance import router as portfolio_governance_router
 from app.allocation.types import (
     AllocationResult,
     AllocationSnapshot,
@@ -32,6 +33,7 @@ from backend.services.allocation_service import (
 )
 
 router = APIRouter()
+router.include_router(portfolio_governance_router)
 
 
 # ── 配置状态接口 ─────────────────────────────────────────

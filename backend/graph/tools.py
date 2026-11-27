@@ -1285,7 +1285,22 @@ def execute_simulate_portfolio_transition(*, request):
                                   os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
 
 
+def execute_get_portfolio_review_followups(*, request=None):
+    """PEER can read the same private governance projection. No commit tool."""
+    import os
+
+    from app import state
+    from backend.services.investment_thesis.portfolio_access import require_isolation, read_portfolio_records
+    from backend.services.investment_thesis.portfolio_contracts import PortfolioQuery
+    from backend.services.investment_thesis.store import ThesisStore
+
+    require_isolation()
+    store = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), state.portfolio_id)
+    return read_portfolio_records(store, PortfolioQuery.model_validate(request or {}))
+
+
 TOOL_EXECUTORS = {
+    "get_portfolio_review_followups": execute_get_portfolio_review_followups,
     "simulate_portfolio_transition": execute_simulate_portfolio_transition,
     "compare_company_pool": execute_compare_company_pool,
     "assess_position_evidence": execute_assess_position_evidence,

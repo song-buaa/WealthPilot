@@ -20,7 +20,8 @@ from app.llm_observation import safe_metadata, run_id
 from app.analysis_runtime import policy, budget_context, ENV_KEYS as TIME_ENV_KEYS
 from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
-SAFE_ERRORS |= ASSET_ERRORS
+from backend.services.investment_thesis.portfolio_sources import PORTFOLIO_SOURCE_ERRORS
+SAFE_ERRORS |= ASSET_ERRORS | PORTFOLIO_SOURCE_ERRORS
 from backend.services.allocation_scenarios import TRANSITION_REJECTION_CODES
 SAFE_ERRORS |= TRANSITION_REJECTION_CODES | {"POLICY_VERSION_CONFLICT", "POLICY_CONTEXT_UNAVAILABLE",
                                              "CONCENTRATION_POLICY_BINDING_MISMATCH"}
@@ -253,6 +254,19 @@ def main():
                                 result['concentration'] = read_frozen_concentration(
                                     config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
                                     config.get('database_contract_path') if config else None)
+                    elif operation == "portfolio_governance_sources":
+                        from backend.services.investment_thesis.portfolio_access import require_isolation
+                        from backend.services.investment_thesis.portfolio_contracts import PortfolioPreviewRequest, PortfolioSourceRequest
+                        from backend.services.investment_thesis.portfolio_sources import read_portfolio_sources
+
+                        require_isolation()
+                        if not config:
+                            raise ValueError("ASSET_VIEW_NOT_READY")
+                        if config.get("portfolio_id") != args.portfolio_id:
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        request_type = PortfolioPreviewRequest if "items" in a else PortfolioSourceRequest
+                        result = read_portfolio_sources(config["database_path"], config["portfolio_id"],
+                            request_type.model_validate(a), config.get("database_contract_path"))
                     elif operation == "simulate_portfolio_transition":
                         from backend.services.allocation_service import read_frozen_transition
                         from backend.services.allocation_scenarios import TransitionRequest
