@@ -8,7 +8,7 @@ from backend.services.quality_valuation_research import ROOT
 
 from backend.services.market_data.quality_valuation import dec, stamp, text
 from backend.services.s3_holder_returns import BOUNDED, FULL, UNKNOWN, attach_cash
-from backend.services import s3_equity_bridges as bridges
+from backend.services import s3_equity_bridges as bridges, s3_listed_eps
 
 CODE = 'backend/services/s3_multimethod.py'
 BOOK = 'research_v2/s3_profiles/multimethod-v1.json'
@@ -125,7 +125,7 @@ def tesla_investment_stress(card, dossier, profile, at):
         limitations='No verified future exit price, tax, restriction release or realization. Holding proceeds until terminal is a stress assumption. Autonomy and robotics are unquantified.')
 
 
-def apply(cards, dossier, professional_checks, start, end):
+def apply(cards, dossier, professional_checks, start, end, *, current_checks=None):
     profiles = json.loads((ROOT/BOOK).read_text())
 
     for card in cards:
@@ -141,6 +141,18 @@ def apply(cards, dossier, professional_checks, start, end):
                     card['observed_dividend'] = dict(event,source=proof,owner_version=profile['owner_source_version'],
                         scope='DECLARED_ONLY_NOT_AN_ELIGIBLE_OR_PAID_CASH_FLOW')
 
+            if eps_profile := profile.get('listed_eps'):
+                sources = _review_sources(issuer_dossier,eps_profile,start)
+                if sources:
+                    alternative = deepcopy(card)
+                    if s3_listed_eps.build(alternative,(current_checks or {}).get(symbol,{}),eps_profile,sources,start,end):
+                        _set_bounded(alternative,'LISTED_EPS_VALUE_NONOPERATING_RECOVERY_AND_CONVERSION_NOT_CLOSED')
+                        alternative['listed_eps_method']['reviewed_at'] = issuer_dossier['reviewed_at']
+                        alternative['owner_qualification_reason'] = card['failure_reason']
+                        card.update(alternative)
+                        card.pop('failure_reason',None)
+                        continue
+
             if claims := equity_components(symbol,issuer_dossier):
                 card['economic_claim_states'] = claims
             if symbol == 'GOOG:US':
@@ -154,7 +166,7 @@ def apply(cards, dossier, professional_checks, start, end):
                         if bridges.alphabet_equity(candidate,operating,claims,profile['holder_bridge'],
                                 {**operating['sources'],**scoped_sources},start,end):
                             candidate['holder_equity_bridge']['reviewed_at'] = operating['reviewed_at']
-                            _set_bounded(candidate,'UNMODELED_CAPPED_CALL_SETTLEMENT_AND_FINANCING_RESIDUAL')
+                            qualify_modeled_scope(candidate,candidate['holder_equity_bridge'])
                             card.update(candidate)
                             card.pop('failure_reason',None)
             continue
@@ -179,6 +191,18 @@ def apply(cards, dossier, professional_checks, start, end):
         if card.get('nonoperating_normalization'):
             card['nonoperating_materiality'] = bridges.investment_materiality(card,profile,start,end)
         qualify_economic_scope(card,profile.get('closed_ordinary_scope'),evidence)
+
+
+def qualify_modeled_scope(card, bridge):
+    """Model coverage is independent of whether the research conclusion is stable."""
+    if (bridge.get('status')!='MODELED_CONDITIONAL_ORDINARY_SCOPE'
+            or not {'quarter','preferred_terms','eur_notes','cad_notes'} <= bridge['source_evidence'].keys()
+            or not card.get('cash_return_contract')
+            or set(card.get('scenarios',{}))!={'cautious','base','optimistic'}):
+        _set_bounded(card,'ORDINARY_ECONOMIC_SCOPE_NOT_CLOSED')
+        return
+    card.update(holder_return_scope=FULL,comparison_status='COMPARABLE',
+                holder_return_scope_reason='MATERIAL_ECONOMICS_INCLUDED_IN_CONDITIONAL_CASES')
 
 
 def _set_bounded(card, reason):

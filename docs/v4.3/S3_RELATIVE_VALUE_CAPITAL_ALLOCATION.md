@@ -63,7 +63,7 @@ existing source contract. Older bundle bytes are immutable and method-drift
 receipts still point to original-version replay.
 
 NVDA's current GAAP EPS and partial operating bridge are reportable. A missing
-parent-attributable net-income flow still withholds professional return.
+parent-attributable net-income flow still withholds the EBIT-to-parent-income method.
 TSLA uses the existing operating earnings method with listed GAAP EPS and an
 issuer-specific reviewed scenario. Return is conditional on its specified
 operating path against the entire listed close. Potential autonomous driving,
@@ -133,9 +133,19 @@ schedule and withholds full qualification pending the material cash waterfall.
 GOOG maps the existing operating EV to a conditional Class C value using the
 September balance snapshot, the two verified EUR/CAD financing events,
 implied cash retention, explicit tax/liquidity recoveries, ordinary share
-change and unadjusted preferred conversion. It excludes unavailable capped
-call offsets and does not treat unused ATM as realized proceeds. Withheld
-full status is specific to the unresolved hedge and financing residual.
-The Class C path requires a qualified listed close and no historical EPS
+change and unadjusted preferred conversion. The later contract overlay distinguishes
+unused ATM capacity from issued stock, and applies a cash or net-share
+capped-call offset once. It separately pairs assumed Waymo borrowing with
+retained proceeds and records financing, conversion and liquidity as scenario
+variables. The Class C path requires a qualified listed close and no historical EPS
 substitute. Price-only replay verifies the issuer and filing clock again
 and reuses the fixed terminal bridge and its cash schedule.
+
+### 股东价值范围、估值资格与结论稳健性
+
+公司卡保留数据资格、方法资格、股东价值范围和结论稳健性的区别。具备完整条件价值范围的公司可进入同口径比较。回报门槛或排序对重大已建模情景敏感时，保留条件回报并报告敏感性。真实经济条款缺失且无法限定重大影响时，显示限定回报或 UNKNOWN。口径完整不构成买入或配置依据。
+
+- GOOG Class C 以经营 EV 加现金及投资回收，扣利息债务、租赁、少数股东权益及股息，以计入普通股变动、优先股转换、条件 ATM 与对冲结算后的股数折算。已发生的外币债务和未执行的融资授权独立处理；当前价格和历史 Class C EPS 资格保持独立。当前资料下的现金回收、用途、换汇和转换均为情景，九格压力测试改变经营增速和退出倍数。
+- MSFT 维持剔除 OpenAI 投资损益的 $18.04 TTM EPS。额外压力情景同时检验未来私募权益退出、权益稀释、可兑现及税后比例、余下资本承诺和经营端分成到期。未有证据闭合当前私募工具的分配顺位和处置约束，完整范围仍不成立。
+- NVDA 保留原经营桥的归母要求。独立上市 EPS 方法以同一时点的普通股稀释 EPS 为起点，将预测收入、营业利润率、条件税负、非经营转换和相对股数分开估算。以 $0.25 已宣告分配校准独立年度假设。买入者资格和付款仍待证，声明本身不计入现金收益。非经营投资资产未形成合格回收范围，输出限定股东回报。价格重估只更新证券资格、价格和剩余期限，保留原 EPS 与现金情景。
+- ANT 的 4.1 单次估值报价收据有独立决策时点。上市 Class A 原始收盘通过该时点的估值观察资格；技术、动量和回测历史仍不达标。4.5 不把该收据回贴到另一时点或用来替代期初经济股本和净现金。

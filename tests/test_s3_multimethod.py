@@ -152,3 +152,35 @@ def test_class_c_close_uses_share_observation_not_quote_date(monkeypatch):
     with pytest.raises(ValueError,match='NEW_FILING'):
         relative.qualify_class_c_close(None,entry,'GOOG:US','2026-11-23T16:05:00Z',
             datetime(2026,11,26,tzinfo=timezone.utc),datetime(2026,11,28,tzinfo=timezone.utc))
+
+
+def test_modeled_materiality_is_not_investment_stability():
+    card=dict(cash_return_contract={'schedule':[]},scenarios={k:{} for k in ('cautious','base','optimistic')})
+    bridge=dict(status='MODELED_CONDITIONAL_ORDINARY_SCOPE',
+                source_evidence={k:{} for k in ('quarter','preferred_terms','eur_notes','cad_notes')},
+                decision_threshold_crossed=True)
+    multimethod.qualify_modeled_scope(card,bridge)
+    assert card['holder_return_scope']==holder.FULL
+    bridge['source_evidence'].pop('cad_notes')
+    multimethod.qualify_modeled_scope(card,bridge)
+    assert card['holder_return_scope']==holder.BOUNDED
+
+
+def test_alphabet_overlay_never_pays_hedge_twice():
+    from backend.services.s3_equity_bridges import alphabet_option_overlay
+    overlay=dict(capped_calls={'C':['21887250','439.7537','527.7974']},
+                 unused_atm_authority_usd_m='27600',waymo_facility_usd_m='5000')
+    cash=alphabet_option_overlay(Decimal(600),overlay,['1','.75','1','.5','.5','CASH'],Decimal(3000))
+    stock=alphabet_option_overlay(Decimal(600),overlay,['1','.75','1','.5','.5','NET_SHARES'],Decimal(3000))
+    assert cash['hedge_shares']==stock['hedge_cash']==0
+    assert abs(cash['hedge_cash']-stock['hedge_shares']*600)<Decimal('.0000001')
+    assert cash['atm_shares']==46 and cash['atm_net_retained']==20700 and cash['waymo_net_claim']==2500
+    assert cash['coupon_shares']==Decimal('2.5') and cash['coupon_cash']==1500
+
+
+def test_nvda_forecast_uses_direct_eps_not_missing_parent_income():
+    from backend.services.s3_listed_eps import project
+    case=project(Decimal('9.31'),Decimal('.60'),
+                 [['0']*5,'.60','.20','1','0','20'],Decimal('.20'))
+    assert case['years'][-1]['eps']=='9.31000000'
+    assert case['terminal_price']=='186.20000000'

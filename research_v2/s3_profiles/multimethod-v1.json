@@ -113,7 +113,58 @@
         "2029_common_vwap",
         "net_annual_common_share_change_excluding_preferred"
       ],
-      "classification_limit": "Capped-call execution/offset and nonordinary issuance or share-coupon branches are unresolved. Published $27.6bn unused ATM authority is excluded from observed cash and analysed separately as a stress, not counted as exercised."
+      "classification_limit": "Conditional valuation covers operating EV, public/private investments, parent and nonrecourse debt, preferred cash or shares, dilution and capped calls. Future adjustment, option election, actual FX, taxes, cash uses and unexecuted commitments are modeled hypotheses. New events require requalification.",
+      "overlay": {
+        "capped_calls": {
+          "A": [
+            "21675500",
+            "444.0497",
+            "532.6704"
+          ],
+          "C": [
+            "21887250",
+            "439.7537",
+            "527.7974"
+          ]
+        },
+        "unused_atm_authority_usd_m": "27600",
+        "waymo_facility_usd_m": "5000",
+        "states": {
+          "cautious": [
+            "0",
+            "0",
+            "1",
+            "0",
+            "0",
+            "NET_SHARES"
+          ],
+          "base": [
+            ".5",
+            ".5",
+            ".5",
+            ".5",
+            ".25",
+            "NET_SHARES"
+          ],
+          "optimistic": [
+            "1",
+            ".75",
+            ".25",
+            "1",
+            ".5",
+            "CASH"
+          ]
+        },
+        "columns": [
+          "atm_fraction_used",
+          "atm_net_cash_retention_after_fees_and_uses",
+          "waymo_fraction_drawn",
+          "waymo_retained_fraction",
+          "preferred_coupon_fraction_paid_in_shares",
+          "hedge_settlement"
+        ],
+        "basis": "Unadjusted option terms in June 5 Exhibit designations/forms, 10-Q Waymo facility and ATM limits. Scenario owner assumes single common VWAP for A/C and future settlement; no actual option settlement, unused authorization or draw treated as observed proceeds."
+      }
     }
   },
   "TSLA:US": {
@@ -157,7 +208,10 @@
     "commitment_remaining_usd_m": "1000",
     "reported_diluted_shares_m": "7446",
     "as_converted": "0.24",
-    "window": ["2025-10-01", "2026-09-30"],
+    "window": [
+      "2025-10-01",
+      "2026-09-30"
+    ],
     "gross_reference_usd_m": [
       "0",
       "135000",
@@ -165,7 +219,8 @@
     ],
     "official_transaction_anchors": [
       "https://blogs.microsoft.com/blog/2025/10/28/the-next-chapter-of-the-microsoft-openai-partnership/",
-      "https://openai.com/index/accelerating-the-next-phase-ai/"
+      "https://openai.com/index/accelerating-the-next-phase-ai/",
+      "https://openai.com/index/next-phase-of-microsoft-partnership/"
     ],
     "capital_bounds_note": "Historic recap and investee-wide diluted funding references are scenario scales, not carrying values, liquidation caps or realizable proceeds.",
     "closed_ordinary_scope": {
@@ -175,7 +230,31 @@
       ],
       "residual_required": true,
       "rationale": "Ordinary share scope admitted only with an evidence-supported residual envelope preserving decisions."
-    }
+    },
+    "exit_cases": {
+      "cautious": [
+        "450000",
+        ".65",
+        ".35",
+        ".65",
+        "25000"
+      ],
+      "base": [
+        "852000",
+        ".80",
+        ".60",
+        ".76",
+        "10000"
+      ],
+      "optimistic": [
+        "1200000",
+        ".95",
+        ".85",
+        ".85",
+        "0"
+      ]
+    },
+    "exit_rationale": "The $852bn financing value is historical transaction scale only. 450/852/1,200bn future investee values are 5y hypotheses. Current as-converted participation is 24% but waterfall, future dilution, marketability and realization taxes are scenario scales, not exposure facts. April 2026 terms put capped OpenAI payments to Microsoft through 2030; the model tests an unseparated royalty runoff at $0/10/25bn annual pretax impact; not current observed royalties."
   },
   "AAPL:US": {
     "closed_ordinary_scope": {
@@ -199,6 +278,60 @@
       "actual_paid_on": null,
       "source_document_sha256": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038"
     },
-    "owner_source_version": "4.1 PR #154 f7ea987f27f546cb2ce7b3825b69d99d53ac3972"
+    "owner_source_version": "4.1 PR #154 f7ea987f27f546cb2ce7b3825b69d99d53ac3972",
+    "listed_eps": {
+      "financial_period": "2026-10-25",
+      "reference_tax": ".20",
+      "sources": {
+        "results": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038"
+      },
+      "dividend_source": "results",
+      "parameters": {
+        "cautious": [
+          [
+            ".16",
+            ".10",
+            ".06",
+            ".04",
+            ".04"
+          ],
+          ".42",
+          ".25",
+          ".90",
+          ".012",
+          "16"
+        ],
+        "base": [
+          [
+            ".32",
+            ".22",
+            ".16",
+            ".12",
+            ".09"
+          ],
+          ".55",
+          ".20",
+          ".97",
+          "-.005",
+          "23"
+        ],
+        "optimistic": [
+          [
+            ".45",
+            ".32",
+            ".23",
+            ".18",
+            ".13"
+          ],
+          ".62",
+          ".18",
+          "1.02",
+          "-.012",
+          "32"
+        ]
+      },
+      "rationale": "Q3 revenue +103% YoY, Data Center $107.6bn, Q4 $130bn +/-3% guidance excluding China compute; FY27 Q3 gross margin 74.8%, non-GAAP Q4 guide begins at 71%. Scenario paths deliberately fade growth and margins from observed ramp, not management five-year forecasts. Tax and conversion are explicit scenario ratios; EPS remains directly qualified. The diluted-share trend is about 1.2% lower YoY, but repurchase authorization is not execution. Terminal multiple stresses reflect mature semiconductor vs durable AI platform economics without a fabricated historical PIT range.",
+      "residual": "$65.528bn nonmarketable holdings are disclosed at carrying value. Exit rights, current fair value, restrictions and tax basis are not fully bounded by a carrying-value stress. Supplier commitments and nonoperating normalization remain conditional."
+    }
   }
 }

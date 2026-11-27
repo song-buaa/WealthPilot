@@ -6,7 +6,7 @@ from backend.services.market_data.quality_valuation import dec, text
 from backend.services.s3_holder_returns import attach_cash, settle
 
 CODE = 'backend/services/s3_equity_bridges.py'
-ALPHABET_METHOD = 'GOOG_CLASS_C_OPERATING_EV_BRIDGE_V1'
+ALPHABET_METHOD = 'GOOG_CLASS_C_OPERATING_EV_BRIDGE_V2'
 
 
 def evidence_by_digest(check):
@@ -74,16 +74,52 @@ def investment_materiality(card, profile, start, end, *, cutoff=None, price=None
                              net_terminal_per_share_usd=text(amount),annualized_return=value['annualized_return'],
                              meets_required_return=dec(value['annualized_return'])>=rate))
     switches = len({r['meets_required_return'] for r in rows}) > 1
+    combined = {}
+    for name, values in profile.get('exit_cases',{}).items():
+        investee_value,retention,realization,aftertax,royalty_runoff = map(dec,values)
+        old = card['scenarios'][name]
+        scenario_shares = dec(profile['reported_diluted_shares_m'])*dec(old['years'][-1]['relative_shares'])
+        net_exit = investee_value*dec(profile['as_converted'])*retention*realization*aftertax-obligation
+        multiple = dec(card['operating_assumptions'][name]['terminal_pe'])
+        # Use a scenario tax proxy for the royalty, separate from investment exit tax.
+        royalty_terminal = royalty_runoff*Decimal('.76')*multiple
+        delta_per_share = (net_exit-royalty_terminal)/scenario_shares
+        case = dict(old,terminal_price=text(dec(old['terminal_price'])+delta_per_share))
+        value = settle(case,price,rate,start,end,cutoff,cash_contract['schedule'])
+        combined[name] = dict(annualized_return=value['annualized_return'],total_return=value['total_return'],
+            terminal_wealth=value['terminal_wealth'], terminal_price=value['terminal_price'],
+            net_exit_usd_m=text(net_exit), royalty_runoff_terminal_usd_m=text(royalty_terminal),
+            assumption_columns=['future_investee_equity_usd_m','retention_of_current_as_converted_share',
+                'private_claim_realizability','exit_after_tax_retention','pretax_annual_royalty_runoff_usd_m'],
+            assumptions=values)
     return dict(status='DECISION_THRESHOLD_SENSITIVE' if switches else 'NO_THRESHOLD_CROSSING_IN_TESTED_STRESS',
         obligation_adjusted_net_terminal_proceeds_needed_usd_m=text(hurdle*shares+obligation),
         bounded_economic_range=False, decision_threshold_crossed=switches, cases=rows,
         tested_scope='BASE_ANNUALIZED_RETURN_HURDLE_ONLY',
         relative_comparison_sensitive=None,cautious_downside_sensitive=None,
-        frozen_stress_inputs={key:profile[key] for key in ('reported_diluted_shares_m',
-            'commitment_remaining_usd_m','gross_reference_usd_m','official_transaction_anchors')},
+        combined_conditional_exit_cases=combined,
+        exit_case_limit=profile.get('exit_rationale'),
+        frozen_stress_inputs={key: profile[key] for key in (
+            'reported_diluted_shares_m', 'commitment_remaining_usd_m', 'gross_reference_usd_m',
+            'official_transaction_anchors', 'exit_cases', 'exit_rationale', 'as_converted') if key in profile},
         checked_at=cutoff.isoformat(),
         terms='Funding reference amounts are historical transaction-scale stresses. 204,480m is 24% times the investee historical 852,000m funding scale; it is neither a cap nor distributable value. Tax basis, transfer rights, preferences, timing and residual equity are not quantified.',
         reference_sources=profile['official_transaction_anchors'])
+
+
+def alphabet_option_overlay(vwap, overlay, state, coupon):
+    """Apply cash-or-stock election once and keep conditional funding assets and claims paired."""
+    atm_fraction, atm_keep, waymo_draw, waymo_keep, stock_coupon = map(dec,state[:5])
+    settlement = state[5]
+    atm_size = dec(overlay['unused_atm_authority_usd_m'])*atm_fraction
+    waymo = dec(overlay['waymo_facility_usd_m'])*waymo_draw
+    gross_hedge = sum(dec(units)*max(Decimal(0),min(vwap,dec(cap))-dec(strike))
+                      for units,strike,cap in overlay['capped_calls'].values())/10**6
+    cash_hedge = gross_hedge if settlement=='CASH' else Decimal(0)
+    share_hedge = gross_hedge/vwap if settlement=='NET_SHARES' else Decimal(0)
+    return dict(atm_gross=atm_size,atm_net_retained=atm_size*atm_keep,atm_shares=atm_size/vwap,
+        waymo_draw=waymo,waymo_net_claim=waymo*(1-waymo_keep),coupon_cash=coupon*(1-stock_coupon),
+        coupon_shares=coupon*stock_coupon/vwap,hedge_cash=cash_hedge,hedge_shares=share_hedge)
 
 
 def alphabet_equity(card, research, claims, profile, sources, start, end):
@@ -113,9 +149,12 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
             if dec(r['hypothetical_class_vwap_usd'])==vwap)['unadjusted_common_shares'])
             for rows in claims['converted_shares_by_hypothetical_vwap'].values())/10**6
         preferred_cash = dec(profile['preferred_annual_cash_equivalent_m'])*Decimal('2.5')
+        overlay = alphabet_option_overlay(vwap,profile['overlay'],profile['overlay']['states'][name],preferred_cash)
         net_assets = b['cash_and_non_equity_marketable']*liquid+(b['spacex_restricted']+b['other_marketable_equities'])*equities+b['nonmarketable_equity']*private
-        net_bridge = net_assets-b['interest_bearing_notes']-b['finance_leases']-b['nci']-gross_new_debt*(1-retained)-preferred_cash
-        shares = base_shares*(1+shares_change)**5+preferred_shares
+        net_bridge = net_assets-b['interest_bearing_notes']-b['finance_leases']-b['nci']-gross_new_debt*(1-retained)-overlay['coupon_cash']
+        net_bridge += overlay['atm_net_retained']+overlay['hedge_cash']-overlay['waymo_net_claim']
+        shares = (base_shares*(1+shares_change)**5+preferred_shares+overlay['atm_shares']
+                  +overlay['coupon_shares']-overlay['hedge_shares'])
         ev = dec(research['cases'][name]['terminal_operating_ev_usd_m'])
         terminal = (ev+net_bridge)/shares
         if terminal <= 0:
@@ -123,16 +162,17 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
         card['scenarios'][name] = dict(terminal_price=text(terminal))
         components[name] = dict(operating_ev_usd_m=text(ev),net_bridge_usd_m=text(net_bridge),
             forecast_shares_m=text(shares),new_debt_gross_usd_m=text(gross_new_debt),cash_retained_fraction=str(retained),
-            preferred_cash_cost_usd_m=text(preferred_cash),preferred_converted_shares_m=text(preferred_shares))
-    card['holder_equity_bridge'] = dict(status='CONDITIONAL_ORDINARY_VALUE_BOUNDED',
+            preferred_cash_cost_usd_m=text(overlay['coupon_cash']),preferred_converted_shares_m=text(preferred_shares),
+            scenario_overlay={key:text(value) for key,value in overlay.items()})
+    card['holder_equity_bridge'] = dict(status='MODELED_CONDITIONAL_ORDINARY_SCOPE',
         observation_date='2026-09-30',
         ordinary_share_basis='October 21 cover; A/B/C liquidation and common dividend rights are identical except voting under the reviewed 10-Q.',
         financial_inputs=profile['quarter_balance_usd_m'],
         post_quarter_origin_currency=profile['post_quarter_gross_m'],
         scenario_parameter_columns=profile['scenario_columns'],scenario_parameters=profile['contract_states'],
-        components=components,source_evidence=sources,
+        components=components,source_evidence=sources,contract_overlay=profile['overlay'],
         limitations=profile['classification_limit'],
-        assumptions='Operating EV absorbs operating reinvestment; annual ordinary dividends are not added to terminal cash. Preferred coupon-cash branch to 2029, unadjusted conversion, no assumed capped-call recovery, note retention and currency are conditional.')
+        assumptions='Operating EV absorbs operating reinvestment; annual ordinary dividends are not added to terminal cash. Conditional conversion, cash/stock coupons and capped-call election to 2029. Ordinary share drift excludes the explicitly modeled ATM/convertibles. Waymo debit is consolidated and nonrecourse to the parent; announced credit capacity is not observed debt draw.')
     attach_cash(card,dict(quarterly_usd=profile['ordinary_quarterly_cash'],
         locator='10-Q October common dividend declaration for A/B/C',source=sources['quarter']),start,end)
     rate = dec(card['assumptions']['required_return'])
@@ -154,6 +194,17 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
             case=settle(dict(terminal_price=text(price_case)),quote['price'],required,start,end,start,contract['schedule'])
             card['sensitivity'].append(dict(parameter=variable,delta=raw,parameters={variable:raw},
                                              required_return=str(required),result=case))
+    for growth_delta in ('-.03','0','.03'):
+        for multiple_delta in ('-.2','0','.2'):
+            growth = dec(research['cases']['base']['revenue_cagr'])
+            ev = base_ev*((1+growth+dec(growth_delta))/(1+growth))**5*(1+dec(multiple_delta))
+            case = settle(dict(terminal_price=text((ev+net)/shares)),quote['price'],rate,start,end,start,contract['schedule'])
+            card['joint_sensitivity'].append(dict(stress_axis='REVENUE_EV',
+                revenue_growth_shift=growth_delta,terminal_pe_shift=multiple_delta,result=case))
+    card['joint_qualification'].update(
+        complete=True, all_above_required=all(
+            dec(item['result']['annualized_return']) >= rate for item in card['joint_sensitivity']))
+    card['research_method_blockers']=['CONDITIONAL_CAPITAL_AND_EXIT_ASSUMPTIONS']
     card['sensitivity_method']='GOOG_OPERATING_EV_AND_EQUITY_BRIDGE'
     card.pop('failure_reason',None)
     return True

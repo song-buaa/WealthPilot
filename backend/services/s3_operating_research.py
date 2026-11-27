@@ -315,12 +315,12 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
         if professional_context.get('relative_policy'):
             from backend.services.s3_relative_profiles import BOOK
-            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, qualify_class_c_close, rank_comparisons, relative_stress
-            from backend.services import s3_holder_returns, s3_multimethod, s3_equity_bridges
+            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, qualify_class_c_close, qualify_nvda_eps_close, rank_comparisons, relative_stress
+            from backend.services import s3_holder_returns, s3_multimethod, s3_equity_bridges, s3_listed_eps
             from backend.services import s3_berkshire_research as berkshire
             methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
                         BOOK, METHOD, berkshire.CODE,
-                        'backend/services/instruments/issuers.py', s3_holder_returns.CODE, s3_multimethod.CODE, s3_multimethod.BOOK, s3_equity_bridges.CODE)
+                        'backend/services/instruments/issuers.py', s3_holder_returns.CODE, s3_multimethod.CODE, s3_multimethod.BOOK, s3_equity_bridges.CODE, s3_listed_eps.CODE)
             result['quality_dossier'] = professional_context['quality_dossier']
             for index, card in enumerate(result['cards']):
                 if card['symbol'] == 'BRK.B:US':
@@ -343,13 +343,19 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
                     quote = listed_close(root, manifest['companies'][symbol], symbol, at.date().isoformat(),
                                          at-timedelta(days=2), at)
                     card['reference_close'] = dict(quote, scope='LISTED_CLOSE_ONLY_NO_EPS_OR_ENTITLEMENT_QUALIFICATION')
+                    if symbol == 'NVDA:US':
+                        current = professional_context.get('current_financial_qualification',{}).get(symbol,{})
+                        bridge = current.get('bridge') or {}
+                        card['independent_eps_quote'] = qualify_nvda_eps_close(root,manifest['companies'][symbol],
+                            symbol,dossier_card['reviewed_at'],bridge['start'],at-timedelta(days=2),at)
                     if symbol == 'GOOG:US':
                         card['class_c_bridge_quote'] = qualify_class_c_close(root,manifest['companies'][symbol],
                             symbol,dossier_card['reviewed_at'],at-timedelta(days=2),at)
                 except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError):
                     pass
             s3_multimethod.apply(result['cards'], result['quality_dossier'],
-                professional_context['companies'], at, endpoint(at))
+                professional_context['companies'], at, endpoint(at), current_checks=
+                professional_context.get('current_financial_qualification',{}))
             result.update(s3_holder_returns.counts(result['cards']))
             relative_request = pool.PoolRequest.model_validate(request)
             result['comparable_count'] = rank_comparisons(result['cards'], relative_request)
@@ -361,7 +367,9 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
             result['relative_stress'] = stress
             previous_rank = result['ranking']
             result['ranking'] = {k:v for k,v in previous_rank.items() if k not in ('stable','changes')}
-            result['ranking'].update(stable=stress['stable'], changes_status=stress['status'])
+            result['ranking'].update(stable=stress['stable'], changes_status=stress['status'],
+                not_comparable=[c['symbol'] for c in result['cards']
+                                if c['holder_return_scope'] != s3_holder_returns.FULL])
         result['professional_qualification']=professional_context
         result['assumption_profile_version']=professional_context['profile_version']
         result['research_scope']='CURRENT_EVIDENCE_CONDITIONAL_RESEARCH_NOT_VALIDATED_FORECAST'

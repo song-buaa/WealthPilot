@@ -13,6 +13,7 @@ from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERS
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
 from backend.services.s3_equity_bridges import ALPHABET_METHOD, investment_materiality
+from backend.services.s3_listed_eps import METHOD as LISTED_EPS_METHOD
 
 VERSION = 's3-relative-value.fixed-endpoint.v1.1'
 METHOD = 'backend/services/s3_relative_value.py'
@@ -93,6 +94,10 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0001067983.json',earliest,cutoff)
         check_identity(symbol,directory,sub,profile,cutoff)
         return listed_close(root,entry,symbol,profile['shares_as_of'],earliest,cutoff)
+    if card.get('valuation_method') == LISTED_EPS_METHOD:
+        proof = card['listed_eps_method']
+        return qualify_nvda_eps_close(root,entry,symbol,proof['reviewed_at'],
+            card['price_qualification']['eps_interval_start'],earliest,cutoff)
     if card.get('valuation_method') == ALPHABET_METHOD:
         return qualify_class_c_close(root,entry,symbol,card['holder_equity_bridge']['reviewed_at'],earliest,cutoff)
     reviewed = registry(relative=payload['professional_context'].get('relative_policy',False))['companies'][symbol]
@@ -125,6 +130,20 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
 
     return dict(listed_close(root, entry, symbol, card['price_qualification']['eps_interval_start'],
                             earliest, cutoff), ir_sha256=ir['sha256'])
+
+
+def qualify_nvda_eps_close(root,entry,symbol,reviewed_at,interval_start,earliest,cutoff):
+    from backend.services.s3_method_research import identity_projection
+    from research_v2 import sec_disclosures as sec
+
+    review = require_review_clock(reviewed_at,cutoff)
+    directory = source(root,entry['directory'],sec.DIRECTORY,earliest,cutoff)
+    sub = source(root,entry['submissions'],'https://data.sec.gov/submissions/CIK0001045810.json',earliest,cutoff)
+    issuer, _, _ = identity_projection(symbol,directory,sub)
+    if issuer['cik']!='0001045810' or issuer['registered_tickers']!=['NVDA']:
+        raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
+    check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
+    return listed_close(root,entry,symbol,interval_start,earliest,cutoff)
 
 
 def qualify_class_c_close(root, entry, symbol, reviewed_at, earliest, cutoff):
@@ -245,15 +264,18 @@ def rank_comparisons(cards, request):
     engine._rank(cohort + [c for c in cards if not c['scenarios']], request)
     for card in cards:
         if card.get('scenarios') and card.get('holder_return_scope') == holder.BOUNDED:
-            if card.get('sensitivity_method') == 'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE':
-                card['sensitivity_qualification'] = dict(status='METHOD_SPECIFIC',
-                    computed_count=sum(bool(v.get('result')) for v in card['sensitivity']))
-            else:
+            if not card.get('sensitivity_method'):
                 engine._sensitivity_qualification(card)
             card.update(group=None, rank=None, rank_reason=card['holder_return_scope_reason'])
             for key in ('relative_return','tie_reason','classification_reasons'):
                 card.pop(key, None)
     for card in cards:
+        if card['scenarios'] and card.get('sensitivity_method') in (
+                'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE', 'LISTED_EPS_OPERATING_DRIVERS'):
+            card['sensitivity_qualification'] = dict(
+                status='METHOD_SPECIFIC',
+                computed_count=sum(bool(v.get('result')) for v in card['sensitivity']),
+                joint_count=sum(bool(v.get('result')) for v in card['joint_sensitivity']))
         if not card['scenarios']:
             card.pop('relative_return', None)
             card.update(group=None, rank=None, rank_reason=card['failure_reason'])
@@ -310,7 +332,7 @@ def relative_stress(cards, request, *, remaining=Decimal(5)):
             except (ValueError, KeyError, TypeError, ArithmeticError):
                 continue
         grid[symbol] = points
-        expected = 9 if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1' else 11
+        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1',ALPHABET_METHOD) else 11
         if len(points) < expected:
             missing.append(symbol)
     baseline = {c['symbol']: [c['group'],c['rank']] for c in eligible}
@@ -323,7 +345,7 @@ def relative_stress(cards, request, *, remaining=Decimal(5)):
     for shift in ('-.2','.2'):
         variants = {symbol: value for symbol,points in grid.items()
                     for (axis,growth,multiple),value in points.items()
-                    if axis in ('REVENUE_PE','OPERATING_EARNINGS_PE') and growth=='0' and multiple==shift}
+                    if axis in ('REVENUE_PE','OPERATING_EARNINGS_PE','REVENUE_EV') and growth=='0' and multiple==shift}
         if len(variants) > 1:
             cases.append(('COMMON_EXIT_MULTIPLE', ('EXIT_MULTIPLE','0',shift), variants))
     cases.extend((symbol,key,{symbol: scenario}) for symbol,points in grid.items()
