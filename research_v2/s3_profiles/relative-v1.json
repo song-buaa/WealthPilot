@@ -361,7 +361,8 @@
           "primary": "d44678d424b5.htm",
           "form": "424B5",
           "locator": "Recent Developments: November 2 completed depositary option, 37.5m shares and $1.869bn net proceeds",
-          "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2"
+          "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
