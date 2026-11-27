@@ -211,6 +211,20 @@ def test_inconsistent_owner_budget_receipt_keeps_only_actual(conflict):
     assert result["potential_cny"] is None
 
 
+def test_budget_receipt_must_match_the_actual_instant_across_dst_fold():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    data = exposure()
+    before = datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo("America/New_York"), fold=0)
+    after = before.replace(fold=1)
+    receipt = data.strategy_budget_evidence.model_dump()
+    stale = exposure(as_of=after, strategy_budget_evidence=receipt | {"as_of":before})
+    current = exposure(as_of=after, strategy_budget_evidence=receipt | {"as_of":after.astimezone(timezone.utc)})
+    assert exposure_diagnostic(stale)["potential_cny"] is None
+    assert exposure_diagnostic(current)["potential_cny"] == 1500
+
+
 def test_same_capital_cannot_be_allocated_across_sleeves_or_reused_from_a_position():
     data = exposure()
     strategy_cash = data.uninvested_funding[0]

@@ -1,6 +1,6 @@
 """BTC-only policy and isolated diagnostics. No asset, provider or order I/O."""
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 from typing import Annotated, ClassVar, Literal
 
@@ -241,7 +241,8 @@ def _funding_qualified(evidence, positions, funds):
 
     return (
         budget is not None
-        and budget.as_of == evidence.as_of
+        and budget.as_of.utcoffset() is not None
+        and budget.as_of.astimezone(timezone.utc) == evidence.as_of.astimezone(timezone.utc)
         and budget.authorized_cny > 0
         and budget.authorized_cny == evidence.strategy_budget_cny
         and budget.position_ids == strategy_positions
