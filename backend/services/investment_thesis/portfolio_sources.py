@@ -95,7 +95,7 @@ def read_portfolio_sources(database, portfolio_id, request, contract=None, *, in
     with bind(pinned):
         try:
             with _assembled_policy_assets(portfolio_id, request.snapshot_id, frozen_view=view,
-                                          evaluation_at=at, etf_inputs=evidence) as assembled:
+                                          evaluation_at=at, etf_inputs=evidence, strategic=False) as assembled:
                 if assembled.context["policy_reference"] != reference:
                     raise ValueError("E1_PORTFOLIO_POLICY_CHANGED")
                 concentration = assembled.allocation_concentration

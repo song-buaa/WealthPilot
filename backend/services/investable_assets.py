@@ -46,20 +46,21 @@ def _account_observation(account, at):
     return observed if observed <= published else None
 
 
-def _inventory_current(account, at):
+def _inventory_current(account, at, *, strategic):
+    max_age = ACCOUNT_INVENTORY_MAX_AGE if strategic else 300
     if (account.get('publication_status') != 'matched' or account.get('last_attempt_status') != 'success'
             or account.get('complete') is not True or account.get('fill_sync_pending')
-            or not _source_current(account.get('account_synced_at'), at, ACCOUNT_INVENTORY_MAX_AGE)):
+            or not _source_current(account.get('account_synced_at'), at, max_age)):
         return False
     if account.get('quality') == 'current':
         return True
     issues = set(account.get('issues') or [])
-    return bool(account.get('quality') == 'partial' and issues and _account_observation(account, at)
+    return bool(strategic and account.get('quality') == 'partial' and issues and _account_observation(account, at)
                 and issues <= _INVENTORY_OBSERVATIONS[account['source']][2])
 
 
-def _allocation_view_expires_at(captured_at):
-    return datetime.fromisoformat(captured_at) + timedelta(seconds=VIEW_TTL)
+def _expires_at(value, seconds):
+    return datetime.fromisoformat(value) + timedelta(seconds=seconds)
 
 
 class Disposition(Contract):
@@ -126,7 +127,7 @@ def _evidenced(refs):
     return bool(refs) and all(ref.strip() for ref in refs)
 
 
-def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha256, at):
+def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha256, at, strategic=True):
     """Validate source identity/hash and derive qualification, never trust flags.
 
     The hash must come from the original frozen-input owner. A content digest
@@ -145,11 +146,13 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
     if snapshot_sha256 != actual_hash:
         raise ValueError('INVESTABLE_SNAPSHOT_HASH_MISMATCH')
     quality = source.get('data_quality', {})
+    view_age = VIEW_TTL if strategic else 300
+    inventory_age = ACCOUNT_INVENTORY_MAX_AGE if strategic else 300
     limits, issues = [], []
-    if not _source_current(source.get('captured_at'), at, VIEW_TTL):
+    if not _source_current(source.get('captured_at'), at, view_age):
         issues.append('INVESTABLE_SNAPSHOT_STALE')
     else:
-        limits.append(_allocation_view_expires_at(source['captured_at']))
+        limits.append(_expires_at(source['captured_at'], view_age))
     raw = quality.get('investable_scope_evidence')
     try:
         evidence = ScopeEvidence.model_validate(raw) if raw else None
@@ -160,10 +163,10 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
         raise ValueError('INVESTABLE_EVIDENCE_SCOPE_MISMATCH')
     if not evidence:
         issues.append('INVESTABLE_SCOPE_EVIDENCE_MISSING')
-    elif not _source_current(evidence.as_of, at, VIEW_TTL):
+    elif not _source_current(evidence.as_of, at, view_age):
         issues.append('INVESTABLE_SCOPE_EVIDENCE_STALE')
     else:
-        limits.append(_allocation_view_expires_at(evidence.as_of))
+        limits.append(_expires_at(evidence.as_of, view_age))
 
     inputs = quality.get('investable_security_inputs', quality.get('security_inputs', []))
     manual = source.get('views', {}).get('get_manual_wealth_items', {}).get('items', [])
@@ -174,11 +177,10 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
     for account in accounts:
         # Inventory includes excluded rows too. A failed/partial last-good
         # account cannot prove that other freely investable holdings are absent.
-        if not _inventory_current(account, at):
+        if not _inventory_current(account, at, strategic=strategic):
             issues.append('INVESTABLE_ACCOUNT_INVENTORY_UNVERIFIED')
         else:
-            limits.append(datetime.fromisoformat(account['account_synced_at']) +
-                          timedelta(seconds=ACCOUNT_INVENTORY_MAX_AGE))
+            limits.append(_expires_at(account['account_synced_at'], inventory_age))
     source_rows = [('position', row) for row in inputs]
     source_rows += [('wealth', row) for row in manual if str(row.get('kind', '')).lower() == 'asset']
     keys = [f'{kind}:{row.get("id")}' for kind, row in source_rows]
@@ -193,7 +195,7 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
     for domain in ('accounts', 'manual_assets', 'pensions', 'gold', 'btc', 'deduplication'):
         item = evidence.coverage.get(domain) if evidence else None
         ok = bool(item and item.status != 'UNKNOWN' and _evidenced(item.evidence_refs)
-                  and _source_current(item.as_of, at, VIEW_TTL) and set(item.asset_refs) <= set(keys))
+                  and _source_current(item.as_of, at, view_age) and set(item.asset_refs) <= set(keys))
         if item and item.status == 'PRESENT' and domain != 'accounts':
             ok = ok and bool(item.asset_refs)
         if item and item.status == 'ABSENT' and item.asset_refs:
@@ -208,7 +210,7 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
         if not ok:
             issues.append('INVESTABLE_'+domain.upper()+'_COVERAGE_UNKNOWN')
         else:
-            limits.append(_allocation_view_expires_at(item.as_of))
+            limits.append(_expires_at(item.as_of, view_age))
 
     linked_positions = set()
     pension_ok = coverage_ok['pensions']
@@ -280,27 +282,27 @@ def project_investable_assets(view, *, portfolio_id, snapshot_id, snapshot_sha25
                 fx_ok = False
             if kind == 'position':
                 account = account_map.get(row.get('account_ref'), {})
-                if not _inventory_current(account, at):
+                if not _inventory_current(account, at, strategic=strategic):
                     row_issues.append('ACCOUNT_SOURCE_UNVERIFIED_OR_STALE')
                 cash = row.get('vehicle_type') == 'CASH'
                 source_time = row.get('cash_as_of' if cash else 'positions_as_of')
-                if source_time is None:
+                if source_time is None and strategic:
                     observed = _account_observation(account, at)
-                elif _source_current(source_time, at, ACCOUNT_INVENTORY_MAX_AGE):
+                elif _source_current(source_time, at, inventory_age):
                     observed = datetime.fromisoformat(source_time)
                 else:
                     observed = None
                 if observed is None:
                     row_issues.append('ASSET_SOURCE_TIME_UNKNOWN_OR_STALE')
                 else:
-                    limits.append(observed + timedelta(seconds=ACCOUNT_INVENTORY_MAX_AGE))
+                    limits.append(observed + timedelta(seconds=inventory_age))
                 if not cash:
                     # Like U1's qualify_view, defer the optional market helper;
                     # its legacy package initializer adjusts sys.path.
                     from backend.services.execution_plan.market_hours import valuation_quality
                     symbol = row.get('security_symbol') or row.get('symbol') or ''
                     price = valuation_quality(row.get('price_as_of'), symbol.rsplit(':', 1)[-1], at=at,
-                                              basis=row.get('price_time_basis'), for_allocation=True)
+                                              basis=row.get('price_time_basis'), for_allocation=strategic)
                     if price['status'] not in {'intraday', 'recent_close'}:
                         row_issues.append('PRICE_TIME_UNKNOWN_OR_STALE')
                     elif price.get('valid_until'):

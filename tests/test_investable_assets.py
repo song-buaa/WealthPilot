@@ -126,6 +126,7 @@ def test_evidence_scope_and_duplicate_rows_fail_closed(view):
 def test_source_clock_not_rejuvenated_by_fresh_receipt(view):
     view['captured_at'] = (AT-timedelta(seconds=301)).isoformat()
     assert project(view).status == 'QUALIFIED'
+    assert project(view, strategic=False).status == 'UNKNOWN'
     view['captured_at'] = (AT-timedelta(seconds=VIEW_TTL+1)).isoformat()
     assert project(view).status == 'UNKNOWN'
 
@@ -293,6 +294,7 @@ def test_complete_native_read_can_prove_cash_observation_without_claiming_source
 
     assert project(view).status == 'QUALIFIED'
     assert row['cash_as_of'] is None
+    assert project(view, strategic=False).status == 'UNKNOWN'
 
     for change in (dict(complete=False), dict(fill_sync_pending=True), dict(last_attempt_id=18),
                    dict(issues=[warning, 'UNEXPLAINED_PARTIAL']), dict(source='other'),

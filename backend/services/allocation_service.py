@@ -53,7 +53,8 @@ def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
         return build_allocation_snapshot(positions, segment="投资")
 
 
-def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None, evaluation_at=None, etf_inputs=None):
+def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None, evaluation_at=None,
+                             etf_inputs=None, strategic=True):
     """Server-owned read only: pin policy, original stored U1 bytes and A-min.
 
     Never call prepare, live Portfolio, FX providers or broker synchronization.
@@ -114,7 +115,7 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
                 ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED', owner_issue,
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
-            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
+            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at, strategic=strategic)
         # A new request-local session; never mutate a caller's pinned assets.
         from backend.services.investment_policy.runtime import PolicySession
         session = PolicySession(portfolio_id, assets=projection.policy_assets)
