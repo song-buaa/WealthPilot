@@ -48,10 +48,11 @@ def normalize_openai(card, profile, evidence):
     return True
 
 
-def investment_materiality(card, profile, start, end):
+def investment_materiality(card, profile, start, end, *, cutoff=None, price=None):
     """No issuer-wide value cap inferred from ownership or a financing valuation."""
     base = card['scenarios']['base']
-    price = dec(card['cross_checks']['observed_price']['values']['observed_price'])
+    cutoff = cutoff or start
+    price = dec(price if price is not None else card['cross_checks']['observed_price']['values']['observed_price'])
     rate = dec(card['assumptions']['required_return'])
     shares = dec(profile['reported_diluted_shares_m'])*dec(base['years'][-1]['relative_shares'])
     obligation = dec(profile['commitment_remaining_usd_m'])
@@ -64,7 +65,7 @@ def investment_materiality(card, profile, start, end):
             proceeds = gross*recovery-obligation
             amount = proceeds/shares
             case = dict(base,terminal_price=text(dec(base['terminal_price'])+amount))
-            value = settle(case,price,rate,start,end,start,cash_contract['schedule'])
+            value = settle(case,price,rate,start,end,cutoff,cash_contract['schedule'])
             rows.append(dict(gross_reference_usd_m=str(gross),after_tax_and_transfer_recovery_fraction=str(recovery),
                              current_contract_funding_stress_usd_m=str(obligation),
                              net_terminal_per_share_usd=text(amount),annualized_return=value['annualized_return'],
@@ -73,13 +74,16 @@ def investment_materiality(card, profile, start, end):
     return dict(status='DECISION_THRESHOLD_SENSITIVE' if switches else 'NO_THRESHOLD_CROSSING_IN_TESTED_STRESS',
         obligation_adjusted_net_terminal_proceeds_needed_usd_m=text(hurdle*shares+obligation),
         bounded_economic_range=False, decision_threshold_crossed=switches, cases=rows,
+        frozen_stress_inputs={key:profile[key] for key in ('reported_diluted_shares_m',
+            'commitment_remaining_usd_m','gross_reference_usd_m','official_transaction_anchors')},
+        checked_at=cutoff.isoformat(),
         terms='Funding reference amounts are historical transaction-scale stresses. Tax basis, transfer rights, preferences, timing and residual equity are not quantified.',
         reference_sources=profile['official_transaction_anchors'])
 
 
 def alphabet_equity(card, research, claims, profile, sources, start, end):
     """Qualified raw close, independently reviewed operating EV and Class C claim."""
-    quote = card.get('reference_close')
+    quote = card.get('class_c_bridge_quote')
     if not quote or not claims or not profile['sources'].keys() <= sources.keys():
         return False
     b = {k:dec(v) for k,v in profile['quarter_balance_usd_m'].items()}
@@ -87,7 +91,7 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
     card['scenarios'] = {}
     card['cross_checks'] = {'observed_price':dict(values={'observed_price':quote['price']},period=quote['price_date'],
                                                   currency='USD',source_receipt=quote)}
-    card['price_qualification'] = dict(quote,eps_interval_start=quote['price_date'])
+    card['price_qualification'] = dict(quote,eps_interval_start='2026-10-21')
     card['valuation_method'] = ALPHABET_METHOD
     card['assumptions'] = dict(required_return='.10',rationale='Scenario shares and retained assets disclosed separately')
     card['formula'] = '(operating EV + modeled nonoperating assets − notes − finance leases − NCI − preferred cash) / post-conversion ordinary shares'

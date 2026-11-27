@@ -154,6 +154,7 @@ def apply(cards, dossier, professional_checks, start, end):
                             candidate['holder_equity_bridge']['reviewed_at'] = operating['reviewed_at']
                             _set_bounded(candidate,'UNMODELED_CAPPED_CALL_SETTLEMENT_AND_FINANCING_RESIDUAL')
                             card.update(candidate)
+                            card.pop('failure_reason',None)
             continue
         if symbol == 'TSLA:US':
             stress = tesla_investment_stress(card,dossier.get(symbol,{}),profiles[symbol],start)

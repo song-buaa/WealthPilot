@@ -315,7 +315,7 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
         if professional_context.get('relative_policy'):
             from backend.services.s3_relative_profiles import BOOK
-            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, rank_comparisons, relative_stress
+            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, qualify_class_c_close, rank_comparisons, relative_stress
             from backend.services import s3_holder_returns, s3_multimethod, s3_equity_bridges
             from backend.services import s3_berkshire_research as berkshire
             methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
@@ -343,6 +343,9 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
                     quote = listed_close(root, manifest['companies'][symbol], symbol, at.date().isoformat(),
                                          at-timedelta(days=2), at)
                     card['reference_close'] = dict(quote, scope='LISTED_CLOSE_ONLY_NO_EPS_OR_ENTITLEMENT_QUALIFICATION')
+                    if symbol == 'GOOG:US':
+                        card['class_c_bridge_quote'] = qualify_class_c_close(root,manifest['companies'][symbol],
+                            symbol,dossier_card['reviewed_at'],at-timedelta(days=2),at)
                 except (KeyError, ValueError, TypeError, ArithmeticError, OSError, IndexError):
                     pass
             s3_multimethod.apply(result['cards'], result['quality_dossier'],

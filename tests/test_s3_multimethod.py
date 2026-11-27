@@ -127,3 +127,28 @@ def test_required_residual_envelope_cannot_be_omitted():
         dict(sources=['q'], rationale='requires financial ownership bridge', residual_required=True),
         {'q':{'source_sha256':'q'}})
     assert card['holder_return_scope'] == holder.BOUNDED
+
+
+def test_class_c_close_uses_share_observation_not_quote_date(monkeypatch):
+    import json
+    from research_v2 import sec_disclosures as sec
+    from backend.services import s3_method_research as method
+
+    labels=[]
+    def source(_,record,url,earliest,cutoff):
+        assert record['url']==url
+        return json.dumps({'filings':{'recent':{'accessionNumber':['a'], 'filingDate':['2026-11-24'],
+            'acceptanceDateTime':['2026-11-24T19:00:00Z']}}}).encode(),cutoff.isoformat()
+    def listed(root,entry,symbol,interval,earliest,cutoff):
+        labels.append(interval)
+        return {'price':'270.98'}
+    monkeypatch.setattr(relative,'source',source)
+    monkeypatch.setattr(relative,'listed_close',listed)
+    monkeypatch.setattr(method,'identity_projection',lambda *a: ({'cik':'0001652044','sec_ticker':'GOOG'},None,None))
+    entry=dict(directory={'url':sec.DIRECTORY},submissions={'url':'https://data.sec.gov/submissions/CIK0001652044.json'})
+    relative.qualify_class_c_close(None,entry,'GOOG:US','2026-11-27T16:05:00Z',
+        datetime(2026,11,26,tzinfo=timezone.utc),datetime(2026,11,28,tzinfo=timezone.utc))
+    assert labels==['2026-10-21']
+    with pytest.raises(ValueError,match='NEW_FILING'):
+        relative.qualify_class_c_close(None,entry,'GOOG:US','2026-11-23T16:05:00Z',
+            datetime(2026,11,26,tzinfo=timezone.utc),datetime(2026,11,28,tzinfo=timezone.utc))

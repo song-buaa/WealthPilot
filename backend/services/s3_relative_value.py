@@ -12,7 +12,7 @@ from backend.services import quality_valuation_research as archive
 from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERSION, policy_target_identity
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
-from backend.services.s3_equity_bridges import ALPHABET_METHOD
+from backend.services.s3_equity_bridges import ALPHABET_METHOD, investment_materiality
 
 VERSION = 's3-relative-value.fixed-endpoint.v1.1'
 METHOD = 'backend/services/s3_relative_value.py'
@@ -94,13 +94,7 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         check_identity(symbol,directory,sub,profile,cutoff)
         return listed_close(root,entry,symbol,profile['shares_as_of'],earliest,cutoff)
     if card.get('valuation_method') == ALPHABET_METHOD:
-        review = require_review_clock(card['holder_equity_bridge']['reviewed_at'],cutoff)
-        sub = source(root,entry['submissions'],'https://data.sec.gov/submissions/CIK0001652044.json',earliest,cutoff)
-        issuer, _, _ = identity_projection(symbol,directory,sub)
-        if issuer['cik'] != '0001652044' or issuer['sec_ticker'] != 'GOOG':
-            raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
-        check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
-        return listed_close(root,entry,symbol,'2026-10-21',earliest,cutoff)
+        return qualify_class_c_close(root,entry,symbol,card['holder_equity_bridge']['reviewed_at'],earliest,cutoff)
     reviewed = registry(relative=payload['professional_context'].get('relative_policy',False))['companies'][symbol]
     sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK'+reviewed['cik']+'.json',
                  earliest, cutoff)
@@ -131,6 +125,21 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
 
     return dict(listed_close(root, entry, symbol, card['price_qualification']['eps_interval_start'],
                             earliest, cutoff), ir_sha256=ir['sha256'])
+
+
+def qualify_class_c_close(root, entry, symbol, reviewed_at, earliest, cutoff):
+    from backend.services.s3_method_research import identity_projection
+    from research_v2 import sec_disclosures as sec
+
+    review = require_review_clock(reviewed_at,cutoff)
+    directory = source(root,entry['directory'],sec.DIRECTORY,earliest,cutoff)
+    sub = source(root,entry['submissions'],'https://data.sec.gov/submissions/CIK0001652044.json',earliest,cutoff)
+    issuer, _, _ = identity_projection(symbol,directory,sub)
+    if issuer['cik'] != '0001652044' or issuer['sec_ticker'] != 'GOOG':
+        raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
+    check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
+    return dict(listed_close(root,entry,symbol,'2026-10-21',earliest,cutoff),
+                holder_basis='CLASS_C_FROM_2026_10_21_SHARE_OBSERVATION_AND_SPLIT_WINDOW')
 
 
 def listed_close(root, entry, symbol, interval_start, earliest, cutoff):
@@ -374,13 +383,14 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             observation = qualify_price(root, manifest, payload, card, cutoff, live=live)
             if card.get('nonoperating_asset_stress'):
                 card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
-            if card.get('nonoperating_materiality'):
-                card['nonoperating_materiality']['status'] = 'HISTORICAL_MATERIALITY_AT_ORIGIN'
             old_price = engine.dec(card['cross_checks']['observed_price']['values']['observed_price'])
             price = engine.dec(observation['price'])
             required = engine.dec(card['assumptions']['required_return'])
             for name, case in card['scenarios'].items():
                 card['scenarios'][name] = reprice_at(card, case, old_price, price, remaining, required, cutoff)
+            if card.get('nonoperating_materiality'):
+                card['nonoperating_materiality'] = investment_materiality(card,
+                    card['nonoperating_materiality']['frozen_stress_inputs'],start,end,cutoff=cutoff,price=price)
             for key in ('sensitivity', 'joint_sensitivity'):
                 for variant in card[key]:
                     rate = engine.dec(variant['required_return']) if key == 'sensitivity' else required
@@ -429,6 +439,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                 card['holder_return_scope_reason'] = reason
                 if card.get('nonoperating_asset_stress'):
                     card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
+                if card.get('nonoperating_materiality'):
+                    card['nonoperating_materiality']['status'] = 'HISTORICAL_MATERIALITY_NOT_REQUALIFIED'
                 if card.get('holder_equity_bridge'):
                     card['holder_equity_bridge']['status'] = 'HISTORICAL_HOLDER_ECONOMICS_NOT_REQUALIFIED'
                 if card.get('economic_claim_states'):
