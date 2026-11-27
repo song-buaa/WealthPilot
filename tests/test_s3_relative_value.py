@@ -70,7 +70,13 @@ def test_recent_filing_clock_fails_closed(day, acceptance, error):
 
 
 def test_independent_verifier_keeps_card_with_no_quality_evidence(monkeypatch, tmp_path):
-    from scripts import s3_relative_value_verify as verifier
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / 'scripts/s3_relative_value_verify.py'
+    spec = spec_from_file_location('s3_relative_value_verify', script)
+    verifier = module_from_spec(spec)
+    spec.loader.exec_module(verifier)
 
     parent = {'result': {'decision_at': '2026-11-03T10:00:00+00:00',
                          'cards': [{'symbol': 'UNKNOWN:US', 'scenarios': {}, 'rank': None}]}}
