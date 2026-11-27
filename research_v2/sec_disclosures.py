@@ -1298,12 +1298,17 @@ def collect(symbol, *, current=None):
     A failure to resolve/verify never turns a request/card into source authority.
     """
     _diagnostics.set(())
-    from backend.core.demo_mode import PUBLIC_DEMO_MODE
     from backend.services.market_data.cache import get_cached, set_cached, FUNDAMENTALS_TTL
-    if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1' or not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
+    if not isinstance(symbol, str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}:US', symbol):
         return [], {}.get
-    cache_key = 'sec-disclosures:v3-annual-original:'+symbol
     frozen_fetch = current.get('frozen_fetch') if current is not None else None
+    if frozen_fetch is None:
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1':
+            return [], {}.get
+    elif current.get('capture') is None:
+        raise ValueError('CURRENT_FROZEN_TRANSPORT_INCOMPLETE')
+    cache_key = 'sec-disclosures:v3-annual-original:'+symbol
     fetch = _fetch if frozen_fetch is None else frozen_fetch
     cached = get_cached(cache_key) if frozen_fetch is None else None
     if cached and current is not None and not all(

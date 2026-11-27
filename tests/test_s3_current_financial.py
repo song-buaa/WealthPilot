@@ -47,6 +47,9 @@ def test_frozen_current_calls_official_owner_without_vendor_or_sec_live_io(monke
 def test_current_capture_failure_is_per_issuer_and_cannot_replay_as_legacy(tmp_path, monkeypatch):
     from backend.services.market_data import av_fundamentals_service as av
 
+    monkeypatch.setattr('backend.core.demo_mode.PUBLIC_DEMO_MODE', False)
+    monkeypatch.setenv('AV_DEV_MOCK', '0')
+
     directory, submissions, facts = [dict(path=name, url=name) for name in ('dir', 'sub', 'facts')]
     manifest = dict(companies={
         symbol: dict(directory=directory, submissions=submissions, companyfacts=facts)

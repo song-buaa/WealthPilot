@@ -1,6 +1,7 @@
 """S3 source adapter. SEC/AV transport and financial qualification remain with 4.1."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from backend.services.market_data.evidence import stamp
@@ -44,6 +45,7 @@ def frozen(symbol, entry, source, at):
 
 def capture(root, manifest, symbols):
     """Record only the current Owner inputs not already captured for this pool."""
+    from backend.core.demo_mode import PUBLIC_DEMO_MODE
     from backend.services.market_data.av_fundamentals_service import collect_current_statements
 
     root = Path(root)
@@ -58,6 +60,8 @@ def capture(root, manifest, symbols):
         entry = manifest['companies'][symbol]
         ticker = symbol[:-3]
         try:
+            if PUBLIC_DEMO_MODE or os.getenv('AV_DEV_MOCK') == '1':
+                raise ValueError('S3_CURRENT_LIVE_CAPTURE_DISABLED')
             if not all(entry.get(kind, {}).get('path') for kind in ('directory', 'submissions', 'companyfacts')):
                 raise ValueError('S3_CURRENT_STRUCTURED_INPUT_UNAVAILABLE')
             by_url = {row['url']: row for row in [
