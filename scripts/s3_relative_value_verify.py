@@ -24,6 +24,30 @@ def load(path):
     return p
 
 
+def verify_berkshire(parent_card):
+    profile = parent_card['alternate_operating_profile']
+    rows = profile['operating_millions']
+    for column, expected in enumerate(profile['reported_totals_millions']):
+        assert sum(values[column] for values in rows.values()) == expected
+    shares = profile['class_a_outstanding']*1500 + profile['class_b_outstanding']
+    bridge = parent_card['operating_earnings_bridge']
+    assert bridge['b_equivalent_shares'] == shares
+    segments = {name: D(fy + cy - py) for name, (fy,cy,py) in rows.items()}
+    assert sum(segments.values()) == D(bridge['ttm_usd_millions'])
+    with localcontext() as ctx:
+        ctx.prec = 34
+        price = D(parent_card['cross_checks']['observed_price']['values']['observed_price'])
+        for name, hypothesis in profile['scenarios'].items():
+            terminal_net = sum(v*(1+D(hypothesis['growth'][segment]))**5
+                               for segment,v in segments.items())*1000000
+            end_shares = shares*(1+D(hypothesis['annual_share_change']))**5
+            wealth = terminal_net*D(hypothesis['multiple'])/end_shares
+            case = parent_card['scenarios'][name]
+            assert abs(D(case['terminal_wealth'])-wealth) < D('0.00000002')
+            assert abs(D(case['annualized_return'])-((wealth/price)**(D(1)/5)-1)) < D('0.00000002')
+    return len(profile['scenarios'])
+
+
 def verify(path):
     if not __debug__:
         raise RuntimeError('OPTIMIZED_PYTHON_UNSAFE_FOR_VERIFICATION')
@@ -45,6 +69,8 @@ def verify(path):
     assert D(r['remaining_years']) == years
     original = {c['symbol']: c for c in parent['result']['cards']}
     checked = 0
+    berkshire_checked = sum(verify_berkshire(c) for c in original.values()
+                            if c.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1')
     with localcontext() as ctx:
         ctx.prec = 34
         for card in r['cards']:
@@ -80,7 +106,8 @@ def verify(path):
                 assert D(pairs[other['symbol']]['annualized_base_difference']) == expected
     assert not original
     return dict(artifact_id=path.parent.name, parent_artifact_id=child['parent_artifact_id'],
-                cases=checked, status='PASS' if checked else 'NO_QUALIFIED_CASES')
+                cases=checked, berkshire_parent_cases=berkshire_checked,
+                status='PASS' if checked else 'NO_QUALIFIED_CASES')
 
 
 if __name__ == '__main__':

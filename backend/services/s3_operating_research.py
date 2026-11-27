@@ -327,8 +327,12 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
             at = engine.stamp(request['decision_at'])
             for card in result['cards']:
                 symbol = card['symbol']
-                if card['scenarios'] or not result['quality_dossier'].get(symbol,{}).get('sources'):
+                dossier_card = result['quality_dossier'].get(symbol,{})
+                if card['scenarios'] or not dossier_card.get('sources'):
                     continue
+                if dossier_card.get('valuation_blocker'):
+                    card['owner_qualification_reason'] = card['failure_reason']
+                    card['failure_reason'] = dossier_card['valuation_blocker']
                 try:
                     quote = listed_close(root, manifest['companies'][symbol], symbol, at.date().isoformat(),
                                          at-timedelta(days=2), at)

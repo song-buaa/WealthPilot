@@ -206,7 +206,8 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "valuation_blocker": "CURRENT_OCTOBER_QUARTER_SEC_FINANCIAL_WINDOW_NOT_QUALIFIED"
     },
     "GOOG:US": {
       "cik": "0001652044",
@@ -269,7 +270,8 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "valuation_blocker": "CLASS_C_Q4_EPS_AND_FORWARD_PREFERRED_ENTITLEMENTS_UNQUALIFIED"
     },
     "META:US": {
       "cik": "0001326801",
@@ -409,7 +411,8 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "valuation_blocker": "EXACT_2025_Q4_ORDINARY_EPS_MISSING"
     },
     "BRK.B:US": {
       "cik": "0001067983",
@@ -562,7 +565,8 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "valuation_blocker": "POST_IPO_CLASS_A_DILUTION_AND_RECOVERY_CASH_FLOW_UNQUALIFIED"
     }
   },
   "reviewed_at": "2026-11-27T09:59:13.926379+00:00",

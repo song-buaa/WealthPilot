@@ -130,7 +130,8 @@ def quality_cards(root, manifest, cutoff, book):
                                   version=book['version'], reviewed_at=profile['reviewed_at'],
                                   dimensions=dimensions, sources=evidence,
                                   valuation_method=profile['valuation_method'],
-                                  equity_bridge=profile['equity_bridge'])
+                                  equity_bridge=profile['equity_bridge'],
+                                  valuation_blocker=profile.get('valuation_blocker'))
         except (KeyError, TypeError, ValueError, OSError, StopIteration) as exc:
             from backend.services.s3_pool_research import _error_code
             result[symbol] = dict(status='INSUFFICIENT_EVIDENCE',
