@@ -286,3 +286,60 @@ test('D previews both paths from a frozen 409 baseline without other writes', as
   await expect(page.getByText(/action:sale.*UNSETTLED/)).toBeVisible()
   expect(writes).toEqual(['/api/allocation/simulate-transition'])
 })
+
+test('E previews, cancels and confirms exactly one checked item', async ({ page }) => {
+  let saved = 0
+  let cancelled = 0
+  const baseGovernance = '/api/allocation/governance'
+  const receipt = { request_id: 'test-once', preview_token: 't'.repeat(32), preview_fingerprint: 'a'.repeat(64),
+    expires_at: '2026-11-27T12:00:00Z' }
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64) } } })
+    } else if (path === baseGovernance + '/preview') {
+      const draft = route.request().postDataJSON()
+      expect(draft.policy_bundle_sha256).toBe('f'.repeat(64))
+      await route.fulfill({ json: { ...receipt, payload: {
+        qualification: { status: 'UNKNOWN', issues: ['TEST_UNKNOWN'] }, request: { bundle_id: 'test' },
+        policy_reference: { bundle_version: 3 }, simulation: null,
+        items: ['keep', 'hold'].map(item_id => ({ proposal: { item_id, kind: 'CONDITIONAL_HOLD',
+          reason: 'test reason', review_due_at: '2026-12-01T10:00:00Z', expires_at: '2026-12-02T10:00:00Z',
+          revoke_when: 'changed evidence' }, disposition_state: 'AWAITING_CONFIRMATION', event_states: [] })),
+      } } })
+    } else if (path === baseGovernance + '/commit') {
+      const body = route.request().postDataJSON()
+      expect(body.preview_fingerprint).toBe(receipt.preview_fingerprint)
+      if (body.confirmation === '取消') {
+        cancelled++
+        expect(body.selected_item_ids).toEqual([])
+        await route.fulfill({ json: { saved: false, cancelled: true } })
+      } else {
+        saved++
+        expect(body.selected_item_ids).toEqual(['hold'])
+        expect(body.confirmed).toBe(true)
+        await route.fulfill({ json: { saved: true } })
+      }
+    } else if (path === baseGovernance) {
+      await route.fulfill({ json: { records: saved ? [{ bundle_id: 'test', revision: 1, bundle_state: 'RECORDED' }] : [],
+        followups: [], risk_events: [] } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('组合人工决策与复核', { exact: true }).click()
+  await page.getByLabel('决策草案 JSON').fill('{"bundle_id":"test"}')
+  await page.getByRole('button', { name: '预览组合决定' }).click()
+  await expect(page.getByRole('button', { name: '保存这次组合决定（0 项）' })).toBeDisabled()
+  await page.getByRole('button', { name: '取消预览' }).click()
+  expect(cancelled).toBe(1)
+  expect(saved).toBe(0)
+  await page.getByRole('button', { name: '预览组合决定' }).click()
+  await page.getByRole('checkbox', { name: /hold/ }).check()
+  await page.getByRole('button', { name: '保存这次组合决定（1 项）' }).click()
+  await expect(page.getByText('已保存并读回确认版本。')).toBeVisible()
+  expect(saved).toBe(1)
+})

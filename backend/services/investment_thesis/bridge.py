@@ -139,14 +139,23 @@ class ResearchBridge:
             confirmation_required='保存这次判断', saved=False, execution_authorized=False,
             expires_at=(now()+timedelta(seconds=self.ttl)).isoformat(),
             limitation='Local/future authorized research save only; not online integration or trading authorization')
+        return self._remember(preview, storage_fingerprint=storage_fingerprint, kind=kind)
+
+    def _remember(self, preview, **metadata):
         with self.lock:
             self.pending = {k:v for k,v in self.pending.items() if v['deadline'] > self.clock()}
             if len(self.pending) >= self.capacity:
                 raise ValueError('E1_PREVIEW_CAPACITY_REACHED')
             token = secrets.token_urlsafe(32)
-            self.pending[token] = dict(deadline=self.clock()+self.ttl, preview=deepcopy(preview),
-                                       storage_fingerprint=storage_fingerprint, kind=kind)
+            self.pending[token] = dict(deadline=self.clock()+self.ttl, preview=deepcopy(preview), **metadata)
         return dict(preview, preview_token=token)
+
+    def _pending(self, token):
+        item = self.pending.get(token)
+        if item is None or item['deadline'] <= self.clock():
+            self.pending.pop(token, None)
+            raise ValueError('E1_PREVIEW_EXPIRED_OR_RESTARTED')
+        return item['preview']
 
     @staticmethod
     def _summary(operation, record, evaluation, changes, thesis):
@@ -173,16 +182,13 @@ class ResearchBridge:
     def commit(self, token, fingerprint, *, confirmed=False, confirmation=None):
         # Serializes same-token confirmations; SQLite serializes distinct bridge instances.
         with self.lock:
-            item = self.pending.get(token)
-            if item is None or item['deadline'] <= self.clock():
-                self.pending.pop(token, None)
-                raise ValueError('E1_PREVIEW_EXPIRED_OR_RESTARTED')
+            preview = self._pending(token)
+            item = self.pending[token]
             if confirmation == '取消':
                 self.pending.pop(token)
                 return dict(saved=False, cancelled=True, execution_authorized=False)
             if confirmed is not True or confirmation != '保存这次判断':
                 raise ValueError('E1_EXPLICIT_CONFIRMATION_REQUIRED')
-            preview = item['preview']
             if not isinstance(fingerprint, str) or not secrets.compare_digest(fingerprint, preview['preview_fingerprint']):
                 raise ValueError('E1_PREVIEW_CHANGED_REPREVIEW')
             p = preview['payload']

@@ -220,3 +220,80 @@ def test_transition_mcp_uses_readonly_frozen_worker(tmp_path, monkeypatch):
 
     asyncio.run(run())
     assert db.read_bytes() == db_before and active[0].path.read_bytes() == policy_before
+
+
+def test_e_candidate_uses_actual_mcp_worker_and_private_e1(tmp_path, monkeypatch):
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+    from app.asset_views import PIPELINE, VERSION
+    from backend.services.investment_thesis.portfolio_store import migrate_portfolio_governance
+    from backend.services.investment_policy.contracts import digest
+    from tests import test_policy_integration as policy_fixtures
+
+    monkeypatch.setattr(policy_fixtures, "POLICY", policy_fixtures.POLICY.replace(b"SYN1", b"AAPL"))
+    policy = policy_fixtures.active.__wrapped__(tmp_path, monkeypatch)[0]
+    db = tmp_path/"frozen-e.sqlite"
+    source = {"schema_version": VERSION, "pipeline": PIPELINE, "state": "ready", "snapshot_id": "asset-view:v1:1",
+              "captured_at":"2001-01-01T15:00:00+00:00", "portfolio_id":7, "data_quality":{},
+              "views":{"get_manual_wealth_items":{"items":[]}}}
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE wealth_snapshots(id INTEGER, portfolio_id INTEGER, analysis_request_id TEXT, payload_json TEXT)")
+        conn.execute("INSERT INTO wealth_snapshots VALUES(1,7,'TEST_ONLY',?)", (json.dumps(source),))
+    db.chmod(0o400)
+    config = tmp_path/"e-read.json"
+    config.write_text(json.dumps({"database_path":str(db), "portfolio_id":7})); config.chmod(0o600)
+    e1 = ThesisStore(tmp_path/"e-private"/"research.sqlite", 7)
+    e1.init()
+    migrate_portfolio_governance(e1)
+    cfg = settings(e1.path, None)
+    cfg.prepare_config = None
+    cfg.e1_enable_writes = False
+    cfg.real_config = str(config)
+    before = (db.read_bytes(), policy.path.read_bytes())
+    bound = {"snapshot_id":source["snapshot_id"], "snapshot_sha256":digest(source),
+             "policy_bundle_sha256":context(7)["policy_reference"]["bundle_sha256"]}
+    at = datetime.now(timezone.utc)
+    scenario = {**bound,"paths":{"A":[{"label":"S1","actions":[{
+        "kind":"TRANSFER_CASH","action_id":"stalled","cash_ref":"position:1","amount":"100","fee":"0",
+        "outcome":"FAILED","assumption":"TEST_ONLY",
+        "destination_account":"account_fixture","destination_currency":"CNY","destination_per_source":"1",
+    }]}]}}
+    proposal = {**bound, "bundle_id":"e-mcp-demo", "request_id":"e-mcp-once","expected_revision":0, "scenario":scenario,
+                "selected_path":"A","items":[{"item_id":"mvp","kind":"PLANNED_TRANSITION_HOLD","reason":"Test research",
+                 "stage_index":1,"review_due_at":(at+timedelta(days=1)).isoformat(),
+                 "expires_at":(at+timedelta(days=2)).isoformat(),"revoke_when":"If facts change"}]}
+
+    async def run():
+        async with Client(create_server(cfg), mode="legacy") as client:
+            assert "commit_portfolio_review_decision" not in {tool.name for tool in (await client.list_tools()).tools}
+        monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_MODE", "ISOLATED")
+        async with Client(create_server(cfg), mode="legacy") as client:
+            tools = {tool.name:tool for tool in (await client.list_tools()).tools}
+            assert tools["preview_portfolio_review_decision"].annotations.read_only_hint is True
+            assert tools["commit_portfolio_review_decision"].annotations.read_only_hint is False
+            assert "commit_e1_record" not in tools
+
+            async def call(name, arguments):
+                result = await client.call_tool(name, arguments)
+                assert not result.is_error, result.content
+                return result.structured_content or json.loads(result.content[0].text)
+
+            p = await call("preview_portfolio_review_decision", {"request":proposal})
+            saved = await call("commit_portfolio_review_decision", {"request":{
+                **{key:p[key] for key in ("preview_token", "preview_fingerprint", "request_id")},
+                "selected_item_ids":["mvp"],"confirmed":True,"confirmation":"保存这次组合决定"}})
+            assert saved["record"]["decisions"][0]["disposition_state"] == "RESEARCH_DECISION_WITH_ASSUMPTIONS"
+            readback = await call("get_portfolio_review_followups", {"request":{"bundle_id":"e-mcp-demo","revision":1}})
+            archive = readback["records"][0]["evidence_archive"]
+            archived_input = archive["scenario"]["evidence_archive"]["normalized_input"]
+            assert archived_input["paths"] == scenario["paths"]
+            assert all(archived_input[key] == value for key, value in bound.items())
+            assert not saved["execution_authorized"] and not readback["risk_events"]
+
+        config.write_text(json.dumps({"database_path":str(db),"portfolio_id":8}))
+        async with Client(create_server(cfg), mode="legacy") as client:
+            wrong = await client.call_tool("get_portfolio_review_followups", {"source":bound})
+            assert wrong.is_error and "E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH" in str(wrong.content)
+
+    asyncio.run(run())
+    assert (db.read_bytes(), policy.path.read_bytes()) == before

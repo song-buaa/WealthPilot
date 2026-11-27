@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import PortfolioGovernanceCard from './PortfolioGovernanceCard'
 import { fmtCny } from '@/lib/fmt'
 
 type Stage = {
@@ -21,6 +22,7 @@ const money = (value: string | null | undefined) => value == null ? 'UNKNOWN' : 
 export default function PortfolioTransition({ snapshotId, snapshotSha, policySha }:
   { snapshotId: string; snapshotSha: string; policySha: string }) {
   const [input, setInput] = useState('')
+  const [scenario, setScenario] = useState<object>()
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -43,17 +45,20 @@ export default function PortfolioTransition({ snapshotId, snapshotSha, policySha
     setBusy(true)
     setError('')
     setResult(null)
+    setScenario(undefined)
     try {
       const plan = JSON.parse(input)
       if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('请填写方案对象')
+      const normalized = { ...plan, snapshot_id: snapshotId, snapshot_sha256: snapshotSha,
+        policy_bundle_sha256: policySha }
       const response = await fetch('/api/allocation/simulate-transition', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...plan, snapshot_id: snapshotId, snapshot_sha256: snapshotSha,
-          policy_bundle_sha256: policySha }),
+        body: JSON.stringify(normalized),
       })
       const body = await response.json()
       if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : '请检查方案字段与金额')
       setResult(body as Result)
+      setScenario(normalized)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '模拟不可用')
     } finally {
@@ -61,13 +66,14 @@ export default function PortfolioTransition({ snapshotId, snapshotSha, policySha
     }
   }
 
-  return <details className="my-4">
+  return <>
+  <details className="my-4">
     <summary>多阶段资产修复模拟</summary>
     <p>使用同一冻结快照比较路径 A/B。所有动作、费用和到账结果均为情景假设。</p>
     <button type="button" onClick={() => setInput(JSON.stringify(example, null, 2))}>载入可编辑的 A/B 示例</button>
     <label className="block">方案 JSON
       <textarea className="block w-full rounded border p-2 font-mono text-sm" rows={9} value={input}
-        onChange={event => { setInput(event.target.value); setResult(null) }} disabled={busy} />
+        onChange={event => { setInput(event.target.value); setResult(null); setScenario(undefined) }} disabled={busy} />
     </label>
     <button type="button" disabled={busy || !input.trim()} onClick={() => void run()}>
       {busy ? '计算中…' : '运行模拟'}
@@ -103,4 +109,6 @@ export default function PortfolioTransition({ snapshotId, snapshotSha, policySha
       </div>
     </>}
   </details>
+  <PortfolioGovernanceCard snapshotId={snapshotId} snapshotSha={snapshotSha} policySha={policySha} scenarioInput={scenario} />
+  </>
 }

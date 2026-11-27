@@ -419,16 +419,16 @@ class TransitionRejected(ValueError):
 
 
 def simulate_transition(request, *, holdings, cash, loans, total_debt, net_assets,
-                        denominator, rates, accounts, instruments, evaluate):
+                        denominator, rates, accounts, instruments, evaluate, archive_stage_holdings=False):
     """Evaluate independent paths from one immutable baseline. All money is Decimal."""
     with localcontext() as ctx:
         ctx.prec = 60
         return _simulate_transition(request, holdings, cash, loans, total_debt, net_assets,
-                                    denominator, rates, accounts, instruments, evaluate)
+                                    denominator, rates, accounts, instruments, evaluate, archive_stage_holdings)
 
 
 def _simulate_transition(request, holdings, cash, loans, total_debt, net_assets,
-                         denominator, rates, accounts, instruments, evaluate):
+                         denominator, rates, accounts, instruments, evaluate, archive_stage_holdings):
     def investable(securities, balances):
         return (sum((row.amount_cny for row in securities.values()), ZERO)
                 + sum((lot.cny for lot in balances.values() if lot.included), ZERO))
@@ -478,6 +478,13 @@ def _simulate_transition(request, holdings, cash, loans, total_debt, net_assets,
                 "cash_flow_conservation_verified": True,
                 "cumulative_cost_cny": costs, "cumulative_fx_effect_cny": fx, "actions": events,
             })
+            if archive_stage_holdings:
+                output[-1]["scenario_holdings"] = [
+                    {"source_ref": ref, "account_ref": row.account,
+                     "symbol": row.identity.get("security_symbol") or row.identity.get("symbol"),
+                     "currency": row.currency, "amount_cny": row.amount_cny, "identity_evidence": row.evidence}
+                    for ref, row in securities.items() if row.amount_cny
+                ]
             prior_hits = hits
         paths[name] = output
     return paths

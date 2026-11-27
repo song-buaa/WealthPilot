@@ -55,8 +55,10 @@ def _read_etf_evidence(portfolio_id, *, at=None):
     return records, {symbol: digest(record) for symbol, record in records.items()}, None, {}, {}
 
 
-def allocation_concentration(view, *, projection, session, at, classified_assets):
-    records, pins, issue, close_caps, observations = _read_etf_evidence(view["portfolio_id"], at=at)
+def allocation_concentration(view, *, projection, session, at, classified_assets, etf_inputs=None):
+    if etf_inputs is None:
+        etf_inputs = _read_etf_evidence(view["portfolio_id"], at=at)
+    records, pins, issue, close_caps, observations = etf_inputs
     try:
         result = analyze_concentration(view, projection=projection, session=session, at=at,
                                        etf_evidence=records, evidence_pins=pins,

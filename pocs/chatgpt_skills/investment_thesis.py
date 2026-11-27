@@ -102,3 +102,52 @@ def register_write_tools(server, path, portfolio_id, security_meta):
                          confirmed: StrictBool = False, confirmation: str | None = None) -> ResearchWriteResult:
         return invoke(lambda: ResearchWriteResult.model_validate(bridge.commit(preview_token, preview_fingerprint,
                                             confirmed=confirmed, confirmation=confirmation)))
+
+
+def register_portfolio_tools(server, path, portfolio_id, security_meta, client):
+    """Isolated portfolio candidate. The original E1 and business write gates stay independent."""
+    import re
+    from backend.services.investment_thesis.portfolio import PortfolioGovernance
+    from backend.services.investment_thesis.portfolio_access import read_portfolio_records, risk_preview
+    from backend.services.investment_thesis.portfolio_contracts import (
+        PortfolioConfirmation, PortfolioPreviewRequest, PortfolioQuery, PortfolioSourceRequest,
+    )
+
+    store = ThesisStore(path, portfolio_id)
+    bridge = PortfolioGovernance(store, lambda req: client.call("portfolio_governance_sources",
+                                                                req.model_dump(mode="json")))
+    read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
+
+    def invoke(function):
+        try:
+            return function()
+        except (ValueError, OSError, sqlite3.Error) as error:
+            code = str(error)
+            raise ToolError(code if re.fullmatch(r"E1_[A-Z0-9_]{1,100}", code)
+                            else "E1_PORTFOLIO_OPERATION_UNAVAILABLE") from None
+
+    @server.tool(meta=security_meta, annotations=read,
+        description="Read private immutable combination decisions, historical revisions, due followups and persisted risks. "
+                    "For formal risk candidates pass source with an existing snapshot ID/hash and ACTIVE bundle hash. "
+                    "No broker sync, trade or write. Keep actual risks separate from simulation and ETF observations.")
+    def get_portfolio_review_followups(request: PortfolioQuery | None = None,
+                                       source: PortfolioSourceRequest | None = None) -> dict:
+        if source is not None and request is not None:
+            raise ToolError("E1_PORTFOLIO_QUERY_INVALID")
+        if source is not None:
+            return invoke(lambda: risk_preview(bridge.source_reader(source)))
+        return invoke(lambda: read_portfolio_records(store, request or PortfolioQuery()))
+
+    @server.tool(meta=security_meta, annotations=read,
+        description="Preview exact combination items from original B/C/D inputs, no persistent write. Show every proposed "
+                    "disposition, dates, limits and evidence before asking which items to save. Formal exceptions stay pending.")
+    def preview_portfolio_review_decision(request: PortfolioPreviewRequest) -> dict:
+        return invoke(lambda: bridge.preview(request))
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+        idempotent_hint=True, open_world_hint=False),
+        description="Save only the selected exact items after showing the bound preview and receiving a fresh explicit "
+                    "human confirmation 保存这次组合决定. Parameters attest client confirmation and do not authenticate it. "
+                    "取消 discards a preview. No trade, funding, sync, Policy write or exception activation.")
+    def commit_portfolio_review_decision(request: PortfolioConfirmation) -> dict:
+        return invoke(lambda: bridge.commit(request))

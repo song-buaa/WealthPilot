@@ -89,7 +89,7 @@ class BusinessClient:
                     evidence_keys = {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256",
                                      "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
                                      "WEALTHPILOT_ETF_RELEASE_OWNER_UID"}
-                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys if k in os.environ})
+                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | {"WEALTHPILOT_E1_PORTFOLIO_MODE"} if k in os.environ})
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
@@ -268,6 +268,11 @@ def create_server(settings):
             raise ValueError("E1_EXPLICIT_STORE_REQUIRED_FOR_WRITES")
         from pocs.chatgpt_skills.investment_thesis import register_write_tools
         register_write_tools(server, e1_path, settings.portfolio_id, security_meta)
+
+    from backend.services.investment_thesis.portfolio_access import isolation_enabled
+    if e1_path and isolation_enabled() and settings.real_config:
+        from pocs.chatgpt_skills.investment_thesis import register_portfolio_tools
+        register_portfolio_tools(server, e1_path, settings.portfolio_id, security_meta, client)
 
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
     if prepare_config:
