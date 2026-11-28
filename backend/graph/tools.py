@@ -32,7 +32,7 @@ class HoldingItem(BaseModel):
     ticker: str
     asset_class: str
     market_value_cny: float
-    pl_rate: float          # 百分比数值，如 99.9 = +99.9%
+    pl_rate: Optional[float]  # UNKNOWN when original cost is unproven; 百分比数值，如 99.9 = +99.9%
     weight: float           # 0~1 小数
     platforms: list[str]
 
@@ -1224,12 +1224,22 @@ def execute_assess_position_evidence(**kwargs):
     from backend.services.market_data.evidence import assess, mapping
     diagnostics=[]
     rows=[]
+    kwargs.pop("current_financial", None)  # Only the server source owner supplies this receipt.
+    current_research = kwargs.pop("current_research", False)
     # Original-source verification is a server dependency, never request/card trust.
     if (kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol") or "").endswith(":US"):
-        from research_v2.official_disclosures import collect
+        from research_v2.official_disclosures import collect, collect_current
         from research_v2.sec_disclosures import source_diagnostics
-        rows, verifier = collect(kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol"),
-                                 kwargs.get("research", ()))
+        from backend.core.demo_mode import PUBLIC_DEMO_MODE
+        import os
+        symbol=kwargs.get("symbol") or mapping(kwargs.get("market_data")).get("symbol")
+        candidates=kwargs.get("research", ())
+        if current_research and kwargs.get("at") is None and not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
+            rows, verifier, current = collect_current(symbol, candidates)
+            if current is not None:
+                kwargs["current_financial"] = current
+        else:
+            rows, verifier = collect(symbol, candidates)
         diagnostics=source_diagnostics()
         if rows:
             kwargs["research"] = [*kwargs.get("research", ()), *rows]
@@ -1240,8 +1250,8 @@ def execute_assess_position_evidence(**kwargs):
     from backend.core.demo_mode import PUBLIC_DEMO_MODE
     import os
     if not PUBLIC_DEMO_MODE and os.getenv('AV_DEV_MOCK')!='1':
-        from backend.services.market_data.financial_research import build
-        calculated=build(result)['records']
+        from backend.services.market_data.financial_research import build_current
+        calculated=build_current(result)['records']
         eps=next((r for r in calculated if r['field']=='diluted_eps_ttm'),None)
         observed=next((r for r in calculated if r['field']=='observed_price'),None)
         if eps and observed and eps['currency']!=observed['currency']:
@@ -1273,7 +1283,49 @@ def execute_compare_company_pool(**kwargs):
     return run_company_pool(**kwargs)
 
 
+def execute_simulate_portfolio_transition(*, request):
+    """PEER preview with server-owned database and portfolio binding."""
+    import os
+
+    from app import state
+    from app.database import DB_PATH
+    from backend.services.allocation_scenarios import TransitionRequest
+    from backend.services.allocation_service import read_frozen_transition
+    return read_frozen_transition(DB_PATH, state.portfolio_id, TransitionRequest.model_validate(request),
+                                  os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+
+
+def execute_get_portfolio_review_followups(*, request=None, reconciliation=None):
+    """PEER reads the same private governance and reconciliation projection."""
+    import os
+
+    from app import state
+    from backend.services.investment_thesis.portfolio_access import (
+        production_enabled, read_portfolio_records, require_portfolio_access, require_production_scope,
+    )
+    from backend.services.investment_thesis.portfolio_contracts import PortfolioQuery
+    from backend.services.investment_thesis.store import ThesisStore
+
+    require_portfolio_access("read")
+    if production_enabled():
+        from app.database import DB_PATH
+        require_production_scope(DB_PATH, state.portfolio_id, os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+    store = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), state.portfolio_id)
+    if reconciliation is not None:
+        from app.database import DB_PATH
+        from backend.services.investment_thesis.reconciliation import reconcile_portfolio
+        from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+
+        if request is not None:
+            raise ValueError("E1_PORTFOLIO_QUERY_INVALID")
+        return reconcile_portfolio(store, DB_PATH, ReconciliationRequest.model_validate(reconciliation),
+                                   os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+    return read_portfolio_records(store, PortfolioQuery.model_validate(request or {}))
+
+
 TOOL_EXECUTORS = {
+    "get_portfolio_review_followups": execute_get_portfolio_review_followups,
+    "simulate_portfolio_transition": execute_simulate_portfolio_transition,
     "compare_company_pool": execute_compare_company_pool,
     "assess_position_evidence": execute_assess_position_evidence,
     "fetch_holdings":             execute_fetch_holdings,

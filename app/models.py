@@ -124,6 +124,8 @@ class Position(Base):
     @property
     def profit_loss(self):
         """盈亏金额"""
+        if self.cost_price is None:
+            return None
         if self.cost_price > 0 and self.quantity > 0:
             return (self.current_price - self.cost_price) * self.quantity
         return 0
@@ -131,6 +133,8 @@ class Position(Base):
     @property
     def profit_loss_pct(self):
         """盈亏百分比"""
+        if self.cost_price is None:
+            return None
         if self.cost_price > 0:
             return (self.current_price - self.cost_price) / self.cost_price * 100
         return 0

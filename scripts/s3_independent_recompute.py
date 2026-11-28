@@ -158,6 +158,11 @@ def verify(path):
     path = Path(path)
     b = json.loads(path.read_text())
     p = b["payload"]
+    if p['result']['method_version'] in {'s3-p2.operating-earnings.v1','s3-p2.operating-earnings.v1.1','s3-p2.operating-earnings.v1.2','s3-p2.operating-earnings.v1.3'}:
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('s3_operating_verify',Path(__file__).with_name('s3_operating_verify.py'))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        return module.verify_operating(path,verify)
     assert hashlib.sha256(canonical(p).encode()).hexdigest() == b["artifact_id"], "artifact hash"
     for relative, expected in p["view_hashes"].items():
         view = (path.parent / relative).resolve()
@@ -167,9 +172,9 @@ def verify(path):
         source = (path.parent / "sources" / relative).resolve()
         assert (path.parent / "sources").resolve() in source.parents, "unsafe source path"
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected, "raw source hash"
-    if p['result']['method_version']=='s3-d.real-pool.v1':
+    if p['result']['method_version'] in {'s3-d.real-pool.v1','s3-d.real-pool.v1.1'}:
         verify_pool_inputs(path,p)
-    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1"}:
+    if p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1", "s3-d.real-pool.v1.1", "s3-c.method-applicability.v1.3"}:
         for c in p['result']['cards']:
             a=p['assessments'].get(c['symbol'],{})
             scope=a.get('quality_scope',{});identity=a.get('method_identity',{})
@@ -192,6 +197,35 @@ def verify(path):
                         and identity.get('sec_ticker') in identity.get('submissions_tickers',[])
                         and identity.get('directory_sha256') and identity.get('submissions_sha256')==scope['source_document_sha256']):
                         expected_model='APPLICABLE'
+            classes=identity.get('registered_tickers',identity.get('registered_equity_tickers',[]))
+            qualified_identity=bool(identity.get('symbol')==a.get('symbol') and identity.get('sec_ticker') in classes
+                and identity.get('sec_ticker') in identity.get('submissions_tickers',[])
+                and identity.get('directory_sha256') and identity.get('submissions_sha256')==scope.get('source_document_sha256'))
+            notice_required=bool(p['result']['method_version'] in {'s3-d.real-pool.v1.1','s3-c.method-applicability.v1.3'}
+                and expected_quality=='APPLICABLE' and qualified_identity and identity.get('cik')=='0001326801'
+                and at>=datetime.fromisoformat('2026-10-21T20:03:35+00:00'))
+            if notice_required:
+                assert app.get('return_unit_qualification'), 'required capital structure notice missing'
+                notice=app['return_unit_qualification']
+                assert identity.get('cik')=='0001326801' and at>=datetime.fromisoformat('2026-10-21T20:03:35+00:00')
+                expected_model='INSUFFICIENT_EVIDENCE'
+                assert not c['scenarios'] and c['rank'] is None and c['group'] is None
+                assert c['assumptions'] is None and c.get('assumption_context') is None and not c['cross_checks']
+                assert not {'conditional_value_range','formula','high_sensitivity','sensitivity_span'} & c.keys()
+                if notice['evidence']:
+                    import gzip
+                    manifest_path=path.parent/'sources/methods/research_v2/qualified_notices/meta-capital-structure.json'
+                    manifest_bytes=manifest_path.read_bytes()
+                    assert hashlib.sha256(manifest_bytes).hexdigest()==notice['manifest_sha256']=='7063abdc75b89116bf869752bb1d702fff0536b12b841b2d7aa5f943bf430314'
+                    document=json.loads(manifest_bytes);assert document['cik']==identity['cik']
+                    assert len(notice['evidence'])==len(document['filings'])==2
+                    for source,proof in zip(document['filings'],notice['evidence']):
+                        body=gzip.decompress((manifest_path.parent/source['path']).read_bytes())
+                        assert hashlib.sha256(body).hexdigest()==source['sha256']==proof['source_sha256']
+                        assert proof['source_ref']==source['filing']['full_url']
+                        assert datetime.fromisoformat(source['filing']['published_at'])<=datetime.fromisoformat(source['fetched_at'])<=at
+                        assert proof['accession']==source['filing']['accession']
+                        assert 'CENTRAL INDEX KEY:' in body.decode() and '0001326801' in body.decode()
             assert app['quality_screen']['status']==expected_quality, 'quality applicability differs'
             assert app['earnings_model']['status']==expected_model, 'earnings applicability differs'
             if expected_quality!='APPLICABLE':
@@ -209,7 +243,7 @@ def verify(path):
                 assert c['comparison_status']=='COMPARABLE'
     checked = 0
     quality_periods = 0
-    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1"}
+    is_c = p["result"]["method_version"] in {"s3-c.method-applicability.v1", "s3-c.method-applicability.v1.1", "s3-c.method-applicability.v1.2", "s3-d.real-pool.v1", "s3-d.real-pool.v1.1", "s3-c.method-applicability.v1.3"}
     if is_c or p["result"]["method_version"] in {"s3-b.quality-evidence.v1", "s3-b.quality-evidence.v1.1"}:
         for card in p["result"]["cards"]:
             if card.get("quality", {}).get("financial_inputs"):

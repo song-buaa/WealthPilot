@@ -133,6 +133,12 @@ class AllocationSnapshot(BaseModel):
     has_unclassified: bool = False
 
 
+class PolicyAllocationSnapshot(AllocationSnapshot):
+    """Additive ACTIVE-only evidence; legacy AllocationSnapshot is unchanged."""
+    total_investable_assets: float | None = None
+    policy_allocation: dict
+
+
 class ClassDeviation(BaseModel):
     current_ratio: float
     target_mid: float

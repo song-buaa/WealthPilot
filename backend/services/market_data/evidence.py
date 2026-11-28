@@ -5,6 +5,7 @@ No provider, persistence or trading operations. Source clocks never default to n
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+import calendar
 import math
 from urllib.parse import urlparse
 
@@ -342,15 +343,22 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
     for obs in raw.get("financial_observations",[]) if isinstance(raw.get("financial_observations"),list) else []:
         if not isinstance(obs,dict): continue
         key=obs.get("source_field");end=stamp(obs.get("fiscal_period_end"))
-        if key in quality_basis and (not sec_source or identity.get("issuer_type")!="domestic"):
+        if key in quality_basis and not sec_source:
             continue
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
+        monthly_deliveries = sec_source and key == "vehicleDeliveries" and obs.get("period_basis") == "monthly"
+        if monthly_deliveries:
+            start = stamp(obs.get("fiscal_period_start"))
+            if (not end or not start or start.day != 1 or (start.year, start.month) != (end.year, end.month)
+                    or end.day != calendar.monthrange(end.year, end.month)[1]
+                    or scale != 1 or value is None or value <= 0 or not float(value).is_integer()):
+                continue
         if (key not in (_OFFICIAL_FIELD_BASIS | quality_basis) or obs.get("accounting_basis") not in {(_OFFICIAL_FIELD_BASIS | quality_basis)[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
-                or obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
-                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent","quality_shares":"shares","quality_diluted_shares":"shares"}.get(key,"currency_units") or scale not in {1,1000,1000000}
+                or (not monthly_deliveries and obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"})) or not end or end>published
+                or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent","quality_shares":"shares","quality_diluted_shares":"shares","quality_diluted_ads_shares":"shares","quality_ads_ratio":"ordinary_shares_per_ads"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
-                or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin","quality_shares","quality_diluted_shares"} else {"CNY","USD","HKD"}) or value is None
+                or obs.get("currency") not in ({None} if key in {"vehicleDeliveries","vehicleMargin","quality_shares","quality_diluted_shares","quality_diluted_ads_shares","quality_ads_ratio"} else {"CNY","USD","HKD"}) or value is None
                 or not math.isfinite(value*scale)):
             continue
         proof_at=stamp(obs.get('proof_available_at')) if obs.get('period_start_source_refs') else None
@@ -506,7 +514,7 @@ def financial_source_conflicts(records):
 
 def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
            asset_view=None, planner=None, stored_price=None, principles_available=False,
-           disclosure_verifier=None):
+           disclosure_verifier=None, current_financial=None):
     at = at or datetime.now(timezone.utc)
     market = mapping(market_data)
     symbol = symbol or market.get("symbol")
@@ -514,6 +522,7 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
     quarter_observations = [obs for item in research if mapping(item).get("symbol") == symbol
         for obs in _official_observations(mapping(item),symbol,at,disclosure_verifier=disclosure_verifier)
         if obs["source_field"] in _OFFICIAL_FIELD_BASIS]
+    quality_fields=assess_quality_facts(research,symbol=symbol,at=at,disclosure_verifier=disclosure_verifier)
     market,research=link_disclosure_clocks(market,research,at,symbol,disclosure_verifier=disclosure_verifier)
     records = [record(kind, market[kind], at=at, symbol=symbol)
                for kind in ("quote", "fundamentals", "technical", "capital_flow") if market.get(kind) is not None]
@@ -651,6 +660,10 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "vehicleDeliveries":"vehicle_deliveries_quarter", "vehicleSales":"vehicle_sales_quarter", "vehicleMargin":"vehicle_margin_pct",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
+    monthly_values = {}
+    for obs in quarter_observations:
+        if obs["period_basis"] == "monthly":
+            monthly_values.setdefault(obs["fiscal_period_end"], set()).add(obs["value"])
     for obs in quarter_observations:
         end = stamp(obs["fiscal_period_end"])
         if not end:
@@ -658,6 +671,11 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         historical=(at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400
         field = quarter_fields[obs["source_field"]]
         if obs["period_basis"]=="annual": field=field.replace("_quarter","_annual")
+        if obs["period_basis"] == "monthly":
+            if len(monthly_values[obs["fiscal_period_end"]]) != 1:
+                continue
+            field = "vehicle_deliveries_month"
+            historical = (at-end).total_seconds() > 60*86400
         if obs['source_field']=='netIncome' and obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
         (historical_field_records if historical else verified_field_records).append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],
@@ -688,11 +706,12 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         issues.append("PLANNER_"+str(planner.get("status", "unknown")).upper())
     ceiling = .85 if levels["L3"]["allowed"] else .6 if levels["L2"]["allowed"] else .35
     return dict(schema_version="wealthpilot.position-evidence.v1", as_of=at.isoformat(), symbol=symbol,
-        snapshot_id=view.get("snapshot_id"), records=records, verified_field_records=verified_field_records, historical_field_records=historical_field_records, verified_period_records=verified_period_records, conflicts=conflicts,
+        snapshot_id=view.get("snapshot_id"), quality_field_records=quality_fields, records=records, verified_field_records=verified_field_records, historical_field_records=historical_field_records, verified_period_records=verified_period_records, conflicts=conflicts,
         source_conflicts=source_conflicts,
         issues=sorted(set(issues)), planner=planner, qualification=levels,
         confidence_ceiling=ceiling, technical_levels=valid_series or None,
-        infoNeeded=sorted(set(l3)), execution_authorized=False)
+        infoNeeded=sorted(set(l3)), execution_authorized=False,
+        **({'current_financial': current_financial} if current_financial is not None else {}))
 
 
 def safe_market(market_data, assessment):
@@ -715,7 +734,10 @@ def safe_market(market_data, assessment):
                         setattr(original, name, None)
                 setattr(result, kind, original if any(state["quality"] == "valid" for state in records[0]["field_quality"].values()) else None)
         elif kind=="technical" and records and records[0]["quality"]=="partial":
-            original=copy(getattr(result,kind))
+            original=getattr(result,kind,None)
+            if original is None:
+                continue
+            original=copy(original)
             original.series={p:row for p,row in original.series.items() if records[0]["period_quality"].get(p,{}).get("quality")=="valid"}
             if "day" not in original.series:
                 for name in ("current_price","ma5","ma20","rsi14","macd","macd_signal","macd_hist"):
@@ -751,8 +773,18 @@ def assess_quality_facts(research, *, symbol, at, disclosure_verifier):
                         or (scope=="year_to_date" and 105<days<350)): continue
             rows.append(dict(kind="quality_financial_field", record_id=obs["record_id"]+":"+key+":"+str(obs.get("fiscal_period_start"))+":"+obs["fiscal_period_end"],
                 symbol=symbol, field=key.removeprefix("quality_"), values={key.removeprefix("quality_"):obs["value"]},
-                quality="valid", scope=scope, period=obs["fiscal_period_end"], fiscal_period_start=obs.get("fiscal_period_start"),
-                currency=obs["currency"], unit=obs["unit"], accounting_basis=obs["accounting_basis"],
+                quality="valid", source="official_disclosure", source_url=obs["source_url"], data_as_of=obs["fiscal_period_end"], scope=scope, period=obs["fiscal_period_end"], fiscal_period_start=obs.get("fiscal_period_start"),
+                currency=obs["currency"], currency_role=obs.get("currency_role"), unit=obs["unit"], accounting_basis=obs["accounting_basis"],
                 published_at=obs["published_at"], fetched_at=obs["fetched_at"], publication_links=[obs],
                 is_seed=False, is_mock=False))
+    # Same observed-window freshness used by the existing quality Owner. Old
+    # original facts remain citable history, never current balance authority.
+    latest={}
+    for row in rows:
+        key=(row['field'],row['currency'])
+        latest[key]=max(latest.get(key,''),row['period'])
+    for row in rows:
+        row['historical_only']=((at-stamp(row['period'])).days>150
+            or row['period']<latest[(row['field'],row['currency'])])
+        row['temporal_role']='historical_baseline' if row['historical_only'] else 'latest_reported_period_not_live_balance'
     return rows

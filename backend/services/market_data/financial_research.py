@@ -18,6 +18,7 @@ LABELS={
     'net_income_available_to_ordinary_shareholders_quarter':'季度归属于普通股股东的收益',
     'operating_income_quarter':'季度营业利润','operating_cash_flow_quarter':'季度经营现金流',
     'diluted_eps_ads_quarter':'季度稀释每ADS收益','diluted_eps_ordinary_quarter':'季度稀释普通股收益',
+    'vehicle_deliveries_month':'月度汽车交付量',
     'vehicle_deliveries_quarter':'季度汽车交付量','vehicle_sales_quarter':'季度汽车销售收入',
     'vehicle_margin_pct':'季度汽车业务毛利率','vehicle_revenue_per_delivery_approx':'季度汽车收入/交付量近似值',
     'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
@@ -41,6 +42,11 @@ LABELS={
     'earnings_yield_pct':'基础TTM盈利收益率','observed_price':'历史收盘观察价格',
     'fx_rate':'财报币/上市币汇率',
 }
+LABELS.update(dict(cash='现金及现金等价物',restricted_cash='受限现金',deposits_investments='定期存款及短期投资',
+    current_debt='已披露流动债务/短期借款',noncurrent_debt='已披露非流动债务/长期借款',
+    shares='已披露普通股数量（类别范围须另核）',diluted_shares='期间加权稀释普通股数',
+    diluted_ads_shares='期间加权稀释ADS数',ads_ratio='普通股/ADS换算',assets='总资产',
+    liabilities='总负债',total_equity='含非控股权益的总权益',noncontrolling='非控股权益'))
 for _stem,_label in {'cost_of_revenue':'营业成本率','sales_marketing':'销售营销费用率',
                       'general_admin':'管理费用率','research_development':'研发费用率'}.items():
     LABELS[_stem+'_burden_pct']=_label
@@ -69,13 +75,36 @@ def _continuous(rows):
     return len(rows)==4 and all(spans) and all(a[1]+timedelta(days=1)==b[0] for a,b in zip(spans,spans[1:]))
 
 
-def build(assessment):
+def build(assessment, *, current=False):
     """All calculations consume unique exact-basis evidence; incomplete stays unknown."""
     symbol=assessment.get('symbol')
     source=[r for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[])
             if r.get('quality')=='valid' and not r.get('is_seed') and not r.get('is_mock') and r.get('symbol')==symbol
             and isinstance(r.get('field'),str) and isinstance(r.get('values'),dict) and stamp(r.get('period'))]
     metrics=[];missing=[]
+    current_window = assessment.get('current_financial') if current else None
+    current_refs = set()
+    if current_window:
+        at = stamp(assessment.get('as_of'))
+        official_slots = {(r['field'],r['period']) for r in source
+                          if r.get('source') == 'official_disclosure' and r.get('scope') == 'quarterly'}
+        for row in current_window.get('vendor_records', []):
+            period, known = stamp(row.get('period')), stamp(row.get('known_at'))
+            if (not at or not period or not known or not period <= known <= at
+                    or row.get('qualification') != 'CURRENT_RESEARCH_ONLY'
+                    or row.get('source') != 'alphavantage' or row.get('symbol') != symbol
+                    or row.get('is_seed') or row.get('is_mock') or not _span(row)):
+                continue
+            if (row['field'],row['period']) in official_slots:
+                comparable = [r for r in source if r.get('source') == 'official_disclosure'
+                              and r['field'] == row['field'] and _same_span(r,row)
+                              and r.get('currency') == row['currency'] and r.get('scope') == 'quarterly'
+                              and r.get('accounting_basis') == row['accounting_basis']]
+                if comparable and any(r['values'][row['field']] != row['values'][row['field']] for r in comparable):
+                    missing.append('AV_OFFICIAL_FIELD_DISAGREEMENT:'+row['field']+':'+row['period'])
+                continue
+            source.append(dict(row, historical_only=(at-period).days>150))
+            current_refs.add(row['record_id'])
     def add(field,value,refs,*,period,currency=None,unit='ratio',details=None):
         if number(value) is None or not math.isfinite(value):return None
         refs=list(dict.fromkeys(refs))
@@ -85,6 +114,8 @@ def build(assessment):
             source_url=None,period=period,data_as_of=period,published_at=None,fetched_at=None,
             values={field:value},currency=currency,unit=unit,evidence_refs=refs,details=details or {},
             historical_only=False,is_seed=False,is_mock=False)
+        if current_refs.intersection(refs):
+            row['qualification']='CURRENT_RESEARCH_ONLY'
         metrics.append(row);return row
     selections=[]
     def document_keys(row):
@@ -145,8 +176,16 @@ def build(assessment):
         elif paired:
             chosen=paired
         return sorted(chosen,key=lambda r:r['record_id'])[0],list(dict.fromkeys(r['record_id'] for r in chosen))
-    current=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
-    latest=current[0] if current else None
+    current_periods=sorted({r['period'] for r in source if not r.get('historical_only') and r.get('scope')=='quarterly'},reverse=True)
+    latest=current_periods[0] if current_periods else None
+    if current_window:
+        latest = current_window.get('latest_period')
+        observed = stamp(latest)
+        at = stamp(assessment.get('as_of'))
+        if (not observed or not at or not 0 <= (at-observed).days <= 150
+                or current_window.get('pending_latest_release')):
+            latest = None
+            missing.append('LATEST_DISCLOSED_FISCAL_PERIOD_UNRESOLVED')
     for field,growth in [('revenue_quarter','revenue_yoy_pct'),('net_income_quarter','net_income_yoy_pct'),
                          ('net_income_attributable_parent_quarter','parent_income_yoy_pct'),
                          ('net_income_available_to_ordinary_shareholders_quarter','ordinary_income_yoy_pct')]:
@@ -404,19 +443,107 @@ def build(assessment):
     return dict(records=metrics,limitations=sorted(set(missing)),valuation_sensitivity=sensitivity,comparative_selections=selections)
 
 
+def build_current(assessment):
+    """Current-only consumer opt-in; old assessments keep the original contract."""
+    if assessment.get('current_financial'):
+        return build(assessment, current=True)
+    return build(assessment)
+
+
+def operating_ttm_bridge(assessment, eps=None, *, current=False):
+    """Opt-in operating flows on the *existing* qualified EPS window.
+
+    FY + current YTD - comparable prior YTD is a flow bridge, never an EPS
+    reconstruction. Original quality/Evidence owners alone qualify facts.
+    Missing/conflicting boundaries fail closed; no end-share EPS estimate.
+    """
+    from decimal import localcontext
+    financial = build_current(assessment) if current else build(assessment)
+    owned = next((r for r in financial['records'] if r['field']=='diluted_eps_ttm'), None)
+    if not owned or (eps is not None and eps != owned):
+        raise ValueError('OPERATING_BRIDGE_OWNER_EPS_REQUIRED')
+    eps = owned
+    q = build_quality(assessment)
+    if q['rejected_refs'] or q['conflicts'] or assessment.get('conflicts') or assessment.get('source_conflicts'):
+        raise ValueError('OPERATING_BRIDGE_SOURCE_CONFLICT')
+    refs = set(eps.get('evidence_refs', []))
+    selected = [r for r in assessment.get('verified_field_records', []) + assessment.get('historical_field_records', [])
+                if r.get('record_id') in refs and r.get('field') == 'diluted_eps_ordinary_quarter']
+    windows = sorted({(r['fiscal_period_start'], r['period']) for r in selected})
+    if len(windows) != 4 or any((stamp(b[0])-stamp(a[1])).days != 1 for a,b in zip(windows,windows[1:])):
+        raise ValueError('OPERATING_BRIDGE_EPS_WINDOW_UNKNOWN')
+    start,end = windows[0][0],windows[-1][1]
+    if not 350 <= (stamp(end)-stamp(start)).days+1 <= 380:
+        raise ValueError('OPERATING_BRIDGE_WINDOW_INVALID')
+    facts=q['facts']; output={}
+    required = ('revenue','operating_income','net_income')
+    fields = required + ('cfo',) if current else required
+    missing = []
+    with localcontext() as ctx:
+        ctx.prec=34
+        for field in fields:
+            rows=[r for r in facts if r['field']==field]
+            direct=[r for r in rows if r['start']==start and r['period']==end and r['scope']=='annual']
+            matches=[]
+            if direct: matches=[(Decimal(direct[0]['value']),direct,'direct annual same EPS window')]
+            else:
+                for fy in (r for r in rows if r['scope']=='annual'):
+                    for cur in (r for r in rows if r['period']==end and r['scope'] in ('quarterly','year_to_date')):
+                        if (stamp(cur['start'])-stamp(fy['period'])).days != 1: continue
+                        for prior in (r for r in rows if r['start']==fy['start'] and r['scope']==cur['scope']):
+                            if (stamp(start)-stamp(prior['period'])).days != 1: continue
+                            span=(stamp(cur['period'])-stamp(cur['start'])).days
+                            oldspan=(stamp(prior['period'])-stamp(prior['start'])).days
+                            if abs(span-oldspan)>7 or not 350 <= (stamp(cur['period'])-stamp(prior['period'])).days <= 380: continue
+                            value=Decimal(fy['value'])+Decimal(cur['value'])-Decimal(prior['value'])
+                            matches.append((value,[fy,cur,prior],'FY + current YTD - comparable prior YTD; not EPS subtraction'))
+            if not matches or len({v for v,_,_ in matches})!=1:
+                if current:
+                    missing.append(field)
+                    continue
+                raise ValueError('OPERATING_BRIDGE_PERIOD_OR_INPUT_MISSING')
+            value,components,formula=matches[0]
+            output[field]=dict(value=format(value,'f'),components=components,formula=formula,
+                evidence_refs=sorted({ref for row in components for ref in row['evidence_refs']}))
+        if current and missing:
+            return dict(status='PARTIAL_GAAP_OPERATING_TTM',start=start,period=end,
+                        currency='USD',unit='currency_units',flows=output,eps=eps,missing_fields=missing)
+        revenue,op,net=[Decimal(output[f]['value']) for f in required]
+        if min(revenue,op,net)<=0: raise ValueError('OPERATING_BRIDGE_NONPOSITIVE_BASE')
+        return dict(status='QUALIFIED_GAAP_OPERATING_TTM_NOT_NORMALIZED',start=start,period=end,
+            currency='USD',unit='currency_units',flows=output,
+            operating_margin=format(op/revenue,'f'),net_to_operating_conversion=format(net/op,'f'),
+            net_margin=format(net/revenue,'f'),eps=eps,
+            limitations=['FLOW_TTM_IS_NOT_WEIGHTED_SHARE_EPS_RECONSTRUCTION',
+                'GAAP_BELOW_LINE_AND_TAX_EFFECTS_NOT_NORMALIZED','FUTURE_EPS_USES_EXPLICIT_RELATIVE_SHARE_ASSUMPTION'])
+
+
 def display(row,field):
     value=number(row.get('values',{}).get(field))
     if value is None:return None
-    unit=row.get('unit');suffix='%' if unit=='percent' else '个百分点' if unit=='percentage_points' else '倍' if unit in {'ratio','multiple'} else ''
-    label=LABELS.get(field,field)
+    unit=row.get('unit');currency=row.get('currency');label=LABELS.get(field,field)
+    units={'vehicles':'辆','shares':'份ADS' if field=='diluted_ads_shares' else '股',
+           'percent':'%','percentage_points':'个百分点','ratio':'倍','multiple':'倍',
+           'ordinary_shares_per_ads':'股普通股/ADS'}
+    suffix=units.get(unit,'');shown=f"{value:,.2f}"
+    if unit=='currency_units' and currency:
+        if currency=='CNY' and abs(value)>=100000000:shown=f"{value/100000000:,.2f}";suffix='亿元'
+        elif currency=='CNY' and abs(value)>=10000:shown=f"{value/10000:,.2f}";suffix='万元'
+        elif abs(value)>=1000000:shown=f"{value/1000000:,.2f}";suffix='百万'+currency
+        else:suffix=currency
+    elif unit in {'vehicles','shares'}:shown=f"{value:,.0f}"
+    elif 0<abs(value)<0.01:shown=f"{value:,.6f}"
+    if unit in {'currency_per_listed_unit','currency_per_ordinary_share'}:suffix=(currency or '币种未知')+('/ADS或上市单位' if unit=='currency_per_listed_unit' else '/普通股')
     caveat='；静态估算，股本/拆股变更未核验，非当前精确估值' if field in {'pe_ttm','earnings_yield_pct'} and row.get('source')=='owner_calculation' else ''
-    return f"{label}（{row.get('period') or row.get('data_as_of')}，{row.get('currency') or '无币种比率'}）{value:,.4f}{suffix}{caveat}"
+    if row.get('historical_only'):caveat+='；历史基线，非当前事实'
+    return f"{label}（{row.get('period') or row.get('data_as_of')}{'，'+currency if currency else ''}）{shown}{suffix}{caveat}"
+
 
 
 QUALITY_INPUT_VERSION = 'financial-quality-inputs.v1'
 
 
-def build_quality(assessment):
+def build_quality(assessment, *, currency="USD"):
     """Opt-in GAAP quality projection from Registry-qualified facts.
 
     No new parser, TTM or source-trust owner. Instant balances and YTD durations
@@ -430,12 +557,13 @@ def build_quality(assessment):
     entries, rejected, conflicts = {}, [], []
     for row in assessment.get('quality_field_records', []):
         field = row.get('field')
+        if field in {'ads_ratio','diluted_ads_shares'}:continue  # Listed-unit bridge is not a GAAP balance/cash input.
         start, end = stamp(row.get('fiscal_period_start')), stamp(row.get('period'))
         links = row.get('publication_links', [])
         valid = (at and field in bases and row.get('quality')=='valid'
             and row.get('symbol')==assessment.get('symbol') and not row.get('is_seed') and not row.get('is_mock')
             and row.get('accounting_basis')==bases.get(field)
-            and row.get('currency')==(None if field in {'shares','diluted_shares'} else 'USD')
+            and row.get('currency')==(None if field in {'shares','diluted_shares'} else currency)
             and row.get('unit')==('shares' if field in {'shares','diluted_shares'} else 'currency_units')
             and end and end<=at and links)
         if valid:
@@ -525,7 +653,7 @@ def build_quality(assessment):
                                  'Period length differs across issuers; no cross-company ROE ranking.'])
         return dict(version=QUALITY_INPUT_VERSION, period=end,
             fresh=bool(at and end and 0<=(at-stamp(end)).days<=150),
-            facts=list(index.values()), balance=balance, cash_periods=cash_periods, latest_cash=latest_cash,
+            facts=list(index.values()), balance=balance, currency=currency, cash_periods=cash_periods, latest_cash=latest_cash,
             quarters=quarters, rejected_refs=sorted(rejected), conflicts=conflicts,
             capital_efficiency=dict(roe=roe, roic=dict(status='UNKNOWN',
                 reason='Average operating invested capital/NOPAT scope, lease classes and R&D capitalization not closed; no proxy ROIC ranking.',
@@ -533,3 +661,110 @@ def build_quality(assessment):
                 nopat='UNKNOWN_TAX_AND_OPERATING_SCOPE_NOT_NORMALIZED', rnd_treatment='EXPENSED_GAAP_NOT_CAPITALIZED')),
             normalization=dict(status='UNKNOWN', adjustments=[],
                 reason='GAAP retained. Working-capital changes are observations, not a complete cash bridge; no verified one-off normalization.'))
+
+
+def build_valuation_inputs(assessment):
+    """Qualified historical inputs for the existing research Owner, never fair value.
+
+    A cash-only borrowing bridge is deliberately not surplus/distributable cash.
+    Weighted period shares never supply point-in-time market capitalization.
+    """
+    from decimal import Decimal
+    currency_rows=[r for r in assessment.get('quality_field_records',[]) if r.get('quality')=='valid' and r.get('field')=='assets']
+    latest_balance=max((r.get('period','') for r in currency_rows),default=None)
+    currency_rows=[r for r in currency_rows if r.get('period')==latest_balance]
+    explicit={r.get('currency') for r in currency_rows if r.get('currency_role')=='reporting_currency'}
+    currencies=explicit or {r.get('currency') for r in currency_rows}
+    out=dict(version='valuation-inputs.v1',symbol=assessment.get('symbol'),decision_at=assessment.get('as_of'),
+        net_cash=None,cash_less_disclosed_borrowings=None,listed_unit={},market_cap=None,issues=[],execution_authorized=False)
+    currency=next(iter(currencies)) if len(currencies)==1 else None
+    if currency not in {'CNY','USD','HKD'}:
+        out['issues'].append('BALANCE_CURRENCY_MISSING_OR_AMBIGUOUS')
+    q=build_quality(assessment,currency=currency);b=q['balance']
+    out.update(currency=currency,balance=b,balance_period=q.get('period'),source_conflicts=q['conflicts'])
+    if not q['fresh'] or any(row[0] in {'cash','current_debt','noncurrent_debt','assets','liabilities','total_equity'} for row in q['conflicts']):
+        out['issues'].append('BALANCE_INPUTS_STALE_CONFLICTING_OR_REJECTED')
+    else:
+        fields=['cash','current_debt','noncurrent_debt','assets','liabilities','total_equity']
+        if all(b.get(f) for f in fields):
+            v=lambda f:Decimal(b[f]['value'])
+            if v('assets')==v('liabilities')+v('total_equity') and v('cash')<=v('assets'):
+                out['cash_less_disclosed_borrowings']=dict(debt_coverage='PARTIAL_DISCLOSED_BORROWINGS',usable_for_equity_bridge=False,value=str(v('cash')-v('current_debt')-v('noncurrent_debt')),
+                    currency=currency,period=q['period'],formula='cash - disclosed current debt - disclosed noncurrent debt',
+                    basis='CASH_ONLY_LESS_DISCLOSED_BORROWINGS_OTHER_FINANCING_NOT_VERIFIED_NOT_DISTRIBUTABLE_CASH',
+                    evidence_refs=sorted({ref for f in fields for ref in b[f]['evidence_refs']}))
+            else:out['issues'].append('BALANCE_SHEET_DOES_NOT_RECONCILE')
+        else:out['issues'].append('CASH_OR_DEBT_OR_BALANCE_CLOSURE_MISSING')
+    # These are already source-owner-qualified fields; additionally check decision
+    # clocks and exact semantics before exposing a listed-unit bridge.
+    ratios=[];weighted=[];point=[]
+    for r in assessment.get('quality_field_records',[]):
+        if (r.get('quality')!='valid' or r.get('symbol')!=assessment.get('symbol') or r.get('is_seed') or r.get('is_mock')
+                or not r.get('publication_links') or not stamp(r.get('published_at')) or not stamp(r.get('fetched_at'))
+                or not stamp(r.get('period')) or not stamp(assessment.get('as_of'))
+                or not stamp(r['period'])<=stamp(r['published_at'])<=stamp(r['fetched_at'])<=stamp(assessment['as_of'])):continue
+        if (r.get('field')=='ads_ratio' and r.get('unit')=='ordinary_shares_per_ads'
+                and r.get('accounting_basis')=='ordinary_shares_per_ads' and r.get('currency') is None
+                and number(r['values'].get('ads_ratio')) and r['values']['ads_ratio']>0):ratios.append(r)
+        if r.get('field') in {'diluted_shares','diluted_ads_shares'} and r.get('unit')=='shares':weighted.append(r)
+        if r.get('field')=='shares' and r.get('scope')=='instant' and r.get('unit')=='shares':point.append(r)
+    latest=max((r['period'] for r in ratios),default=None)
+    selected=[r for r in ratios if r['period']==latest]
+    if len({r['values']['ads_ratio'] for r in selected})==1:
+        out['listed_unit']=dict(ordinary_shares_per_ads=selected[0]['values']['ads_ratio'],as_of=latest,
+            evidence_refs=[r['record_id'] for r in selected],basis='EXPLICIT_OFFICIAL_ADS_FOOTNOTE_NOT_CURRENT_SHARE_COUNT')
+    else:out['issues'].append('ADS_RATIO_MISSING_OR_CONFLICTING')
+    out['weighted_share_observations']=weighted
+    out['reported_point_share_observations']=point
+    derived={r['field']:r for r in build(assessment)['records']}
+    out['observed_price']=derived.get('observed_price')
+    out['qualified_fx']=derived.get('fx_rate')
+    out['issues'] += ['POINT_IN_TIME_ECONOMIC_SHARES_UNVERIFIED','CURRENT_PRICE_FX_AND_CORPORATE_ACTION_CLOSURE_REQUIRED',
+                     'SURPLUS_CASH_AND_COMPLETE_LEASE_DEBT_TREATMENT_UNKNOWN']
+    return out
+
+
+def annual_owner_cash_history(assessment):
+    """Three same-filing RMB years, adjusted for merchant float and SBC economics."""
+    fields = {'cfo', 'productive_asset_payments', 'merchant_float_change', 'sbc', 'net_income', 'diluted_shares'}
+    filings = {}
+    for row in assessment.get('quality_field_records', ()):
+        links = row.get('publication_links') or []
+        if (row.get('field') in fields and row.get('scope') == 'annual' and len(links) == 1
+                and links[0].get('document_type') in {'20-F', '10-K'}
+                and links[0].get('record_id')):
+            filings.setdefault(links[0]['record_id'], []).append(row)
+    histories = []
+    for rows in filings.values():
+        verified = build_quality(assessment | {'quality_field_records': rows}, currency='CNY')['facts']
+        years = {}
+        for row in verified:
+            years.setdefault((row['start'], row['period']), {})[row['field']] = row
+        periods = sorted(years)
+        if len(periods) != 3 or any(set(years[p]) != fields for p in periods):
+            continue
+        if any((stamp(start) - stamp(prior_end)).days != 1 for (_, prior_end), (start, _) in zip(periods, periods[1:])):
+            continue
+        # Historical GAAP reporting basis. These are not point-in-time shares,
+        # current economic cash, or a determination of distributable cash.
+        history = []
+        for (_, day), facts in sorted(years.items()):
+            amounts = {k: Decimal(r['value']) for k, r in facts.items()}
+            cfo, productive, float_change, sbc, profit, shares = (
+                amounts[k] for k in ('cfo', 'productive_asset_payments', 'merchant_float_change',
+                                     'sbc', 'net_income', 'diluted_shares'))
+            cash = cfo - productive - float_change - sbc
+            if min(profit, shares, cash) <= 0:
+                break
+            history.append(dict(period=day, gaap_income_cny=str(profit), operating_cash_cny=str(cfo),
+                productive_asset_cash_spend_cny=str(productive), merchant_payables_cash_change_cny=str(float_change),
+                sbc_economic_cost_cny=str(sbc), owner_cash_proxy_cny=str(cash), weighted_diluted_shares=str(shares),
+                owner_cash_per_ordinary_share_cny=str(cash / shares), conversion=str(cash / profit),
+                evidence_refs=sorted({ref for r in facts.values() for ref in r['evidence_refs']})))
+        if len(history) == 3:
+            histories.append(history)
+    if not histories:
+        return []
+    latest = max(h[-1]['period'] for h in histories)
+    candidates = [h for h in histories if h[-1]['period'] == latest]
+    return candidates[0] if len(candidates) == 1 else []

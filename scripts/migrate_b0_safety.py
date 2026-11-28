@@ -28,7 +28,7 @@ SCHEMA_COLUMNS = __import__("app.b0_schema", fromlist=["COLUMNS"]).COLUMNS
 def select_stage(stage):
     """Explicit opt-in only; the original B0 CLI/receipts stay B0 by default."""
     global MIGRATION_STAGE, RECEIPT_KEY, SCHEMA_COLUMNS, ddl_plan, verify_shape
-    if stage not in {"b0", "u0", "u1", "u2", "b2"}:
+    if stage not in {"b0", "u0", "u1", "u2", "b2", "binance"}:
         raise ValueError("UNKNOWN_MIGRATION_STAGE")
     module = __import__("app."+stage+"_schema", fromlist=["plan","verify","COLUMNS"])
     MIGRATION_STAGE, RECEIPT_KEY = stage, stage+"_migration_receipt"
@@ -187,9 +187,9 @@ def make_plan(database, contract_path, corrections=()):
         existing = sum(int(any(row[1] == col for row in source.execute(f"PRAGMA table_info({table})")))
                        for table, cols in SCHEMA_COLUMNS.items() for col in cols)
         expected = sum(len(cols) for cols in SCHEMA_COLUMNS.values())
-        if existing not in {0, expected} or (existing == expected and statements):
+        if MIGRATION_STAGE != "binance" and (existing not in {0, expected} or (existing == expected and statements)):
             raise ValueError("PARTIAL_B0_SCHEMA_REQUIRES_RECEIPT_RECOVERY")
-        if MIGRATION_STAGE in {"u1","u2","b2"} and corrections:
+        if MIGRATION_STAGE in {"u1","u2","b2","binance"} and corrections:
             raise ValueError(MIGRATION_STAGE.upper()+"_HAS_NO_DATA_CORRECTIONS")
         corrections = (cash_owner_plan if MIGRATION_STAGE == "u0" else identity_plan)(
             source, corrections, contract["portfolio_id"])
@@ -317,7 +317,7 @@ def restore_prewrite(database, contract_path, receipt_path, preserved_backup, *,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["plan", "apply", "verify", "resume-contract", "mark-writers-enabled", "restore-prewrite"])
-    parser.add_argument("--stage", choices=["b0","u0","u1","u2","b2"], default="b0",
+    parser.add_argument("--stage", choices=["b0","u0","u1","u2","b2","binance"], default="b0",
                         help="U0/U1/U2/B2 must be explicitly selected; never implicit in B0")
     parser.add_argument("--database", required=True)
     parser.add_argument("--contract", required=True)

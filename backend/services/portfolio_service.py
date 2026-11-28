@@ -48,7 +48,12 @@ def get_summary(portfolio_id: int) -> dict:
     if bs is None:
         return {"error": "portfolio not found"}
 
+    from app.sync_status import unvalued_source_assets
+    with get_session() as source_session:
+        gaps = unvalued_source_assets(source_session.connection(), portfolio_id)
     return {
+        **({"valuation_complete": False, "unvalued_assets": gaps,
+            "valuation_scope": "STORED_KNOWN_AND_LAST_GOOD_SUBTOTAL"} if gaps else {}),
         "total_assets": bs.total_assets,
         "total_liabilities": bs.total_liabilities,
         "net_worth": bs.net_worth,

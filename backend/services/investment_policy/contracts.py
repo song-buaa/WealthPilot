@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import date
 import hashlib
 import json
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -65,6 +65,7 @@ class Rule(Contract):
 
 
 class Allocation(Contract):
+    allow_dynamic_growth: ClassVar[bool] = False
     denominator: Literal["QUALIFIED_INVESTABLE_ASSETS"]
     neutral: dict[str, Decimal]
     etf_internal: dict[str, Decimal]
@@ -104,7 +105,8 @@ class Allocation(Contract):
         stable = sum(self.neutral[k] for k in ("ib01", "cbu3", "cash"))
         if growth != self.growth_total or stable != self.stable_total or growth + stable != 1:
             raise ValueError("MAJOR_BUDGET_NOT_CLOSED")
-        if self.growth_total - self.flex_joint_max != self.us_core_floor:
+        flex_floor = self.growth_total - self.flex_joint_max
+        if (flex_floor < self.us_core_floor if self.allow_dynamic_growth else flex_floor != self.us_core_floor):
             raise ValueError("FLEX_FLOOR_MISMATCH")
         c, a = self.neutral["china"], self.neutral["gold"] + self.neutral["btc"]
         if not (c < self.flex_china_max_exclusive and a <= self.flex_alternatives_max and c + a <= self.flex_joint_max):
@@ -145,6 +147,116 @@ class Snapshot(Contract):
         if any(ref.source_sha256 != self.source_hashes[ref.document] for ref in refs):
             raise ValueError("SOURCE_MAPPING_MISMATCH")
         return self
+
+
+B3_NODE_TARGETS = {"growth_and_alternatives": Decimal("0.70"), "stable_pool": Decimal("0.30")}
+
+
+class StrategicReviewScope(Contract):
+    fixed_node_targets: ClassVar[bool] = True
+    rule_id: Literal["allocation.deviation"] = "allocation.deviation"
+    nodes: dict[str, Decimal]
+    review_unit: Literal["PORTFOLIO_PER_SNAPSHOT"]
+    cash: Literal["QUALIFIED_TEMPORARY_INVESTMENT_CASH_IN_STABLE_POOL"]
+    product_decision_ref: str = Field(min_length=1)
+    content_status: Literal["DRAFT_CONTENT", "APPROVED_CONTENT"]
+    content_approval_ref: str | None
+    source_clause: SourceClause
+
+    @model_validator(mode="after")
+    def exact_scope(self):
+        if (set(self.nodes) != set(B3_NODE_TARGETS)
+                or (self.fixed_node_targets and self.nodes != B3_NODE_TARGETS)
+                or self.source_clause.document != "policy"
+                or self.source_clause.section != "6.3"):
+            raise ValueError("INVALID_B3_NODE_SCOPE")
+        if (self.content_status == "APPROVED_CONTENT") != bool(self.content_approval_ref):
+            raise ValueError("B3_CONTENT_APPROVAL_REFERENCE_MISMATCH")
+        return self
+
+
+class SnapshotV2(Snapshot):
+    schema_version: Literal["wp.policy.v2"] = "wp.policy.v2"
+    parser_version: Literal["approved-markdown-v2"] = "approved-markdown-v2"
+    strategic_review_scope: StrategicReviewScope
+    direct_target_count: ClassVar[int | None] = 6
+
+    @property
+    def content_status(self):
+        return self.strategic_review_scope.content_status
+
+    @model_validator(mode="after")
+    def strategic_review_binding(self):
+        if (self.direct_target_count is not None
+                and len(self.allocation.direct_equity.keys() - {"unallocated"}) != self.direct_target_count):
+            raise ValueError("POLICY_SOURCE_TARGET_COUNT_MISMATCH")
+        mapping = self.strategic_review_scope
+        rule = next((r for r in self.rules if r.rule_id == mapping.rule_id), None)
+        if (rule is None or (rule.metric, rule.scope, rule.operator, rule.threshold, rule.action, rule.subject)
+                != ("major_class_absolute_deviation", "APPROVED_MAJOR_ASSET_CLASS", "gt",
+                    Decimal("0.05"), "HUMAN_REVIEW", None)
+                or rule.source_clause != mapping.source_clause
+                or mapping.source_clause != self.contextual_clauses.get("6.3")
+                or (self.allocation.growth_total, self.allocation.stable_total)
+                != (mapping.nodes["growth_and_alternatives"], mapping.nodes["stable_pool"])):
+            raise ValueError("B3_SCOPE_RULE_OR_SOURCE_MISMATCH")
+        return self
+
+
+class PolicyAmendmentApproval(Contract):
+    status: Literal["DRAFT_CONTENT", "APPROVED_CONTENT"]
+    approved_on: date | None
+    reference: str | None
+
+    @model_validator(mode="after")
+    def approval_fields(self):
+        approved = self.status == "APPROVED_CONTENT"
+        if approved != (self.approved_on is not None) or approved != bool(self.reference):
+            raise ValueError("POLICY_AMENDMENT_APPROVAL_INCOMPLETE")
+        return self
+
+
+class SnapshotV2WithAmendment(SnapshotV2):
+    amendment_approval: PolicyAmendmentApproval
+    direct_target_count: ClassVar[int] = 8
+
+    @property
+    def content_status(self):
+        return self.amendment_approval.status
+
+    @model_validator(mode="after")
+    def amendment_binding(self):
+        if (self.strategic_review_scope.content_status != "APPROVED_CONTENT"
+                or (self.amendment_approval.approved_on is not None
+                    and self.amendment_approval.approved_on.isoformat() != self.content_approved_on)):
+            raise ValueError("POLICY_AMENDMENT_APPROVAL_MISMATCH")
+        return self
+
+
+def parse_snapshot(value) -> Snapshot:
+    """Decode frozen versions explicitly; unknown formats fail closed."""
+    if not isinstance(value, dict):
+        return Snapshot.model_validate(value)
+    if "btc_governance" not in value:
+        clauses = value.get("contextual_clauses") or {}
+        if isinstance(clauses, dict) and any(
+                "BTC治理合同：" in str(clauses.get(section, "")) for section in ("4.3", "9.3")):
+            raise ValueError("BTC_GOVERNANCE_DERIVATIVE_MISSING")
+    if value.get("schema_version") == "wp.policy.external.v1":
+        from .external_content import ExternalBtcSnapshot, ExternalSnapshot
+        model = ExternalBtcSnapshot if "btc_governance" in value else ExternalSnapshot
+        return model.model_validate(value)
+    if value.get("schema_version") == "wp.policy.config.v1":
+        from .configuration import ConfiguredSnapshot, ConfiguredSnapshotWithBtcGovernance
+        model = ConfiguredSnapshotWithBtcGovernance if "btc_governance" in value else ConfiguredSnapshot
+        return model.model_validate(value)
+    if value.get("schema_version") == "wp.policy.v2":
+        if "btc_governance" in value:
+            from .btc_governance import SnapshotV2WithBtcGovernance
+            return SnapshotV2WithBtcGovernance.model_validate(value)
+        model = SnapshotV2WithAmendment if "amendment_approval" in value else SnapshotV2
+        return model.model_validate(value)
+    return Snapshot.model_validate(value)
 
 
 class PolicyReference(Contract):

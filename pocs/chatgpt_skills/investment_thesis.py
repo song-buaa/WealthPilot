@@ -102,3 +102,76 @@ def register_write_tools(server, path, portfolio_id, security_meta):
                          confirmed: StrictBool = False, confirmation: str | None = None) -> ResearchWriteResult:
         return invoke(lambda: ResearchWriteResult.model_validate(bridge.commit(preview_token, preview_fingerprint,
                                             confirmed=confirmed, confirmation=confirmation)))
+
+
+def register_portfolio_tools(server, path, portfolio_id, security_meta, client):
+    """Shared E/F reads and previews. Production confirmation stays in private Web."""
+    import re
+    from backend.services.investment_thesis.portfolio import PortfolioGovernance
+    from backend.services.investment_thesis.portfolio_access import (
+        isolation_enabled, portfolio_capabilities, production_enabled, read_portfolio_records,
+        require_portfolio_access, risk_preview,
+    )
+    from backend.services.investment_thesis.portfolio_contracts import (
+        PortfolioConfirmation, PortfolioPreviewRequest, PortfolioQuery, PortfolioSourceRequest,
+    )
+
+    from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+
+    store = ThesisStore(path, portfolio_id)
+    bridge = PortfolioGovernance(store, lambda req: client.call("portfolio_governance_sources",
+                                                                req.model_dump(mode="json")))
+    read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
+
+    def invoke(function, capability="read"):
+        try:
+            require_portfolio_access(capability)
+            return function()
+        except (ValueError, OSError, sqlite3.Error) as error:
+            code = str(error)
+            raise ToolError(code if re.fullmatch(r"E1_[A-Z0-9_]{1,100}", code)
+                            else "E1_PORTFOLIO_OPERATION_UNAVAILABLE") from None
+
+    @server.tool(meta=security_meta, annotations=read,
+        description="Read private immutable combination decisions, historical revisions, due followups and persisted risks. "
+                    "For formal risk candidates pass source with an existing snapshot ID/hash and ACTIVE bundle hash. "
+                    "For reconciliation specify an existing newer U1 ID and hash; the last confirmed plan is read "
+                    "automatically if its bundle is omitted. Only link existing exact stored order IDs for proof. "
+                    "Report checkpoint observation and execution proof separately. No refresh, trade or write.")
+    def get_portfolio_review_followups(request: PortfolioQuery | None = None,
+                                       source: PortfolioSourceRequest | None = None,
+                                       reconciliation: ReconciliationRequest | None = None) -> dict:
+        if sum(value is not None for value in (request, source, reconciliation)) > 1:
+            raise ToolError("E1_PORTFOLIO_QUERY_INVALID")
+        if reconciliation is not None:
+            return invoke(lambda: client.call("portfolio_reconciliation", reconciliation.model_dump(mode="json")))
+        if source is not None:
+            return invoke(lambda: risk_preview(bridge.source_reader(source)))
+        return invoke(lambda: read_portfolio_records(store, request or PortfolioQuery()))
+
+    if "preview" not in portfolio_capabilities():
+        return
+
+    @server.tool(meta=security_meta, annotations=read,
+        description="Preview exact combination items from original B/C/D inputs, no persistent write. Show every proposed "
+                    "disposition, dates, limits and evidence. In production recreate the preview in private Web for "
+                    "human selection and confirmation. Formal exceptions stay pending.")
+    def preview_portfolio_review_decision(request: PortfolioPreviewRequest) -> dict:
+        result = invoke(lambda: bridge.preview(request), "preview")
+        if production_enabled():
+            result.pop("preview_token", None)
+            result["confirmation_channel"] = "PRIVATE_WEB"
+        return result
+
+    if not isolation_enabled():
+        return
+
+    @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+        idempotent_hint=True, open_world_hint=False),
+        description="Save only the selected exact items after showing the bound preview and receiving a fresh explicit "
+                    "human confirmation 保存这次组合决定. Parameters attest client confirmation and do not authenticate it. "
+                    "取消 discards a preview. No trade, funding, sync, Policy write or exception activation.")
+    def commit_portfolio_review_decision(request: PortfolioConfirmation) -> dict:
+        if not isolation_enabled():
+            raise ToolError("E1_PORTFOLIO_ACCESS_DENIED")
+        return invoke(lambda: bridge.commit(request), "confirm")

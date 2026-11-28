@@ -3,6 +3,7 @@
 This module owns no data/provider, model, persistence, order or sync operations.
 """
 from datetime import datetime, timedelta, timezone
+import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 
@@ -15,6 +16,7 @@ class ResearchIntent(BaseModel):
     reference_quantity: float | None=Field(default=None,gt=0,allow_inf_nan=False)
     tranche_fractions: list[float]=Field(default_factory=list,max_length=8)
     historical_price_bands: list[tuple[float,float]]=Field(default_factory=list,max_length=8)
+    conditional_valuation: dict | None=None
 
     @model_validator(mode='after')
     def valid_assumptions(self):
@@ -25,6 +27,11 @@ class ResearchIntent(BaseModel):
             raise ValueError('RESEARCH_FRACTIONS_INVALID')
         if any(not all(math.isfinite(v) for v in pair) or not 0<pair[0]<=pair[1] for pair in self.historical_price_bands):
             raise ValueError('RESEARCH_OBSERVATION_ASSUMPTION_INVALID')
+        if self.conditional_valuation is not None:
+            from backend.services.market_data.quality_valuation import Assumptions, RecoveryAssumptions
+            case=(self.conditional_valuation.get('base') or {}) if isinstance(self.conditional_valuation,dict) else {}
+            contract=Assumptions if 'terminal_pe' in case else RecoveryAssumptions
+            self.conditional_valuation=contract.model_validate(self.conditional_valuation).model_dump(mode='json')
         return self
 
 
@@ -60,7 +67,7 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     research=research or getattr(loaded,"research",[]) or []
     # Event-tagged entries are taken only from the original research context.
     events=[r for r in research if mapping(r).get("metadata",{}).get("evidence_kind")=="event"]
-    assessment=invoke_skill("wp-assess-position-evidence",market_data=market,symbol=symbol,at=at,
+    assessment=invoke_skill("wp-assess-position-evidence",market_data=market,symbol=symbol,at=at,current_research=at is None,
         asset_view=qualification_view(asset_view,options.get("scenario_legs",[]),at=at) if asset_view else None,research=research,events=events,
         planner=plan.planner_trace,stored_price=native[0].get("current_price") if native else None,
         principles_available=bool(getattr(loaded,"retrieved_principles",[])))
@@ -74,6 +81,8 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
     context["effective_rules_provenance"]=rule_source
     member_ids={m["id"] for m in (context.get("company_exposure") or {}).get("members",[])}
     context["security_inputs"]=[r for r in rows if r.get("id") in member_ids]
+    from backend.services.market_data.financial_research import build_valuation_inputs
+    assessment["valuation_inputs"]=build_valuation_inputs(assessment)
     assessment["allocation_context"]=context
     assessment['research_intent']=research_intent(options)
     if assessment['research_intent']['objective']=='evaluate' and 'objective' not in assessment['research_intent']['sources']:
@@ -82,6 +91,17 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
         if goal.get('direction')=='gradual_exit':
             assessment['research_intent'].update(objective='exit',formal_target_confirmed=True)
             assessment['research_intent']['sources']['objective']='server_confirmed_stage_target:'+str(formal.get('version'))
+    if options.get('enable_l1_research_v2') or 'l1_holding_context' in (getattr(executed, 'position_evidence', None) or {}):
+        stored = any(row.get('symbol') == symbol and not row.get('is_virtual')
+                     for row in map(mapping, getattr(loaded, 'positions', ()) or ()) if symbol)
+        assessment['l1_research_as_of'] = assessment['as_of']
+        assessment['l1_holding_context'] = {
+            'stored_position': 'present' if stored else 'unknown',
+            'snapshot': 'qualified' if assessment['snapshot_id'] and assessment['qualification']['L2']['allowed'] else 'unverified',
+            'entry_counterfactual': bool(re.search(
+                r'建仓|加仓|增配|新增配置|纳入.{0,12}组合|\b(?:new position|buy|initiate)\b',
+                options.get('research_question') or '', re.I)),
+        }
     if not context["confirmed_stage_targets"]:
         blockers=["CONFIRMED_STAGE_TARGETS_REQUIRED"]
         if context["proposed_stage_targets"]:
@@ -127,8 +147,21 @@ def prepare(plan, executed, *, asset_view=None, options=None, at=None):
                     if candidate['scenario']:
                         candidate['scenario']['mode']='illustrative_unqualified'
                         candidate['scenario']['amount_blockers']=loan_b.get('blockers',[])
-    from backend.services.market_data.financial_research import build
-    assessment['financial_research']=build(assessment)
+    from backend.services.market_data.financial_research import build_current
+    assessment['financial_research']=build_current(assessment)
+    assumptions=assessment['research_intent'].get('conditional_valuation')
+    if assumptions:
+        from backend.services.market_data.quality_valuation import foreign_ads_conditional_research
+        assessment['conditional_valuation']=foreign_ads_conditional_research(assessment,assumptions)
+    elif assessment['research_intent'].get('valuation_research_requested'):
+        from backend.services.market_data.quality_valuation import propose_foreign_ads_conditional_research
+        if 'l1_holding_context' in assessment and (assessment.get('symbol') or '').endswith(':US'):
+            from backend.services.market_data.l1_valuation import bind_inputs, observation_date, read_inputs
+            if getattr(executed, 'l1_valuation_inputs', None) is None:
+                observed = observation_date(assessment)
+                executed.l1_valuation_inputs = read_inputs(assessment['symbol'], observed)
+            bind_inputs(assessment, executed.l1_valuation_inputs)
+        assessment['conditional_valuation']=propose_foreign_ads_conditional_research(assessment)
     return assessment
 
 
@@ -156,6 +189,9 @@ def research_intent(options):
         r'不(?:假设|认为|预设)?(?:我|本人|用户)?(?:已|实际|目前|当前)?(?:持有|持仓)|没有持仓|无持仓|未持有|纯研究|仅(?:作|做)?研究|'
         r'no\s+(?:current\s+)?(?:position|holdings?)|not\s+(?:currently\s+)?holding', question,re.I)
         and not re.search(buy_words,buy_context,re.I))
+    valuation_research_requested=bool(isinstance(question,str) and re.search(
+        r'长期.{0,12}(?:投资|持有|回报|退出|价值|经营恢复)|(?:五年|估值|预期回报|条件回报|内在价值|长期回报|长期投资|当前价(?:格)?隐含)',
+        question,re.I))
     turns += [('user_history',t.get('content','')) for t in reversed(options.get('research_history') or []) if t.get('role')=='user']
     for source,text in turns:
         if not isinstance(text,str):continue
@@ -186,14 +222,17 @@ def research_intent(options):
                     from datetime import date
                     value['review_date']=date(*map(int,matches[0])).isoformat();sources['review_date']=source
                 except ValueError:pass
+    if valuation_research_requested and not value.get('conditional_valuation'):
+        sources['conditional_valuation']='system_evidence_bound_reference_or_unknown'
     return dict(value,sources=sources,no_holding_research=no_holding_research,
+                valuation_research_requested=valuation_research_requested,
                 confirmation='user_research_assumption_only',
                 holdings_verified=False,formal_target_confirmed=False)
 
 
 def research_plan(assessment, *, at):
     """Non-executable L1 planning, composed from original technical/financial facts."""
-    from backend.services.market_data.financial_research import build
+    from backend.services.market_data.financial_research import build_current
     intent=assessment.get('research_intent') or research_intent({})
     objective=intent['objective'];user_exit=objective in {'exit','reduce'}
     day=(assessment.get('technical_levels') or {}).get('day')
@@ -213,7 +252,7 @@ def research_plan(assessment, *, at):
         fraction_basis='user_assumption' if intent['tranche_fractions'] else 'illustrative_research_draft',
         priority=i+1,condition=conditions[min(i,3)],observation_band=band,
         quantity=None,amount=None,execution_authorized=False) for i,f in enumerate(fractions)]
-    financial=build(assessment)
+    financial=build_current(assessment)
     return dict(mode='research_only',non_executable=True,objective=objective,
         objective_source=intent['sources'].get('objective','system_inference_evaluate'),
         assumption_context=intent,stages=stages,price_observation=band,
@@ -420,25 +459,55 @@ def fact_sections(assessment, *, include_scenarios=True):
         field_currencies=sorted({f.get('currency') for f in assessment.get('verified_field_records',[]) if f.get('currency') and str(f.get('record_id','')).startswith(str(r.get('record_id'))+':')})
         report_currency=r['values'].get('report_currency') or '/'.join(field_currencies) or '未核验'
         facts.append(f"- {r['source']}，{r['data_as_of']}，期间 {r['period']}；经营财务币种 {report_currency}、上市估值币种 {r['values'].get('valuation_currency') or '未核验'}："+"；".join(values))
+    from backend.services.market_data.financial_research import build_valuation_inputs, display
+    valuation=build_valuation_inputs(assessment)
+    bridge=valuation.get('cash_less_disclosed_borrowings')
+    if bridge:
+        section('历史现金/借款口径（非可分配净现金或公允价值）',
+            display(dict(values={'cash_less_disclosed_borrowings':float(bridge['value'])},unit='currency_units',currency=bridge['currency'],period=bridge['period']),'cash_less_disclosed_borrowings')+f"；{bridge['basis']}；引用："+', '.join(bridge['evidence_refs']))
     # Display equal facts once; all original records/references remain in evidence.
     import json
     grouped={}
-    for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[]):
+    for r in assessment.get('verified_field_records',[])+assessment.get('historical_field_records',[])+assessment.get('quality_field_records',[]):
         key=(r.get('field'),r.get('period'),r.get('currency'),r.get('scope'),
              json.dumps(r.get('values'),sort_keys=True,default=str))
         grouped.setdefault(key,[]).append(r)
     for equal in grouped.values():
         r=equal[0]
-        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "月度" if r.get('scope')=='monthly' else "季度"
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
-        facts.append(f"- {scope}字段事实 {r.get('field')}：{r.get('values')}；币种 {r.get('currency') or '未核验'}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
-    from backend.services.market_data.financial_research import build,display
-    financial=build(assessment)
+        facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
+    from backend.services.market_data.financial_research import build_current,display
+    financial=build_current(assessment)
     for metric in financial['records']:
         facts.append('- 确定性研究计算 '+display(metric,metric['field'])+'；依据：'+'、'.join(metric['evidence_refs'])+'；计算口径：'+str(metric['details']))
     if include_scenarios and financial['valuation_sensitivity']:
         import json
         facts.append('估值敏感性（盈利/倍数变化为假设，固定FX；非预测、目标价或订单）：'+json.dumps(financial['valuation_sensitivity'],ensure_ascii=False))
+    conditional=assessment.get('conditional_valuation') or {}
+    if conditional.get('status')=='CONDITIONAL_RESEARCH_ONLY':
+        from backend.services.market_data.quality_valuation import SCENARIOS
+        from decimal import Decimal
+        def percentage(value):
+            return 'N/A' if value is None else f"{Decimal(str(value))*100:.2f}%"
+        cases=[]
+        for name in SCENARIOS:
+            row=conditional['scenarios'][name]
+            description=f"{name}: 5年条件年化回报 {percentage(row.get('annualized_return'))}"
+            if row.get('required_return_met') is not None:
+                hurdle=('观察收益率参考（非用户要求回报）' if
+                        conditional.get('proposal_origin')=='system_evidence_bound_reference' else
+                        '研究要求回报')
+                description+='；'+('达到' if row['required_return_met'] else '未达到')+hurdle
+            if 'implied_year_five_ebit_margin' in row:
+                description+=f"；当前价隐含第五年营业利润率 {percentage(row['implied_year_five_ebit_margin'])}"
+            cases.append(description+f"；状态 {row.get('status',conditional['status'])}")
+        facts.insert(0,'五年条件估值研究（服务端计算；研究假设，不是历史事实、公允价值、目标价或交易指令；'
+                     '原始输入与假设见结构化回执）：'+ '；'.join(cases)+'；限制：'+', '.join(conditional.get('limitations',[])))
+    elif conditional.get('status')=='HYPOTHESES_REQUIRED':
+        facts.insert(0,'长期条件估值：N/A；缺口：'+', '.join(conditional.get('missing',[]))+
+                     '；反向条件：'+conditional['reverse_equation']+
+                     '；未取得独立假设依据时不制造公允价值、目标价或回报。')
     facts.append('独立缺口（不影响其他合格研究）：'+'；'.join(financial['limitations'])+'。旧观点和Seed不作当前经营事实。')
     section("②经营与估值事实","\n".join(facts) if facts else "缺少当前可核验的经营或估值事实。旧观点和Seed仅保留在来源记录，不作当前估值。")
     technical=assessment.get("technical_levels")

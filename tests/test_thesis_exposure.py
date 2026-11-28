@@ -105,9 +105,9 @@ def test_missing_stale_wrong_scope_refuses(alter,reason):
     assert any(reason in r for r in result['reasons']),result
 
 
-def test_unmapped_nvda_is_not_added_to_shared_issuer_owner():
-    assert calculate(sec=security('NVDA:US','USD'))['status']=='CANNOT_QUANTIFY'
-    v=view();v['data_quality']['security_inputs'][0]['symbol']='NVDA:US'
+def test_unmapped_common_stock_does_not_invent_an_issuer():
+    assert calculate(sec=security('ZZZY:US','USD'))['status']=='CANNOT_QUANTIFY'
+    v=view();v['data_quality']['security_inputs'][0].update(symbol='ZZZY:US', security_symbol='ZZZY:US')
     assert 'ISSUER_MAPPING_INCOMPLETE' in calculate(v)['reasons']
 
 

@@ -12,16 +12,21 @@ def context(tmp_path, monkeypatch):
     yield from original.__wrapped__(tmp_path, monkeypatch)
 
 
-@pytest.mark.parametrize('security_type,isin,vehicle,economic,status', [
-    ('STK', None, 'ETF', 'EQUITY', 'VERIFIED'),
-    ('ETF', None, 'ETF', 'EQUITY', 'VERIFIED'),
-    ('OPT', None, 'OPTION', 'DERIVATIVE', 'DETERMINISTIC'),
-    ('FUT', None, 'FUTURE', 'DERIVATIVE', 'DETERMINISTIC'),
-    ('STK', 'US78462F1030', 'COMMON_STOCK', 'UNKNOWN', 'CONFLICT'),
-    ('ETF', 'US78462F1030', 'ETF', 'UNKNOWN', 'CONFLICT'),
+@pytest.mark.parametrize('listing,market,security_type,isin,vehicle,economic,status', [
+    ('QQQ', 'US', 'STK', None, 'ETF', 'EQUITY', 'VERIFIED'),
+    ('QQQ', 'US', 'ETF', None, 'ETF', 'EQUITY', 'VERIFIED'),
+    ('QQQ', 'US', 'OPT', None, 'OPTION', 'DERIVATIVE', 'DETERMINISTIC'),
+    ('QQQ', 'US', 'FUT', None, 'FUTURE', 'DERIVATIVE', 'DETERMINISTIC'),
+    ('QQQ', 'US', 'STK', 'US78462F1030', 'COMMON_STOCK', 'UNKNOWN', 'CONFLICT'),
+    ('QQQ', 'US', 'ETF', 'US78462F1030', 'ETF', 'UNKNOWN', 'CONFLICT'),
+    ('LI', 'US', 'STK', None, 'ADR', 'EQUITY', 'VERIFIED'),
+    ('PDD', 'US', 'STK', 'US7223041028', 'ADR', 'EQUITY', 'VERIFIED'),
+    ('LI', 'US', 'OPT', None, 'OPTION', 'DERIVATIVE', 'DETERMINISTIC'),
+    ('LI', 'US', 'STK', 'KYG5479M1050', 'COMMON_STOCK', 'UNKNOWN', 'CONFLICT'),
+    ('LI', 'HK', 'STK', None, 'COMMON_STOCK', 'UNKNOWN', 'CONFLICT'),
 ])
 def test_tiger_snapshot_publication_and_fixed_view_preserve_classification(
-        context, security_type, isin, vehicle, economic, status):
+        context, listing, market, security_type, isin, vehicle, economic, status):
     from app.models import Position
     from app.asset_views import load_view, frozen_result
     from backend.services.asset_analysis import AssetAnalysisPreparation
@@ -32,11 +37,15 @@ def test_tiger_snapshot_publication_and_fixed_view_preserve_classification(
     from services.broker_sync.tiger.adapter import TigerAdapter
     from tests.test_u0_review_regressions import stock
     c = context
-    sdk = stock();sdk.contract.symbol = 'QQQ';sdk.contract.sec_type = security_type
+    sdk = stock()
+    sdk.contract.symbol = listing
+    sdk.contract.market = market
+    sdk.contract.sec_type = security_type
+    symbol = f'{listing}:US'
     sdk.contract.isin = isin
     native = TigerAdapter('fixture').to_position(sdk)
     assert (native.vehicle_type,native.economic_asset_class,native.classification_verification_status) == (vehicle,economic,status)
-    assert native.classification_evidence['listing_symbol'] == 'QQQ:US'
+    assert native.classification_evidence['listing_symbol'] == symbol
     def factory(broker):
         def sync(db,triggered_by='analysis'):
             positions = [native,cash_position('tiger','fixture','USD',50,datetime.now(timezone.utc))]
@@ -48,30 +57,49 @@ def test_tiger_snapshot_publication_and_fixed_view_preserve_classification(
     _,claim = service.request('publication');service.run(*claim)
     prepared = service.status('publication');assert prepared['state'] == 'ready',prepared
     with c.sessions() as db:
-        snapshot = db.query(PositionSnapshot).filter_by(symbol='QQQ:US').one()
-        position = db.query(Position).filter_by(symbol='QQQ:US',portfolio_id=7).one()
+        snapshot = db.query(PositionSnapshot).filter_by(symbol=symbol).one()
+        position = db.query(Position).filter_by(symbol=symbol,portfolio_id=7).one()
         assert (snapshot.vehicle_type,snapshot.economic_asset_class,snapshot.classification_verification_status) == (vehicle,economic,status)
         assert (position.vehicle_type,position.economic_asset_class,position.classification_verification_status) == (vehicle,economic,status)
         evidence = json.loads(position.classification_evidence_json)
-        assert evidence['listing_symbol'] == 'QQQ:US' and evidence['isin'] == isin
+        assert evidence['listing_symbol'] == symbol and evidence['isin'] == isin
         assert position.quantity == 10 and position.cost_price == 1 and position.current_price == 1
         assert position.market_value_cny == 10 and position.original_value == 10
         assert (position.broker,position.broker_account_id,position.sync_source,position.currency) == ('tiger','fixture','api','USD')
         assert db.query(Position).filter_by(portfolio_id=8).count() == 0
     view = load_view(c.db,7,prepared['snapshot_id'])
     details = frozen_result(view,'get_investment_details',{})
-    item = next(i for i in details['items'] if i['symbol'] == 'QQQ:US')
+    item = next(i for i in details['items'] if i['symbol'] == symbol)
     assert (item['vehicle_type'],item['economic_asset_class']) == (vehicle,economic)
     assert item['quantity'] == 10 and item['cost_price'] == 1 and item['market_value_cny'] == 10
     assert not view['issuer_exposure']['unmapped_direct_holdings']
-    assert not view['issuer_exposure']['companies']  # ETF is not a direct issuer.
+    issuer_ids = [issuer['issuer_id'] for issuer in view['issuer_exposure']['companies']]
+    expected_issuer = {'LI': 'LI_AUTO', 'PDD': 'PDD_HOLDINGS'}.get(listing)
+    assert issuer_ids == ([expected_issuer] if vehicle == 'ADR' else [])
     stored = json.dumps(view,sort_keys=True)
     with c.sessions() as db:
         db.info['portfolio_id'] = 7
         factory('tiger').sync_and_persist(db)
-        assert db.query(Position).filter_by(portfolio_id=7,symbol='QQQ:US').count() == 1
-        assert db.query(Position).filter_by(symbol='QQQ:US').one().vehicle_type == vehicle
+        assert db.query(Position).filter_by(portfolio_id=7,symbol=symbol).count() == 1
+        assert db.query(Position).filter_by(symbol=symbol).one().vehicle_type == vehicle
     assert json.dumps(load_view(c.db,7,prepared['snapshot_id']),sort_keys=True) == stored
+
+
+@pytest.mark.parametrize("overrides, expected", [
+    ({"listing_market": None}, ("COMMON_STOCK", "DETERMINISTIC")),
+    ({"listing_market": None, "isin": "US50202M1027"}, ("ADR", "VERIFIED")),
+    ({"currency": "HKD"}, ("COMMON_STOCK", "DETERMINISTIC")),
+    ({"broker": "snowball"}, ("COMMON_STOCK", "DETERMINISTIC")),
+    ({"con_id": 756733}, ("COMMON_STOCK", "CONFLICT")),
+    ({"listing_market": None, "con_id": 756733}, ("COMMON_STOCK", "CONFLICT")),
+])
+def test_tiger_adr_listing_requires_compatible_native_identity(overrides, expected):
+    from backend.services.instruments.classification import AssetClassificationEvidence, classify_instrument
+
+    native = dict(broker="tiger", currency="USD", listing_symbol="LI:US",
+                  listing_market="US", broker_security_type="STK", stock_type="COMMON")
+    classification = classify_instrument(AssetClassificationEvidence(**(native | overrides)))
+    assert (classification.vehicle_type, classification.verification_status) == expected
 
 
 def test_raw_ticker_cannot_invent_verified_listing_proof():

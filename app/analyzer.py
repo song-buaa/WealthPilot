@@ -41,7 +41,7 @@ class BalanceSheet:
     concentration: Dict[str, float] = field(default_factory=dict)
 
     # 浮动盈亏
-    total_profit_loss: float = 0.0
+    total_profit_loss: Optional[float] = 0.0
 
 
 @dataclass
@@ -78,9 +78,14 @@ def analyze_portfolio(portfolio_id: int) -> Optional[BalanceSheet]:
 
         # 计算各大类资产市值
         for pos in positions:
+            if pos.broker == "binance" and pos.profit_loss_value is None:
+                bs.total_profit_loss = None
+            elif bs.total_profit_loss is not None:
+                bs.total_profit_loss += (pos.profit_loss_value or 0)
             value = pos.market_value_cny
+            if value is None:
+                continue
             bs.total_assets += value
-            bs.total_profit_loss += (pos.profit_loss_value or 0)
 
             ac = economic_asset_class_cn(pos)
             if ac == "权益":

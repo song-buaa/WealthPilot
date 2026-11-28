@@ -15,6 +15,8 @@ def history_account_ref(portfolio_id, broker, account):
 
 def position_key(row):
     from .sources import instrument
+    if row.broker == 'binance' and row.symbol == 'BTC:CRYPTO':
+        return 'listing:BTC:CRYPTO:USD:CRYPTO_SPOT'
     evidence=json.loads(row.classification_evidence_json or '{}')
     if evidence.get('con_id'):
         return 'conid:'+str(evidence['con_id'])
@@ -59,7 +61,8 @@ def valuation(db, portfolio_id, broker, account, key, *, at):
     if row.original_currency==row.currency and row.fx_rate_date and row.fx_rate_to_cny and row.fx_rate_to_cny>0:
         fx=dict(rate=number(row.fx_rate_to_cny,positive=True),rate_date=row.fx_rate_date,source='stored_U0_FX',pair=row.currency+'/CNY')
     return dict(quantity=number(row.quantity),currency=row.original_currency,market_value=number(row.original_value),
-        broker_cost_basis=number(row.cost_price*row.quantity),broker_reference_pnl=number(row.profit_loss_original_value),
+        broker_cost_basis=number(row.cost_price*row.quantity) if row.cost_price is not None else None,
+        broker_reference_pnl=number(row.profit_loss_original_value) if row.profit_loss_original_value is not None else None,
         as_of=source_time or None,positions_as_of=positions_time,qualified=qualified,fx=fx,
         account_synced_at=run.finished_at.isoformat() if run and run.finished_at else None,
         price_as_of=source_time,valuation_effective_at=price_effective,price_time_basis=meta.get('price_time_basis'),quality='trusted_stored_source' if qualified else 'unknown_or_stale')
@@ -118,7 +121,7 @@ def query(db, portfolio_id, *, account_ref=None, symbol=None, start=None, end=No
         if visible!='inside':continue
         public={k:e.get(k) for k in ('kind','external_id','instrument_key','symbol','currency','sec_type',
             'executed_at','time_precision','source_time_raw','source_timezone','source_local_date','source_date_semantics','source_time_evidence','fx_date','fx_date_basis','side','quantity','price','multiplier','commission','commission_currency',
-            'taxes','broker_realized_pnl','broker_cost_basis','broker_order_id','perm_id','amount','fx')}
+            'quote_asset','quote_quantity','valuation_convention','source_channel','source_trade_id','taxes','broker_realized_pnl','broker_cost_basis','broker_order_id','perm_id','amount','fx')}
         public.update(account_ref=history_account_ref(portfolio_id,r.broker,r.account_id),broker=r.broker,
             commission_status='KNOWN' if e.get('commission') is not None and e.get('commission_currency') else 'UNKNOWN',
             taxes_status='KNOWN' if e.get('taxes') is not None else 'UNKNOWN',

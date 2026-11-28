@@ -185,7 +185,8 @@ def test_xpev_failed_production_pair_now_reaches_professional_path(analysis_db, 
     assert result["intent"]["asset"] == "XPEV:US"
     assert result["intent"]["planner_route"] == "position_single"
     assert "ANALYSIS_ROUTE_MISMATCH" not in result["issues"]
-    assert result["professional_analysis_complete"] is True
+    assert result["professional_analysis_complete"] is False  # No qualified model explanation in this route fixture.
+    assert result["stage_diagnostics"]["professional_result"] == "incomplete"
     assert result["stage_diagnostics"]["expressing"] == "completed"
     assert result["stage_diagnostics"]["reviewing"] == "completed"
     assert result["professional_result"]["analysis_result"]["decisionType"] == "watch"

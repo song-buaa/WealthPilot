@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from .contracts import MetricEvidence, Snapshot
+from .contracts import MetricEvidence, Snapshot, SnapshotV2
 from .parser import PolicyError
 from .store import clock
 
@@ -38,6 +38,9 @@ def evaluate_snapshot(snapshot: Snapshot, *, metrics: dict[str, MetricEvidence],
                 triggers.append({"rule_id": rule.rule_id, "action": rule.action, "source_clause": rule.source_clause.model_dump(), "auto_trade_allowed": False})
             elif value is not False:
                 unknown.append({"rule_id": rule.rule_id, "reason": "BEHAVIOR_FACT_UNKNOWN"})
+            continue
+        if isinstance(snapshot, SnapshotV2) and rule.rule_id == "allocation.deviation":
+            unknown.append({"rule_id": rule.rule_id, "reason": "QUALIFIED_B3_HIERARCHY_REQUIRED"})
             continue
         evidence = metrics.get(rule.metric)
         try:
@@ -76,20 +79,22 @@ def evaluate_snapshot(snapshot: Snapshot, *, metrics: dict[str, MetricEvidence],
                 policy_version=snapshot.policy_version, portfolio_compliance="UNKNOWN" if unknown else "NOT_AN_EXECUTION_ASSESSMENT")
 
 
-def budget_preview(snapshot: Snapshot, *, china_used: Decimal, unallocated_us_used: Decimal, temporary_cash: Decimal):
+def budget_preview(snapshot: Snapshot, *, china_used: Decimal, unallocated_us_used: Decimal,
+                   temporary_cash: Decimal, specified_us_used: Decimal | None = None):
     """Conditional unused-budget routing, not a permanent target change or order.
 
     No automatic redistribution of remaining IB01/CBU3 when cash is requested;
     that product-level decision remains UNKNOWN instead of inventing a rule.
     """
     a = snapshot.allocation
-    for number in (china_used, unallocated_us_used, temporary_cash):
+    specified = a.specified_equity_total if specified_us_used is None else specified_us_used
+    for number in (china_used, unallocated_us_used, temporary_cash, specified):
         if not number.is_finite() or number < 0:
             raise PolicyError("INVALID_SCENARIO_NUMBER")
     if (china_used > a.neutral["china"] or unallocated_us_used > a.direct_equity.get("unallocated", Decimal(0))
-            or temporary_cash > a.temporary_cash_max):
+            or specified > a.specified_equity_total or temporary_cash > a.temporary_cash_max):
         raise PolicyError("SCENARIO_REQUIRES_NEW_POLICY_DECISION")
-    us_direct = a.specified_equity_total + unallocated_us_used
+    us_direct = specified + unallocated_us_used
     alternatives = a.neutral["gold"] + a.neutral["btc"]
     us_total = a.growth_total - china_used - alternatives
     us_etf = us_total - us_direct

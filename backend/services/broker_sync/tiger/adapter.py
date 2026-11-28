@@ -123,6 +123,7 @@ class TigerAdapter:
             long_name=getattr(contract, "name", None) or raw_symbol,
             currency=currency,
             listing_symbol=self.normalize_symbol(raw_symbol, currency),
+            listing_market=getattr(sdk_market, "value", sdk_market),
             isin=getattr(contract, "isin", None),
         )
         classification = classify_instrument(evidence)

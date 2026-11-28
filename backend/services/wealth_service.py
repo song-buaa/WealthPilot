@@ -33,6 +33,126 @@ ASSET_TYPES: dict[str, tuple[str, bool]] = {
 PENSION_SECURITY_ITEM_TYPES = frozenset({
     "enterprise_annuity", "personal_pension", "pension_insurance", "basic_pension",
 })
+
+
+def investable_inventory_identity(view, *, include_liabilities=False):
+    """Identity only, no new amount ledger. Changes require renewed owner evidence."""
+    from backend.services.investment_policy.contracts import digest
+    rows = view['data_quality'].get('investable_security_inputs', view['data_quality'].get('security_inputs', []))
+    manual = view['views']['get_manual_wealth_items']['items']
+    return digest({'portfolio_id': view['portfolio_id'],
+        'all_position_ids': sorted(r['id'] for r in view['views'].get('positions', {}).get('items', rows)),
+        'accounts': sorted(a['account_ref'] for a in view['data_quality'].get('investable_accounts', view['data_quality'].get('accounts', []))),
+        'positions': sorted([{k:r.get(k) for k in ('id', 'account_ref', 'symbol', 'security_symbol',
+            'vehicle_type', 'currency', 'economic_asset_class', 'segment', 'classification_source',
+            'classification_verification_status','classification_version')} for r in rows], key=lambda r:r['id']),
+        'manual': sorted([{k:r.get(k) for k in ('id', 'kind', 'item_type', 'currency',
+            'already_investment_accounted')} for r in manual if r.get('kind') == 'asset'
+            or (include_liabilities and r.get('kind') == 'liability')], key=lambda r:r['id'])})
+
+
+def owner_confirmation_expiry(owner, *, strategic):
+    from datetime import timedelta
+    from backend.services.investment_policy.store import clock
+
+    if owner.get('confirmation_mode') == 'EVENT_DRIVEN':
+        return None if strategic else clock(owner['confirmed_at']) + timedelta(days=30)
+    return clock(owner['valid_until'])
+
+
+def freeze_investable_scope(view):
+    """Original Wealth Owner's optional private evidence, frozen before publication.
+
+    No API accepts these assertions. File contains no values/targets/qualification
+    flags: it attests inventory completeness, purpose and pension identity only.
+    Account freshness, source times, FX and all amounts are rechecked by A-min.
+    Existing snapshots are never enriched retrospectively.
+    """
+    import json
+    import os
+    from pathlib import Path
+    from datetime import timedelta
+    from backend.services.investable_assets import ScopeEvidence
+    from backend.services.investment_policy.contracts import digest
+    from backend.services.investment_policy.store import clock
+    from pydantic import ValidationError
+    path = os.environ.get('WEALTHPILOT_INVESTABLE_EVIDENCE_FILE')
+    view['data_quality'].pop('investable_scope_evidence', None)
+    view['data_quality'].pop('investable_owner_evidence', None)
+    if not path:
+        return view
+    try:
+        from app.shared_sqlite import private_file
+        file = private_file(Path(path))
+        if file.stat().st_size > 262144:
+            raise ValueError('bounded evidence file required')
+        raw = json.loads(file.read_text())
+        allowed = {'schema_version', 'portfolio_id', 'inventory_sha256', 'confirmed_at',
+                   'valid_until', 'dispositions', 'coverage', 'pension_links', 'manual_classes',
+                   'confirmation_mode', 'manual_baseline_confirmed_on'}
+        if set(raw) - allowed or raw['schema_version'] != 'wealthpilot.owner-scope.v1':
+            raise ValueError('invalid owner evidence')
+        at = clock(view['captured_at'])
+        confirmed = clock(raw['confirmed_at'])
+        mode = raw.get('confirmation_mode')
+        baseline = raw.get('manual_baseline_confirmed_on')
+        if mode == 'EVENT_DRIVEN':
+            from zoneinfo import ZoneInfo
+            if ('valid_until' in raw or not isinstance(baseline, str)
+                    or date.fromisoformat(baseline).isoformat() != baseline
+                    or confirmed.astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat() < baseline):
+                raise ValueError('invalid event-driven owner evidence')
+        elif (mode is not None or baseline is not None
+              or not at <= clock(raw['valid_until']) <= confirmed + timedelta(days=30)):
+            raise ValueError('invalid or expired owner evidence')
+        if confirmed > at:
+            raise ValueError('future owner evidence')
+        inventory = investable_inventory_identity(view, include_liabilities=mode == 'EVENT_DRIVEN')
+        if raw['portfolio_id'] != view['portfolio_id'] or raw['inventory_sha256'] != inventory:
+            raise ValueError('inventory identity changed')
+        # The old U1 investment reader can omit retirement/other segments.
+        # An inventory assertion cannot silently hide those known source rows.
+        all_ids = {r['id'] for r in view['views'].get('positions', {}).get('items', [])}
+        captured_ids = {r['id'] for r in view['data_quality'].get('investable_security_inputs', view['data_quality'].get('security_inputs', []))}
+        if all_ids - captured_ids:
+            view['data_quality'].setdefault('issues', []).append('INVESTABLE_POSITION_SCOPE_INCOMPLETE')
+            raise ValueError('full source inventory not represented')
+        from backend.services.instruments.classification import ECONOMIC_CLASS_TO_CN
+        manual_classes = raw.get('manual_classes', {})
+        manual_refs = {f'wealth:{r["id"]}' for r in view['views']['get_manual_wealth_items']['items'] if r.get('kind') == 'asset'}
+        if not isinstance(manual_classes, dict):
+            raise ValueError('invalid manual classification')
+        for ref, item in manual_classes.items():
+            if (ref not in manual_refs or not isinstance(item, dict)
+                    or set(item) != {'economic_asset_class', 'evidence_refs'}
+                    or item['economic_asset_class'] not in ECONOMIC_CLASS_TO_CN
+                    or item['economic_asset_class'] == 'UNKNOWN'
+                    or not isinstance(item['evidence_refs'], list) or not item['evidence_refs']
+                    or any(not isinstance(r, str) or not r.strip() for r in item['evidence_refs'])):
+                raise ValueError('invalid manual classification')
+        # Structured retirement-product identity already belongs to Wealth.
+        # It proves restriction, not the absence of any other pension account.
+        dispositions = dict(raw['dispositions'])
+        for row in view['views']['get_manual_wealth_items']['items']:
+            if row.get('kind') == 'asset' and row.get('item_type') in PENSION_SECURITY_ITEM_TYPES and not row.get('already_investment_accounted'):
+                dispositions.setdefault(f'wealth:{row["id"]}', {'state':'EXCLUDED','reason':'PENSION',
+                    'evidence_refs':[f'wealth:{row["id"]}:structured-retirement-product']})
+        # Coverage assertions have explicit PRESENT/ABSENT/UNKNOWN states and
+        # evidence refs. Their validity is bounded above; live facts stay frozen.
+        scope = ScopeEvidence(schema_version='wealthpilot.investable-scope.v1',
+            portfolio_id=view['portfolio_id'], snapshot_id=view['snapshot_id'], as_of=view['captured_at'],
+            dispositions=dispositions, pension_links=raw.get('pension_links', {}),
+            coverage={k:{**v, 'as_of':view['captured_at']} for k,v in raw['coverage'].items()})
+        view['data_quality']['investable_scope_evidence'] = scope.model_dump(mode='json')
+        view['data_quality']['investable_owner_evidence'] = {
+            'sha256':digest(raw), 'inventory_sha256':raw['inventory_sha256'],
+            'confirmed_at':raw['confirmed_at'],
+            **({'confirmation_mode':mode, 'manual_baseline_confirmed_on':baseline}
+                if mode else {'valid_until':raw['valid_until']}),
+            'manual_classes':raw.get('manual_classes', {})}
+    except (OSError, ValueError, KeyError, TypeError, ValidationError):
+        view['data_quality'].setdefault('issues', []).append('INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE')
+    return view
 LIABILITY_TYPES: dict[str, tuple[str, bool]] = {
     "credit_card": ("credit_card", True),
     "consumer_loan": ("consumer_loan", True),

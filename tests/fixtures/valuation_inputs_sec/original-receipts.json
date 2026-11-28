@@ -1,0 +1,80 @@
+[
+  {
+    "symbol": "LI",
+    "file": "LI-quarter-original.txt.gz",
+    "url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/0001104659-26-101065.txt",
+    "issuer": {
+      "symbol": "LI:US",
+      "issuer_id": "LI_AUTO",
+      "cik": "0001791706",
+      "name": "Li Auto Inc.",
+      "issuer_type": "foreign_private",
+      "sec_ticker": "LI",
+      "registered_tickers": [
+        "LAAOF",
+        "LI"
+      ],
+      "registered_equity_tickers": [
+        "LAAOF",
+        "LI"
+      ],
+      "identity_source": "https://www.sec.gov/files/company_tickers.json",
+      "submissions_url": "https://data.sec.gov/submissions/CIK0001791706.json"
+    },
+    "filing": {
+      "accession": "0001104659-26-101065",
+      "form": "6-K",
+      "filed": "2026-08-26",
+      "report_date": "2026-08-26",
+      "published_at": "2026-08-26T11:57:57+00:00",
+      "accepted_at": "2026-08-26T11:57:57+00:00",
+      "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+      "publication_locator": "Submissions/filings/recent/acceptanceDateTime[10]",
+      "primary_url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/tm2624080d1_6k.htm",
+      "full_url": "https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/0001104659-26-101065.txt"
+    },
+    "fetched_at": "2026-11-03T03:04:29.828490+00:00",
+    "sha256": "9b3170dbdde2e9a37417f4132d619f390ec799569b68e1908fa3824d00528865",
+    "bytes": 520544,
+    "parsed": true,
+    "fixture_file": "../li_sec_q2_2026/0001104659-26-101065.txt.gz"
+  },
+  {
+    "symbol": "PDD",
+    "file": "PDD-quarter-original.txt.gz",
+    "url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926100534/0001104659-26-100534.txt",
+    "issuer": {
+      "symbol": "PDD:US",
+      "issuer_id": "PDD_HOLDINGS",
+      "cik": "0001737806",
+      "name": "PDD Holdings Inc.",
+      "issuer_type": "foreign_private",
+      "sec_ticker": "PDD",
+      "registered_tickers": [
+        "PDD"
+      ],
+      "registered_equity_tickers": [
+        "PDD"
+      ],
+      "identity_source": "https://www.sec.gov/files/company_tickers.json",
+      "submissions_url": "https://data.sec.gov/submissions/CIK0001737806.json"
+    },
+    "filing": {
+      "accession": "0001104659-26-100534",
+      "form": "6-K",
+      "filed": "2026-08-25",
+      "report_date": "2026-08-25",
+      "published_at": "2026-08-25T11:20:02+00:00",
+      "accepted_at": "2026-08-25T11:20:02+00:00",
+      "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+      "publication_locator": "Submissions/filings/recent/acceptanceDateTime[3]",
+      "primary_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926100534/tm2623874d1_6k.htm",
+      "full_url": "https://www.sec.gov/Archives/edgar/data/1737806/000110465926100534/0001104659-26-100534.txt"
+    },
+    "fetched_at": "2026-11-03T03:04:33.659543+00:00",
+    "sha256": "162f5c2578869f4870fe24cc1ecb1518273447f3e21e0ba4ace1dfbd8cdc8b42",
+    "bytes": 351853,
+    "parsed": true,
+    "fixture_file": "../pdd_sec_q2_2026/0001104659-26-100534.txt.gz"
+  }
+]

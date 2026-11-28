@@ -6,11 +6,17 @@ parser version, not a manually maintained JSON policy.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 import hashlib
 import re
 
-from .contracts import Allocation, Rule, Snapshot, SourceClause
+from backend.services.instruments.issuers import policy_target_identity
+
+from .contracts import (
+    Allocation, PolicyAmendmentApproval, Rule, Snapshot, SnapshotV2, SnapshotV2WithAmendment,
+    SourceClause, StrategicReviewScope,
+)
 
 
 class PolicyError(ValueError):
@@ -69,7 +75,8 @@ class Document:
         return result[2:]
 
 
-def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_version: int) -> Snapshot:
+def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_version: int,
+           expected_schema_version: str | None = None) -> Snapshot:
     if set(expected_hashes) != {"philosophy", "policy"}:
         raise PolicyError("EXACTLY_TWO_APPROVED_SOURCES_REQUIRED")
     docs = {"philosophy": Document(philosophy, expected_hashes["philosophy"], "philosophy"),
@@ -114,7 +121,25 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
         if identity in direct:
             raise PolicyError("DUPLICATE_DIRECT_EQUITY")
         direct[identity] = pct(one(r"^(\d+(?:\.\d+)?%)$", row[1]))
-    specified = one(r"已指定六股合计([\d.]+)%", doc.text("3.2"))
+    equity_section = doc.text("3.2")
+    count, specified = one(r"已指定(六|八)股合计([\d.]+)%", equity_section)
+    amendment_lines = [line for line in doc.lines if line.startswith("美国核心股内容批准：")]
+    targets = {label: policy_target_identity(label)[1] for label in direct if label != "unallocated"}
+    if count == "八":
+        if len(amendment_lines) != 1 or amendment_lines[0] not in equity_section.splitlines():
+            raise PolicyError("POLICY_AMENDMENT_CONTENT_MARKER_REQUIRED")
+        amendment = amendment_lines[0].removeprefix("美国核心股内容批准：")
+        if (len(targets) != 8 or None in targets.values() or len(set(targets.values())) != 8
+                or direct.get("unallocated") != 0 or any(direct[label] <= 0 for label in targets)):
+            raise PolicyError("EIGHT_DISTINCT_QUALIFIED_DIRECT_TARGETS_REQUIRED")
+    elif (len(targets) != 6 or any(
+            ticker in {"NVDA", "ANT"} for label in targets for ticker in policy_target_identity(label)[0]
+    )):
+        raise PolicyError("POLICY_AMENDMENT_CONTENT_MARKER_REQUIRED")
+    elif amendment_lines:
+        raise PolicyError("UNEXPECTED_POLICY_AMENDMENT_CONTENT_MARKER")
+    else:
+        amendment = None
     flex = doc.text("2.2")
     china_max = one(r"0%\s*≤\s*C\s*<\s*([\d.]+)%", flex)
     alt_max = one(r"0%\s*≤\s*A\s*≤\s*([\d.]+)%", flex)
@@ -179,5 +204,132 @@ def derive(philosophy: bytes, policy: bytes, *, expected_hashes: dict, policy_ve
     contexts = {s: doc.ref(s) for s in doc.sections}
     contexts["philosophy"] = SourceClause(document="philosophy", source_sha256=docs["philosophy"].sha,
         section="full", line_start=1, line_end=len(docs["philosophy"].lines), text=philosophy.decode())
-    return Snapshot(policy_version=policy_version, source_hashes={k: d.sha for k, d in docs.items()},
-                    content_approved_on=approval_dates[0], allocation=allocation, rules=rules, contextual_clauses=contexts)
+    fields = dict(policy_version=policy_version, source_hashes={k: d.sha for k, d in docs.items()},
+                  content_approved_on=approval_dates[0], allocation=allocation, rules=rules, contextual_clauses=contexts)
+    markers = ("B3节点合同：", "B3节点 growth_and_alternatives：", "B3节点 stable_pool：",
+               "B3节点复核单位：", "B3节点现金范围：", "B3节点产品决定：", "B3节点内容批准：")
+    has_versioned_clause = any(line.startswith(markers) for line in doc.lines)
+    btc_sections = {"4.3", "9.3"} & doc.sections.keys()
+    btc_markers = [line for line in doc.lines if line.startswith(("BTC治理合同：", "BTC治理内容批准："))]
+    has_btc_governance = bool(btc_sections or btc_markers)
+    if has_btc_governance and (amendment is None or not has_versioned_clause):
+        raise PolicyError("BTC_GOVERNANCE_REQUIRES_AMENDMENT_BASE")
+    schema_version = expected_schema_version
+    if schema_version is None:
+        schema_version = "wp.policy.v2" if has_versioned_clause else "wp.policy.v1"
+    if schema_version == "wp.policy.v1":
+        if amendment is not None or has_btc_governance:
+            raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
+        return Snapshot(**fields)
+    if schema_version != "wp.policy.v2" or not has_versioned_clause:
+        raise PolicyError("POLICY_SOURCE_SCHEMA_MISMATCH")
+
+    section = doc.text("6.3")
+    prefix_lines = [line for line in doc.lines if line.startswith("B3节点")]
+    if len(prefix_lines) != 7 or any(line not in section.splitlines() for line in prefix_lines):
+        raise PolicyError("B3_SOURCE_CLAUSE_LAYOUT_INVALID")
+    one(r"^B3节点合同：wp\.policy\.v2$", section)
+    nodes = {
+        key: pct(one(rf"^B3节点 {key}：(\d+(?:\.\d+)?%)$", section))
+        for key in ("growth_and_alternatives", "stable_pool")
+    }
+    review_unit = one(r"^B3节点复核单位：(PORTFOLIO_PER_SNAPSHOT)$", section)
+    cash_scope = one(r"^B3节点现金范围：(QUALIFIED_TEMPORARY_INVESTMENT_CASH_IN_STABLE_POOL)$", section)
+    decision_ref = one(r"^B3节点产品决定：(https://github\.com/song-buaa/WealthPilot/issues/111#issuecomment-6814354290)$", section)
+    approval = one(r"^B3节点内容批准：([^\n]+)$", section)
+    content_status = "DRAFT_CONTENT"
+    approval_ref = None
+    if approval != content_status:
+        approved_on, approval_ref = one(r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| (\S(?:.*\S)?)$", approval)
+        if (approved_on < approval_dates[0] or approval_ref in {
+                decision_ref, "https://github.com/song-buaa/WealthPilot/issues/111#issuecomment-6816141673"
+        }):
+            raise PolicyError("B3_INDEPENDENT_CONTENT_APPROVAL_REQUIRED")
+        fields["content_approved_on"] = approved_on
+        content_status = "APPROVED_CONTENT"
+    mapping = StrategicReviewScope(nodes=nodes, review_unit=review_unit, cash=cash_scope,
+        product_decision_ref=decision_ref, content_status=content_status,
+        content_approval_ref=approval_ref, source_clause=doc.ref("6.3"))
+    if amendment is None:
+        return SnapshotV2(**fields, strategic_review_scope=mapping)
+    if mapping.content_status != "APPROVED_CONTENT":
+        raise PolicyError("B3_BASE_CONTENT_APPROVAL_REQUIRED")
+    approval_date, reference = None, None
+    if amendment != "DRAFT_CONTENT":
+        day, reference = one(
+            r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| "
+            r"(https://github\.com/song-buaa/WealthPilot/issues/[1-9]\d*#issuecomment-[1-9]\d*)$",
+            amendment,
+        )
+        issue_number = reference.split("/issues/")[1].split("#")[0]
+        approval_date = date.fromisoformat(day)
+        if (day < fields["content_approved_on"] or issue_number in {"111", "121", "124"}
+                or reference == mapping.content_approval_ref):
+            raise PolicyError("INDEPENDENT_POLICY_AMENDMENT_CONTENT_APPROVAL_REQUIRED")
+        fields["content_approved_on"] = day
+    snapshot = SnapshotV2WithAmendment(**fields, strategic_review_scope=mapping,
+        amendment_approval=PolicyAmendmentApproval(
+            status="APPROVED_CONTENT" if approval_date else "DRAFT_CONTENT",
+            approved_on=approval_date, reference=reference))
+    if has_btc_governance:
+        return _derive_btc_governance(snapshot, doc, btc_markers)
+    return snapshot
+
+
+# Digests of the reviewed BTC additions in this contract version. A change to
+# the machine-interpreted prose requires an explicit contract revision.
+BTC_SOURCE_FRAGMENT_SHA256 = {
+    "4.3": "9edb48d64020171def4b5012e08c661afd9ac7b1cc79dde143497c867f6e9fc9",
+    "5.1": "b5a9551ed7175ce16076c2529b69993cf1ea290460bb604a991a9580d0ded340",
+    "5.2": "a87d829711b66432f288eb45e14c817dec05d701fe53646c756504d76e86f0e2",
+    "5.3": "f26963a674bb51e6c7ca57ff2e068afb07aa27efbbbf2614a31da7645eebec05",
+    "6.2": "1a89af4d2ada2e71408fdb526ee35a5f66a83b7b26c0549d99d407fd7aa82e04",
+    "9.3": "405aa7fd7a85247953256175f6c2a4c42d02be39b90e0a146ff583c86de34cb9",
+}
+BTC_APPENDED_PARAGRAPHS = {"5.1": 2, "5.2": 1, "5.3": 1, "6.2": 4}
+
+
+def _btc_source_fragment(doc, section):
+    text = doc.ref(section).text.rstrip("\n")
+    if section in BTC_APPENDED_PARAGRAPHS:
+        paragraphs = text.split("\n\n")
+        return "\n\n".join(paragraphs[-BTC_APPENDED_PARAGRAPHS[section]:])
+    lines = text.splitlines()[1:]
+    return "\n".join(line for line in lines if not line.startswith(
+        ("BTC治理合同：", "BTC治理内容批准："))).strip("\n")
+
+
+def _derive_btc_governance(base, doc, markers):
+    from .btc_governance import BtcGovernance, SECTIONS, SnapshotV2WithBtcGovernance, VERSION
+
+    if len(markers) != 2 or any(line not in doc.text("9.3").splitlines() for line in markers):
+        raise PolicyError("BTC_GOVERNANCE_SOURCE_LAYOUT_INVALID")
+    one(rf"^BTC治理合同：{re.escape(VERSION)}$", doc.text("9.3"))
+    stamp = one(r"^BTC治理内容批准：([^\n]+)$", doc.text("9.3"))
+    # Bind the structured interpretation to the reviewed L2 prose, without
+    # storing private Markdown in the repository. L1 edits may alter the
+    # preceding cash paragraph, while the reviewed BTC additions stay fixed.
+    for section, expected in BTC_SOURCE_FRAGMENT_SHA256.items():
+        fragment = _btc_source_fragment(doc, section)
+        if hashlib.sha256(fragment.encode()).hexdigest() != expected:
+            raise PolicyError("BTC_GOVERNANCE_SOURCE_FRAGMENT_MISMATCH: " + section)
+    approved_on, ref = None, None
+    if stamp != "DRAFT_CONTENT":
+        day, ref, issue = _btc_approval(stamp)
+        approved_on = date.fromisoformat(day)
+        if issue in {"111", "121", "124", "126", "127"}:
+            raise PolicyError("BTC_INDEPENDENT_CONTENT_APPROVAL_REQUIRED")
+    governance = BtcGovernance(content_approval=PolicyAmendmentApproval(
+        status="APPROVED_CONTENT" if approved_on else "DRAFT_CONTENT", approved_on=approved_on, reference=ref),
+        source_clauses={key:doc.ref(key) for key in SECTIONS})
+    return SnapshotV2WithBtcGovernance(**(base.model_dump() | {
+        "btc_governance":governance,
+        "content_approved_on":approved_on.isoformat() if approved_on else base.content_approved_on}))
+
+
+def _btc_approval(stamp):
+    return one(
+        r"^APPROVED_CONTENT \| (\d{4}-\d{2}-\d{2}) \| "
+        r"(https://github\.com/song-buaa/WealthPilot/issues/([1-9]\d*)(?:#issuecomment-[1-9]\d*)?)$",
+        stamp,
+    )

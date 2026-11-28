@@ -229,7 +229,7 @@ class AVKlineProvider(KlineProvider):
                 return None
 
             from backend.services.market_data.av_fundamentals_service import (
-                get_next_av_key, AV_BASE, av_identity,
+                get_next_av_key, AV_BASE, av_identity, response_diagnostic,
             )
             import json
             import urllib.request
@@ -263,25 +263,19 @@ class AVKlineProvider(KlineProvider):
                     self._unavailable("AV_"+status.upper())
                     return None
 
-                series = data.get("Time Series (Daily)", {})
-                dates = sorted(series) if isinstance(series, dict) else []
-                from backend.services.market_data.av_fundamentals_service import _response_status
-                status = "available" if dates else _response_status("OVERVIEW", data)
-                attempt = dict(function="TIME_SERIES_DAILY", request_mode=outputsize,
-                    **av_identity(api_key), status=status, row_count=len(dates),
-                    first_data_date=dates[0] if dates else None, last_data_date=dates[-1] if dates else None,
-                    cache_hit=False, fetched_at=datetime.now(timezone.utc).isoformat(), fallback_reason=None)
+                attempt = response_diagnostic('TIME_SERIES_DAILY', data, api_key, mode=outputsize)
                 attempts.append(attempt)
-                if "Note" in data or "Information" in data:
-                    msg = data.get("Note", data.get("Information", ""))
-                    if "prem" in msg.lower() and outputsize == "full":
-                        logger.info("[AVKline] AV full 需要 Premium, fallback compact: %s", av_ticker)
-                        data = None
-                        import time; time.sleep(1)  # 避免 AV 限频
-                        attempt["fallback_reason"] = "FULL_PREMIUM_NOTICE"  # same account, explicit degraded route
-                        continue
-                    logger.warning("[AVKline] AV 频率限制: %s", av_ticker)
-                    self._unavailable("AV 返回限频信息")
+                status = attempt['status']
+                if status == 'premium' and outputsize == 'full':
+                    logger.info('[AVKline] full access refused; explicit compact fallback: %s', av_ticker)
+                    data = None
+                    import time; time.sleep(1)
+                    attempt['fallback_reason'] = 'FULL_PREMIUM_NOTICE'
+                    continue
+                if status != 'available':
+                    logger.warning('[AVKline] AV unavailable: %s status=%s', av_ticker, status)
+                    scope = attempt.get('rate_limit_scope')
+                    self._unavailable('AV_' + status.upper() + ('_' + scope.upper() if scope else ''))
                     return None
                 break
 

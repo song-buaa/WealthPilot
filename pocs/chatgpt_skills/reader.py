@@ -108,7 +108,9 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                 serialized = portfolio_service.get_positions(portfolio_id, "投资")["items"]
                 by_id = {i["id"]: i for i in serialized}
                 aggregate, _ = position_aggregator.aggregate_investment_positions(portfolio_id)
-                weights = {i.symbol or i.ticker: i.weight for i in aggregate}
+                summary = portfolio_service.get_summary(portfolio_id)
+                weights = {} if summary.get("valuation_complete") is False else {
+                    i.symbol or i.ticker: i.weight for i in aggregate}
                 items, owner_map = [], {}
                 for row in rows:
                     ref = account_ref(portfolio_id, row)
@@ -129,14 +131,22 @@ def _read_details(path, portfolio_id, operation, arguments, *, database_contract
                     accounts = [a for a in accounts if a["account_ref"] == arguments["account_ref"]]
                     if not accounts:
                         raise ReadError("ACCOUNT_NOT_FOUND")
-                # Portfolio summary reads the same stored native CASH as holdings.
-                summary = portfolio_service.get_summary(portfolio_id)
                 if any(i.get("id") == -1 for i in serialized):
                     issues.append("LIVE_CASH_VALUATION_DATE_UNKNOWN")
                 scope = "Stored investment holdings. CNY fields are yuan; prices/original_value use their stated currency. Weight is the existing cross-account symbol weight (0..1), not a new account balance. Accounts are stored ownership groups, not a live broker account inventory."
             else:
                 raise ReadError("UNKNOWN_OPERATION")
-            return dict(schema_version="wealthpilot.details.v1", synthetic=synthetic,
+            source_gaps = summary.get("unvalued_assets", []) if summary else []
+            if source_gaps:
+                issues.append("BINANCE_UNVALUED_ASSETS")
+                if arguments.get("account_ref"):
+                    source_gaps = [g for g in source_gaps if g["account_ref"] == arguments["account_ref"]]
+                if arguments.get("symbol"):
+                    source_gaps = [g for g in source_gaps if arguments["symbol"] in (g["symbol"], g["asset"])]
+                summary["unvalued_assets"] = source_gaps
+            return dict(**({"unvalued_assets": source_gaps, "valuation_complete": False,
+                        "valuation_scope": "STORED_KNOWN_AND_LAST_GOOD_SUBTOTAL"} if source_gaps else {}),
+                        schema_version="wealthpilot.details.v1", synthetic=synthetic,
                         queried_at=datetime.now(timezone.utc).isoformat(), status="partial" if issues else "ok",
                         issues=sorted(set(issues)), amount_unit="major", scope=scope,
                         items=items, accounts=accounts, portfolio_summary=summary,

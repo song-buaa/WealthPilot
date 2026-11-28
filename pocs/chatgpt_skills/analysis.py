@@ -51,7 +51,7 @@ class AnalysisRequest(BaseModel):
         return value
 
 
-from app.llm_observation import observed_result, safe_metadata
+from app.llm_observation import observed_result, safe_metadata, post_model_stage
 
 
 class AnalysisResult(BaseModel):
@@ -240,11 +240,12 @@ def captured_evidence(result, captured, portfolio_id):
 
 def retain_facts(result, assessment, *, asset_view=None, missing_stages=None):
     from backend.services.market_data.output_policy import facts_only_result
-    retained=facts_only_result(assessment,at=datetime.now(timezone.utc),asset_view=asset_view)
+    retained=facts_only_result(assessment,at=datetime.now(timezone.utc),asset_view=asset_view,compact=True)
     if not retained:return False
     assessment,facts,conclusion=retained
     result.status='partial'
-    result.conclusion=conclusion
+    reason=[x for x in result.issues if x in {'ANALYSIS_TIMEOUT','L1_CONTEXT_BUDGET_EXCEEDED','L1_EXPRESSION_TRUNCATED','L1_EXPRESSION_TIMEOUT','PEER_EXPRESSION_FAILED'}]
+    result.conclusion=('研究未完成；实际原因：'+', '.join(reason)+'。\n' if reason else '')+conclusion
     result.professional_analysis_complete=False
     result.missing_stages=missing_stages or ['professional_result']
     result.evidence['position_evidence']=encode(assessment)
@@ -265,6 +266,7 @@ def deadline_result(value):
     result.status='unavailable'
     result.conclusion='研究期限已到，专业结果未按时交付；未创建交易。'
     result.professional_result={}
+    result.evidence.pop('l1_research_v2', None)
     result.professional_analysis_complete=False
     result.missing_stages=['timely_delivery']
     result.issues=sorted(set(result.issues+['ANALYSIS_TIMEOUT']))
@@ -273,9 +275,19 @@ def deadline_result(value):
     return result.model_dump(mode='json')
 
 
+def _finalize_research_completion(result, scenario):
+    if scenario == 'analyze_position' and result.get('professional_analysis_complete') and not result.get('professional_result', {}).get('analysis_result', {}).get('professional_explanation'):
+        result['professional_analysis_complete'] = False
+        if result['status'] != 'unavailable':
+            result['status'] = 'partial'
+        result['issues'] = sorted(set(result.get('issues', []) + ['PROFESSIONAL_EXPLANATION_INCOMPLETE']))
+        result['missing_stages'] = list(dict.fromkeys(result.get('missing_stages', []) + ['professional_explanation']))
+        result.setdefault('stage_diagnostics', {})['professional_result'] = 'incomplete'
+
+
 @observed_result
 @budgeted_analysis(on_expired=deadline_result)
-async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
+async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None, research_delivery=None):
     from backend.services.investment_policy.runtime import current as policy_current, bind as policy_bind
     from backend.services.investment_policy.parser import PolicyError
     from backend.services.investment_policy.consumers import finalize_output
@@ -288,29 +300,63 @@ async def analyze(path, portfolio_id, scenario, arguments, *, contract=None, syn
                 session.attach_asset_view(asset_view)
             if session.mode=='POLICY_ACTIVE' and arguments.get('target_versions'):
                 raise PolicyError('POLICY_CLIENT_TARGET_OVERRIDE_UNSUPPORTED')
+            if research_delivery is None:
+                research_delivery = {}
+            if (asset_view is None and session.mode == 'POLICY_ACTIVE' and scenario == 'review_portfolio'
+                    and not arguments.get('scenario_legs')
+                    and arguments.get('analysis_scope', 'investments') == 'investments'):
+                from backend.services.allocation_service import read_allocation_estimate
+                request = AnalysisRequest.model_validate(arguments)
+                from app.asset_views import VIEW_TTL, _source_current, load_view, now
+                view = load_view(path, portfolio_id, request.snapshot_id, contract) if request.snapshot_id else None
+                estimate = None
+                if view is None or not _source_current(view['captured_at'], now(), VIEW_TTL):
+                    estimate = read_allocation_estimate(portfolio_id, snapshot_id=request.snapshot_id,
+                                                        database=path, contract=contract)
+                if estimate is not None:
+                    session.ensure_current()
+                    return AnalysisResult(synthetic=synthetic, scenario=scenario, status='partial',
+                        queried_at=datetime.now(timezone.utc).isoformat(), snapshot_id=request.snapshot_id,
+                        scope={'policy_reference': session.context['policy_reference'],
+                               'snapshot_id': request.snapshot_id, 'analysis_scope': 'investments'},
+                        conclusion=('按可核对的已存投资子集估算，人民币小计 ' + estimate['observed_subtotal_cny']
+                                    + ' 元。来源可能陈旧或仍缺时点，正式分母和风险资格为 UNKNOWN。'),
+                        evidence={'allocation': estimate}, issues=estimate['issues'],
+                        limitations=['各类别占比以可核对小计为分母，资产范围或身份缺证会影响结果。']
+                    ).model_dump(mode='json')
             result=await _analyze_owned(path,portfolio_id,scenario,arguments,contract=contract,synthetic=synthetic,
-                worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic)
+                worker_process=worker_process,asset_view=asset_view,async_l1=async_l1,deadline_monotonic=deadline_monotonic,
+                research_delivery=research_delivery)
             session.ensure_current()
             if session.mode=='POLICY_ACTIVE':
                 from backend.agents.contracts import ExpressionOutput
                 out=ExpressionOutput(structured_payload=result.get('professional_result',{}).get('analysis_result') or {})
-                executed=SimpleNamespace(loaded_data=None,position_evidence=result.get('evidence',{}).get('position_evidence'),
+                # The result below is owned by this analysis, not a model-provided diagnostic.
+                out.explanation_diagnostics = out.structured_payload.get('explanationDiagnostics', {})
+                if result['status'] != 'unavailable' and 'l1_research_v2' in result.get('evidence', {}):
+                    out.research_v2 = research_delivery.get('run')
+                executed=SimpleNamespace(loaded_data=None,analysis_mode='l1_research' if scenario=='analyze_position' else '',position_evidence=result.get('evidence',{}).get('position_evidence'),
                     portfolio_evidence=result.get('evidence',{}).get('policy_source_assessments',[]))
-                finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
+                with post_model_stage('adapter_active_finalization', out):
+                    finalize_output(SimpleNamespace(portfolio_id=portfolio_id),executed,out)
                 result.setdefault('evidence',{})['policy_context']=out.structured_payload['policy_context']
                 result.setdefault('scope',{})['policy_reference']=out.structured_payload['policy_reference']
                 if result['status']!='unavailable':
                     result['status']='partial'
-                    result['conclusion']=out.chat_answer
+                    reasons=[x for x in result.get('issues',[]) if x in {'ANALYSIS_TIMEOUT','L1_CONTEXT_BUDGET_EXCEEDED','L1_EXPRESSION_TRUNCATED','L1_EXPRESSION_TIMEOUT','PEER_EXPRESSION_FAILED'}]
+                    result['conclusion']=('研究未完成；实际原因：'+', '.join(reasons)+'。\n' if reasons and not result.get('professional_analysis_complete') else '')+out.chat_answer
                     result['professional_result']={'analysis_result':out.structured_payload}
+                    if out.research_v2_final is not None:
+                        result['evidence']['l1_research_v2'] = out.research_v2_final
                 session.ensure_current()
+            _finalize_research_completion(result, scenario)
             return result
         except PolicyError as exc:
             return AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[str(exc)],
                 queried_at=datetime.now(timezone.utc).isoformat(),conclusion='政策版本或资格无法核验；未创建交易。').model_dump(mode='json')
 
 
-async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None):
+async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=None, synthetic=False, worker_process=False, asset_view=None, async_l1=False, deadline_monotonic=None, research_delivery=None):
     request=AnalysisRequest.model_validate(arguments)
     if request.snapshot_id and asset_view is None:
         from app.asset_views import load_view, frozen_input, public_view
@@ -319,7 +365,8 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             return await analyze(fixed_path, portfolio_id, scenario, arguments, synthetic=synthetic,
                                  worker_process=worker_process, asset_view=public_view(view,
                                      symbol=request.symbol if scenario == 'analyze_position' else None,
-                                     analysis_scope=request.analysis_scope),async_l1=async_l1,deadline_monotonic=deadline_monotonic)
+                                     analysis_scope=request.analysis_scope),async_l1=async_l1,deadline_monotonic=deadline_monotonic,
+                                 research_delivery=research_delivery)
     conversation='mcp-analysis-'+uuid.uuid4().hex
     result=AnalysisResult(synthetic=synthetic,scenario=scenario,status='unavailable',issues=[],
                           queried_at=datetime.now(timezone.utc).isoformat(),conclusion='')
@@ -350,7 +397,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 stage_completed.add(stage)
                 if stage=='evidence_ready':
                     if executed.position_evidence:
-                        stage_receipt.update(assessment=deepcopy(executed.position_evidence),missing=['expressing','reviewing'])
+                        stage_receipt.update(assessment=deepcopy(executed.position_evidence),executed=executed,missing=['expressing','reviewing'])
                 elif stage_receipt:
                     completed={'expressing_complete':'expressing','reviewing_complete':'reviewing'}.get(stage)
                     stage_receipt['missing']=[s for s in stage_receipt['missing'] if s!=completed]
@@ -384,6 +431,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 async for event in run_chat_stream_v3(question,conversation,portfolio_id,
                         conversation_history=[t.model_dump() for t in request.history],result_callback=capture,stage_callback=capture_stage if async_l1 else None,analysis_only=True,analysis_context=asset_view,
                             analysis_options=dict(single_position_research=scenario=='analyze_position',requested_symbol=request.symbol,
+                                enable_l1_research_v2=async_l1 and os.getenv('WEALTHPILOT_L1_RESEARCH_V2') == '1',
                                 research_question=request.question,
                                 target_versions=[t.model_dump(mode="json") for t in request.target_versions],
                                 research_context=request.research_context.model_dump() if request.research_context else None,
@@ -459,17 +507,22 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             # Reuse the captured PEER result and the SAME immutable snapshot.
             # Adapter latency may invalidate an initially qualified nested plan.
             executed, expressed = captured['executed'], captured['expressed']
-            executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
-                options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
-                             research_context=request.research_context.model_dump() if request.research_context else None,
-                             research_question=request.question,research_history=[t.model_dump() for t in request.history],
-                             scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
-            enforce(expressed, executed.position_evidence)
+            with post_model_stage('adapter_requalification', expressed):
+                executed.position_evidence = prepare(captured['plan'], executed, asset_view=asset_view,
+                    options=dict(target_versions=[t.model_dump(mode='json') for t in request.target_versions],
+                                 research_context=request.research_context.model_dump() if request.research_context else None,
+                                 research_question=request.question,research_history=[t.model_dump() for t in request.history],
+                                 scenario_legs=[s.model_dump(mode='json') for s in request.scenario_legs]))
+                enforce(expressed, executed.position_evidence,compact_incomplete=True)
             result.evidence['position_evidence'] = encode(executed.position_evidence)
             result.issues = sorted(set(result.issues + executed.position_evidence.get('issues', [])))
             if result.status != 'unavailable':
                 result.conclusion = expressed.chat_answer
                 result.professional_result['analysis_result'] = encode(expressed.structured_payload)
+                if expressed.research_v2_final is not None:
+                    result.evidence['l1_research_v2'] = encode(expressed.research_v2_final)
+                    if research_delivery is not None:
+                        research_delivery['run'] = expressed.research_v2
         from backend.services.investment_policy.runtime import current as policy_current
         if scenario=='review_portfolio' and policy_current(portfolio_id).mode=='LEGACY':
             from backend.services.allocation_scenarios import target_context
@@ -497,6 +550,15 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.data_quality['asset_view'] = asset_view['data_quality']
             result.data_quality['context_current'] = asset_view['context_current']
             result.scope['snapshot_id'] = request.snapshot_id
+            if (scenario == 'review_portfolio' and not request.scenario_legs
+                    and request.analysis_scope == 'investments'
+                    and policy_current(portfolio_id).mode == 'POLICY_ACTIVE'):
+                from backend.services.allocation_service import estimate_allocation
+                estimate = estimate_allocation(asset_view, snapshot_id=request.snapshot_id)
+                if estimate is not None:
+                    # Bind the calculation to the source at read time, not the requalified public projection.
+                    estimate.pop('snapshot_sha256', None)
+                    result.evidence['allocation_estimate'] = estimate
             result.evidence['asset_view'] = dict(wealth_summary=asset_view['views']['wealth_summary'],
                 portfolio_summary=asset_view['views']['portfolio_summary'], issuer_exposure=asset_view['issuer_exposure'])
             result.issues = sorted(set(result.issues + asset_view['data_quality']['issues']))
@@ -508,6 +570,9 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
                 result.professional_result = {}
                 result.issues = sorted(set(result.issues + ['ANALYSIS_CONTEXT_EXPIRED']))
                 result.conclusion = '分析上下文已到期，请重新准备资产数据；本次结果不可用于精确调仓。'
+                if result.evidence.get('allocation_estimate'):
+                    result.status = 'partial'
+                    result.conclusion = '专业分析的固定上下文已到期。现仅返回已存投资子集估算，正式分母和风险资格为 UNKNOWN。'
         if (scenario == 'review_portfolio' and policy_current(portfolio_id).mode=='LEGACY' and result.status != 'unavailable'
                 and (not asset_view or asset_view['context_current'])):
             # D1 precision is a holdings-quality gate, not L3 research/technical
@@ -537,6 +602,12 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.professional_result['analysis_result']['exit_candidates']=result.evidence.get('exit_candidates',[])
             result.conclusion+=render_explanation(explanation)
             result.issues = sorted(set(result.issues + ['PRECISE_PORTFOLIO_OUTPUT_BLOCKED']))
+        context_diagnostic=getattr(stage_receipt.get('executed'),'research_context_diagnostics',{})
+        if context_diagnostic:
+            result.evidence['l1_context_diagnostics']=deepcopy(context_diagnostic)
+            state=context_diagnostic.get('model_state')
+            if context_diagnostic.get('status')=='budget_exceeded':result.issues.append('L1_CONTEXT_BUDGET_EXCEEDED')
+            if state in {'truncated','timeout','invalid_output','empty_output'}:result.issues.append('L1_EXPRESSION_'+state.upper())
         if result.status=='unavailable':
             result.professional_analysis_complete=False
             if not result.missing_stages:
@@ -552,7 +623,7 @@ async def _analyze_owned(path, portfolio_id, scenario, arguments, *, contract=No
             result.stage_diagnostics={
                 'planning': 'completed' if result.intent else 'failed' if 'PEER_PLANNING_FAILED' in result.issues else 'started' if 'intent' in stage_events else 'not_started',
                 'executing': 'completed' if 'evidence_ready' in stage_completed or captured else 'failed' if 'PEER_EXECUTION_FAILED' in result.issues else 'started' if 'loading' in stage_events else 'not_started',
-                'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'reasoning' in stage_events else 'not_started',
+                'expressing': 'completed' if 'expressing_complete' in stage_completed or captured else 'failed' if 'expressing_failed' in stage_completed or 'PEER_EXPRESSION_FAILED' in result.issues else 'started' if 'expressing_started' in stage_completed or 'reasoning' in stage_events else 'not_started',
                 'reviewing': 'completed' if 'reviewing_complete' in stage_completed or captured else 'unknown' if 'expressing_complete' in stage_completed else 'not_started',
                 'professional_result': 'accepted' if result.professional_analysis_complete else 'rejected' if 'ANALYSIS_ROUTE_MISMATCH' in result.issues else 'incomplete',
             }

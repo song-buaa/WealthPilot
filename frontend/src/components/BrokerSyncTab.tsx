@@ -15,10 +15,11 @@ interface Props {
   onRefresh: () => void
 }
 
-type VisibleBroker = 'tiger' | 'snowball' | 'guojin'
-const VISIBLE_BROKERS: readonly VisibleBroker[] = ['tiger', 'snowball', 'guojin']
+type VisibleBroker = 'tiger' | 'snowball' | 'guojin' | 'binance'
+const VISIBLE_BROKERS: readonly VisibleBroker[] = ['tiger', 'snowball', 'guojin', 'binance']
 function visibleSyncStatus(items: SyncStatusItem[]): SyncStatusItem[] {
-  return items.filter(item => VISIBLE_BROKERS.includes(item.broker as VisibleBroker))
+  return items.filter(item => VISIBLE_BROKERS.includes(item.broker as VisibleBroker)
+    && (item.broker !== 'binance' || item.enabled === true))
 }
 
 const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
@@ -66,7 +67,7 @@ export function BrokerSyncTab({ onRefresh }: Props) {
 
     try {
       // UI “all” means only the visible brokers, not the backend's broader all.
-      const targets = RESTRICTED_WEB ? [broker] : broker === 'all' ? VISIBLE_BROKERS : [broker]
+      const targets = RESTRICTED_WEB ? [broker] : broker === 'all' ? status.map(item => item.broker as VisibleBroker) : [broker]
       const results = await Promise.all(targets.map(target => triggerSync(target)))
       const brokersToCheck = [...new Set(results.flatMap(result => result.brokers_triggered))]
       if (!brokersToCheck.length) {
@@ -162,6 +163,12 @@ export function BrokerSyncTab({ onRefresh }: Props) {
                     最近成功: {item.last_successful_sync_time}{item.last_successful_position_count != null ? ` · ${item.last_successful_position_count} 条` : ''}
                   </div>
                 )}
+                {item.data_quality?.unvalued_assets?.map((asset, i) => (
+                  <div key={`${asset.symbol}:${i}`} style={{ fontSize: 11, color: '#92400E', marginTop: 3 }}>
+                    来源 partial · {asset.asset} 数量 {asset.quantity ?? 'UNKNOWN'} · 估值 UNKNOWN
+                    {asset.last_good_retained ? ' · 原有效估值保留' : ''}
+                  </div>
+                ))}
                 {attemptError && (
                   <div style={{ fontSize: 11, color: '#DC2626', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     同步失败：{attemptError}

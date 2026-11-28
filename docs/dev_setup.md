@@ -4,11 +4,11 @@
 
 ## MacBook 本地开发目录
 
-活跃源码、worktree、依赖、虚拟环境和构建目录默认位于 `~/Developer/`。本机源码主检出迁移目标为 `~/Developer/WealthPilot`；已经位于 `~/.codex/worktrees/` 的安全检出可以保留，须同时核验 `git rev-parse --path-format=absolute --git-common-dir`。独立 PoC 或量化仓库保持独立，不合并历史或数据库。
+依据 2026-11-28 [目录治理收口](https://github.com/song-buaa/WealthPilot/issues/119)，WealthPilot 专属一级目录仅保留 `~/Developer/WealthPilot/`（正式主仓）和 `~/Developer/WealthPilot-workspace/`（统一研发工作区）。工作区使用 `worktrees/`、`diagnostics/`、`envs/`、`outputs/` 子目录；不得重建已迁出的旧一级目录。独立 Redstone 或其他项目保持独立，不合并 Git 历史、数据库或研究资料。
 
-创建前解析目标 realpath，核对所有软链接及最近存在的父目录；运行 `fileproviderctl evaluate <现存父目录>`，只有明确返回 `No item for URL` 才通过 FileProvider 资格检查，未知/超时拒绝创建。同时拒绝 Documents、Desktop、Mobile Documents、CloudStorage 及其他实际同步根，不能只靠目录名字推断。该 MacBook 已安装的统一入口为 `~/.local/bin/dev-workspace`：先 `check <绝对目标路径>`，再使用其 `init`、`clone` 或 `worktree` 子命令；其他设备未安装时应实现同等资格检查，不静默回退同步目录。分支、PR 和容量治理仍遵循原工作流。
+创建前解析目标 realpath，核对软链接、最近存在的父目录及 `git rev-parse --path-format=absolute --git-common-dir`（已有 Git 检出）。核验真实位置未受 FileProvider 或其他云盘管理；使用 `fileproviderctl evaluate <现存父目录>` 时，仅明确返回 `No item for URL` 才通过该项检查，未知或超时不创建。拒绝 Documents、Desktop、Mobile Documents、CloudStorage 等实际同步位置。若本机已有 `~/.local/bin/dev-workspace`，先执行 `check <绝对目标路径>` 再用其创建入口；缺少该入口时做等价资格检查，不回退到同步目录。新 worktree 的分支、PR 和测试继续遵循原流程。
 
-迁移使用 Git 原生 worktree move/repair，保留 dirty、untracked、ignored、本地数据库和唯一研究数据；历史报告保留原路径。迁移本身不构成删除或生产授权，也不要求迁移 Docker 数据、冻结归档或关闭个人文档同步。Codex 新聊天的 primary folder 通过应用受支持设置由操作者确认；历史聊天必须显式核验新 cwd，不能重建旧目录或永久保留旧 iCloud 入口的兼容软链接。Mac Mini 的部署、路径和生产数据不因本规则改变。
+历史 worktree 迁移使用 Git 原生 move/repair，保留 dirty、untracked、ignored、唯一研究证据及本地数据；历史报告路径只作追溯，旧聊天不得重建迁出目录。已有工作树或应用路径需调整时先核实实际位置及用户授权，不修改会话数据库、不擅自删除。目录规范不授权额外清理、归档、恢复或生产操作，也不改变 Mac Mini 的部署路径和个人云盘设置。
 
 ## 文档任务
 

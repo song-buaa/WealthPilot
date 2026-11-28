@@ -95,9 +95,9 @@ class PositionSnapshot(Base):
     # 数量与成本
     quantity = Column(Numeric(20, 8), nullable=False)
     available_quantity = Column(Numeric(20, 8), nullable=True)
-    avg_cost = Column(Numeric(20, 8), nullable=False)
+    avg_cost = Column(Numeric(20, 8), nullable=True)
     cost_method = Column(String(20), nullable=False)
-    cost_basis = Column(Numeric(20, 8), nullable=False)
+    cost_basis = Column(Numeric(20, 8), nullable=True)
 
     # 行情
     current_price = Column(Numeric(20, 8), nullable=False)
@@ -105,8 +105,8 @@ class PositionSnapshot(Base):
     currency = Column(String(10), nullable=False)
 
     # 盈亏
-    unrealized_pnl = Column(Numeric(20, 8), nullable=False)
-    unrealized_pnl_pct = Column(Numeric(10, 6), nullable=False)
+    unrealized_pnl = Column(Numeric(20, 8), nullable=True)
+    unrealized_pnl_pct = Column(Numeric(10, 6), nullable=True)
     realized_pnl = Column(Numeric(20, 8), nullable=True)
     day_pnl = Column(Numeric(20, 8), nullable=True)
 

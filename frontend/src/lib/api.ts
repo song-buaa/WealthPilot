@@ -830,7 +830,7 @@ export const executionBatchApi = {
   ),
   confirmTradeLinkIntent: (preview: IBKRLinkPreview, quote: IBKRQuote, limit?: string) => request<ExecutionBatchResponse>(
     '/execution-batches/trade-link/confirm-intent', {
-      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true, preview_hash: quote.preview_hash, quote_as_of: quote.batch.legs[0].quote_as_of, ...(limit ? {limit_price: limit} : {}) }),
+      method: 'POST', body: JSON.stringify({ ...preview.order, request_id: preview.request_id, confirmed: true, preview_hash: quote.preview_hash, quote_as_of: quote.batch.legs[0].quote_as_of, limit_price: limit || quote.batch.legs[0].final_limit }),
     },
   ),
   create: (conversationId: string, messageId: number) =>
@@ -1076,12 +1076,22 @@ export interface OrderResponse {
 
 // ── 类型定义 ─────────────────────────────────────────────
 
+export interface UnvaluedAsset {
+  asset: string
+  symbol: string
+  quantity: string | null
+  valuation: 'UNKNOWN'
+  last_good_retained?: boolean
+}
+
 export interface PortfolioSummary {
+  valuation_complete?: boolean
+  unvalued_assets?: UnvaluedAsset[]
   total_assets: number
   total_liabilities: number
   net_worth: number
   leverage_ratio: number
-  total_profit_loss: number
+  total_profit_loss: number | null
   allocation: Record<string, { value: number; pct: number }>
   platform_distribution: Record<string, number>
   concentration: Record<string, number>
@@ -1103,14 +1113,14 @@ export interface Position {
   classification_version?: string | null
   currency?: string
   quantity?: number
-  cost_price?: number
-  current_price?: number
-  market_value_cny: number
+  cost_price?: number | null
+  current_price?: number | null
+  market_value_cny: number | null
   original_currency?: string   // USD / HKD / CNY
-  original_value?: number      // 原始货币金额
+  original_value?: number | null      // 原始货币金额
   fx_rate_to_cny?: number
-  profit_loss_value?: number   // 盈亏金额（人民币）
-  profit_loss_rate?: number    // 盈亏百分比
+  profit_loss_value?: number | null   // 盈亏金额（人民币）
+  profit_loss_rate?: number | null    // 盈亏百分比
   segment?: string
 }
 

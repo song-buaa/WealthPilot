@@ -636,3 +636,162 @@ LI完整SEC 2026 Q2冻结原文可解析交付量98,330、汽车销售收入约2
 开发环境进一步使用同一冻结 SEC 证据、隔离临时 SQLite 与真实 Sol/Luna 走完整 PEER（无生产资产、Provider 刷新或交易）。XPEV 两次均完成四阶段并保留 5 段专业解释；开发环境中无持仓、无买入意图保持 `watch`。LI 原完整 PEER 的 4/6（medium）及 5/6（high）解释虽完成，但经营计算指标没有进入最终数字绑定；聚焦补充后最终保留 5 段，其中 3 段绑定经营数字。PDD 原完整 PEER 保留 6/6 定性段落而无数字绑定；聚焦补充后最终保留 5 段，其中 4 段绑定收入同比、利润率及现金流指标。聚焦补充的结果仍经原 Output Policy 二次验证，不能代替事实资格。此处的组合持仓是隔离夹具，政策为开发环境 LEGACY；没有经过生产 ACTIVE 规则和真实账户验证。美团尚无合格的冻结财务/行情输入，故本轮不以旧未核夹具制造完整 PEER 成功样例。开发完成不等于三标生产质量达到 8 分。
 
 PR #79 最终质量保护：聚焦解释不再整数组替换首轮。两组候选均由原 `explanation_projection` 验证；保留每一段首轮安全解释，仅在六段上限内追加带来新关键经营计算指标绑定的有效段落。首轮六段已满时不补充，不以段落数量覆盖已有主题；已有至少两个可用关键指标绑定（仅一个可用时为一个）不追加调用。非关键数字不阻止补充，补充无新增合格绑定则保留原结果。此保守规则可能让完整六段报告继续缺少数字解释，避免未经证明的替换损失研究深度。
+
+## LI 专业研究交付修复（2026-11-02）
+
+L2 最小修复，复用原 Evidence / Financial Research / ACTIVE Policy / MCP；不改变事实资格、数字合同、政策和交易权限。生产 `c347281` 的原 LI job 缓存显示四阶段完成、四次模型成功、最终零候选/零解释但 `professional_analysis_complete=true`。没有模型原文或首次候选的持久副本，原始内容及首次过滤数量 UNKNOWN，后续诊断不得反推为模型没有输出。
+
+代码断点：`consumers.finalize_output` 原先先拼接 records/verified_field_records，丢失 symbol、历史/期间字段及派生计算所需的 owner assessment；财务 `calc:` 引用随之不可用。现逐个完整 assessment 通过原 `_evidence_index` 重核后再组合，保留相同来源/时钟/冲突规则。重复投影仍复核原 text_template/numbers，不接受渲染文本的自由数字。MCP 只透传本轮服务端生成的诊断，保留首次 generation 与本次 final；复制诊断防止后续投影覆盖首次计数，不从模型 JSON 采信自报诊断。ACTIVE 输出明确 `research_delivery_status`；MCP 最终零合格解释时 `professional_analysis_complete=false`、professional_result=incomplete，并列明缺失 professional_explanation，财务事实可继续 partial。阶段完成不等于研究交付完成。
+
+Registry 无需更新：原 owner 和入口未变。生产只读核验不启动研究；开发真实模型使用隔离临时持仓、冻结公开 SEC 与只读核验的政策结构化投影（校验 structured hash），不复制生产库，不修改政策或 E1。完整业务评分仍依实际交付内容，不以工程结果替代 LI 8 分验收。
+
+## PR-A：正式估值输入与报告交付口径（2026-11-03）
+
+范围L2：沿原SEC/official_disclosures、Evidence及Financial Research补正式资产负债与股份输入，不实现PR-B估值/预测，不改政策、模型、资产或交易。原S3默认domestic/USD适用性不放宽。通用原文解析新增明确合并资产负债表的日期/报告币/单位，以及GAAP加权股数和明确ADS脚注；加权股数与点时股数分开，不把任意历史/否定ADS提及变成当前比例。原CompanyFacts同一请求同时投影普通与质量字段，不增加第二个Provider；显式币种的`build_quality`原默认USD仍保持。
+
+`financial_research.build_valuation_inputs()`是原Owner的纯投影：提供带来源的资产负债、报告币、加权/已披露点时股数观察及ADS关系；不等于已验证当前经济总股本或公司行动。现金减已披露短/长期借款只输出`cash_less_disclosed_borrowings`，`debt_coverage=PARTIAL_DISCLOSED_BORROWINGS`、`usable_for_equity_bridge=false`；完整`net_cash`、`market_cap`仍N/A。受限现金、定存/投资不随意计入可分配现金；未披露的其他债务不填零。报告币只能由同一最新资产负债期的明确原文列证明，历史币种不能替最新混币数据授予资格。旧字段保留历史标记，不冒充当前余额，不改TTL。
+
+原Output Policy索引/数字绑定接入正式质量字段，仍执行来源/时钟与纯财务竞争解释条件限制；原`captured_facts`重复核验完整质量上下文。ACTIVE已交付解释时采用“已核验研究事实”正文，未完成时继续保留原未完成提示。金额/交付/股数/比率仅调整显示单位与舍入，原值、公式、哈希及绑定不变。无币种交付不再显示“无币种比率”。
+
+真实LI/PDD完整SEC冻结原文及开发公开CompanyFacts/Submissions/目录回放覆盖解析、身份、原始哈希与实际抓取时钟。原Q2冻结原文的历史下载钟仍按原夹具说明，不补造；本次新公开请求单独保存实际完成时间。美团仅做官方公告可行性检查，不把可读PDF等同已接入Evidence；HK/IFRS原文资格及映射未闭合时保持缺口，不阻断LI/PDD交付。只有三PR集成后才安排完整隔离LI质量评估；本PR不启动生产Job或为评分重复部署。
+
+## 条件估值 PR-B 开发候选（2026-11-03）
+
+沿原 `quality_valuation.py::scenario` 的五年正盈利每股收益算术增加外国发行人 ADS 限定投影 `foreign_ads_earnings_research`。仅在原 `Financial Research` 同时产出正式连续四季度每ADS EPS、合格美元日线观察价、同日 FX，且与官方明确 ADS 比例一致时执行；未来增长、股份变化、分红和终值 PE 均为显式研究假设。原 S3 domestic/US-GAAP 方法适用性、分组排名和 ACTIVE 政策不变。计算结果是条件研究，不是目标价、交易建议或质量8分证明。
+外国 ADS 投影只保留条件期末价值、回报与反向增长，不暴露原 S3 折现 `conditional_value` / `margin_to_conditional_value`；后两项需要另行验证方法适用性与资本结构，不能因一组研究倍数变成伪精确公允价值。
+
+开发侧真实冻结 PDD 四份正式 SEC 季度 EPS 与 2026-11-02 AV 日线、同日 FX 可在原 `assess → build` 后产生 63.14 CNY/ADS、81.68 USD/ADS、6.6483 CNY/USD，进而进入同一五年条件算术及独立 Decimal 复算。第二轮通过可选 `ResearchIntent.conditional_valuation` 将该原 Owner 的结果交给原 PEER 证据上下文、确定性报告、ACTIVE 再验证与 MCP 最终投影；无解释时研究状态仍是 `INCOMPLETE`。历史事实仅能由原 Evidence 合格引用支持，情景回报仅为显式研究假设下的服务端计算，不能当公允价值或交易价。
+
+最终收口候选增加普通自然语言长期研究接入：`research_intent()`只从当前问题识别长期/估值意图，`position_analysis.prepare()`向原S3 Owner请求条件研究。正盈利ADS须同时具备合格四季EPS、价格、FX、静态PE、收益率及同口径收入/利润同比，才给出围绕已观察历史指标的**系统参考敏感性**：零增长与两项已观察同比构成范围，终值PE只取当前静态PE的0.75/1/1.25倍，股份不变、无分红和收益率参考均明示为研究假设，绝非预测或用户要求回报。亏损经营证据触发的自然请求不套用正盈利PE，返回经营恢复反向公式和股数、完整净现金、独立倍数及未来现金/FX假设缺口。其余缺少必要来源时也返回`HYPOTHESES_REQUIRED`、反向条件变量与N/A；没有独立倍数、净现金或当前经济股数时始终没有正式公允价值。原`captured_facts()`重新计算并比较来源回执，防止首轮条件结果在ACTIVE/MCP投影时携带变更后的依据。确定性报告把条件研究置于历史明细前，并将系统参考收益率与用户要求回报明确区分；正盈利ADS情景的专业解释提示其假设反证与竞争/现金风险，LI经营恢复路径不套该提示（真实模型对照显示会损失合格主题），原数字与引用过滤不变。LI经营恢复情景新增现金流、税/营运资本/资本支出及回购资金与利润假设未闭合的显式标记；其数值仍只供显式假设下的条件研究，不能提升估值资格。
+
+实际 PDD 冻结来源：四个官方季度构成63.14 CNY/ADS，2026-11-02 原 AV compact 日线81.68 USD/ADS，原 FXService 同日6.6483 CNY/USD，原静态PE约8.60。AV full 在当前开发密钥返回 Premium 拒绝，compact 100根通过日线校验，周线不足；不能称 Premium full 已在本开发环境可用。以显式研究假设演示五年谨慎/基准/乐观条件年化约−5.42%/+9.31%/+24.16%；基准未达到示例10%要求回报，绝非盈利预测或目标价。真实 Sol 在冻结官方财务证据上完成一次**表达组件级**开发验证：6候选、5段经原数字引用过滤保留；经营、现金转化、股数/汇率和 Temu 证据限制均有具体分析。该组件级样本不能替代下文的完整隔离 PEER 回放。
+
+LI [2026 Q2正式公告](https://www.sec.gov/Archives/edgar/data/1791706/000110465926101065/tm2624080d1_ex99-1.htm)与已冻结20-F为合格经营来源；2025全年正式收入112,312,511,000 CNY、2026Q2营业利润率约−8.96%、2026-11-02合格观察价11.18 USD/ADS、官方2普通股/ADS均可进条件研究。2026-09-30 [港交所月报的SEC附件](https://www.sec.gov/Archives/edgar/data/1791706/000110465926115185/tm2627401d1_ex99-1.htm)记录A类不含库存股1,716,030,157股、库存股102,294,952股、B类345,199,159股；观察日不含库存股合计2,061,229,316普通股。该**日期明确的观察**不能证明11月研究时点股数，也不能把期权/RSU/可转债潜在股数直接相加为实际摊薄数。[2026中报正式资产负债表](https://www.sec.gov/Archives/edgar/data/1791706/000110465926105658/tm2624872d2_ex99-1.pdf)中，6月末现金及等价物40.117782bn CNY、受限现金0.014782bn、短期定存及投资45.474274bn、借款7.150204bn、经营租赁负债7.192375bn、非流动融资租赁0.349322bn；流动性、资金可转移性、其他融资和未来资本需求未闭合。原329.67578亿元部分现金借款差额仍不得充当完整净现金。
+
+第二轮在原 S3 Decimal Owner 增加五年营业收入/第五年EBIT率/年度资本后现金变化/期末股数/净现金/ADS/FX/终值EV-EBIT的**显式假设**与反向利润率计算；亏损终值维持 N/A，`fair_value=None`。示意输入基于合格2025收入和11月2日价格，年增长−5%/3%/12%、第五年营业利润率−3%/5%/12%、终值EV/EBIT 8/10/12；倍数只是待核验研究范围，不是 S3 默认倍数或独立已验证同业证据。以2025财年收入为基数、2026年决策时点起算五年（终值为2031财年），中间未观察的2026年收入桥接同样属于增长假设。在这些假设及10%研究要求回报下，当前价隐含第五年营业利润率约18.43%/9.08%/4.58%；谨慎情景因仍亏损无正终值估值，基准条件年化约−1.18%，乐观约32.12%。净现金/股数/FX及未来现金消耗均为可改变结果的研究假设，不是已取得正式估值输入。真正当前公允价值、亏损期PE继续 N/A；不能用情景结果替代资产/资本结构闭环。原方法附16项单因素敏感性和输入摘要哈希；冻结开发工件保存在私人Developer诊断目录，不提交原始证据或私人配置。
+
+美团 [HKEX 2026中期业绩公告目录](https://www1.hkexnews.hk/search/titlesearch.xhtml?category=0&market=SEHK&stockId=198419)可定位8月28日业绩公告与9月29日中报；[公司IR报告目录](https://www.meituan.com/en-US/investor/reports)亦列示中报。PDF可阅读且为正式披露候选，但现有 SEC/AV 财务 Owner 不解析 HKEX IFRS 报表为带原文定位、期间和抓取时钟的合格字段。收入、IFRS集团利润、分部结果、现金流、资产负债及股本在原 Evidence 中仍为 UNKNOWN，不用网站摘要或半年累计值伪装独立季度，也不阻断 LI/PDD 的条件研究。完整 PEER、生产真实来源发现及正式三标8分研究验收仍待单独验证。
+
+### PR-B最终隔离研究回执（开发环境，非生产验收）
+
+使用已冻结的真实SEC/AV/FX Evidence assessment，原`analysis.analyze()`依次执行真实Luna Planning、原Executing、真实Sol Expressing、原Reviewing、ACTIVE `finalize_output()`及MCP `AnalysisResult`序列化。实际ACTIVE政策结构化投影由原只读工具取得，Bundle `policy-ce1ea09f9a5e7cb71dadc79f`、v1、SHA `995d40d90a978d9e0c11e7767a918c3f759c7c5680e960433c5ae23161434256`；隔离运行按原PolicySession重放，未复制生产库或激活政策。只读投影不含原批准日，测试夹具仅以现有效日填充Snapshot验证必填字段，不将其当真实批准时钟或生产PolicyStore收据。隔离SQLite内仅有虚拟研究持仓，故不能验证真实个人敞口、完整资产分母或生产源自动发现；测试库哈希前后一致。
+
+在上述边界内，LI显式研究假设的完整回放四阶段完成、最终6段解释保留，营业恢复的2031年终值、谨慎情景N/A、基准/乐观条件年化约−1.18%/+32.12%、当前价反向所需终值营业利润率约18.43%/9.08%/4.58%均由服务端计算并经独立Decimal公式复算；`fair_value=None`。普通LI自然语言完整回放也完成四阶段并保留6段解释；原问题“长期经营恢复、当前价格隐含条件”曾漏过意图识别，定点补齐后最终MCP结果包含`HYPOTHESES_REQUIRED`恢复型反向条件，列出当前经济股数、完整净现金、独立EV/EBIT依据及未来现金/FX假设缺口，公允价值仍N/A。PDD普通自然语言完整回放四阶段完成、最终5段解释保留，四季63.14 CNY/ADS EPS、81.68 USD/ADS观察价、6.6483 FX及约8.60倍历史静态PE进入服务端参考敏感性；谨慎/基准/乐观条件年化约−16.56%/0%/+12.98%，独立Decimal复算一致。PDD模型解释明确指出静态PE不是便宜证明、Temu与盈利持续性反证，以及下一次退出研究触发条件；这些仍非完整竞争或公允价值证明。三次完整回放最终`professional_analysis_complete=true`、业务`partial`，正式政策引用保留，交易授权始终false。
+
+真实模型对照显示，对所有条件估值统一加强提示会使LI的竞争、投资逻辑和复核条件段被原安全过滤拒绝（6段降为3段）；因此只给正盈利ADS路径增加限定提示，LI仍沿原Prompt。此前PDD参考情景提示后的5段包含investment_thesis与Temu风险；历史原始候选未保存时不反推过滤词。大规模字段明细使隔离报告文本仍超过十万字符，是可读性待改进项；本PR不裁掉原证据或扩大报告引擎。以上开发验证不等于生产完整L1、正式三标8分或美团IFRS资格通过。
+
+## L1 异步结果持久交付方案 C（2026-11-05，开发候选）
+
+范围：修复原PositionJobs的2MiB丢弃、进程内结果丢失及跨重启重复启动风险。不改PEER、模型、Evidence、ACTIVE、E1、资产或交易；工程候选不代表部署或历史事故最终归因。
+
+- **Owner与合同**：PositionJobs保留L1准入/结果Owner，position_store只做私有文件IO。原AnalysisResult v1完整保存；异步Job升级为`wealthpilot.position-analysis-job.v2`，`delivery=report`，result为`wealthpilot.analysis-report.v1`。报告保留全部结论、专业解释、数字/来源、条件估值/假设/敏感性、完成状态及UNKNOWN；移走底层Evidence树和重复政策全文。artifact提供opaque ID、原结果SHA256和编码字节数、原schema及`authorized_private_file_only`边界，不暴露路径。旧客户端须识别新schema，不能把report当全量Evidence。
+- **提交顺序**：文件锁内提交Request ID摘要、参数指纹、Job/Run、接收时间、代码指纹和状态，再启动原Worker。原analysis_lock及跨进程active.lock协调单项L1。完成结果使用原JSON编码、0600临时文件、fsync、不可覆盖原子提交及目录fsync；读验成功再更新收据。completed表示结果可取回，业务unavailable仍需如实展示。异步提前事件改为`analysis_result_ready`；最终存储事件committed也不冒充客户端已收到。
+- **恢复与失败**：相同ID/参数跨进程返回原Job，变参拒绝；get不执行研究。无活跃执行锁、无工件的running标ANALYSIS_INTERRUPTED；工件提交后收据未更新时，严格核对Job/Run/参数、schema、hash、bytes和AnalysisResult才恢复。损坏或缺失索引、非法权限、配额或磁盘失败均拒绝，不重置旧结果。过期报告不再返回正文，完整工件与幂等tombstone不自动删除。本系统不重复启动的证明，不等于外部Provider绝对exactly-once计费。
+- **生产配置待批准**：预建仓库外私有目录0700，属主为MCP运行用户，文件0600；拒绝符号链接、路径穿越、非普通文件和多硬链接，父目录逐级NOFOLLOW打开。必须同时设置`--analysis-results-dir`、`--analysis-results-quota-bytes`、`--analysis-results-retention-seconds`；不完整或非正配置拒绝。未配置时异步L1明确RESULT_STORAGE_UNCONFIGURED，不回退内存/同步研究。根目录丢失不自动重建。配额含原子替换峰值和遗留临时文件，原64收据/8有效结果容量保留，满则拒绝；不得删除收据后复用旧请求。生产容量、保留和人工归档由项目管理决定，本PR不执行清理。合成协议服务器仅用隔离临时目录和测试默认值。
+- **诊断与兼容**：沿原私有--events记录serialization_completed/committed/recovered、过期/中断和闭集错误；包含匿名Job/Run、已知实际字节/hash及业务状态，未知保持UNKNOWN。不记录正文、Prompt、账户或原始异常。父进程仍须持久化原诊断，不依赖stderr。同步入口、Worker、原工具、S3 standard/professional及冻结读取格式不变；S3明确使用原ProcessLocal登记，不启用L1新配置或report。PR92只验证共享合同，不合入业务改动。
+- **冻结验收**：PDD完整结果2,207,475 bytes，原编码SHA256为`4cdf627f475b6a97889a62db9666023958c4013181c1400faf29a6ca6ce588bf`；report正文247,412 bytes，六段完整解释及估值保持。私人源工件不进Git。专项覆盖更大合法结果、配额耗尽、真实多进程同ID、两个崩溃窗口、过期及损坏；最终测试和exact-HEAD CI以PR记录为准。
+
+部署须单独授权私有目录、配额、保留期及同版本MCP父进程/Worker发布；不迁移数据库或旧进程内任务。回滚前停止新研究并确认在途状态，完整保留新收据、工件和事件。旧代码不理解新收据，不能把旧请求重新提交到旧进程；回滚不删除存储、不自动补跑，新结果仅由授权私有读取或兼容版本恢复。
+
+## L1 Expressing 有界上下文与输出预算（2026-11-06，开发候选）
+
+### PR97 合并前输入余量补验（同日，替代首轮预算结论）
+
+用户补交了本轮PDD实际 `request.question`（588字符），确认没有history、research_context或snapshot_id。本轮将该问题与已保存的pr-c-20261103 Evidence及已核验v1政策冻结投影组合；**这是混合离线复验，不是生产请求重放**。不访问Mini、不调用模型或Provider、不改事实时钟。持仓使用UNKNOWN占位，不从问题推断真实数量。
+
+原b090361候选在同口径构造下含预留39939/40000，仅余61，确有误拒正常追加上下文的风险。最小修正：
+
+- 保留最新四季度关键收入、经营利润、净利润、现金流及原全部指标/估值依赖；当前样本从127增至131条，原454条合格事实不改。
+- 敏感性各result中的重复逐年数组与主情景一致，仅移出模型展示；所有端点、回报、假设和敏感性点保留，完整年度明细仍在原Owner。
+- `TARGET_TOKENS=28000`现在实际触发第二层无损去重：记录使用同一columns与rows表示重复字段名，null_cells表示未提供的外层字段；嵌套原值、完整evidence_ref、来源/会计/期间/单位、政策和用户历史可逆保留。不按Top-K丢竞争反证，不提高40000上限。必要内容仍超限则拒绝发送。
+- 各层仅记录计数、编码方式、减少的参考Token及最终状态，不记录完整Prompt。最终过滤仍使用原完整Evidence，与模型序列化格式无关。
+
+下表为同一合法冻结输入、实际问题及合成长度边界，均按o200k_base参考编码计数，已包含1024框架预留；不能冒充Sol实际usage：
+
+| 场景 | 含预留参考Token | 余量 | 结果 |
+|---|---:|---:|---|
+| 原始588字符问题、无历史 | 34487 | 5513 | 通过 |
+| 同问题、2×300字符历史 | 34918 | 5082 | 通过 |
+| 同问题、2×1000字符历史 | 35918 | 4082 | 通过 |
+| 同问题、4×1500字符历史 | 38776 | 1224 | 通过 |
+| 同问题、8×3000字符历史 | 51648 | 超限 | 拒绝，不截断历史或必需证据 |
+| 6000字符问题、无历史 | 39297 | 703 | 通过 |
+| 协议上限6000字符问题、16×12000字符用户历史 | 176444 | 超限 | 拒绝，模型初始化前停止 |
+
+典型零/短/中历史的消息本体约33463–34894参考Token，符合约30k–35k目标；软目标是去重触发值，不是强制截去事实的门槛。缺少词表时使用UTF-8字节保守上界，本样本109320（含预留）会安全拒绝；该数不是参考编码Token。必需证据过多的合成压力样本同样拒绝。缺失或损坏词表的冷进程测试禁止网络，确认不会在研究中下载。
+
+### ARM 部署前验收清单（只交接，本轮不执行生产操作）
+
+1. 在新隔离release的**完整Business Python**核验原依赖锁（含OpenAI 2.29.0及tiktoken 0.12.0）；不得在旧生产环境原地安装，也不要求MCP轻环境安装完整业务依赖。必须以Python进程内`platform.machine()`验证原生arm64，不能用MacBook或Rosetta导入成功替代。
+2. 在构建/部署准备阶段复用或经授权获取官方公开词表：`https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken`。SHA256必须为`446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`；缓存文件名为URL的SHA1。放入原运维机制选定的持久可读资产目录；不在研究中下载，不依赖可能被清理的临时缓存。
+3. 核对MCP父进程的既有环境与实际`--analysis-env-file`。父进程只白名单透传`TIKTOKEN_CACHE_DIR`；Worker配置文件同名合法项按原加载顺序覆盖继承值。只核验变量存在、资产哈希与可读性，不输出配置内容/Key。原协议回归覆盖父子透传，cache-only配置不重置模型或加载Key。
+4. 用实际Business解释器、实际release代码、实际环境文件启动一个**冷的只读检查进程**，仅按原`load_analysis_environment(..., model_policy_only=True)`加载配置，然后核验下列条件。此检查不启动服务、不运行研究、不创建客户端、不读取账户。检查中禁网；失败即停止，不以暖进程已加载的encoder代替资产存在证明。
+
+   ```python
+   # 在原运行入口/目录执行；环境文件路径取现有MCP参数，不复制生产配置。
+   import hashlib, importlib.metadata, os, platform
+   from pathlib import Path
+   from backend.services.market_data import l1_context as c
+   assert platform.machine() == 'arm64'
+   assert importlib.metadata.version('tiktoken') == '0.12.0'
+   cache = Path(os.environ['TIKTOKEN_CACHE_DIR'])
+   asset = cache / hashlib.sha1(c.VOCAB_URL.encode()).hexdigest()
+   assert asset.is_file() and hashlib.sha256(asset.read_bytes()).hexdigest() == c.VOCAB_SHA
+   assert c._encoder() is not None
+   assert c.measure('中文')['counting'] == 'o200k_base_reference_estimate'
+   # 只汇报上述布尔结果/版本，不打印路径、配置或凭证。
+   ```
+
+5. MCP父进程与只读Worker必须同SHA，重启后的冷Worker仍能读取同一资产。真实研究仍需后续单独授权；本轮只完成离线合并前验收，**ARM现场结果保持PENDING_ARM_RUNTIME_CHECK，不等于生产发布GO**。缺词表不得被解释为行情/模型故障或通过放宽预算补救。
+
+### 首轮候选记录（b090361，以下保留追溯）
+
+生产故障由用户提供：PDD Run 70b493cc87cd4c4e8f19487ae3f3faa1，130543输入、8192输出全部用于reasoning，truncated后仅facts-only；PR96已成功保存结果。该生产工件尚未交接，本轮不访问Mini、不重跑研究，精确原Prompt分段状态为`PENDING_PRODUCTION_INPUT_EVIDENCE`。开发冻结PDD测量不能替代生产实测。
+
+- **代码断点**：已持仓PositionDecision此前追加prompt_context后进入旧reason，大JSON、DecisionContext、历史及旧交易字段参与展开；reason请求max_tokens=4096，被原适配转换为8192总输出。新建仓/纯研究曾使用另一输出预算。本轮不修改decision_engine核心或模型全局档位。
+- **同一研究合同**：服务端analysis_only/single_position_research设置内部ExecutionOutput标记，原Expressing在该模式下统一生成professional_explanation JSON。持仓、无持仓、退出及用户研究假设保留，只有原始用户历史作为未验证研究上下文；不再重复注入旧决策payload、助手历史/RAG和整份政策Prompt。不生成旧交易JSON参数。非该模式的旧路径、组合、多标及S3保持原行为。
+- **Context Pack**：l1_context是原Evidence/Output Policy下的确定性投影，不是新金融Owner。仅从原_evidence_index取当前合格引用；保留当前、前一及同比期财务、最新年度基线、所有计算/条件估值依赖闭包、合格研究/事件/技术周期。按主题组织，不按top-K丢弃竞争反证；完整关键主题超预算即安全拒绝，不发送超大请求。稳定evidence_ref、原值、期间、币种/单位、来源资格及时钟不变。单一主体、来源与完全相同依赖共享表示，context_id只做包内关联，不可作为合格引用。旧年度和无关历史从模型投影移走，原Assessment不改。条件情景只移除重复逐年明细，端点、全部假设和敏感性保留；完整年度数组仍在原工件。政策保留全部结构化规则、理念、义务及来源定位；重复规则source_clause全文由原Policy Owner保留，不改变ACTIVE规则。
+- **预算及可知边界**：统一适配的l1_research_options显式发送Sol Medium、max_completion_tokens=32768、JSON对象合同；SDK重试与600/660秒研究/IPC期限均不变。输入目标28000，40000参考Token硬预检并预留消息框架空间。tiktoken==0.12.0使用本地已核验的官方o200k_base参考词表，不宣称这是已验证Sol专用tokenizer；Provider真实Token只有获授权调用后可知。研究期间不下载词表；未预热时用UTF-8字节保守上界，无法容纳则facts-only，不能绕过预检。部署前须在新隔离环境安装锁定依赖、预热官方参考词表并核对缓存，不原地改生产。
+- **冻结开发样本**：pr-c-20261103的PDD原工件旧Evidence Prompt为112909参考Token（不是完整旧请求实测）；新版含实际政策结构化投影的请求约38463参考Token，含1024预留为39487。原454条合格事实不变，投影保留127条及依赖闭包。样本高于20k–30k目标但低于40k上限，不为命中目标删除必要季度字段；默认facts-only正文由326786字符降至1560字符，原始输入不改；facts-only返回继续清空原合同中的未完成估值敏感性，完整原始工件保留。
+- **安全计数**：只记录各主题bytes/参考Token、有效/选中记录数、原Assessment及旧Evidence Prompt对照、计数方法与预算状态。Prompt、研究原文、账户和模型原始回答不写入诊断；输入分段计数不是模型实际usage。原模型观测增加实际output_token_budget，原安全投影贯通Worker/MCP。缺失观察仍UNKNOWN。
+- **诊断与facts-only**：Expressing有独立started/failed回执，最终安全观测可将真实truncated映射到该阶段，不能记成not_started。阶段完成与最终accepted_final分开，零合格解释仍INCOMPLETE。默认facts-only仅展示实际失败原因、关键财务及合格技术摘要、条件估值状态/假设限制与完整私有工件提示；不会输出新的投资判断，完整原事实不删改。已交付专业解释的正常报告不以facts-only摘要替代。
+- **回归与限制**：使用现有公开SEC原文、私有开发冻结结果、SDK MockTransport及原完整PEER/Reviewing/隔离合成ACTIVE/MCP验证工程合同；未运行真实Sol/Luna研究。PR96存储/幂等文件无改动，PR92保持Draft。真实质量、是否达到8分均为`N/R`，不得把Mock或CI当成内容验收。实际开发模型对照须单独批准次数和预算；本PR不合并、不部署、不改资产/E1/政策或交易。
+
+## L1 后置交付超时修复（2026-11-06，开发候选）
+
+仅服务端 `analysis_only` 且 `execution.analysis_mode == l1_research` 的单标研究，Review 后不再生成最终 ACTIVE 会丢弃的15字符/8ms展示流。原后置 `prepare → enforce → ACTIVE finalize_output → result_callback` 顺序及外层 MCP 再验证不变；Web普通SSE、组合、S3和非L1展示保持原行为。政策仍在真实事件推进与最终交接点检查版本/状态，不做长期ACTIVE缓存。来源采集/SEC/FX及新鲜度逻辑本轮不重构。
+
+原 `llm_observation.stage_timings` 增加封闭枚举的后置阶段（Review后重核、PEER/Adapter ACTIVE审核、Adapter重核、结果收据及正式callback），仅保留相对计时、状态、首筛/终筛数量与安全拒绝类别；经原IPC安全投影保留，不含Prompt、回答、资产或政策原文。阶段超时/异常留下相应安全状态，不把未知计数填0。
+
+`stage_diagnostics` 将模型生成与最终交付分开：Sol已completed时，不再仅因整体`ANALYSIS_TIMEOUT`将Expressing反写为failed；模型返回不代表JSON/证据审核通过，原解析/过滤失败仍保留。Review已完成后的整体超时标为`postprocessing=timeout`、`delivery=timeout`，最终专业完成仍要求合格解释非空。facts-only、600/660秒、Sol Medium/32768、Context Pack约40000参考Token及PR96 Job v2/report v1持久化、幂等、恢复合同不变。
+
+验证采用冻结PDD来源、MockTransport模型、合成ACTIVE及原PEER/Reviewing/Evidence/ACTIVE/AnalysisResult/存储路径；不是本次生产请求重放或真实模型研究评分。诊断旧基线Review后人工分块221.139秒、17427块、后置17442次政策检查；修复后的同口径墙钟与计数以PR交付收据为准。生产约323秒的精确归因仍待已有安全事件，不将离线计时充当生产实测。无新业务能力或Owner入口，Registry无需更新；没有生产部署或付费研究授权。
+
+## L1 v2 P1-A/P1-B 本地候选（2026-11-10）
+
+依据冻结 PRD v1.0 SHA256 `8efa5b6fb5364118dce2d52ab2509b0193ab0fcabc2dc1474e84ae0b4ea261d4`。`WEALTHPILOT_L1_RESEARCH_V2=1` 只在原单标异步 L1 入口启用内部研究合同，默认走原路径。无新的公开请求参数。工作树只用于隔离研发，开启生产另需授权。
+
+原财务 Evidence 与 S3 负责事实及前置条件计算。C1 最多三格，用请求域加内容摘要绑定参数、计算结果、ADS、FX、来源与依赖；当前未选敏感性附加格，C2 未接入。模型只引用已发送的目录及假设，禁止升级机械参考为预测。PDD 用原 ADS 正盈利方法；LI 经营恢复缺输入及美团无适用数值方法时保留变量边界/N/R。
+
+原 PEER Expressing 单次 Sol Medium，原40k参考输入及32768总输出门槛。最多三争议组、十二个原子候选；局部非法数字和必要依赖失效只影响对应主张。Review v2 采用确定性校验，硬失败降级且不追加模型请求。原 Output Policy/ACTIVE 同一权威终审后生成正文、财务表、C1 估值卡、七问覆盖和限度。已合格主张的覆盖状态保守标为 limited，决策审阅 not_assessed。原合格旧段落投影最多六条，完整 v2 对象留在原私有 analysis.v1 Evidence 字典，report v1 延续既有字段。Job v2、原存储、旧工件、资产、S3、ACTIVE、E1、交易门禁及 PR101 无人工分块路径继续沿原合同。无新数据 Owner 或能力入口，Registry 无需更新。
+
+**业务硬门槛为真实原生投资研究报告 ≥8.0/10。** 原五维每维2分：财务事实与证据可信度、经营分析与商业价值驱动、竞争优势与最强反证、估值与长期潜在回报、投资判断/机会成本与决策价值。工程验收独立，缺真实产物为 N/R。经单独授权的真实报告按五维逐项独立评分，未达8分保留 BUSINESS_BLOCKED，依实际扣分项定位，不能以重复付费调用或范围扩张补过。
+
+PDD 真实候选复盘后，内部 v2 的模型组名不再决定组内资格，显示编号由服务端生成。原子主张仍按严格结构、来源、假设与必要依赖终审。已验证占位符紧邻重复的同口径单位可在首筛规范化，终审仍由原始绑定重算。普通词“参数”“参考”不会因 Unicode 数值属性被误拒。未绑定的数字、错币种或错单位、孤立占位符以及失效前提均继续拒绝。独立命题应由模型另列，服务端不猜测同一段中的句子依赖。明确“不足以证明”等措辞可表达竞争机制的待证状态。Context Pack 使用实际入包的收入同比引用示范绑定，金融、竞争证据不足均继续披露。
+
+L1 v2 的 Q1/Q6 综合判断可继承已审核的经营与风险/回报前提。服务端仅生成固定研究取向和前提引用，不能用继承的引用给模型新写的事实授予资格。最终重核会同步移除依赖已失效前提的综合判断。
+
+在隔离研究中，原 S3 ADS 方法可使用正式、同观察日的五年期美元国债曲线作为独立终值锚。仅服务端可把已取得的官方原文字节与合格 Evidence 收据绑定。公司风险加成、经营增长、稀释和零分派均为压力假设；历史加权稀释股数只用于定标，不证明未来发行。价格敏感性用原 S3 算术重算假设入场价，市场观察价不变。可用情景及其来源随 C1 入包和终审，仍不给出公允价值、个人要求回报或交易授权。未接入合格曲线收据时，原机械参考和拒评行为保持；本切片没有新增生产采集。
+
+在同一原 S3 ADS 条件算术内，可选三年股东现金代理桥使用经原 SEC/Evidence 资格的同一年度申报。严格区分集团经营现金流、生产性资产现金支出、商家应付款带来的现金贡献和 SBC 经济成本。每 ADS 历史展示沿用合格上市单位与期间加权摊薄分母，既不替代当前经济股数，也不主张可分配现金或季度 FCF。新终值将历史转化率区间、可取得比例、稳态增速及外部风险研究的实际版本纳入原 C1，另给出当前价格要求的反向可取得比例；五年期间无现金分配或净现金加回。第三方风险研究是估值假设收据，不能作为当前发行人事实。缺少任一完整桥或风险输入时保留受限；无运行时新来源采集、交易权限或公开 Schema 变化。
+
+现金终值场景的决策审阅独立于模型的跟踪态度。每个情景需有原门禁通过的独立估值与复核主张，机会成本也需有独立的合格主张。报告按原 S3 数字比较同一观察价和同一条件门槛。基准未达门槛时，继续跟踪或乐观过线都不能自动转为新增资本配置。场景论证不足时明确证据不足。此审阅不产生交易权限，也不改变原政策或估值。
+
+Issue #117 在异步结果读取端提供确定性阅读投影。通过终审的 L1 v2 报告默认在 `result.conclusion` 显示投资结论、逐段合格论证、条件回报和复核条件。编号对应同一 Job 的 `get_position_analysis_result(view="audit")`，其中保留原报告、来源时钟、合格与过滤收据及原有 C1 结构。原 `analysis.v1` 私有工件和访问规则不变，原有报告/Job 版本、重启读回和 v2 默认关闭不变。无终审结论的失败或事实降级及旧版按原路径返回；阅读投影不调用模型或重新运行研究。
+
+
+### #117 L1 v2 估值来源与阅读合同
+
+默认研究入口在形成估值 proposal 和模型目录前，读取 4.1 已核验的原件及来源收据。运行配置 `WEALTHPILOT_L1_VALUATION_SOURCE_ROOT` 为服务端可选私有绝对路径。每个 `<symbol>/<observation_date>/` 只读 `manifest.json`、`treasury.original` 和 `nyu-country-risk.original`。Manifest 沿用 4.1 的 `symbol`、`observation_date`、`a2`、`a3` 字段。记录缺失、权限不符、哈希或时点不符按实际状态降级；缺同日国债的交易日不取前值。已有 SEC Evidence 仍负责同一年度申报的三年现金桥。配置与原件交付是生产启用这一来源路径的前提。
+
+同次请求只读一次来源字节，后续 PEER、ACTIVE 和 MCP 复核沿用同一收据，并按当前资格和原计算复算。失去来源资格的旧情景不得重新发布。未形成现金桥与合格锚时，原机械敏感性保留真实标签和观察盈利收益率参考。Reader 区分财报期末、披露、抓取／已知时点与研究截止，并把反事实新增配置、存储持仓和快照资格分别呈现。原投资政策是独立的存量方向来源，仍须使用原政策与交易资格。

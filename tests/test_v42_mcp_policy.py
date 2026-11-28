@@ -204,6 +204,12 @@ def test_original_peer_cited_explanation_survives_final_mcp_without_snapshot(ana
         model_calls.append('portfolio')
         return GenericLLMResult(intent_type='PortfolioReview', chat_answer='unsafe 987654',
             raw_payload={'chat_answer':'unsafe 987654','professional_explanation':[explanation]})
+    from backend.agents import expressing_agent
+    from types import SimpleNamespace
+    def research_completion(*args,**kwargs):
+        model_calls.append('position')
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({'professional_explanation':[explanation]})))])
+    monkeypatch.setattr(expressing_agent,'chat_completion',research_completion)
     monkeypatch.setattr(llm_engine, 'reason', reason)
     monkeypatch.setattr(llm_engine, 'review_portfolio', portfolio)
     before = hashlib.sha256(analysis_db.read_bytes()).hexdigest()
@@ -218,11 +224,16 @@ def test_original_peer_cited_explanation_survives_final_mcp_without_snapshot(ana
 
 
 def test_portfolio_automatic_repayment_rechecks_full_loan_amount_scope(monkeypatch):
+    from functools import partial
+
     from backend.agents.contracts import ExpressionOutput
     from backend.services.market_data.output_policy import enforce_portfolio
     from backend.services import allocation_scenarios
-    from tests.test_v42_exit_plan import setup_case
     from tests.test_v42_account_candidates import auto_case
+    from tests.test_v42_scenarios import AT
+
+    monkeypatch.setattr(allocation_scenarios, 'target_context',
+                        partial(allocation_scenarios.target_context, at=AT))
     v, executed, _, t = auto_case('3690:HK')
     v['data_quality']['analysis_eligibility']['B']['allowed'] = True
     calls = []

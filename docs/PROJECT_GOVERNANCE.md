@@ -1,24 +1,40 @@
 # WealthPilot 项目治理基线
 
-> 更新日期：2026-10-17。本文只维护长期工程流程、风险、质量与发布边界。开发基线为当前 `origin/main`；历史版本/生产快照不是实时状态或新的操作授权。
+> 更新日期：2026-11-27。本文只维护长期工程流程、风险、质量与发布边界。开发基线为当前 `origin/main`；历史版本/生产快照不是实时状态或新的操作授权。
 
 ## 1. 当前产品与架构
 
 产品入口见 [README](../README.md)，系统分层、模块职责和数据权威统一见 [ARCHITECTURE_CURRENT](ARCHITECTURE_CURRENT.md)，已有能力及复用入口见 [CAPABILITY_REGISTRY](CAPABILITY_REGISTRY.md)。本文不重复维护这些实现说明。四份核心文档的职责与引用以第 8 节为准。
 
+## 全局研发原则（2026-11-27）
+
+Product Owner 明确要求效率优先、实用优先、维护成本优先。适用于 4.0—4.6、全局项目管理及个人独立策略仓库；职责矩阵继续沿用 Issue #119，执行者优先直接完成可做事项，Chat 使用 GitHub 做台账、审查、集成和 CI，Codex 处理本地研发及生产环境，不增加重复角色交接。普通修复以真实复现、最小差量、必要定向测试、正常 CI 为闭环；不默认大型独立审计、全历史复验或额外基础设施。独立任务不因无关问题互相阻塞。
+
+既有授权的真实只读 API、日志、数据读取、正常模型调用及开发测试默认允许，限当前任务、既有账户/凭据权限和合理成本/速率；新增付费产品、超预算、扩大凭据/账户范围或真实写入不在此默认授权。代码合并、生产发布、数据库迁移、正式数据同步、定时任务启用可由一次明确任务级授权覆盖完整闭环，包括必要预检、备份、执行、验收和已批准恢复方案，不按技术阶段重复审批。真实交易、资金划转/提现、正式投资政策变更、实盘自动交易启用、不可逆数据删除仍需明确独立授权；批准的确切政策候选可一次授权全发布链，不需要重复审批，但尚未实现的发布入口不得冒充可用。凭据/隐私、账户身份、金额精度、UNKNOWN/partial/Last-good、原风控和分支保护不削弱。明确的任务级限制优先；本规则从后续研发任务执行，不自动重开旧任务、解除专项停止条件或授权实际生产变更。
+
+Web UI 主动研发冻结。前端改动须独立产品授权；后端、MCP、数据及策略研发保留原界面，只验证必要兼容性。见 [#119](https://github.com/song-buaa/WealthPilot/issues/119)。
+
 ## 2. 运行模式
 
-- **MacBook Dev / 隔离测试**：临时 SQLite、`PYTHON_DOTENV_DISABLED=1`、Mock broker、冻结或禁用外部 Provider；不借用生产库、凭证、Tunnel、配置。命令见 [dev_setup](dev_setup.md)。
+- **MacBook Dev**：数据源开发尽早在已有授权和只读权限内验证真实 API、账户、行情、成交和业务数据；故障优先取得真实输入、异常栈和运行证据，保留私有脱敏复现，不猜测修改。自动化回归/隔离测试使用临时 SQLite、`PYTHON_DOTENV_DISABLED=1`、Mock broker、冻结/禁用 Provider；不借用真实凭据或生产可写库。Mock 用于回归、边界、异常，不替代真实验证。命令见 [dev_setup](dev_setup.md)。
 - **Public Demo**：固定 Seed / 隔离库、`PUBLIC_DEMO_MODE=true`、`BROKER_MODE=mock`、默认禁用外部行情；Provider gate 阻断真实 LLM/行情/券商/交易；Demo 密码缺失 fail closed。
-- **Mac Mini Prod / Private Full Mode**：代码与用户本地 DB、配置、凭证、日志、备份分离；真实 Provider、只读调查、同步写入、安装/启停/切换与恢复按当前任务分别授权。生产不直接修改业务代码，修复回 Dev / PR。
+- **Mac Mini Prod / Private Full Mode**：代码与用户本地 DB、配置、凭证、日志、备份分离；允许在原环境用已授权的真实 Provider、日志及只读数据库诊断和测试；严格只读连接/原只读入口，不触发同步、订单或其他副作用。同步写入、安装/启停/切换、迁移和恢复按明确任务级授权，可一次覆盖。生产不直接修改业务代码，修复回 Dev / PR。
 - 非 Demo 完整 backend 的 lifespan 包含原调度/同步、孤儿扫描、订单轮询与触发评估；审计/测试不能为图方便启动它。CI 或文档发布均不暗含生产启停授权。
+
+### 个人 Mac Mini 连接
+
+WealthPilot 是个人项目；个人生产 Mini 只沿既有 **Tailscale + macOS 原生 SSH + 本人交互密码建立 ControlMaster** 连接。固定 alias `wealthpilot-poc03-mini`，目标 `songbin@100.97.137.119:22`，ControlPath `~/.ssh/wpmini-poc03/c.sock`，空闲保留15分钟。先执行 `ssh -O check wealthpilot-poc03-mini`；有效则复用，过期只由本人在 MacBook Terminal 按 SOP 续期，Codex 不索取密码或尝试替代身份。
+
+**禁止在 WealthPilot 使用公司的 `sshm` Skill、公司 SSH Agent 或公司公钥。** 严格主机校验及原 SOP 固定指纹继续生效；主机记录缺失不等于密码问题，不关闭校验、不接受新指纹、不擅改 SSH/生产配置。连接成功不扩大当前任务的生产权限。
+
+唯一详细操作指南是现有本机 `MacBook-MacMini-SSH-SOP.md`，当前迁移位置：`/Users/songbin/Developer/_archives/2026-11-01/Documents/Codex/2026-10-30/task/MacBook-MacMini-SSH-SOP.md`。旧 Documents 路径只作追溯；文件再次迁移时按文件名在已验证 Developer 根下定位，不重建旧入口。本节只维护规范和指针，不复制连接指南或保存凭证。
 
 ## 3. 分支与提交策略
 
 - `main` 是唯一长期集成分支。新任务 fetch 后从最新 `origin/main` 建短期 `codex/<topic>` 分支；继续已有 PR 时复用其分支并核对 base，不创建重复 PR。
 - 保护其他分支/worktree 和未提交工作；未知历史分支、用户文件和 worktree 未确认用途/授权前不删除。不长期维护 develop/release/个人 handover 分支。
 - 按可独立验证、可回退的最小职责分步提交，提交信息采用 Conventional Commits 风格（如 `docs:` / `fix:` / `feat:`）；精确路径暂存。禁止 `git add .` / `git add -A`、force push、squash 既有历史、force add ignored 本地配置。
-- push/PR、合并、Tag/Release、部署分别授权。用户已明确授权的下一步不重复询问；仅 PR 的任务停止在 PR/CI，明确授权合并的任务按第 6 节完成集成，均不默认部署。
+- push/PR、合并、Tag/Release、部署可在一次任务级授权中明确范围及条件。已授权的下一步不重复询问；仅 PR 的任务停止在 PR/CI，明确授权合并的任务按第 6 节完成集成，未包含部署授权的任务不默认部署。
 
 ## 4. 版本、Tag 与发布
 
@@ -40,11 +56,11 @@
 
 ### 本地与端到端验证
 
-- 任何代码修改：任务相关定向测试、`python -m pytest`、frontend `npm run lint` / `npm run build`、`python scripts/m5_e2e_18_cases.py --mode offline` **18/18**。保留原严格代码 Gate，不因风险分级豁免。
+- 普通局部修复：真实复现（适用时）、任务相关定向测试及现有四项 CI；不默认在本地重复执行 CI 已覆盖的全量 pytest、frontend lint/build、Offline M5。跨模块、关键计算、生产权限/迁移等按实际影响补必要契约、完整场景或本地回归。保留现有远端四项 Gate，不绕过失败；区分本地和 CI 证据。
 - L0 仅文档：本地执行 `python scripts/check_engineering_docs.py`、`git diff --check`、语义/引用走查；不要求重复本地全部业务测试，但现有四项 CI 仍全跑。必要文档检查配置/脚本的 L0 变更也必须通过完整 CI。
-- 测试使用同一 Python 环境、临时库及关闭/冻结 Provider，不以个人 .env/DB 或真实服务可用为前提。怀疑回归须同条件与 clean main 对照；历史测试数量不是当前基线，更不能代替完整业务验收。
+- 自动化回归使用隔离环境、临时库及关闭/冻结 Provider，不以个人 .env/DB 或真实服务可用为前提。真实只读验证与自动化回归分别留证，数据源不把首次真实验证推迟到发布。怀疑回归按需同条件与 clean main 对照；历史测试数量不是当前基线，更不能代替实际业务验收。
 - Offline M5 自带环境白名单、冻结 LLM/Search/Knowledge/Clock、固定 Seed、Mock 与公网 socket guard；默认报告到系统临时 artifact，仅显式 `--update-report` 更新 tracked 报告。
-- Live M5 仅在独立人工授权下使用 `--mode live` 与 `M5_ALLOW_LIVE_PROVIDER=1`，仍临时 Eval DB、禁止券商/订单 mutation；不进入 CI、不替代离线 Gate。
+- Live M5 在已有明确覆盖该场景及合理模型成本的任务授权内使用 `--mode live` 与 `M5_ALLOW_LIVE_PROVIDER=1`，无需逐次审批；仍临时 Eval DB、禁止券商/订单 mutation，不进入 CI、不替代离线 Gate。
 - 涉及关键业务时验收完整场景：输入/身份/来源 → 规则/数据/状态 → Web/MCP 呈现 → 人工确认边界 → 过期/失败/重试/一致性；Web/iOS 分别记录。测试数量、接口 PASS、健康检查或 synthetic=false 不代表生产业务验收。
 
 ### Automated CI
@@ -55,15 +71,15 @@ CI 对 main / codex 分支 push、面向 main 的 PR 及手动 dispatch 运行�
 
 ### Main branch protection
 
-2026-10-17 核对的 ruleset `Protect main with Quality Gates` 对 main 要求 linear history、禁止删除/force push、三个 required checks（Backend tests / Frontend checks / Offline M5）及 strict up-to-date；项目额外要求 MCP PoC tests 同样通过。平台未强制 PR/review 不构成绕过授权；项目仍须 PR、人工评审和明确合并授权。每次合并核对实际规则，不为方便关闭规则或使用 owner bypass。
+2026-10-17 核对的 ruleset `Protect main with Quality Gates` 对 main 要求 linear history、禁止删除/force push、三个 required checks（Backend tests / Frontend checks / Offline M5）及 strict up-to-date；项目额外要求 MCP PoC tests 同样通过。平台未强制 PR/review 不构成绕过授权；项目仍须 PR、必要审查和明确合并授权（可包含在任务级授权中）；普通修复不默认额外独立审计。每次合并核对实际规则，不为方便关闭规则或使用 owner bypass。
 
 ### GitHub 集成与 Mac Mini 部署
 
 1. 检查全部 worktree，fetch 最新 main / PR head，保护无关工作；按授权 push 候选和更新 PR，检查 exact HEAD 的全部四项 CI。失败或实质性问题未解决不能合并。
-2. 取得明确合并授权、核对最新 base 与候选 ancestry 后，按 linear-history 允许方式集成；可 fast-forward 推送已验证的相同 HEAD 到 main（不 force / bypass、不 squash 既有历史）。base 变化则形成可审查新候选并重跑 Gate。
+2. 核对已有明确合并授权（可为条件性任务级授权）、最新 base 与候选 ancestry 后，按 linear-history 允许方式集成；可 fast-forward 推送已验证的相同 HEAD 到 main（不 force / bypass、不 squash 既有历史）。base 变化则形成可审查新候选并重跑 Gate。
 3. 核对 PR MERGED、remote main / origin/main / local main 与预期 SHA，检查 main CI，记录 PR/Run/完整 revision。更新 local main 只在对应 worktree 干净且可 fast-forward 时进行，不覆盖其他工作。合并不创建 Tag/Release、不代表生产验收。
-4. **另有部署授权时**，先列生产影响、备份/预检/切换/验收/回滚与停止条件；Mini 沿用原 `install-github`，安装确认的 main ancestor 完整 SHA 和 exact-commit 四项 CI 成功。复用原组件环境、共享库、配置和凭证，不重复迁移、不复制 Dev .env。
-5. 安装不等于激活；必要一致性数据备份和旧启动入口备份完成后，经授权切换原组件，验收健康/契约/原功能及必要设备场景；失败恢复入口并核对健康。组件 SHA、依赖/资产、时间分别记录；离线包仅应急。
+4. **任务授权包含部署时**，先列生产影响、备份/预检/切换/验收/回滚与停止条件；Mini 沿用原 `install-github`，安装确认的 main ancestor 完整 SHA 和 exact-commit 四项 CI 成功。复用原组件环境、共享库、配置和凭证，不重复迁移、不复制 Dev .env。
+5. 安装不等于激活；必要一致性数据备份和旧启动入口备份完成后，在已授权范围内连续切换原组件，验收健康/契约/原功能及必要设备场景；失败恢复入口并核对健康。组件 SHA、依赖/资产、时间分别记录；离线包仅应急。
 6. 代码回滚前核对数据/schema兼容性，不盲目覆盖共享 WAL。数据库回滚不能撤销券商已接订单；撤单/重试等 mutation 另行授权。常驻恢复、代理网络、每个数据源和真实成交逐项留证，不从 CI/health 推导全部 PASS。
 
 ## 7. 当前已知限制与技术债
@@ -87,14 +103,14 @@ CI 对 main / codex 分支 push、面向 main 的 PR 及手动 dispatch 运行�
 
 ## 9. 标准开发流程与风险分级
 
-开发前 **需求/非目标 → 能力检索 → 架构影响 → 最小变更方案**：用 Registry 和代码检索已有服务、adapter、模型、API/MCP 和测试；记录 owner、来源/账户/币种/单位/时间/去重、缺口、复用路径、权限及验收。索引没有列出不代表能力不存在。
+开发前按风险做最小准备：L0/L1 明确问题、复现/检索、原 owner、最小改动和定向测试即可；L2/L3 按实际影响补需求/非目标、架构/合同、来源/账户/币种/单位/时间/去重、权限及验收。用 Registry 和代码检索已有服务、adapter、模型、API/MCP 和测试；索引没有列出不代表能力不存在。
 
 | 等级 | 示例与默认工作流 | 验证/人工边界 |
 |---|---|---|
 | L0 文档/规范 | 原文档整合、检查配置，无业务行为改变 | 文档检查/走查与四项 CI；不启动业务/生产；按任务授权 PR 或集成 |
-| L1 局部 Bug/UI | 复现、定位原 owner、最小修复，无需独立架构评审 | 代码 Gate + 对应 smoke/E2E；不因局部修复获得生产权限 |
+| L1 局部 Bug/UI | 复现、定位原 owner、最小修复，无需独立架构评审 | 必要定向测试 + 正常 CI；适用时 smoke/E2E，不因局部修复获得生产写权限 |
 | L2 跨模块/口径/接口 | 列边界、状态/账户、兼容与最小扩展，复用原 owner | 代码 Gate + 合约/完整用户场景；新增平行体系先有架构依据/迁移退出及人工批准 |
-| L3 交易/生产/权限/迁移 | L2 加权限、必要备份、预检/恢复及停止条件 | 原安全/幂等/partial/unknown/恢复验收；真实调用/同步写/启停/恢复/交易分别授权，未做标 runtime-pending |
+| L3 交易/生产/权限/迁移 | L2 加权限、必要备份、预检/恢复及停止条件 | 原安全/幂等/partial/unknown/恢复验收；既有只读调用默认允许；同步写/启停/恢复可任务级一次授权；交易仍独立授权，未做标 runtime-pending |
 
 风险取最敏感路径。开发中执行 AGENTS 的 Reuse First / Minimal Diff / Single Source of Truth / Thin MCP 等硬规则；架构影响按原专项设计或 PR 留可追溯决策，不引入新的大型治理框架。
 
@@ -114,7 +130,7 @@ CI 对 main / codex 分支 push、面向 main 的 PR 及手动 dispatch 运行�
 1. 复核最小 diff/敏感性并精确暂存；执行第 6 节适用 Gate 与完整场景，CI-only 和本地证据分开。
 2. 按上面的 Registry 条件同步文档；其他架构/接口/数据口径变化更新对应现行文档/契约，无变化写 N/A + 原因。
 3. 填[PR 模板](../.github/pull_request_template.md)：问题/结果、复用证据、owner、风险/权限、检查/E2E、文档和未验收项。已确认、推断、UNKNOWN、runtime-pending 分开；无证据不勾选 PASS。
-4. 等最新 HEAD 四项 CI，通过且获合并授权后按第 6 节集成。生产部署必须另有明确授权，不跟随文档/代码合入自动执行。
+4. 等最新 HEAD 四项 CI，通过且任务已授权合并则按第 6 节集成；若任务已明确覆盖部署及必要验收，连续执行，不重复询问。未包含部署授权的不跟随文档/代码合入自动执行。
 
 ### 文档检查与会话验证
 

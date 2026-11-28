@@ -4,7 +4,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from .contracts import canonical
-from .runtime import context, current, diagnose, assets_qualified
+from .runtime import context, current, diagnose, assets_qualified, peer_context, _includes_btc_governance
 from .parser import PolicyError
 
 
@@ -18,12 +18,15 @@ def allocation_context(portfolio_id=None):
 def targets():
     from app.allocation.types import AssetTarget, AllocAssetClass
     c = allocation_context()
-    n = c['targets']['neutral']
-    n = {k: Decimal(v) for k,v in n.items()}
-    weights = {'cash':n['cash'], 'fixed':n['ib01']+n['cbu3'],
-               'equity':n['us_etf']+n['us_direct']+n['china'], 'alt':n['gold']+n['btc'], 'deriv':Decimal(0)}
+    weights = major_targets(c)
     return [AssetTarget(asset_class=AllocAssetClass(k), floor_ratio=float(v), ceiling_ratio=float(v),
                         mid_ratio=float(v),cash_min_amount=None,cash_max_amount=None) for k,v in weights.items()]
+
+
+def major_targets(c):
+    n = {k:Decimal(v) for k,v in c['targets']['neutral'].items()}
+    return {'cash':n['cash'], 'fixed':n['ib01']+n['cbu3'],
+        'equity':n['us_etf']+n['us_direct']+n['china'], 'alt':n['gold']+n['btc'], 'deriv':Decimal(0)}
 
 
 def conditional_plan(amount, portfolio_id=None):
@@ -34,14 +37,17 @@ def conditional_plan(amount, portfolio_id=None):
         discipline_check=DisciplineCheckResult(passed=False, violations=[]))
 
 
-def qualified_bucket(evidence):
+def qualified_bucket(evidence, *, valid_until=None):
     from .store import clock, utc_now
     try:
+        if evidence.as_of is None:
+            return False
+        observed = clock(evidence.as_of)
+        expires = clock(valid_until) if valid_until else observed + timedelta(minutes=5)
         return bool(evidence.value is not None and evidence.value.is_finite()
             and 0 <= evidence.value <= 1 and evidence.complete and evidence.fresh
             and evidence.identity_verified and evidence.denominator_qualified
-            and evidence.as_of is not None
-            and timedelta(0) <= clock(utc_now()) - clock(evidence.as_of) <= timedelta(minutes=5))
+            and observed <= clock(utc_now()) <= expires)
     except PolicyError:
         return False
 
@@ -57,8 +63,11 @@ def deviation(portfolio_id):
         buckets: dict = Field(default_factory=dict)
         risk_diagnostic: dict = Field(default_factory=dict)
         execution_authorized: bool = False
+    risk = diagnose(portfolio_id)
+    if "btc_governance" in c:
+        risk["btc_governance"] = c["btc_governance"]
     if not assets_qualified(session,complete=True):
-        return Diagnostic(status='UNKNOWN',policy_reference=c['policy_reference'],risk_diagnostic=diagnose(portfolio_id))
+        return Diagnostic(status='UNKNOWN',policy_reference=c['policy_reference'],risk_diagnostic=risk)
     rows={}
     for key,evidence in session.assets.bucket_weights.items():
         if key not in c['targets']['neutral'] or not qualified_bucket(evidence):
@@ -67,7 +76,7 @@ def deviation(portfolio_id):
                    'deviation':str(evidence.value-Decimal(c['targets']['neutral'][key])),
                    'action':'INFORMATION_ONLY_NOT_MAJOR_CLASS_TRIGGER'}
     return Diagnostic(status='QUALIFIED_SCOPE_DIAGNOSTIC' if len(rows)==len(c['targets']['neutral']) and sum(Decimal(row['current']) for row in rows.values())==1 else 'UNKNOWN',
-        policy_reference=c['policy_reference'],buckets=rows,risk_diagnostic=diagnose(portfolio_id))
+        policy_reference=c['policy_reference'],buckets=rows,risk_diagnostic=risk)
 
 
 def snapshot(portfolio_id):
@@ -76,6 +85,43 @@ def snapshot(portfolio_id):
     session=current(portfolio_id)
     if not assets_qualified(session,complete=True):
         raise PolicyError('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED')
+    if hasattr(session, 'allocation_amounts'):
+        from app.allocation.types import PolicyAllocationSnapshot
+        from decimal import ROUND_HALF_EVEN
+        weights = session.assets.major_class_weights
+        amounts, desired = session.allocation_amounts, major_targets(c)
+        if set(weights) != set(desired) or any(
+            e.as_of != session.allocation_source['as_of']
+            or not qualified_bucket(e, valid_until=session.allocation_source['expires_at'])
+            for e in weights.values()
+        ):
+            raise PolicyError('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED')
+        if sum(e.value for e in weights.values()) != 1 or sum(amounts.values()) != session.assets.denominator_cny:
+            raise PolicyError('POLICY_ASSET_WEIGHTS_NOT_CLOSED')
+        rows = {}
+        for key, amount in amounts.items():
+            difference = amount - desired[key]*session.assets.denominator_cny
+            rows[key] = {'amount_cny':str(amount), 'current_ratio':str(weights[key].value),
+                'target_ratio':str(desired[key]), 'target_kind':'NEUTRAL_POLICY',
+                'gap_pp':str((weights[key].value-desired[key])*100),
+                'amount_gap_cny':str(difference.quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)),
+                'direction':'OVER' if difference > 0 else 'UNDER' if difference < 0 else 'AT_TARGET'}
+        meta = {**session.allocation_source, 'status':'QUALIFIED_MAJOR_CLASSES',
+            'denominator_cny':str(session.assets.denominator_cny), 'amount_unit':'CNY major decimal',
+            'policy_reference':c['policy_reference'], 'classes':rows,
+            'focus':sorted([k for k in rows if rows[k]['direction']!='AT_TARGET'],
+                key=lambda k:abs(Decimal(rows[k]['gap_pp'])), reverse=True),
+            'risk_status':'NOT_ASSESSED_IN_B2', 'execution_authorized':False}
+        if 'btc_governance' in c:
+            meta['btc_governance'] = c['btc_governance']
+        if hasattr(session, 'allocation_hierarchy'):
+            meta['hierarchy'] = session.allocation_hierarchy
+        if hasattr(session, 'allocation_concentration'):
+            meta['concentration'] = session.allocation_concentration
+        return PolicyAllocationSnapshot(snapshot_at=session.assets.as_of,
+            total_investable_assets=float(session.assets.denominator_cny),
+            by_class={k:ClassAllocation(amount=float(v),ratio=float(weights[k].value)) for k,v in amounts.items()},
+            policy_allocation=meta)
     rows=session.assets.bucket_weights
     if set(rows)!=set(c['targets']['neutral']) or any(not qualified_bucket(e) for e in rows.values()):
         raise PolicyError('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED')
@@ -93,6 +139,9 @@ def discipline_tool(asset_name, portfolio_id):
     value = diagnose(portfolio_id, issuer_symbol=asset_name)
     # Never guess issuer ID from a display name. Source-owner keyed evidence only.
     session = current(portfolio_id)
+    governance = session.context.get("snapshot", {}).get("btc_governance")
+    if governance and _includes_btc_governance("position", asset_name):
+        value["btc_governance"] = governance
     evidence = session.assets.issuer_weights.get(asset_name) if session.assets else None
     weight = float(evidence.value) if evidence and evidence.value is not None else 0.0
     # Stored weight remains only a compatibility field; diagnostic quality carries
@@ -108,32 +157,59 @@ def finalize_output(plan, executed, expressed):
     if session.mode == 'LEGACY':
         return
     session.ensure_current()
-    value = context(plan.portfolio_id,consumer='peer',view='portfolio')
+    loaded = getattr(executed, "loaded_data", None)
+    value = peer_context(plan.portfolio_id, position_only=getattr(plan, "route", None) == "position_single",
+                         loaded=loaded)
     expressed.actionable = False
     expressed.actionable_hint = None
     # Reuse the original evidence-qualified renderer. Arbitrary model prose and
     # action fields are never a qualified policy output, regardless of spelling.
-    from backend.services.market_data.output_policy import _explanations_with_trace, render_explanation, facts_only_result
+    from backend.services.market_data.output_policy import _explanations_with_trace, render_explanation, facts_only_result, _evidence_index
     from .store import clock, utc_now
     assessments = ([executed.position_evidence] if getattr(executed,'position_evidence',None)
                    else list(getattr(executed,'portfolio_evidence',[]) or []))
-    combined={'records':[r for a in assessments for r in a.get('records',[])],
-              'verified_field_records':[r for a in assessments for r in a.get('verified_field_records',[])]}
+    # Resolve each complete owner assessment before combining. Derived metrics
+    # require its symbol, periods and publication proofs; flattening first loses them.
+    combined = {'records': [record for assessment in assessments
+                            for record in _evidence_index(assessment).values()]}
     explanation_input=SimpleNamespace(structured_payload=expressed.structured_payload or {},
+        explanation_diagnostics=getattr(expressed,"explanation_diagnostics",{}),
         llm_result=getattr(expressed,'llm_result',None),raw_text=getattr(expressed,'raw_text',''))
     explanations, diagnostics = _explanations_with_trace(explanation_input,combined)
+    expressed.explanation_diagnostics = diagnostics
+    research_run = getattr(expressed, "research_v2", None)
+    fresh_position = None
     fact_text=[]
+    conditional_results=[]
     for assessment in assessments:
-        retained=facts_only_result(assessment,at=clock(utc_now()))
+        retained=facts_only_result(assessment,at=clock(utc_now()),professional_delivered=bool(explanations) and research_run is None,
+            compact=getattr(executed,'analysis_mode','')=='l1_research')
         if retained:
             fact_text.append(retained[2])
+            if research_run is not None and len(assessments) == 1:
+                fresh_position = retained[0]
+            if retained[0].get('conditional_valuation'):
+                conditional_results.append(retained[0]['conditional_valuation'])
+    research_text = ''
+    if research_run is not None:
+        from backend.services.market_data.output_policy import project_research_v2
+        # Qualify all typed claims against the retained, freshly verified facts.
+        explanations, diagnostics, research_text = project_research_v2(expressed, fresh_position or {})
+        conditional = expressed.research_v2_final['conditional_valuation']
+        conditional_results = [conditional] if conditional else []
     expressed.structured_payload = {'mode':'policy_qualified_research','policy_context':value,
         'policy_reference':value.get('policy_reference'), 'execution_authorized':False,
-        'professional_explanation':explanations,'explanationDiagnostics':diagnostics,'policy_precision':'CANNOT_QUANTIFY'}
+        'professional_explanation':explanations,'explanationDiagnostics':diagnostics,
+        'conditionalValuation':conditional_results[0] if len(conditional_results)==1 else None,
+        'conditionalValuations':[{'symbol':r.get('symbol'),'result':r} for r in conditional_results],
+        'research_delivery_status':'DELIVERED' if explanations else 'INCOMPLETE',
+        'policy_precision':'CANNOT_QUANTIFY'}
     expressed.chat_answer = ('\n\n'.join(fact_text) if fact_text else '当前未取得足够的可核验经营/技术事实；以下保留政策条件及UNKNOWN，不提供精确交易数量或金额。')
-    expressed.chat_answer += render_explanation(explanations)
+    if research_text:
+        expressed.chat_answer = research_text
+    else:
+        expressed.chat_answer += render_explanation(explanations)
     expressed.raw_text=''
-    loaded = getattr(executed,'loaded_data',None)
     if loaded:
         loaded.policy_context = value
     ref = value.get('policy_reference') or {}

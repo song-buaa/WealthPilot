@@ -93,10 +93,34 @@ def create_app(config, static_dir, *, factory=None):
     # Same fixed-scope read owner as full Web; no discipline write routes.
     app.add_api_route("/api/discipline/policy-context", get_policy_context, methods=["GET"])
 
+    @app.get('/api/allocation/snapshot')
+    def allocation_snapshot(snapshot_id: str | None = None):
+        # Reuse the original B1/B2 handler, expose no other allocation methods.
+        # The generic restricted middleware returns 503 for legacy routes;
+        # this API's unknown-program-error contract specifically remains 500.
+        from backend.api.allocation import api_snapshot
+        try:
+            return api_snapshot(snapshot_id)
+        except HTTPException:
+            raise
+        except Exception:
+            logging.getLogger('restricted-web-lifecycle').error('allocation_snapshot_unexpected_error')
+            return JSONResponse({'detail':'INTERNAL_SERVER_ERROR'}, status_code=500)
+
     @app.get("/api/allocation/targets")
     def targets():
         from backend.services.allocation_service import get_targets
         return [t.model_dump() for t in get_targets()]
+
+    from backend.services.investment_thesis.portfolio_access import portfolio_capabilities, production_enabled
+    if production_enabled() and portfolio_capabilities() and os.environ.get("WEALTHPILOT_E1_DB_PATH"):
+        from backend.api.allocation import api_simulate_transition
+        from backend.api.portfolio_governance import router as governance_router
+
+        app.state.portfolio_governance_scope = contract["portfolio_id"]
+        app.include_router(governance_router, prefix="/api/allocation")
+        if "preview" in portfolio_capabilities():
+            app.add_api_route("/api/allocation/simulate-transition", api_simulate_transition, methods=["POST"])
 
     app.add_api_route("/api/broker-sync/status", executor.status, methods=["GET"])
 

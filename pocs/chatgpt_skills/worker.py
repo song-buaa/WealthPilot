@@ -20,7 +20,14 @@ from app.llm_observation import safe_metadata, run_id
 from app.analysis_runtime import policy, budget_context, ENV_KEYS as TIME_ENV_KEYS
 from pocs.chatgpt_skills.diagnostics import ANALYSIS_OPERATIONS, diagnostic, milliseconds
 from app.asset_views import ERRORS as ASSET_ERRORS
-SAFE_ERRORS |= ASSET_ERRORS
+from backend.services.investment_thesis.portfolio_sources import PORTFOLIO_SOURCE_ERRORS
+SAFE_ERRORS |= ASSET_ERRORS | PORTFOLIO_SOURCE_ERRORS | {
+    "E1_PORTFOLIO_ORDER_LINK_OUTSIDE_PLAN", "E1_PORTFOLIO_NEWER_SNAPSHOT_REQUIRED",
+    "E1_PORTFOLIO_DECISION_NOT_FOUND", "E1_PORTFOLIO_SCENARIO_ARCHIVE_MISMATCH", "E1_RECORD_NOT_FOUND",
+}
+from backend.services.allocation_scenarios import TRANSITION_REJECTION_CODES
+SAFE_ERRORS |= TRANSITION_REJECTION_CODES | {"POLICY_VERSION_CONFLICT", "POLICY_CONTEXT_UNAVAILABLE",
+                                             "CONCENTRATION_POLICY_BINDING_MISMATCH"}
 from backend.services.portfolio_history.sources import ERRORS as HISTORY_ERRORS
 SAFE_ERRORS |= HISTORY_ERRORS
 SAFE_ERRORS |= {"S3_RESEARCH_UNAVAILABLE", "S3_ARTIFACT_UNAVAILABLE", "S3_ARCHIVE_INVALID", "S3_SYNTHETIC_SOURCE_REQUIRED"}
@@ -30,6 +37,7 @@ SAFE_ERRORS |= {"S3_RESEARCH_UNAVAILABLE", "S3_ARTIFACT_UNAVAILABLE", "S3_ARCHIV
 MODEL_ENV_KEYS = {"WEALTHPILOT_LLM_PROFILE", "WEALTHPILOT_LLM_MAIN_MODEL",
                   "WEALTHPILOT_LLM_LIGHT_MODEL", "WEALTHPILOT_LLM_MAIN_EFFORT",
                   "WEALTHPILOT_LLM_LIGHT_EFFORT"}
+OWNER_EVIDENCE_ENV_KEY = "WEALTHPILOT_INVESTABLE_EVIDENCE_FILE"
 
 
 def load_analysis_environment(path, *, model_policy_only=False, sec_identity_only=False):
@@ -57,9 +65,12 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
         "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
+        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL",
+        OWNER_EVIDENCE_ENV_KEY}
     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
-    allowed = allowed | POLICY_ENV_KEYS
+    allowed = allowed | POLICY_ENV_KEYS | {"TIKTOKEN_CACHE_DIR"}
+    if "TIKTOKEN_CACHE_DIR" in values and not isinstance(values["TIKTOKEN_CACHE_DIR"],str):
+        raise ValueError("ANALYSIS_CONFIGURATION_INVALID")
     if not model_policy_only:
         from backend.services.market_data.av_fundamentals_service import AV_KEY_NAMES
         if any(key in values for key in AV_KEY_NAMES):
@@ -68,7 +79,7 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
             for key in AV_KEY_NAMES:
                 os.environ.pop(key, None)
     if not model_policy_only:
-        from research_v2.sec_disclosures import SEC_IDENTITY_KEYS
+        from research_v2.sec_identity import SEC_IDENTITY_KEYS
         # This operator file owns the SEC identity; removing its keys also
         # disables a previously loaded identity in a persistent worker.
         for key in SEC_IDENTITY_KEYS:
@@ -157,7 +168,8 @@ def pool_worker(args):
                 from backend.services.decision_service_v3 import run_company_pool_research
                 result = run_company_pool_research(arguments, archive_root=args.s3_archive_root,
                     source_root=args.s3_source_root, reuse_sources=args.s3_reuse_sources,
-                    synthetic=args.synthetic_input)
+                    synthetic=args.synthetic_input, **({'portfolio_id': args.portfolio_id}
+                        if arguments.get('scope') == 'active_us_direct' else {}))
         response = dict(ok=True, result=result)
     except Exception as error:
         code = str(error) if str(error) in SAFE_ERRORS else (
@@ -237,9 +249,53 @@ def main():
                     progress(phase)
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     if operation == 'get_investment_policy_context':
-                        from backend.services.investment_policy.runtime import context
-                        result = context(config['portfolio_id'] if config else args.portfolio_id,consumer='mcp',
-                            view=a.get('scope','portfolio'),symbol=a.get('symbol'))
+                        from backend.services.investment_policy.runtime import bind, context, current
+                        portfolio_id = config['portfolio_id'] if config else args.portfolio_id
+                        with bind(current(portfolio_id)):
+                            result = context(portfolio_id, consumer='mcp', view=a.get('scope','portfolio'), symbol=a.get('symbol'))
+                            if a.get('snapshot_id'):
+                                if a.get('scope') != 'risk' or a.get('symbol') is not None:
+                                    raise ValueError('POLICY_RISK_SNAPSHOT_SCOPE_REQUIRED')
+                                from backend.services.allocation_service import read_frozen_concentration
+                                result['concentration'] = read_frozen_concentration(
+                                    config['database_path'] if config else path, portfolio_id, a['snapshot_id'],
+                                    config.get('database_contract_path') if config else None)
+                    elif operation == "portfolio_reconciliation":
+                        from backend.services.investment_thesis.portfolio_access import production_enabled, require_portfolio_access
+                        from backend.services.investment_thesis.reconciliation import reconcile_portfolio
+                        from backend.services.investment_thesis.reconciliation_contract import ReconciliationRequest
+                        from backend.services.investment_thesis.store import ThesisStore
+
+                        require_portfolio_access("read")
+                        if production_enabled() and (not args.real_config or args.mock_database):
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        if not config or config.get("portfolio_id") != args.portfolio_id:
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        e1 = ThesisStore(os.environ.get("WEALTHPILOT_E1_DB_PATH"), args.portfolio_id)
+                        result = reconcile_portfolio(e1, config["database_path"],
+                            ReconciliationRequest.model_validate(a), config.get("database_contract_path"))
+                    elif operation == "portfolio_governance_sources":
+                        from backend.services.investment_thesis.portfolio_access import production_enabled, require_portfolio_access
+                        from backend.services.investment_thesis.portfolio_contracts import PortfolioPreviewRequest, PortfolioSourceRequest
+                        from backend.services.investment_thesis.portfolio_sources import read_portfolio_sources
+
+                        require_portfolio_access("preview" if "items" in a else "read")
+                        if production_enabled() and (not args.real_config or args.mock_database):
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        if not config:
+                            raise ValueError("ASSET_VIEW_NOT_READY")
+                        if config.get("portfolio_id") != args.portfolio_id:
+                            raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                        request_type = PortfolioPreviewRequest if "items" in a else PortfolioSourceRequest
+                        result = read_portfolio_sources(config["database_path"], config["portfolio_id"],
+                            request_type.model_validate(a), config.get("database_contract_path"))
+                    elif operation == "simulate_portfolio_transition":
+                        from backend.services.allocation_service import read_frozen_transition
+                        from backend.services.allocation_scenarios import TransitionRequest
+                        if not config:
+                            raise ValueError("ASSET_VIEW_NOT_READY")
+                        result = read_frozen_transition(config["database_path"], config["portfolio_id"],
+                            TransitionRequest.model_validate(a), config.get("database_contract_path"))
                     elif operation == "capture_asset_view" and args.frozen_database:
                         from pocs.chatgpt_skills.asset_view import capture
                         import socket
@@ -279,6 +335,15 @@ def main():
                                     synthetic=args.synthetic_input or config is None, worker_process=True,
                                     _analysis_run_id=request.get("analysis_run_id"), async_l1=args.single_analysis,
                                     deadline_monotonic=request.get("analysis_deadline_monotonic") if args.single_analysis else None)
+                            if operation == 'review_portfolio' and value.get('status') != 'unavailable':
+                                selected = value.get('snapshot_id')
+                                reference = value.get('scope', {}).get('policy_reference')
+                                if selected and selected == a.get('snapshot_id') and reference:
+                                    from backend.services.allocation_service import read_frozen_concentration
+                                    value.setdefault('evidence', {})['concentration'] = read_frozen_concentration(
+                                        config['database_path'] if config else path,
+                                        config['portfolio_id'] if config else args.portfolio_id, selected,
+                                        config.get('database_contract_path') if config else None, expected_policy=reference)
                             if args.single_analysis:
                                 result=value
                                 phase="result_serialization"

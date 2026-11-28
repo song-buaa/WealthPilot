@@ -7,6 +7,7 @@ Unsupported layouts/periods remain unknown. No persistence or asset operations.
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
+import calendar
 import hashlib
 import re
 from urllib.parse import urlsplit, urljoin
@@ -15,6 +16,72 @@ import urllib.request
 from bs4 import BeautifulSoup
 
 IR_INDEX = 'https://ir.lixiang.com/news/'
+# Bounded opt-in public research context. These are not financial-fact parsers
+# or a historical publication clock. A live page is known only when captured.
+RESEARCH_CONTEXT_URLS = {
+    '0000320193': 'https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/',
+    '0000789019': 'https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1',
+    '0001045810': 'https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-Announces-Financial-Results-for-Second-Quarter-Fiscal-2027/',
+}
+
+
+def research_context_fingerprint(body, cik):
+    """Visible reviewed article/transcript only; never extracts financial facts."""
+    selectors = {'0000320193': ('article.article', 'Services'),
+                 '0000789019': ('div.cmp-text', 'JONATHAN NEILSON:'),
+                 '0001045810': ('div.module_body', 'Revenue is expected')}
+    try:
+        selector, marker = selectors[str(int(cik)).zfill(10)]
+        soup = BeautifulSoup(body, 'html.parser')
+        for node in soup.select('script,style,noscript'):
+            node.decompose()
+        texts = [re.sub(r'\s+', ' ', n.get_text(' ', strip=True)).strip()
+                 for n in soup.select(selector) if marker in n.get_text(' ', strip=True)]
+        if len(texts) != 1 or len(texts[0]) < 1000:
+            raise ValueError()
+        return hashlib.sha256(texts[0].encode()).hexdigest()
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('ISSUER_RESEARCH_CONTEXT_LAYOUT_REQUIRES_REVIEW') from None
+
+
+def fetch_current_issuer_context(cik):
+    """Bounded explicit opt-in fetch from the same issuer context allowlist."""
+    url = RESEARCH_CONTEXT_URLS[str(int(cik)).zfill(10)]
+    request = urllib.request.Request(url, headers={'User-Agent': 'WealthPilotResearch/1.0'})
+    with urllib.request.build_opener(_NoRedirect()).open(request, timeout=20) as response:
+        body = response.read(8*1024*1024+1)
+        if response.status != 200 or response.geturl() != url or len(body) > 8*1024*1024:
+            raise ValueError('ISSUER_RESEARCH_CONTEXT_FETCH_REJECTED')
+        return body, dict(url=url, final_url=response.geturl(), http_status=200,
+            fetched_at=datetime.now(timezone.utc).isoformat(), sha256=hashlib.sha256(body).hexdigest(),
+            owner='ISSUER_IR_RESEARCH_CONTEXT_NOT_GAAP')
+
+
+def verify_current_issuer_context(body, receipt, issuer, decision_at):
+    """Explicit original-issuer page, byte hash and capture clock only.
+
+    Human-checked statements/guidance remain research context. No metric is
+    promoted to GAAP, no page date is used to backdate a mutable web page.
+    """
+    try:
+        cik = str(int(issuer['cik'])).zfill(10)
+        fetched = datetime.fromisoformat(receipt['fetched_at'].replace('Z', '+00:00'))
+        cutoff = datetime.fromisoformat(str(decision_at).replace('Z', '+00:00'))
+        if (receipt['url'] != RESEARCH_CONTEXT_URLS.get(cik)
+                or receipt.get('http_status') != 200
+                or receipt.get('final_url') != receipt['url']
+                or receipt.get('owner') != 'ISSUER_IR_RESEARCH_CONTEXT_NOT_GAAP'
+                or not isinstance(body, bytes) or not 1000 <= len(body) <= 8*1024*1024
+                or hashlib.sha256(body).hexdigest() != receipt['sha256']
+                or fetched.tzinfo is None or cutoff.tzinfo is None or fetched > cutoff):
+            raise ValueError()
+        return dict(source_ref=receipt['url'], source_sha256=receipt['sha256'],
+                    fetched_at=fetched.isoformat(), known_at=fetched.isoformat(),
+                    publication_clock='UNKNOWN_MUTABLE_PAGE_CAPTURE_CLOCK_ONLY',
+                    rule_version='official.current-research-context.v1', cik=cik)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise ValueError('ISSUER_RESEARCH_CONTEXT_REJECTED') from None
+
 MAX_BYTES = 2 * 1024 * 1024
 LABELS = {
     'revenues': ('totalRevenue', 'total_revenue'),
@@ -249,6 +316,42 @@ def _column_currency(value):
     match=re.fullmatch(r'(?:(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}\s+)?'
                        r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
     return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
+
+
+def parse_monthly_vehicle_delivery(soup, published, issuer_name):
+    """A single explicitly dated issuer monthly count, never a quarterly proxy."""
+    text=' '.join(soup.stripped_strings)
+    if not isinstance(issuer_name,str) or issuer_name.lower() not in text[:1000].lower():
+        return []
+    named=re.sub(r'\s+Inc\.?$', '', issuer_name, flags=re.I)
+    month=r'(January|February|March|April|May|June|July|August|September|October|November|December)'
+    named_pattern=re.escape(named)
+    patterns=[
+        named_pattern+r'\s+delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+        r'In\s+'+month+r'\s+(20\d{2}),\s*'+named_pattern+r'\s+delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\b',
+        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),\s*(?:a [^,;.!?]{1,160},\s*)?today announced that it delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+    ]
+    matches=[]
+    for index,pattern in enumerate(patterns):
+        for match in re.finditer(pattern,text,re.I):
+            groups=match.groups()
+            amount,month_name,year=(groups[2],groups[0],groups[1]) if index==1 else groups
+            matches.append((amount,month_name,year,match.group(0)))
+    matches=list({(item[0].replace(',', ''),item[1].lower(),item[2]):item for item in matches}.values())
+    if len(matches)!=1:
+        return []
+    match=matches[0]
+    year=int(match[2]);month=list(calendar.month_name).index(match[1].title())
+    value=_amount(match[0]);end=datetime(year,month,calendar.monthrange(year,month)[1]).date()
+    try:
+        if value is None or value<=0 or end>datetime.fromisoformat(str(published).replace('Z','+00:00')).date():
+            return []
+    except (TypeError,ValueError):
+        return []
+    return [dict(source_field='vehicleDeliveries',accounting_basis='vehicle_deliveries',
+        period_basis='monthly',fiscal_period_start=f'{year:04d}-{month:02d}-01',
+        fiscal_period_end=end.isoformat(),currency=None,unit='vehicles',unit_scale=1,value=float(value),
+        source_locator='issuer delivery update / '+match[3])]
 
 
 def parse_vehicle_operating(soup, published):
@@ -486,23 +589,41 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
     result=[]
     for ti,table in enumerate(soup.find_all('table')):
         nearby=[]
+        heading_labels=[]
         for node in table.previous_elements:
             if getattr(node,'name',None)=='table':
                 break
             if isinstance(node,NavigableString):
                 value=' '.join(str(node).split())
                 if value:
+                    title=node.find_parent(['h1','h2','h3','h4','h5','h6','caption'])
+                    if title:
+                        heading_labels.append(title.get_text(' ',strip=True))
                     nearby.append(value)
                     if len(nearby)>=8:
                         break
         heading=' '.join(reversed(nearby))
-        if (not re.search(r'\b(?:condensed )?consolidated statements of (?:operations|income)\b',heading,re.I)
-                or not re.search(r'\bexcept\b.{0,70}\bper[ -]?share\b',heading,re.I)
-                or re.search(r'non[ -]?gaap|reconciliation',heading,re.I)):
-            continue
         try:
             rows=_grid(table)
         except ValueError:
+            continue
+        # Statement titles/units may be table rows (META), or a separate
+        # immediately preceding INCOME STATEMENTS heading (MSFT). Only the
+        # bounded statement header supplies qualification, not earlier prose.
+        title_pattern=r'\b(?:condensed )?(?:consolidated statements of (?:operations|income)|income statements)\b'
+        inside=' '.join(' '.join(dict.fromkeys(row)) for row in rows[:5])
+        if re.search(title_pattern,inside,re.I):
+            # An in-table title cannot override an explicit nearby adjusted
+            # statement/reconciliation label. Long narrative disclaimers before
+            # the separately titled statement do not label this table.
+            if (any(re.search(r'non[ -]?gaap|reconciliation|\badjusted\b',text,re.I) for text in heading_labels)
+                    or any(re.fullmatch(r'(?:non[ -]?gaap(?:\s+reconciliation)?|reconciliation(?:\s+of\s+.*)?|(?:non[ -]?gaap|adjusted)\s+.*(?:statements|results|income))',text,re.I)
+                           for text in nearby)):
+                continue
+            heading=inside
+        if (not re.search(title_pattern,heading,re.I)
+                or not re.search(r'\bexcept\b.{0,70}\bper[ -]?share\b',heading,re.I)
+                or re.search(r'non[ -]?gaap|reconciliation',heading,re.I)):
             continue
         for ri,row in enumerate(rows):
             label=next((v.strip().lower().rstrip(':') for v in row if v.strip()),'')
@@ -515,7 +636,10 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
                 candidates={}
                 for col in range(1,len(diluted)):
                     value=_cell_amount(rows,di,col)
-                    if value is None or col==0 or rows[di][col-1].strip()!='$':
+                    dollar_in_cell=bool(re.fullmatch(r'\$\s*\d+(?:\.\d+)?',rows[di][col].strip()))
+                    if dollar_in_cell:
+                        value=_amount(rows[di][col].strip()[1:].strip())
+                    if value is None or col==0 or not (rows[di][col-1].strip()=='$' or dollar_in_cell):
                         continue
                     header=_column_header(rows,di,col)
                     dates=re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2}',header,re.I)
@@ -543,6 +667,120 @@ def parse_us_gaap_diluted_eps(soup, published, period_context):
                         annual_eps_corroboration=float(annual[0][0]),
                         source_locator=f'table[{ti}]/row[{di}]/column[{col}]/GAAP diluted EPS'))
                 break
+    return result
+
+
+def parse_tesla_summary_eps(soup, period_context):
+    """Read the declared financial summary's explicit GAAP row and Q4 column."""
+    if soup.find('table'):
+        return []
+    body = ' '.join(' '.join(soup.stripped_strings).split())
+    headers = list(re.finditer(
+        r'F I N A N C I A L S U M M A R Y \(Unaudited\) '
+        r'\(\$ in millions, except percentages and per share data\) '
+        r'Q4-(20\d{2}) Q1-(20\d{2}) Q2-\2 Q3-\2 Q4-\2 YoY Total automotive revenues',
+        body,
+    ))
+    if len(headers) != 1:
+        return []
+    header = headers[0]
+    if int(header[1]) + 1 != int(header[2]):
+        return []
+    end = header[2] + '-12-31'
+    proof = period_context.get(end)
+    if not proof or proof['start'] != header[2] + '-10-01':
+        return []
+    rows = re.findall(
+        r'EPS attributable to common stockholders, diluted \(GAAP\) \(1\) '
+        r'((?:-?\d+\.\d{2} ){5})-?\d+% EPS attributable to common stockholders, diluted \(non-GAAP\)',
+        body[header.end():].split('Net cash provided by operating activities', 1)[0],
+    )
+    if len(rows) != 1:
+        return []
+    return [dict(source_field='dilutedEPSOrdinary', value=float(Decimal(rows[0].split()[4])),
+        currency='USD', unit='currency_per_ordinary_share', unit_scale=1, period_basis='quarterly',
+        fiscal_period_start=proof['start'], fiscal_period_end=end, accounting_basis='diluted_eps_ordinary',
+        period_start_source_refs=[proof['prior_ref'], proof['annual_ref']],
+        proof_available_at=proof['proof_available_at'],
+        source_locator='Financial summary/GAAP diluted common-stockholder EPS/Q4 column')]
+
+
+def parse_nvidia_supplement(soup, periods):
+    """Read independently bounded three-month columns in two exact statements."""
+    from bs4 import NavigableString
+    result = []
+    income = 'CONDENSED CONSOLIDATED STATEMENTS OF INCOME'
+    cash = 'CONDENSED CONSOLIDATED STATEMENTS OF CASH FLOWS'
+    for ti, table in enumerate(soup.find_all('table')):
+        try:
+            rows = _grid(table)
+        except ValueError:
+            continue
+        labels = [next((v.strip() for v in row if v.strip()), '') for row in rows]
+        prior = []
+        for node in table.previous_elements:
+            if getattr(node, 'name', None) == 'table':
+                break
+            if isinstance(node, NavigableString) and str(node).strip():
+                prior.append(' '.join(str(node).split()))
+                if len(prior) == 3:
+                    break
+        statement = (income if prior == ['(Unaudited)', '(In millions, except per share data)', income]
+                     else cash if labels[:5] == ['', '', cash, '(In millions)', '(Unaudited)']
+                     else None)
+        if not statement:
+            continue
+        boundary = next((i for i, label in enumerate(labels) if label == 'Three Months Ended'), None)
+        if boundary is None or boundary + 3 >= len(rows):
+            continue
+        header_end = boundary + 3
+        dollar_row = 'Revenue' if statement == income else 'Net income'
+        anchors = [row for row, label in zip(rows, labels) if label == dollar_row]
+        if len(anchors) != 1:
+            continue
+        heading = None
+        for ri in range(header_end, len(rows)):
+            label = labels[ri]
+            if label.endswith(':'):
+                heading = label
+            fields = {
+                'Revenue': [('totalRevenue', 'total_revenue'), ('quality_revenue', 'total_revenue')],
+                'Operating income': [('operatingIncome', 'operating_income'), ('quality_operating_income', 'operating_income')],
+                'Net income': [('netIncome', 'consolidated_net_income')],
+            } if statement == income else {
+                'Net cash provided by operating activities': [('operatingCashflow', 'operating_cash_flow'), ('quality_cfo', 'operating_cash_flow')],
+                'Purchases related to property and equipment and intangible assets': [
+                    ('quality_combined_acquisitions', 'signed_property_equipment_and_intangible_purchases')],
+            }
+            if statement == income and label == 'Diluted':
+                fields = {'Diluted': [('dilutedEPSOrdinary', 'diluted_eps_ordinary')]} if heading == 'Net income per share:' else (
+                    {'Diluted': [('quality_diluted_shares', 'weighted_diluted_shares')]}
+                    if heading == 'Weighted average shares used in per share computation:' else {})
+            for key, basis in fields.get(label, []):
+                for col in range(1, min(len(rows[ri]), len(anchors[0]))):
+                    # The anchor identifies numeric columns when colspan repeats a number.
+                    if anchors[0][col-1] != '$' or _amount(anchors[0][col]) is None:
+                        continue
+                    header = _column_header(rows[boundary:header_end], header_end-boundary, col).strip()
+                    match = re.fullmatch(r'(Three|Nine) Months Ended ([A-Za-z]+ \d{1,2},\s+20\d{2})', header)
+                    if not match:
+                        continue
+                    end = _date(match[2])
+                    scope = 'quarterly' if match[1] == 'Three' else 'year_to_date'
+                    proof = periods.get((end, scope))
+                    if not proof or (scope != 'quarterly' and not key.startswith('quality_')):
+                        continue
+                    value = _amount(rows[ri][col])
+                    if value is None or (key == 'quality_combined_acquisitions' and value > 0):
+                        continue
+                    eps, shares = key == 'dilutedEPSOrdinary', key == 'quality_diluted_shares'
+                    result.append(dict(source_field=key, value=float(value),
+                        currency=None if shares else 'USD',
+                        unit='shares' if shares else 'currency_per_ordinary_share' if eps else 'currency_units',
+                        unit_scale=1 if eps else 1000000, period_basis=scope,
+                        fiscal_period_start=proof['start'], fiscal_period_end=end, accounting_basis=basis,
+                        period_start_source_refs=[proof['ref']], proof_available_at=proof['at'],
+                        source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{label}'))
     return result
 
 
@@ -661,3 +899,95 @@ def collect(symbol, candidates=()):
     ir_rows, _ = _collect_li(symbol, candidates)
     rows = [*sec_rows, *ir_rows]
     return rows, {r['record_id']:deepcopy(r) for r in rows}.get
+
+
+def collect_current(symbol, candidates=(), *, at=None, frozen_fetch=None, frozen_vendor=None):
+    """Production L1/current S3 source entry. Historical callers retain collect()."""
+    from research_v2.sec_disclosures import collect as collect_sec
+    if frozen_fetch is not None and frozen_vendor is None:
+        raise ValueError('CURRENT_FROZEN_TRANSPORT_INCOMPLETE')
+    current = dict(capture=frozen_vendor, at=at, frozen_fetch=frozen_fetch)
+    sec_rows, _ = collect_sec(symbol, current=current)
+    ir_rows, _ = _collect_li(symbol, candidates) if frozen_fetch is None else ([], None)
+    rows = [*sec_rows, *ir_rows]
+    receipt = current.get('result')
+    if receipt is not None:
+        receipt['av_endpoints'] = {key:value['diagnostics'] for key,value in (current['capture'] or {}).items()}
+    return rows, {r['record_id']:deepcopy(r) for r in rows}.get, receipt
+
+
+def parse_valuation_statement_inputs(soup, published):
+    """Exact balance labels/dated columns and weighted shares in GAAP exhibits.
+
+    No ticker branches, assumed zeros, balance-sheet date from release headline,
+    or substitution of weighted shares for point-in-time shares outstanding.
+    """
+    from research_v2.sec_disclosures import QUALITY_CONCEPTS
+    bases = dict(QUALITY_CONCEPTS.values())
+    labels = {'cash and cash equivalents':'quality_cash', 'restricted cash':'quality_restricted_cash',
+        'time deposits and short-term investments':'quality_deposits_investments',
+        'short-term borrowings':'quality_current_debt', 'long-term borrowings':'quality_noncurrent_debt',
+        'total assets':'quality_assets', 'total liabilities':'quality_liabilities',
+        'total current assets':'quality_current_assets','total current liabilities':'quality_current_liabilities',
+        'total shareholders’ equity':'quality_total_equity', 'total shareholders\' equity':'quality_total_equity', 'noncontrolling interests':'quality_noncontrolling'}
+    result=[]
+    # Only a standalone current footnote or an exact GAAP EPS row can prove
+    # the ratio. A historical/changed/negated mention elsewhere is not authority.
+    nums={'one':1,'two':2,'three':3,'four':4,'five':5,'ten':10}
+    ratios=set()
+    for node in soup.find_all(['p','div']):
+        match=re.fullmatch(r'(?:[0-9]+\s*)?Each ADS represents (\d+|one|two|three|four|five|ten) Class A ordinary shares\.?',node.get_text(' ',strip=True),re.I)
+        if match:ratios.add(nums.get(match[1].lower(),int(match[1]) if match[1].isdigit() else None))
+    for ti,table in enumerate(soup.find_all('table')):
+        try:rows=_grid(table)
+        except ValueError:continue
+        context=_table_context(table);head=(context+' '+' '.join(' '.join(r) for r in rows[:2])).lower()
+        if re.search(r'non-gaap|reconciliation',head):continue
+        balance=bool(re.search(r'consolidated balance sheets',head))
+        income=_statement_kind(rows,context)=='income'
+        if not balance and not income:continue
+        scales=[scale for label,scale in [('thousands',1000),('millions',1000000)] if re.search(r'in '+label,head)]
+        if len(scales)!=1:continue
+        table_ratios=set(ratios)
+        if income:
+            for row in rows:
+                match=re.fullmatch(r'Earnings per ADS \((\d+) ordinary shares equals 1 ADS\):?',row[0].strip(),re.I) if row else None
+                if match:table_ratios.add(int(match[1]))
+        group=None;group_scale=None
+        for ri,row in enumerate(rows):
+            if not row:continue
+            label=row[0].strip().lower().rstrip(':')
+            if income and re.fullmatch(r'weighted[- ]average (?:number of )?ordinary shares(?: outstanding)?(?: \(in (?:thousands|millions)\))?',label):
+                group='quality_diluted_shares'
+                group_scale=1000000 if '(in millions)' in label else 1000 if '(in thousands)' in label else 1 if 'except for ads/ordinary share' in head else None
+            elif income and re.fullmatch(r'weighted[- ]average (?:number of )?adss?',label):
+                group='quality_diluted_ads_shares';group_scale=1 if 'except for ads/ordinary share' in head else None
+            elif income and label and label not in {'basic','diluted','-basic','-diluted'}:group=None
+            # Parent equity needs an exact taxonomy concept or verified issuer
+            # label, not a wildcard that also matches liabilities/NCI/preferred.
+            field=labels.get(label) if balance else group if label in {'diluted','-diluted'} else None
+            if not field:continue
+            for col in range(1,len(row)):
+                header=_column_header(rows,ri,col)
+                dates=set(re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+20\d{2}',header))
+                if len(dates)!=1:continue
+                end=datetime.strptime(next(iter(dates)).replace(',',''),'%B %d %Y').date().isoformat()
+                if end>published[:10]:continue
+                currencies={_column_currency(v) for r in rows[:ri] for v in ([r[col]] if col<len(r) else [])} - {None}
+                if len(currencies)!=1:continue
+                currency=next(iter(currencies))
+                if currency!='CNY':continue  # Explicit reporting RMB only; convenience USD is not a second fact.
+                value=_cell_amount(rows,ri,col)
+                if value is None or not value.is_finite() or value<0:continue
+                start=_calendar_quarter_start(header,end) if income else None
+                if income and (not start or group_scale is None):continue
+                result.append(dict(source_field=field,value=float(value),currency=None if income else currency,
+                    unit='shares' if income else 'currency_units',unit_scale=group_scale if income else scales[0],
+                    period_basis='quarterly' if income else 'instant',fiscal_period_start=start,fiscal_period_end=end,
+                    currency_role='reporting_currency' if balance else None,accounting_basis=bases[field],source_locator=f'table[{ti}]/row[{ri}]/column[{col}]/{row[0]}'))
+                if income and len(table_ratios)==1 and next(iter(table_ratios)):
+                    result.append(dict(source_field='quality_ads_ratio',value=next(iter(table_ratios)),currency=None,
+                        unit='ordinary_shares_per_ads',unit_scale=1,period_basis='instant',fiscal_period_start=None,
+                        fiscal_period_end=published[:10],accounting_basis=bases['quality_ads_ratio'],
+                        source_locator=f'table[{ti}]/column[{col}]; original explicit ADS/ordinary share statement'))
+    return result

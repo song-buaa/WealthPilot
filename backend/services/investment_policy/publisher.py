@@ -11,6 +11,8 @@ def publish_synthetic(store, *, scope, bundle_id, expected_sequence, request_id,
         raise PolicyError('SYNTHETIC_RELEASE_REQUEST_INVALID')
     with store.connection(write=True) as db:
         bundle = store._bundle(db,scope,bundle_id)
+        if bundle["snapshot"]["schema_version"] != "wp.policy.v1":
+            raise PolicyError("VERSIONED_SCOPE_REQUIRES_FORMAL_RELEASE")
         source = db.execute('SELECT philosophy,policy FROM policy_bundles WHERE scope=? AND bundle_id=?',(scope,bundle_id)).fetchone()
         if not all(bytes(source[k]).startswith(b'# SYNTHETIC ONLY') for k in ('philosophy','policy')):
             raise PolicyError('REAL_POLICY_ACTIVATION_FORBIDDEN')

@@ -49,9 +49,15 @@ class PolicyService:
                     raise PolicyError("POLICY_VERSION_MISMATCH_OR_STALE_REFERENCE")
                 ref = PolicyReference(bundle_id=value["bundle_id"], bundle_version=value["bundle_version"],
                     bundle_sha256=bundle_sha, structured_sha256=value["structured_sha256"], scope=scope)
+                release_context = {key:item for key,item in release.items() if key != "policy_config_proof"}
+                if release.get("policy_config_proof"):
+                    proof = release["policy_config_proof"]["approval"]
+                    release_context["verified_release_approval"] = {
+                        key:proof[key] for key in ("approval_id","approved_at","approved_by","operation")}
                 return {"status": "ACTIVE", "policy_reference": ref.model_dump(), "source_files": value["source_files"],
                         "source_hashes": value["source_hashes"], "snapshot": value["snapshot"],
-                        "effective_at": release["effective_at"], "release": release,
+                        "effective_at": release["effective_at"],
+                        "release": release_context,
                         "data_quality": "SOURCE_HASHES_AND_DETERMINISTIC_DERIVATIVE_VERIFIED",
                         "limitations": ["POLICY_IS_NOT_TRADE_AUTHORIZATION", "PORTFOLIO_DATA_NOT_EVALUATED", "ACTIVATION_RECEIPT_DOES_NOT_VERIFY_PORTFOLIO_DATA"]}
         except (PolicyError, OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:

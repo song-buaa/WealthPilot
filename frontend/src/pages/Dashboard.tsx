@@ -134,6 +134,15 @@ export default function Dashboard() {
     return (
       <div>
         <PageHeader />
+        {Boolean(summary?.unvalued_assets?.length) && (
+          <div role="status" style={{ padding: 12, marginBottom: 12, background: '#FFFBEB', color: '#92400E' }}>
+            存在未估值资产；以下总额仅为已记录与Last-good估值小计，不是完整账户总值。
+            {summary?.unvalued_assets?.map((asset, i) => (
+              <div key={`${asset.symbol}:${i}`}>{asset.asset}：数量 {asset.quantity ?? 'UNKNOWN'}；估值 UNKNOWN
+                {asset.last_good_retained ? '（原有效估值保留）' : ''}</div>
+            ))}
+          </div>
+        )}
         <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
           <EmptyState icon={Upload} title="暂无持仓数据" desc={RESTRICTED_WEB ? '请先核实并启用券商，再手动同步。' : '请通过导入 CSV 添加持仓，导入后数据将自动刷新'} />
         </div>
@@ -148,8 +157,8 @@ export default function Dashboard() {
 
   const bs = summary!
   const pnl = bs.total_profit_loss
-  const cost = bs.total_assets - pnl
-  const returnRate = cost > 0 ? (pnl / cost) * 100 : 0
+  const cost = pnl == null ? null : bs.total_assets - pnl
+  const returnRate = pnl == null || cost == null ? null : cost > 0 ? (pnl / cost) * 100 : 0
   const netWorth = bs.net_worth
   const levMult = bs.total_assets / Math.max(netWorth, 1)
   const levGrade = leverageGrade(levMult)
@@ -162,13 +171,13 @@ export default function Dashboard() {
 
   // 持仓排序
   const platTotals: Record<string, number> = {}
-  positions.forEach(p => { platTotals[p.platform] = (platTotals[p.platform] ?? 0) + p.market_value_cny })
+  positions.forEach(p => { platTotals[p.platform] = (platTotals[p.platform] ?? 0) + (p.market_value_cny ?? 0) })
   const sortedPos = [...positions].sort(
-    (a, b) => (platTotals[b.platform] ?? 0) - (platTotals[a.platform] ?? 0) || b.market_value_cny - a.market_value_cny
+    (a, b) => (platTotals[b.platform] ?? 0) - (platTotals[a.platform] ?? 0) || (b.market_value_cny ?? 0) - (a.market_value_cny ?? 0)
   )
 
   // 资产明细 Tab 过滤
-  const OVERSEAS_PLATFORMS = new Set(['老虎证券', '富途证券', '雪盈证券', '盈透证券'])
+  const OVERSEAS_PLATFORMS = new Set(['Binance Spot', '老虎证券', '富途证券', '雪盈证券', '盈透证券'])
   const DOMESTIC_STOCK_PLATFORMS = new Set(['中信证券', '国金证券'])
   const tabFilteredPos = sortedPos.filter(p => {
     const plat = p.platform ?? ''
@@ -188,6 +197,15 @@ export default function Dashboard() {
       <DataTip />
       {/* ── 页面标题 ── */}
       <PageHeader />
+        {Boolean(summary?.unvalued_assets?.length) && (
+          <div role="status" style={{ padding: 12, marginBottom: 12, background: '#FFFBEB', color: '#92400E' }}>
+            存在未估值资产；以下总额仅为已记录与Last-good估值小计，不是完整账户总值。
+            {summary?.unvalued_assets?.map((asset, i) => (
+              <div key={`${asset.symbol}:${i}`}>{asset.asset}：数量 {asset.quantity ?? 'UNKNOWN'}；估值 UNKNOWN
+                {asset.last_good_retained ? '（原有效估值保留）' : ''}</div>
+            ))}
+          </div>
+        )}
 
 
       {/* ── KPI 三卡 ── */}
@@ -222,12 +240,12 @@ export default function Dashboard() {
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 100,
         }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.5px' }}>浮动盈亏</div>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums', marginTop: 4, color: pnl >= 0 ? '#DC2626' : '#16A34A' }}>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums', marginTop: 4, color: (pnl ?? 0) >= 0 ? '#DC2626' : '#16A34A' }}>
             {fmtCnySigned(pnl)}
           </div>
-          {cost > 0 && (
-            <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, display: 'flex', alignItems: 'center', gap: 3, color: returnRate >= 0 ? '#DC2626' : '#16A34A' }}>
-              {returnRate >= 0 ? '↑' : '↓'} 收益率 {fmtDelta(returnRate)}
+          {cost != null && cost > 0 && (
+            <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, display: 'flex', alignItems: 'center', gap: 3, color: (returnRate ?? 0) >= 0 ? '#DC2626' : '#16A34A' }}>
+              {returnRate == null ? '' : returnRate >= 0 ? '↑' : '↓'} 收益率 {fmtDelta(returnRate)}
             </div>
           )}
         </div>
@@ -317,11 +335,12 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {tabFilteredPos.map(p => {
+                  const unknownPnl = p.profit_loss_value == null
                   const pnlV = p.profit_loss_value ?? 0
                   const costV = (p.market_value_cny ?? 0) - pnlV
                   const rate = costV > 0 ? (pnlV / costV) * 100 : 0
                   const pct = getPct(bs.concentration, p.id)
-                  const isUSD = p.original_currency === 'USD'
+                  const isUSD = p.original_currency === 'USD' || p.original_currency === 'USDT'
                   const isHKD = p.original_currency === 'HKD'
                   return (
                     <tr key={p.id}
@@ -331,18 +350,18 @@ export default function Dashboard() {
                       <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.name}>{p.name}</td>
                       <td style={{ ...td, color: '#6B7280', fontSize: 12 }}>{p.ticker || '—'}</td>
                       <td style={{ ...td, textAlign: 'center' }}><span style={tag('#F3F4F6','#374151')}>{p.asset_class}</span></td>
-                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtQty(p.quantity)}</td>
+                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtQty(p.quantity, p.platform === 'Binance Spot')}</td>
                       {posTab === 'overseas' && <>
-                        <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? fmtFx(p.original_value,'USD') : '—'}</td>
+                        <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isUSD ? (p.original_currency === 'USDT' ? '≈' : '') + fmtFx(p.original_value,'USD') : '—'}</td>
                         <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{isHKD ? fmtFx(p.original_value,'HKD') : '—'}</td>
                       </>}
-                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtCny(p.market_value_cny)}</td>
-                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#6B7280', fontSize: 12 }}>{pct.toFixed(2)}%</td>
+                      <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{p.market_value_cny == null ? 'UNKNOWN' : fmtCny(p.market_value_cny)}</td>
+                      <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#6B7280', fontSize: 12 }}>{bs.valuation_complete === false ? 'UNKNOWN' : pct.toFixed(2) + '%'}</td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: posTab === 'domestic_fund' ? '#9CA3AF' : pnlV > 0 ? '#DC2626' : pnlV < 0 ? '#16A34A' : '#9CA3AF' }}>
-                        {posTab === 'domestic_fund' ? '—' : pnlV === 0 ? '¥0' : pnlV > 0 ? `+${fmtCny(pnlV)}` : `-${fmtCny(-pnlV)}`}
+                        {posTab === 'domestic_fund' || unknownPnl ? 'UNKNOWN' : pnlV === 0 ? '¥0' : pnlV > 0 ? `+${fmtCny(pnlV)}` : `-${fmtCny(-pnlV)}`}
                       </td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: posTab === 'domestic_fund' ? '#9CA3AF' : rate > 0 ? '#DC2626' : rate < 0 ? '#16A34A' : '#9CA3AF' }}>
-                        {posTab === 'domestic_fund' ? '—' : rate === 0 ? '0.00%' : fmtDelta(rate)}
+                        {posTab === 'domestic_fund' || unknownPnl ? 'UNKNOWN' : rate === 0 ? '0.00%' : fmtDelta(rate)}
                       </td>
                     </tr>
                   )

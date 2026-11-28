@@ -73,6 +73,13 @@ def evaluate_trade(text: str, portfolio_id: int) -> dict:
 
     parsed = _parse_trade_intent(text, raw, total_assets)
 
+    if any(row["profit_loss_rate"] is None and row["market_value_cny"] != 0 for row in raw):
+        return {"parsed_intent": parsed, "execution_authorized": False,
+                "evaluation": {"blocked": True, "risk_status": "UNKNOWN",
+                    "block_reason": "POSITION_COST_UNKNOWN",
+                    "block_reasons": ["POSITION_COST_UNKNOWN"],
+                    "decision_recommendation": None}}
+
     # 构建 PortfolioState（基于聚合后数据）
     portfolio_state = _build_portfolio_state(raw, portfolio_drawdown_pct=0.0)
 
@@ -236,6 +243,8 @@ def _build_portfolio_state(raw: list[dict], portfolio_drawdown_pct: float) -> Po
     )
     pos_states = []
     for r in raw:
+        if r["market_value_cny"] == 0 and r["profit_loss_rate"] is None:
+            continue  # No economic exposure; never fabricate a cost/P&L value.
         ac = "leverage_etf" if r["is_leverage_etf"] else _ASSET_CLASS_MAP.get(r["asset_class"], "equity")
         drawdown = (r["profit_loss_rate"] / 100.0) if r["profit_loss_rate"] < 0 else 0.0
         pos_states.append(PositionState(

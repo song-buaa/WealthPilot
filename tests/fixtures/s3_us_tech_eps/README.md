@@ -1,0 +1,1 @@
+Public SEC raw sources captured 2026-11-02 Shanghai for bounded S3 P1 regression. gzip mtime=0; manifest SHA256 is of uncompressed unchanged original. No AV prices, credentials, account or private research data. Source qualification remains the original SEC/Evidence Owner. GOOG is direct Class C quarterly EPS only, not a complete TTM or conversion.

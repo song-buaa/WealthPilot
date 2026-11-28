@@ -151,6 +151,11 @@ class ExecutionOutput:
     invoked_skills: list[str] = field(default_factory=list)
     """实际调用的 Skill 名称列表（按顺序）。"""
 
+    analysis_mode: str = ""  # Server-only; not supplied by Planner/model.
+    research_question: str = ""  # Original user intent, not expanded prompt.
+    research_history: list[dict] = field(default_factory=list)
+    research_context_diagnostics: dict = field(default_factory=dict)
+    l1_valuation_inputs: dict | None = None  # Server-owned request-local receipts.
     position_evidence: dict = field(default_factory=dict)
     portfolio_evidence: list[dict] = field(default_factory=list)
     skill_results: dict = field(default_factory=dict)
@@ -249,6 +254,9 @@ class ExpressionOutput:
 
     structured_payload: dict = field(default_factory=dict)
     """完整结构化输出（除 chat_answer 外的所有 JSON 字段）。"""
+
+    research_v2: Optional[object] = None  # In-process state only, never serialized.
+    research_v2_final: Optional[dict] = None
 
     explanation_diagnostics: dict = field(default_factory=dict)
     """Server-owned stage/count/reason diagnostics; never model text or asset context."""

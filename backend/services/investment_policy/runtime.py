@@ -6,14 +6,37 @@ from datetime import timedelta
 from decimal import Decimal
 import json
 import os
+from pathlib import Path
+import re
 
 from pydantic import Field
 
-from .contracts import Contract, MetricEvidence, Snapshot, canonical
+from backend.services.instruments.issuers import policy_target_identity
+
+from .contracts import Contract, MetricEvidence, canonical, parse_snapshot
 from .evaluation import evaluate_snapshot
 from .parser import PolicyError
 from .service import PolicyService
 from .store import PolicyStore, clock, utc_now
+
+def _installed_runtime():
+    # Resolve at process import. A later "current" symlink change therefore
+    # cannot make an old Web or MCP worker claim the newly installed code.
+    directory = Path(__file__).resolve().parents[4]
+    sha = directory.name
+    if not re.fullmatch(r"[a-f0-9]{40}", sha):
+        return None
+    try:
+        receipt = json.loads((directory / "installed.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if receipt.get("package_verified") is not True or receipt.get("revision") != sha:
+        return None
+    return {"code_sha": sha, "runtime_id": str(os.getpid())}
+
+
+_INSTALLED_RUNTIME = _installed_runtime()
+
 
 POLICY_ENV_KEYS = {"WEALTHPILOT_POLICY_DB_PATH", "WEALTHPILOT_POLICY_SCOPE", "WEALTHPILOT_POLICY_SHARED_CONTRACT"}
 _current = ContextVar("wealthpilot_policy_session", default=None)
@@ -139,7 +162,20 @@ def current(portfolio_id=None):
     return PolicySession(portfolio_id)
 
 
-def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
+def _includes_btc_governance(view, symbol):
+    if view == "philosophy":
+        return False
+    if not symbol:
+        return view != "position"
+    ticker, _, market = symbol.partition(":")
+    if view == "full":
+        return True
+    return (market.upper() in {"CRYPTO", "DIGITAL_ASSET"}
+            or (not market and ticker.upper() in {"BTC", "USDT", "ETH", "SOL", "BNB", "USDC"}))
+
+
+
+def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None, btc_position_symbol=None):
     if view not in {"full", "portfolio", "position", "risk", "philosophy"}:
         raise PolicyError("POLICY_VIEW_INVALID")
     session = current(portfolio_id)
@@ -155,10 +191,22 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
     value['synthetic']=value.get('release',{}).get('synthetic',False) is True
     value['obligations'] = {k: v for k,v in snap['contextual_clauses'].items()
                             if k in {'5.2','5.3','6.3','7.1','7.2','7.3','8','9.2','10'}}
+    btc_view, btc_symbol = (view, symbol) if btc_position_symbol is None else ("position", btc_position_symbol)
+    if "btc_governance" in snap and _includes_btc_governance(btc_view, btc_symbol):
+        governance = snap["btc_governance"]
+        value["btc_governance"] = governance
+        value["obligations"].update(governance["source_clauses"])
     if view == "position":
-        # Source identity is preserved; no guessing aliases/issuer mappings.
+        ticker = symbol.removesuffix(":US") if symbol else None
         direct = snap["allocation"]["direct_equity"]
-        value["position_target"] = {k:v for k,v in direct.items() if symbol and symbol in k.split("（")[0].split("/")}
+        target_issuers = snap.get("target_issuers")
+        if target_issuers is not None:
+            issuer = snap["target_symbols"].get(f"{ticker}:US")
+            value["position_target"] = {label: direct[label] for label, target in target_issuers.items()
+                                        if issuer == target}
+        else:
+            value["position_target"] = {label: target for label, target in direct.items()
+                                        if label != "unallocated" and ticker in policy_target_identity(label)[0]}
     if view in {'portfolio','position','full','risk'}:
         with bind(session):
             value['risk_diagnostic'] = diagnose(session.portfolio_id,issuer_symbol=symbol)
@@ -170,6 +218,8 @@ def context(portfolio_id=None, *, consumer="policy", view="full", symbol=None):
             value.pop(key, None)
     if view != "full":
         value.pop("clauses", None)
+    if _INSTALLED_RUNTIME:
+        value["policy_runtime"] = _INSTALLED_RUNTIME.copy()
     return value
 
 
@@ -191,7 +241,7 @@ def diagnose(portfolio_id=None, *, issuer_symbol=None, behaviors=None):
                 metrics["issuer_weight"] = qualify(assets.issuer_weights[issuer_symbol])
             if assets.btc_weight:
                 metrics["btc_weight"] = qualify(assets.btc_weight)
-    result = evaluate_snapshot(Snapshot.model_validate(raw["snapshot"]), metrics=metrics, issuer_symbol=issuer_symbol,
+    result = evaluate_snapshot(parse_snapshot(raw["snapshot"]), metrics=metrics, issuer_symbol=issuer_symbol,
         behavior_facts=behaviors or {}, as_of=utc_now(), max_age=timedelta(minutes=5))
     # Portfolio diagnostics retain every evidenced issuer risk. UNKNOWN coverage
     # cannot replace a known breach; repeat only issuer-specific rules here.
@@ -205,27 +255,29 @@ def diagnose(portfolio_id=None, *, issuer_symbol=None, behaviors=None):
                 result['issuers'][symbol]={'triggers':triggers,'unknown':unknown}
                 result['triggers'].extend(triggers)
                 result['unknown'].extend(unknown)
-    # Evaluate each class with its own deviation evidence, never use a netted average.
+    # Strategic review belongs to the qualified B3 snapshot, never to caller
+    # supplied weights. Reuse its single portfolio diagnostic at the top level.
     result["major_classes"] = {}
-    if assets and qualified:
-        expected = {'growth_and_alternatives':Snapshot.model_validate(raw['snapshot']).allocation.growth_total,
-                    'stable_pool':Snapshot.model_validate(raw['snapshot']).allocation.stable_total}
-        for key, evidence in assets.major_class_weights.items():
-            if key not in expected:
-                result['unknown'].append({'reason':'NOT_A_POLICY_MAJOR_CLASS','class':key})
-                continue
-            value = abs(evidence.value-expected[key]) if evidence.value is not None else None
-            evidence = qualify(evidence).model_copy(update={'value':value})
-            result["major_classes"][key] = evaluate_snapshot(Snapshot.model_validate(raw["snapshot"]),
-                metrics={"major_class_absolute_deviation": evidence}, issuer_symbol=None,
-                behavior_facts={}, as_of=utc_now(), max_age=timedelta(minutes=5))
-            result['triggers'].extend(dict(t,major_class=key) for t in result['major_classes'][key]['triggers'])
-            result['unknown'].extend(result['major_classes'][key]['unknown'])
-        actions={item['action'] for item in result['triggers']}
-        for level in ['HARD_BLOCK','HUMAN_REVIEW','WARNING']:
-            if level in actions:
-                result['status']=level
-                break
+    review = getattr(session, "allocation_hierarchy", {}).get("strategic_review", {})
+    source = getattr(session, "allocation_source", {})
+    if (issuer_symbol is None and review.get("status") in {"HUMAN_REVIEW", "NO_RULE_TRIGGERED"}
+            and review.get("policy_reference") == raw["policy_reference"]
+            and assets_qualified(session, complete=True)
+            and source.get("snapshot_id") == assets.snapshot_id
+            and source.get("snapshot_sha256") == review["snapshot_sha256"]
+            and clock(utc_now()) <= clock(source["expires_at"])):
+        if review["status"] == "HUMAN_REVIEW":
+            result["triggers"].append({**review, "action": "HUMAN_REVIEW", "auto_trade_allowed": False})
+        result["unknown"] = [item for item in result["unknown"]
+                             if item.get("rule_id") != review["rule_id"]]
+    result["portfolio_compliance"] = "UNKNOWN" if result["unknown"] else "NOT_AN_EXECUTION_ASSESSMENT"
+    if result["status"] == "UNKNOWN" and not result["unknown"]:
+        result["status"] = "NO_RULE_TRIGGERED_NOT_EXECUTION_APPROVAL"
+    actions = {item["action"] for item in result["triggers"]}
+    for level in ("HARD_BLOCK", "HUMAN_REVIEW", "WARNING"):
+        if level in actions:
+            result["status"] = level
+            break
     result.update(policy_reference=raw["policy_reference"], mode=raw["mode"],
         asset_snapshot_id=assets.snapshot_id if assets else None,
         asset_issues=assets.issues if assets else ["FULL_INVESTABLE_ASSET_DENOMINATOR_UNVERIFIED", "PENSION_DEDUP_FX_EXTERNAL_GOLD_BTC_COVERAGE_UNKNOWN"])
@@ -237,11 +289,18 @@ def assets_qualified(session, *, complete=False):
     if not assets or assets.portfolio_id!=session.portfolio_id:
         return False
     try:
+        now = clock(utc_now())
+        captured = clock(assets.as_of)
+        # Only the server-owned Allocation assembly issues a strategic receipt.
+        # Other PolicyAssets callers retain their original five-minute limit.
+        source = getattr(session, "allocation_source", {})
+        expiry = (clock(source["expires_at"]) if source.get("snapshot_id") == assets.snapshot_id
+                  and source.get("as_of") == assets.as_of else captured + timedelta(minutes=5))
         return bool(assets.denominator_qualified and assets.denominator_cny is not None and assets.denominator_cny.is_finite()
             and assets.denominator_cny>0 and assets.coverage_evidence and assets.fx_qualified
             and assets.pension_exclusion_verified and assets.deduplication_verified and assets.external_assets_verified
             and (assets.complete_inventory or not complete)
-            and timedelta(0)<=clock(utc_now())-clock(assets.as_of)<=timedelta(minutes=5))
+            and captured <= now <= expiry)
     except PolicyError:
         return False
 
@@ -251,8 +310,14 @@ def assert_editable(portfolio_id=None):
         raise PolicyError("POLICY_BUNDLE_READ_ONLY_USE_CONTROLLED_RELEASE")
 
 
-def prompt(portfolio_id):
-    value = context(portfolio_id, consumer="peer", view="portfolio")
+def peer_context(portfolio_id, *, position_only=False, loaded=None):
+    symbol = getattr(getattr(loaded, "target_position", None), "symbol", None)
+    return context(portfolio_id, consumer="peer", view="portfolio",
+                   btc_position_symbol=(symbol or "") if position_only else None)
+
+
+def prompt(portfolio_id, *, position_only=False, loaded=None):
+    value = peer_context(portfolio_id, position_only=position_only, loaded=loaded)
     if value["mode"] == "LEGACY":
         return ""
     return "\n[唯一生效政策，数值只使用本结构；政策不是交易授权；旧索引和旧数值字段不适用。仓位/分母缺失为UNKNOWN，禁止生成精确交易数量。]\n" + canonical(value)
@@ -277,6 +342,7 @@ def sanitize_loaded(loaded, portfolio_id):
     loaded.rules = InvestmentRules(*[AbsentLegacyThreshold() for _ in range(4)])
     loaded.full_discipline_rules = {}
     loaded.retrieved_principles = []  # Unversioned Chroma is not formal policy.
-    loaded.policy_context = context(portfolio_id, consumer="peer", view="portfolio")
+    loaded.policy_context = peer_context(portfolio_id,
+        position_only=getattr(loaded, "target_position", None) is not None, loaded=loaded)
     loaded.rules_provenance = raw.get("policy_reference") or {"status": "UNAVAILABLE"}
     return loaded

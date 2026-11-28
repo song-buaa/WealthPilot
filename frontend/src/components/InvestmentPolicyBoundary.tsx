@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
+import ActiveAllocation from './allocation/ActiveAllocation'
 
 interface PolicyContext {
   mode: 'LEGACY' | 'POLICY_ACTIVE' | 'UNAVAILABLE'
@@ -45,6 +46,7 @@ export default function InvestmentPolicyBoundary({ children, view = 'portfolio',
     {context.source_hashes && <details><summary>批准原文来源指纹</summary>{Object.entries(context.source_hashes).map(([key,value]) => <p key={key} style={{ overflowWrap:'anywhere' }}>{key}: {value}</p>)}</details>}
     {context.risk_diagnostic && <p role="status">当前偏差及风险资格：{context.risk_diagnostic.status}；{context.risk_diagnostic.asset_snapshot_id || '没有合格全组合资产快照'}。{context.risk_diagnostic.asset_issues?.join(' / ')}。UNKNOWN 不表示无风险。</p>}
     {context.targets && <>
+      {(view === 'portfolio' || view === 'full') && <ActiveAllocation key={context.bundle_sha} policySha={context.bundle_sha} />}
       <h3>长期中性预算（合格可投资资产分母）</h3>
       <p>增长及另类 {(Number(context.targets.growth_total)*100).toFixed(2)}% / 稳健池 {(Number(context.targets.stable_total)*100).toFixed(2)}%</p>
       <table><tbody>{Object.entries(context.targets.neutral).map(([key, value]) => <tr key={key}><th>{key}</th><td>{(Number(value) * 100).toFixed(2)}%</td></tr>)}</tbody></table>

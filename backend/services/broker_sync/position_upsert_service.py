@@ -31,6 +31,7 @@ BROKER_TO_PLATFORM = {
     "futu": "富途证券",
     "snowball": "雪盈证券",
     "guojin": "国金证券",
+    "binance": "Binance Spot",
 }
 
 # 受保护字段(首次写入,后续不覆盖)
@@ -100,6 +101,7 @@ def _snapshot_classification(
         # Preserve the adapter's canonical listing proof through publication;
         # a raw ticker/name alone must not enable a verified listing exception.
         listing_symbol=stored_evidence.get("listing_symbol"),
+        listing_market=stored_evidence.get("listing_market"),
     )
     return classify_instrument(evidence), evidence
 
@@ -376,8 +378,15 @@ class PositionUpsertService:
         import json as _json
         meta = _json.loads(run.context_json or "{}")
         quote = meta.get("fx", {}).get(snap.currency)
-        if quote:
-            if quote.get("rate") is None and (snap.market_value != 0 or snap.unrealized_pnl != 0):
+        valuation_missing = (
+            snap.broker == "binance" and snap.symbol == "BTC:CRYPTO" and snap.currency == "USDT"
+            and snap.quantity > 0 and snap.current_price is None and snap.market_value is None
+            and meta.get("publication_mode") == "observed_rows" and meta.get("complete") is False
+        )
+        if valuation_missing:
+            market_value_cny, fx_rate, fx_date = None, None, None
+        elif quote:
+            if quote.get("rate") is None and (snap.market_value != 0 or snap.unrealized_pnl not in (None, 0)):
                 raise ValueError("FX_RATE_UNAVAILABLE")
             fx_rate = quote["rate"]
             fx_date = quote.get("rate_date") if quote.get("quality") in {"current","historical"} else quote.get("quality")
@@ -428,10 +437,10 @@ class PositionUpsertService:
                 ).first()
 
         # 3. 计算盈亏
-        pnl_original = float(snap.unrealized_pnl)
-        pnl_cny = pnl_original * fx_rate if fx_rate is not None else 0.0
+        pnl_original = float(snap.unrealized_pnl) if snap.unrealized_pnl is not None else None
+        pnl_cny = pnl_original * fx_rate if pnl_original is not None and fx_rate is not None else None
         # Position 表 profit_loss_rate 存百分数(如 30.5 表示 +30.5%)
-        pnl_pct = float(snap.unrealized_pnl_pct) * 100
+        pnl_pct = float(snap.unrealized_pnl_pct) * 100 if snap.unrealized_pnl_pct is not None else None
 
         # 4. 由唯一 canonical authority 解析 vehicle 与经济资产类别。
         classification, classification_evidence = _snapshot_classification(snap)
@@ -454,27 +463,27 @@ class PositionUpsertService:
                 segment="投资",
                 currency=snap.currency,  # v3.4 修复: 存原币种(USD/HKD),不是 CNY
                 quantity=float(snap.quantity),
-                cost_price=float(snap.avg_cost),
-                current_price=float(snap.current_price),
-                market_value_cny=market_value_cny,
+                cost_price=float(snap.avg_cost) if snap.avg_cost is not None else null(),
+                current_price=null() if valuation_missing else float(snap.current_price),
+                market_value_cny=null() if valuation_missing else market_value_cny,
                 original_currency=snap.currency,
-                original_value=float(snap.market_value),
+                original_value=null() if valuation_missing else float(snap.market_value),
                 fx_rate_to_cny=fx_rate if fx_rate is not None else null(),
                 fx_rate_date=fx_date,
-                profit_loss_value=pnl_cny,
-                profit_loss_rate=pnl_pct,
-                profit_loss_original_value=pnl_original,
+                profit_loss_value=pnl_cny if pnl_cny is not None else null(),
+                profit_loss_rate=pnl_pct if pnl_pct is not None else null(),
+                profit_loss_original_value=pnl_original if pnl_original is not None else null(),
             )
             self.session.add(new_pos)
             return True
         else:
             # 更新:只覆盖非保护字段
             existing.quantity = float(snap.quantity)
-            existing.cost_price = float(snap.avg_cost)
-            existing.current_price = float(snap.current_price)
+            existing.cost_price = float(snap.avg_cost) if snap.avg_cost is not None else None
+            existing.current_price = None if valuation_missing else float(snap.current_price)
             existing.market_value_cny = market_value_cny
             existing.original_currency = snap.currency
-            existing.original_value = float(snap.market_value)
+            existing.original_value = None if valuation_missing else float(snap.market_value)
             existing.fx_rate_to_cny = fx_rate
             existing.fx_rate_date = fx_date
             existing.profit_loss_value = pnl_cny

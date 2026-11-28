@@ -1,0 +1,49 @@
+{
+  "version": "sec.reviewed-capital-structure-notice.v1",
+  "cik": "0001326801",
+  "scope": "EXISTING_LISTED_COMMON_HOLDER_FIVE_YEAR_ENTITLEMENTS_NOT_ISSUER_QUALITY",
+  "reason": "KNOWN_CAPITAL_STRUCTURE_CHANGE_REQUIRES_ENTITLEMENT_BRIDGE",
+  "unresolved": [
+    "CLASS_A_PLUS_CLASS_C_DISTRIBUTION_ECONOMIC_ENTITLEMENTS",
+    "MANDATORY_CONVERTIBLE_PREFERRED_AND_DEPOSITARY_SHARE_SENIOR_CLAIMS",
+    "FORWARD_SALE_SETTLEMENT_AND_POTENTIAL_DILUTION"
+  ],
+  "release_condition": "Explicit source-qualified entitlement/capital-structure adapter or verified cancellation; never expire automatically on effective/record/payment dates.",
+  "status": "REVIEWED_UNBRIDGED_NO_VALUATION_CONVERSION",
+  "filings": [
+    {
+      "path": "0001628280-26-066700.txt.gz",
+      "sha256": "b1ae151aa9f1892f85b46d812c483b5244b83e1e72f1e2a2fc9fa923f81bb31a",
+      "fetched_at": "2026-11-03T04:01:31.982453+00:00",
+      "filing": {
+        "accession": "0001628280-26-066700",
+        "form": "8-K",
+        "filed": "2026-10-21",
+        "report_date": "2026-10-19",
+        "published_at": "2026-10-21T20:03:35+00:00",
+        "accepted_at": "2026-10-21T20:03:35+00:00",
+        "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+        "publication_locator": "Submissions/filings/recent/acceptanceDateTime[21]",
+        "primary_url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026066700/meta-20261019.htm",
+        "full_url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026066700/0001628280-26-066700.txt"
+      }
+    },
+    {
+      "path": "0001193125-26-438017.txt.gz",
+      "sha256": "6706007b84f7af678f881e9f8750507bd34379b0f3abb13613a0bd9c3b794191",
+      "fetched_at": "2026-11-03T04:01:31.612537+00:00",
+      "filing": {
+        "accession": "0001193125-26-438017",
+        "form": "8-K",
+        "filed": "2026-10-29",
+        "report_date": "2026-10-26",
+        "published_at": "2026-10-29T21:08:00+00:00",
+        "accepted_at": "2026-10-29T21:08:00+00:00",
+        "publication_clock_basis": "EXACT_SUBMISSIONS_ACCEPTANCE",
+        "publication_locator": "Submissions/filings/recent/acceptanceDateTime[6]",
+        "primary_url": "https://www.sec.gov/Archives/edgar/data/1326801/000119312526438017/d183592d8k.htm",
+        "full_url": "https://www.sec.gov/Archives/edgar/data/1326801/000119312526438017/0001193125-26-438017.txt"
+      }
+    }
+  ]
+}

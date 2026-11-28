@@ -74,3 +74,108 @@
 [运行时故障注入](../tests/test_b3_ibkr_runtime.py)覆盖真实独立loop、并发首次连接、失败共享/重试、候选超时清理、等待者超时、断线/重连、旧事件、shutdown、真实ib_async Future/迟到reqId、工厂并发、受保护HTTP预算及IB01/CBU3身份/Owner；[PR31评审安全回归](../tests/test_b3_ibkr_review_regressions.py)覆盖迟到初始化/shutdown交错、清理期间锁释放、16次无End超时及迟到STK/bond/End、正常CBU3恢复、显式等待者取消、共享连接上的原OrderManager FILLED/UNKNOWN与原orderRef对账且无重发；[MCP协议回归](../pocs/chatgpt_skills/test_u1_protocol.py)覆盖已配置/未配置错误投影、只读注解与越权拒绝。原交易确认、B0提交幂等、UNKNOWN恢复、U2同步及固定视图合同不变。Registry无需更新：能力、权威Owner、工具及接口参数没有新增/迁移，仅修复原入口的运行时生命周期。
 
 生产部署输入（需另行授权）：Backend、MCP和业务worker统一本PR固定SHA，按现有流程切换进程以清除旧Adapter状态；Web可同SHA统一发布。**0 Schema/Digest/依赖/权限变更，不执行DDL，不改Gateway/clientId/Owner/token/实盘开关**。先健康串行、再受控并发IB01/CBU3只读合约查询，核对身份、一次初始化、断线/超时后的收敛及错误码；ChatGPT刷新目录后中文只读查询，仍允许权限UNKNOWN和费用NULL。不得通过试探下单/撤单验收。回滚组件到上一固定SHA，保留全部数据库事实，不恢复旧数据库。
+
+
+### 2026-11-02 移动端限价编辑修复候选
+
+普通P2预填草稿原先每次按键立即parseFloat，导致`82.`回写为`82`。原ActionDraftCard保留独立的限价编辑文本并指定`inputMode=decimal`，仅将数值投影给原API；保留尾零和中间态，不通过格式化或舍入修正价格。空值、非正数、未完成小数及超过原Numeric(20,4)存储精度的价格不能继续确认。非法字母、符号/指数/多小数点输入不覆盖当前合法编辑值。数量字段、原确认/资金/WhatIf/TTL/订单授权链路不变；不新增Schema或依赖。
+
+四位是现有持久化精度上限，不是证券最小报价单位承诺。现有普通单链路没有统一账户级tick证据，此项仍需来源合同核实；不得据此声称所有市场价格已验证，也不自动round到可成交价格。
+
+新增原trade-link浏览器回归覆盖输入、删除、整值替换、清空/重编、整数、小数及非法输入，核对API/后端预览价格一致、订单前后不变。Chromium整组24/24、WebKit移动模拟定向1/1、lint/build、后端全量3070 passed/7 skipped及Offline M5 18/18通过；WebKit复用本机已有webkit-2311，不是iPhone实机证明。iPhone Safari及ChatGPT内置浏览器实机验收待用户配合，只验证参数不提交订单。当前为本地候选，未push/合并/部署；生产限价编辑问题不得标记已上线修复。
+
+### 2026-11-03 PR #86 本地回归修复候选
+
+稳定基线 `dac2b22161d194c075c278cde97fc384ecffd405` 与 PR #86
+`fe0020b4cddef32a2009f1f0db72b6ef70f87c11` 的隔离对照确认：
+仅增加小数键盘不能保留 `82.`；独立编辑文本可以。PR #86 的全策略
+`validLimits` 还会额外阻断未编辑且无限价的历史草稿，即使原 `missing_fields`
+允许继续；这不是移动端小数编辑所必需的规则变化。
+
+本候选仅校验用户实际编辑过的限价文本，保留原 missing-fields、后端策略校验及
+最终确认/资金/WhatIf/报价TTL。编辑后的空值、零、未完成小数、超过四位或数值
+传输精度丢失仍不能确认。未编辑策略恢复稳定版确认资格，不代表绕过后端检查。
+原始草稿上下文以 IBKR request、P2 prefill request、draft ID 及来源 payload 绑定；
+关闭或切换来源时重置本地编辑状态，防止索引文本挂到另一条策略。空 draft ID 的
+请求复用问题在稳定版已存在，本候选同时防止新增文本状态延续该问题。
+
+[本地组件安全回归](../frontend/tests/e2e/action-draft-price.spec.ts)覆盖中间态、
+API 数值、旧草稿资格、missing-fields、请求切换、来源重排和关闭重开；原交易链路
+回归继续覆盖数量、TTL、WhatIf、风险及幂等。稳定/A/B/C/修复候选使用相同依赖和
+构建方式，Chromium及本机 WebKit 移动模拟均能加载页面，无脚本异常，JS响应与
+构建文件字节一致。**本地未复现真实 iPhone 白屏，白屏根因仍未定位**；这些业务
+回归不能解释或宣称修复了生产资源下载中断。无 Schema/依赖/API/权限变化；
+本轮候选仅本地，未 push、合并或部署。Registry无需更新：能力和权威入口未变。
+
+本轮本地质量门：全量pytest 3070 passed / 7 skipped，浏览器27/27（原24+新增3），
+Offline M5 18/18且公网尝试0，lint/build、工程文档及diff检查通过。新候选未push，
+因此新提交CI为NOT_RUN；不将原PR的CI结果用于本候选。
+
+### 2026-11-03 编辑上下文最终收口与发布准入
+
+上一候选把整个payload序列化为React key；仅对象属性插入顺序变化也会丢失
+`82.40`编辑。本候选改为稳定请求身份及显式业务字段数组：策略身份、方向、
+数量、价格、触发条件、币种、TIF、意图关联、配置比例、缺字段身份和风险提示。
+配置比例的对象键排序后比较，策略数组顺序仍有业务含义。对象字段顺序、
+更新时间、说明和value_sources等元数据变化不再重置编辑；新prefill请求、
+真实经济参数变化、策略重排及必要授权事实变化仍会重置。关闭重开规则、
+仅对实际编辑限价校验和旧草稿原资格不变；不修改Backend或最终交易授权。
+
+新增回归先复现属性顺序导致编辑丢失，再验证字段/配置键顺序及元数据变化保留
+`82.40`与焦点，`82.`仍不可确认；逐项验证10个策略业务字段及风险/缺字段变化
+清除旧编辑。原交易回归继续验证价格和数量、资金、WhatIf、TTL、风险确认及
+幂等。本轮按用户要求仅重跑相关Chromium/WebKit、lint/build和必要安全检查，
+复用上一轮已完成的3070 passed/7 skipped与Offline M5证据，不冒充本轮重跑。
+WebKit使用本机已有webkit-2311，仅模拟，不是iPhone实机验收。
+
+历史iPhone白屏根因仍UNKNOWN；上一轮MacBook外部Tailnet已验证稳定版和PR86的
+HTTP/gzip/内容哈希，本地修复不能被描述为解决了历史下载中断。生产继续保留
+回退Web。本轮无push、合并或部署，无Schema/Digest/依赖/接口/权限变化。
+
+授权后的受控发布仅切必要Web组件，固定制品先验证HTML全部引用和资源SHA，
+保留稳定Web回滚制品；沿原launchd退出等待/启动流程，保留原Serve与Backend/MCP。
+切换后先由MacBook外部Tailnet验证TLS、完整下载、哈希、页面及Console，再安排
+一次iPhone参数编辑验收；不确认/提交已在券商App完成的PDD交易。资源不完整、
+页面异常或输入静默变化立即回滚Web，不恢复数据库。发布前仍需新提交CI及独立
+发布授权；不得以本地准入代替生产或实机验收。Registry无需更新：业务能力与
+权威入口不变。
+
+最终候选本地结果：Chromium标准整组29/29、WebKit标准整组29/29、WebKit移动输入
+专项7/7，lint/build、文档与diff检查通过；候选及稳定回滚包各自通过HTML引用、
+归档还原哈希和两种浏览器gzip加载核验。另将整组强制设为390px时，既有历史记录
+断言在原PR86制品上同样失败，未改变该历史页面或把整组移动业务标记为全通过。
+已确认的小数、旧草稿资格和无意义重挂载问题关闭，未发现新增Critical/Important；
+本地准入为READY_FOR_RELEASE，表示可在另行授权后进入原PR/CI及单Web受控发布流程，
+不表示新CI、生产部署或iPhone验收已完成。
+
+## IB01预览FX缓存类型修复（2026-11-03，本地候选）
+
+生产Backend与最新main的原风险检查仍以元组下标读取FX缓存；U0实际缓存为
+`FXQuote`，使原`trade-link/quote → ExecutionBatch → portfolio_order_risk`在风险
+投影阶段抛出类型异常，不能返回已计算的报价/资金/WhatIf预览。该接口将异常
+转为HTTP错误，既有生产日志没有保留该次完整堆栈；首次失败位置由字节一致源码
+和隔离重放确认，不能冒称已取得生产堆栈。
+
+仅在原risk_engine归一化缓存读取：支持实际FXQuote、同合同dict及原测试/兼容
+元组，不调用FX Provider。对象/dict必须仍在FXService TTL内且质量合格；过期、
+fallback、stale、缺日期、无效或非正汇率保持原data_quality风险确认，不伪造PASS。
+不更改IBKR行情/身份、LIVE/30秒TTL、tick、费用、WhatIf、原币现金、预算/安全垫、
+Owner、确认指纹或最终人工授权；不调用真实订单。
+
+回归入口：[缓存类型及2650 USD隔离合同](../tests/test_ib01_fxquote_preview.py)、
+原IB01 link/Batch/B0测试，以及原浏览器交易fixture中预热的类型化缓存与
+2650 USD预算/2692.91 USD现金场景。行情和费用均为明确合成测试输入，不代表
+真实市场报价或成交。Registry无需更新：能力及权威入口没有变化。
+
+本节记录本地修复/测试；集成及生产状态以本次PR和发布回执为准。生产操作须按
+任务单独授权、部署差异门、原Git/CI、固定Backend制品及回滚入口执行；生产只读
+报价/WhatIf仍需核实Gateway权限和真实来源，
+不得以隔离Mock或本地READY代替实盘授权或成交验收。无Schema/Digest/依赖变更。
+
+## IB01预览一致性定向修复
+
+无保存预览原来只有空Portfolio，确认则使用真实持仓；组合风险进入review指纹，导致报价相同也可能永久要求刷新。现在从授权Portfolio读取类型化Position事实复制到原临时内存库，仅临时库承接预览写入；源只读会话在券商I/O前释放，其他Portfolio不复制，持仓变化仍要求重新核对。
+
+预览review指纹只排除瞬时bid/ask，保留账户、请求、风险、限价、数量、真实现金、费用和安全垫。最终授权指纹仍绑定bid/ask及原版本状态。Web确认请求携带用户已看到的限价，防止再次取价静默变更限价。LIVE/30秒TTL、WhatIf、资金、风险确认及最终人工授权不变。非实质盘口变化可继续，经济或风险变化必须先重新计算；无Schema/依赖或交易权限变化。
+
+不处理或重放用户已在IBKR官方界面完成的买入；不重新部署已恢复的同步能力或修改持仓。发布复用原完整源码SHA及单组件切换/回滚：Backend以生产e9c4d856…为基线，只加本次运行时修复；Web以生产6bca7a8…为基线，只加确认请求修复。完整快照提交经准确SHA CI后成为最终main祖先，随后恢复主干完整tree；不把其他未验收研究功能激活到Backend。两组件运行版本及只读/隔离验收分别记录在发布回执。

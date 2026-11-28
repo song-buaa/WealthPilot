@@ -1,8 +1,11 @@
 // 券商 API 同步相关接口
 
+import type { UnvaluedAsset } from './api';
+
 const BASE = "/api/broker-sync";
 
 export interface SyncStatusItem {
+  data_quality?: { complete?: boolean; unvalued_assets?: UnvaluedAsset[] };
   enabled?: boolean;
   running?: boolean;
   last_attempt_id?: number | null;
@@ -37,7 +40,7 @@ export async function getSyncStatus(): Promise<SyncStatusResponse> {
   return res.json();
 }
 
-export async function triggerSync(broker: "tiger" | "futu" | "snowball" | "guojin" | "all" = "all"): Promise<TriggerResponse> {
+export async function triggerSync(broker: "tiger" | "futu" | "snowball" | "guojin" | "binance" | "all" = "all"): Promise<TriggerResponse> {
   const res = await fetch(`${BASE}/trigger`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

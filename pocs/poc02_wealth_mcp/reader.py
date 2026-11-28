@@ -161,6 +161,10 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
                     issues.append("VALUATION_DATE_UNKNOWN")
                 if stale:
                     issues.append("STALE_COMPONENTS")
+                from app.sync_status import unvalued_source_assets
+                source_gaps = unvalued_source_assets(connection, portfolio_id)
+                if source_gaps:
+                    issues.append("BINANCE_UNVALUED_ASSETS")
                 totals = wealth._current_totals(portfolio_id)
                 has_cash = any(p.broker == "tiger" and p.vehicle_type == "CASH" for p in positions)
                 cash_status = "stored_native_cash" if has_cash else "not_synced" if cash_configured else "not_configured"
@@ -174,6 +178,8 @@ def read_overview(path, portfolio_id, *, cash_configured=False, now=None, databa
                 if missing_cash:
                     amounts = {key:None for key in amounts}
                 return {
+                    **({"valuation_complete": False, "unvalued_assets": source_gaps,
+                        "valuation_scope": "STORED_KNOWN_AND_LAST_GOOD_SUBTOTAL"} if source_gaps else {}),
                     "schema_version": "poc02.wealth-overview.v1", "synthetic": False,
                     "currency": "CNY", "amount_unit": "minor", "minor_unit_scale": 2,
                     **amounts, "queried_at": queried_at,

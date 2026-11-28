@@ -72,6 +72,8 @@ def store_identity(store):
 
 
 def _bound(auth, store, bundle, operation, now):
+    if bundle.get("content_status") != "APPROVED_CONTENT":
+        raise PolicyError("POLICY_CONTENT_APPROVAL_REQUIRED")
     if (auth.operation != operation or auth.scope != bundle["scope"]
             or auth.store_identity != store_identity(store)
             or auth.bundle_id != bundle["bundle_id"] or auth.bundle_sha256 != digest(bundle)
@@ -84,11 +86,16 @@ def _bound(auth, store, bundle, operation, now):
 def verify_formal_release(store, db, bundle, release):
     """Read-side proof check; legacy synthetic receipts keep their original path."""
     if release.get("synthetic") is True:
+        if bundle["snapshot"]["schema_version"] != "wp.policy.v1":
+            raise PolicyError("VERSIONED_SCOPE_REQUIRES_FORMAL_RELEASE")
         source = db.execute("SELECT philosophy,policy FROM policy_bundles WHERE scope=? AND bundle_id=?",
                             (bundle["scope"], bundle["bundle_id"])).fetchone()
         if not all(bytes(source[k]).startswith(b"# SYNTHETIC ONLY") for k in ("philosophy", "policy")):
             raise PolicyError("REAL_SOURCE_CANNOT_USE_SYNTHETIC_RELEASE")
         return
+    if release.get("policy_config_proof") is not None:
+        from .fast_release import verify_config_release
+        return verify_config_release(store, db, bundle, release)
     auth = Authorization.model_validate(release["authorization"])
     install = Installation.model_validate(release["installation"])
     _bound(auth, store, bundle, "ROLLBACK" if release["action"] == "ROLLBACK" else "ACTIVATE", release["recorded_at"])

@@ -22,13 +22,21 @@ from tests.test_execution_batch_service import FakeIBKRExecutionAdapter
 from backend.services.execution_batch import link_handoff
 from backend.services.execution_batch.service import ExecutionBatchService
 from datetime import datetime, timezone
+from app.fx_service import FXQuote, fx_service
+
+# Exercise the same warmed U0 cache shape as production, not an empty cache
+# that would hide consumer type-contract regressions. No FX provider is called.
+fx_service._cache[('USD', 'CNY', 'latest')] = FXQuote(
+    7.1, datetime.now(timezone.utc).date().isoformat(),
+    datetime.now(timezone.utc).isoformat(), 'provider_fixture', 'current')
+fx_service._expires[('USD', 'CNY', 'latest')] = fx_service._clock() + fx_service.ttl
 
 ibkr = FakeIBKRExecutionAdapter()
 ibkr_state = {'quality':'LIVE', 'cash':10000, 'fee':5}
 _original_quote = ibkr.get_executable_quote
 _original_cash = ibkr.get_cash_snapshot
 ibkr.get_executable_quote = lambda r: _original_quote(r) | {
-    'ask':100, 'bid':99.99, 'quote_timestamp':datetime.now(timezone.utc).isoformat(),
+    'ask':100, 'bid':99.99 + ibkr_state.get('bid_offset', 0), 'quote_timestamp':datetime.now(timezone.utc).isoformat(),
     'quote_quality':ibkr_state['quality'], 'market_data_type':1 if ibkr_state['quality']=='LIVE' else 3}
 ibkr.get_cash_snapshot = lambda c: _original_cash(c) | {k:ibkr_state['cash'] for k in ['CashBalance','SettledCash','TotalCashValue']}
 _original_what_if = ibkr.what_if_limit_order
@@ -56,6 +64,14 @@ app.include_router(execution_batch.router, prefix='/api/execution-batches')
 @app.post('/__test/ibkr-state')
 def set_ibkr_state(body: dict):
     ibkr_state.update(body)
+    if body.get('seed_portfolio'):
+        from app.models import Position
+        with get_session() as s:
+            if not s.query(Position).filter_by(ticker='FLOW_FIXTURE').first():
+                s.add(Position(portfolio_id=1, segment='投资', ticker='FLOW_FIXTURE',
+                    name='Synthetic real ORM holding', platform='fixture', currency='CNY',
+                    asset_class='货币', quantity=10000, market_value_cny=10000))
+                s.commit()
     return {'isolated_synthetic_fixture':True, 'real_order_submitted':False}
 
 @app.get('/__test/ibkr-counts')

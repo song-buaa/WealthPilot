@@ -139,6 +139,8 @@ class AssetAnalysisPreparation:
             captured = self.capture(path, self.portfolio_id, "capture_asset_view", {"internal":internal},
                 frozen=True, synthetic=self.synthetic)
             captured.update(snapshot_id=f"asset-view:v1:{row_id}", internal=internal)
+            from backend.services.wealth_service import freeze_investable_scope
+            freeze_investable_scope(captured)
             encoded = dumps(captured)
             with self.sessions() as db:
                 self._begin(db)

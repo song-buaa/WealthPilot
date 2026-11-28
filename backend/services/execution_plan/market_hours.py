@@ -3,7 +3,7 @@
 
 用于触发评估循环：非交易时段直接 skip。
 """
-from datetime import datetime, timezone, time as dtime
+from datetime import datetime, timedelta, timezone, time as dtime
 
 
 def _is_us_dst(dt_utc: datetime) -> bool:
@@ -30,6 +30,8 @@ def is_market_open(market: str, dt_utc: datetime | None = None) -> bool:
         market: "US" / "HK"
         dt_utc: UTC 时间，默认当前
     """
+    if market == "CRYPTO":
+        return True
     if dt_utc is None:
         dt_utc = datetime.now(timezone.utc)
 
@@ -56,7 +58,7 @@ def is_market_open(market: str, dt_utc: datetime | None = None) -> bool:
     return False
 
 
-def valuation_quality(value, market, *, at=None, basis=None):
+def valuation_quality(value, market, *, at=None, basis=None, for_allocation=False):
     """Assess a SOURCE price time against local exchange sessions, never fetch time.
 
     Trading trigger hours above keep their original semantics. This read-only
@@ -68,6 +70,19 @@ def valuation_quality(value, market, *, at=None, basis=None):
     if not value:
         return result
     try:
+        if market == "CRYPTO":
+            stamp = datetime.fromisoformat(value)
+            if stamp.tzinfo is None or at.tzinfo is None:
+                return result
+            age = (at - stamp).total_seconds()
+            if for_allocation and basis not in {"last_trade", "close"}:
+                return result
+            max_age = (24 * 60 * 60) if for_allocation else 300
+            current = 0 <= age <= max_age
+            if current and for_allocation:
+                result["valid_until"] = stamp + timedelta(seconds=max_age)
+            return {**result, "status":"intraday" if current else "stale",
+                    "reason_code":None if current else "PRICE_STALE", "calendar":"24/7"}
         import exchange_calendars as calendars
         import pandas as pd
         code = {"US":"XNYS", "HK":"XHKG", "SH":"XSHG", "SZ":"XSHG",
@@ -96,10 +111,17 @@ def valuation_quality(value, market, *, at=None, basis=None):
                 return result
             if stamp > current:
                 return {**result, "status":"stale", "reason_code":"PRICE_TIME_FUTURE"}
-            if opened and (current-stamp).total_seconds() <= 300 and calendar.is_open_on_minute(stamp.floor("min")):
+            intraday_limit = (60 * 60) if for_allocation else 300
+            if (opened and (current-stamp).total_seconds() <= intraday_limit
+                    and calendar.is_open_on_minute(stamp.floor("min"))):
+                if for_allocation:
+                    result["valid_until"] = (stamp + timedelta(seconds=intraday_limit)).to_pydatetime()
                 return {**result, "status":"intraday", "reason_code":None, "calendar":code}
             closed = not finished.empty and abs((stamp-finished.iloc[-1]["close"]).total_seconds()) <= 300
-        if not opened and closed:
+        if closed and (not opened or for_allocation):
+            future_close = schedule[schedule["close"] > current]
+            if for_allocation and not future_close.empty:
+                result["valid_until"] = future_close.iloc[0]["close"].to_pydatetime()
             return {**result, "status":"recent_close", "reason_code":None, "calendar":code,
                     "session_date":finished.index[-1].date().isoformat()}
         return {**result, "status":"stale", "reason_code":"PRICE_STALE", "calendar":code}

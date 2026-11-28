@@ -104,10 +104,10 @@ def candidate(a):
 def test_numeric_binding_survives_final_recheck_with_trace_and_no_free_number():
     a=actual_pdd();item=candidate(a)
     accepted,diag=explanation_projection([item],a)
-    assert diag['accepted_count']==1 and '8.0521%' in accepted[0]['text']
+    assert diag['accepted_count']==1 and '8.05%' in accepted[0]['text']
     assert '2026-06-30' in accepted[0]['text'] and accepted[0]['sources'][0]['derived_from']
     assert explanation_projection(accepted,a)[0]==accepted
-    bad=deepcopy(accepted);bad[0]['text']=bad[0]['text'].replace('8.0521','88.0000')
+    bad=deepcopy(accepted);bad[0]['text']=bad[0]['text'].replace('8.05','88.00')
     assert not explanation_projection(bad,a)[0]
 
 
@@ -279,7 +279,7 @@ def test_bound_prose_survives_original_output_and_legacy_explain_projection():
     a=actual_pdd();llm=LLMResult('HOLD',[],[],[])
     out=ExpressionOutput(llm_result=llm,structured_payload=dict(decisionType='watch',professional_explanation=[candidate(a)]))
     enforce(out,a)
-    assert '8.0521%' in out.chat_answer and any('8.0521%' in x for x in out.llm_result.reasoning)
+    assert '8.05%' in out.chat_answer and any('8.05%' in x for x in out.llm_result.reasoning)
     first=deepcopy(out.structured_payload['professional_explanation']);enforce(out,a)
     assert out.structured_payload['professional_explanation']==first
     assert not out.actionable and not out.structured_payload['exitPlan']['execution_authorized']

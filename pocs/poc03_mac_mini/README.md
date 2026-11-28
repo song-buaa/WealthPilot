@@ -29,6 +29,12 @@ Stage 1.5 主要路线已改为 GitHub PR/CI/main → Mini 拉取指定完整 SH
 
 第一阶段测试只在 MacBook 临时目录运行，没有连接 Mac Mini、安装 launchd、迁移真实库、创建生产 Key 或启动生产 Tunnel。报告中的 ARM wheel 可用性不代表 ARM 实际执行通过。
 
+## 私有 Web 并行监听
+
+当完整 Web 已占用 `127.0.0.1:8790`，在现有私有 `config/web.json` 设置独立的整数 `listen_port`，例如经现场确认空闲的 `8791`。首次配置可用 `web_deploy.py configure --listen-port 8791`。缺省仍使用 `8790`。受限 Web 固定绑定 `127.0.0.1`，端口占用时在应用启动前退出。原完整 Web 和 Tunnel 路由继续使用原配置。
+
+在 Mini 本机访问 `http://127.0.0.1:8791`，也可从 MacBook 沿既有个人 SSH 转发，将两端均绑定回环地址。浏览器在该私有入口内发起 CONFIRM，同源要求包含端口。从原完整 Web 端口发起的跨源确认仍被拒绝。
+
 ## Dev 重新打包
 
 先使用交付记录指定的完整 Git SHA 建立干净 checkout；部署包内的源码和 bundle 已包含该 revision。解出包内 `wheels-arm64.zip`，沿用官方 Tunnel ZIP，不从最新上游替换资产。下面命令使用 Python 3.11，输出目录必须在代码目录外且尚不存在：

@@ -2,8 +2,10 @@
 sqlalchemy>=2.0.0
 pandas>=2.0.0
 exchange-calendars==4.13.2  # Local session/holiday evidence for asset valuation; no network/calendar service
+openpyxl==3.1.5           # ETF Owner public holdings and NAV XLSX
 TA-Lib>=0.6.5,<0.7        # Pattern canonical indicator authority
 openai==2.29.0  # Matches the existing hashed ARM business lock
+cryptography==46.0.3    # Existing Mini locks; verify detached Policy approvals
 pydantic>=2.0.0          # 数据契约（FastAPI / Agents contracts）
 httpx[socks]>=0.24.0
 plotly>=5.20.0
@@ -37,3 +39,6 @@ chromadb>=0.5.0
 python-frontmatter>=1.1.0
 langchain-text-splitters>=0.2.0
 pypinyin>=0.53.0
+
+# Offline L1 context preflight; reference encoding is not provider usage.
+tiktoken==0.12.0

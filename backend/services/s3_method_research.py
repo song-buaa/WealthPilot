@@ -6,10 +6,10 @@ import json
 from pydantic import Field
 
 from backend.services.market_data.evidence import assess, assess_quality_facts, stamp
-from backend.services.market_data.method_applicability import applicability, APPLICABLE, VERSION, RETURN_BASIS
+from backend.services.market_data.method_applicability import applicability, APPLICABLE, VERSION, RETURN_BASIS, notice_assets
 from backend.services.market_data.quality_valuation import ResearchRequest, Assumptions, compare, _facts, _quality
 from backend.services.market_data.quality_evaluation import evaluate
-from backend.services.market_data.financial_research import build
+from backend.services.market_data.financial_research import build, build_current
 from backend.services import quality_valuation_research as archive
 
 
@@ -38,7 +38,7 @@ def compare_methods(raw_request, assessments):
                 raise ValueError('UNRESOLVED_SOURCE_CONFLICT')
             if app['quality_screen']['status'] == APPLICABLE:
                 rows = _facts(a, request.decision_at)
-                derived = build(a)
+                derived = build_current(a) if a.get('s3_current_owner') else build(a)
                 metrics = {r['field']: r for r in derived['records']}
                 card['quality'] = evaluate(a, _quality(rows, metrics))
                 if app['earnings_model']['status'] == APPLICABLE and parameters:
@@ -56,6 +56,12 @@ def compare_methods(raw_request, assessments):
                     evidence_catalog={r['record_id']: r for r in a.get('quality_field_records', [])})
             if app['earnings_model']['status'] == 'NOT_APPLICABLE':
                 card['valuation_status'] = 'NOT_APPLICABLE'
+            if app.get('return_unit_qualification'):
+                # P2.1 refusal contract: no old target/parameters masquerading
+                # as a current holder return. Quality remains independently valid.
+                card.update(assumptions=None,assumption_context=None,cross_checks={},
+                    failure_reason=app['earnings_model']['reason'],
+                    rank_reason=app['earnings_model']['reason']+'; return withheld, not an adverse fundamental judgment.')
         except (ValueError, KeyError, TypeError, ArithmeticError):
             card.update(status='unavailable', failure_reason='QUALIFIED_COMPANY_INPUT_REJECTED_OR_MISSING')
         withheld.append(card)
@@ -186,7 +192,7 @@ def make_bundle(root, raw_request, official_root=None):
     for symbol in request.companies:
         if symbol not in assessments:
             failures.setdefault(symbol, 'OFFICIAL_SOURCE_NOT_FROZEN')
-    methods = tuple(archive.METHOD_FILES) + ('backend/services/s3_method_research.py', 'backend/services/market_data/method_applicability.py', 'research_v2/sec_identity.py')
+    methods = tuple(archive.METHOD_FILES) + ('backend/services/s3_method_research.py', 'backend/services/market_data/method_applicability.py', 'research_v2/sec_identity.py') + notice_assets()
     files.update({'methods/'+name: archive.ROOT/name for name in methods})
     result = compare_methods(request, assessments)
     archive._project_source_failures(result, failures)

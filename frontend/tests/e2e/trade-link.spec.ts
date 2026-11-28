@@ -5,6 +5,29 @@ import { expect, test } from '@playwright/test'
 
 let backend: ChildProcess
 const base = 'http://127.0.0.1:18092'
+
+for (const mobile of [false,true]) {
+  test(`nonempty Portfolio fee refresh and moving bid reaches confirmation (${mobile ? 'iPhone' : 'desktop'})`,async({page,request})=>{
+    await resetIBKR(request)
+    await request.post(`${base}/__test/ibkr-state`,{data:{seed_portfolio:true,bid_offset:0}})
+    if(mobile)await page.setViewportSize({width:390,height:844})
+    let submits=0
+    page.on('request',r=>{if(r.url().endsWith('/submit')||r.url().endsWith('/place_order'))submits++})
+    await page.goto(ibkrLink())
+    await page.getByRole('button',{name:'加入投资行动',exact:true}).click()
+    await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeEnabled()
+    await request.post(`${base}/__test/ibkr-state`,{data:{fee:6}})
+    await page.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+    await expect(page.getByRole('dialog')).toContainText('PREVIEW_CHANGED')
+    await page.getByRole('button',{name:'重新计算股数、费用及 WhatIf',exact:true}).click()
+    await expect(page.getByRole('button',{name:'核对并进入最终确认',exact:true})).toBeEnabled()
+    await request.post(`${base}/__test/ibkr-state`,{data:{bid_offset:0.001}})
+    await page.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+    await expect(page.getByTestId('confirm-order-dialog')).toBeVisible()
+    expect(submits).toBe(0)
+    await request.post(`${base}/__test/ibkr-state`,{data:{bid_offset:0}})
+  })
+}
 function link(extra = '') {
   return `${base}/#/action?trade=1&request_id=${randomUUID()}&symbol=NVDA%3AUS&side=BUY&quantity=10&order_type=LIMIT&limit_price=180&currency=USD${extra}`
 }
@@ -61,10 +84,10 @@ test('invalid and duplicate parameters are explicit, no implicit defaults', asyn
   await page.goto(link())
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.goto(link('&quantity=2'))
-  await expect(page.getByRole('alert')).toContainText('参数重复')
+  await expect(page.getByRole('alert').filter({hasText:'参数重复'})).toBeVisible()
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await page.goto(link().replace('currency=USD',''))
-  await expect(page.getByRole('alert')).toContainText('currency')
+  await expect(page.getByRole('alert').filter({hasText:'currency'})).toBeVisible()
   await expect(page.getByRole('dialog')).not.toBeVisible()
 })
 
@@ -463,4 +486,69 @@ test('B3 failure before dispatch leaves recheck available without implying an or
   await expect(final.getByRole('button',{name:'重新计算股数、费用及 WhatIf'})).toBeEnabled()
   await expect(final.getByRole('checkbox')).not.toBeChecked()
   expect(submits).toBe(0)
+})
+
+test('mobile decimal limit retains editing text and sends exact numeric price without an order', async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const originalOrders = (await (await request.get(`${base}/api/action/orders`)).json()).items
+  let orderCalls = 0
+  page.on('request', r => { if (r.url().endsWith('/place_order')) orderCalls++ })
+  await page.goto(link().replace('NVDA%3AUS', 'PDD%3AUS').replace('side=BUY', 'side=SELL').replace('quantity=10', 'quantity=30').replace('limit_price=180', 'limit_price=82') + '&time_in_force=GTC')
+  const dialog = page.getByRole('dialog')
+  const price = dialog.getByLabel('限价', { exact: true })
+  const join = dialog.getByRole('button', { name: '加入投资行动' })
+  await expect(price).toHaveAttribute('inputmode', 'decimal')
+  await price.focus()
+  await price.evaluate((input: HTMLInputElement) => input.setSelectionRange(input.value.length, input.value.length))
+  await price.pressSequentially('.')
+  await expect(price).toHaveValue('82.')
+  await expect(join).toBeDisabled()
+  await price.pressSequentially('40')
+  await expect(price).toHaveValue('82.40')
+  await price.press('Backspace')
+  await expect(price).toHaveValue('82.4')
+  await price.fill('')
+  await expect(join).toBeDisabled()
+  for (const invalid of ['0', '82.40001', '.', '9999999999999999.99']) {
+    await price.fill(invalid)
+    await expect(join).toBeDisabled()
+  }
+  await price.fill('82')
+  for (const invalid of ['82x', '-82.40', '8e2', '82..40', '82,40']) {
+    await price.fill(invalid)
+    await expect(price).toHaveValue('82')
+  }
+  // fill exercises whole-value replacement, including the paste input path.
+  await price.fill('82.40')
+  await expect(dialog.getByLabel('数量（股）')).toHaveValue('30')
+  const sent = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/api/action/drafts'))
+  await join.click()
+  const payload = (await sent).postDataJSON()
+  expect(payload.payload.symbol_strategies[0]).toMatchObject({symbol:'PDD:US', side:'SELL', quantity:30, limit_price:82.4, time_in_force:'GTC'})
+  await expect(page.getByTestId('confirm-order-dialog')).toContainText('82.4')
+  expect(orderCalls).toBe(0)
+  expect((await (await request.get(`${base}/api/action/orders`)).json()).items).toEqual(originalOrders)
+})
+
+test('IB01 2650 all-in with warmed FXQuote reaches final human gate without submission', async ({page, request}) => {
+  await request.post(`${base}/__test/ibkr-state`, {data:{quality:'LIVE', cash:2692.91, fee:5}})
+  const before=await (await request.get(`${base}/__test/ibkr-counts`)).json()
+  let submissions=0
+  page.on('request',r=>{if(r.url().endsWith('/submit')||r.url().endsWith('/place_order')) submissions++})
+  await page.goto(ibkrLink().replace('target_amount=4000','target_amount=2650'))
+  await page.getByRole('button',{name:'加入投资行动',exact:true}).click()
+  const review=page.getByRole('dialog')
+  await expect(review.getByTestId('ibkr-link-target')).toHaveText('2,650 USD')
+  await expect(review.getByTestId('ibkr-quantity')).toHaveText('26')
+  await expect(review.getByTestId('ibkr-review-fields')).toContainText('WhatIf：PASS')
+  await review.getByRole('button',{name:'核对并进入最终确认',exact:true}).click()
+  const final=page.getByTestId('confirm-order-dialog')
+  await expect(final).toContainText('最终确认下单')
+  await expect(final.getByTestId('submit-btn')).toBeDisabled()
+  const after=await (await request.get(`${base}/__test/ibkr-counts`)).json()
+  expect(after.orders).toBe(before.orders)
+  expect(after.real_order_calls).toBe(0)
+  expect(submissions).toBe(0)
+  await final.getByTestId('cancel-btn').click()
+  await resetIBKR(request)
 })

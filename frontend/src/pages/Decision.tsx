@@ -100,10 +100,10 @@ function isGenericName(name: string): boolean {
 
 function buildPersonalizedQuestions(positions: Position[], totalAssets: number): string[] {
   const holdings = positions
-    .filter(p => p.market_value_cny > 0 && p.ticker !== 'HKCONNECT')
+    .filter(p => (p.market_value_cny ?? 0) > 0 && p.ticker !== 'HKCONNECT')
     .map(p => ({
       name: p.name,
-      ratio: p.market_value_cny / totalAssets,
+      ratio: (p.market_value_cny ?? 0) / totalAssets,
       pnl: p.profit_loss_value ?? 0,
     }))
     .sort((a, b) => b.ratio - a.ratio)
@@ -283,7 +283,7 @@ export default function Decision() {
       .then(([posResult, summary]) => {
         const positions = posResult.items
         const totalAssets = summary.total_assets
-        if (positions.length >= 1 && totalAssets > 0) {
+        if (summary.valuation_complete !== false && positions.length >= 1 && totalAssets > 0) {
           const qs = buildPersonalizedQuestions(positions, totalAssets)
           if (qs.length >= 1) {
             setRecSuggestions(qs)

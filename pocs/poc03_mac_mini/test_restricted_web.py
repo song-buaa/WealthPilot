@@ -2,14 +2,17 @@
 from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
+from http.client import HTTPConnection
 import json
 import os
 from pathlib import Path
 import plistlib
+import socket
 import sqlite3
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,7 +73,8 @@ def test_explicit_route_catalog_and_static_mode(web,monkeypatch):
         ("GET", "/api/demo/status"), ("GET", "/api/web/status"),
         *(('GET', '/api/portfolio/' + p) for p in ('summary','positions','liabilities','alerts')),
         ("GET", "/api/wealth/summary"), ("GET", "/api/wealth/items"),
-        ("GET", "/api/allocation/targets"), ("GET", "/api/discipline/policy-context"), ("GET", "/api/broker-sync/status"),
+        ("GET", "/api/allocation/targets"), ("GET", "/api/allocation/snapshot"),
+        ("GET", "/api/discipline/policy-context"), ("GET", "/api/broker-sync/status"),
         ("POST", "/api/broker-sync/trigger"), ("GET", "/")
     ]}
     with TestClient(app, base_url="http://127.0.0.1:8790") as client:
@@ -81,6 +85,32 @@ def test_explicit_route_catalog_and_static_mode(web,monkeypatch):
         policy=client.get('/api/discipline/policy-context?view=portfolio')
         assert policy.status_code==200 and policy.json()['status']=='NOT_ACTIVE'
         assert client.post('/api/discipline/policy-context',json={}).status_code>=400
+
+
+@pytest.mark.parametrize('code,status', [('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',409),
+    ('POLICY_CONTEXT_UNAVAILABLE',503), ('PRIVATE_PROGRAM_DIAGNOSTIC',500), (None,200)])
+def test_b2_snapshot_uses_original_read_handler_and_error_contract(web, monkeypatch, code, status):
+    from backend.api import allocation
+    from fastapi import HTTPException
+    calls = []
+    def original(snapshot_id=None):
+        calls.append(snapshot_id)
+        if code and status != 500:
+            raise HTTPException(status, code)
+        if code:
+            raise ValueError(code)
+        return {'original_read_handler':True}
+    monkeypatch.setattr(allocation, 'api_snapshot', original)
+    config, directory = web
+    app = create_app(config, directory, factory=fake_service)
+    with TestClient(app, base_url='http://127.0.0.1:8790') as client:
+        response = client.get('/api/allocation/snapshot?snapshot_id=asset-view:v1:1')
+        assert response.status_code == status
+        assert calls == ['asset-view:v1:1']
+        assert 'PRIVATE_PROGRAM_DIAGNOSTIC' not in response.text
+        assert client.post('/api/allocation/snapshot',json={}).status_code >= 400
+        assert client.get('/api/allocation/snapshot',headers={'host':'attacker.example'}).status_code == 403
+        assert calls == ['asset-view:v1:1']
         with monkeypatch.context() as broken:
             missing=Path(config['database_path']).parent/'PRIVATE_PATH_SENTINEL.sqlite'
             broken.setenv('WEALTHPILOT_POLICY_DB_PATH',str(missing))
@@ -388,17 +418,61 @@ def test_runner_excludes_inherited_credentials_and_disabled_broker_env(shared,mo
     monkeypatch.setenv('OPENAI_API_KEY','synthetic-inherited-secret')
     _,config,environment=web_runner.settings(root)
     assert config['portfolio_id']==7
+    assert config['listen_port']==8790
     assert 'OPENAI_API_KEY' not in environment and 'GUOJIN_GATEWAY_SECRET' not in environment
     assert environment['IBKR_READ_ONLY_MODE']=='true' and environment['ENABLE_IBKR_LIVE_TRADING']=='false'
-    common.write_json(root/'config/web.json',{'revision':release.name,'enabled_brokers':['guojin']})
+    common.write_json(root/'config/web.json',{'revision':release.name,'enabled_brokers':['guojin'],'listen_port':8791})
     common.write_json(root/'config/web-brokers.json',{'GUOJIN_NATIVE_CONFIG':'/private/synthetic-native.json',
         'GUOJIN_ACCOUNT':'fixture-owner','GUOJIN_GATEWAY_SECRET':'synthetic-unused-secret'})
-    _,_,environment=web_runner.settings(root)
+    _,config,environment=web_runner.settings(root)
+    assert config['listen_port']==8791
     assert environment['GUOJIN_NATIVE_CONFIG']=='/private/synthetic-native.json'
     assert environment['GUOJIN_ACCOUNT']=='fixture-owner' and 'GUOJIN_GATEWAY_SECRET' not in environment
     common.write_json(root/'config/web-brokers.json',{'OPENAI_API_KEY':'forbidden'})
     with pytest.raises(ValueError,match='BROKER_ENV_INVALID'):
         web_runner.settings(root)
+
+
+@pytest.mark.parametrize("port", [None, True, "8791", 0, 1023, 65536])
+def test_invalid_web_listen_port_is_refused(port):
+    with pytest.raises(ValueError, match="WEB_LISTEN_PORT_INVALID"):
+        web_deploy.validate_listen_port(port)
+
+
+def test_private_listener_can_coexist_and_refuses_an_occupied_port(web):
+    import uvicorn
+
+    with socket.create_server(("127.0.0.1", 0)) as full_web:
+        occupied_port = full_web.getsockname()[1]
+        with pytest.raises(ValueError, match="WEB_LISTEN_PORT_UNAVAILABLE"):
+            web_runner.open_listener(occupied_port)
+        with web_runner.open_listener(0) as private_web:
+            host, port = private_web.getsockname()
+            assert host == "127.0.0.1" and port != occupied_port
+            app = create_app(*web, factory=fake_service)
+            server = uvicorn.Server(uvicorn.Config(app, proxy_headers=False, log_config=None))
+            thread = threading.Thread(target=server.run, kwargs={"sockets": [private_web]}, daemon=True)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 5
+                while not server.started and thread.is_alive() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert server.started
+                client = HTTPConnection(host, port, timeout=2)
+                try:
+                    client.request("GET", "/api/demo/status", headers={"Origin": f"http://{host}:{port}"})
+                    reply = client.getresponse()
+                    assert reply.status == 200 and json.loads(reply.read())["restricted_web"]
+                    client.request("GET", "/api/demo/status", headers={"Origin": f"http://{host}:{occupied_port}"})
+                    reply = client.getresponse()
+                    assert reply.status == 403
+                    reply.read()
+                finally:
+                    client.close()
+            finally:
+                server.should_exit = True
+                thread.join(timeout=5)
+                assert not thread.is_alive()
 
 
 def test_web_sync_wal_backup_and_web_restart(shared,web):
@@ -473,3 +547,37 @@ def test_concurrent_web_refreshes_do_not_fail_during_wal_cleanup(web,caplog):
         with ThreadPoolExecutor(max_workers=8) as pool:
             results=list(pool.map(lambda i:client.get(paths[i%len(paths)]).status_code,range(90)))
     assert all(status==200 for status in results),caplog.text
+
+
+def test_ef_production_allowlist_uses_existing_private_web_boundary(web, monkeypatch, tmp_path):
+    from backend.api.portfolio_governance import _bridge
+    from backend.services.investment_thesis.portfolio_store import migrate_portfolio_governance
+    from backend.services.investment_thesis.store import ThesisStore
+
+    store = ThesisStore(tmp_path / "e1-private" / "e1.sqlite", 7)
+    store.init()
+    migrate_portfolio_governance(store)
+    monkeypatch.setenv("PUBLIC_DEMO_MODE", "false")
+    monkeypatch.setenv("WEALTHPILOT_E1_DB_PATH", str(store.path))
+    monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_MODE", "PRODUCTION")
+    _bridge.cache_clear()
+    config, directory = web
+    prefix = "/api/allocation/governance"
+    before = store.path.read_bytes()
+    for access, status in ((None, 404), ("READ", 200), ("PREVIEW", 200), ("CONFIRM", 200)):
+        if access is None:
+            monkeypatch.delenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", raising=False)
+        else:
+            monkeypatch.setenv("WEALTHPILOT_E1_PORTFOLIO_ACCESS", access)
+        app = create_app(config, directory, factory=fake_service)
+        origin = "http://127.0.0.1:8791"
+        with TestClient(app, base_url=origin) as client:
+            assert client.get(prefix).status_code == status
+            if access is None:
+                continue
+            assert client.get(prefix, headers={"host": "host.invalid"}).status_code == 403
+            assert client.get(prefix, headers={"origin": "https://host.invalid"}).status_code == 403
+            assert client.post(prefix + "/commit", json={}, headers={"origin": "http://127.0.0.1:8790"}).status_code == 403
+            assert client.get(prefix, headers={"origin": origin}).status_code == 200
+            assert client.post("/api/action/orders", json={}).status_code == 404
+    assert store.path.read_bytes() == before

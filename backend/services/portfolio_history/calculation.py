@@ -51,7 +51,7 @@ def attribution(events, imports, valuation=None, *, boundary_uncertain=False):
     income=[e for e in events if e['kind']!='EXECUTION']
     corporate=any('CORPORATE_ACTIONS_UNSUPPORTED' in r.get('source_metadata',{}).get('issues',[]) for r in imports)
     if corporate:issues.append('CORPORATE_ACTIONS_UNSUPPORTED')
-    unsupported=corporate or any(e['sec_type'] not in {'STK','ETF'} or D(e.get('multiplier','1'))!=1 for e in events)
+    unsupported=corporate or any(e['sec_type'] not in {'STK','ETF','CRYPTO_SPOT'} or D(e.get('multiplier','1'))!=1 for e in events)
     if unsupported:issues.append('SECURITY_TYPE_OR_MULTIPLIER_UNSUPPORTED')
     mixed=any(e['currency']!=currency for e in events)
     if mixed:issues.append('MIXED_INSTRUMENT_CURRENCIES')
@@ -68,10 +68,19 @@ def attribution(events, imports, valuation=None, *, boundary_uncertain=False):
         fee=None
         if e.get('commission') is None or not e.get('commission_currency') or e.get('taxes') is None:
             costs_known=False;issues.append('ACTUAL_FEES_UNKNOWN')
+        elif (e.get('source_channel') == 'binance_spot' and e.get('valuation_convention') == 'USDT_USD_PARITY_APPROVED'
+              and e['commission_currency'] == 'USDT' and currency == 'USD'):
+            fee=D(e['commission'])+D(e['taxes']);total_fees+=fee
         elif e['commission_currency']!=currency:
             costs_known=False;issues.append('FEE_CURRENCY_NOT_NATIVE')
         else:fee=D(e['commission'])+D(e['taxes']);total_fees+=fee
         q=D(e['quantity'])
+        if (e.get('source_channel') == 'binance_spot' and e['sec_type'] == 'CRYPTO_SPOT'
+                and e.get('commission_currency') == 'BTC' and e.get('commission') is not None):
+            base_fee = D(e['commission'])
+            q = q - base_fee if e['side'] == 'BUY' else q + base_fee
+            if q <= 0:
+                raise ValueError('HISTORY_BASE_FEE_INVALID')
         if e['side']=='BUY':
             buy_qty+=q;qty+=q;principal+=amount;fee_basis+=fee or 0;buy_outlay+=amount+(fee or 0)
             dates.append(e.get('source_local_date') or e['executed_at'][:10])

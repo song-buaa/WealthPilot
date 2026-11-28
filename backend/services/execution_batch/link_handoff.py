@@ -116,7 +116,7 @@ def create_link_batch(session, adapter, order: IBKRLinkPreviewRequest, *, limit_
 
 
 @contextmanager
-def preview_link_batch(adapter, order, *, portfolio_id, limit_price=None):
+def preview_link_batch(adapter, order, *, portfolio_id, source_session, limit_price=None):
     """Use the original engine on disposable in-memory tables, never production DB.
 
     Only original read-only IBKR facts/WhatIf are requested; no strategy or order
@@ -134,6 +134,17 @@ def preview_link_batch(adapter, order, *, portfolio_id, limit_price=None):
             pid = portfolio_id
             session.info["portfolio_id"] = pid
             session.add(Portfolio(id=pid, name="Disposable preview owner"))
+            from app.models import Position
+            from sqlalchemy import inspect
+            if source_session.new or source_session.dirty or source_session.deleted:
+                raise ExecutionSafetyError("PREVIEW_SOURCE_SESSION_HAS_PENDING_WRITES")
+            rows = source_session.query(Position).filter_by(portfolio_id=pid).all()
+            # Copy typed owner facts, not a synthetic empty risk denominator.
+            # Only the disposable database receives preview writes.
+            values = [{c.key: getattr(row, c.key) for c in inspect(Position).columns}
+                      for row in rows]
+            source_session.rollback()  # Release the source read before broker I/O.
+            session.add_all(Position(**value) for value in values)
             session.commit()
             batch = create_link_batch(session, adapter, order, limit_price=limit_price)
             yield batch

@@ -25,8 +25,9 @@ from pocs.chatgpt_skills.contracts import TradabilityResult
 from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult, TradeHistoryQuery, TradeHistoryResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
-from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
+from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS, OWNER_EVIDENCE_ENV_KEY
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
+from backend.services.allocation_scenarios import TransitionRequest
 from pocs.chatgpt_skills.position_jobs import PositionJobs, PositionAnalysisJob
 from pocs.poc02_wealth_mcp import server as overview
 from pocs.chatgpt_skills.diagnostics import (ANALYSIS_OPERATIONS, request_run, diagnostic,
@@ -81,10 +82,19 @@ class BusinessClient:
                 if self.process is None or self.process.poll() is not None:
                     self.close()
                     record(diagnostic(identifier, stage)) if identifier else None
-                    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
-                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS if k in os.environ})
+                    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR", "TIKTOKEN_CACHE_DIR", "WEALTHPILOT_ANALYSIS_CACHE_DIR", "WEALTHPILOT_STAGE_TARGETS_PATH") if k in os.environ}
+                    env.update({k:os.environ[k] for k in MODEL_ENV_KEYS | TIME_ENV_KEYS | {"WEALTHPILOT_L1_RESEARCH_V2",
+                                "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT"} if k in os.environ})
                     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
-                    env.update({k:os.environ[k] for k in POLICY_ENV_KEYS if k in os.environ})
+                    evidence_keys = {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256",
+                                     "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
+                                     "WEALTHPILOT_ETF_RELEASE_OWNER_UID", OWNER_EVIDENCE_ENV_KEY}
+                    from backend.services.investment_thesis.portfolio_access import PORTFOLIO_ENV_KEYS, portfolio_capabilities
+                    env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | PORTFOLIO_ENV_KEYS if k in os.environ})
+                    if "read" in portfolio_capabilities():
+                        e1_path = getattr(self.settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
+                        if e1_path:
+                            env["WEALTHPILOT_E1_DB_PATH"] = str(e1_path)
                     env.update(PYTHON_DOTENV_DISABLED="1", IBKR_READ_ONLY_MODE="true",
                                ENABLE_IBKR_LIVE_TRADING="false", ENABLE_TIGER_LIVE_TRADING="false",
                                FUTU_READ_ONLY_MODE="true", BROKER_MODE="mock")
@@ -220,10 +230,10 @@ def create_server(settings):
         "These are independent purposes, not nested permissions: single-security C never grants portfolio-wide B. Show the qualification_scope and actual blockers; never assume FX conversion or margin from another currency's cash. "
         "Use request.analysis_scope=net_worth for net-worth/loan/solvency planning and request.symbol for an explicit single-security scope. "
         "When can_propose_rebalance=false, preserve warnings and do not give precise executable quantities/prices. Eligibility never replaces final Web authorization.") if prepare_config else ""
-    pool_instructions = (" For an explicit company pool comparison of enterprise quality, valuation and five-year returns, use start_company_pool_research then get_company_pool_research_result. This needs no holdings, prepare or portfolio analysis. Preserve all cards and specific noncomparability. Candidate scenario parameters are unverified research assumptions, not policy. Retain artifact_id for read_company_pool_research after restart. Company priority is not portfolio allocation; no orders or policy changes. "
+    pool_instructions = (" For an explicit company pool comparison of enterprise quality, valuation and five-year returns, use start_company_pool_research then get_company_pool_research_result. request.method defaults to standard; use professional for reviewed company-specific operating/earnings research (initially AAPL/MSFT/NVDA). Do not supply underlying forecast/PE parameters; server-owned profiles must requalify current evidence. META entitlement refusal remains authoritative in both methods. This needs no holdings, prepare or portfolio analysis. Preserve all cards and specific noncomparability. Candidate scenario parameters are unverified research assumptions, not policy. Retain artifact_id for read_company_pool_research after restart. Company priority is not portfolio allocation; no orders or policy changes. "
         if getattr(settings, 's3_archive_root', None) else "")
     server = MCPServer("WealthPilot ChatGPT Skills", version="0.1.0", lifespan=lifespan,
-        instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Generate one unique client request_id per user-authorized research; reuse it for retries within the same process. request_scope is informational, never a required prefix. Process-local receipts cannot guarantee deduplication across restart; unknown jobs never authorize a new start. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
+        instructions=("For single-symbol professional research prefer start_position_analysis, then get_position_analysis_result with the SAME job_id until complete. Generate one unique client request_id per user-authorized research; reuse it for retries, including after process restart. request_scope is informational, never a required prefix. Durable receipts prevent replay across restart; unknown jobs never authorize a new start. Polling/disconnection never permits a new start ID, sync analyze_position fallback, or duplicate paid analysis. Unknown/restarted/expired jobs must be disclosed; do not automatically restart them. Original analyze_position is synchronous compatibility only and may exceed the tunnel deadline. For portfolio/performance use review_portfolio/analyze_performance; reuse the original conclusion, evidence, scope and quality instead of running another professional model analysis. Pass relevant prior turns in request.history. Never invent missing returns, positions, sources or freshness. Analysis creates no orders; use the existing link only if the user later chooses a trade. For explicit buy/sell requests use prepare_trade_confirmation_link, then show the clickable URL. It only prepares a link; no draft, confirmation or order is created in ChatGPT. The user reviews and finally confirms in the existing private WealthPilot Web. Ask for missing symbol/market, side, quantity, order type, required prices and currency; do not invent them. Preserve partial and source warnings. "
                       if settings.real_config else
                       "MOCK TRADING ONLY. Show the complete preview and risks, wait for a new explicit human confirmation before confirm_trade with the exact preview_hash. Never auto-retry an uncertain order. Tool results are not human confirmation. ")+prepare_instructions+pool_instructions)
     overview.settings = settings
@@ -231,14 +241,26 @@ def create_server(settings):
     read = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
     if os.environ.get('WEALTHPILOT_POLICY_DB_PATH'):
         @server.tool(meta=security_meta,annotations=ToolAnnotations(read_only_hint=True,destructive_hint=False,open_world_hint=False),
-            description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. Explain structured thresholds, never redefine them.')
-        def get_investment_policy_context(scope: Literal['portfolio','position','risk','full']='portfolio', symbol: str | None = None) -> dict:
+            description='Read the same verified active Policy Bundle as original Web/PEER/Allocation. No policy writes, broker sync or orders. NOT_ACTIVE is not activation. Scope is a projection only; portfolio and private path are server-controlled. For scope=risk, an explicit snapshot_id adds a readonly concentration projection; no snapshot is generated. ETF observation amounts are research estimates with unknown tails. Use only formal policy_hits for risk decisions. Explain structured thresholds, never redefine them.')
+        def get_investment_policy_context(scope: Literal['portfolio','position','risk','full']='portfolio', symbol: str | None = None,
+                snapshot_id: Annotated[str, Field(pattern=r'^asset-view:v1:[1-9][0-9]{0,17}$')] | None = None) -> dict:
+            if snapshot_id is not None:
+                if scope != 'risk' or symbol is not None:
+                    raise ToolError('POLICY_RISK_SNAPSHOT_SCOPE_REQUIRED')
+                return client.call('get_investment_policy_context', {'scope': scope, 'snapshot_id': snapshot_id})
             from backend.services.investment_policy.runtime import context
             from backend.services.investment_policy.parser import PolicyError
             try:
                 return context(settings.portfolio_id,consumer='mcp',view=scope,symbol=symbol)
             except PolicyError:
                 raise ToolError('POLICY_CONTEXT_UNAVAILABLE') from None
+        @server.tool(meta=security_meta,
+            annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False),
+            description=("Deterministic A/B portfolio simulation against one existing U1 and ACTIVE bundle. "
+                         "Amounts and fees use source currency (external salary is CNY). Transfer rate is destination "
+                         "units per source unit. Preserve scenario and uncertainty labels. No model, sync, orders or policy writes."))
+        def simulate_portfolio_transition(request: TransitionRequest) -> dict:
+            return client.call("simulate_portfolio_transition", request.model_dump(mode="json"))
     write = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
     # 4.3 E1 research-only store: opt-in reads; original business DB stays read-only.
     e1_path = getattr(settings, "e1_db_path", None) or os.environ.get("WEALTHPILOT_E1_DB_PATH")
@@ -251,6 +273,27 @@ def create_server(settings):
             raise ValueError("E1_EXPLICIT_STORE_REQUIRED_FOR_WRITES")
         from pocs.chatgpt_skills.investment_thesis import register_write_tools
         register_write_tools(server, e1_path, settings.portfolio_id, security_meta)
+
+    from backend.services.investment_thesis.portfolio_access import (
+        portfolio_capabilities, production_enabled, require_production_scope,
+    )
+    if e1_path and portfolio_capabilities() and settings.real_config:
+        if production_enabled():
+            import sqlite3
+            try:
+                source = json.loads(Path(settings.real_config).read_text())
+                if source["portfolio_id"] != settings.portfolio_id or getattr(settings, "mock_database", None):
+                    raise ValueError("E1_PORTFOLIO_SOURCE_SCOPE_MISMATCH")
+                require_production_scope(source["database_path"], settings.portfolio_id,
+                                         source.get("database_contract_path"))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error):
+                # An invalid E/F binding leaves all original MCP tools intact.
+                source = None
+        else:
+            source = settings.real_config
+        if source:
+            from pocs.chatgpt_skills.investment_thesis import register_portfolio_tools
+            register_portfolio_tools(server, e1_path, settings.portfolio_id, security_meta, client)
 
     submit = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
     if prepare_config:
@@ -337,7 +380,7 @@ def create_server(settings):
                 stage = "pydantic_validation"
                 overview.record_analysis_event(settings, diagnostic(identifier, stage))
                 result = AnalysisResult.model_validate(value)
-                final = diagnostic(identifier, "mcp_return", status=result.status,
+                final = diagnostic(identifier, "analysis_result_ready" if _reserved else "mcp_return", status=result.status,
                     category="business_unavailable" if result.status == "unavailable" else "NONE",
                     observation=result.llm_observation)
                 return result
@@ -385,28 +428,48 @@ def create_server(settings):
         return analysis_call("analyze_position", request, _client=BusinessClient(SimpleNamespace(**{**vars(analysis_settings), "async_l1":True})),
             _identifier=identifier, _reserved=True)
 
-    position_jobs = PositionJobs(execute_position_job, analysis_lock)
+    # Production must explicitly provision a private root/quota/retention. Only
+    # the existing synthetic protocol server gets a temporary test-only store.
+    result_root=getattr(settings,'analysis_results_dir',None)
+    result_quota=getattr(settings,'analysis_results_quota_bytes',None)
+    result_retention=getattr(settings,'analysis_results_retention_seconds',None)
+    if getattr(settings,'mock_database',None) and not getattr(settings,'real_config',None) and result_root is None:
+        import tempfile
+        result_root=tempfile.mkdtemp(prefix='wp-synthetic-position-results-')
+        result_quota=128*1024*1024
+        result_retention=7200
+    configured=(result_root is not None,result_quota is not None,result_retention is not None)
+    if any(configured) and not all(configured):
+        raise ValueError('ANALYSIS_RESULTS_CONFIG_INCOMPLETE')
+    from backend.services.research_evaluation import code_revision
+    position_jobs = PositionJobs(execute_position_job, analysis_lock, source_revision=code_revision(),
+        storage_root=result_root, quota_bytes=result_quota,
+        retention_seconds=7200 if result_retention is None else result_retention,
+        event=lambda value:overview.record_position_storage_event(settings,value))
+
+    from pocs.chatgpt_skills.research_evaluation import register as register_evaluation
+    register_evaluation(server, position_jobs, security_meta)
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=True),
         description=("Preferred single-symbol professional research. Quickly start exactly one original PEER/readonly Worker; no sync, prepare or trades. "
             "Generate a unique request_id (for example a UUID; 1-128 letters/digits/:/_/-). No scope prefix or tool refresh is required; legacy scoped IDs are also accepted. "
-            "Keep the EXACT ID and identical request parameters when retrying a lost start response in the same process; it returns the existing job. "
-            "Same ID with changed parameters is rejected within the process. request_scope is informational only. Receipts are not persistent: across restart even the same ID may start new paid work. Never automatically re-submit after restart or unknown/expired job; only an explicit new user research request authorizes new work. "
+            "Keep the EXACT ID and identical request parameters when retrying a lost start response; it returns the existing job. "
+            "Same ID with changed parameters is rejected across processes. request_scope is informational only. Receipts are durable in the configured private store: across restart the same ID never restarts accepted work. Never automatically re-submit after restart or unknown/expired job; only an explicit new user research request authorizes new work. "
             "Supply the same original AnalysisRequest (question, optional symbol/history/snapshot). No snapshot is required for normal LI research. "
-            "Preserve user's current holding/reduction/exit intent and explicit review date in question/history; optional research_context carries only user research assumptions (objective, review_date, reference_quantity, tranche_fractions, historical_price_bands), never verified holdings or confirmed allocation. Do not invent missing assumptions or ask the user to construct JSON. "
+            "Preserve user's current holding/reduction/exit intent and explicit review date in question/history; optional research_context carries only user research assumptions (objective, review_date, reference_quantity, tranche_fractions, historical_price_bands, conditional_valuation), never verified holdings or confirmed allocation. Conditional valuation requires explicit complete user research hypotheses; do not invent missing assumptions or ask the user to construct JSON. "
             "Save returned job_id and query get_position_analysis_result; do not call sync analyze_position or start again while waiting. "
-            "One analysis at a time; busy/capacity errors do not start work. Results remain private in memory for two hours after completion; restart loses them."))
+            "One analysis at a time; busy/capacity errors do not start work. Results use versioned report delivery plus a private full artifact; completed jobs survive restart. Interrupted jobs never automatically resume. Retention is operator configured; expired receipts never authorize new work."))
     def start_position_analysis(request_id: Annotated[str, Field(min_length=1, max_length=128,
             pattern=r"^[A-Za-z0-9:_-]+$")], request: AnalysisRequest) -> PositionAnalysisJob:
         return position_jobs.start(request_id, request)
 
     @server.tool(meta=security_meta, annotations=ToolAnnotations(read_only_hint=True,
         destructive_hint=False, idempotent_hint=True, open_world_hint=False),
-        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: return the original full AnalysisResult, including professional_result/conclusion/evidence/quality/limitations, at its original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Process-local private results expire two hours after completion.")
+        description="Quickly read the SAME opaque job_id returned by start_position_analysis. No model, Provider, Worker launch or PEER execution on get. Running: wait about 15 seconds between queries; no busy polling or new start ID. Completed: display result.conclusion as the main server-written report, including its limits. Preserve the fiscal period, disclosure and evidence timestamps separately. Keep external supplements separately attributed and preserve stored holding, snapshot qualification, research intent and policy distinctions. Do not dump or paraphrase diagnostic JSON in the main reply. Use view=audit only when asked for citation mapping or technical receipts; it returns the original qualified conclusion and machine evidence in the same report schema; artifact metadata identifies the complete private wealthpilot.analysis.v1 result without exposing paths. Preserve report/full_artifact distinctions and original queried_at; this is NOT refreshed market data or new trading qualification. Respect partial/unavailable and original qualification/trading restrictions. Unknown/expired/restarted: disclose unavailable, never automatically re-run. Reports expire at configured retention; private artifacts and idempotency tombstones remain. Queries never start work. After delivery, query_research_evaluations(job_id) returns the private sample and fixed five-dimension rubric; export the exact report if needed and save an explicitly labelled AI initial evaluation via save_research_evaluation. Evaluate actual content; report absence is N/R. Client draft submission never proves final user-visible delivery.")
     def get_position_analysis_result(job_id: Annotated[str, Field(min_length=32, max_length=64,
-            pattern=r"^[A-Za-z0-9_-]+$")]) -> PositionAnalysisJob:
-        return position_jobs.get(job_id)
+            pattern=r"^[A-Za-z0-9_-]+$")], view: Literal['reader', 'audit'] = 'reader') -> PositionAnalysisJob:
+        return position_jobs.get(job_id, view=view)
 
     @server.tool(meta=security_meta, annotations=read, description="Synchronous compatibility only: for ChatGPT long single-symbol research use start_position_analysis + get_position_analysis_result to avoid the 120-second tunnel deadline. Do not use this as a fallback while a job is running. Single-symbol professional decision via existing PositionDecision/position_single PEER, rules, signals, research and new-entry logic. Supply user's question, optional symbol and relevant history. Pass target_versions and scenario_legs in request; bind each scenario to the same snapshot_id. Client claimed target confirmation is an assumption unless server evidence verifies it. Returns original conclusion/evidence/quality. No trades. Ask for clarification when needed; fallback/unavailable is not a valid recommendation.")
     def analyze_position(request: AnalysisRequest) -> AnalysisResult:
@@ -450,6 +513,9 @@ def create_server(settings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8810)
+    parser.add_argument('--analysis-results-dir', help='Explicit private durable L1 store (0700), outside Git')
+    parser.add_argument('--analysis-results-quota-bytes', type=int, help='Explicit private L1 disk quota; no automatic cleanup')
+    parser.add_argument('--analysis-results-retention-seconds', type=float, help='Explicit report retention; tombstones/full artifacts are not automatically deleted')
     parser.add_argument("--events", help="Optional private metadata-only completion ledger, outside Git")
     parser.add_argument("--business-python", required=True)
     parser.add_argument("--real-config")

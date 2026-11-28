@@ -24,8 +24,11 @@
 | 数据与知识 | `app/database.py`、`app/models.py`、`app/shared_sqlite.py` 与各业务模型；共享 SQLite WAL。根 `knowledge_base/` Markdown 为知识真相源，Chroma 为可重建索引。 |
 | Mac Mini Prod | 原生 ARM Python / Node、launchd、完整 Web/后端、MCP/Tunnel、生产数据库及原业务服务。数据、配置、凭证、日志和备份位于代码外。 |
 | MacBook Dev / GitHub | 本地开发与隔离测试 → 短期分支 / PR / 四项 CI → 经授权集成 → Mini 安装确认的完整 SHA，不在生产直接改业务代码。 |
+| 个人历史回测研究（离线） | [research_backtest](../research_backtest/__init__.py)复用已验收的个人AV文件转换、独立Decimal账本和原生LEAN隔离runner；[资格边界](v4.3/AV_LEAN_RESEARCH_INFRA.md)。只消费不可变AV响应/事件/日历，不复制采集客户端、不导入生产Owner运行时；不是Portfolio历史收益服务或交易模型。五ETF研究PASS、严格结算PARTIAL；严格请求启动前拒绝，默认研究模式不得替代。 |
 
 P1–P5 均 DONE：资产负债查询、明确交易预填链接、单标决策、组合评估、当前持仓收益分析。Web/iOS 读取与分析、MacBook/iPhone 交易预填均已实际验收；P2 新入口首次真实券商提交/成交仍未验收。P5 完成的是现有持仓账面盈亏能力，不包含完整历史收益归因。
+
+Binance Spot只读开发候选沿原SyncExecutor → Repository → PositionUpsertService/B2事务 → U0/U1 → 原Web/MCP，不另建同步或财富Owner。UID绑定原Portfolio，BTC现货、原生USD现金与USDT原币分开；账户权限组与Key权限分离，缺报价资产数量/UNKNOWN沿原Run及observed_rows质量投影保留，不写伪零估值；USDT仅用批准美元等值约定，成本与源有效时间缺证保持UNKNOWN。四列nullable快照迁移为原CLI显式stage，默认不启用、不自动DDL。配置、证据、B3/C身份及首次接入边界见[Binance合同](BINANCE_SPOT.md)。生产接入尚未验收。
 
 ## 2. 生产调用关系
 
@@ -223,6 +226,14 @@ U0 只增加 run 的 context_json 和活动 owner 唯一索引；共享 SQLite �
 
 PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影指纹；freshness 复用和冻结副本内均验证，不把最近 success 当当前行完整证明。无旧证据须刷新或降级，不事后认领历史事实。原 PEER 输出前重核同 ID 时效，Web 采用最终质量；最近失败尝试使用原安全错误白名单，与 last-good 质量分列。未新增 Schema。
 
+4.4 A-min本地候选在原Portfolio/Wealth域增加[纯分母投影](../backend/services/investable_assets.py)：消费同一U1 payload的来源事实与内部scope evidence，返回原PolicyAssets及不可变来源hash；没有数据库/Provider读取、写入或新API。旧U1缺完整证据时仍UNKNOWN；不接入B2的PolicySession装配和目标差距。输入合同见[U1补充](U1_IMPLEMENTATION.md#44-a-min合格分母纯投影本地候选)。
+
+4.4 B2候选由原Wealth Owner在U1冻结发布时读取私有用途/覆盖证据，保留原Portfolio全持仓范围及账户来源；原Allocation GET只读既有固定视图，复用A-min、PolicyAssets及请求级PolicySession计算ACTIVE五大类差距，来源不足409而非假零资产。原政策/组合页面显示证据与到期UNKNOWN；不含同步、穿透风险或交易。无共享DDL/政策写入；Owner文件与真实数据资格须另行确认，见[原U1合同](U1_IMPLEMENTATION.md#44-b2-owner凭据与active配置接线)。
+
+4.4 B3沿原只读Allocation快照追加ACTIVE分层差距。原Wealth/U1、A-min及PolicySession共同约束分母、身份、时点和政策版本，原五类输出保留。一级、八个二级桶与有限ETF产品层按逐项证据汇总，未归类留在D并披露，不发布不完整分层的当前权重或金额差距。详见[B3合同](U1_IMPLEMENTATION.md#44-b3-active分层配置差距)。
+
+4.4 C 内核复用原发行人身份、U1/A-min 与固定 ACTIVE PolicySession，使用独立版本化 ETF 成分证据评估已知风险下限及有证上界。通过原 Allocation GET 和 Web 消费 B3 同源分类；MCP 风险读取与 PEER 组合复核可按已有冻结 ID 复用同一资格投影。详见[C 合同](U1_IMPLEMENTATION.md#44-c-发行人及-etf-穿透内核)。
+
 ## 14. U2 成交驱动同步与只读状态（已合入）
 
 [OrderManager](../backend/services/action/order_manager.py) 是成交归并唯一 owner；原 OrderRecord 新增 nullable `fill_sync_json`，在原 pre-send claim 保存基线，在同一观察事务记录累计水位/execId 证据。原 [OrderPoller](../backend/services/action/order_poller.py) 在事务结束后调用 [SyncExecutor](../backend/services/restricted_sync.py) 的账户消费；原 [Repository](../backend/services/broker_sync/repository.py) 在 Run claim 下重读目标，同账户合并、持久退避/崩溃恢复、发布 fence 及覆盖进度一起提交。手动/22:00/分析前同步仍同一入口，发布也重核已跟踪覆盖。
@@ -246,7 +257,7 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 
 ## 16. D1 资产质量（已合入）
 
-发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 补充有官方 listing 证据的 Tiger QQQ 例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
+发行主体仍由原 instruments.issuers 投影，补充有证据的美团/PDD；只聚合市值，账户/通道/证券数量及成本不合并。原 canonical classifier 复用有官方上市证据的 Tiger QQQ、LI、PDD 载体例外，未知基金不猜测。无新持仓、现金、分类系统或收益库。
 
 原 U1 capture/public_view 在同一不可变输入上输出 A 战略配置、B 大致金额、C 精确参数及逐项阻断；原 can_propose_rebalance 对应 C。可选 analysis_scope 与原 symbol 限定用途/相关证券，贷款陈旧不阻断无关单标；养老金关联未证实继续人工核对。原 WealthService 仍负责主/副表与去重，编辑时间不再冒充余额有效日期。
 
@@ -267,6 +278,8 @@ PR #24 修复：原 Run context 在原子发布时记录实际 Position 投影�
 国金最终上线合同：原解析器记录精确PASS/双上限估值WARNING/超限阻断；原生v2来源仅用真实观察动作排序，券商时间和完整性缺证据保留UNKNOWN。原Repository的默认关闭观察行选项仅供国金显式reconcile使用，不清仓/删除未观察到的行，不退役旧汇总；Run.complete=false供原U1质量判定。具体权限与政策以[原国金合同](GUOJIN_NATIVE_SYNC.md#最终上线政策估值-warning-与可观察来源当前合同)为准。
 
 ## 4.2 开发扩展：分析证据资格
+
+4.1 当前财务来源 V2 候选沿原 L1 证据工具接入。SEC 目录和 Submissions 锚定发行人及披露窗口后，原 AV 缓存优先提供可判明会计口径的结构化字段。缺口走 CompanyFacts，再按目标期间读取已声明原件。供应商观察单列在当前财务收据，原 Financial Research 通过显式当前模式计算。严格 PIT、旧 S3 冻结复算和投资政策仍使用原资格，详见[三级来源合同](V42_US_FINANCIAL_SOURCES.md#三级财务来源-v2)。
 
 P1研究内容沿原Owner扩展：独立核验的旧季度进入历史比较分区，不改变当前字段时钟或交易资格；[纯财务研究投影](../backend/services/market_data/financial_research.py)复用原AV窗口/求和、原FXService和已验证技术价格，按完整起止期间/币种/会计及ADS口径生成变化和静态估值。原Output Policy以字段绑定插入数字，研究段落可讨论非执行性价格观察与退出条件，不能补造数字或发出即时下单指令。原ExitPlan的research_plan与执行价量字段分开：用户意图/历史参考仅为假设，日期优先于默认值；L2–L4公式、E1库及PR56运行机制不变。合同与UNKNOWN见[来源说明](V42_US_FINANCIAL_SOURCES.md#p1-专业研究扩展2026-10-29-开发中)。
 P1.1仍在原纯投影内选择同原文比较列/明确精度相容值，保留不同披露原值和未解释差异；原表格修正列币种注记与EPS/股数分组，原Output Policy保留绑定数值并区分安全拒绝子原因，无新的来源或任务Owner。合同与生产待验收见[原记录](V42_IMPLEMENTATION.md#p11-多披露比较与数字解释2026-10-29-开发候选)。
@@ -289,9 +302,13 @@ P1.1仍在原纯投影内选择同原文比较列/明确精度相容值，保留
 
 正常 MCP 分析的安全阶段诊断沿原 [server/BusinessClient](../pocs/chatgpt_skills/server.py) → [Worker](../pocs/chatgpt_skills/worker.py) → 原 PEER → IPC/Pydantic 返回，复用匿名 analysis_run_id 与原只读事件入口，区分协议错误与业务 ok/partial/unavailable。安全枚举投影和阶段记录不参与业务资格，不输出原文；未观测的模型/Provider 请求数 UNKNOWN。240/270 秒超时与专项预算 owner 不变；字段、离线覆盖及待授权的一次 LI 验证见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-单标错误诊断2026-10-27待合并候选)。
 
-正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配，优先于同步analyze_position；[进程内登记](../pocs/chatgpt_skills/position_jobs.py)只拥有任务准入/收据/暂存结果，原Worker/PEER仍是研究与证据owner。后台独立BusinessClient与HTTP请求生命周期解耦，get不执行业务/Provider；共享准入锁最多一项分析。客户端唯一ID在进程内幂等，兼容缓存旧scope格式；request_scope仅诊断，不要求刷新目录。纯内存不保证跨重启去重，未知job不自动重跑，结果两小时保留，旧/过期任务UNKNOWN/unavailable，无新数据库/队列/资格/交易权限。原10/11工具不移除，增加start/get后12/13项；120秒官方规则、证据强度、容量/隐私及待授权真实LI使用见[4.2记录](V42_IMPLEMENTATION.md#正常-mcp-长研究异步取回2026-10-27待合并候选)。
+正常单标长研究在原[MCP server](../pocs/chatgpt_skills/server.py)提供start/get薄适配；[PositionJobs](../pocs/chatgpt_skills/position_jobs.py)拥有L1准入和持久收据，原Worker/PEER仍是研究与证据owner。后台BusinessClient与HTTP生命周期解耦；get只读工件。原进程锁与跨进程文件锁协调单项L1，请求摘要和参数指纹在启动前提交。完整Evidence/ACTIVE过滤结果先原子保存、校验，再标completed；v2 Job返回analysis-report.v1和完整analysis.v1工件的哈希/字节数，不暴露路径。重启可恢复完整结果，中断/过期收据不自动重跑。目录、配额、保留期必须显式配置，无生产默认保存或清理策略。同步入口不作自动回退；S3继续使用此Owner内保留的原进程内登记，其标准/专业入口和冻结格式不变。详见[持久交付合同](V42_IMPLEMENTATION.md#l1-异步结果持久交付方案-c2026-11-05开发候选)。
+
+2026-11-06 L1 Expressing 开发候选：服务端 `analysis_only + single_position_research` 进入原Expressing的共用专业研究合同，持仓/未持仓均复用原Evidence、数字绑定、Reviewing及ACTIVE最终过滤。原[有界投影](../backend/services/market_data/l1_context.py)保留最新四季核心财务、当前/可比期、计算依赖和主题证据；软目标触发可逆字段名去重，不拥有财务计算或资格；原完整Evidence不裁剪。Sol Medium显式总输出32768，输入参考编码预检约40000上限，必要闭包超限不发送。无词表时使用保守UTF-8字节上界，不在研究中下载资源。facts-only默认正文精简，完整原事实仍存私有工件；PR96存储/幂等合同不变。开发冻结测量、真实调用待授权及来源边界见[实施说明](V42_IMPLEMENTATION.md#l1-expressing-有界上下文与输出预算2026-11-06开发候选)。
 
 ## 4.3 开发边界：E1 研究记录
+
+
 
 E1-B0/B1/B2/B3均属WealthPilot 4.3内部阶段。B1独立分支新增 [轻量研究域](../backend/services/investment_thesis/service.py) 和显式私人SQLite，保存不可覆盖假设/证据/复核，不复制Position/账户/订单账本，也不修改业务库schema。专业分析仍为原PEER/AnalysisRequest/AnalysisResult；原MCP任务内存不是E1永久档案。
 
@@ -302,3 +319,74 @@ B3-2沿同一私人E1库显式迁移 [监控事件及待办收据](../backend/se
 N1不新增schema或scheduler：[自然扫描](../backend/services/investment_thesis/natural_scan.py)只对显式opt-in的US证券复用原SEC directory/Submissions/full-submission读取，首次建水位不回放，后续用CIK/accession/接受时间/原件哈希确定性去重；源失败追加失败收据并隔离，不能解释为无事件。[MCP适配](../pocs/chatgpt_skills/investment_thesis.py)新增第三项E1只读待办投影，使用稳定event key的at-least-once语义，不改变任务或研究记录。生产自动扫描继续OFF；Scheduled task私人连接和用户TEST ONLY提醒已通过。真实SEC验收发现抓取完成时间被误作PIT截止，PR59只以SEC acceptance/known clock判断未来信息并保留真实`fetched_at`。2026-10-29本对话已核对生产收据：4e4fdb4ea0831eb079cf96518f91d4397e326e05运行，18工具/E1 v2及既有canonical记录不变，4次SEC HTTP200，首次76 accession，独立进程0新待办，临时monitor取消。水位后真实新accession尚未验证；状态为E1_CORE_RELEASED_N1_NOTIFICATION_PASS_NATURAL_NEW_EVENT_PENDING，不是E1_RELEASED。上述扫描OFF/通知NOT_WIRED为该次验收值，今日状态本轮未重测。旧N1记录的修复待发布段落保留其历史时点，当前证据边界见[统一映射](v4.3/UNIFIED_INVESTMENT_DECISION_ARCHITECTURE.md#7-生产证据与现状差异)。实现、限制和一次性上线验收见 [N1记录](v4.3/E1_N1_NATURAL_REVIEW.md)。
 
 P2汽车经营研究候选复用既有SEC原始申报来源Owner：只有经过原发行主体/CIK、accession、附件声明、正式发布与抓取时钟及原文哈希验证的季度经营观察值，才由Evidence Registry投影为L1可引用字段。EX-99.1附件声明可位于官方封面同一表格行的独立单元格，仍要求精确文件名与唯一链接。financial_research复用统一计算记录与原引用合同计算汽车交付、汽车销售收入、车辆业务毛利率及汽车收入/交付量近似值；Output Policy继续最终数字绑定。该行业层不修改基础财报、资产/交易Owner、分析资格或PEER编排；缺失独立季度/币种/业务口径继续UNKNOWN。XPEV完整原文已通过离线资格链，生产自动发现和真实PEER解释仍待验收。
+
+PR-A估值必要输入仍归原Financial Research Owner：`build_valuation_inputs`消费Evidence的正式质量字段，显式报告币与时点，区分加权股数、点时披露股数、ADS关系和当前经济股本资格。部分借款现金差额不得用作完整净现金或权益估值桥；旧S3适用性不变。无新存储/Provider/Agent，详见V42实现记录PR-A。
+
+PR-B候选沿原S3 `quality_valuation` 增加外国发行人ADS正盈利条件情景投影，原 `financial_research` 仍负责财务、价格和FX资格。普通长期研究请求经原 `position_analysis` 意图入口触发证据限定的参考敏感性；缺少合格价格、EPS、FX、上市单位或独立未来假设时保留N/A和反向条件变量。该投影不改变S3 domestic适用范围、PEER编排、ACTIVE政策或交易权限；缺少LI股本/完整净现金等必要输入时，恢复估值继续N/A。
+
+S3 META权益资格候选沿原[method_applicability](../backend/services/market_data/method_applicability.py)及[pool](../backend/services/s3_pool_research.py)复用P2.1已核验SEC notice，仅拒绝未桥接资本结构的五年回报，保留质量卡，不启用P2盈利模型。规则/公开原件随原归档冻结，未知/损坏不放行；源码、时钟、历史兼容及验收边界见[S3说明](v4.3/S3_A_IMPLEMENTATION.md#meta-已知资本结构资格修复2026-11-03-候选)。
+
+### S3专业研究方法选择（P3候选）
+
+原MCP公司池的`request.method`向后兼容：默认`standard`复用原P1，`professional`沿同一PEER/Skill入口调用原P2.2经营模型。服务端版本化档案仅保存已评审研究假设，不成为财务或投资政策Owner；原SEC/Price/Evidence先资格化新采集，专业薄适配再核当前窗口、最新申报及研究上下文适用性，变化则逐公司UNKNOWN。META原权益门禁不因方法切换而解除。原归档保存完整父资格与参数/方法/来源，读回按冻结原Owner投影重算、无新网络/事实资格；漂移要求原版本，不静默改历史。无新MCP工具、Agent Runtime、数据库或交易权限；接口、年度原件快照复用与发布/验收边界见[P3合同](v4.3/S3_P2_OPERATING_RESEARCH.md#p3-专业研究产品接线候选)。
+
+## L1质量样本与评测（开发候选）
+
+研究执行及不可变完整原件继续归PositionJobs/PositionStore；Research Evaluation仅拥有受限原请求、原件引用、报告版本与追加评分/反馈，存于同一私有边界的独立有界文件目录。MCP复用原访问控制；native/Reader/client draft/human-reported final分开留证。不持有资产、E1、政策或交易权威，不修改公开Job/report版本。容量满仅停归档，不停研究。[数据/权限/发布合同](L1_RESEARCH_EVALUATION.md)。
+
+## 4.4 D 多阶段模拟（候选）
+
+D 读取同一 Portfolio 下既有 U1 快照，验证 U1 内容摘要和现役 ACTIVE Policy Bundle 摘要。每条路径从同一冻结基准复制计算。请求稿和本次评估各有独立摘要，评估摘要绑定评价时点和 ETF 证据。结果只存在于请求内存。四个动作可顺序组合出卖入现金、换仓、跨账户到账、偿债和失败路径。客户端声明属于假设，不能签发 Owner 证据。
+
+| 合同 | 含义 |
+| --- | --- |
+| `paths.A`、`paths.B` | 独立的有序阶段，每个阶段有一个或多个动作；`B` 可省略 |
+| `amount`、`fee` | 原币主单位的十进制字符串；售出费从收到的现金扣除，其他费用与支出之和不得超可用现金 |
+| `cash_ref` | U1 的 `position:<id>`、据实排除的还贷储备 `wealth:<id>`，或前序动作生成的 `action:<id>` |
+| `destination_per_source` | 目标币每一单位原币的到账假设，与冻结估值 FX 分开；在途留在单一资金批次，下一阶段可对该批次显式假设到账 |
+| `external_cashflow` | `SALARY_CASHFLOW_REPAY`，只减少指定贷款；工资结余独立于投资分母 |
+| `scenario_policy_hits` | 合格冻结基准的反事实越线。正式 `policy_hits` 保持空。真实分母 UNKNOWN 时仅给条件性金额及明确假设的研究比例 |
+
+D 保留买入失败或未结算现金原有归属。跨账户转移限冻结 Portfolio 账户。买入 MVP 支持有据的美元标的，保留原可信身份。假设买入 ETF 增加可得的观察性敞口，新头寸缺独立估值时不会提升正式 ETF 下限。未知尾部不赋零。净资产仅在总体财富有据时计算。临界净偿债额依赖敞口、估值、费用和其他资金流不变。
+
+Web 现有政策工作台复用同一只读模拟入口，支持编辑阶段输入及 A/B 并排显示。MCP 私有 Worker 与原 PEER 工具委托 AllocationService；无需新 U1、同步、模型或交易。A3 后使用真实 Owner/U1 和 ACTIVE 绑定验收，并继续保留隔离的合成 S0—S3 金样。
+
+## 4.4 E 组合人工治理（隔离候选）
+
+组合决定由原 E1 私有 SQLite Owner 管理，与单标 Thesis/Review 分开。显式迁移只新增组合决策历史和风险事件历史表、索引及追加保护。现有运行进程保持默认关闭，未改变单标 E1 的开关。候选要求私有库、独立 `WEALTHPILOT_E1_PORTFOLIO_MODE=ISOLATED` 和隔离发布或合成 ACTIVE Policy。部署和生产迁移需要独立批准。
+
+- Web 在 Allocation 工作台预览 D 路径和组合处置。MCP 用独立只读预览和明确确认工具，PEER 工具只读消费同一历史/待办模型。无读取时写入或巡检任务。
+- B/C 的当前正式事实触发组合风险候选，D 模拟命中、ETF 观察和 UNKNOWN 分开。持续事件按组合、规则及主体去重，互补一级节点只产生一个候选；风险解除需要正式、同范围的清除证据。到期与监控保留原风险证据的快照和政策溯源。日程由人工设定，政策交易日 SLA 目前无类型化运行时合同。
+- 同一预览的分项独立选择，一次确认事务写入不可变版本及选中事件。重试需原令牌、指纹及同一选择；撤销追加新版本并退出原方案待办，风险事件继续独立追踪。正式例外只保存待定状态。
+- 冻结实际 U1 内容、结构化政策、B/C 依据、D 规范输入和结果、正式/观察 ETF 版本及计算源码摘要。历史读取不重新计算。原核可实现不可用时仍可读当时结果；本切片未提供跨版本回放执行器。
+- F 可读稳定组合决策/版本引用、原快照、原政策、场景、检查点、复核日和证据要求。检查点中的规范身份、计划余额、预算差距、假设和资金状态用于未来复核，当前不生成交易股数或实际执行事实。
+
+隔离迁移使用 `python -m backend.services.investment_thesis.cli --store <isolated-e1.sqlite> --portfolio-id <id> migrate-portfolio-isolated`，仅对已初始化 E1 库运行。先使用 SQLite Backup API 保留一致副本。隔离回归验证旧 Thesis 版本未变、同一事务写入、不可变历史及备份读回。关闭组合开关即可停用新入口，既有 E1 继续读取原表；有写入后恢复应由 Owner 对照备份、版本和完整性另行批准。
+
+## 4.4 F 组合实际复核（隔离候选）
+
+F 只读原 E1 当前确认版或指定历史 revision，核对原 U1 摘要，并消费用户选择的既有较新 U1。默认选择最近确认、有阶段检查点且尚未撤销的方案。已撤销和被替代版本仍可读取历史，不能返回为现役计划。政策变更、到期和当前证据不足会保留原计划并要求人工审议。
+
+- 原账户归属、规范证券、原币现金及 Wealth 负债用于快照差分。重复或不完整账户、未发布/已失败同步、陈旧来源、公司行为或无法比较的证券身份显示未知。价格和 FX 变化、跨户可能转移与执行归因分列。
+- 检查点列出计划金额或本金、当前事实、剩余差额及质量。E 只提供金额目标时 F 不推算股数目标。实际证券数量只来自 U1。现金差额不证明到账，负债本金下降不证明资金来源。
+- 执行证据复用原 Trade History、OrderRecord 及 Trade/Sync 查询。可显式绑定计划动作与已存订单 ID，只有同组合、账户、券商、证券、方向、时段和计划金额一致的原始成交证据才能确认对应交易。成交和持仓同步单独呈现。MVP 不自动匹配转账与还贷；缺独立 Owner 证据时保持待证。
+- 当前分母、B3 差距和 C 风险沿用原解析。正式新增/持续/有证可解除风险与观察估计分开。只读复核不会更改 E 风险/历史或批准下一腿。续办沿用 E 的预览及确认。
+- Web `POST /api/allocation/governance/reconcile`、MCP 与 PEER 继续使用原隔离组合治理入口，依赖未变。下一次复核时间由用户人工确定。无额外迁移、后台扫描、券商入口或生产启用。
+
+## 4.4 E/F 最小生产启用合同
+
+默认关闭。正式环境配置 `WEALTHPILOT_E1_PORTFOLIO_MODE=PRODUCTION`、`WEALTHPILOT_E1_PORTFOLIO_ACCESS=READ|PREVIEW|CONFIRM`。三档依次允许读历史/风险候选/复核、增加无落盘预览、增加明确确认保存。Public Demo 和未配置的进程不开放生产合同。`ISOLATED` 沿用原隔离入口。
+
+- Web 沿现有私有回环访问保护。授权发布时在现有私有 `web.json` 加入 `"e1_portfolio":{"store":"<已存在的E1库绝对路径>","access":"READ"}`，按已批准的档位递进。Web runner 绑定现有共库、scope、Policy 和 SQLite 契约。确认写入仅在此私有 Web 入口，同源 POST 使用原预览令牌、指纹、选项及明确确认。MCP 沿既有私有真实配置、同一 SQLite 契约与 E1 路径设置上述变量，提供读取及按权限预览。生产 MCP 预览提示到 Web 重新预览并确认。PEER 可读同一复核结果，沿原宿主的访问边界。
+- 现有 U1 由服务器按快照 ID、SHA 和 Portfolio scope 读取。生产拒绝合成快照或隔离版 Policy。当前正式 ACTIVE Bundle 原样复用。资产资格不足保留 UNKNOWN，观察与执行证据仍分层。
+- 授权维护窗口先停止 E1 客户端，使用现有 Python 显式运行以下命令。它验证原 E1、通过原 SQLite Backup API 创建并验证新备份，在原库单一事务新增组合表及保护，检查 FK。不迁移业务库，不在服务启动时迁移。
+
+```sh
+"$EXISTING_PYTHON" -m backend.services.investment_thesis.cli --store "$E1_DB" \
+  --portfolio-id "$PORTFOLIO_ID" migrate-portfolio-production \
+  --backup "$NEW_PRIVATE_E1_BACKUP" --services-stopped
+```
+
+统一发布先验收关闭态。启用 READ 后对照同一现存 U1、ACTIVE PolicyReference、旧单标 Thesis/Review 和 Web/MCP/PEER，确认 UNKNOWN 及历史一致。随后按发布授权开放预览与私有 Web 确认。确认真实写入需有独立的用户实际选择。故障时优先撤回配置，新增表可留存。若需恢复库，按原 [SQLite 快照备份恢复](../pocs/poc03_mac_mini/snapshot.py) 停止客户端、校验备份及保留当前库，再恢复；恢复后按 E1 原 Owner 权限设 0600。恢复前核对备份后产生的记录，避免遗失真实决定。
+
+S3 4.5 policy-scoped company research uses the read-only ACTIVE Policy Owner and the existing Company Pool Worker. The price revaluation child references the prior professional artifact and preserves its terminal date. See the [Phase 1 contract](v4.3/S3_RELATIVE_VALUE_CAPITAL_ALLOCATION.md).

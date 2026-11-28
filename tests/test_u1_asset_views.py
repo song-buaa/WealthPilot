@@ -15,6 +15,7 @@ from app.models import Portfolio, Position, WealthItem, WealthSnapshot
 from app.asset_views import load_view, public_view, frozen_input, frozen_result
 from backend.services.asset_analysis import AssetAnalysisPreparation
 from tests.test_analysis_skills import peer  # noqa: F401 - original isolated PEER fixture
+from tests.test_policy_integration import active  # noqa: F401 - isolated policy owner
 
 
 @pytest.fixture
@@ -80,6 +81,79 @@ def test_prepare_idempotency_and_immutable_views(context):
     assert next_view['views']['wealth_summary']['total_assets']==1000
     assert all('account_id' not in a and 'account' not in a for a in public_view(view)['data_quality']['accounts'])
     assert 'internal' not in public_view(view)
+
+
+def test_b2_full_inventory_preserves_original_investment_scope(context):
+    c = context
+    with c.sessions() as session:
+        pension = Position(portfolio_id=7, name='Synthetic pension', platform='manual',
+            asset_class='货币', economic_asset_class='CASH', vehicle_type='CASH', currency='CNY',
+            market_value_cny=123, segment='养老')
+        session.add(pension); session.commit(); ident = pension.id
+    view = ready(c, 'full-inventory')
+    quality = view['data_quality']
+    assert ident not in {p['id'] for p in quality['security_inputs']}
+    assert ident in {p['id'] for p in quality['investable_security_inputs']}
+    assert len(quality['investable_security_inputs']) == len(view['views']['positions']['items'])
+
+
+def test_b2_non_investment_platform_does_not_change_original_account_ref(context):
+    with context.sessions() as session:
+        session.add(Position(portfolio_id=7,name='Synthetic retirement',platform='Different platform',
+            broker='tiger',broker_account_id='fixture',sync_source='manual',segment='养老',
+            asset_class='货币',economic_asset_class='CASH',vehicle_type='CASH',market_value_cny=10))
+        session.commit()
+    view = ready(context, 'scope-identity')
+    quality = view['data_quality']
+    assert {p['account_ref'] for p in quality['security_inputs']} <= {a['account_ref'] for a in quality['accounts']}
+
+
+def test_b2_capture_does_not_promote_legacy_classification(context):
+    with context.sessions() as session:
+        row = Position(portfolio_id=7,name='Synthetic legacy ETF',platform='manual',
+            symbol='OLD:US',asset_class='权益',vehicle_type='ETF',economic_asset_class=None,
+            market_value_cny=10,segment='养老')
+        session.add(row);session.commit();ident=row.id
+    view = ready(context, 'legacy-class')
+    original = next(p for p in view['views']['positions']['items'] if p['id']==ident)
+    inventory = next(p for p in view['data_quality']['investable_security_inputs'] if p['id']==ident)
+    assert original['economic_asset_class']=='EQUITY'  # Original compatibility display only.
+    assert inventory['economic_asset_class'] is None
+    assert inventory['classification_verification_status'] is None
+
+
+def test_b2_owner_receipt_is_frozen_by_original_prepare(context, monkeypatch, tmp_path, active):
+    from backend.services.wealth_service import investable_inventory_identity
+    from backend.services.investment_policy.contracts import digest
+    from backend.services.investable_assets import project_investable_assets
+    first = ready(context, 'inventory-before-owner')
+    refs = [f'position:{p["id"]}' for p in first['data_quality']['investable_security_inputs']]
+    stamp = datetime.now(timezone.utc)
+    coverage = {k:{'status':'ABSENT','evidence_refs':['synthetic:confirmed-empty'],'asset_refs':[]}
+        for k in ['accounts','manual_assets','pensions','gold','btc','deduplication']}
+    for key in ['accounts','deduplication']:
+        coverage[key].update(status='PRESENT', asset_refs=refs)
+    raw = {'schema_version':'wealthpilot.owner-scope.v1','portfolio_id':7,
+        'inventory_sha256':investable_inventory_identity(first), 'confirmed_at':stamp.isoformat(),
+        'valid_until':(stamp+timedelta(days=1)).isoformat(), 'coverage':coverage,
+        'dispositions':{ref:{'state':'INCLUDED','reason':'FREE_INVESTMENT',
+            'evidence_refs':['synthetic:free-investment-cash']} for ref in refs}}
+    path = tmp_path/'owner.json'; path.write_text(json.dumps(raw)); path.chmod(0o600)
+    monkeypatch.setenv('WEALTHPILOT_INVESTABLE_EVIDENCE_FILE',str(path))
+    second = ready(context, 'inventory-with-owner')
+    assert second['data_quality']['investable_scope_evidence']['snapshot_id'] == second['snapshot_id']
+    assert second['data_quality']['investable_owner_evidence']['sha256'] == digest(raw)
+    receipt = project_investable_assets(second, portfolio_id=7, snapshot_id=second['snapshot_id'],
+        snapshot_sha256=digest(second), at=datetime.now(timezone.utc))
+    assert receipt.status == 'QUALIFIED', receipt.policy_assets.issues
+    assert receipt.policy_assets.denominator_cny == 1000
+    assert 'investable_scope_evidence' not in first['data_quality']
+    from app import database
+    from backend.services.allocation_service import get_snapshot
+    monkeypatch.setattr(database, 'DB_PATH', context.db)
+    result = get_snapshot(7, snapshot_id=second['snapshot_id'])
+    assert result.total_investable_assets == 1000
+    assert result.policy_allocation['snapshot_sha256'] == digest(second)
 
 
 def test_fixed_scope_does_not_read_unbound_consumption_cashflow(context,monkeypatch):

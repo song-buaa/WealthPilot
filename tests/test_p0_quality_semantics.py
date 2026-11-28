@@ -61,7 +61,12 @@ def test_pdd_higher_scope_and_currency_not_silently_certified():
     assert not a['verified_field_records']
     six=pdd_original().replace(b'three months',b'six months')
     x=pdd_record(six)
-    assert x is None or not x['financial_observations']
+    # Instant balance-sheet facts remain valid when income becomes six-month.
+    # No duration or weighted-share fact may be certified as an independent quarter.
+    assert x is not None
+    assert x['financial_observations']
+    assert all(o['period_basis']=='instant' and o['source_field'].startswith('quality_')
+               for o in x['financial_observations'])
 
 
 def test_keyword_optimism_is_not_a_financial_or_personal_rule_pass():
@@ -121,7 +126,7 @@ def test_native_collect_recovers_pdd_without_request_dates_or_manual_fields(monk
     assert {'revenue_quarter','net_income_quarter','operating_cash_flow_quarter'} <= {f['field'] for f in a['verified_field_records']}
     assert 'OFFICIAL_FIELD_OPERATINGCASHFLOW_STATEMENT_COLUMN_AMBIGUITY_CORROBORATED' in a['issues']
     assert a['qualification']['L1']['allowed']
-    assert len(calls)==4  # no annual original needed after independent quarters
+    assert len(calls)==5 and calls[-1].endswith("/0001104659-25-000001.txt")
 
 
 def test_report_deduplicates_display_only_and_labels_annual_basis_currency():

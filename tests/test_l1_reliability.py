@@ -100,7 +100,7 @@ def test_pdd_facts_only_preserves_clocks_and_exact_fields_without_decision():
     assert {r['field'] for r in rows if r['kind']=='fundamental_field'}=={'revenue_quarter','net_income_quarter','operating_cash_flow_quarter','operating_income_quarter','net_income_available_to_ordinary_shareholders_quarter','diluted_eps_ads_quarter','diluted_eps_ordinary_quarter','cost_of_revenue_reported_quarter','sales_marketing_reported_quarter','general_admin_reported_quarter','research_development_reported_quarter','income_tax_reported_quarter'}
     assert all(r['published_at']=='2026-08-25T07:20:02-04:00' for r in rows if r['kind']=='fundamental_field')
     assert all(r['published_at'] is None and r['evidence_refs'] for r in rows if r['kind']=='research_metric')  # calculations are not filings
-    assert '专业推断未完成' in text and '112358000000' in text
+    assert '专业推断未完成' in text and '1,123.58亿元' in text
     assert original==before
     later=facts_only_result(original,at=AT.replace(year=2027))
     assert not later[0]['verified_field_records'] and all(r.get('historical_only') for r in later[1])
@@ -160,8 +160,9 @@ def test_qualified_technical_periods_survive_without_financial_facts(symbol):
 def test_normal_complete_peer_retains_professional_result(analysis_db,peer):
     result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
     assert result['status']=='partial'  # existing data gaps, not an inference failure
-    assert result['professional_analysis_complete']
-    assert not result['missing_stages'] and result['professional_result']['analysis_result'].get('mode')!='facts_only'
+    assert not result['professional_analysis_complete']  # The mock returned no qualified explanation.
+    assert result['missing_stages']==['professional_explanation']
+    assert result['professional_result']['analysis_result'].get('mode')!='facts_only'
     assert not result['execution_authorized']
 
 
@@ -219,14 +220,14 @@ def test_operator_runtime_values_cross_worker_without_loading_credentials(monkey
 
 def test_original_peer_finishes_after_old_240_second_deadline_with_virtual_clock(analysis_db,peer,monkeypatch):
     """Advance only the event-loop clock; no long sleep or network call."""
-    from decision_engine import llm_engine
-    original=llm_engine.reason
+    from backend.agents import expressing_agent
+    original=expressing_agent.chat_completion
     offset=[0]
     def reason(*a,**kw):
         result=original(*a,**kw)
         offset[0]+=250
         return result
-    monkeypatch.setattr(llm_engine,'reason',reason)
+    monkeypatch.setattr(expressing_agent,'chat_completion',reason)
     async def run(async_l1):
         loop=asyncio.get_running_loop();real=loop.time;offset[0]=0
         loop.time=lambda:real()+offset[0]
@@ -235,7 +236,8 @@ def test_original_peer_finishes_after_old_240_second_deadline_with_virtual_clock
     old=asyncio.run(run(False))
     assert 'ANALYSIS_TIMEOUT' in old['issues'] and not old['professional_analysis_complete']
     new=asyncio.run(run(True))
-    assert 'ANALYSIS_TIMEOUT' not in new['issues'] and new['professional_analysis_complete']
+    assert 'ANALYSIS_TIMEOUT' not in new['issues']
+    assert not new['professional_analysis_complete'] and 'PROFESSIONAL_EXPLANATION_INCOMPLETE' in new['issues']
 
 
 def test_recovery_rechecks_old_qualification_and_cannot_create_new_refs():
@@ -370,36 +372,98 @@ def test_valid_SDK_timeout_objects_and_none_are_deadline_clamped():
     assert isinstance(request_options(SOL,timeout=httpx.Timeout(60))['timeout'],httpx.Timeout)
 
 
-def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db,monkeypatch):
+@pytest.mark.parametrize('pre_stream_exhausted', [False, True], ids=['receipt-in-cleanup', 'no-receipt-before-stream'])
+def test_outer_deadline_during_stream_cleanup_still_retains_receipt(analysis_db, monkeypatch, pre_stream_exhausted):
+    from app import analysis_runtime
     from pocs.chatgpt_skills import analysis
     from backend.services import decision_service_v3 as svc
-    receipt=facts()
+
+    receipt = facts()
+    elapsed = [0.0]
+    trace = []
+
     class Clock(datetime):
         @classmethod
-        def now(cls,tz=None):return AT
-    monkeypatch.setattr(analysis,'datetime',Clock)
-    async def stream(*a,**kw):
-        kw['stage_callback'](NS(route='position_single'),NS(position_evidence=receipt))
-        try:await asyncio.sleep(10)
-        finally:await asyncio.sleep(.2)  # outer deadline interrupts this cleanup
+        def now(cls, tz=None):
+            return AT
+
+    monkeypatch.setattr(analysis, 'datetime', Clock)
+    monkeypatch.setattr(analysis_runtime, 'time', NS(monotonic=lambda: elapsed[0]))
+    original_quality = analysis.quality
+    original_retain = analysis.retain_facts
+
+    def quality(portfolio_id):
+        result = original_quality(portfolio_id)
+        if pre_stream_exhausted:
+            # Spend the .18s work budget during setup, within the .2s outer deadline.
+            elapsed[0] = .19
+        return result
+
+    def retain(result, assessment, **kwargs):
+        trace.append(('retain', assessment == receipt))
+        return original_retain(result, assessment, **kwargs)
+
+    async def stream(*a, **kw):
+        kw['stage_callback'](NS(route='position_single'), NS(position_evidence=receipt))
+        trace.append('evidence_ready')
+        outer, inner = [scope for scope, _ in current().timeout_scopes]
+        loop = asyncio.get_running_loop()
+        try:
+            inner.reschedule(loop.time())
+            await loop.create_future()
+        finally:
+            trace.append(('cleanup', inner.expired(), outer.expired()))
+            outer.reschedule(loop.time())
+            try:
+                await loop.create_future()
+            except asyncio.CancelledError:
+                trace.append(('outer_cancel', outer.expired()))
+                elapsed[0] = .201
+                raise
         yield
-    monkeypatch.setattr(svc,'run_chat_stream_v3',stream)
+
+    monkeypatch.setattr(analysis, 'quality', quality)
+    monkeypatch.setattr(analysis, 'retain_facts', retain)
+    monkeypatch.setattr(svc, 'run_chat_stream_v3', stream)
+
     async def run():
-        with budget_context(Policy(total_seconds=.2)):
-            return await analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True)
-    result=asyncio.run(run())
-    assert result['status']=='partial' and not result['professional_analysis_complete']
-    assert result['professional_result']['analysis_result']['mode']=='facts_only'
+        with budget_context(Policy(total_seconds=.2)) as budget:
+            # Keep the real asyncio scopes and cancellation bookkeeping. Start
+            # each timer only at its asserted stage, independent of setup speed.
+            real_timeout = budget.timeout
+            monkeypatch.setattr(budget, 'timeout', lambda _seconds: real_timeout(None))
+            return await analyze(analysis_db, 7, 'analyze_position', dict(question='frozen'),
+                                 synthetic=True, async_l1=True)
+
+    result = asyncio.run(run())
     assert 'ANALYSIS_TIMEOUT' in result['issues']
-    assert result['evidence']['qualified_facts']
+    assert not result['professional_analysis_complete']
+    if pre_stream_exhausted:
+        assert trace == []
+        assert result['status'] == 'unavailable'
+        assert result['missing_stages'] == ['planning_not_started']
+        assert 'qualified_facts' not in result['evidence']
+    else:
+        assert trace == ['evidence_ready', ('cleanup', True, False), ('outer_cancel', True), ('retain', True)]
+        assert result['status'] == 'partial'
+        assert result['professional_result']['analysis_result']['mode'] == 'facts_only'
+        assert result['evidence']['qualified_facts']
 
 
 def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,monkeypatch):
     from pocs.chatgpt_skills import analysis
     from backend.services import position_analysis
+    from backend.services.market_data import l1_context
+    # This injects a result-assembly failure, not a tokenizer/budget failure.
+    # Keep its model input tiny in cache-free CI; real preflight is covered separately.
+    monkeypatch.setattr(l1_context,'messages',lambda *a,**kw:([{'role':'user','content':'offline assembly fixture'}],{'status':'accepted'}))
+    assembly_hits=[]
+    def fail_assembly(*a,**kw):
+        assembly_hits.append(True)
+        raise RuntimeError('private assembly error')
     receipt=facts()
     monkeypatch.setattr(position_analysis,'prepare',lambda *a,**kw:receipt)
-    monkeypatch.setattr(analysis,'captured_evidence',lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('private assembly error')))
+    monkeypatch.setattr(analysis,'captured_evidence',fail_assembly)
     class Clock(datetime):
         @classmethod
         def now(cls,tz=None):return AT
@@ -407,6 +471,7 @@ def test_result_assembly_failure_cannot_keep_success_status(analysis_db,peer,mon
     result=asyncio.run(analyze(analysis_db,7,'analyze_position',dict(question='frozen'),synthetic=True,async_l1=True))
     assert result['status']=='partial' and not result['professional_analysis_complete']
     assert result['professional_result']['analysis_result']['mode']=='facts_only'
+    assert assembly_hits
     assert 'PROFESSIONAL_STAGE_FAILURE' in result['issues']
     assert 'private assembly' not in json.dumps(result)
 

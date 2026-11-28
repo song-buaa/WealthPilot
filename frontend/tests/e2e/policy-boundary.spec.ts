@@ -23,6 +23,30 @@ test.beforeAll(async () => {
   base=`http://127.0.0.1:${address.port}`
 })
 test.afterAll(() => server?.close())
+
+test('ACTIVE allocation displays qualified gap then expires without writes', async ({page}) => {
+  let writes = 0
+  const stamp = new Date().toISOString()
+  await page.route('**/api/**', async route => {
+    if (route.request().method() !== 'GET') writes++
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({json:{mode:'POLICY_ACTIVE',status:'ACTIVE',bundle_sha:'f'.repeat(64),
+        targets:{neutral:{cash:'.1'},etf_internal:{},direct_equity:{},growth_total:'.65',stable_total:'.35'}}})
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({json:{policy_allocation:{status:'QUALIFIED_MAJOR_CLASSES',snapshot_id:'asset-view:v1:1',
+        snapshot_sha256:'a'.repeat(64),as_of:stamp,expires_at:new Date(Date.now()+5000).toISOString(),
+        denominator_cny:'1000',policy_reference:{bundle_sha256:'f'.repeat(64)},
+        classes:{cash:{amount_cny:'1000',current_ratio:'1',target_ratio:'.1',gap_pp:'90',amount_gap_cny:'900',direction:'OVER'}},
+        focus:['cash'],execution_authorized:false}}})
+    } else await route.fulfill({json:path.endsWith('/summary')?null:{}})
+  })
+  await page.goto(base+'/#/discipline')
+  await expect(page.getByRole('region',{name:'当前与目标配置'})).toContainText('超配')
+  await expect(page.getByRole('region',{name:'当前与目标配置'})).toHaveCount(0,{timeout:10000})
+  await expect(page.getByRole('alert')).toContainText('ASSET_VIEW_EXPIRED')
+  expect(writes).toBe(0)
+})
 for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
   test(`policy ${mode}: legacy editor exposure and zero writes`,async ({page}) => {
     let writes=0
@@ -56,3 +80,302 @@ for(const mode of ['LEGACY','POLICY_ACTIVE','UNAVAILABLE']) {
     expect(writes).toBe(0)
   })
 }
+
+for (const fixture of ['QUALIFIED', 'PARTIAL', 'OLD_HIERARCHY', 'FORMAL_V2', 'MISMATCHED_V2']) {
+  test(`ACTIVE hierarchy renders ${fixture} with the appropriate review qualification`, async ({ page }) => {
+    const status = fixture === 'PARTIAL' ? 'PARTIAL' : 'QUALIFIED'
+    const gap = { amount_cny: '760', current_ratio: '.76', target_ratio: '.70', target_kind: 'NEUTRAL_POLICY',
+      gap_pp: '6', amount_gap_cny: '60' }
+    const partial = { ...gap, amount_cny: null, current_ratio: null, gap_pp: null, amount_gap_cny: null }
+    const v2 = fixture === 'FORMAL_V2' || fixture === 'MISMATCHED_V2'
+    const ref = { bundle_id: 'fixture-bundle', bundle_version: 2, bundle_sha256: 'f'.repeat(64),
+      structured_sha256: 'e'.repeat(64), scope: 'portfolio:7' }
+    const writes: string[] = []
+    await page.route('**/api/**', async route => {
+      if (route.request().method() !== 'GET') writes.push(route.request().url())
+      const path = new URL(route.request().url()).pathname
+      if (path.includes('policy-context')) {
+        await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+          targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+      } else if (path === '/api/allocation/snapshot') {
+        await route.fulfill({ json: { policy_allocation: {
+          status: 'QUALIFIED_MAJOR_CLASSES', snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64),
+          as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
+          denominator_cny: '1000', policy_reference: v2 ? ref : { bundle_sha256: 'f'.repeat(64) },
+          classes: { equity: { ...gap, direction: 'OVER' } }, focus: ['equity'], execution_authorized: false,
+          hierarchy: {
+            status, strategic: { growth_and_alternatives: status === 'QUALIFIED' ? gap : partial },
+            secondary: { us_etf: status === 'QUALIFIED' ? gap : partial },
+            direct_equity: { status, issuers: { Alphabet: status === 'QUALIFIED' ? gap : partial },
+              unallocated: { status: 'UNASSIGNED', target_ratio: '.03' } },
+            etf: { status: status === 'QUALIFIED' ? 'QUALIFIED' : 'UNKNOWN', products: {
+              SPY: { ...(status === 'QUALIFIED' ? gap : partial),
+                current_ratio_of_d: status === 'QUALIFIED' ? '.12' : null, target_ratio_of_d: '.09' },
+            } },
+            strategic_review: v2
+              ? { status: 'HUMAN_REVIEW', threshold_pp: '5', policy_schema_version: 'wp.policy.v2',
+                  policy_reference: ref, snapshot_sha256: (fixture === 'FORMAL_V2' ? 'a' : 'b').repeat(64),
+                  review_id: 'c'.repeat(64), triggered_classes: ['growth_and_alternatives', 'stable_pool'] }
+              : fixture === 'OLD_HIERARCHY'
+              ? { status: 'HUMAN_REVIEW', threshold_pp: '5', triggered_classes: ['growth_and_alternatives'] }
+              : { status: 'RULE_SCOPE_UNVERIFIED', threshold_pp: '5', triggered_classes: [],
+                  candidate_hit_classes: status === 'QUALIFIED' ? ['growth_and_alternatives'] : null },
+            unclassified_asset_refs: ['position:99'], unclassified_amount_cny: '15',
+          },
+        } } })
+      } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+    })
+    await page.goto(base + '/#/discipline')
+    const hierarchy = page.getByRole('region', { name: 'ACTIVE 分层配置' })
+    await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('9.00%')
+    if (fixture === 'FORMAL_V2') {
+      await expect(hierarchy.getByText('一级战略配置偏差严格超过政策阈值，请复核一次组合配置。')).toHaveCount(1)
+      await expect(hierarchy).not.toContainText('RULE_SCOPE_UNVERIFIED')
+    } else {
+      await expect(hierarchy).toContainText('RULE_SCOPE_UNVERIFIED')
+      await expect(hierarchy).not.toContainText('请复核一次组合配置')
+    }
+    await expect(hierarchy.getByRole('table', { name: '美国核心直接股（占 D）' })).toContainText('Alphabet')
+    await expect(hierarchy).toContainText('未指定自主选股预算 3.00% · 待研究')
+    await expect(hierarchy).not.toContainText('人工专项配置复核')
+    await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('中性政策目标')
+    if (fixture === 'QUALIFIED') {
+      await expect(hierarchy).toContainText('候选偏差超过 5 个百分点')
+    } else {
+      await expect(hierarchy).not.toContainText('候选偏差超过')
+    }
+    if (status === 'QUALIFIED') {
+      await expect(hierarchy.getByRole('table', { name: 'ETF 产品占 D' })).toContainText('12.00%')
+    } else {
+      await expect(hierarchy).toContainText('position:99')
+      await expect(hierarchy.getByRole('table', { name: '一级战略配置（占 D）' })).not.toContainText('76.00%')
+    }
+    expect(writes).toEqual([])
+  })
+}
+
+
+test('ACTIVE concentration retains an 8% lower-bound review with missing upper bound', async ({ page }) => {
+  let writes = 0
+  await page.route('**/api/**', async route => {
+    if (route.request().method() !== 'GET') writes++
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ json: { policy_allocation: {
+        status: 'QUALIFIED_MAJOR_CLASSES', snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64),
+        as_of: new Date().toISOString(), expires_at: new Date(Date.now() + 30_000).toISOString(),
+        denominator_cny: '1000', policy_reference: { bundle_sha256: 'f'.repeat(64) },
+        classes: {}, focus: [], execution_authorized: false,
+        concentration: { status: 'DIAGNOSTIC', expires_at: new Date(Date.now() + 3000).toISOString(), unknown_coverage: true, issues: ['ETF_LOOKTHROUGH_INCOMPLETE'],
+          issuers: { 'fixture-alphabet': { issuer_name: 'Alphabet Inc.', direct_pct: '4', indirect_known_pct: '4',
+            known_lower_bound_pct: '8', proven_upper_bound_pct: null, risk_status: 'HUMAN_REVIEW' } } },
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  const risk = page.getByRole('region', { name: '发行人集中度' })
+  await expect(risk).toContainText('缺少上界时无法判定安全')
+  const alpha = risk.getByRole('row', { name: /Alphabet Inc/ })
+  await expect(alpha).toContainText('8.00%')
+  await expect(alpha).toContainText('—')
+  await expect(alpha).toContainText('HUMAN_REVIEW')
+  await expect(risk).toContainText('发行人集中度证据已到期')
+  await expect(alpha).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '当前与目标配置' })).toBeVisible()
+  expect(writes).toBe(0)
+})
+
+
+test('ETF observation expires independently and preserves formal C and B', async ({ page }) => {
+  const sha = 'f'.repeat(64)
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: sha,
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {} } } })
+    } else if (path === '/api/allocation/snapshot') {
+      const source = { status: 'OBSERVED', holdings_as_of: '2026-11-24', lag_sessions: 5,
+        expires_at: new Date(Date.now() + 3000).toISOString(), mapped_weight_pct: '35.1',
+        unmapped_equity_weight_pct: '64.9' }
+      await route.fulfill({ json: { policy_allocation: {
+        status: 'QUALIFIED_MAJOR_CLASSES', as_of: new Date().toISOString(), snapshot_id: 'asset-view:v1:1',
+        expires_at: new Date(Date.now() + 30_000).toISOString(), denominator_cny: '1000',
+        policy_reference: { bundle_sha256: sha }, classes: {}, focus: [],
+        concentration: { status: 'DIAGNOSTIC', issues: [], issuers: {
+          alphabet: { issuer_name: 'Alphabet', direct_pct: '4', indirect_known_pct: '4',
+            known_lower_bound_pct: '8', proven_upper_bound_pct: null, risk_status: 'HUMAN_REVIEW' },
+        }, etf_observation: {
+          status: 'OBSERVATION_ONLY', latest_completed_session: '2026-12-02', max_lag_sessions: 5,
+          sources: { 'SPY:US': { ...source, expires_at: null }, 'QQQ:US': source,
+            'SPMO:US': { ...source, status: 'UNAVAILABLE', expires_at: null } },
+          issuers: { alphabet: { issuer_name: 'Alphabet', direct_cny: '40',
+            indirect_observed_cny: { 'SPY:US': '15', 'QQQ:US': '12', 'SPMO:US': null },
+            available_observed_cny: '67' } },
+        } },
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  const observations = page.getByRole('region', { name: 'ETF 观察性敞口' })
+  await expect(observations.getByRole('row', { name: /Alphabet/ })).toContainText('未知')
+  await expect(observations).toContainText('2026-11-24')
+  await expect(observations.getByRole('row', { name: /Alphabet/ })).toContainText('已到期')
+  await expect(page.getByRole('region', { name: '发行人集中度' })).toContainText('HUMAN_REVIEW')
+  await expect(page.getByRole('region', { name: '当前与目标配置' })).toBeVisible()
+})
+
+test('409 shows only conditional ETF amounts from the pinned policy', async ({ page }) => {
+  const sha = 'f'.repeat(64)
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: sha,
+        targets: { neutral: { cash: '0' }, etf_internal: {}, direct_equity: {} } } })
+    } else if (path === '/api/allocation/snapshot') {
+      const source = { status: 'UNAVAILABLE', holdings_as_of: null, lag_sessions: null, expires_at: null,
+        mapped_weight_pct: null, unmapped_equity_weight_pct: null }
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { concentration: { policy_reference: { bundle_sha256: sha }, etf_observation: {
+          status: 'CONDITIONAL', snapshot_at: new Date().toISOString(),
+          latest_completed_session: '2026-11-25', max_lag_sessions: 5,
+          sources: { 'SPY:US': source, 'QQQ:US': source, 'SPMO:US': source }, issuers: {},
+        } } },
+      } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await expect(page.getByRole('alert')).toContainText('当前配置资格 UNKNOWN')
+  await expect(page.getByRole('region', { name: 'ETF 观察性敞口' })).toContainText('条件性金额')
+  await expect(page.getByRole('region', { name: '发行人集中度' })).toHaveCount(0)
+})
+
+test('D previews both paths from a frozen 409 baseline without other writes', async ({ page }) => {
+  const writes: string[] = []
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() !== 'GET') writes.push(path)
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64), issues: [] } } })
+    } else if (path === '/api/allocation/simulate-transition') {
+      const body = route.request().postDataJSON()
+      expect(body.snapshot_sha256).toBe('a'.repeat(64))
+      expect(body.policy_bundle_sha256).toBe('f'.repeat(64))
+      expect(Object.keys(body.paths)).toEqual(['A', 'B'])
+      const stage = { label: 'S1', investment_assets_cny: null, liabilities_cny: '150',
+        newly_breached_issuers: [], allocation: {}, concentration: {}, cash: {}, actions: [] }
+      await route.fulfill({ json: { basis: 'ILLUSTRATIVE_ASSUMPTION', paths: {
+        A: [stage], B: [{ ...stage, cash: { 'action:sale': {
+          account: 'account_fixture', currency: 'USD', amount: '100', state: 'UNSETTLED' } } }],
+      } } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('多阶段资产修复模拟', { exact: true }).click()
+  await page.getByRole('button', { name: '载入可编辑的 A/B 示例' }).click()
+  await page.getByRole('button', { name: '运行模拟' }).click()
+  await expect(page.getByText('假设基准 · 研究结果')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '路径 A' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '路径 B' })).toBeVisible()
+  await expect(page.getByText(/action:sale.*UNSETTLED/)).toBeVisible()
+  expect(writes).toEqual(['/api/allocation/simulate-transition'])
+})
+
+test('E previews, cancels and confirms exactly one checked item', async ({ page }) => {
+  let saved = 0
+  let cancelled = 0
+  const baseGovernance = '/api/allocation/governance'
+  const receipt = { request_id: 'test-once', preview_token: 't'.repeat(32), preview_fingerprint: 'a'.repeat(64),
+    expires_at: '2026-11-27T12:00:00Z' }
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:1', snapshot_sha256: 'a'.repeat(64) } } })
+    } else if (path === baseGovernance + '/preview') {
+      const draft = route.request().postDataJSON()
+      expect(draft.policy_bundle_sha256).toBe('f'.repeat(64))
+      await route.fulfill({ json: { ...receipt, payload: {
+        qualification: { status: 'UNKNOWN', issues: ['TEST_UNKNOWN'] }, request: { bundle_id: 'test' },
+        policy_reference: { bundle_version: 3 }, simulation: null,
+        items: ['keep', 'hold'].map(item_id => ({ proposal: { item_id, kind: 'CONDITIONAL_HOLD',
+          reason: 'test reason', review_due_at: '2026-12-01T10:00:00Z', expires_at: '2026-12-02T10:00:00Z',
+          revoke_when: 'changed evidence' }, disposition_state: 'AWAITING_CONFIRMATION', event_states: [] })),
+      } } })
+    } else if (path === baseGovernance + '/commit') {
+      const body = route.request().postDataJSON()
+      expect(body.preview_fingerprint).toBe(receipt.preview_fingerprint)
+      if (body.confirmation === '取消') {
+        cancelled++
+        expect(body.selected_item_ids).toEqual([])
+        await route.fulfill({ json: { saved: false, cancelled: true } })
+      } else {
+        saved++
+        expect(body.selected_item_ids).toEqual(['hold'])
+        expect(body.confirmed).toBe(true)
+        await route.fulfill({ json: { saved: true } })
+      }
+    } else if (path === baseGovernance) {
+      await route.fulfill({ json: { records: saved ? [{ bundle_id: 'test', revision: 1, bundle_state: 'RECORDED' }] : [],
+        followups: [], risk_events: [] } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('组合人工决策与复核', { exact: true }).click()
+  await page.getByLabel('决策草案 JSON').fill('{"bundle_id":"test"}')
+  await page.getByRole('button', { name: '预览组合决定' }).click()
+  await expect(page.getByRole('button', { name: '保存这次组合决定（0 项）' })).toBeDisabled()
+  await page.getByRole('button', { name: '取消预览' }).click()
+  expect(cancelled).toBe(1)
+  expect(saved).toBe(0)
+  await page.getByRole('button', { name: '预览组合决定' }).click()
+  await page.getByRole('checkbox', { name: /hold/ }).check()
+  await page.getByRole('button', { name: '保存这次组合决定（1 项）' }).click()
+  await expect(page.getByText('已保存并读回确认版本。')).toBeVisible()
+  expect(saved).toBe(1)
+})
+
+test('F reads the last plan and keeps observation distinct from execution proof', async ({ page }) => {
+  const followups = '/api/allocation/governance'
+  const writes: string[] = []
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() !== 'GET') writes.push(path)
+    if (path.includes('policy-context')) {
+      await route.fulfill({ json: { mode: 'POLICY_ACTIVE', status: 'ACTIVE', bundle_sha: 'f'.repeat(64),
+        targets: { neutral: {}, etf_internal: {}, direct_equity: {}, growth_total: '.7', stable_total: '.3' } } })
+    } else if (path === '/api/allocation/snapshot') {
+      await route.fulfill({ status: 409, json: { detail: 'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+        qualification: { snapshot_id: 'asset-view:v1:2', snapshot_sha256: 'a'.repeat(64) } } })
+    } else if (path === followups) {
+      await route.fulfill({ json: { records: [], followups: [], risk_events: [] } })
+    } else if (path === followups + '/reconcile') {
+      expect(route.request().postDataJSON()).toEqual({ snapshot_id: 'asset-view:v1:2',
+        snapshot_sha256: 'a'.repeat(64), bundle_id: null, order_links: {} })
+      await route.fulfill({ json: { decision_revision_ref: 'plan:1', decision_state: 'REVIEW_REQUIRED',
+        policy_changed: true, review_due_at: '2026-12-01T00:00:00Z',
+        checkpoints: [{ item_id: 'S1', stage_label: 'S1', observation_status: 'CHECKPOINT_REACHED',
+          actions: [{ action_id: 'PDD', observation_status: 'CHECKPOINT_REACHED',
+            execution: { status: 'EVIDENCE_PENDING' }, target_amount_cny: '0', current: { current_amount_cny: '0' } }] }],
+        next_review: 'REOPEN_E_PREVIEW_FOR_HUMAN_REVIEW',
+      } })
+    } else await route.fulfill({ json: path.endsWith('/summary') ? null : {} })
+  })
+  await page.goto(base + '/#/discipline')
+  await page.getByText('组合人工决策与复核', { exact: true }).click()
+  await page.getByRole('button', { name: '复核上次方案' }).click()
+  const row = page.getByRole('row').filter({ hasText: 'PDD' })
+  await expect(row).toContainText('CHECKPOINT_REACHED')
+  await expect(row).toContainText('EVIDENCE_PENDING')
+  await expect(page.getByText(/ACTIVE 政策已变化/)).toBeVisible()
+  expect(writes).toEqual([followups + '/reconcile'])
+})

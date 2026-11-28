@@ -179,10 +179,11 @@ def quote_ibkr_link(body: IBKRQuoteRequest):
         from backend.services.action.ownership import portfolio_scope
         with get_session() as owner_session:
             pid = portfolio_scope(owner_session)
-        with preview_link_batch(_adapter(), _link_order(body), portfolio_id=pid, limit_price=body.limit_price) as batch:
-            result = _serialize_batch(batch)
-            return {"batch": result, "preview_hash": ExecutionBatchService.review_fingerprint(batch) if batch.status == "READY" else "",
-                    "request_id": str(body.request_id), "persisted": False, "order_submitted": False}
+            with preview_link_batch(_adapter(), _link_order(body), portfolio_id=pid,
+                                    limit_price=body.limit_price, source_session=owner_session) as batch:
+                result = _serialize_batch(batch)
+                return {"batch": result, "preview_hash": ExecutionBatchService.review_fingerprint(batch) if batch.status == "READY" else "",
+                        "request_id": str(body.request_id), "persisted": False, "order_submitted": False}
     except Exception as exc:
         _raise(exc)
 

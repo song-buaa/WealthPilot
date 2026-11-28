@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional
 
 from app import state
+from backend.api.portfolio_governance import router as portfolio_governance_router
 from app.allocation.types import (
     AllocationResult,
     AllocationSnapshot,
@@ -18,7 +19,9 @@ from app.allocation.types import (
     DeviationSnapshot,
     DisciplineCheckResult,
 )
+from backend.services.allocation_scenarios import TransitionRejected, TransitionRequest
 from backend.services.allocation_service import (
+    read_frozen_transition,
     classify_asset,
     compute_increment_plan,
     compute_initial_plan,
@@ -30,16 +33,65 @@ from backend.services.allocation_service import (
 )
 
 router = APIRouter()
+router.include_router(portfolio_governance_router)
 
 
 # ── 配置状态接口 ─────────────────────────────────────────
 
 @router.get("/snapshot")
-def api_snapshot() -> dict:
+def api_snapshot(snapshot_id: str | None = None) -> dict:
     """获取当前五大类配置快照"""
+    from backend.services.investment_policy.parser import PolicyError
+
     pid = state.portfolio_id
-    snapshot = get_snapshot(pid)
+    try:
+        snapshot = get_snapshot(pid, snapshot_id=snapshot_id) if snapshot_id else get_snapshot(pid)
+    except PolicyError as exc:
+        # Qualification failures are expected domain results. Keep detail a
+        # string for existing Web clients; never manufacture an empty snapshot.
+        code = str(exc)
+        if code == 'POLICY_CONTEXT_UNAVAILABLE':
+            raise HTTPException(503, detail=code) from None
+        if code in {
+            'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+            'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED',
+            'POLICY_ASSET_WEIGHTS_NOT_CLOSED',
+            'POLICY_VERSION_CONFLICT',
+            'POLICY_SCOPE_MISMATCH',
+        }:
+            if hasattr(exc, 'qualification'):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=409, content={'detail':code, 'qualification':exc.qualification})
+            raise HTTPException(409, detail=code) from None
+        raise  # Unknown defects retain a 500; do not disclose arbitrary text.
     return snapshot.model_dump()
+
+
+@router.post("/simulate-transition")
+def api_simulate_transition(request: TransitionRequest) -> dict:
+    """Simulate against one explicitly selected private U1. No writes or refresh."""
+    import os
+
+    from app.asset_views import ERRORS
+    from app.database import DB_PATH
+    from backend.services.investment_policy.parser import PolicyError
+
+    try:
+        return read_frozen_transition(DB_PATH, state.portfolio_id, request,
+                                      os.environ.get("WEALTHPILOT_SQLITE_CONTRACT"))
+    except PolicyError as exc:
+        code = str(exc)
+        if code in {"POLICY_VERSION_CONFLICT", "POLICY_SCOPE_MISMATCH"}:
+            raise HTTPException(409, detail=code) from None
+        if code == "POLICY_CONTEXT_UNAVAILABLE" or code.startswith("CONCENTRATION_"):
+            raise HTTPException(503, detail=code) from None
+        raise
+    except TransitionRejected as exc:
+        raise HTTPException(409, detail=str(exc)) from None
+    except ValueError as exc:
+        if str(exc) in ERRORS:
+            raise HTTPException(409, detail=str(exc)) from None
+        raise
 
 
 @router.get("/deviation")

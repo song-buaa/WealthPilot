@@ -14,7 +14,7 @@ from backend.api import broker_sync as api
 from services.broker_sync.models import PositionSnapshotRun
 from services.broker_sync.repository import PositionSnapshotRepository
 
-SUPPORTED = ("tiger", "futu", "snowball", "guojin")
+SUPPORTED = ("tiger", "futu", "snowball", "guojin", "binance")
 
 
 class ReadonlyIBKRClient:
@@ -36,7 +36,10 @@ class ServiceFactory:
         self.restricted = restricted
 
     def __call__(self, broker):
-        if broker == "tiger":
+        if broker == "binance":
+            from services.broker_sync.binance.sync_service import BinanceSyncService
+            service = BinanceSyncService()
+        elif broker == "tiger":
             from services.broker_sync.tiger.sync_service import TigerSyncService
             service = TigerSyncService()
         elif broker == "futu":

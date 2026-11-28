@@ -11,7 +11,8 @@ export function fmtCny(v: number | null | undefined): string {
 }
 
 /** 金额带符号（盈亏专用）：正 +¥xxx 绿，负 -¥xxx 红 */
-export function fmtCnySigned(v: number): string {
+export function fmtCnySigned(v: number | null | undefined): string {
+  if (v == null) return 'UNKNOWN'
   const abs = Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
   return v >= 0 ? `+¥${abs}` : `-¥${abs}`
 }
@@ -30,7 +31,8 @@ export function fmtDelta(v: number | null | undefined): string {
 }
 
 /** 数量/份额：无小数整数 */
-export function fmtQty(v: number | null | undefined): string {
+export function fmtQty(v: number | null | undefined, fractional = false): string {
+  if (fractional && v != null) return v.toLocaleString('zh-CN', { maximumFractionDigits: 8 })
   if (v == null || v === 0) return '—'
   return Math.abs(v) >= 1
     ? Math.round(v).toLocaleString('zh-CN')

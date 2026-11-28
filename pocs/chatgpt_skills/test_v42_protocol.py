@@ -51,6 +51,31 @@ def test_v42_targets_and_scenarios_roundtrip_actual_mcp_schema(monkeypatch):
     asyncio.run(run())
 
 
+def test_explicit_conditional_research_assumptions_cross_original_mcp_schema(monkeypatch):
+    case = dict(earnings_growth='.04', annual_share_change='0', terminal_pe='12', dividend_payout='0')
+    assumptions = dict(basis='S3_RESEARCH_ASSUMPTION_NOT_POLICY',
+                       rationale='Synthetic MCP serialization contract only.', required_return='.10',
+                       cautious=dict(case, earnings_growth='0'), base=case,
+                       optimistic=dict(case, earnings_growth='.08'))
+    calls=[]
+    def record(self, operation, arguments):
+        calls.append((operation,arguments))
+        return dict(synthetic=True,scenario=operation,status='partial',issues=['TEST_ONLY'],
+                    queried_at='2026-11-03T00:00:00+00:00',conclusion='fixture')
+    monkeypatch.setattr(BusinessClient,'call',record)
+    async def run():
+        server=create_server(SimpleNamespace(real_config='not-opened',web_base_url='https://mini.example.ts.net'))
+        async with Client(server,mode='legacy') as client:
+            tool=next(t for t in (await client.list_tools()).tools if t.name=='analyze_position')
+            request=dict(symbol='PDD:US',question='仅研究有条件的五年收益，不执行交易',
+                         research_context=dict(objective='evaluate',conditional_valuation=assumptions))
+            jsonschema.validate({'request':request},tool.input_schema)
+            result=await client.call_tool('analyze_position',{'request':request})
+            assert not result.is_error
+            assert calls[0][1]['research_context']['conditional_valuation']['basis']=='S3_RESEARCH_ASSUMPTION_NOT_POLICY'
+    asyncio.run(run())
+
+
 def test_server_target_configuration_crosses_business_process_boundary(monkeypatch, tmp_path):
     """The path is server configuration, never a tool argument or confirmation."""
     import subprocess
@@ -129,6 +154,46 @@ def test_actual_mcp_output_preserves_safe_token_metadata_not_model_content(monke
             rejected=await client.call_tool('analyze_position',{'request':{'question':'分析','analysis_run_id':'a'*32}})
             assert rejected.is_error
     asyncio.run(run())
+
+
+def test_portfolio_worker_loads_only_operator_owner_evidence_without_sec_parser(monkeypatch, tmp_path):
+    import builtins
+    import io
+    import os
+    from pocs.chatgpt_skills import server, worker
+
+    key = "WEALTHPILOT_INVESTABLE_EVIDENCE_FILE"
+    evidence = str(tmp_path / "owner-evidence.json")
+    config = tmp_path / "runtime.json"
+    config.write_text(json.dumps({key: evidence}))
+    monkeypatch.setenv(key, evidence)
+    child = SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO('{"ok":true,"result":{}}\n'))
+    spawned_env = {}
+
+    def spawn(*args, env, **kwargs):
+        spawned_env.update(env)
+        return child
+
+    monkeypatch.setattr(server.subprocess, "Popen", spawn)
+    monkeypatch.setattr(server.select, "select", lambda *args: ([child.stdout], [], []))
+    client = BusinessClient(SimpleNamespace(business_python="unused", portfolio_id=7,
+                                            real_config=None, mock_database="unused"))
+    client.call("review_portfolio", {"question": "fixture", key: "request-controlled"})
+    assert spawned_env[key] == evidence
+
+    original_import = builtins.__import__
+
+    def without_parser(name, *args, **kwargs):
+        if name in {"research_v2.sec_disclosures", "bs4"}:
+            raise ImportError("SEC parser unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_parser)
+    monkeypatch.delenv(key)
+    worker.load_analysis_environment(config, model_policy_only=True)
+    assert key not in os.environ
+    worker.load_analysis_environment(config)
+    assert os.environ[key] == evidence
 
 
 def test_mcp_error_metadata_rejects_wrong_analysis_run_and_preserves_safe_business_errors(monkeypatch):
@@ -446,8 +511,11 @@ worker.main()
 
     @contextmanager
     def http_server():
+        (tmp_path/'results').mkdir(mode=0o700,exist_ok=True)
         server=create_server(SimpleNamespace(real_config='not-opened',mock_database=None,
-            business_python='replaced-by-isolated-probe',portfolio_id=7,events=str(tmp_path/'events.jsonl')))
+            business_python='replaced-by-isolated-probe',portfolio_id=7,events=str(tmp_path/'events.jsonl'),
+            analysis_results_dir=tmp_path/'results',analysis_results_quota_bytes=10000000,
+            analysis_results_retention_seconds=7200))
         app=server.streamable_http_app(json_response=True,stateless_http=True)
         listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(16)
         config=uvicorn.Config(app,log_level='critical',access_log=False)
@@ -466,10 +534,10 @@ worker.main()
         async with Client(url,mode='legacy',read_timeout_seconds=10) as client:
             tools={tool.name:tool for tool in (await client.list_tools()).tools}
             description=tools['start_position_analysis'].description
-            assert 'No scope prefix' in description and 'Receipts are not persistent' in description
+            assert 'No scope prefix' in description and 'Receipts are durable' in description
             assert not re.search(r'pa_[0-9a-f]{32}',description)
             scope='pa_'+'a'*32  # A cached description from an unrelated previous process.
-            assert len(tools)==12 and 'Synchronous compatibility' in tools['analyze_position'].description
+            assert len(tools)==16 and 'Synchronous compatibility' in tools['analyze_position'].description
             request_id=scope+':li_request_00000001' if cached_scope else 'client-unique-request-0001'
             arguments={'request_id':request_id,'request':{'symbol':'LI:US','question':'PRIVATE_SYNTHETIC_QUESTION'}}
             before=time.monotonic()
@@ -507,22 +575,27 @@ worker.main()
                 assert final['state']=='unavailable' and final['result'] is None and final['business_status']=='UNKNOWN'
             else:
                 assert final['state']=='completed' and final['business_status']==outcome
-                assert final['result']==AnalysisResult.model_validate_json(expected.read_text()).model_dump(mode='json')
+                from pocs.chatgpt_skills.position_jobs import report_projection
+                assert final['result']==report_projection(AnalysisResult.model_validate_json(expected.read_text())).model_dump(mode='json')
                 assert final['result']['llm_observation']['analysis_run_id']==first['analysis_run_id']
                 assert not final['result']['order_created']
+                audit = await client.call_tool('get_position_analysis_result', {'job_id': first['job_id'], 'view': 'audit'})
+                assert not audit.is_error
+                assert audit.structured_content['result'] == final['result']  # Original v1 stays byte-equivalent.
+                assert audit.structured_content['artifact'] == final['artifact']
             again=await client.call_tool('start_position_analysis',arguments)
             assert again.structured_content['job_id']==first['job_id'] and len(children)==1
             return first,request_id
     try:
         with http_server() as url:first,request_id=asyncio.run(run(url))
-        # Receipt loss is explicit; querying the old job never launches new work.
+        # A new server instance reads the same durable receipt without launching work.
         with http_server() as url:
             async def restarted():
                 async with Client(url,mode='legacy') as client:
                     missing=await client.call_tool('get_position_analysis_result',{'job_id':first['job_id']})
-                    assert missing.structured_content['issue']=='JOB_UNKNOWN_OR_PROCESS_RESTARTED'
-                    assert missing.structured_content['business_status']=='UNKNOWN'
-                    assert missing.structured_content['result'] is None
+                    assert missing.structured_content['state']==('unavailable' if outcome=='exit' else 'completed')
+                    assert missing.structured_content['business_status']==('UNKNOWN' if outcome=='exit' else outcome)
+                    assert (missing.structured_content['result'] is None)==(outcome=='exit')
                     assert len(children)==1
             asyncio.run(restarted())
         assert len(children)==1
@@ -655,3 +728,13 @@ worker.main()
         assert detail['protocol_is_error']
         client.process.wait(timeout=3)  # error path is single-use too
     finally:client.close()
+
+
+@pytest.mark.parametrize('values',[
+    {'analysis_results_dir':'/not/opened','analysis_results_quota_bytes':1000},
+    {'analysis_results_dir':'/not/opened','analysis_results_quota_bytes':1000,'analysis_results_retention_seconds':0},
+])
+def test_durable_results_require_explicit_complete_positive_configuration(values):
+    from pocs.chatgpt_skills.server import create_server
+    with pytest.raises(ValueError):
+        create_server(SimpleNamespace(real_config='not-opened',**values))
