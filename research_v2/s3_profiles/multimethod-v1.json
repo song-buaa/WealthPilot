@@ -178,6 +178,25 @@
       "0",
       ".5",
       "1"
+    ],
+    "spacex_ytd_gain_usd": "863000000",
+    "reverse_net_recovery": ".75",
+    "reverse_economics": [
+      [
+        "15",
+        ".10",
+        ".65"
+      ],
+      [
+        "22",
+        ".20",
+        "1"
+      ],
+      [
+        "30",
+        ".30",
+        "1.5"
+      ]
     ]
   },
   "MSFT:US": {
@@ -331,7 +350,258 @@
         ]
       },
       "rationale": "Q3 revenue +103% YoY, Data Center $107.6bn, Q4 $130bn +/-3% guidance excluding China compute; FY27 Q3 gross margin 74.8%, non-GAAP Q4 guide begins at 71%. Scenario paths deliberately fade growth and margins from observed ramp, not management five-year forecasts. Tax and conversion are explicit scenario ratios; EPS remains directly qualified. The diluted-share trend is about 1.2% lower YoY, but repurchase authorization is not execution. Terminal multiple stresses reflect mature semiconductor vs durable AI platform economics without a fabricated historical PIT range.",
-      "residual": "$65.528bn nonmarketable holdings are disclosed at carrying value. Exit rights, current fair value, restrictions and tax basis are not fully bounded by a carrying-value stress. Supplier commitments and nonoperating normalization remain conditional."
+      "residual": "$65.528bn nonmarketable holdings are disclosed at carrying value. Exit rights, current fair value, restrictions and tax basis are not fully bounded by a carrying-value stress. Supplier commitments and nonoperating normalization remain conditional.",
+      "economic_scope": {
+        "sources": {
+          "results": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038",
+          "fy26_q4": "db8bce6920aefef77847471f407a19732d00fef379f0735b02a8a9744eda8027",
+          "fy27_q1": "fd15a270c0b4ebbfcec982749f940b5cf703e2571e10bd74bc484f233cc68b67",
+          "fy27_q2": "27de5f3a6af821a4cfc029811cf4a5724c0f71d63d6d7892abc8ab7d0a959e07",
+          "acquisition": "15cedfbe951d5297592640a298f3928bac4d7fc2372efff2eaf5fd994f79e4b3"
+        },
+        "normalization_rows": [
+          {
+            "period": "2026-01-25",
+            "source": "fy26_q4",
+            "other_income_m": 6098,
+            "equity_gains_m": 5491,
+            "diluted_m": 24432
+          },
+          {
+            "period": "2026-04-26",
+            "source": "fy27_q1",
+            "other_income_m": 16367,
+            "equity_gains_m": 15936,
+            "diluted_m": 24391
+          },
+          {
+            "period": "2026-07-26",
+            "source": "fy27_q2",
+            "other_income_m": 7773,
+            "equity_gains_m": 7771,
+            "diluted_m": 24285
+          },
+          {
+            "period": "2026-10-25",
+            "source": "results",
+            "other_income_m": 1497,
+            "equity_gains_m": 1767,
+            "diluted_m": 24186
+          }
+        ],
+        "balance_date": "2026-10-25",
+        "balances_m": {
+          "cash_and_market_debt": 53512,
+          "convertible_included_in_market_debt": 3471,
+          "short_market_equity": 44219,
+          "locked_long_market_equity": 4669,
+          "nonmarketable_total": 65528,
+          "private_equity_subtotal": 61650,
+          "funded_debt": 32371,
+          "maximum_guarantee_gross": 118000,
+          "signed_equity_commitments": 20000,
+          "cloud_dc_capital_contract_scale": 108000,
+          "pending_hf_consideration": 11900,
+          "hf_equity_retention_max": 1000,
+          "prior_reported_groq_payable_m": 986
+        },
+        "assumptions": {
+          "cautious": {
+            "normalization_tax": ".15",
+            "operating_cash_reserve_m": "22000",
+            "market_risk_net_recovery": ".55",
+            "private_equity_net_recovery": ".25",
+            "other_private_net_recovery": ".40",
+            "guarantee_loss_fraction": "1",
+            "signed_equity_net_funding_fraction": "1",
+            "infrastructure_net_cash_shortfall_m": "27000",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": "1"
+          },
+          "base": {
+            "normalization_tax": ".21",
+            "operating_cash_reserve_m": "16000",
+            "market_risk_net_recovery": ".85",
+            "private_equity_net_recovery": ".65",
+            "other_private_net_recovery": ".70",
+            "guarantee_loss_fraction": ".15",
+            "signed_equity_net_funding_fraction": ".5",
+            "infrastructure_net_cash_shortfall_m": "13500",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": ".5"
+          },
+          "optimistic": {
+            "normalization_tax": ".25",
+            "operating_cash_reserve_m": "10000",
+            "market_risk_net_recovery": "1.10",
+            "private_equity_net_recovery": "1.15",
+            "other_private_net_recovery": "1",
+            "guarantee_loss_fraction": "0",
+            "signed_equity_net_funding_fraction": "0",
+            "infrastructure_net_cash_shortfall_m": "5400",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": "0"
+          }
+        },
+        "limitations": [
+          "Recoveries are combined, net of assumed liquidity, impairment and tax leakage. Carrying values are not exit prices.",
+          "All below-operating income is removed using quarterly diluted denominators and a scenario tax proxy before modeling capital separately.",
+          "Committed guarantee maximum is stressed up to the full disclosed gross amount without a recovery credit. It is not currently funded debt or an expected loss.",
+          "Supplies ($390bn) and ongoing leases are addressed through operating performance. Distinct cloud ($28bn), uncommenced DC leases ($74bn) and capex contracts ($6bn) anchor modeled residual terminal-equivalent funding of $27bn/$13.5bn/$5.4bn. Gross face value is not separately deducted.",
+          "The signed $20bn investment commitments are incremental to existing assets; scenario net discount covers cash funding less recovery value of new holdings. Pending Hugging Face consideration is conservatively treated as a dollar-for-dollar shareholder claim at full $11.9bn without crediting undemonstrated synergies. Up to $1bn retention is an equity claim with scenario realization, not cash.",
+          "No credit for future uncommitted guarantees or new investment gains. Share drift is an operating scenario and financing reserve is not separately capitalized.",
+          "The July Groq acquisition payable is conservatively carried as a shareholder claim after the October supplement showed no corresponding payment in the quarter. The $986m is a prior reported balance, not a newly reported October payable."
+        ]
+      }
+    }
+  },
+  "META:US": {
+    "holder_bridge": {
+      "sources": {
+        "quarter": "3de6e48369ae5c088752ea78ac414fc59a6e8434972993ebdf8fa149edfdff50",
+        "equity": "b1ae151aa9f1892f85b46d812c483b5244b83e1e72f1e2a2fc9fa923f81bb31a",
+        "finance": "6706007b84f7af678f881e9f8750507bd34379b0f3abb13613a0bd9c3b794191",
+        "forward_expansion": "8bc0bc99067ab2c82b324bda5d36f439117a4c76050ad8c91b8536285a3f0354",
+        "class_c_litigation": "6a1871e005887c2256e0fa0fe7f7c358e7ddf37f1bdccd7224f6d8298bdb985f",
+        "preferred_option_close": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
+        "eur_notes": "1955f8608c4f22d7433a442ff8300705f00a4878139cf0b40d3c19ea8d72147a"
+      },
+      "reported": {
+        "a_shares_m": "2214.472367",
+        "b_shares_m": "341.768886",
+        "share_date": "2026-10-16",
+        "foa_nine_month_revenue_m": "180436",
+        "foa_nine_month_ebit_m": "67410",
+        "rl_nine_month_loss_m": "12775",
+        "liquid_cash_and_debt_securities_m": "79324",
+        "marketable_equity_m": "3125",
+        "private_investments_m": "32624",
+        "restricted_cash_m": "13132",
+        "funded_note_face_m": "84000",
+        "legal_accrual_m": "19881",
+        "venture_funding_m": "3703",
+        "max_venture_residual_guarantees_m": "41493",
+        "uncommenced_operating_and_finance_lease_m": "355730",
+        "noncancelable_purchase_m": "454520",
+        "usd_notes_issued_m": "15000",
+        "eur_notes_issued_m": "9000",
+        "forward_initial_price_usd": "622.91875",
+        "preferred_initial_net_before_issuer_expenses_m": "12458.375",
+        "preferred_initial_estimated_expenses_m": "4",
+        "preferred_option_net_actual_m": "1869",
+        "preferred_initial_issued_m": "12.5",
+        "preferred_option_issued_m": "1.875",
+        "preferred_initial_issue_date": "2026-10-29",
+        "preferred_option_issue_date": "2026-11-02",
+        "preferred_first_pay_date": "2027-02-15",
+        "preferred_annual_coupon_per_share": "65",
+        "preferred_fixed_min": "1.362",
+        "preferred_fixed_max": "1.600",
+        "preferred_liquidation_per_share": "1000",
+        "preferred_remaining_full_quarters": 10,
+        "ordinary_quarterly_anchor": ".525",
+        "cloud_contingent_five_year_max_m": "14720",
+        "eur_notes_estimated_net_m": "8960",
+        "usd_notes_proceeds_before_expenses_m": "14947.07500"
+      },
+      "case_columns": [
+        "foa_cagr",
+        "foa_terminal_margin",
+        "rl_terminal_loss_m",
+        "operating_ev_multiple",
+        "cash_reserve_m",
+        "public_equity_recovery",
+        "private_equity_recovery",
+        "restricted_cash_release",
+        "eur_usd",
+        "bond_proceeds_retention",
+        "preferred_proceeds_retention",
+        "forward_price_multiplier",
+        "forward_cash_retention",
+        "share_drift",
+        "a_vwap",
+        "a_to_c_ratio",
+        "legal_payment_fraction",
+        "infrastructure_net_financing_m",
+        "venture_residual_fraction",
+        "net_corporate_tax_claim_m"
+      ],
+      "cases": {
+        "cautious": [
+          ".065",
+          ".25",
+          "23000",
+          "12",
+          "20000",
+          ".55",
+          ".30",
+          "0",
+          "1.20",
+          ".1",
+          ".2",
+          ".93",
+          ".2",
+          ".019",
+          "480",
+          "1.22",
+          "1",
+          "155000",
+          ".65",
+          "16000"
+        ],
+        "base": [
+          ".105",
+          ".34",
+          "18000",
+          "17",
+          "13000",
+          ".85",
+          ".65",
+          ".55",
+          "1.13",
+          ".4",
+          ".5",
+          "1",
+          ".5",
+          ".010",
+          "690",
+          "1.10",
+          ".75",
+          "85000",
+          ".25",
+          "9000"
+        ],
+        "optimistic": [
+          ".145",
+          ".42",
+          "8500",
+          "22",
+          "10000",
+          "1.1",
+          "1.05",
+          ".9",
+          "1.05",
+          ".7",
+          ".75",
+          "1.04",
+          ".75",
+          ".004",
+          "930",
+          "1.03",
+          ".5",
+          "40000",
+          ".05",
+          "4000"
+        ]
+      },
+      "scope_limitations": [
+        "B price premium and founder-event timing / further antidilution are not independently valued. Headline state cases include no Class C and one declared stock dividend if effective before the preferred trigger.",
+        "Class A versus C market premium and 2029 VWAP are scenario assumptions. Post-issuance new A buyer would require an observed post-distribution price and is outside these purchase returns.",
+        "Current forward proceeds are zero. Terminal cases use full contractual physical delivery before distribution (A only) or after distribution (paired A and C). All-C election and affiliate dividend interactions are outside the tested scope.",
+        "Liquid balances distinguish paid proceeds, restricted collateral, and net retained proceeds. Source discloses principal on completed notes, not actual retained cash after deployment.",
+        "Operating EV includes ongoing operating costs, leases and depreciation. Additional terminal-equivalent net financing approximates funding shortfall including finance capital and the contingent cloud obligation; it is not a second deduction of the gross contract totals.",
+        "Venture funding and residual guarantees are separate from net ordinary infrastructure financing. Quarterly common dividend is a flat package-level hypothesis calibrated to the past 10-Q and conditional on honoring preferred coupons."
+      ]
     }
   }
 }

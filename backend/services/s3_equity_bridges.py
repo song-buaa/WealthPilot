@@ -1,6 +1,7 @@
 """Issuer economic methods; all resulting returns use the existing holder settlement."""
 from copy import deepcopy
-from decimal import Decimal, localcontext
+from datetime import date
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 from backend.services.market_data.quality_valuation import dec, text
 from backend.services.s3_holder_returns import attach_cash, settle
@@ -105,6 +106,40 @@ def investment_materiality(card, profile, start, end, *, cutoff=None, price=None
         checked_at=cutoff.isoformat(),
         terms='Funding reference amounts are historical transaction-scale stresses. 204,480m is 24% times the investee historical 852,000m funding scale; it is neither a cap nor distributable value. Tax basis, transfer rights, preferences, timing and residual equity are not quantified.',
         reference_sources=profile['official_transaction_anchors'])
+
+
+def tesla_reverse_value(card, price, remaining):
+    """Invert the price and 10% hurdle; never capitalize speculative businesses."""
+    stress = card['nonoperating_asset_stress']
+    profile = stress['reported']
+    price, remaining = dec(price), dec(remaining)
+    baseline = card['scenarios']['base']
+    # In the accepted operating model, the GAAP EPS starting point is divided
+    # by the matched GAAP net-to-EBIT reference ratio. The terminal conversion
+    # excludes repeat gains; a second proportional EPS haircut would double-strip.
+    operating = dec(baseline['terminal_wealth'])
+    diluted = dec(profile['outstanding_common_shares']) * dec(baseline['years'][-1]['relative_shares'])
+    investment = dec(profile['spacex_carrying_usd']) * dec(profile['reverse_net_recovery']) / diluted
+    hurdle = dec(card['assumptions']['required_return'])
+    wealth_target = price * (1 + hurdle) ** remaining
+    residual = max(Decimal(0), wealth_target - operating - investment)
+    rows = []
+    for multiple, margin, capital_turnover in profile['reverse_economics']:
+        multiple, margin, capital_turnover = map(dec, (multiple, margin, capital_turnover))
+        earnings = residual * diluted / multiple
+        revenue = earnings / margin
+        rows.append(dict(exit_pe=str(multiple), after_tax_margin=str(margin),
+                         revenue_to_invested_capital=str(capital_turnover),
+                         implied_net_income_usd=text(earnings), implied_sales_usd=text(revenue),
+                         illustrative_invested_capital_usd=text(revenue / capital_turnover)))
+    return dict(status='REVERSE_PRICE_REQUIREMENT_ONLY', required_return=str(hurdle), basis_price_usd=text(price),
+                remaining_years=str(remaining), operating_terminal_per_share=text(operating),
+                investment_terminal_per_share=text(investment),
+                unexplained_current_price_usd=text(price - (operating + investment) / (1 + hurdle) ** remaining),
+                required_other_terminal_per_share_usd=text(residual),
+                required_other_terminal_equity_usd=text(residual * diluted),
+                scenarios=rows,
+                limitation='Residual includes anything outside the specified operating scenario. It is not attributed wholly to autonomous driving or robotics. Capital scales are illustrative stock of operating capital, not funded cash flows or proof of feasibility.')
 
 
 def alphabet_option_overlay(vwap, overlay, state, coupon):
@@ -212,4 +247,131 @@ def alphabet_equity(card, research, claims, profile, sources, start, end):
     card['research_method_blockers']=['CONDITIONAL_CAPITAL_AND_EXIT_ASSUMPTIONS']
     card['sensitivity_method']='GOOG_OPERATING_EV_AND_EQUITY_BRIDGE'
     card.pop('failure_reason',None)
+    return True
+
+
+META_METHOD = 'META_CLASS_A_CONDITIONAL_HOLDER_VALUE_V1'
+
+
+def _meta_coupon_cost(reported):
+    # The certificate uses twelve 30-day months for the initial stub. Both issued tranches belong to the same series and accrue from
+    # that series' original initial issue date.
+    first_pay = date.fromisoformat(reported['preferred_first_pay_date'])
+    origin = date.fromisoformat(reported['preferred_initial_issue_date'])
+    stub_days = 360*(first_pay.year-origin.year) + 30*(first_pay.month-origin.month) + first_pay.day-origin.day
+    years = dec(stub_days) / 360 + dec(reported['preferred_remaining_full_quarters']) / 4
+    units = dec(reported['preferred_initial_issued_m']) + dec(reported['preferred_option_issued_m'])
+    return units * dec(reported['preferred_annual_coupon_per_share']) * years
+
+
+def meta_ordinary_case(profile, forward_shares, settings, *, distribution):
+    """Price one observed A share acquired before an unobserved distribution."""
+    facts = profile['reported']
+    p = {key: dec(value) for key, value in zip(profile['case_columns'], settings, strict=True)}
+
+    foa = dec(facts['foa_nine_month_revenue_m']) * Decimal(4) / 3 * (1 + p['foa_cagr']) ** 5
+    operating_ebit = foa * p['foa_terminal_margin'] - p['rl_terminal_loss_m']
+    operating_ev = operating_ebit * p['operating_ev_multiple']
+
+    issued_notes = dec(facts['usd_notes_issued_m']) + dec(facts['eur_notes_issued_m']) * p['eur_usd']
+    net_notes = (dec(facts['usd_notes_proceeds_before_expenses_m'])
+                 + dec(facts['eur_notes_estimated_net_m']) * p['eur_usd'])
+    preferred_net = (dec(facts['preferred_initial_net_before_issuer_expenses_m'])
+                     - dec(facts['preferred_initial_estimated_expenses_m'])
+                     + dec(facts['preferred_option_net_actual_m']))
+    net_assets = (dec(facts['liquid_cash_and_debt_securities_m']) - p['cash_reserve_m']
+                  + dec(facts['marketable_equity_m']) * p['public_equity_recovery']
+                  + dec(facts['private_investments_m']) * p['private_equity_recovery']
+                  + dec(facts['restricted_cash_m']) * p['restricted_cash_release']
+                  + net_notes * p['bond_proceeds_retention']
+                  + preferred_net * p['preferred_proceeds_retention'])
+    coupons = _meta_coupon_cost(facts)
+    claims = (dec(facts['funded_note_face_m']) + issued_notes + coupons
+              + dec(facts['legal_accrual_m']) * p['legal_payment_fraction']
+              + p['infrastructure_net_financing_m'] + dec(facts['venture_funding_m'])
+              + dec(facts['max_venture_residual_guarantees_m']) * p['venture_residual_fraction']
+              + p['net_corporate_tax_claim_m'])
+
+    existing = (dec(facts['a_shares_m']) + dec(facts['b_shares_m'])) * (1 + p['share_drift']) ** 5
+    a_and_b, c = existing + forward_shares, existing + forward_shares if distribution else Decimal(0)
+    forward_price = dec(facts['forward_initial_price_usd']) * p['forward_price_multiplier']
+    ratio = p['a_to_c_ratio'] if distribution else Decimal(1)
+    a_vwap = p['a_vwap']
+    conversion_vwap = a_vwap / ratio
+    if distribution:
+        forward_price = forward_price / 2 * Decimal('1.998')
+    ratio_reset = min(3, max(2, 1 + ratio)) if distribution else Decimal(1)
+    conversion_min = dec(facts['preferred_fixed_min']) * ratio_reset
+    conversion_max = dec(facts['preferred_fixed_max']) * ratio_reset
+    conversion = max(conversion_min, min(conversion_max, dec(facts['preferred_liquidation_per_share']) / conversion_vwap))
+    conversion = conversion.quantize(Decimal('.0001'), rounding=ROUND_HALF_UP)
+    preferred_m = dec(facts['preferred_initial_issued_m']) + dec(facts['preferred_option_issued_m'])
+    converted_m = preferred_m * conversion
+    if distribution:
+        c += converted_m
+    else:
+        a_and_b += converted_m
+
+    forward_cash = forward_price * forward_shares * p['forward_cash_retention']
+    equity = operating_ev + net_assets - claims + forward_cash
+    c_unit = equity / (a_and_b * ratio + c)
+    a_unit = c_unit * ratio
+    package = a_unit + c_unit if distribution else a_unit
+    if package <= 0:
+        raise ValueError('S3_META_NONPOSITIVE_HOLDER_SCENARIO')
+    return dict(terminal_price=text(package), state='A_PLUS_C' if distribution else 'A_ONLY',
+                operating_five_year_ebit_usd_m=text(operating_ebit), operating_ev_usd_m=text(operating_ev),
+                net_assets_before_forward_usd_m=text(net_assets), financial_claims_usd_m=text(claims),
+                preferred_cash_coupon_usd_m=text(coupons), projected_a_and_b_m=text(a_and_b),
+                projected_c_m=text(c), preferred_conversion_shares_m=text(converted_m),
+                forward_cash_retained_usd_m=text(forward_cash), ordinary_equity_usd_m=text(equity),
+                terminal_a_per_share=text(a_unit),
+                terminal_c_per_share=text(c_unit) if distribution else None)
+
+
+def meta_equity(card, claims, profile, sources, start, end):
+    quote = card.get('meta_class_a_bridge_quote')
+    contract = (claims or {}).get('observed_preferred_option_close')
+    if not quote or not contract:
+        return False
+    facts = profile['reported']
+    observed_preferred = claims['preferred']['actual_aggregate_issued']['underlying_preferred_shares']
+    if (dec(observed_preferred) / 10**6 != dec(facts['preferred_initial_issued_m']) + dec(facts['preferred_option_issued_m'])
+            or dec(contract['incremental_net_proceeds_usd']) / 10**6 != dec(facts['preferred_option_net_actual_m'])):
+        return False
+    with localcontext() as ctx:
+        ctx.prec = 34
+        forward_shares = dec(claims['forward_reference_shares']) / 10**6
+        values = profile['cases']
+        card.update(valuation_method=META_METHOD, valuation_status='CONDITIONAL_RESEARCH',
+                    price_qualification=dict(quote, eps_interval_start=profile['reported']['share_date']),
+                    cross_checks=dict(observed_price=dict(period=quote['price_date'], currency='USD',
+                                                          values=dict(observed_price=quote['price']))),
+                    scenarios={}, sensitivity=[], joint_sensitivity=[],
+                    joint_qualification=dict(complete=False, all_above_required=False),
+                    sensitivity_method='META_PAIRED_HOLDER_STATES',
+                    assumptions=dict(required_return='.10'),
+                    formula='Terminal FoA EBIT less RL losses × EV/EBIT + scenario financial assets/funding − claims, divided across modeled common classes')
+        for name, settings in values.items():
+            distribution = name != 'cautious'
+            card['scenarios'][name] = meta_ordinary_case(profile, forward_shares, settings, distribution=distribution)
+            alternate = meta_ordinary_case(profile, forward_shares, settings, distribution=not distribution)
+            card['sensitivity'].append(dict(parameter='paired_dividend_state', delta=name,
+                                             required_return='.10', result=alternate))
+        for growth in ('-.02', '0', '.02'):
+            for multiple in ('-.2', '0', '.2'):
+                settings = list(values['base'])
+                settings[0] = str(dec(settings[0]) + dec(growth))
+                settings[3] = str(dec(settings[3]) * (1+dec(multiple)))
+                card['joint_sensitivity'].append(dict(stress_axis='REVENUE_EV',
+                    revenue_growth_shift=growth, terminal_pe_shift=multiple,
+                    result=meta_ordinary_case(profile, forward_shares, settings, distribution=True)))
+        card['holder_equity_bridge'] = dict(status='CONDITIONAL_ORDINARY_VALUE_BOUNDED',
+            method=META_METHOD, source_evidence=sources, definition=profile,
+            observed_holder='ONE_A_BEFORE_ANY_DISTRIBUTION_WITH_CONDITIONAL_CONTINUOUS_OWNERSHIP',
+            current_issued_forward_proceeds='UNOBSERVED_NO_AMOUNT_ADDED_TO_INITIAL_STATE',
+            remaining_scope=['FOUNDER_EVENT_AND_ANTIDILUTION', 'FORWARD_ALL_C_OR_MIXED_DELIVERY', 'FINANCING_CASH_ALLOCATION'])
+        attach_cash(card, dict(quarterly_usd=profile['reported']['ordinary_quarterly_anchor'],
+                               locator='Report-based flat distribution per original holding package',
+                               source=sources['quarter']), start, end)
     return True

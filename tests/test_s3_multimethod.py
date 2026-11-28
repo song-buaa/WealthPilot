@@ -184,3 +184,43 @@ def test_nvda_forecast_uses_direct_eps_not_missing_parent_income():
                  [['0']*5,'.60','.20','1','0','20'],Decimal('.20'))
     assert case['years'][-1]['eps']=='9.31000000'
     assert case['terminal_price']=='186.20000000'
+
+
+def test_nvda_portfolio_uses_normalized_eps_and_counts_the_convertible_once():
+    from backend.services import s3_listed_eps
+
+    profile = json.loads((multimethod.ROOT/multimethod.BOOK).read_text())['NVDA:US']['listed_eps']
+    eps = Decimal('9.31')
+    margin = Decimal('239.090') / Decimal('361.808')
+    scope = profile['economic_scope']
+    case = s3_listed_eps.portfolio_case(eps, margin, profile['parameters']['base'],
+                                       Decimal('.20'), scope, 'base')
+    v = case['equity_scope_components']
+    assert Decimal(v['normalized_research_eps']) == Decimal('8.28095680')
+    assert Decimal(v['guarantee_loss_usd_m']) == Decimal('17700')
+    assert Decimal(v['pending_acquisition_claim_usd_m']) == Decimal('12400')
+    assert Decimal(v['risk_adjusted_assets_usd_m']) == Decimal('121333.25')
+    assert Decimal(v['claims_usd_m']) == Decimal('86957')
+    assert abs(Decimal(case['terminal_price']) - Decimal('361.0249')) < Decimal('.001')
+
+
+def test_meta_conditional_stock_dividend_prices_the_actual_holder_package():
+    from backend.services.s3_equity_bridges import meta_ordinary_case
+
+    profile = json.loads((multimethod.ROOT/multimethod.BOOK).read_text())['META:US']['holder_bridge']
+    params = profile['cases']['base']
+    standalone = meta_ordinary_case(profile, Decimal(46), params, distribution=False)
+    package = meta_ordinary_case(profile, Decimal(46), params, distribution=True)
+    assert standalone['terminal_c_per_share'] is None
+    assert standalone['terminal_price'] == standalone['terminal_a_per_share']
+    assert Decimal(package['projected_c_m']) > Decimal(package['projected_a_and_b_m'])
+    a, c = map(Decimal, (package['terminal_a_per_share'], package['terminal_c_per_share']))
+    assert abs(Decimal(package['terminal_price']) - a - c) <= Decimal('.00000001')
+    assert a > c
+    assert Decimal(package['forward_cash_retained_usd_m']) < Decimal(standalone['forward_cash_retained_usd_m'])
+
+
+def test_meta_price_only_contract_expires_before_potential_class_c_entitlement():
+    with pytest.raises(ValueError, match='DISTRIBUTION_ENTITLEMENT_REQUIRES_RESEARCH'):
+        relative.qualify_meta_close(None, {}, 'META:US', '2026-11-27', '2026-10-16',
+                                    date(2027), datetime(2027, 1, 19, tzinfo=timezone.utc))

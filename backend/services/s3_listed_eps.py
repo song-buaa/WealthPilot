@@ -26,7 +26,53 @@ def project(eps, margin, assumptions, reference_tax):
     return dict(terminal_price=text(earnings*multiple),years=path,terminal_pe=str(multiple))
 
 
-def build(card, check, profile, evidence, start,end):
+def portfolio_case(eps, margin, parameters, reference_tax, scope, name):
+    assumptions = {k: dec(v) for k, v in scope['assumptions'][name].items()}
+    rows = scope['normalization_rows']
+    tax = assumptions['normalization_tax']
+    reduction = sum(dec(row['other_income_m']) / dec(row['diluted_m']) for row in rows) * (1 - tax)
+    adjusted = eps - reduction
+    if adjusted <= 0:
+        raise ValueError('S3_LISTED_EPS_NORMALIZATION_NONPOSITIVE')
+    case = project(adjusted, margin, parameters, reference_tax)
+    balance = {k: dec(v) for k, v in scope['balances_m'].items()}
+    liquidity = balance['cash_and_market_debt'] - balance['convertible_included_in_market_debt']
+    equity_like = (balance['short_market_equity'] + balance['locked_long_market_equity']
+                   + balance['convertible_included_in_market_debt'])
+    other_private = balance['nonmarketable_total'] - balance['private_equity_subtotal']
+    if min(liquidity, equity_like, other_private) < 0:
+        raise ValueError('S3_LISTED_EPS_ASSET_BUCKETS_DO_NOT_RECONCILE')
+    reserve = assumptions['operating_cash_reserve_m']
+    if reserve > liquidity or not 0 <= assumptions['guarantee_loss_fraction'] <= 1:
+        raise ValueError('S3_LISTED_EPS_BALANCE_ASSUMPTIONS_INVALID')
+    guarantee_loss = balance['maximum_guarantee_gross'] * assumptions['guarantee_loss_fraction']
+    financial_assets = (liquidity - reserve + equity_like * assumptions['market_risk_net_recovery']
+                        + balance['private_equity_subtotal'] * assumptions['private_equity_net_recovery']
+                        + other_private * assumptions['other_private_net_recovery'])
+    investment_funding = balance['signed_equity_commitments'] * assumptions['signed_equity_net_funding_fraction']
+    acquisition_claim = (balance['pending_hf_consideration'] * assumptions['hf_consideration_fraction']
+                         + balance['hf_equity_retention_max'] * assumptions['hf_retention_economic_claim_fraction'])
+    funding_shortfall = assumptions['infrastructure_net_cash_shortfall_m']
+    financial_claims = (balance['funded_debt'] + guarantee_loss + investment_funding
+                        + acquisition_claim + funding_shortfall + balance['prior_reported_groq_payable_m'])
+    diluted_shares = dec(rows[-1]['diluted_m']) * (1 + dec(parameters[4])) ** 5
+    terminal_operating = dec(case['terminal_price'])
+    financial_per_share = (financial_assets - financial_claims) / diluted_shares
+    case.update(
+        terminal_price=text(terminal_operating + financial_per_share),
+        equity_scope_components=dict(
+            normalized_research_eps=text(adjusted), removed_eps=text(reduction),
+            terminal_operating_per_share=text(terminal_operating),
+            risk_adjusted_assets_usd_m=text(financial_assets), claims_usd_m=text(financial_claims),
+            guarantee_loss_usd_m=text(guarantee_loss), pending_acquisition_claim_usd_m=text(acquisition_claim),
+            incremental_investment_funding_usd_m=text(investment_funding),
+            infrastructure_funding_usd_m=text(funding_shortfall),
+            terminal_diluted_shares_m=text(diluted_shares),
+            net_financial_per_share=text(financial_per_share)))
+    return case
+
+
+def build(card, check, profile, evidence, start,end, *, portfolio=None):
     bridge = check.get('bridge') or {}
     eps_record = bridge.get('eps') or {}
     quote = card.get('independent_eps_quote')
@@ -50,7 +96,20 @@ def build(card, check, profile, evidence, start,end):
         if eps <= 0:
             return False
         assumed = profile['parameters']
-        card.update(valuation_method=METHOD,scenarios={n:project(eps,margin,p,tax) for n,p in assumed.items()},
+        scope = portfolio and portfolio['definition']
+        if scope and (
+            scope['balance_date'] != bridge['period']
+            or [row['period'] for row in scope['normalization_rows']] != eps_record['details'].get('periods')
+            or not {row['source'] for row in scope['normalization_rows']} <= portfolio['sources'].keys()
+        ):
+            scope = None
+
+        def researched_case(name, params):
+            if scope:
+                return portfolio_case(eps, margin, params, tax, scope, name)
+            return project(eps, margin, params, tax)
+
+        card.update(valuation_method=METHOD,scenarios={name: researched_case(name, params) for name, params in assumed.items()},
             cross_checks=dict(observed_price=dict(period=quote['price_date'],currency='USD',
                                                  values=dict(observed_price=quote['price']),source_receipt=quote),
                               diluted_eps_ttm=eps_record),
@@ -69,7 +128,7 @@ def build(card, check, profile, evidence, start,end):
                     params[0] = [str(dec(v)+delta) for v in params[0]]
                 else:
                     params[idx] = str(dec(params[idx])*(1+delta) if idx==5 else dec(params[idx])+delta)
-                case = project(eps,margin,params,tax)
+                case = researched_case('base', params)
                 card['sensitivity'].append(dict(parameter=name,delta=raw,required_return=str(rate),
                     parameters={name:params[idx]},result=case))
         attach_cash(card,dict(quarterly_usd=dividend['amount_per_share'],
@@ -85,13 +144,20 @@ def build(card, check, profile, evidence, start,end):
             scenario_parameters=assumed, review_basis=profile['rationale'],
             residual=profile['residual'], observed_dividend=dividend,
             sources=evidence)
+        if scope:
+            card['listed_eps_method']['residual'] = scope['limitations']
+            card['listed_eps_method']['portfolio_extension'] = dict(
+                status='MODELED_CONDITIONAL_ORDINARY_SCOPE', version='LISTED_EPS_PORTFOLIO_BRIDGE_V1',
+                source_evidence=portfolio['sources'], definition=scope,
+                observed_ttm_equity_gains_usd_m=sum(row['equity_gains_m'] for row in scope['normalization_rows']))
+            card['formula'] += ' plus risk-adjusted financial assets less funded/contingent claims per terminal diluted share'
         price = dec(quote['price'])
         for growth_delta in ('-.04', '0', '.04'):
             for multiple_delta in ('-.2', '0', '.2'):
                 params = list(assumed['base'])
                 params[0] = [str(dec(v) + dec(growth_delta)) for v in params[0]]
                 params[5] = str(dec(params[5]) * (1 + dec(multiple_delta)))
-                case = project(eps, margin, params, tax)
+                case = researched_case('base', params)
                 card['joint_sensitivity'].append(dict(
                     stress_axis='REVENUE_PE', revenue_growth_shift=growth_delta,
                     terminal_pe_shift=multiple_delta,

@@ -145,8 +145,14 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
                 sources = _review_sources(issuer_dossier,eps_profile,start)
                 if sources:
                     alternative = deepcopy(card)
-                    if s3_listed_eps.build(alternative,(current_checks or {}).get(symbol,{}),eps_profile,sources,start,end):
+                    scope = eps_profile.get('economic_scope')
+                    portfolio_sources = _review_sources(issuer_dossier, scope, start) if scope else None
+                    portfolio = dict(definition=scope, sources=portfolio_sources) if portfolio_sources else None
+                    if s3_listed_eps.build(alternative, (current_checks or {}).get(symbol, {}), eps_profile,
+                                           sources, start, end, portfolio=portfolio):
                         _set_bounded(alternative,'LISTED_EPS_VALUE_NONOPERATING_RECOVERY_AND_CONVERSION_NOT_CLOSED')
+                        if extension := alternative['listed_eps_method'].get('portfolio_extension'):
+                            qualify_modeled_scope(alternative, extension, required_sources=scope['sources'])
                         alternative['listed_eps_method']['reviewed_at'] = issuer_dossier['reviewed_at']
                         alternative['owner_qualification_reason'] = card['failure_reason']
                         card.update(alternative)
@@ -155,6 +161,16 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
 
             if claims := equity_components(symbol,issuer_dossier):
                 card['economic_claim_states'] = claims
+            if symbol == 'META:US' and (definition := profile.get('holder_bridge')):
+                sources = _review_sources(issuer_dossier, definition, start)
+                if sources:
+                    candidate = deepcopy(card)
+                    if bridges.meta_equity(candidate, claims, definition, sources, start, end):
+                        candidate['holder_equity_bridge']['reviewed_at'] = issuer_dossier['reviewed_at']
+                        candidate['owner_qualification_reason'] = card['failure_reason']
+                        candidate.pop('failure_reason', None)
+                        _set_bounded(candidate, 'MODELED_A_AND_AC_FOUNDER_AND_FUNDING_PATHS_INCOMPLETE')
+                        card.update(candidate)
             if symbol == 'GOOG:US':
                 operating = alphabet_operating_cases(issuer_dossier, profiles['GOOG:US'], start)
                 if operating:
@@ -174,6 +190,11 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
             stress = tesla_investment_stress(card,dossier.get(symbol,{}),profiles[symbol],start)
             if stress:
                 card['nonoperating_asset_stress'] = stress
+                if 'reverse_economics' in profile:
+                    with localcontext() as context:
+                        context.prec = 34
+                        card['reverse_valuation'] = bridges.tesla_reverse_value(
+                            card, card['cross_checks']['observed_price']['values']['observed_price'], Decimal(5))
         _set_bounded(card,'LIMITED_OPERATING_VALUE_OR_UNMODELED_MATERIAL_DISTRIBUTION')
         if symbol not in DIVIDEND_ANCHORS:
             continue
@@ -193,10 +214,10 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
         qualify_economic_scope(card,profile.get('closed_ordinary_scope'),evidence)
 
 
-def qualify_modeled_scope(card, bridge):
+def qualify_modeled_scope(card, bridge, *, required_sources=('quarter', 'preferred_terms', 'eur_notes', 'cad_notes')):
     """Model coverage is independent of whether the research conclusion is stable."""
     if (bridge.get('status')!='MODELED_CONDITIONAL_ORDINARY_SCOPE'
-            or not {'quarter','preferred_terms','eur_notes','cad_notes'} <= bridge['source_evidence'].keys()
+            or not set(required_sources) <= bridge['source_evidence'].keys()
             or not card.get('cash_return_contract')
             or set(card.get('scenarios',{}))!={'cautious','base','optimistic'}):
         _set_bounded(card,'ORDINARY_ECONOMIC_SCOPE_NOT_CLOSED')

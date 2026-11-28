@@ -12,7 +12,7 @@ from backend.services import quality_valuation_research as archive
 from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERSION, policy_target_identity
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
-from backend.services.s3_equity_bridges import ALPHABET_METHOD, investment_materiality
+from backend.services.s3_equity_bridges import ALPHABET_METHOD, META_METHOD, investment_materiality, tesla_reverse_value
 from backend.services.s3_listed_eps import METHOD as LISTED_EPS_METHOD
 
 VERSION = 's3-relative-value.fixed-endpoint.v1.1'
@@ -98,6 +98,10 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         proof = card['listed_eps_method']
         return qualify_nvda_eps_close(root,entry,symbol,proof['reviewed_at'],
             card['price_qualification']['eps_interval_start'],earliest,cutoff)
+    if card.get('valuation_method') == META_METHOD:
+        bridge = card['holder_equity_bridge']
+        return qualify_meta_close(root, entry, symbol, bridge['reviewed_at'],
+                                  bridge['definition']['reported']['share_date'], earliest, cutoff)
     if card.get('valuation_method') == ALPHABET_METHOD:
         return qualify_class_c_close(root,entry,symbol,card['holder_equity_bridge']['reviewed_at'],earliest,cutoff)
     reviewed = registry(relative=payload['professional_context'].get('relative_policy',False))['companies'][symbol]
@@ -144,6 +148,23 @@ def qualify_nvda_eps_close(root,entry,symbol,reviewed_at,interval_start,earliest
         raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
     check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
     return listed_close(root,entry,symbol,interval_start,earliest,cutoff)
+
+
+def qualify_meta_close(root, entry, symbol, reviewed_at, share_date, earliest, cutoff):
+    from backend.services.s3_method_research import identity_projection
+    from research_v2 import sec_disclosures as sec
+
+    if cutoff >= engine.stamp('2027-01-19T00:00:00+00:00'):
+        raise ValueError('S3_META_DISTRIBUTION_ENTITLEMENT_REQUIRES_RESEARCH')
+    review = require_review_clock(reviewed_at, cutoff)
+    directory = source(root, entry['directory'], sec.DIRECTORY, earliest, cutoff)
+    sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0001326801.json', earliest, cutoff)
+    issuer, _, _ = identity_projection(symbol, directory, sub)
+    if issuer['cik'] != '0001326801' or issuer['sec_ticker'] != 'META':
+        raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
+    check_recent_filings(json.loads(sub[0])['filings']['recent'], review)
+    return dict(listed_close(root, entry, symbol, share_date, earliest, cutoff),
+                holder_basis='CLASS_A_BEFORE_POTENTIAL_CLASS_C_DISTRIBUTION')
 
 
 def qualify_class_c_close(root, entry, symbol, reviewed_at, earliest, cutoff):
@@ -271,7 +292,7 @@ def rank_comparisons(cards, request):
                 card.pop(key, None)
     for card in cards:
         if card['scenarios'] and card.get('sensitivity_method') in (
-                'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE', 'LISTED_EPS_OPERATING_DRIVERS'):
+                'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE', 'LISTED_EPS_OPERATING_DRIVERS', 'META_PAIRED_HOLDER_STATES'):
             card['sensitivity_qualification'] = dict(
                 status='METHOD_SPECIFIC',
                 computed_count=sum(bool(v.get('result')) for v in card['sensitivity']),
@@ -332,7 +353,7 @@ def relative_stress(cards, request, *, remaining=Decimal(5)):
             except (ValueError, KeyError, TypeError, ArithmeticError):
                 continue
         grid[symbol] = points
-        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1',ALPHABET_METHOD) else 11
+        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', ALPHABET_METHOD, LISTED_EPS_METHOD) else 11
         if len(points) < expected:
             missing.append(symbol)
     baseline = {c['symbol']: [c['group'],c['rank']] for c in eligible}
@@ -410,6 +431,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             required = engine.dec(card['assumptions']['required_return'])
             for name, case in card['scenarios'].items():
                 card['scenarios'][name] = reprice_at(card, case, old_price, price, remaining, required, cutoff)
+            if card.get('reverse_valuation'):
+                card['reverse_valuation'] = tesla_reverse_value(card, price, remaining)
             if card.get('nonoperating_materiality'):
                 card['nonoperating_materiality'] = investment_materiality(card,
                     card['nonoperating_materiality']['frozen_stress_inputs'],start,end,cutoff=cutoff,price=price)
@@ -443,7 +466,7 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
                 card['current_operating_earnings_multiple'] = engine.text(
                     price / engine.dec(card['operating_earnings_bridge']['earnings_per_b']))
-            elif card.get('valuation_method') != ALPHABET_METHOD:
+            elif card.get('valuation_method') not in (ALPHABET_METHOD, META_METHOD):
                 eps = engine.dec(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm'])
                 card['current_pe'] = engine.text(price / eps)
             card['price_qualification'] = dict(observation, eps_interval_start=card['price_qualification']['eps_interval_start'])
@@ -459,6 +482,7 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             if 'holder_return_scope' in card:
                 card['holder_return_scope'] = 'UNKNOWN'
                 card['holder_return_scope_reason'] = reason
+                card.pop('reverse_valuation', None)
                 if card.get('nonoperating_asset_stress'):
                     card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
                 if card.get('nonoperating_materiality'):

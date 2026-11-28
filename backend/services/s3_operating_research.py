@@ -315,7 +315,7 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
         methods+=('backend/services/s3_professional_research.py','research_v2/s3_profiles/p22-v1.json')
         if professional_context.get('relative_policy'):
             from backend.services.s3_relative_profiles import BOOK
-            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, qualify_class_c_close, qualify_nvda_eps_close, rank_comparisons, relative_stress
+            from backend.services.s3_relative_value import METHOD, endpoint, listed_close, qualify_class_c_close, qualify_meta_close, qualify_nvda_eps_close, rank_comparisons, relative_stress
             from backend.services import s3_holder_returns, s3_multimethod, s3_equity_bridges, s3_listed_eps
             from backend.services import s3_berkshire_research as berkshire
             methods += ('backend/services/s3_relative_profiles.py', 'backend/services/s3_entitlement_evidence.py',
@@ -348,6 +348,10 @@ def make_bundle(parent_path,dossier_raw,*,professional_context=None,entry_proven
                         bridge = current.get('bridge') or {}
                         card['independent_eps_quote'] = qualify_nvda_eps_close(root,manifest['companies'][symbol],
                             symbol,dossier_card['reviewed_at'],bridge['start'],at-timedelta(days=2),at)
+                    if symbol == 'META:US':
+                        card['meta_class_a_bridge_quote'] = qualify_meta_close(
+                            root, manifest['companies'][symbol], symbol, dossier_card['reviewed_at'],
+                            '2026-10-16', at-timedelta(days=2), at)
                     if symbol == 'GOOG:US':
                         card['class_c_bridge_quote'] = qualify_class_c_close(root,manifest['companies'][symbol],
                             symbol,dossier_card['reviewed_at'],at-timedelta(days=2),at)

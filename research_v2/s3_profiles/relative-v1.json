@@ -151,6 +151,30 @@
           "accession": "0001045810-26-000090",
           "locator": "2026-11-23 Form 8-K; subsequent disclosure check",
           "sha256": "a53c2e57e76808b437349e7bd05dfd0228b4e17ca8a138775c8fd8d439703407"
+        },
+        "fy26_q4": {
+          "accession": "0001045810-26-000019",
+          "locator": "Q4 FY26 earnings release, diluted shares and total other income",
+          "sha256": "db8bce6920aefef77847471f407a19732d00fef379f0735b02a8a9744eda8027",
+          "optional": true
+        },
+        "fy27_q1": {
+          "accession": "0001045810-26-000052",
+          "locator": "Q1 FY27 10-Q diluted shares and total other income",
+          "sha256": "fd15a270c0b4ebbfcec982749f940b5cf703e2571e10bd74bc484f233cc68b67",
+          "optional": true
+        },
+        "fy27_q2": {
+          "accession": "0001045810-26-000075",
+          "locator": "Q2 FY27 10-Q EPS, other income and commitment notes",
+          "sha256": "27de5f3a6af821a4cfc029811cf4a5724c0f71d63d6d7892abc8ab7d0a959e07",
+          "optional": true
+        },
+        "acquisition": {
+          "accession": "0001045810-26-000078",
+          "locator": "Definitive acquisition and retention arrangements, September 2 Form 8-K",
+          "sha256": "15cedfbe951d5297592640a298f3928bac4d7fc2372efff2eaf5fd994f79e4b3",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_IF_CURRENT_EXACT_TTM_QUALIFIES",
@@ -206,7 +230,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-28T00:25:20+00:00",
       "valuation_blocker": "CURRENT_OCTOBER_QUARTER_SEC_FINANCIAL_WINDOW_NOT_QUALIFIED"
     },
     "GOOG:US": {
@@ -363,6 +387,12 @@
           "locator": "Recent Developments: November 2 completed depositary option, 37.5m shares and $1.869bn net proceeds",
           "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
           "optional": true
+        },
+        "eur_notes": {
+          "accession": "0001193125-26-458525",
+          "locator": "November 12 completed EUR notes, aggregate face EUR9bn",
+          "sha256": "1955f8608c4f22d7433a442ff8300705f00a4878139cf0b40d3c19ea8d72147a",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
@@ -423,7 +453,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-28T00:25:20+00:00",
       "entitlement_evidence": {
         "source_labels": [
           "equity",
