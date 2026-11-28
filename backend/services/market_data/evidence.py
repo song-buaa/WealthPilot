@@ -5,6 +5,7 @@ No provider, persistence or trading operations. Source clocks never default to n
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+import calendar
 import math
 from urllib.parse import urlparse
 
@@ -345,8 +346,15 @@ def _official_observations(raw, symbol, at, *, disclosure_verifier=None):
         if key in quality_basis and not sec_source:
             continue
         value,scale=number(obs.get("value")),number(obs.get("unit_scale"))
+        monthly_deliveries = sec_source and key == "vehicleDeliveries" and obs.get("period_basis") == "monthly"
+        if monthly_deliveries:
+            start = stamp(obs.get("fiscal_period_start"))
+            if (not end or not start or start.day != 1 or (start.year, start.month) != (end.year, end.month)
+                    or end.day != calendar.monthrange(end.year, end.month)[1]
+                    or scale != 1 or value is None or value <= 0 or not float(value).is_integer()):
+                continue
         if (key not in (_OFFICIAL_FIELD_BASIS | quality_basis) or obs.get("accounting_basis") not in {(_OFFICIAL_FIELD_BASIS | quality_basis)[key], *( ["net_income_attributable_parent"] if key=="netIncome" else [])}
-                or obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"}) or not end or end>published
+                or (not monthly_deliveries and obs.get("period_basis") not in ({"instant"} if sec_source and key in QUALITY_INSTANT else {"quarterly","annual","year_to_date"} if sec_source and key in quality_basis else {"quarterly","annual"} if sec_source else {"quarterly"})) or not end or end>published
                 or obs.get("unit")!={"dilutedEPSADS":"currency_per_listed_unit","dilutedEPSOrdinary":"currency_per_ordinary_share","vehicleDeliveries":"vehicles","vehicleMargin":"percent","quality_shares":"shares","quality_diluted_shares":"shares","quality_diluted_ads_shares":"shares","quality_ads_ratio":"ordinary_shares_per_ads"}.get(key,"currency_units") or scale not in {1,1000,1000000}
                 or not isinstance(obs.get("source_locator"),str) or not obs["source_locator"].strip()
                 or isinstance(obs.get("value"),bool) or isinstance(obs.get("unit_scale"),bool)
@@ -652,6 +660,10 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
                       "vehicleDeliveries":"vehicle_deliveries_quarter", "vehicleSales":"vehicle_sales_quarter", "vehicleMargin":"vehicle_margin_pct",
                       "dilutedEPSADS":"diluted_eps_ads_quarter", "dilutedEPSOrdinary":"diluted_eps_ordinary_quarter"}
     historical_field_records=[]
+    monthly_values = {}
+    for obs in quarter_observations:
+        if obs["period_basis"] == "monthly":
+            monthly_values.setdefault(obs["fiscal_period_end"], set()).add(obs["value"])
     for obs in quarter_observations:
         end = stamp(obs["fiscal_period_end"])
         if not end:
@@ -659,6 +671,11 @@ def assess(market_data=None, *, research=(), events=(), at=None, symbol=None,
         historical=(at-end).total_seconds() > (450 if obs["period_basis"]=="annual" else 150)*86400
         field = quarter_fields[obs["source_field"]]
         if obs["period_basis"]=="annual": field=field.replace("_quarter","_annual")
+        if obs["period_basis"] == "monthly":
+            if len(monthly_values[obs["fiscal_period_end"]]) != 1:
+                continue
+            field = "vehicle_deliveries_month"
+            historical = (at-end).total_seconds() > 60*86400
         if obs['source_field']=='netIncome' and obs["accounting_basis"]=="net_income_attributable_parent": field=field.replace("net_income_","net_income_attributable_parent_")
         (historical_field_records if historical else verified_field_records).append(dict(kind="fundamental_field", field=field, symbol=symbol,
             source="official_disclosure", source_url=obs["source_url"],

@@ -823,6 +823,9 @@ def parse_filing(source, issuer, filing, *, identity_digest, fiscal_eps_context=
         try:
             table_observations=parse_statement_tables(soup,filing['published_at'],require_statements=True,currencies=('CNY','USD','HKD'),diagnostics=statement_issues)
             table_observations += parse_valuation_statement_inputs(soup, filing['published_at'])
+            if is_exhibit and filing['form']=='6-K' and issuer['issuer_id'] in {'LI_AUTO', 'XPENG'}:
+                from research_v2.official_disclosures import parse_monthly_vehicle_delivery
+                table_observations += parse_monthly_vehicle_delivery(soup,filing['published_at'],issuer['name'])
             if is_exhibit and filing['form']=='8-K' and issuer['issuer_type']=='domestic' and fiscal_eps_context:
                 table_observations += parse_us_gaap_diluted_eps(soup,filing['published_at'],fiscal_eps_context)
             if current_structure is not None and is_exhibit and filing['form'] == '8-K':

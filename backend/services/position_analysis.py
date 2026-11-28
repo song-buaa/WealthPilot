@@ -474,7 +474,7 @@ def fact_sections(assessment, *, include_scenarios=True):
         grouped.setdefault(key,[]).append(r)
     for equal in grouped.values():
         r=equal[0]
-        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "季度"
+        scope="历史可比基线（非当前经营事实）" if r.get('historical_only') else "年度经营基线（非最新季度）" if r.get('scope')=='annual' else "月度" if r.get('scope')=='monthly' else "季度"
         sources="、".join(dict.fromkeys(x['source']+" "+str(x.get('source_url') or x.get('record_id')) for x in equal))
         facts.append(f"- {scope}字段事实 {r.get('field')}：{display(r,r['field'])}；来源 {sources}；期间 {r['period']}；数据日 {r['data_as_of']}。")
     from backend.services.market_data.financial_research import build_current,display
