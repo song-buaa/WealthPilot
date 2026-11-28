@@ -32,6 +32,8 @@ Web UI 主动研发冻结（[#119](https://github.com/song-buaa/WealthPilot/issu
 
 ## 风险、权限与隔离
 
+MacBook 的 WealthPilot 活跃开发仅使用 `~/Developer/WealthPilot/` 正式主仓与 `~/Developer/WealthPilot-workspace/` 统一研发工作区。新 worktree、诊断、环境及交付物使用后者相应子目录；不再创建分散的 WealthPilot 一级目录。创建前验证真实路径、Git 公共目录及 FileProvider/云盘同步资格；不明则拒绝创建。独立 Redstone 等仓库不并入 WealthPilot。细则见[本地目录规则](docs/dev_setup.md#macbook-本地开发目录)，治理结论见 [#119](https://github.com/song-buaa/WealthPilot/issues/119)。
+
 风险工作流和质量矩阵以[治理文档](docs/PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)为唯一详细规则：L0 文档、L1 局部修复、L2 跨模块/口径、L3 生产/交易/迁移。简单 Bug 不需要独立架构评审；不能据此豁免原有代码 Gate。
 
 - **个人 Mini 连接**：只使用原生 SSH + Tailscale 的 `wealthpilot-poc03-mini` 和本人密码建立的限时 ControlMaster；先 `ssh -O check wealthpilot-poc03-mini`，有效则直接复用，过期只由本人在 Terminal 续期。**禁止 WealthPilot 使用公司的 `sshm` Skill、公司 SSH Agent 或公司公钥**；不探索替代认证。现有 `MacBook-MacMini-SSH-SOP.md` 的定位与边界见[个人 Mac Mini 连接](docs/PROJECT_GOVERNANCE.md#个人-mac-mini-连接)。

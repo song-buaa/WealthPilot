@@ -2,6 +2,14 @@
 
 本文件负责本地命令与测试隔离；规则及风险矩阵见[治理文档](PROJECT_GOVERNANCE.md#9-标准开发流程与风险分级)，架构见[当前架构](ARCHITECTURE_CURRENT.md)，复用入口见[能力索引](CAPABILITY_REGISTRY.md)。MacBook Dev / Mac Mini Prod 的发布步骤统一放在治理文档，不复制一套部署流程。
 
+## MacBook 本地开发目录
+
+依据 2026-11-28 [目录治理收口](https://github.com/song-buaa/WealthPilot/issues/119)，WealthPilot 专属一级目录仅保留 `~/Developer/WealthPilot/`（正式主仓）和 `~/Developer/WealthPilot-workspace/`（统一研发工作区）。工作区使用 `worktrees/`、`diagnostics/`、`envs/`、`outputs/` 子目录；不得重建已迁出的旧一级目录。独立 Redstone 或其他项目保持独立，不合并 Git 历史、数据库或研究资料。
+
+创建前解析目标 realpath，核对软链接、最近存在的父目录及 `git rev-parse --path-format=absolute --git-common-dir`（已有 Git 检出）。核验真实位置未受 FileProvider 或其他云盘管理；使用 `fileproviderctl evaluate <现存父目录>` 时，仅明确返回 `No item for URL` 才通过该项检查，未知或超时不创建。拒绝 Documents、Desktop、Mobile Documents、CloudStorage 等实际同步位置。若本机已有 `~/.local/bin/dev-workspace`，先执行 `check <绝对目标路径>` 再用其创建入口；缺少该入口时做等价资格检查，不回退到同步目录。新 worktree 的分支、PR 和测试继续遵循原流程。
+
+历史 worktree 迁移使用 Git 原生 move/repair，保留 dirty、untracked、ignored、唯一研究证据及本地数据；历史报告路径只作追溯，旧聊天不得重建迁出目录。已有工作树或应用路径需调整时先核实实际位置及用户授权，不修改会话数据库、不擅自删除。目录规范不授权额外清理、归档、恢复或生产操作，也不改变 Mac Mini 的部署路径和个人云盘设置。
+
 ## 文档任务
 
 仓库根执行，标准库 Python 即可，不导入业务、不启动服务：
