@@ -1,0 +1,1027 @@
+{
+  "GOOG:US": {
+    "sources": {
+      "quarter": "b74e29c9e29e1287ddfb71da78577fcf7f1d26dd0aad599dbea9b778b465a6b1",
+      "preferred_terms": "0564227c40214d75adafe3247980d853f2baaeb04f48f18de073beafbcfb4ff3"
+    },
+    "reported_usd_m": {
+      "period": "NINE_MONTHS_ENDED_2026_09_30",
+      "revenue": "357269",
+      "ebit": "121042",
+      "cfo": "127149",
+      "capex": "131953",
+      "cash_and_marketable_securities": "265098",
+      "long_term_debt": "125102",
+      "outstanding_common_millions": {
+        "A": "5888",
+        "B": "827",
+        "C": "5579"
+      },
+      "share_observation_date": "2026-10-21",
+      "executed_atm_millions": {
+        "A": "12",
+        "C": "24"
+      },
+      "historical_atm_net_proceeds_usd_m": {
+        "A": "4300",
+        "C": "8100"
+      },
+      "unused_atm_capacity_usd_m": "27600"
+    },
+    "field_locators": {
+      "revenue_ebit": "10-Q Consolidated Statements of Income, nine months ended September 30, 2026",
+      "cfo_capex": "10-Q Consolidated Statements of Cash Flows, nine months ended September 30, 2026",
+      "cash_debt": "10-Q Consolidated Balance Sheets, September 30, 2026",
+      "shares_atm": "10-Q cover as of October 21, 2026 and Note 11 common shares / ATM program"
+    },
+    "cases": {
+      "cautious": [
+        ".04",
+        ".28",
+        "14"
+      ],
+      "base": [
+        ".09",
+        ".34",
+        "19"
+      ],
+      "optimistic": [
+        ".13",
+        ".37",
+        "25"
+      ]
+    },
+    "holder_bridge": {
+      "sources": {
+        "eur_notes": "c04091929e533f45b7219cd81a406b72585bc6699f724fbbcec0f9c68b881d23",
+        "cad_notes": "1138ef7a10b85e5941a5b61d4a65414ab75ce9d7dd10b6ae492a6293d1acdf1c"
+      },
+      "quarter_balance_usd_m": {
+        "cash_and_non_equity_marketable": "174714",
+        "spacex_restricted": "75200",
+        "other_marketable_equities": "15184",
+        "nonmarketable_equity": "135230",
+        "interest_bearing_notes": "126118",
+        "finance_leases": "3705",
+        "nci": "6900"
+      },
+      "post_quarter_gross_m": {
+        "EUR": "6000",
+        "CAD": "6000"
+      },
+      "preferred_annual_cash_equivalent_m": "1203.125",
+      "ordinary_quarterly_cash": ".22",
+      "contract_states": {
+        "cautious": [
+          ".50",
+          ".35",
+          ".25",
+          "0",
+          "1.22",
+          ".76",
+          "300",
+          ".025"
+        ],
+        "base": [
+          ".70",
+          ".60",
+          ".50",
+          ".50",
+          "1.16",
+          ".73",
+          "420",
+          ".005"
+        ],
+        "optimistic": [
+          ".90",
+          ".85",
+          ".75",
+          "1",
+          "1.10",
+          ".69",
+          "600",
+          "-.01"
+        ]
+      },
+      "scenario_columns": [
+        "liquid_non_equity_retained",
+        "marketable_equity_after_tax_recovery",
+        "nonmarketable_after_tax_recovery",
+        "new_debt_cash_retained",
+        "usd_per_eur",
+        "usd_per_cad",
+        "2029_common_vwap",
+        "net_annual_common_share_change_excluding_preferred"
+      ],
+      "classification_limit": "Conditional valuation covers operating EV, public/private investments, parent and nonrecourse debt, preferred cash or shares, dilution and capped calls. Future adjustment, option election, actual FX, taxes, cash uses and unexecuted commitments are modeled hypotheses. New events require requalification.",
+      "overlay": {
+        "capped_calls": {
+          "A": [
+            "21675500",
+            "444.0497",
+            "532.6704"
+          ],
+          "C": [
+            "21887250",
+            "439.7537",
+            "527.7974"
+          ]
+        },
+        "unused_atm_authority_usd_m": "27600",
+        "waymo_facility_usd_m": "5000",
+        "states": {
+          "cautious": [
+            "0",
+            "0",
+            "1",
+            "0",
+            "0",
+            "NET_SHARES"
+          ],
+          "base": [
+            ".5",
+            ".5",
+            ".5",
+            ".5",
+            ".25",
+            "NET_SHARES"
+          ],
+          "optimistic": [
+            "1",
+            ".75",
+            ".25",
+            "1",
+            ".5",
+            "CASH"
+          ]
+        },
+        "columns": [
+          "atm_fraction_used",
+          "atm_net_cash_retention_after_fees_and_uses",
+          "waymo_fraction_drawn",
+          "waymo_retained_fraction",
+          "preferred_coupon_fraction_paid_in_shares",
+          "hedge_settlement"
+        ],
+        "basis": "Unadjusted option terms in June 5 Exhibit designations/forms, 10-Q Waymo facility and ATM limits. Scenario owner assumes single common VWAP for A/C and future settlement; no actual option settlement, unused authorization or draw treated as observed proceeds."
+      }
+    }
+  },
+  "TSLA:US": {
+    "sources": {
+      "quarter": "613e1de9d5eb101a840cd65acdb3bcc393aec1318772c5df8f9df61c1dc33611"
+    },
+    "source_locator": "Third-quarter 10-Q cover and Note 3 fair value of financial instruments",
+    "spacex_carrying_usd": "2865000000",
+    "outstanding_common_shares": "3952757946",
+    "hypothetical_retention_fractions": [
+      "0",
+      ".5",
+      "1"
+    ],
+    "spacex_ytd_gain_usd": "863000000",
+    "reverse_net_recovery": ".75",
+    "reverse_economics": [
+      [
+        "15",
+        ".10",
+        ".65"
+      ],
+      [
+        "22",
+        ".20",
+        "1"
+      ],
+      [
+        "30",
+        ".30",
+        "1.5"
+      ]
+    ],
+    "positive_scope": {
+      "sources": {
+        "q3_operating_update": "ddec505db52e182b2b1dbc1d993b865aeb094ac09c4d4ca2443550b12d60dabd"
+      }
+    }
+  },
+  "MSFT:US": {
+    "adjusted_quarter_sources": [
+      {
+        "source_sha256": "6ef777cbf8450f72cbee578c44a4432484344651d766a38f76bb063b186ab4ec",
+        "adjusted_eps_usd": "4.14"
+      },
+      {
+        "source_sha256": "59690f25c80996ae9195963717b8dbdfe388be7b9b3c4a158b1e20077da8337c",
+        "adjusted_eps_usd": "4.27"
+      },
+      {
+        "source_sha256": "d5bf29b45bc42bf81154ac3adb2f33c0f003d1633e7ce5fc36f306072c9806b6",
+        "adjusted_eps_usd": "4.74"
+      },
+      {
+        "source_sha256": "ffccb87dda210fd462f177077620c3a15436b4aabf9ee8ff6f2baf0b929ead82",
+        "adjusted_eps_usd": "4.89"
+      }
+    ],
+    "annual_source_sha256": "a4cef60615c42685dcf0c080a56cd1be85ce09071c97050c78589a5167e26bff",
+    "openai_gaap_after_tax_usd_m": {
+      "fy26": "4963",
+      "fy26_q1": "-3086",
+      "fy27_q1": "207"
+    },
+    "commitment_remaining_usd_m": "1000",
+    "reported_diluted_shares_m": "7446",
+    "as_converted": "0.24",
+    "window": [
+      "2025-10-01",
+      "2026-09-30"
+    ],
+    "gross_reference_usd_m": [
+      "0",
+      "135000",
+      "204480"
+    ],
+    "official_transaction_anchors": [
+      "https://blogs.microsoft.com/blog/2025/10/28/the-next-chapter-of-the-microsoft-openai-partnership/",
+      "https://openai.com/index/accelerating-the-next-phase-ai/",
+      "https://openai.com/index/next-phase-of-microsoft-partnership/"
+    ],
+    "capital_bounds_note": "Historic recap and investee-wide diluted funding references are scenario scales, not carrying values, liquidation caps or realizable proceeds.",
+    "closed_ordinary_scope": {
+      "sources": [
+        "ffccb87dda210fd462f177077620c3a15436b4aabf9ee8ff6f2baf0b929ead82",
+        "a4cef60615c42685dcf0c080a56cd1be85ce09071c97050c78589a5167e26bff"
+      ],
+      "residual_required": true,
+      "rationale": "Ordinary share scope admitted only with an evidence-supported residual envelope preserving decisions."
+    },
+    "exit_cases": {
+      "cautious": [
+        "450000",
+        ".65",
+        ".35",
+        ".65",
+        "25000"
+      ],
+      "base": [
+        "852000",
+        ".80",
+        ".60",
+        ".76",
+        "10000"
+      ],
+      "optimistic": [
+        "1200000",
+        ".95",
+        ".85",
+        ".85",
+        "0"
+      ]
+    },
+    "exit_rationale": "The $852bn financing value is historical transaction scale only. 450/852/1,200bn future investee values are 5y hypotheses. Current as-converted participation is 24% but waterfall, future dilution, marketability and realization taxes are scenario scales, not exposure facts. April 2026 terms put capped OpenAI payments to Microsoft through 2030; the model tests an unseparated royalty runoff at $0/10/25bn annual pretax impact; not current observed royalties."
+  },
+  "AAPL:US": {
+    "closed_ordinary_scope": {
+      "sources": [
+        "edd39e7620e992bf51f3a8e82e383cc3d2faf931bdebf41b2d22dd50b872d380",
+        "384eb347f36378f48cd44c4b2cfeaec411d65736097c12b705e600fd96cfe4d2"
+      ],
+      "rationale": "Reviewed ordinary listed equity, distribution and issuer timeline supported by the qualified operating record. Current dossier identifies no split security or unresolved separate material equity claim."
+    }
+  },
+  "NVDA:US": {
+    "owner_declared_cash_event": {
+      "status": "DECLARED",
+      "share_basis": "LISTED_COMMON_SHARE",
+      "amount_per_share": "0.25",
+      "currency": "USD",
+      "announced_on": "2026-11-17",
+      "record_date": "2026-12-02",
+      "ex_date": null,
+      "scheduled_payment_date": "2026-12-23",
+      "actual_paid_on": null,
+      "source_document_sha256": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038"
+    },
+    "owner_source_version": "4.1 PR #154 f7ea987f27f546cb2ce7b3825b69d99d53ac3972",
+    "listed_eps": {
+      "financial_period": "2026-10-25",
+      "reference_tax": ".20",
+      "sources": {
+        "results": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038"
+      },
+      "dividend_source": "results",
+      "parameters": {
+        "cautious": [
+          [
+            ".16",
+            ".10",
+            ".06",
+            ".04",
+            ".04"
+          ],
+          ".42",
+          ".25",
+          ".90",
+          ".012",
+          "16"
+        ],
+        "base": [
+          [
+            ".32",
+            ".22",
+            ".16",
+            ".12",
+            ".09"
+          ],
+          ".55",
+          ".20",
+          ".97",
+          "-.005",
+          "23"
+        ],
+        "optimistic": [
+          [
+            ".45",
+            ".32",
+            ".23",
+            ".18",
+            ".13"
+          ],
+          ".62",
+          ".18",
+          "1.02",
+          "-.012",
+          "32"
+        ]
+      },
+      "rationale": "Q3 revenue +103% YoY, Data Center $107.6bn, Q4 $130bn +/-3% guidance excluding China compute; FY27 Q3 gross margin 74.8%, non-GAAP Q4 guide begins at 71%. Scenario paths deliberately fade growth and margins from observed ramp, not management five-year forecasts. Tax and conversion are explicit scenario ratios; EPS remains directly qualified. The diluted-share trend is about 1.2% lower YoY, but repurchase authorization is not execution. Terminal multiple stresses reflect mature semiconductor vs durable AI platform economics without a fabricated historical PIT range.",
+      "residual": "$65.528bn nonmarketable holdings are disclosed at carrying value. Exit rights, current fair value, restrictions and tax basis are not fully bounded by a carrying-value stress. Supplier commitments and nonoperating normalization remain conditional.",
+      "economic_scope": {
+        "sources": {
+          "results": "849bd5ff0d26f9c30a8272b15a71703b75f53509c964ad33106dcfe8e7df3038",
+          "fy26_q4": "db8bce6920aefef77847471f407a19732d00fef379f0735b02a8a9744eda8027",
+          "fy27_q1": "fd15a270c0b4ebbfcec982749f940b5cf703e2571e10bd74bc484f233cc68b67",
+          "fy27_q2": "27de5f3a6af821a4cfc029811cf4a5724c0f71d63d6d7892abc8ab7d0a959e07",
+          "acquisition": "15cedfbe951d5297592640a298f3928bac4d7fc2372efff2eaf5fd994f79e4b3"
+        },
+        "normalization_rows": [
+          {
+            "period": "2026-01-25",
+            "source": "fy26_q4",
+            "other_income_m": 6098,
+            "equity_gains_m": 5491,
+            "diluted_m": 24432
+          },
+          {
+            "period": "2026-04-26",
+            "source": "fy27_q1",
+            "other_income_m": 16367,
+            "equity_gains_m": 15936,
+            "diluted_m": 24391
+          },
+          {
+            "period": "2026-07-26",
+            "source": "fy27_q2",
+            "other_income_m": 7773,
+            "equity_gains_m": 7771,
+            "diluted_m": 24285
+          },
+          {
+            "period": "2026-10-25",
+            "source": "results",
+            "other_income_m": 1497,
+            "equity_gains_m": 1767,
+            "diluted_m": 24186
+          }
+        ],
+        "balance_date": "2026-10-25",
+        "balances_m": {
+          "cash_and_market_debt": 53512,
+          "convertible_included_in_market_debt": 3471,
+          "short_market_equity": 44219,
+          "locked_long_market_equity": 4669,
+          "nonmarketable_total": 65528,
+          "private_equity_subtotal": 61650,
+          "funded_debt": 32371,
+          "maximum_guarantee_gross": 118000,
+          "signed_equity_commitments": 20000,
+          "cloud_dc_capital_contract_scale": 108000,
+          "pending_hf_consideration": 11900,
+          "hf_equity_retention_max": 1000,
+          "prior_reported_groq_payable_m": 986
+        },
+        "assumptions": {
+          "cautious": {
+            "normalization_tax": ".15",
+            "operating_cash_reserve_m": "22000",
+            "market_risk_net_recovery": ".55",
+            "private_equity_net_recovery": ".25",
+            "other_private_net_recovery": ".40",
+            "guarantee_loss_fraction": "1",
+            "signed_equity_net_funding_fraction": "1",
+            "infrastructure_net_cash_shortfall_m": "27000",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": "1"
+          },
+          "base": {
+            "normalization_tax": ".21",
+            "operating_cash_reserve_m": "16000",
+            "market_risk_net_recovery": ".85",
+            "private_equity_net_recovery": ".65",
+            "other_private_net_recovery": ".70",
+            "guarantee_loss_fraction": ".15",
+            "signed_equity_net_funding_fraction": ".5",
+            "infrastructure_net_cash_shortfall_m": "13500",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": ".5"
+          },
+          "optimistic": {
+            "normalization_tax": ".25",
+            "operating_cash_reserve_m": "10000",
+            "market_risk_net_recovery": "1.10",
+            "private_equity_net_recovery": "1.15",
+            "other_private_net_recovery": "1",
+            "guarantee_loss_fraction": "0",
+            "signed_equity_net_funding_fraction": "0",
+            "infrastructure_net_cash_shortfall_m": "5400",
+            "hf_consideration_fraction": "1",
+            "hf_retention_economic_claim_fraction": "0"
+          }
+        },
+        "limitations": [
+          "Recoveries are combined, net of assumed liquidity, impairment and tax leakage. Carrying values are not exit prices.",
+          "All below-operating income is removed using quarterly diluted denominators and a scenario tax proxy before modeling capital separately.",
+          "Committed guarantee maximum is stressed up to the full disclosed gross amount without a recovery credit. It is not currently funded debt or an expected loss.",
+          "Supplies ($390bn) and ongoing leases are addressed through operating performance. Distinct cloud ($28bn), uncommenced DC leases ($74bn) and capex contracts ($6bn) anchor modeled residual terminal-equivalent funding of $27bn/$13.5bn/$5.4bn. Gross face value is not separately deducted.",
+          "The signed $20bn investment commitments are incremental to existing assets; scenario net discount covers cash funding less recovery value of new holdings. Pending Hugging Face consideration is conservatively treated as a dollar-for-dollar shareholder claim at full $11.9bn without crediting undemonstrated synergies. Up to $1bn retention is an equity claim with scenario realization, not cash.",
+          "No credit for future uncommitted guarantees or new investment gains. Share drift is an operating scenario and financing reserve is not separately capitalized.",
+          "The July Groq acquisition payable is conservatively carried as a shareholder claim after the October supplement showed no corresponding payment in the quarter. The $986m is a prior reported balance, not a newly reported October payable."
+        ]
+      }
+    }
+  },
+  "META:US": {
+    "holder_bridge": {
+      "sources": {
+        "quarter": "3de6e48369ae5c088752ea78ac414fc59a6e8434972993ebdf8fa149edfdff50",
+        "equity": "b1ae151aa9f1892f85b46d812c483b5244b83e1e72f1e2a2fc9fa923f81bb31a",
+        "finance": "6706007b84f7af678f881e9f8750507bd34379b0f3abb13613a0bd9c3b794191",
+        "forward_expansion": "8bc0bc99067ab2c82b324bda5d36f439117a4c76050ad8c91b8536285a3f0354",
+        "class_c_litigation": "6a1871e005887c2256e0fa0fe7f7c358e7ddf37f1bdccd7224f6d8298bdb985f",
+        "preferred_option_close": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
+        "eur_notes": "1955f8608c4f22d7433a442ff8300705f00a4878139cf0b40d3c19ea8d72147a"
+      },
+      "reported": {
+        "a_shares_m": "2214.472367",
+        "b_shares_m": "341.768886",
+        "share_date": "2026-10-16",
+        "foa_nine_month_revenue_m": "180436",
+        "foa_nine_month_ebit_m": "67410",
+        "rl_nine_month_loss_m": "12775",
+        "liquid_cash_and_debt_securities_m": "79324",
+        "marketable_equity_m": "3125",
+        "private_investments_m": "32624",
+        "restricted_cash_m": "13132",
+        "funded_note_face_m": "84000",
+        "legal_accrual_m": "19881",
+        "venture_funding_m": "3703",
+        "max_venture_residual_guarantees_m": "41493",
+        "uncommenced_operating_and_finance_lease_m": "355730",
+        "noncancelable_purchase_m": "454520",
+        "usd_notes_issued_m": "15000",
+        "eur_notes_issued_m": "9000",
+        "forward_initial_price_usd": "622.91875",
+        "preferred_initial_net_before_issuer_expenses_m": "12458.375",
+        "preferred_initial_estimated_expenses_m": "4",
+        "preferred_option_net_actual_m": "1869",
+        "preferred_initial_issued_m": "12.5",
+        "preferred_option_issued_m": "1.875",
+        "preferred_initial_issue_date": "2026-10-29",
+        "preferred_option_issue_date": "2026-11-02",
+        "preferred_first_pay_date": "2027-02-15",
+        "preferred_annual_coupon_per_share": "65",
+        "preferred_fixed_min": "1.362",
+        "preferred_fixed_max": "1.600",
+        "preferred_liquidation_per_share": "1000",
+        "preferred_remaining_full_quarters": 10,
+        "ordinary_quarterly_anchor": ".525",
+        "cloud_contingent_five_year_max_m": "14720",
+        "eur_notes_estimated_net_m": "8960",
+        "usd_notes_proceeds_before_expenses_m": "14947.07500"
+      },
+      "case_columns": [
+        "foa_cagr",
+        "foa_terminal_margin",
+        "rl_terminal_loss_m",
+        "operating_ev_multiple",
+        "cash_reserve_m",
+        "public_equity_recovery",
+        "private_equity_recovery",
+        "restricted_cash_release",
+        "eur_usd",
+        "bond_proceeds_retention",
+        "preferred_proceeds_retention",
+        "forward_price_multiplier",
+        "forward_cash_retention",
+        "share_drift",
+        "a_vwap",
+        "a_to_c_ratio",
+        "legal_payment_fraction",
+        "infrastructure_net_financing_m",
+        "venture_residual_fraction",
+        "net_corporate_tax_claim_m"
+      ],
+      "cases": {
+        "cautious": [
+          ".065",
+          ".25",
+          "23000",
+          "12",
+          "20000",
+          ".55",
+          ".30",
+          "0",
+          "1.20",
+          ".1",
+          ".2",
+          ".93",
+          ".2",
+          ".019",
+          "480",
+          "1.22",
+          "1",
+          "155000",
+          ".65",
+          "16000"
+        ],
+        "base": [
+          ".105",
+          ".34",
+          "18000",
+          "17",
+          "13000",
+          ".85",
+          ".65",
+          ".55",
+          "1.13",
+          ".4",
+          ".5",
+          "1",
+          ".5",
+          ".010",
+          "690",
+          "1.10",
+          ".75",
+          "85000",
+          ".25",
+          "9000"
+        ],
+        "optimistic": [
+          ".145",
+          ".42",
+          "8500",
+          "22",
+          "10000",
+          "1.1",
+          "1.05",
+          ".9",
+          "1.05",
+          ".7",
+          ".75",
+          "1.04",
+          ".75",
+          ".004",
+          "930",
+          "1.03",
+          ".5",
+          "40000",
+          ".05",
+          "4000"
+        ]
+      },
+      "scope_limitations": [
+        "No executed Class C distribution or physical forward delivery in the admitted facts; valuation states are conditional.",
+        "Cash coupons through the modeled conversion are used as the bridge reference; the output is an aggregate five-year continuing A-holder analysis.",
+        "The initial event 40-day reset, conversion pricing, forward settlement and terminal class relativity are distinct scenario inputs.",
+        "Notes support completed principal but no observed net retained cash after deployment; operating capitalization includes ongoing leases and depreciation, with only a net financing claim scenario.",
+        "Venture funding and calls on guarantees remain separately modeled. Ordinary package cash assumes preferred senior distributions are satisfied."
+      ],
+      "capital_scenarios": {
+        "cautious": {
+          "conditional_new_issue_usd_m": "18000",
+          "new_issue_class": "A",
+          "new_issue_retention": ".20"
+        },
+        "base": {
+          "all_c_fraction": "0",
+          "conditional_new_issue_usd_m": "9000",
+          "new_issue_class": "C",
+          "new_issue_retention": ".40",
+          "post_ex_ratio_40_day": "1.18",
+          "preferred_class_vwap": "545",
+          "forward_a_vwap": "615",
+          "forward_c_vwap": "530"
+        },
+        "optimistic": {
+          "all_c_fraction": "1",
+          "founder_events": 1,
+          "conditional_new_issue_usd_m": "6000",
+          "new_issue_class": "C",
+          "new_issue_retention": ".65",
+          "post_ex_ratio_40_day": "1.04",
+          "preferred_class_vwap": "810",
+          "forward_a_vwap": "730",
+          "forward_c_vwap": "640"
+        }
+      },
+      "capital_stresses": {
+        "all_c": {
+          "all_c_fraction": "1",
+          "post_ex_ratio_40_day": "1.30",
+          "preferred_class_vwap": "430",
+          "forward_a_vwap": "700",
+          "forward_c_vwap": "460"
+        },
+        "protected_extra_dividend_before_conversion": {
+          "all_c_fraction": ".5",
+          "founder_events": 1,
+          "founder_before_conversion": true,
+          "post_ex_ratio_40_day": "1.12",
+          "preferred_class_vwap": "580",
+          "forward_a_vwap": "645",
+          "forward_c_vwap": "520"
+        },
+        "three_additional_after_conversion_if_thresholds_met": {
+          "all_c_fraction": "0",
+          "founder_events": 3
+        },
+        "high_new_class_a_funding": {
+          "conditional_new_issue_usd_m": "36000",
+          "new_issue_class": "A",
+          "new_issue_retention": ".20"
+        }
+      },
+      "capital_scope_notes": [
+        "Current holder is one listed A before any Class C distribution, held throughout. Separate post-distribution purchases require a new identity and quote.",
+        "Founder additional dividends are conditional on the contractual market-price milestones and IRR test. Issuing one C for each A/B/C otherwise redistributes existing equity. Stapling and equal-treatment rights do not grant an extra preference in company economics.",
+        "All-C replaces the A leg after the trigger on modeled settlement. The positive A-minus-C VWAP difference reduces the replacement leg; unsupported negative settlement is rejected.",
+        "Initial preferred conversion uses §13(a)(vii); additional ratable stock dividend before conversion adjusts C conversion via §13(a)(i). Coupons assume cash; stock coupons would substitute settlement shares for cash and are not assumed simultaneously.",
+        "Future issue amounts, retention, VWAP and share drift are research assumptions. Existing forward cash is a terminal condition only and the standstill is preserved."
+      ]
+    }
+  },
+  "BRK.B:US": {
+    "sources": {
+      "quarter": "0cf42920b0abc830c7b2801aa6f152a39afdb6b5a626f8964fe282da9d00060e",
+      "annual_earnings": "e19171a2c7e4b5177e0f91f9b995a46fb931b0d806be9d2fdfb997c30161d027",
+      "quarter_earnings": "1ecfcf109bd982a90eb08d78f3cb57b95992ff355617b297552f11a9cebc1631",
+      "financing": "a60a1ad92286d5b9a9b27da0a0010498fbee9de6d3cf18fc60b8706aca56dad4",
+      "annual_parent": "800b5f7f0f12f20c22ce053c020d758e44588d7aedd113d956687e4f7deadf7e"
+    },
+    "financial_millions": {
+      "group_unsettled": 20489,
+      "insurer_unsettled": 15400,
+      "insurer_cash_treasury": 230941,
+      "insurance_and_other_cash_treasury": 372769,
+      "insurance_public_equity": 333359,
+      "public_equity": 335515,
+      "public_equity_cost": 108462,
+      "insurance_fixed_maturity": 16933,
+      "group_fixed_maturity": 17082,
+      "float_net_of_insurance_receivables": 178500,
+      "listed_equity_method_fair_value": 22055,
+      "other_equity_method_carry": 460,
+      "parent_debt": 20400,
+      "new_parent_jpy_notes_m": 182300,
+      "parent_cost": 134
+    },
+    "cases": {
+      "cautious": {
+        "operating": {
+          "underwriting": [
+            "0",
+            "9"
+          ],
+          "rail": [
+            ".01",
+            "13"
+          ],
+          "energy": [
+            ".02",
+            "12"
+          ],
+          "manufacturing_retail": [
+            ".02",
+            "12"
+          ]
+        },
+        "market_recovery": ".85",
+        "realization_tax": ".26",
+        "treasury_reinvestment": ".015",
+        "fixed_income_recovery": ".95",
+        "float_claim_factor": "1.12",
+        "insurance_capital_discount": ".30",
+        "outside_surplus_fraction": ".65",
+        "usd_per_jpy": ".0075",
+        "yen_proceeds_retention": ".15",
+        "equity_method_recovery": ".65",
+        "parent_cost_multiple": "16",
+        "annual_share_change": "0"
+      },
+      "base": {
+        "operating": {
+          "underwriting": [
+            ".04",
+            "13"
+          ],
+          "rail": [
+            ".045",
+            "17"
+          ],
+          "energy": [
+            ".055",
+            "16"
+          ],
+          "manufacturing_retail": [
+            ".055",
+            "16"
+          ]
+        },
+        "market_recovery": "1.18",
+        "realization_tax": ".24",
+        "treasury_reinvestment": ".03",
+        "fixed_income_recovery": "1",
+        "float_claim_factor": "1",
+        "insurance_capital_discount": ".20",
+        "outside_surplus_fraction": ".83",
+        "usd_per_jpy": ".0067",
+        "yen_proceeds_retention": ".55",
+        "equity_method_recovery": ".85",
+        "parent_cost_multiple": "18",
+        "annual_share_change": "0"
+      },
+      "optimistic": {
+        "operating": {
+          "underwriting": [
+            ".065",
+            "16"
+          ],
+          "rail": [
+            ".07",
+            "21"
+          ],
+          "energy": [
+            ".08",
+            "20"
+          ],
+          "manufacturing_retail": [
+            ".08",
+            "21"
+          ]
+        },
+        "market_recovery": "1.50",
+        "realization_tax": ".22",
+        "treasury_reinvestment": ".04",
+        "fixed_income_recovery": "1.05",
+        "float_claim_factor": ".93",
+        "insurance_capital_discount": ".12",
+        "outside_surplus_fraction": ".94",
+        "usd_per_jpy": ".0060",
+        "yen_proceeds_retention": ".90",
+        "equity_method_recovery": "1.15",
+        "parent_cost_multiple": "21",
+        "annual_share_change": "0"
+      }
+    },
+    "anchors_m": {
+      "fy25_standalone_parent_cash_treasury": 127438,
+      "fy25_statutory_surplus": 333000,
+      "fy26_ordinary_dividend_limit": 33000
+    },
+    "limitations": [
+      "Insurance invested assets less float and an explicit capital friction are economic equity value, not immediately transferable cash.",
+      "FY25 parent cash and ordinary dividend permissions support scenario judgment only. Current cash outside insurance is the group residual, not a claimed parent-only cash balance.",
+      "After-tax segment earnings already reflect funded segment interest. Subtract standalone parent financing only.",
+      "Funding retention is a scenario, not an attestation of November proceeds or post-close balance. Taxes use a simplified portfolio realization basis.",
+      "Taylor Morrison closed in July for $6.8bn and OxyChem in January for $9.4bn; balances reflect deployed cash, while TTM operating earnings include partial ownership. No standalone additive acquired earnings; manufacturing/other growth and exit stress encompass unqualified ramp and full-period contribution.",
+      "Separate Kraft Heinz/Occidental recovery factors are net of hypothetical realization tax and disposal frictions because the tax basis is unqualified; not added to their capitalized investment earnings."
+    ]
+  },
+  "ANT:US": {
+    "sources": {
+      "prospectus": "9a674665d93ca04d1dc27e4644ec9ac7c8fb5f3e4d9c7b9c3623ace227d64cf9",
+      "listing": "f85715f84d1d69545f5c036e19116db44364be745f427ef91b5283c1ff0a185f"
+    },
+    "reported": {
+      "pro_forma_liquidity_bn": "244.6",
+      "a_shares_bn": "7.730103996",
+      "n_shares_bn": "4.789697318",
+      "options_bn": "1.774342693",
+      "option_strike": "2.91",
+      "rsus_bn": "1.073701297",
+      "remaining_note_conversion_bn": "1.547676309",
+      "remaining_note_carry_bn": "109.742",
+      "remaining_note_nominal_bn": "5.5903",
+      "quarter_revenue_bn": "17.0",
+      "cash_due_in_12m_bn": "70.7",
+      "terminable_near_term_bn": "4.2",
+      "nine_month_cfo_bn": "6.569",
+      "nine_month_revenue_bn": "33.242",
+      "subsidiary_public_benefit_shares_bn": ".846840960",
+      "september_cash_bn": "131.845",
+      "no_shoe_pro_forma_liquidity_bn": "232.351",
+      "closing_issuer_shares_bn": "1.103351354",
+      "closing_selling_holder_shares_bn": ".023648646",
+      "closing_private_shares_bn": ".313253007",
+      "exercise_shares_bn": ".147",
+      "ipo_price": "83",
+      "total_contract_inventory_bn": "900.9",
+      "pre_2031_contract_inventory_bn": "451.6"
+    },
+    "cases": {
+      "cautious": {
+        "growth": [
+          "0.45",
+          ".31",
+          ".24",
+          ".18",
+          ".12"
+        ],
+        "compute_cost_share": [
+          ".72",
+          ".64",
+          ".58",
+          ".53",
+          ".48"
+        ],
+        "non_compute_cost_share": [
+          ".23",
+          ".24",
+          ".25",
+          ".25",
+          ".25"
+        ],
+        "contract_cash_floor_bn": [
+          "0",
+          "103",
+          "102",
+          "98",
+          "55"
+        ],
+        "convert_remaining_notes": false,
+        "option_exercise_fraction": ".70",
+        "rsu_settlement_fraction": ".7",
+        "tax_rate": ".24",
+        "incremental_capex_share": ".085",
+        "minimum_liquidity_bn": "70",
+        "equity_issue_per_share": "32",
+        "annual_new_share_drift": ".045",
+        "terminal_cash_multiple": "15",
+        "note_claim_factor": "1.25",
+        "foundation_release_fraction": "1",
+        "post_september_cash_change_bn": "-20",
+        "contract_cash_before_start_bn": "8",
+        "near_term_contingent_performance_fraction": "1",
+        "legacy_note_conversion_fraction": "0",
+        "terminal_tail_performance": ".60",
+        "legacy_residual_exercise_weight": ".70",
+        "included_2031_contract_bn": "55",
+        "terminal_tail_overlap": ".8",
+        "contract_overlap": [
+          ".68",
+          ".72",
+          ".76",
+          ".78",
+          ".8"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
+      },
+      "base": {
+        "growth": [
+          ".69",
+          ".45",
+          ".34",
+          ".27",
+          ".20"
+        ],
+        "compute_cost_share": [
+          ".64",
+          ".55",
+          ".48",
+          ".44",
+          ".40"
+        ],
+        "non_compute_cost_share": [
+          ".22",
+          ".23",
+          ".24",
+          ".24",
+          ".24"
+        ],
+        "contract_cash_floor_bn": [
+          "0",
+          "97",
+          "96",
+          "94",
+          "54"
+        ],
+        "convert_remaining_notes": true,
+        "option_exercise_fraction": ".90",
+        "rsu_settlement_fraction": ".85",
+        "tax_rate": ".23",
+        "incremental_capex_share": ".07",
+        "minimum_liquidity_bn": "55",
+        "equity_issue_per_share": "45",
+        "annual_new_share_drift": ".03",
+        "terminal_cash_multiple": "21",
+        "note_claim_factor": "1",
+        "foundation_release_fraction": ".5",
+        "post_september_cash_change_bn": "-8",
+        "contract_cash_before_start_bn": "10",
+        "near_term_contingent_performance_fraction": ".5",
+        "legacy_note_conversion_fraction": ".5",
+        "terminal_tail_performance": ".80",
+        "legacy_residual_exercise_weight": ".5",
+        "included_2031_contract_bn": "54",
+        "terminal_tail_overlap": ".87",
+        "contract_overlap": [
+          ".82",
+          ".83",
+          ".85",
+          ".86",
+          ".87"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
+      },
+      "optimistic": {
+        "growth": [
+          ".88",
+          ".57",
+          ".44",
+          ".32",
+          ".24"
+        ],
+        "compute_cost_share": [
+          ".56",
+          ".47",
+          ".41",
+          ".37",
+          ".34"
+        ],
+        "non_compute_cost_share": [
+          ".21",
+          ".22",
+          ".23",
+          ".23",
+          ".23"
+        ],
+        "contract_cash_floor_bn": [
+          "0",
+          "88",
+          "87",
+          "86",
+          "48"
+        ],
+        "convert_remaining_notes": true,
+        "option_exercise_fraction": "1",
+        "rsu_settlement_fraction": ".95",
+        "tax_rate": ".22",
+        "incremental_capex_share": ".06",
+        "minimum_liquidity_bn": "45",
+        "equity_issue_per_share": "70",
+        "annual_new_share_drift": ".02",
+        "terminal_cash_multiple": "27",
+        "note_claim_factor": "1",
+        "foundation_release_fraction": ".25",
+        "post_september_cash_change_bn": "0",
+        "contract_cash_before_start_bn": "13",
+        "near_term_contingent_performance_fraction": "0",
+        "legacy_note_conversion_fraction": "1",
+        "terminal_tail_performance": ".93",
+        "legacy_residual_exercise_weight": ".35",
+        "included_2031_contract_bn": "48",
+        "terminal_tail_overlap": ".94",
+        "contract_overlap": [
+          ".92",
+          ".93",
+          ".93",
+          ".94",
+          ".94"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
+      }
+    },
+    "limitations": [
+      "424B4 full-shoe pro forma reconciled to completed issuer and secondary IPO shares and concurrent private Class N placement. After-September cash changes are scenarios, not an observed ledger.",
+      "Annualized Q3 revenue is a starting scale. Contract cash and ordinary operating compute overlap only to the stated extent. Capex is incremental non-duplicative cash; timing and performance are conditions.",
+      "No calendar obligation tables are added to the umbrella $900.9bn inventory. Model year one rolls the September $70.7bn 12-month disclosure to the November origin using a scenario already-paid allowance. Later years are modeled cash paths; incremental post-2031 outflows get a discounted reserve outside normalized terminal operations.",
+      "Remaining Amazon notes: converted units enter the denominator once; unconverted units have a mutually exclusive discounted principal or economic option reserve. $109.742bn is a historical fair-value carrying amount only, not settlement cash.",
+      "Financing from unexercised facilities is not opening cash. Scenario equity rescue and stress price cover financing need and market dilution, not assumed actual draws. Fixed annual drift is independent of option/RSU vesting and disclosed subsidiary stock releases.",
+      "Class A and economically eligible N use their common economic rights. The 846.841m Class N subsidiary-held units are excluded from initial external shares and enter upon modeled third-year release.",
+      "Reopen upon new quarterly cash/liability disclosure, contractual change, actual capital draw or note settlement, or material issued-share evidence."
+    ]
+  }
+}
