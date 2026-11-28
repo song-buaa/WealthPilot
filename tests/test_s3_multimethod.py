@@ -275,3 +275,56 @@ def test_ant_distinguishes_contract_overlap_and_residual_convertible():
     assert Decimal(first['compute_cash_bn']) > max(Decimal(first['core_compute_cash_bn']),
                                                    Decimal(first['contract_due_bn']))
     assert Decimal(converted['post_endpoint_commitment_pv_bn']) > 0
+
+
+@pytest.mark.parametrize('form', ['424B4', '424B5'])
+def test_reviewed_primary_filing_remains_hash_bound_after_transport_rotation(tmp_path, monkeypatch, form):
+    import hashlib
+    from backend.services import s3_relative_profiles as profiles
+
+    digest = lambda body: hashlib.sha256(body).hexdigest()
+    at = date(2026)
+    issuer = {'cik': '0000000001'}
+    url = 'https://www.sec.gov/Archives/edgar/data/1/000000000126000001/form.htm'
+    accession = '0000000001-26-000001'
+    prefix = b'<html><body>Reviewed disclosure: 123.'
+    ending = b'</body></html>\n</TEXT>\n</DOCUMENT>\n'
+    def response(path):
+        return prefix+b'<script type="text/javascript"  src="'+path+b'"></script>'+ending
+
+    old = response(b'/old/a/b/c/d/e/f')
+    new = response(b'/new/a/b/c/d/e/f')
+    expected = dict(accession=accession, locator='Reviewed term', primary='form.htm', form=form,
+                    sha256=digest(old), reviewed_without_trailing_sec_script_sha256=digest(prefix+ending))
+    sub = json.dumps({'filings':{'recent':{'accessionNumber':[accession], 'form':[form],
+                     'primaryDocument':['form.htm'], 'acceptanceDateTime':['2025-12-31T18:00:00Z']}}}).encode()
+    def save(name, body, source):
+        (tmp_path/name).write_bytes(body)
+        return dict(path=name, url=source, fetched_at=at.isoformat(), sha256=digest(body))
+    entry = {'directory':save('directory.json', b'{}', profiles.sec.DIRECTORY),
+             'submissions':save('submissions.json', sub, 'https://data.sec.gov/submissions/CIK0000000001.json')}
+    row = save('form.htm', new, url)
+    dimensions = {k:dict(fact='fact', judgment='judgment', counterevidence='limit', evidence=['reviewed'])
+                  for k in profiles.DIMENSIONS}
+    dossier = dict(cik=issuer['cik'], reviewed_at=at.isoformat(), sources={'reviewed':expected},
+                   dimensions=dimensions, valuation_method='proof', equity_bridge={})
+    book = dict(version='proof', companies={'AAA:US':dossier})
+    manifest = dict(companies={'AAA:US':entry}, requests=[row])
+    monkeypatch.setattr(profiles, 'resolve_sec_issuer', lambda *args, **kwargs: issuer)
+    monkeypatch.setattr(profiles.sec, 'discover_filings', lambda *args: [])
+    def qualify():
+        return profiles.quality_cards(tmp_path, manifest, at, book)['AAA:US']
+
+    proof = qualify()
+    assert proof['sources']['reviewed']['source_sha256'] == digest(new)
+    assert proof['sources']['reviewed']['reviewed_source_sha256'] == digest(old)
+    assert multimethod._review_sources(proof, {'sources':{'reviewed':digest(old)}}, at)
+    manifest['requests'][0] = save('form.htm', new.replace(b'123', b'124'), url)
+    assert qualify()['reason'] == 'S3_QUALITY_REVIEWED_BYTES_CHANGED'
+    manifest['requests'][0] = save('form.htm', new.replace(b'</script>', b'</script><span/>'), url)
+    assert qualify()['reason'] == 'S3_QUALITY_REVIEWED_BYTES_CHANGED'
+    manifest['requests'][0] = dict(save('form.htm', new, url), sha256=digest(old))
+    assert qualify()['reason'] == 'S3_QUALITY_SOURCE_HASH_OR_CLOCK_REJECTED'
+    manifest['requests'][0] = save('form.htm', new, url)
+    manifest['requests'][0]['fetched_at'] = date(2026,2).isoformat()
+    assert qualify()['reason'] == 'S3_QUALITY_SOURCE_HASH_OR_CLOCK_REJECTED'

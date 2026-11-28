@@ -385,6 +385,7 @@
           "primary": "d44678d424b5.htm",
           "form": "424B5",
           "locator": "Recent Developments: November 2 completed depositary option, 37.5m shares and $1.869bn net proceeds",
+          "reviewed_without_trailing_sec_script_sha256": "2b1d44a3269404267d8873b243c5213bc0968261da046a971f279cd37d9ebc6c",
           "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
           "optional": true
         },
@@ -678,6 +679,7 @@
           "accession": "0001628280-26-074944",
           "locator": "Final 424B4, operations, charters, compute commitments and liquidity",
           "primary": "anthropicpbc-424b4.htm",
+          "reviewed_without_trailing_sec_script_sha256": "bdfcfa12a99191b8e4ecc60260b0a0867459d8ea3b22555a710287ad51eee0da",
           "sha256": "9a674665d93ca04d1dc27e4644ec9ac7c8fb5f3e4d9c7b9c3623ace227d64cf9"
         },
         "listing": {
