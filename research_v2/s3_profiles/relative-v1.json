@@ -68,7 +68,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00"
+      "reviewed_at": "2026-11-27T23:21:27.486755+00:00"
     },
     "MSFT:US": {
       "cik": "0000789019",
@@ -151,6 +151,30 @@
           "accession": "0001045810-26-000090",
           "locator": "2026-11-23 Form 8-K; subsequent disclosure check",
           "sha256": "a53c2e57e76808b437349e7bd05dfd0228b4e17ca8a138775c8fd8d439703407"
+        },
+        "fy26_q4": {
+          "accession": "0001045810-26-000019",
+          "locator": "Q4 FY26 earnings release, diluted shares and total other income",
+          "sha256": "db8bce6920aefef77847471f407a19732d00fef379f0735b02a8a9744eda8027",
+          "optional": true
+        },
+        "fy27_q1": {
+          "accession": "0001045810-26-000052",
+          "locator": "Q1 FY27 10-Q diluted shares and total other income",
+          "sha256": "fd15a270c0b4ebbfcec982749f940b5cf703e2571e10bd74bc484f233cc68b67",
+          "optional": true
+        },
+        "fy27_q2": {
+          "accession": "0001045810-26-000075",
+          "locator": "Q2 FY27 10-Q EPS, other income and commitment notes",
+          "sha256": "27de5f3a6af821a4cfc029811cf4a5724c0f71d63d6d7892abc8ab7d0a959e07",
+          "optional": true
+        },
+        "acquisition": {
+          "accession": "0001045810-26-000078",
+          "locator": "Definitive acquisition and retention arrangements, September 2 Form 8-K",
+          "sha256": "15cedfbe951d5297592640a298f3928bac4d7fc2372efff2eaf5fd994f79e4b3",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_IF_CURRENT_EXACT_TTM_QUALIFIES",
@@ -206,7 +230,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-28T00:25:20+00:00",
       "valuation_blocker": "CURRENT_OCTOBER_QUARTER_SEC_FINANCIAL_WINDOW_NOT_QUALIFIED"
     },
     "GOOG:US": {
@@ -221,6 +245,16 @@
           "accession": "0001193125-26-259830",
           "locator": "8-K Items 1.01 and 3.03; Exhibits 4.3–4.6 and 5.1–5.2",
           "sha256": "0564227c40214d75adafe3247980d853f2baaeb04f48f18de073beafbcfb4ff3"
+        },
+        "eur_notes": {
+          "accession": "0001193125-26-449835",
+          "locator": "8-K completed post-quarter unsecured financing in EUR",
+          "sha256": "c04091929e533f45b7219cd81a406b72585bc6699f724fbbcec0f9c68b881d23"
+        },
+        "cad_notes": {
+          "accession": "0001193125-26-475973",
+          "locator": "8-K completed post-quarter unsecured financing in CAD",
+          "sha256": "1138ef7a10b85e5941a5b61d4a65414ab75ce9d7dd10b6ae492a6293d1acdf1c"
         }
       },
       "valuation_method": "OPERATING_EARNINGS_CLASS_C_AFTER_ENTITLEMENT_BRIDGE",
@@ -276,7 +310,7 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-27T16:05:00Z",
       "valuation_blocker": "CLASS_C_Q4_EPS_AND_FORWARD_PREFERRED_ENTITLEMENTS_UNQUALIFIED",
       "entitlement_evidence": {
         "source_labels": [
@@ -345,6 +379,20 @@
           "accession": "0001628280-26-075541",
           "locator": "8-K Item 8.01; issuance standstill, founder waiver and deferred ATM",
           "sha256": "6a1871e005887c2256e0fa0fe7f7c358e7ddf37f1bdccd7224f6d8298bdb985f"
+        },
+        "preferred_option_close": {
+          "accession": "0001193125-26-450754",
+          "primary": "d44678d424b5.htm",
+          "form": "424B5",
+          "locator": "Recent Developments: November 2 completed depositary option, 37.5m shares and $1.869bn net proceeds",
+          "sha256": "779720bb6ba58b04906814a8dbe30422f9b6260e16cb72936c3b1b5663147ec2",
+          "optional": true
+        },
+        "eur_notes": {
+          "accession": "0001193125-26-458525",
+          "locator": "November 12 completed EUR notes, aggregate face EUR9bn",
+          "sha256": "1955f8608c4f22d7433a442ff8300705f00a4878139cf0b40d3c19ea8d72147a",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_ONLY_AFTER_ORDINARY_CLASS_A_ENTITLEMENT_BRIDGE",
@@ -405,13 +453,14 @@
           ]
         }
       },
-      "reviewed_at": "2026-11-27T11:31:00Z",
+      "reviewed_at": "2026-11-28T00:25:20+00:00",
       "entitlement_evidence": {
         "source_labels": [
           "equity",
           "finance",
           "forward_expansion",
-          "class_c_litigation"
+          "class_c_litigation",
+          "preferred_option_close"
         ],
         "inputs": {
           "preferred": {
@@ -425,7 +474,7 @@
               "common_class": "A_IF_NO_CLASS_C_TRIGGER",
               "size_basis": "FIRM_OFFER_ON_OCT_29_CLOSE"
             },
-            "full_option_hypothesis": {
+            "actual_aggregate_issued": {
               "depositary_units": 287500000,
               "units_per_preferred": 20,
               "liquidation_usd": "1000",
@@ -433,7 +482,7 @@
               "conversion_min": "1.3620",
               "conversion_max": "1.6000",
               "common_class": "A_IF_NO_CLASS_C_TRIGGER",
-              "size_basis": "HYPOTHETICAL_FULL_OPTION_NOT_VERIFIED_OUTSTANDING"
+              "size_basis": "ISSUED_AGGREGATE_INCLUDING_NOVEMBER_2_OPTION_CLOSE"
             }
           },
           "forward_contracts_shares": [
@@ -443,12 +492,18 @@
           "original_forward_price_usd": "622.91875",
           "original_forward_latest_contractual_settlement": "2027-11-19",
           "stock_dividend_original_terms": "ONE_CLASS_C_FOR_EACH_ELIGIBLE_A_OR_B_IF_EFFECTIVE",
-          "as_of_2026_11_23": "CLASS_C_ISSUANCE_STANDSTILL_AND_CLASS_C_ATM_DELAYED_NOT_CANCELED"
+          "as_of_2026_11_23": "CLASS_C_ISSUANCE_STANDSTILL_AND_CLASS_C_ATM_DELAYED_NOT_CANCELED",
+          "preferred_option_close": {
+            "depositary_units": 37500000,
+            "underlying_preferred": 1875000,
+            "incremental_net_proceeds_usd": "1869000000",
+            "settlement_date": "2026-11-02"
+          }
         },
         "remaining_requirements": [
           "Observed litigation/charter/distribution state and holder A plus C economic package",
-          "Preferred cash-vs-stock coupons, actual depositary units, conversion class and anti-dilution",
-          "Forward issuance and cash settlement with class-dependent price adjustments",
+          "Preferred cash-vs-stock coupons, subsequent changes to confirmed issued units, conversion class and anti-dilution",
+          "Forward physical share delivery against adjusted cash proceeds with class-dependent terms",
           "Net ordinary dilution with actual ATM, buyback and SBC roll-forward"
         ]
       }
@@ -465,6 +520,12 @@
           "accession": "0001628280-26-003837",
           "locator": "Exhibit 99.1 HTML embedded disclosure text, GAAP diluted common EPS row and Q4-2025 column",
           "sha256": "00178bf9d927550ae16ef0cb88e985f243ac35dba66589f8297f1ac15c9ad549"
+        },
+        "q3_operating_update": {
+          "accession": "0001628280-26-066738",
+          "sha256": "ddec505db52e182b2b1dbc1d993b865aeb094ac09c4d4ca2443550b12d60dabd",
+          "locator": "Q3 8-K Exhibit 99.1 Tesla operating data, installed vehicle capacity and active FSD reach",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_EXCLUDING_UNPROVEN_FUTURE_ADJACENCIES",
@@ -545,6 +606,12 @@
           "accession": "0001193125-26-468549",
           "locator": "2026-11-19 Form 8-K yen notes; debt used in scenario risk",
           "sha256": "a60a1ad92286d5b9a9b27da0a0010498fbee9de6d3cf18fc60b8706aca56dad4"
+        },
+        "annual_parent": {
+          "accession": "0001193125-26-083899",
+          "sha256": "800b5f7f0f12f20c22ce053c020d758e44588d7aedd113d956687e4f7deadf7e",
+          "locator": "FY25 10-K Note 15 and Schedule I parent capital, dividends and liquidity",
+          "optional": true
         }
       },
       "valuation_method": "INSURANCE_HOLDING_NORMALIZED_OPERATING_EARNINGS_CLASS_B_RESEARCH_CANDIDATE",
@@ -727,7 +794,7 @@
   "operating_companies": {
     "AAPL:US": {
       "cik": "0000320193",
-      "reviewed_at": "2026-11-27T09:59:13.926379+00:00",
+      "reviewed_at": "2026-11-27T23:21:27.486755+00:00",
       "latest_reviewed_filings": {
         "10-K": "0000320193-26-000026",
         "10-Q": "0000320193-26-000020",
@@ -1105,6 +1172,24 @@
           "url": "https://www.microsoft.com/en-us/Investor/events/fy-2027/earnings-fy-2027-q1",
           "visible_context_sha256": "5ba565574eed961c28b1dd3b44dee6e4b6b6e4d7475acb7771863e12ff05958a",
           "summary": "Current issuer IR visible context checked for company-specific filings and operating changes; no long-run forecast assumed."
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "6ef777cbf8450f72cbee578c44a4432484344651d766a38f76bb063b186ab4ec",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526027207/0001193125-26-027207.txt"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "59690f25c80996ae9195963717b8dbdfe388be7b9b3c4a158b1e20077da8337c",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526191507/0001193125-26-191507.txt"
+        },
+        {
+          "role": "CURRENT_DISCLOSURE_CONTEXT",
+          "sha256": "d5bf29b45bc42bf81154ac3adb2f33c0f003d1633e7ce5fc36f306072c9806b6",
+          "summary": "Published period GAAP to OpenAI-only adjusted diluted EPS reconciliation; not forward management guidance.",
+          "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323632/0001193125-26-323632.txt"
         }
       ],
       "annual_eps_snapshots": {

@@ -115,3 +115,89 @@ def build(card, root, manifest, cutoff, quality):
             limitations=['ISSUER_NON_GAAP_OPERATING_EARNINGS_NOT_GAAP_EPS',
                          'INSURANCE_INVESTMENT_INCOME_ALREADY_CAPITALIZED_NO_SEPARATE_NAV', 'NO_INTERIM_CASH_DISTRIBUTIONS'])
         return result
+
+
+ASSET_METHOD = 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1'
+
+
+def segment_asset_case(bridge, facts, setup, *, growth_shift=Decimal(0), multiple_shift=Decimal(0)):
+    """Non-overlapping operating equity value and supporting financial assets."""
+    d = engine.dec
+    b = {key: d(value) for key, value in facts.items()}
+    components = bridge['components_usd_millions']
+    segments = {}
+    for key, (growth, multiple) in setup['operating'].items():
+        earnings = d(components[key]) * (1 + d(growth) + growth_shift) ** 5
+        segments[key] = earnings * d(multiple) * (1 + multiple_shift)
+    # Neither the insurer's interest/dividends nor consolidated "Other" is
+    # capitalized: the corresponding investments and claims are valued below.
+    securities = b['public_equity'] * d(setup['market_recovery'])
+    tax = max(Decimal(0), securities - b['public_equity_cost']) * d(setup['realization_tax'])
+    securities_net = securities - tax
+    insurance_public = securities_net * b['insurance_public_equity'] / b['public_equity']
+    cash_growth = (1 + d(setup['treasury_reinvestment'])) ** 5
+    insurer_cash = b['insurer_cash_treasury'] - b['insurer_unsettled']
+    insurer_net = (insurer_cash * cash_growth + insurance_public
+                   + b['insurance_fixed_maturity'] * d(setup['fixed_income_recovery'])
+                   - b['float_net_of_insurance_receivables'] * d(setup['float_claim_factor']))
+    # Capital friction applies only to positive net invested assets, not to claims.
+    regulatory = max(Decimal(0), insurer_net) * d(setup['insurance_capital_discount'])
+    consolidated_cash = b['insurance_and_other_cash_treasury'] - b['group_unsettled']
+    outside_insurer = consolidated_cash - insurer_cash
+    outside_reserve = outside_insurer * (1 - d(setup['outside_surplus_fraction']))
+    yen_debt = b['new_parent_jpy_notes_m'] * d(setup['usd_per_jpy'])
+    parent_cash_net = ((outside_insurer - outside_reserve) * cash_growth - b['parent_debt']
+                       - yen_debt * (1 - d(setup['yen_proceeds_retention'])))
+    outside_investments = (securities_net - insurance_public
+                           + (b['group_fixed_maturity'] - b['insurance_fixed_maturity']) * d(setup['fixed_income_recovery'])
+                           + b['listed_equity_method_fair_value'] * d(setup['equity_method_recovery'])
+                           + b['other_equity_method_carry'] * d(setup['equity_method_recovery']))
+    corporate = b['parent_cost'] * d(setup['parent_cost_multiple'])
+    total = sum(segments.values()) + insurer_net - regulatory + parent_cash_net + outside_investments - corporate
+    shares = d(bridge['b_equivalent_shares']) * (1 + d(setup['annual_share_change'])) ** 5
+    components = dict(operating_values_usd_m={k: engine.text(v) for k, v in segments.items()},
+        insurance_net_invested_assets_usd_m=engine.text(insurer_net), insurance_capital_charge_usd_m=engine.text(regulatory),
+        outside_insurer_cash_reserve_usd_m=engine.text(outside_reserve), parent_and_other_cash_net_usd_m=engine.text(parent_cash_net),
+        outside_insurer_investments_usd_m=engine.text(outside_investments), corporate_cost_usd_m=engine.text(corporate),
+        terminal_equity_usd_m=engine.text(total), terminal_class_b_shares=str(shares))
+    return dict(terminal_price=engine.text(total * 10**6 / shares), **components)
+
+
+def add_asset_scope(card, profile, sources, start, end):
+    from backend.services.s3_holder_returns import qualify_joint_sensitivity, settle
+
+    if card.get('valuation_method') != METHOD:
+        return False
+    basis = card['operating_earnings_bridge']
+    quote = card['cross_checks']['observed_price']['values']['observed_price']
+    rate = card['assumptions']['required_return']
+    facts, cases = profile['financial_millions'], profile['cases']
+    with localcontext() as ctx:
+        ctx.prec = 34
+        def valued(setup, **stress):
+            return settle(segment_asset_case(basis, facts, setup, **stress), quote, rate, start, end, start, [])
+
+        scenarios = {name: valued(case) for name, case in cases.items()}
+        joint = [dict(stress_axis='OPERATING_EARNINGS_PE', revenue_growth_shift=g, terminal_pe_shift=m,
+                      result=valued(cases['base'], growth_shift=Decimal(g), multiple_shift=Decimal(m)))
+                 for g in ('-.03','0','.03') for m in ('-.2','0','.2')]
+        sensitivity = []
+        for key, shifts in (('insurance_capital_discount',('-.10','.10')),
+                            ('market_recovery',('-.15','.15')),
+                            ('outside_surplus_fraction',('-.10','.10')),
+                            ('float_claim_factor',('-.05','.05'))):
+            base = cases['base']
+            for shift in shifts:
+                values = dict(base, **{key: str(engine.dec(base[key])+Decimal(shift))})
+                sensitivity.append(dict(parameter=key, delta=shift, required_return=rate, result=valued(values)))
+        card.update(valuation_method=ASSET_METHOD, previous_operating_scenarios=card['scenarios'],
+                    scenarios=scenarios, joint_sensitivity=joint, sensitivity=sensitivity,
+                    sensitivity_method='BRK_SEGMENT_ASSET_RISK', conditional_value_range=sorted(
+                        (x['conditional_value'] for x in scenarios.values()), key=engine.dec)[::2],
+                    formula='After-tax segment value plus separate risk-adjusted investments net of claims and parent debt per Class B',
+                    cash_return_contract=dict(start=start.isoformat(), end=end.isoformat(), schedule=[],
+                                              taxes='NO_INTERIM_DISTRIBUTIONS_ASSUMED'),
+                    holder_equity_bridge=dict(status='MODELED_CONDITIONAL_ORDINARY_SCOPE',
+                        source_evidence=sources, definition=profile))
+        qualify_joint_sensitivity(card, rate)
+    return True
