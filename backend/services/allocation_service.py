@@ -41,8 +41,24 @@ def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
         from backend.services.investment_policy.consumers import snapshot
         with bind(pinned):
             if pinned.mode == 'POLICY_ACTIVE' and pinned.assets is None:
-                with _assembled_policy_assets(portfolio_id, snapshot_id):
-                    return snapshot(portfolio_id)
+                from backend.services.investment_policy.parser import PolicyError
+                try:
+                    with _assembled_policy_assets(portfolio_id, snapshot_id):
+                        return snapshot(portfolio_id)
+                except PolicyError as error:
+                    if str(error) not in {'POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
+                                          'POLICY_BUCKET_CLASSIFICATION_UNVERIFIED'}:
+                        raise
+                    estimate = read_allocation_estimate(portfolio_id, snapshot_id=snapshot_id)
+                    if estimate is None:
+                        raise
+                    estimate['issues'] = sorted(set(estimate['issues']) | {str(error)}
+                        | set(getattr(error, 'qualification', {}).get('issues', [])))
+                    pinned.ensure_current()
+                    from app.allocation.types import PolicyAllocationSnapshot
+                    return PolicyAllocationSnapshot(snapshot_at=estimate['as_of'],
+                        policy_allocation={
+                            **estimate, 'policy_reference':pinned.context['policy_reference']})
             return snapshot(portfolio_id)
     with get_session() as session:
         positions = (
@@ -53,7 +69,145 @@ def get_snapshot(portfolio_id: int, *, snapshot_id=None) -> AllocationSnapshot:
         return build_allocation_snapshot(positions, segment="投资")
 
 
-def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None, evaluation_at=None, etf_inputs=None):
+def read_allocation_estimate(portfolio_id, *, snapshot_id=None, database=None, contract=None):
+    """Read one immutable or current stored inventory without reserving any sync."""
+    from pathlib import Path
+    import os
+    import sqlite3
+    from subprocess import TimeoutExpired
+    from app import asset_views
+    from app.database import DB_PATH
+    from backend.services.asset_analysis import worker_call
+    from backend.services.wealth_service import freeze_investable_scope
+
+    database = database if database is not None else DB_PATH
+    contract = contract if contract is not None else os.environ.get("WEALTHPILOT_SQLITE_CONTRACT")
+    try:
+        if snapshot_id:
+            view = asset_views.load_view(database, portfolio_id, snapshot_id, contract)
+        else:
+            copy_info, path = asset_views.create_frozen_copy(database, contract)
+            try:
+                view = worker_call(path, portfolio_id, "capture_asset_view", {"internal": copy_info}, frozen=True)
+                view["snapshot_id"] = "current-observation"
+                freeze_investable_scope(view)
+            finally:
+                Path(path).unlink(missing_ok=True)
+    except (OSError, TimeoutExpired):
+        return None
+    except sqlite3.OperationalError as error:
+        if getattr(error, "sqlite_errorcode", None) not in {
+            sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_READONLY
+        }:
+            raise
+        return None
+    except ValueError as error:
+        if str(error) not in asset_views.ERRORS and not str(error).startswith("SHARED_"):
+            raise
+        return None
+    if view["portfolio_id"] != portfolio_id:
+        return None
+    return estimate_allocation(view, snapshot_id=snapshot_id)
+
+
+def estimate_allocation(view, *, snapshot_id=None):
+    """Summarize disclosed amounts for a bounded subset, never a PolicyAssets receipt."""
+    from collections import Counter
+    from decimal import Decimal
+    from app.asset_views import VIEW_TTL, _source_current, now
+    from backend.services.instruments.classification import CLASSIFICATION_VERSION, ECONOMIC_CLASS_TO_CN
+    from backend.services.investable_assets import ACCOUNT_INVENTORY_MAX_AGE, _amount
+    from backend.services.investment_policy.contracts import digest
+    from backend.services.wealth_service import PENSION_SECURITY_ITEM_TYPES
+
+    quality = view["data_quality"]
+    accounts = quality.get("investable_accounts", quality.get("accounts", []))
+    at = now()
+    issues = set(quality.get("issues") or []) - {"STALE_ACCOUNT_SYNC", "STALE_ANALYSIS_VIEW"}
+    if not _source_current(view["captured_at"], at, VIEW_TTL):
+        issues.add("ANALYSIS_CONTEXT_EXPIRED")
+    if any(not _source_current(row.get("account_synced_at"), at, ACCOUNT_INVENTORY_MAX_AGE)
+           for row in accounts):
+        issues.add("STALE_ACCOUNT_SYNC")
+    owner = quality.get("investable_owner_evidence", {})
+    scope = quality.get("investable_scope_evidence", {})
+    if scope.get("portfolio_id") != view["portfolio_id"] or scope.get("snapshot_id") != view["snapshot_id"]:
+        scope = {}
+    dispositions = scope.get("dispositions", {})
+    linked_pensions = {ref for links in scope.get("pension_links", {}).values() for ref in links}
+    rows = [(f'position:{row["id"]}', row) for row in
+            quality.get("investable_security_inputs", quality.get("security_inputs", []))]
+    rows += [(f'wealth:{row["id"]}', row) for row in view["views"]["get_manual_wealth_items"]["items"]
+             if row.get("kind") == "asset"]
+    identities = Counter(ref for ref, _ in rows)
+    holdings = Counter((row.get("account_ref"), row.get("symbol")) for ref, row in rows
+                       if ref.startswith("position:") and row.get("account_ref") and row.get("symbol"))
+    unpriced = {(account.get("account_ref"), item.get("symbol"))
+                for account in accounts
+                for item in account.get("unvalued_assets") or []}
+    amounts = Counter()
+    omitted = Counter()
+    for ref, row in rows:
+        position = ref.startswith("position:")
+        disposition = dispositions.get(ref)
+        holding = (row.get("account_ref"), row.get("symbol"))
+        if identities[ref] != 1 or (position and holdings[holding] > 1):
+            omitted["IDENTITY_DUPLICATE"] += 1
+            continue
+        if disposition and disposition.get("state") == "EXCLUDED" and disposition.get("evidence_refs"):
+            omitted["OWNER_EXCLUDED"] += 1
+            continue
+        assigned = (disposition and disposition.get("state") == "INCLUDED"
+                    and disposition.get("reason") == "FREE_INVESTMENT" and disposition.get("evidence_refs"))
+        # Without purpose evidence only clearly classified, broker-held investment
+        # securities enter the observed subset. Cash and manual rows are ambiguous.
+        observed = (disposition is None and position and row.get("broker") and row.get("account_ref")
+                    and row.get("segment") == "投资" and row.get("vehicle_type") not in {None, "CASH"})
+        if (not (assigned or observed) or row.get("already_investment_accounted")
+                or ref in linked_pensions or row.get("item_type") in PENSION_SECURITY_ITEM_TYPES
+                or (position and (not holding[0] or not holding[1]))):
+            omitted["PURPOSE_OR_DEDUP_UNVERIFIED"] += 1
+            continue
+        if position:
+            verified = (row.get("classification_version") == CLASSIFICATION_VERSION
+                        and row.get("classification_source")
+                        and row.get("classification_verification_status") in {"VERIFIED", "EXPLICIT", "DETERMINISTIC"})
+            economic = row.get("economic_asset_class") if verified else None
+        elif row.get("item_type") == "bank_cash":
+            economic = "CASH"
+        else:
+            economic = owner.get("manual_classes", {}).get(ref, {}).get("economic_asset_class")
+        category = CN_TO_ALLOC.get(ECONOMIC_CLASS_TO_CN.get(economic))
+        amount = _amount(row.get("market_value_cny") if position else row.get("current_value"))
+        if amount is None or not row.get("currency") or (position and holding in unpriced):
+            omitted["AMOUNT_UNVERIFIED"] += 1
+            continue
+        if not category:
+            omitted["CLASSIFICATION_UNVERIFIED"] += 1
+            continue
+        amounts[category.value] += amount
+    total = sum(amounts.values(), Decimal(0))
+    if total <= 0:
+        return None
+    return {
+        "status": "PARTIAL", "scope": "OBSERVED_INVESTMENT_SUBSET",
+        "snapshot_id": snapshot_id, "snapshot_sha256": digest(view) if snapshot_id else None,
+        "as_of": view["captured_at"], "observed_subtotal_cny": str(total), "denominator_cny": None,
+        "denominator_qualified": False, "risk_status": "UNKNOWN", "execution_authorized": False,
+        "by_class": {key: {"amount": float(amount), "ratio": float(amount / total)}
+                     for key, amount in sorted(amounts.items())},
+        "omitted_rows_by_reason": dict(omitted), "candidate_rows": len(rows),
+        "manual_baseline_confirmed_on": owner.get("manual_baseline_confirmed_on"),
+        "source_observations": [{key: account.get(key) for key in ("broker", "last_attempt_status",
+            "last_good_run_id", "account_synced_at", "positions_as_of", "cash_as_of", "price_as_of")}
+            for account in accounts],
+        "issues": sorted(issues | {"SUBSET_ESTIMATE_NOT_FULL_COVERAGE",
+                  "STORED_AMOUNTS_MAY_BE_STALE", "FORMAL_DENOMINATOR_AND_RISK_UNVERIFIED"}),
+    }
+
+
+def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None, evaluation_at=None,
+                             etf_inputs=None, strategic=True):
     """Server-owned read only: pin policy, original stored U1 bytes and A-min.
 
     Never call prepare, live Portfolio, FX providers or broker synchronization.
@@ -107,17 +261,28 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             raise error
         evaluated_at = evaluation_at or clock(utc_now())
         owner = view['data_quality'].get('investable_owner_evidence', {})
-        if not owner or clock(owner['valid_until']) < evaluated_at:
+        from backend.services.wealth_service import owner_confirmation_expiry
+        owner_until = owner_confirmation_expiry(owner, strategic=strategic) if owner else None
+        owner_issue = ('INVESTABLE_OWNER_EVIDENCE_MISSING' if not owner else
+                       'INVESTABLE_OWNER_EVIDENCE_EXPIRED' if owner_until and owner_until < evaluated_at else None)
+        if owner_issue:
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED',
-                ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED',
+                ['INVESTABLE_OWNER_EVIDENCE_UNAVAILABLE_OR_EXPIRED', owner_issue,
                  *[i for i in view['data_quality'].get('issues', []) if i.startswith('INVESTABLE_')]])
         projection = project_investable_assets(view, portfolio_id=portfolio_id,
-            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at)
+            snapshot_id=view['snapshot_id'], snapshot_sha256=digest(view), at=evaluated_at, strategic=strategic)
         # A new request-local session; never mutate a caller's pinned assets.
         from backend.services.investment_policy.runtime import PolicySession
         session = PolicySession(portfolio_id, assets=projection.policy_assets)
         if session.context.get('policy_reference') != pinned.context.get('policy_reference'):
             raise PolicyError('POLICY_VERSION_CONFLICT')
+        if projection.valid_until is None:
+            reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
+        session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
+            'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
+            'expires_at':min(projection.valid_until, owner_until or projection.valid_until).isoformat(),
+            'owner_evidence_sha256':view['data_quality'].get('investable_owner_evidence', {}).get('sha256'),
+            'issues':projection.policy_assets.issues}
         if not assets_qualified(session, complete=True):
             reject('POLICY_FULL_INVESTABLE_DENOMINATOR_UNVERIFIED', projection.policy_assets.issues)
         amounts = {k:Decimal(0) for k in ('cash', 'fixed', 'equity', 'alt', 'deriv')}
@@ -172,11 +337,6 @@ def _assembled_policy_assets(portfolio_id, snapshot_id=None, *, frozen_view=None
             portfolio_id=portfolio_id, snapshot_sha256=projection.snapshot_sha256, denominator=denominator)
         session.allocation_concentration = allocation_concentration(view, projection=projection, session=session,
             at=evaluated_at, classified_assets=session.allocation_hierarchy['classified_assets'], etf_inputs=etf_inputs)
-        session.allocation_source = {'snapshot_id':view['snapshot_id'], 'snapshot_sha256':digest(view),
-            'as_of':view['captured_at'], 'evaluated_at':projection.evaluated_at,
-            'expires_at':min(clock(view['captured_at'])+timedelta(minutes=5), clock(owner['valid_until'])).isoformat(),
-            'owner_evidence_sha256':view['data_quality'].get('investable_owner_evidence', {}).get('sha256'),
-            'issues':projection.policy_assets.issues}
         with bind(session):
             session.ensure_current()
             yield session
@@ -445,8 +605,10 @@ def project_frozen_transition(portfolio_id, view, request, *, session, at=None, 
     quality = view["data_quality"]
     owner = quality.get("investable_owner_evidence")
     denominator = projection.policy_assets.denominator_cny
+    from backend.services.wealth_service import owner_confirmation_expiry
     if (not owner or not clock(owner['confirmed_at']) <= clock(view["captured_at"]) <= at
-            <= min(clock(owner['valid_until']), clock(view["captured_at"]) + timedelta(minutes=5))):
+            <= min(owner_confirmation_expiry(owner, strategic=False),
+                   clock(view["captured_at"]) + timedelta(minutes=5))):
         denominator = None
     if denominator is not None and (request.assumed_amounts_cny or request.assumed_loan_principal_cny
                                     or request.assumed_fx_to_cny):

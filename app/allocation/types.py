@@ -135,6 +135,7 @@ class AllocationSnapshot(BaseModel):
 
 class PolicyAllocationSnapshot(AllocationSnapshot):
     """Additive ACTIVE-only evidence; legacy AllocationSnapshot is unchanged."""
+    total_investable_assets: float | None = None
     policy_allocation: dict
 
 

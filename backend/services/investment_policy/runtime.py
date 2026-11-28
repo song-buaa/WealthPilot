@@ -289,11 +289,18 @@ def assets_qualified(session, *, complete=False):
     if not assets or assets.portfolio_id!=session.portfolio_id:
         return False
     try:
+        now = clock(utc_now())
+        captured = clock(assets.as_of)
+        # Only the server-owned Allocation assembly issues a strategic receipt.
+        # Other PolicyAssets callers retain their original five-minute limit.
+        source = getattr(session, "allocation_source", {})
+        expiry = (clock(source["expires_at"]) if source.get("snapshot_id") == assets.snapshot_id
+                  and source.get("as_of") == assets.as_of else captured + timedelta(minutes=5))
         return bool(assets.denominator_qualified and assets.denominator_cny is not None and assets.denominator_cny.is_finite()
             and assets.denominator_cny>0 and assets.coverage_evidence and assets.fx_qualified
             and assets.pension_exclusion_verified and assets.deduplication_verified and assets.external_assets_verified
             and (assets.complete_inventory or not complete)
-            and timedelta(0)<=clock(utc_now())-clock(assets.as_of)<=timedelta(minutes=5))
+            and captured <= now <= expiry)
     except PolicyError:
         return False
 

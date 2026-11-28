@@ -98,7 +98,7 @@
 
 ## 4.4 A-min合格分母纯投影（本地候选）
 
-入口为`backend/services/investable_assets.py:project_investable_assets`。这是原Portfolio/Wealth对已冻结U1事实的纯投影，不读取数据库、不刷新券商、不解析/激活政策、不写入原payload。未接入prepare、Web、PEER、MCP或PolicySession；不实现B2。PolicyAssets合同及既有资格门不变。
+入口为`backend/services/investable_assets.py:project_investable_assets`。这是原Portfolio/Wealth对已冻结U1事实的纯投影，不读取数据库、不刷新券商、不解析/激活政策、不写入原payload。Allocation 通过下文 B2 接线消费该投影。
 
 调用者提供原Owner的view、portfolio_id、snapshot_id、snapshot_sha256及显式时区时钟at。hash复用Policy canonical/digest，绑定完整payload；hash只能证明内容绑定，不能认证来源或证明事实正确。调用者必须来自可信原Owner，不能接受用户上传的scope evidence作真实资产资格。
 
@@ -111,11 +111,19 @@
 
 养老金排除还须逐行核对原Owner用途证据：独立手工养老金为EXCLUDED/PENSION；已在投资账户记账的养老金为EXCLUDED/DUPLICATE，且每个链接持仓均为有据EXCLUDED/PENSION。链接存在不代表已排除；仍标为FREE_INVESTMENT或用途冲突时，养老金资格及分母保持UNKNOWN，不自动改写用途。
 
-原来源仍来自security_inputs、原get_manual_wealth_items及wealth totals。金额为CNY major Decimal；保留源精度、不先舍入，JSON为十进制字符串。投资资金D不减全部贷款；原总资产/负债与派生净资产单列。过期债务令净资产UNKNOWN，不单独否决已完整证实的投资分母。用途、账号publication/同步、原持仓/现金/价格时点及FX按原U1纯质量函数重新核验，不采信can_propose_rebalance或客户端合格标志；原5分钟门和manual/FX规则未放宽。
+原来源仍来自security_inputs、原get_manual_wealth_items及wealth totals。金额为CNY major Decimal；保留源精度、不先舍入，JSON为十进制字符串。投资资金D不减全部贷款；原总资产/负债与派生净资产单列。过期债务令净资产UNKNOWN，不单独否决已完整证实的投资分母。用途、账号publication/同步、原持仓/现金/价格时点及FX按原U1纯质量函数重新核验，不采信can_propose_rebalance或客户端合格标志；手工资产沿原价值与确认日期 30 天规则，外币沿原 FX 来源和有效日规则。
 
 输出为`wealthpilot.investable-projection.v1`，包含来源hash、逐行状态/理由/问题及原PolicyAssets。证据不足时denominator_cny=null、denominator_qualified=false，保留观测金额及UNKNOWN原因；不填0，不输出目标配置或可执行金额。养老金映射生产维护、共享DDL、外部来源接入及真实验收均不在本候选范围。
 
 测试入口：`tests/test_investable_assets.py`，合成隔离、I/O阻断、hash/scope/时钟、负债与分母、FX/来源、用途排除和养老金负面边界。
+
+### A3 普通组合分析（2026-11-28）
+
+Product Owner 确认 2026-11-28 北京时间的生产资产负债整体基线。经发布 Owner 在现有私有 `wealthpilot.owner-scope.v1` 文件登记 `confirmation_mode: EVENT_DRIVEN`、`manual_baseline_confirmed_on: "2026-11-28"` 与实际 `confirmed_at`，沿用用途、覆盖及养老金关联，使用 `investable_inventory_identity(view, include_liabilities=True)` 绑定 `inventory_sha256`；事件模式省略 `valid_until`，持仓身份变化使绑定失效。缺证域或用途保留 UNKNOWN。整体确认不改金额、原披露/更新时间或券商原生时点。历史带截止日凭据继续按原合同读取。E1 保留原严格期限与正式来源资格。
+
+普通 Allocation 在正式证据不足时返回带范围和遗漏原因的 `PARTIAL` 投资子集估算；未指定 U1 时读取原库的只读一致性副本，无写入或券商请求。明确指定的历史 U1 保持原事实和观察时间。MCP 普通组合读取可消费同一估算，含正式分母/风险 UNKNOWN 及不可执行标记。已有 UI 只接受正式资格，按 #119 冻结保持不变。
+
+手工资产、基金和银行余额按月或按需，负债每月维护；养老金、公积金按实际披露周期。普通分析保留 Last-good 并提示陈旧，正式分母、风险及交易仍独立验证。
 
 ## 4.4 B2 Owner凭据与ACTIVE配置接线
 
@@ -137,7 +145,9 @@ B2沿原`AssetAnalysisPreparation.run`，在原只读副本capture返回并取�
 
 五类资格只接受原Position原始canonical分类、当前classification_version及VERIFIED/EXPLICIT/DETERMINISTIC来源证明；完整范围输入保留这些原字段，不能使用序列化器为了旧界面兼容生成的legacy asset_class回退。旧记录缺分类证据或CONFLICT/UNVERIFIED时保持分类UNKNOWN，不能由Owner用途文件覆盖。
 
-Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部scope receipt，保留Owner文件hash、确认时点及原截止时点。账户同步、publication、现金/持仓/价格时点、FX及原手工值30天门仍由A-min独立验证；文件不能补齐或刷新这些事实。GET再次检查Owner截止时间，精确显示有效期为`min(captured_at+5分钟, Owner valid_until)`。hash只绑定内容，不能认证事实本身；Owner必须从实际账户/用途凭据确认，不得为通过测试编造记录。
+Owner有效窗口先验证，再生成绑定同snapshot_id/frozen_at的内部scope receipt，保留Owner文件hash、确认时点及原截止时点。账户同步、publication、现金/持仓/价格时点、FX及原手工值30天门仍由A-min独立验证；文件不能补齐或刷新这些事实。GET再次检查Owner截止时间，凭据有效期为 `min(captured_at+30分钟, Owner valid_until)`；每次读取重新核对各来源时效。hash只绑定内容，不能认证事实本身；Owner必须从实际账户/用途凭据确认，不得为通过测试编造记录。
+
+A3 长期配置时效独立于原交易预览和 E1 正式确认。E1 仍使用原五分钟库存和原生时点门禁。冻结视图沿 U1 30 分钟上下文；日常券商完整库存允许最多 36 小时，仍需匹配发布指纹、最近同步成功、身份与覆盖完整、无待对账成交。IBKR 和 Binance Spot 可引用同一次成功 Run 的账户下载或响应观察时点，原生 `as_of` 仍保留 UNKNOWN；观测不能补价格时点、扩大钱包覆盖或使未估值资产合格。股票及 ETF 采用市场日历最近适用收盘，或盘中一小时内的有据价格；BTC 采用 24 小时内有明确成交或收盘依据的源价。Owner 用途和范围按资产身份变化重新确认；金额更新不刷新 Owner 证据。有缺行、未证实钱包、养老金重叠、分类、负现金口径或估值时点缺证时，分母继续 UNKNOWN，独立可读的持仓仍展示。
 
 原`GET /api/allocation/snapshot`支持可选`snapshot_id`，无ID只读最新原U1尝试；不会prepare、刷新券商、取得行情或写库，也不会绕过最新failed/preparing回退旧快照。真实链为RO load_view → A-min → 原PolicyAssets/请求级PolicySession → 原Allocation消费者。请求快照、portfolio、hash、来源时点及ACTIVE政策版本一起固定，响应前再次核对政策版本；PolicyService仍是唯一政策权威。
 

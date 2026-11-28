@@ -7,6 +7,7 @@ import sqlite3
 
 import pytest
 
+from app.asset_views import VIEW_TTL
 from backend.services.investable_assets import project_investable_assets
 from backend.services.investment_policy.contracts import digest
 
@@ -124,6 +125,9 @@ def test_evidence_scope_and_duplicate_rows_fail_closed(view):
 
 def test_source_clock_not_rejuvenated_by_fresh_receipt(view):
     view['captured_at'] = (AT-timedelta(seconds=301)).isoformat()
+    assert project(view).status == 'QUALIFIED'
+    assert project(view, strategic=False).status == 'UNKNOWN'
+    view['captured_at'] = (AT-timedelta(seconds=VIEW_TTL+1)).isoformat()
     assert project(view).status == 'UNKNOWN'
 
 
@@ -271,4 +275,68 @@ def test_failed_account_cannot_be_hidden_by_excluding_its_observed_rows(view):
     for domain in ['accounts', 'deduplication']:
         e['coverage'][domain]['asset_refs'].append('position:2')
     e['dispositions']['position:2'] = dict(state='EXCLUDED', reason='RESTRICTED', evidence_refs=['fixture:restricted'])
+    assert project(view).status == 'UNKNOWN'
+
+
+@pytest.mark.parametrize(('broker', 'source', 'clock', 'warning'), [
+    ('snowball', 'ibkr_account_download', 'queried_at', 'BROKER_VALUATION_TIME_UNKNOWN'),
+    ('binance', 'binance_spot_account', 'account_response_at', 'BINANCE_SOURCE_EFFECTIVE_TIME_UNKNOWN'),
+])
+def test_complete_native_read_can_prove_cash_observation_without_claiming_source_as_of(
+        view, broker, source, clock, warning):
+    observed = (AT - timedelta(hours=25)).isoformat()
+    account = view['data_quality']['accounts'][0]
+    account.update(broker=broker, source=source, quality='partial', issues=[warning],
+                   last_attempt_id=17, last_good_run_id=17, account_synced_at=observed)
+    account[clock] = (AT - timedelta(hours=25, seconds=1)).isoformat()
+    row = view['data_quality']['security_inputs'][0]
+    row['cash_as_of'] = None
+
+    assert project(view).status == 'QUALIFIED'
+    assert row['cash_as_of'] is None
+    assert project(view, strategic=False).status == 'UNKNOWN'
+
+    for change in (dict(complete=False), dict(fill_sync_pending=True), dict(last_attempt_id=18),
+                   dict(issues=[warning, 'UNEXPLAINED_PARTIAL']), dict(source='other'),
+                   {clock: None}, {clock: (AT - timedelta(hours=37)).isoformat()},
+                   {clock: (AT + timedelta(seconds=1)).isoformat()}):
+        baseline = account.copy()
+        account.update(change)
+        assert project(view).status == 'UNKNOWN'
+        account.clear()
+        account.update(baseline)
+
+    row['cash_as_of'] = (AT + timedelta(seconds=1)).isoformat()
+    assert project(view).status == 'UNKNOWN'
+    row['cash_as_of'] = None
+    account[clock] = (AT - timedelta(hours=36) + timedelta(seconds=15)).isoformat()
+    assert project(view).valid_until == AT + timedelta(seconds=15)
+    if broker == 'binance':
+        account['issues'].append('BINANCE_NON_SPOT_WALLETS_NOT_COVERED')
+        assert project(view).status == 'UNKNOWN'
+
+
+def test_allocation_accepts_latest_completed_equity_close_during_next_session(view):
+    from backend.services.execution_plan.market_hours import valuation_quality
+
+    row = view['data_quality']['security_inputs'][0]
+    row.update(symbol='TSLA:US', vehicle_type='COMMON_STOCK', positions_as_of=STAMP,
+               price_as_of='2026-10-30', price_time_basis='close')
+    assert project(view).status == 'QUALIFIED'
+    assert valuation_quality(row['price_as_of'], 'US', at=AT, basis='close')['status'] == 'stale'
+    row['price_as_of'] = '2026-10-29'
+    assert project(view).status == 'UNKNOWN'
+
+
+def test_btc_allocation_requires_a_real_price_basis_and_remains_separate_from_live_quote(view):
+    from backend.services.execution_plan.market_hours import valuation_quality
+
+    stamp = (AT - timedelta(hours=12)).isoformat()
+    row = view['data_quality']['security_inputs'][0]
+    row.update(symbol='BTC:CRYPTO', vehicle_type='CRYPTO', positions_as_of=STAMP, price_as_of=stamp)
+    assert project(view).status == 'UNKNOWN'
+    row['price_time_basis'] = 'last_trade'
+    assert project(view).status == 'QUALIFIED'
+    assert valuation_quality(stamp, 'CRYPTO', at=AT, basis='last_trade')['status'] == 'stale'
+    row['price_as_of'] = (AT - timedelta(hours=25)).isoformat()
     assert project(view).status == 'UNKNOWN'

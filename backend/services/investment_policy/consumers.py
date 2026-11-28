@@ -37,14 +37,17 @@ def conditional_plan(amount, portfolio_id=None):
         discipline_check=DisciplineCheckResult(passed=False, violations=[]))
 
 
-def qualified_bucket(evidence):
+def qualified_bucket(evidence, *, valid_until=None):
     from .store import clock, utc_now
     try:
+        if evidence.as_of is None:
+            return False
+        observed = clock(evidence.as_of)
+        expires = clock(valid_until) if valid_until else observed + timedelta(minutes=5)
         return bool(evidence.value is not None and evidence.value.is_finite()
             and 0 <= evidence.value <= 1 and evidence.complete and evidence.fresh
             and evidence.identity_verified and evidence.denominator_qualified
-            and evidence.as_of is not None
-            and timedelta(0) <= clock(utc_now()) - clock(evidence.as_of) <= timedelta(minutes=5))
+            and observed <= clock(utc_now()) <= expires)
     except PolicyError:
         return False
 
@@ -87,7 +90,11 @@ def snapshot(portfolio_id):
         from decimal import ROUND_HALF_EVEN
         weights = session.assets.major_class_weights
         amounts, desired = session.allocation_amounts, major_targets(c)
-        if set(weights) != set(desired) or any(not qualified_bucket(e) for e in weights.values()):
+        if set(weights) != set(desired) or any(
+            e.as_of != session.allocation_source['as_of']
+            or not qualified_bucket(e, valid_until=session.allocation_source['expires_at'])
+            for e in weights.values()
+        ):
             raise PolicyError('POLICY_BUCKET_CLASSIFICATION_UNVERIFIED')
         if sum(e.value for e in weights.values()) != 1 or sum(amounts.values()) != session.assets.denominator_cny:
             raise PolicyError('POLICY_ASSET_WEIGHTS_NOT_CLOSED')

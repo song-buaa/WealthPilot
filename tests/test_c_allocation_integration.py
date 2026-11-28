@@ -28,7 +28,7 @@ def active(tmp_path, monkeypatch, clock):
     return policies.active.__wrapped__(tmp_path, monkeypatch)
 
 
-@pytest.mark.parametrize("manifest_state", ["valid", "wrong_pin", "wrong_scope", "absent", "b3_berkshire_alias"])
+@pytest.mark.parametrize("manifest_state", ["valid", "wrong_pin", "wrong_scope", "absent", "b3_berkshire_alias", "observed_ibkr"])
 def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, monkeypatch, client, manifest_state):
     view, classes = b3
     view["captured_at"] = STAMP
@@ -37,9 +37,19 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
     for row in quality["security_inputs"]:
         row.update(cash_as_of=STAMP, positions_as_of=STAMP,
                    price_as_of=AT.date().isoformat(), price_time_basis="close")
+    if manifest_state == "observed_ibkr":
+        view["captured_at"] = (AT - timedelta(minutes=10)).isoformat()
+        observed = (AT - timedelta(hours=24)).isoformat()
+        quality["accounts"][0].update(
+            broker="snowball", source="ibkr_account_download", quality="partial",
+            last_attempt_id=17, last_good_run_id=17, queried_at=observed, account_synced_at=observed,
+            issues=["BROKER_VALUATION_TIME_UNKNOWN", "PRICE_TIME_UNKNOWN"],
+        )
+        for row in quality["security_inputs"]:
+            row.update(cash_as_of=None, positions_as_of=None)
     quality["security_inputs"][4]["symbol"] = "BRK-B:US" if manifest_state == "b3_berkshire_alias" else "TSLA:US"
     path = tmp_path / "etf-owner.json"
-    if manifest_state not in {"absent", "b3_berkshire_alias"}:
+    if manifest_state not in {"absent", "b3_berkshire_alias", "observed_ibkr"}:
         record = holdings("QQQ:US", {"TSLA:US":".1"}, valid_until=AT+timedelta(seconds=30))
         data = json.dumps({"schema_version":"wealthpilot.etf-evidence.v1",
                            "portfolio_id": 8 if manifest_state == "wrong_scope" else 7,
@@ -50,12 +60,12 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
         monkeypatch.setenv("WEALTHPILOT_ETF_EVIDENCE_SHA256",
                            "e"*64 if manifest_state == "wrong_pin" else hashlib.sha256(data).hexdigest())
     owner_file(view, tmp_path/"owner.json", monkeypatch, manual_classes=classes,
-               valid_until=(AT+timedelta(days=1)).isoformat())
+               confirmed_at=view["captured_at"], valid_until=(AT+timedelta(days=1)).isoformat())
     before_policy = active[0].path.read_bytes()
     result = request(view, tmp_path, monkeypatch, client)
     assert result.status_code == 200, result.text
     assert active[0].path.read_bytes() == before_policy
-    if manifest_state not in {"absent", "b3_berkshire_alias"}:
+    if manifest_state not in {"absent", "b3_berkshire_alias", "observed_ibkr"}:
         assert path.read_bytes() == data
     meta = result.json()["policy_allocation"]
     c = meta["concentration"]
@@ -69,7 +79,8 @@ def test_original_snapshot_reads_pinned_etf_and_keeps_b3(active, b3, tmp_path, m
         key = "SEC_CIK_0001067983"
     else:
         key = TESLA
-    expiry = AT+timedelta(seconds=30 if manifest_state == "valid" else 300)
+    expiry = (AT + timedelta(seconds=30) if manifest_state == "valid"
+              else store.clock(view["captured_at"]) + timedelta(seconds=asset_views.VIEW_TTL))
     assert store.clock(c["expires_at"]) == expiry
     row = c["issuers"][key]
     assert row["risk_status"] == "HUMAN_REVIEW" and row["proven_upper_bound_pct"] is None

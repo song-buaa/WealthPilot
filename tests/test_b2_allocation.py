@@ -188,3 +188,87 @@ def test_missing_asset_schema_is_controlled_but_sql_bug_is_not(active, tmp_path,
     def bug(*a, **k): raise sqlite3.OperationalError('syntax error in programmer SQL')
     monkeypatch.setattr(asset_views, 'latest_view', bug)
     assert client.get('/api/allocation/snapshot').status_code == 500
+
+
+def test_stale_last_good_read_returns_partial_without_formal_denominator(active, source, tmp_path, monkeypatch, client):
+    import asyncio
+    from pocs.chatgpt_skills.analysis import analyze
+
+    owner_file(source, tmp_path/'owner.json', monkeypatch)
+    wealth_service.freeze_investable_scope(source)
+    future = AT + timedelta(days=1)
+    monkeypatch.setattr(asset_views, 'now', lambda: future)
+    monkeypatch.setattr(runtime, 'utc_now', lambda: future.isoformat())
+    monkeypatch.setattr(store, 'utc_now', lambda: future.isoformat())
+    db = tmp_path/'frozen.sqlite'
+    publish(source, db, monkeypatch)
+    original = db.read_bytes()
+    explicit = '/api/allocation/snapshot?snapshot_id=asset-view:v1:1'
+    response = client.get(explicit)
+    assert response.status_code == 200, response.text
+    status = response.json()
+    assert status['total_investable_assets'] is None
+    estimate = status['policy_allocation']
+    assert estimate['status'] == 'PARTIAL'
+    assert Decimal(estimate['observed_subtotal_cny']) == 2000
+    assert estimate['denominator_cny'] is None and estimate['execution_authorized'] is False
+    assert estimate['risk_status'] == 'UNKNOWN'
+    assert 'ANALYSIS_CONTEXT_EXPIRED' in estimate['issues']
+
+    result = asyncio.run(analyze(db, 7, 'review_portfolio',
+                                 {'question': '检查投资组合', 'snapshot_id': 'asset-view:v1:1'}))
+    assert result['status'] == 'partial'
+    assert result['evidence']['allocation']['snapshot_sha256'] == estimate['snapshot_sha256']
+    assert not result['execution_authorized']
+    assert db.read_bytes() == original
+
+
+def test_event_owner_confirmation_survives_age_but_not_inventory_change(source, tmp_path, monkeypatch):
+    path = tmp_path/'owner.json'
+    owner = owner_file(source, path, monkeypatch,
+                       confirmation_mode='EVENT_DRIVEN', manual_baseline_confirmed_on=AT.date().isoformat())
+    del owner['valid_until']
+    path.write_text(json.dumps(owner))
+    original_inputs = deepcopy(source['data_quality']['security_inputs'])
+    source['captured_at'] = (AT + timedelta(days=60)).isoformat()
+    wealth_service.freeze_investable_scope(source)
+    recorded = source['data_quality']['investable_owner_evidence']
+    assert recorded['manual_baseline_confirmed_on'] == AT.date().isoformat()
+    assert recorded['confirmed_at'] == STAMP
+    assert wealth_service.owner_confirmation_expiry(recorded, strategic=True) is None
+    assert wealth_service.owner_confirmation_expiry(recorded, strategic=False) == AT + timedelta(days=30)
+    assert source['data_quality']['security_inputs'] == original_inputs
+    source['views']['get_manual_wealth_items']['items'].append(
+        {'id': 404, 'kind': 'liability', 'item_type': 'consumer_loan', 'currency': 'CNY'})
+    wealth_service.freeze_investable_scope(source)
+    assert 'investable_owner_evidence' not in source['data_quality']
+
+
+def test_current_allocation_reads_one_stored_copy_without_scope_or_sync(active, source, tmp_path, monkeypatch, client):
+    from backend.services import asset_analysis
+    pending = tmp_path/'isolated-copy.sqlite'
+    pending.write_bytes(b'test copy')
+    database_file = tmp_path/'current.sqlite'
+    monkeypatch.setattr(database, 'DB_PATH', database_file)
+    monkeypatch.delenv('WEALTHPILOT_INVESTABLE_EVIDENCE_FILE', raising=False)
+
+    def copy_once(path, contract):
+        assert path == database_file
+        return {'frozen_at': STAMP}, pending
+
+    def read_current(path, portfolio_id, operation, arguments, *, frozen):
+        assert (path, portfolio_id, operation, frozen) == (pending, 7, 'capture_asset_view', True)
+        for row in source['data_quality']['security_inputs']:
+            row.update(broker='tiger', segment='投资')
+        return source
+
+    monkeypatch.setattr(asset_views, 'create_frozen_copy', copy_once)
+    monkeypatch.setattr(asset_analysis, 'worker_call', read_current)
+    response = client.get('/api/allocation/snapshot')
+    assert response.status_code == 200, response.text
+    estimate = response.json()['policy_allocation']
+    assert estimate['snapshot_id'] is None
+    assert Decimal(estimate['observed_subtotal_cny']) == 1000
+    assert estimate['omitted_rows_by_reason']['PURPOSE_OR_DEDUP_UNVERIFIED'] == 1
+    assert not pending.exists()
+    assert not database_file.exists()
