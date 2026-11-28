@@ -253,3 +253,28 @@ curl --fail --silent http://127.0.0.1:8789/readyz
 
 5. 其余七项真实通过后，按第 6 节审阅 real switch 再应用。switch 与每次 MCP 启动共同校验例外，生命周期只记录 `broad_permissions_owner_exception`，不改写最小权限事实；失败保持/退回 synthetic。继续真实本地、Web/iOS、MacBook 关闭、进程退出、设备重启与恢复演练。未完成不得宣称 7×24 或 4.0 生产上线。
 6. 出现健康失败，先停止两服务，按第 7 节回退已安装版本的 synthetic/停止状态；旧 34bdce4 Tunnel 参数已知失败，不作为可用 Tunnel 恢复证明。回滚不修改数据库；旧版本不识别宽权限例外，会再次阻塞 real，这是预期行为。
+
+## 现役 MCP 调度修复（Issue #160）
+
+现役 `com.wealthpilot.readonly-mcp` 服务直接响应用户请求。Mini 的正式服务使用
+`ProcessType=Background` 时，子 Worker 继承后台资源策略。S3 归档读回独立启动 Worker，
+不排队等待共享研究槽位。在原 45 秒 IPC 等待窗口内，后台资源策略下的工件 I/O 和
+离线复算可能来不及返回，导致 `BUSINESS_OPERATION_UNAVAILABLE`。
+
+在 Mini 以生产 `4c7a5fd`、原 Worker Python 和原工件对照，父工件隔离 Worker
+无后台限制耗时 12.09 秒，施加 Darwin 后台策略或后台 QoS 限制后分别耗时 38.87
+和 39.00 秒，均通过校验。独立 IPC 客户端父、子耗时分别为 10.06 和 10.42 秒，
+均为 `verified=true`。原正式 MCP 父、子调用复现约 57 秒失败，父工件另一次
+正式 loopback 调用在 43.92 秒成功，显示延迟接近 IPC 上限。外部请求耗时含传输，
+与本机 IPC 耗时不直接等同。
+
+默认模板与渲染器将 MCP 改为 `Standard`，Tunnel 继续使用 `Background`。
+保留原超时、29 项工具合同、验证/估值代码和原工件。正式切换须由项目管理批准并
+协调 Mini 执行。对现役自定义启动入口，备份系统 MCP plist，仅更新其中
+`ProcessType`，保留其参数、运行用户、工作目录、固定版本、Tunnel 和其他服务。
+通用历史安装器不适用于覆盖现役自定义入口。launchd 必须重新载入 MCP job 才会
+应用该字段，单独 kickstart 已载入的定义不能替代重新载入。失败恢复备份 plist 并重新载入。
+
+切换后核对正式入口仍有 29 项工具，使用原父、子 artifact ID 各调用
+`read_company_pool_research`，记录请求耗时和 `evidence.verification.verified`。
+区分正式 loopback 与外部 MCP 的耗时。只读取现有工件，不调用 start 或重估入口。

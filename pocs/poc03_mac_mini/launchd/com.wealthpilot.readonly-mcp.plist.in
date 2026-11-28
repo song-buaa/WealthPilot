@@ -9,7 +9,7 @@
 	<key>Label</key>
 	<string>com.wealthpilot.readonly-mcp</string>
 	<key>ProcessType</key>
-	<string>Background</string>
+	<string>Standard</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/REPLACE/WealthPilotProd/current/envs/mcp/bin/python</string>

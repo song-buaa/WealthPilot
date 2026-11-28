@@ -157,12 +157,14 @@ def render_plists(root, runtime):
     result = {}
     for role, label in LABELS.items():
         # System-domain daemon runs as the chosen user, independent of GUI login.
+        # MCP serves interactive requests whose workers share the launchd resource policy.
         result[role] = {"Label": label, "UserName": runtime["user"],
             "ProgramArguments": [str(root / "current/envs/mcp/bin/python"),
                                   str(root / "current/code/pocs/poc03_mac_mini/runner.py"),
                                   "--root", str(root), "--role", role],
             "WorkingDirectory": str(root), "RunAtLoad": True, "KeepAlive": True,
-            "ThrottleInterval": 10, "ExitTimeOut": 20, "ProcessType": "Background", "Umask": 0o077,
+            "ThrottleInterval": 10, "ExitTimeOut": 20,
+            "ProcessType": "Standard" if role == "mcp" else "Background", "Umask": 0o077,
             "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null"}
     return result
 
