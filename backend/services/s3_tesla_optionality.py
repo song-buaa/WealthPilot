@@ -125,10 +125,37 @@ def reprice(card, price, remaining):
         if price <= 0 or not Decimal(0) < remaining <= 5:
             raise ValueError('S3_TSLA_OPTIONALITY_REPRICE_CLOCK_OR_PRICE_INVALID')
         analysis.update(basis_price_usd=text(price), remaining_years=str(remaining))
+        rate = dec(card.get('assumptions', {}).get('required_return', '.10'))
         for row in analysis['scenarios'].values():
             terminal = max(Decimal(0), dec(row['terminal_per_share_usd']))
+            core = dec(row['operating_core_terminal_usd'])
+            hurdle = max(Decimal(0), price * (1+rate)**remaining - terminal)
             row.update(annualized_return=text((terminal/price)**(1/remaining)-1),
-                       total_return=text(terminal/price-1))
+                       total_return=text(terminal/price-1),
+                       conditional_value=text(terminal/(1+rate)**remaining),
+                       operating_core_conditional_value=text(core/(1+rate)**remaining),
+                       operating_core_annualized_return=text((core/price)**(1/remaining)-1),
+                       remaining_unmodeled_terminal_hurdle_per_share=text(hurdle),
+                       remaining_unmodeled_terminal_hurdle_usd=text(hurdle*dec(row['terminal_diluted_shares'])))
+        base = analysis['scenarios']['base']
+        uplift = dec(base['terminal_per_share_usd']) - dec(base['operating_core_terminal_usd'])
+        analysis['matched_core_stress'] = []
+        for cell in card.get('joint_sensitivity', []):
+            if not cell.get('result'):
+                continue
+            core = dec(cell['result']['terminal_wealth'])
+            extended = max(Decimal(0), core+uplift)
+            analysis['matched_core_stress'].append(dict(
+                revenue_growth_shift=cell['revenue_growth_shift'], multiple_shift=cell['terminal_pe_shift'],
+                core_conditional_value=text(core/(1+rate)**remaining),
+                extended_conditional_value=text(extended/(1+rate)**remaining),
+                core_annualized_return=text((core/price)**(1/remaining)-1),
+                extended_annualized_return=text((extended/price)**(1/remaining)-1)))
+        analysis['matched_core_stress_scope'] = 'SAME_CORE_STRESSES_FIXED_BASE_OPTION_VALUE; NO_OPTIMUS_MARK'
+        analysis['extended_conditional_value_range'] = sorted(
+            (row['conditional_value'] for row in analysis['scenarios'].values()), key=dec)[::2]
+        analysis['operating_core_conditional_value_range'] = sorted(
+            (row['operating_core_conditional_value'] for row in analysis['scenarios'].values()), key=dec)[::2]
 
 
 def build(card, proof, start, end):
@@ -144,6 +171,11 @@ def build(card, proof, start, end):
         method=METHOD, status='BOUNDED_COMMERCIAL_OPTION_SCENARIOS', observed=OBSERVED,
         proof=proof, schedule_assumptions=SCHEDULE, scenarios=scenarios,
         forecast_origin=start.isoformat(), forecast_endpoint=end.isoformat(),
+        optimus_evidence_status=dict(production='FREMONT_EARLY_RAMP_TEXAS_CONSTRUCTION',
+            externally_qualified_model='UNAVAILABLE_PENDING_COMMERCIAL_UNIT_ECONOMICS',
+            reopen_on=['NAMED_EXTERNAL_PAID_DEPLOYMENT_WITH_UNITS_OR_CONTRACTED_VOLUME',
+                       'REPEATABLE_PRICE_AND_UTILIZATION_WITH_MANUFACTURING_AND_SERVICE_COST',
+                       'CAPACITY_RAMP_CAPEX_AND_FUNDING_OR_DILUTION']),
         limitations=[
             'Scenario markets and permit expansion are conditions; the source establishes Austin deployment, not next-year permits.',
             'Fleet, monthly-paying mix, regional pricing, utilization, electricity, cleaning, support, insurance, build cost and incremental R&D are modeled, not current issuer measurements.',

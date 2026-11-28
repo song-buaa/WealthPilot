@@ -415,7 +415,7 @@ def relative_stress(cards, request, *, remaining=Decimal(5)):
             except (ValueError, KeyError, TypeError, ArithmeticError):
                 continue
         grid[symbol] = points
-        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1', ALPHABET_METHOD, META_METHOD, LISTED_EPS_METHOD) else 11
+        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1', 'ANT_PRO_FORMA_CASH_RECOVERY_V1', ALPHABET_METHOD, META_METHOD, LISTED_EPS_METHOD) else 11
         if len(points) < expected:
             missing.append(symbol)
     baseline = {c['symbol']: [c['group'],c['rank']] for c in eligible}
@@ -493,8 +493,6 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             required = engine.dec(card['assumptions']['required_return'])
             for name, case in card['scenarios'].items():
                 card['scenarios'][name] = reprice_at(card, case, old_price, price, remaining, required, cutoff)
-            if card.get('positive_optional_research'):
-                s3_tesla_optionality.reprice(card, price, remaining)
             if card.get('reverse_valuation'):
                 card['reverse_valuation'] = tesla_reverse_value(card, price, remaining)
             if card.get('nonoperating_materiality'):
@@ -508,6 +506,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                     variant.pop('method_blockers_after', None)
                     if key == 'joint_sensitivity':
                         variant.pop('sensitivity', None)
+            if card.get('positive_optional_research'):
+                s3_tesla_optionality.reprice(card, price, remaining)
             qualify_joint_sensitivity(card, required)
             values = [engine.dec(x['conditional_value']) for x in card['scenarios'].values()]
             card['conditional_value_range'] = [engine.text(min(values)), engine.text(max(values))]
@@ -727,7 +727,14 @@ def product_view(result, policy):
         returns = ' / '.join(f"{engine.dec(scenarios[k]['annualized_return'])*100:.2f}%"
                              for k in ('cautious', 'base', 'optimistic')) if scenarios else 'UNKNOWN'
         reason = (c['group'] or '限定估值，无正式名次') if scenarios else c.get('failure_reason', 'INSUFFICIENT_EVIDENCE')
+        option = c.get('positive_optional_research')
+        if option:
+            reason += '；主营'
         lines.append(f"| {symbol} | {engine.dec(row['target'])*100:g}% | {formatted} | {returns} | {reason} |")
+        if option:
+            extended = ' / '.join(f"{engine.dec(option['scenarios'][k]['annualized_return'])*100:.2f}%"
+                                  for k in ('cautious', 'base', 'optimistic'))
+            lines.append(f"| {symbol} 扩展范围 | — | {formatted} | {extended} | FSD、Robotaxi、SpaceX；限定 |")
         dossier = result.get('quality_dossier', {}).get(symbol, {})
         profiles[symbol] = dict(issuer_id=issuer, listed_return_security=symbol, listed_classes=row['classes'],
             valuation_status=c['comparison_status'],

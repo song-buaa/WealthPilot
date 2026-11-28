@@ -190,7 +190,7 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
                         card['failure_reason'] = 'S3_ANT_CONDITIONAL_CASH_RECOVERY_UNQUALIFIED'
                     if modeled:
                         candidate['owner_qualification_reason'] = candidate.pop('failure_reason', None)
-                        _set_bounded(candidate, 'POST_IPO_CASH_TIMING_AND_CONVERSION_SCOPE_BOUNDED')
+                        qualify_modeled_scope(candidate, candidate['holder_equity_bridge'], required_sources=profile['sources'])
                         card.clear()
                         card.update(candidate)
             if symbol == 'GOOG:US':

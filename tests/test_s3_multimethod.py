@@ -258,15 +258,20 @@ def test_meta_additional_c_is_ratable_and_all_c_changes_only_delivery_legs():
     assert extra['ordinary_equity_usd_m'] == paired['ordinary_equity_usd_m']
 
 
-def test_ant_does_not_count_an_unconverted_claim_and_shares_together():
-    from backend.services.s3_ant_research import cash_case
+def test_ant_distinguishes_contract_overlap_and_residual_convertible():
+    from backend.services.s3_ant_research import cash_case, contract_cash, opening_bridge
 
     profile = json.loads((multimethod.ROOT/multimethod.BOOK).read_text())['ANT:US']
-    settings = profile['cases']['base']
-    converted = cash_case(profile['reported'], settings)
-    claim = cash_case(profile['reported'], dict(settings, convert_remaining_notes=False))
+    facts, settings = profile['reported'], profile['cases']['base']
+    assert opening_bridge(facts)['excluded_secondary_gross_bn'] == '1.96283762'
+    assert contract_cash(Decimal(80), Decimal(60), Decimal('.5')) == (110, 30)
+    converted = cash_case(facts, dict(settings, legacy_note_conversion_fraction='1'))
+    claim = cash_case(facts, dict(settings, legacy_note_conversion_fraction='0'))
     assert converted['terminal_retained_note_claim_bn'] == '0.00000000'
-    assert claim['terminal_retained_note_claim_bn'] == '109.74200000'
+    assert Decimal(claim['residual_principal_pv_bn']) < Decimal(facts['remaining_note_nominal_bn'])
+    assert Decimal(claim['terminal_retained_note_claim_bn']) > 0
     assert Decimal(converted['model_years'][0]['shares_bn']) > Decimal(claim['model_years'][0]['shares_bn'])
     first = converted['model_years'][0]
-    assert Decimal(first['compute_cash_bn']) == max(Decimal('68.6'), Decimal(first['revenue_bn'])*Decimal('.64'))
+    assert Decimal(first['compute_cash_bn']) > max(Decimal(first['core_compute_cash_bn']),
+                                                   Decimal(first['contract_due_bn']))
+    assert Decimal(converted['post_endpoint_commitment_pv_bn']) > 0

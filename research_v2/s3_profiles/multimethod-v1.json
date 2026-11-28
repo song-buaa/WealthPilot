@@ -827,7 +827,16 @@
       "terminable_near_term_bn": "4.2",
       "nine_month_cfo_bn": "6.569",
       "nine_month_revenue_bn": "33.242",
-      "subsidiary_public_benefit_shares_bn": ".846840960"
+      "subsidiary_public_benefit_shares_bn": ".846840960",
+      "september_cash_bn": "131.845",
+      "no_shoe_pro_forma_liquidity_bn": "232.351",
+      "closing_issuer_shares_bn": "1.103351354",
+      "closing_selling_holder_shares_bn": ".023648646",
+      "closing_private_shares_bn": ".313253007",
+      "exercise_shares_bn": ".147",
+      "ipo_price": "83",
+      "total_contract_inventory_bn": "900.9",
+      "pre_2031_contract_inventory_bn": "451.6"
     },
     "cases": {
       "cautious": {
@@ -853,11 +862,11 @@
           ".25"
         ],
         "contract_cash_floor_bn": [
-          "70.7",
-          "77",
-          "82",
-          "87",
-          "92"
+          "0",
+          "103",
+          "102",
+          "98",
+          "55"
         ],
         "convert_remaining_notes": false,
         "option_exercise_fraction": ".70",
@@ -869,7 +878,24 @@
         "annual_new_share_drift": ".045",
         "terminal_cash_multiple": "15",
         "note_claim_factor": "1.25",
-        "foundation_release_fraction": "1"
+        "foundation_release_fraction": "1",
+        "post_september_cash_change_bn": "-20",
+        "contract_cash_before_start_bn": "8",
+        "near_term_contingent_performance_fraction": "1",
+        "legacy_note_conversion_fraction": "0",
+        "terminal_tail_performance": ".60",
+        "legacy_residual_exercise_weight": ".70",
+        "included_2031_contract_bn": "55",
+        "terminal_tail_overlap": ".8",
+        "contract_overlap": [
+          ".68",
+          ".72",
+          ".76",
+          ".78",
+          ".8"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
       },
       "base": {
         "growth": [
@@ -894,11 +920,11 @@
           ".24"
         ],
         "contract_cash_floor_bn": [
-          "68.6",
-          "75",
-          "80",
-          "85",
-          "90"
+          "0",
+          "97",
+          "96",
+          "94",
+          "54"
         ],
         "convert_remaining_notes": true,
         "option_exercise_fraction": ".90",
@@ -910,7 +936,24 @@
         "annual_new_share_drift": ".03",
         "terminal_cash_multiple": "21",
         "note_claim_factor": "1",
-        "foundation_release_fraction": ".5"
+        "foundation_release_fraction": ".5",
+        "post_september_cash_change_bn": "-8",
+        "contract_cash_before_start_bn": "10",
+        "near_term_contingent_performance_fraction": ".5",
+        "legacy_note_conversion_fraction": ".5",
+        "terminal_tail_performance": ".80",
+        "legacy_residual_exercise_weight": ".5",
+        "included_2031_contract_bn": "54",
+        "terminal_tail_overlap": ".87",
+        "contract_overlap": [
+          ".82",
+          ".83",
+          ".85",
+          ".86",
+          ".87"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
       },
       "optimistic": {
         "growth": [
@@ -935,11 +978,11 @@
           ".23"
         ],
         "contract_cash_floor_bn": [
-          "66.5",
-          "72",
-          "78",
-          "82",
-          "88"
+          "0",
+          "88",
+          "87",
+          "86",
+          "48"
         ],
         "convert_remaining_notes": true,
         "option_exercise_fraction": "1",
@@ -951,17 +994,34 @@
         "annual_new_share_drift": ".02",
         "terminal_cash_multiple": "27",
         "note_claim_factor": "1",
-        "foundation_release_fraction": ".25"
+        "foundation_release_fraction": ".25",
+        "post_september_cash_change_bn": "0",
+        "contract_cash_before_start_bn": "13",
+        "near_term_contingent_performance_fraction": "0",
+        "legacy_note_conversion_fraction": "1",
+        "terminal_tail_performance": ".93",
+        "legacy_residual_exercise_weight": ".35",
+        "included_2031_contract_bn": "48",
+        "terminal_tail_overlap": ".94",
+        "contract_overlap": [
+          ".92",
+          ".93",
+          ".93",
+          ".94",
+          ".94"
+        ],
+        "claim_discount_rate": ".10",
+        "legacy_principal_maturity_years": "3.5"
       }
     },
     "limitations": [
-      "424B4 pro forma as adjusted with full overallotment, supported by IPO close 8-K. Not an observed closing balance sheet.",
-      "Q3 approximately $17bn revenue is annualized as scenario scale, not trailing GAAP revenue.",
-      "Contract cash floors after year one are modeled payment paths, not actual invoices or annual forecasts. Excess floor over modeled cost is counted once.",
-      "One mutually exclusive Amazon retained-claim or remaining-conversion path per case. The note carrying amount is fair-value-based, not the cash principal or a future actual repayment.",
-      "Options/RSUs use event-settlement fractions and new grants are modeled as independent share drift. Conversion needs approvals and contractual ownership conditions.",
-      "Highly sensitive to frontier model pricing, compute utilization, counterparties, liquidity and recurring equity funding; no exit certainty.",
-      "The legally outstanding 846.841m Class N Initial Public Benefit Issuance is held by a wholly owned subsidiary and is excluded from external shares initially. Conditional external release in year three adds shares without financing proceeds."
+      "424B4 full-shoe pro forma reconciled to completed issuer and secondary IPO shares and concurrent private Class N placement. After-September cash changes are scenarios, not an observed ledger.",
+      "Annualized Q3 revenue is a starting scale. Contract cash and ordinary operating compute overlap only to the stated extent. Capex is incremental non-duplicative cash; timing and performance are conditions.",
+      "No calendar obligation tables are added to the umbrella $900.9bn inventory. Model year one rolls the September $70.7bn 12-month disclosure to the November origin using a scenario already-paid allowance. Later years are modeled cash paths; incremental post-2031 outflows get a discounted reserve outside normalized terminal operations.",
+      "Remaining Amazon notes: converted units enter the denominator once; unconverted units have a mutually exclusive discounted principal or economic option reserve. $109.742bn is a historical fair-value carrying amount only, not settlement cash.",
+      "Financing from unexercised facilities is not opening cash. Scenario equity rescue and stress price cover financing need and market dilution, not assumed actual draws. Fixed annual drift is independent of option/RSU vesting and disclosed subsidiary stock releases.",
+      "Class A and economically eligible N use their common economic rights. The 846.841m Class N subsidiary-held units are excluded from initial external shares and enter upon modeled third-year release.",
+      "Reopen upon new quarterly cash/liability disclosure, contractual change, actual capital draw or note settlement, or material issued-share evidence."
     ]
   }
 }
