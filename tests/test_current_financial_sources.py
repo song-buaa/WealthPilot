@@ -117,3 +117,70 @@ def test_current_same_basis_official_fact_wins_and_preserves_disagreement():
     ttm = next(r for r in result['records'] if r['field']=='revenue_ttm')
     assert ttm['values']['revenue_ttm'] == 494 and 'official-fact' in ttm['evidence_refs']
     assert 'AV_OFFICIAL_FIELD_DISAGREEMENT:revenue_quarter:2026-09-30' in result['limitations']
+
+
+def test_current_operating_bridge_consumes_exact_current_quarters_without_touching_pit():
+    from copy import deepcopy
+    from decimal import Decimal
+    import pytest
+    from backend.services.market_data.financial_research import build_quality, operating_ttm_bridge
+    from backend.services.s3_current_financial import operating_bridge
+    from tests.test_s3_p2_operating_model import sources
+
+    a = sources()
+    a['quality_field_records'] = [r for r in a['quality_field_records']
+        if not (r['field'] == 'net_income' and r['period'] == '2026-06-30')]
+    a['quality_field_records'] = [r for r in a['quality_field_records']
+        if r['field'] != 'revenue']
+    baseline_quality = build_quality(a)
+    baseline_eps = build(a)['records']
+    windows = [('2025-07-01','2025-09-30'), ('2025-10-01','2025-12-31'),
+               ('2026-01-01','2026-03-31'), ('2026-04-01','2026-06-30')]
+    issuer = {**ISSUER, 'symbol':a['symbol'], 'sec_ticker':'AAA'}
+    observed = '2026-10-01T00:00:00+00:00'
+    statements = {'INCOME_STATEMENT': {
+        'payload': {'symbol':'AAA', 'quarterlyReports': [
+            {'fiscalDateEnding':end, 'reportedCurrency':'USD', 'totalRevenue':str(40+i), 'netIncome':str(40+i)}
+            for i, (_,end) in enumerate(windows)]},
+        'diagnostics': {'status':'available','fetched_at':observed}}}
+    records = current_income_records(statements, issuer,
+        {end:dict(start=start, refs=['exact-fiscal-source'], known_at=observed) for start,end in windows},
+        at=datetime.fromisoformat(a['as_of']))
+    revenue_records = [r for r in records if r['field'] == 'revenue_quarter']
+    assert len(revenue_records) == 4 and len(records) == 8
+    a['current_financial'] = dict(latest_period=windows[-1][1],vendor_records=records)
+
+    a['s3_current_owner'] = True
+    bridge = operating_bridge(a)
+    revenue = bridge['flows']['revenue']
+    assert Decimal(revenue['value']) == Decimal(166)
+    assert bridge['qualification'] == revenue['qualification'] == 'CURRENT_RESEARCH_ONLY'
+    assert [r['source_locator'] for r in revenue['components']] == [r['source_locator'] for r in revenue_records]
+    assert all(r['known_at'] == observed for r in revenue['components'])
+    assert 'net_income' in bridge['missing_fields']  # Generic vendor netIncome cannot prove attribution.
+
+    official = sources()
+    official['current_financial'] = a['current_financial']
+    official['s3_current_owner'] = True
+    flows = operating_bridge(official)['flows']
+    assert Decimal(flows['revenue']['value']) == Decimal(1120)
+    assert Decimal(flows['net_income']['value']) == Decimal(210)
+    assert 'qualification' not in flows['revenue']
+    assert build(a)['records'] == baseline_eps and build_quality(a) == baseline_quality
+    with pytest.raises(ValueError, match='OPERATING_BRIDGE_PERIOD_OR_INPUT_MISSING'):
+        operating_ttm_bridge(a)
+
+    for mutation in (dict(currency='CNY'), dict(known_at='2027-06-01T00:00:00Z'),
+                     dict(fiscal_period_start='2026-04-02'), dict(accounting_basis='other_revenue')):
+        invalid = deepcopy(a)
+        next(r for r in reversed(invalid['current_financial']['vendor_records'])
+             if r['field'] == 'revenue_quarter').update(mutation)
+        assert 'revenue' in operating_ttm_bridge(invalid,current=True)['missing_fields']
+    duplicate = deepcopy(a)
+    duplicate['current_financial']['vendor_records'].append(
+        dict(revenue_records[-1], record_id='conflict', values={'revenue_quarter':99}))
+    assert 'revenue' in operating_ttm_bridge(duplicate,current=True)['missing_fields']
+    conflicting = deepcopy(a)
+    conflicting['quality_field_records'].append(next(r for r in official['quality_field_records']
+        if r['field'] == 'revenue' and r['scope'] == 'quarterly' and r['period'] == windows[-1][1]))
+    assert 'revenue' in operating_bridge(conflicting)['missing_fields']
