@@ -109,7 +109,7 @@ def build(card, check, profile, evidence, start,end, *, portfolio=None):
                 return portfolio_case(eps, margin, params, tax, scope, name)
             return project(eps, margin, params, tax)
 
-        card.update(valuation_method=METHOD,scenarios={name: researched_case(name, params) for name, params in assumed.items()},
+        card.update(valuation_method=METHOD, valuation_status='CONDITIONAL_RESEARCH', scenarios={name: researched_case(name, params) for name, params in assumed.items()},
             cross_checks=dict(observed_price=dict(period=quote['price_date'],currency='USD',
                                                  values=dict(observed_price=quote['price']),source_receipt=quote),
                               diluted_eps_ttm=eps_record),

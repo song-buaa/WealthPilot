@@ -171,6 +171,7 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
                         candidate.pop('failure_reason', None)
                         _set_bounded(candidate, 'MODELED_A_AND_AC_FOUNDER_AND_FUNDING_PATHS_INCOMPLETE')
                         card.update(candidate)
+                        card.pop('failure_reason', None)
             if symbol == 'GOOG:US':
                 operating = alphabet_operating_cases(issuer_dossier, profiles['GOOG:US'], start)
                 if operating:
@@ -222,7 +223,7 @@ def qualify_modeled_scope(card, bridge, *, required_sources=('quarter', 'preferr
             or set(card.get('scenarios',{}))!={'cautious','base','optimistic'}):
         _set_bounded(card,'ORDINARY_ECONOMIC_SCOPE_NOT_CLOSED')
         return
-    card.update(holder_return_scope=FULL,comparison_status='COMPARABLE',
+    card.update(holder_return_scope=FULL,comparison_status='COMPARABLE', valuation_status='CONDITIONAL_RESEARCH',
                 holder_return_scope_reason='MATERIAL_ECONOMICS_INCLUDED_IN_CONDITIONAL_CASES')
 
 
