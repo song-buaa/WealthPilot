@@ -151,6 +151,10 @@ def test_plists_system_daemon_nonroot_and_space_paths(runtime):
         assert loaded["UserName"] == "fixture-user"
         assert loaded["RunAtLoad"] and loaded["KeepAlive"]
         assert loaded["Umask"] == 0o077
+        expected_process_type = {"mcp": "Standard", "tunnel": "Background"}[role]
+        assert loaded["ProcessType"] == expected_process_type
+        template = Path(deploy.__file__).parent / "launchd" / (loaded["Label"] + ".plist.in")
+        assert plistlib.loads(template.read_bytes())["ProcessType"] == expected_process_type
         assert loaded["ProgramArguments"][-1] == role
         assert str(root) in loaded["ProgramArguments"]
         assert loaded["StandardOutPath"] == loaded["StandardErrorPath"] == "/dev/null"
