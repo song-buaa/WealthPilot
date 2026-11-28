@@ -25,7 +25,7 @@ from pocs.chatgpt_skills.contracts import TradabilityResult
 from typing import Annotated
 from pocs.chatgpt_skills.contracts import Details, ExplicitOrder, TradeResult, PrepareResult, TradeSyncQuery, TradeSyncResult, TradeHistoryQuery, TradeHistoryResult
 from pocs.chatgpt_skills.trade_link import IBKRLinkOrder, LinkOrder, TradeLinkResult, prepare_link
-from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS
+from pocs.chatgpt_skills.worker import SAFE_ERRORS, MODEL_ENV_KEYS, OWNER_EVIDENCE_ENV_KEY
 from pocs.chatgpt_skills.analysis import AnalysisRequest, AnalysisResult
 from backend.services.allocation_scenarios import TransitionRequest
 from pocs.chatgpt_skills.position_jobs import PositionJobs, PositionAnalysisJob
@@ -88,7 +88,7 @@ class BusinessClient:
                     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
                     evidence_keys = {"WEALTHPILOT_ETF_EVIDENCE_FILE", "WEALTHPILOT_ETF_EVIDENCE_SHA256",
                                      "WEALTHPILOT_ETF_RELEASE_DIRECTORY", "WEALTHPILOT_ETF_RELEASE_PUBLIC_KEY",
-                                     "WEALTHPILOT_ETF_RELEASE_OWNER_UID"}
+                                     "WEALTHPILOT_ETF_RELEASE_OWNER_UID", OWNER_EVIDENCE_ENV_KEY}
                     from backend.services.investment_thesis.portfolio_access import PORTFOLIO_ENV_KEYS, portfolio_capabilities
                     env.update({k: os.environ[k] for k in POLICY_ENV_KEYS | evidence_keys | PORTFOLIO_ENV_KEYS if k in os.environ})
                     if "read" in portfolio_capabilities():
