@@ -450,6 +450,60 @@ def build_current(assessment):
     return build(assessment)
 
 
+_CURRENT_OPERATING_FIELDS = {
+    'revenue': ('revenue_quarter', 'total_revenue'),
+    'operating_income': ('operating_income_quarter', 'operating_income'),
+    # AV's generic netIncome does not independently establish parent attribution.
+}
+
+
+def _current_operating_quarters(assessment, field, windows, official_facts):
+    """Only fill missing exact quarters, using current-only Owner observations."""
+    if field not in _CURRENT_OPERATING_FIELDS:
+        return []
+    field_name, basis = _CURRENT_OPERATING_FIELDS[field]
+    at = stamp(assessment.get('as_of'))
+    facts = {(r['start'], r['period']): r for r in official_facts if r['scope'] == 'quarterly'}
+    vendor = {}
+    for row in (assessment.get('current_financial') or {}).get('vendor_records', []):
+        key = row.get('fiscal_period_start'), row.get('period')
+        known, end = stamp(row.get('known_at')), stamp(row.get('period'))
+        if (key not in windows or row.get('field') != field_name
+                or row.get('source') != 'alphavantage' or row.get('symbol') != assessment.get('symbol')
+                or row.get('qualification') != 'CURRENT_RESEARCH_ONLY' or row.get('quality') != 'valid'
+                or row.get('is_seed') or row.get('is_mock') or row.get('currency') != 'USD'
+                or row.get('unit') != 'currency_units' or row.get('scope') != 'quarterly'
+                or row.get('accounting_basis') != basis or row.get('published_at') is not None
+                or not at or not known or not end or not end <= known <= at
+                or stamp(row.get('fetched_at')) != known or not row.get('period_source_refs')
+                or not row.get('record_id') or not row.get('source_locator') or not row.get('canonical_payload_sha256')):
+            continue
+        value = number(row.get('values', {}).get(field_name))
+        if value is None or not math.isfinite(value):
+            continue
+        if key in facts:
+            if Decimal(facts[key]['value']) != Decimal(str(value)):
+                return []  # Do not use a mixed-window calculation with an unresolved disagreement.
+            continue
+        vendor.setdefault(key, []).append(row)
+    result = []
+    for key in windows:
+        if key in facts:
+            result.append(facts[key])
+            continue
+        rows = vendor.get(key, [])
+        values = {Decimal(str(r['values'][field_name])) for r in rows}
+        if len(values) != 1:
+            return []
+        row = sorted(rows, key=lambda r: r['record_id'])[0]
+        result.append(dict(field=field, start=key[0], period=key[1], scope='quarterly',
+            value=format(next(iter(values)), 'f'), evidence_refs=sorted({r['record_id'] for r in rows}),
+            **{k: row[k] for k in ('source','qualification','accounting_basis','currency','unit',
+                                   'known_at','fetched_at','source_locator','period_source_refs',
+                                   'canonical_payload_sha256')}))
+    return result if vendor else []
+
+
 def operating_ttm_bridge(assessment, eps=None, *, current=False):
     """Opt-in operating flows on the *existing* qualified EPS window.
 
@@ -497,6 +551,11 @@ def operating_ttm_bridge(assessment, eps=None, *, current=False):
                             if abs(span-oldspan)>7 or not 350 <= (stamp(cur['period'])-stamp(prior['period'])).days <= 380: continue
                             value=Decimal(fy['value'])+Decimal(cur['value'])-Decimal(prior['value'])
                             matches.append((value,[fy,cur,prior],'FY + current YTD - comparable prior YTD; not EPS subtraction'))
+            if current and not matches:
+                components = _current_operating_quarters(assessment, field, windows, rows)
+                if components:
+                    matches = [(sum(Decimal(r['value']) for r in components), components,
+                                'sum of four exact EPS-window quarters')]
             if not matches or len({v for v,_,_ in matches})!=1:
                 if current:
                     missing.append(field)
@@ -505,15 +564,19 @@ def operating_ttm_bridge(assessment, eps=None, *, current=False):
             value,components,formula=matches[0]
             output[field]=dict(value=format(value,'f'),components=components,formula=formula,
                 evidence_refs=sorted({ref for row in components for ref in row['evidence_refs']}))
+            if any(row.get('qualification') == 'CURRENT_RESEARCH_ONLY' for row in components):
+                output[field]['qualification'] = 'CURRENT_RESEARCH_ONLY'
+        current_basis = ({'qualification':'CURRENT_RESEARCH_ONLY'}
+                         if any(row.get('qualification') == 'CURRENT_RESEARCH_ONLY' for row in output.values()) else {})
         if current and missing:
             return dict(status='PARTIAL_GAAP_OPERATING_TTM',start=start,period=end,
-                        currency='USD',unit='currency_units',flows=output,eps=eps,missing_fields=missing)
+                        currency='USD',unit='currency_units',flows=output,eps=eps,missing_fields=missing,**current_basis)
         revenue,op,net=[Decimal(output[f]['value']) for f in required]
         if min(revenue,op,net)<=0: raise ValueError('OPERATING_BRIDGE_NONPOSITIVE_BASE')
         return dict(status='QUALIFIED_GAAP_OPERATING_TTM_NOT_NORMALIZED',start=start,period=end,
             currency='USD',unit='currency_units',flows=output,
             operating_margin=format(op/revenue,'f'),net_to_operating_conversion=format(net/op,'f'),
-            net_margin=format(net/revenue,'f'),eps=eps,
+            net_margin=format(net/revenue,'f'),eps=eps,**current_basis,
             limitations=['FLOW_TTM_IS_NOT_WEIGHTED_SHARE_EPS_RECONSTRUCTION',
                 'GAAP_BELOW_LINE_AND_TAX_EFFECTS_NOT_NORMALIZED','FUTURE_EPS_USES_EXPLICIT_RELATIVE_SHARE_ASSUMPTION'])
 
