@@ -8,7 +8,7 @@ from backend.services.quality_valuation_research import ROOT
 
 from backend.services.market_data.quality_valuation import dec, stamp, text
 from backend.services.s3_holder_returns import BOUNDED, FULL, UNKNOWN, attach_cash
-from backend.services import s3_equity_bridges as bridges, s3_listed_eps
+from backend.services import s3_equity_bridges as bridges, s3_ant_research, s3_listed_eps, s3_tesla_optionality
 
 CODE = 'backend/services/s3_multimethod.py'
 BOOK = 'research_v2/s3_profiles/multimethod-v1.json'
@@ -165,13 +165,34 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
                 sources = _review_sources(issuer_dossier, definition, start)
                 if sources:
                     candidate = deepcopy(card)
-                    if bridges.meta_equity(candidate, claims, definition, sources, start, end):
+                    try:
+                        modeled = bridges.meta_equity(candidate, claims, definition, sources, start, end)
+                    except (ValueError, ArithmeticError):
+                        modeled = False
+                        card['failure_reason'] = 'S3_META_CONDITIONAL_HOLDER_MODEL_UNQUALIFIED'
+                    if modeled:
                         candidate['holder_equity_bridge']['reviewed_at'] = issuer_dossier['reviewed_at']
                         candidate['owner_qualification_reason'] = card['failure_reason']
                         candidate.pop('failure_reason', None)
-                        _set_bounded(candidate, 'MODELED_A_AND_AC_FOUNDER_AND_FUNDING_PATHS_INCOMPLETE')
+                        qualify_modeled_scope(candidate, candidate['holder_equity_bridge'],
+                                              required_sources=definition['sources'])
                         card.update(candidate)
                         card.pop('failure_reason', None)
+            if symbol == 'ANT:US' and profile:
+                sources = _review_sources(issuer_dossier, profile, start)
+                candidate = deepcopy(card)
+                if sources:
+                    try:
+                        modeled = s3_ant_research.build(candidate, profile, sources, start, end,
+                                                        issuer_dossier['reviewed_at'])
+                    except (ValueError, ArithmeticError):
+                        modeled = False
+                        card['failure_reason'] = 'S3_ANT_CONDITIONAL_CASH_RECOVERY_UNQUALIFIED'
+                    if modeled:
+                        candidate['owner_qualification_reason'] = candidate.pop('failure_reason', None)
+                        _set_bounded(candidate, 'POST_IPO_CASH_TIMING_AND_CONVERSION_SCOPE_BOUNDED')
+                        card.clear()
+                        card.update(candidate)
             if symbol == 'GOOG:US':
                 operating = alphabet_operating_cases(issuer_dossier, profiles['GOOG:US'], start)
                 if operating:
@@ -196,7 +217,25 @@ def apply(cards, dossier, professional_checks, start, end, *, current_checks=Non
                         context.prec = 34
                         card['reverse_valuation'] = bridges.tesla_reverse_value(
                             card, card['cross_checks']['observed_price']['values']['observed_price'], Decimal(5))
+                proof = _review_sources(dossier.get(symbol, {}), profile.get('positive_scope', {'sources': {}}), start)
+                if proof:
+                    s3_tesla_optionality.build(card, proof, start, end)
         _set_bounded(card,'LIMITED_OPERATING_VALUE_OR_UNMODELED_MATERIAL_DISTRIBUTION')
+        if symbol == 'BRK.B:US' and profile:
+            from backend.services import s3_berkshire_research as berkshire
+
+            proof = _review_sources(dossier.get(symbol, {}), profile, start)
+            if proof:
+                candidate = deepcopy(card)
+                try:
+                    modeled = berkshire.add_asset_scope(candidate, profile, proof, start, end)
+                except (ValueError, ArithmeticError):
+                    modeled = False
+                    card['holder_return_scope_reason'] = 'S3_BRK_ASSET_SCOPE_UNQUALIFIED'
+                if modeled:
+                    qualify_modeled_scope(candidate, candidate['holder_equity_bridge'], required_sources=profile['sources'])
+                    card.update(candidate)
+                    continue
         if symbol not in DIVIDEND_ANCHORS:
             continue
         amount, digest, locator = DIVIDEND_ANCHORS[symbol]

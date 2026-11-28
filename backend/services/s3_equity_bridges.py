@@ -264,7 +264,7 @@ def _meta_coupon_cost(reported):
     return units * dec(reported['preferred_annual_coupon_per_share']) * years
 
 
-def meta_ordinary_case(profile, forward_shares, settings, *, distribution):
+def meta_ordinary_case(profile, forward_shares, settings, *, distribution, capital=None):
     """Price one observed A share acquired before an unobserved distribution."""
     facts = profile['reported']
     p = {key: dec(value) for key, value in zip(profile['case_columns'], settings, strict=True)}
@@ -293,30 +293,68 @@ def meta_ordinary_case(profile, forward_shares, settings, *, distribution):
               + p['net_corporate_tax_claim_m'])
 
     existing = (dec(facts['a_shares_m']) + dec(facts['b_shares_m'])) * (1 + p['share_drift']) ** 5
-    a_and_b, c = existing + forward_shares, existing + forward_shares if distribution else Decimal(0)
+    capital = capital or {}
+    all_c = dec(capital.get('all_c_fraction', 0)) if distribution else Decimal(0)
+    # The ordinary distribution predates delivery in the modeled trigger paths.
+    # One pair per forward reference share, with only the A leg substitutable.
+    a_and_b = existing + forward_shares * (1 - all_c)
+    c = existing + forward_shares * (1 + all_c) if distribution else Decimal(0)
     forward_price = dec(facts['forward_initial_price_usd']) * p['forward_price_multiplier']
     ratio = p['a_to_c_ratio'] if distribution else Decimal(1)
     a_vwap = p['a_vwap']
-    conversion_vwap = a_vwap / ratio
+    conversion_vwap = dec(capital.get('preferred_class_vwap', a_vwap / ratio)) if distribution else a_vwap
+    reset_ratio = dec(capital.get('post_ex_ratio_40_day', ratio))
+    forward_a_vwap = dec(capital.get('forward_a_vwap', a_vwap))
+    forward_c_vwap = dec(capital.get('forward_c_vwap', a_vwap / ratio))
     if distribution:
-        forward_price = forward_price / 2 * Decimal('1.998')
-    ratio_reset = min(3, max(2, 1 + ratio)) if distribution else Decimal(1)
+        a_leg = forward_price / 2
+        c_leg = a_leg * Decimal('.998')
+        substitute = c_leg - max(Decimal(0), forward_a_vwap - forward_c_vwap)
+        if all_c and substitute < 0:
+            raise ValueError('S3_META_ALL_C_SETTLEMENT_TERMS_OUT_OF_RANGE')
+        forward_price = c_leg + a_leg * (1 - all_c) + substitute * all_c
+    ratio_reset = min(3, max(2, 1 + reset_ratio)) if distribution else Decimal(1)
     conversion_min = dec(facts['preferred_fixed_min']) * ratio_reset
     conversion_max = dec(facts['preferred_fixed_max']) * ratio_reset
     conversion = max(conversion_min, min(conversion_max, dec(facts['preferred_liquidation_per_share']) / conversion_vwap))
     conversion = conversion.quantize(Decimal('.0001'), rounding=ROUND_HALF_UP)
     preferred_m = dec(facts['preferred_initial_issued_m']) + dec(facts['preferred_option_issued_m'])
     converted_m = preferred_m * conversion
+    c_per_original = Decimal(1) if distribution else Decimal(0)
+    founder_events = capital.get('founder_events', 0) if distribution else 0
+    extra_before_conversion = capital.get('founder_before_conversion', False)
+    for _ in range(founder_events if extra_before_conversion else 0):
+        new_c = a_and_b + c
+        # Certificate §13(a)(i): after the trigger Class C replaces A;
+        # the additional dividend is paid proportionally on existing C too.
+        split_factor = (c + new_c) / c
+        c += new_c
+        converted_m *= split_factor
+        c_per_original = 1 + 2 * c_per_original
     if distribution:
         c += converted_m
     else:
         a_and_b += converted_m
+    for _ in range(founder_events if not extra_before_conversion else 0):
+        c += a_and_b + c
+        c_per_original = 1 + 2 * c_per_original
+
+    fresh_cash = dec(capital.get('conditional_new_issue_usd_m', 0))
+    if fresh_cash:
+        # Net funding and modeled retention are separate from actual
+        # November debt, preferred proceeds and unobserved forward proceeds.
+        issue_class = capital['new_issue_class'] if distribution else 'A'
+        if issue_class == 'C':
+            c += fresh_cash / (a_vwap / ratio)
+        else:
+            a_and_b += fresh_cash / a_vwap
+        net_assets += fresh_cash * dec(capital['new_issue_retention'])
 
     forward_cash = forward_price * forward_shares * p['forward_cash_retention']
     equity = operating_ev + net_assets - claims + forward_cash
     c_unit = equity / (a_and_b * ratio + c)
     a_unit = c_unit * ratio
-    package = a_unit + c_unit if distribution else a_unit
+    package = a_unit + c_unit * c_per_original
     if package <= 0:
         raise ValueError('S3_META_NONPOSITIVE_HOLDER_SCENARIO')
     return dict(terminal_price=text(package), state='A_PLUS_C' if distribution else 'A_ONLY',
@@ -325,6 +363,10 @@ def meta_ordinary_case(profile, forward_shares, settings, *, distribution):
                 preferred_cash_coupon_usd_m=text(coupons), projected_a_and_b_m=text(a_and_b),
                 projected_c_m=text(c), preferred_conversion_shares_m=text(converted_m),
                 forward_cash_retained_usd_m=text(forward_cash), ordinary_equity_usd_m=text(equity),
+                terminal_c_shares_per_original_a=text(c_per_original),
+                forward_all_c_fraction=text(all_c), founder_additional_distributions=founder_events,
+                founder_before_preferred_conversion=bool(founder_events and extra_before_conversion),
+                new_conditional_equity_issuance_usd_m=text(fresh_cash),
                 terminal_a_per_share=text(a_unit),
                 terminal_c_per_share=text(c_unit) if distribution else None)
 
@@ -352,12 +394,18 @@ def meta_equity(card, claims, profile, sources, start, end):
                     sensitivity_method='META_PAIRED_HOLDER_STATES',
                     assumptions=dict(required_return='.10'),
                     formula='Terminal FoA EBIT less RL losses × EV/EBIT + scenario financial assets/funding − claims, divided across modeled common classes')
+        capital_cases = profile.get('capital_scenarios', {})
         for name, settings in values.items():
+            capital = capital_cases.get(name)
             distribution = name != 'cautious'
-            card['scenarios'][name] = meta_ordinary_case(profile, forward_shares, settings, distribution=distribution)
-            alternate = meta_ordinary_case(profile, forward_shares, settings, distribution=not distribution)
+            card['scenarios'][name] = meta_ordinary_case(profile, forward_shares, settings, distribution=distribution, capital=capital)
+            alternate = meta_ordinary_case(profile, forward_shares, settings, distribution=not distribution, capital=capital)
             card['sensitivity'].append(dict(parameter='paired_dividend_state', delta=name,
                                              required_return='.10', result=alternate))
+        for label, settings in profile.get('capital_stresses', {}).items():
+            condition = meta_ordinary_case(profile, forward_shares, values['base'], distribution=True, capital=settings)
+            card['sensitivity'].append(dict(parameter='contract_capital_state', delta=label, required_return='.10',
+                                             result=condition))
         for growth in ('-.02', '0', '.02'):
             for multiple in ('-.2', '0', '.2'):
                 settings = list(values['base'])
@@ -365,12 +413,13 @@ def meta_equity(card, claims, profile, sources, start, end):
                 settings[3] = str(dec(settings[3]) * (1+dec(multiple)))
                 card['joint_sensitivity'].append(dict(stress_axis='REVENUE_EV',
                     revenue_growth_shift=growth, terminal_pe_shift=multiple,
-                    result=meta_ordinary_case(profile, forward_shares, settings, distribution=True)))
-        card['holder_equity_bridge'] = dict(status='CONDITIONAL_ORDINARY_VALUE_BOUNDED',
+                    result=meta_ordinary_case(profile, forward_shares, settings, distribution=True, capital=capital_cases.get('base'))))
+        card['holder_equity_bridge'] = dict(status=('MODELED_CONDITIONAL_ORDINARY_SCOPE' if capital_cases else 'CONDITIONAL_ORDINARY_VALUE_BOUNDED'),
             method=META_METHOD, source_evidence=sources, definition=profile,
             observed_holder='ONE_A_BEFORE_ANY_DISTRIBUTION_WITH_CONDITIONAL_CONTINUOUS_OWNERSHIP',
             current_issued_forward_proceeds='UNOBSERVED_NO_AMOUNT_ADDED_TO_INITIAL_STATE',
-            remaining_scope=['FOUNDER_EVENT_AND_ANTIDILUTION', 'FORWARD_ALL_C_OR_MIXED_DELIVERY', 'FINANCING_CASH_ALLOCATION'])
+            remaining_scope=[] if capital_cases else ['FOUNDER_EVENT_AND_ANTIDILUTION', 'FORWARD_ALL_C_OR_MIXED_DELIVERY',
+                                                      'FINANCING_CASH_ALLOCATION'])
         attach_cash(card, dict(quarterly_usd=profile['reported']['ordinary_quarterly_anchor'],
                                locator='Report-based flat distribution per original holding package',
                                source=sources['quarter']), start, end)

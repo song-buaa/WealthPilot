@@ -224,3 +224,49 @@ def test_meta_price_only_contract_expires_before_potential_class_c_entitlement()
     with pytest.raises(ValueError, match='DISTRIBUTION_ENTITLEMENT_REQUIRES_RESEARCH'):
         relative.qualify_meta_close(None, {}, 'META:US', '2026-11-27', '2026-10-16',
                                     date(2027), datetime(2027, 1, 19, tzinfo=timezone.utc))
+
+
+def test_joint_requalification_replaces_only_joint_blockers():
+    warnings = ['JOINT_SENSITIVITY_INCOMPLETE', 'QUALITY_OR_DOWNSIDE_REMAINS']
+    row = {'result': {'annualized_return': '.10'}}
+    card = dict(joint_sensitivity=[row]*9, joint_qualification={}, research_method_blockers=warnings)
+    holder.qualify_joint_sensitivity(card, '.10')
+    assert card['joint_qualification'] == dict(complete=True, all_above_required=True)
+    assert card['research_method_blockers'] == warnings[1:]
+    card['joint_sensitivity'][-1] = {'result': {'annualized_return': '.099'}}
+    holder.qualify_joint_sensitivity(card, '.10')
+    assert card['research_method_blockers'] == [warnings[1], 'JOINT_STRESS_RETURN_THRESHOLD_CROSSING']
+    card['joint_sensitivity'].pop()
+    holder.qualify_joint_sensitivity(card, '.10')
+    assert card['research_method_blockers'] == warnings[::-1]
+
+
+def test_meta_additional_c_is_ratable_and_all_c_changes_only_delivery_legs():
+    from backend.services.s3_equity_bridges import meta_ordinary_case
+
+    profile = json.loads((multimethod.ROOT/multimethod.BOOK).read_text())['META:US']['holder_bridge']
+    base = profile['cases']['base']
+    paired = meta_ordinary_case(profile, Decimal(46), base, distribution=True)
+    delivered = meta_ordinary_case(profile, Decimal(46), base, distribution=True,
+                                   capital=dict(all_c_fraction=1))
+    extra = meta_ordinary_case(profile, Decimal(46), base, distribution=True,
+                                capital=dict(founder_events=1))
+    assert Decimal(paired['projected_a_and_b_m']) - Decimal(delivered['projected_a_and_b_m']) == 46
+    assert Decimal(delivered['projected_c_m']) - Decimal(paired['projected_c_m']) == 46
+    assert Decimal(delivered['forward_cash_retained_usd_m']) < Decimal(paired['forward_cash_retained_usd_m'])
+    assert Decimal(extra['terminal_c_shares_per_original_a']) == 3
+    assert extra['ordinary_equity_usd_m'] == paired['ordinary_equity_usd_m']
+
+
+def test_ant_does_not_count_an_unconverted_claim_and_shares_together():
+    from backend.services.s3_ant_research import cash_case
+
+    profile = json.loads((multimethod.ROOT/multimethod.BOOK).read_text())['ANT:US']
+    settings = profile['cases']['base']
+    converted = cash_case(profile['reported'], settings)
+    claim = cash_case(profile['reported'], dict(settings, convert_remaining_notes=False))
+    assert converted['terminal_retained_note_claim_bn'] == '0.00000000'
+    assert claim['terminal_retained_note_claim_bn'] == '109.74200000'
+    assert Decimal(converted['model_years'][0]['shares_bn']) > Decimal(claim['model_years'][0]['shares_bn'])
+    first = converted['model_years'][0]
+    assert Decimal(first['compute_cash_bn']) == max(Decimal('68.6'), Decimal(first['revenue_bn'])*Decimal('.64'))

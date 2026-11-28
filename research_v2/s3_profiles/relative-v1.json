@@ -520,6 +520,12 @@
           "accession": "0001628280-26-003837",
           "locator": "Exhibit 99.1 HTML embedded disclosure text, GAAP diluted common EPS row and Q4-2025 column",
           "sha256": "00178bf9d927550ae16ef0cb88e985f243ac35dba66589f8297f1ac15c9ad549"
+        },
+        "q3_operating_update": {
+          "accession": "0001628280-26-066738",
+          "sha256": "ddec505db52e182b2b1dbc1d993b865aeb094ac09c4d4ca2443550b12d60dabd",
+          "locator": "Q3 8-K Exhibit 99.1 Tesla operating data, installed vehicle capacity and active FSD reach",
+          "optional": true
         }
       },
       "valuation_method": "OPERATING_EARNINGS_PE_EXCLUDING_UNPROVEN_FUTURE_ADJACENCIES",
@@ -600,6 +606,12 @@
           "accession": "0001193125-26-468549",
           "locator": "2026-11-19 Form 8-K yen notes; debt used in scenario risk",
           "sha256": "a60a1ad92286d5b9a9b27da0a0010498fbee9de6d3cf18fc60b8706aca56dad4"
+        },
+        "annual_parent": {
+          "accession": "0001193125-26-083899",
+          "sha256": "800b5f7f0f12f20c22ce053c020d758e44588d7aedd113d956687e4f7deadf7e",
+          "locator": "FY25 10-K Note 15 and Schedule I parent capital, dividends and liquidity",
+          "optional": true
         }
       },
       "valuation_method": "INSURANCE_HOLDING_NORMALIZED_OPERATING_EARNINGS_CLASS_B_RESEARCH_CANDIDATE",

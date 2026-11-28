@@ -86,11 +86,19 @@ def attach_cash(card, anchor, start, end):
     card['assumptions']['rationale'] = ('PE projection keeps its own zero-payout setting. '
         'The separately modeled flat cash schedule determines holder ending wealth and payment-date PV.')
     card['formula'] += '; dated flat research cash distributions in ending wealth and payment-date PV'
-    complete = all(v['result'] for v in card['joint_sensitivity']) and len(card['joint_sensitivity']) == 9
-    robust = complete and all(dec(v['result']['annualized_return']) >= dec(rate) for v in card['joint_sensitivity'])
-    card['joint_qualification'].update(complete=complete,all_above_required=robust)
-    card['research_method_blockers'] = [] if robust else [
-        'JOINT_STRESS_RETURN_THRESHOLD_CROSSING' if complete else 'JOINT_SENSITIVITY_INCOMPLETE']
+    qualify_joint_sensitivity(card, rate)
+
+
+def qualify_joint_sensitivity(card, rate):
+    outcomes = card['joint_sensitivity']
+    complete = len(outcomes) == 9 and all(v['result'] for v in outcomes)
+    robust = complete and all(dec(v['result']['annualized_return']) >= dec(rate) for v in outcomes)
+    card['joint_qualification'].update(complete=complete, all_above_required=robust)
+    joint_codes = {'JOINT_STRESS_RETURN_THRESHOLD_CROSSING', 'JOINT_SENSITIVITY_INCOMPLETE'}
+    blockers = [code for code in card.get('research_method_blockers', ()) if code not in joint_codes]
+    if not robust:
+        blockers.append('JOINT_STRESS_RETURN_THRESHOLD_CROSSING' if complete else 'JOINT_SENSITIVITY_INCOMPLETE')
+    card['research_method_blockers'] = blockers
 
 
 def scope(cards):

@@ -197,7 +197,12 @@
         ".30",
         "1.5"
       ]
-    ]
+    ],
+    "positive_scope": {
+      "sources": {
+        "q3_operating_update": "ddec505db52e182b2b1dbc1d993b865aeb094ac09c4d4ca2443550b12d60dabd"
+      }
+    }
   },
   "MSFT:US": {
     "adjusted_quarter_sources": [
@@ -595,13 +600,368 @@
         ]
       },
       "scope_limitations": [
-        "B price premium and founder-event timing / further antidilution are not independently valued. Headline state cases include no Class C and one declared stock dividend if effective before the preferred trigger.",
-        "Class A versus C market premium and 2029 VWAP are scenario assumptions. Post-issuance new A buyer would require an observed post-distribution price and is outside these purchase returns.",
-        "Current forward proceeds are zero. Terminal cases use full contractual physical delivery before distribution (A only) or after distribution (paired A and C). All-C election and affiliate dividend interactions are outside the tested scope.",
-        "Liquid balances distinguish paid proceeds, restricted collateral, and net retained proceeds. Source discloses principal on completed notes, not actual retained cash after deployment.",
-        "Operating EV includes ongoing operating costs, leases and depreciation. Additional terminal-equivalent net financing approximates funding shortfall including finance capital and the contingent cloud obligation; it is not a second deduction of the gross contract totals.",
-        "Venture funding and residual guarantees are separate from net ordinary infrastructure financing. Quarterly common dividend is a flat package-level hypothesis calibrated to the past 10-Q and conditional on honoring preferred coupons."
+        "No executed Class C distribution or physical forward delivery in the admitted facts; valuation states are conditional.",
+        "Cash coupons through the modeled conversion are used as the bridge reference; the output is an aggregate five-year continuing A-holder analysis.",
+        "The initial event 40-day reset, conversion pricing, forward settlement and terminal class relativity are distinct scenario inputs.",
+        "Notes support completed principal but no observed net retained cash after deployment; operating capitalization includes ongoing leases and depreciation, with only a net financing claim scenario.",
+        "Venture funding and calls on guarantees remain separately modeled. Ordinary package cash assumes preferred senior distributions are satisfied."
+      ],
+      "capital_scenarios": {
+        "cautious": {
+          "conditional_new_issue_usd_m": "18000",
+          "new_issue_class": "A",
+          "new_issue_retention": ".20"
+        },
+        "base": {
+          "all_c_fraction": "0",
+          "conditional_new_issue_usd_m": "9000",
+          "new_issue_class": "C",
+          "new_issue_retention": ".40",
+          "post_ex_ratio_40_day": "1.18",
+          "preferred_class_vwap": "545",
+          "forward_a_vwap": "615",
+          "forward_c_vwap": "530"
+        },
+        "optimistic": {
+          "all_c_fraction": "1",
+          "founder_events": 1,
+          "conditional_new_issue_usd_m": "6000",
+          "new_issue_class": "C",
+          "new_issue_retention": ".65",
+          "post_ex_ratio_40_day": "1.04",
+          "preferred_class_vwap": "810",
+          "forward_a_vwap": "730",
+          "forward_c_vwap": "640"
+        }
+      },
+      "capital_stresses": {
+        "all_c": {
+          "all_c_fraction": "1",
+          "post_ex_ratio_40_day": "1.30",
+          "preferred_class_vwap": "430",
+          "forward_a_vwap": "700",
+          "forward_c_vwap": "460"
+        },
+        "protected_extra_dividend_before_conversion": {
+          "all_c_fraction": ".5",
+          "founder_events": 1,
+          "founder_before_conversion": true,
+          "post_ex_ratio_40_day": "1.12",
+          "preferred_class_vwap": "580",
+          "forward_a_vwap": "645",
+          "forward_c_vwap": "520"
+        },
+        "three_additional_after_conversion_if_thresholds_met": {
+          "all_c_fraction": "0",
+          "founder_events": 3
+        },
+        "high_new_class_a_funding": {
+          "conditional_new_issue_usd_m": "36000",
+          "new_issue_class": "A",
+          "new_issue_retention": ".20"
+        }
+      },
+      "capital_scope_notes": [
+        "Current holder is one listed A before any Class C distribution, held throughout. Separate post-distribution purchases require a new identity and quote.",
+        "Founder additional dividends are conditional on the contractual market-price milestones and IRR test. Issuing one C for each A/B/C otherwise redistributes existing equity. Stapling and equal-treatment rights do not grant an extra preference in company economics.",
+        "All-C replaces the A leg after the trigger on modeled settlement. The positive A-minus-C VWAP difference reduces the replacement leg; unsupported negative settlement is rejected.",
+        "Initial preferred conversion uses §13(a)(vii); additional ratable stock dividend before conversion adjusts C conversion via §13(a)(i). Coupons assume cash; stock coupons would substitute settlement shares for cash and are not assumed simultaneously.",
+        "Future issue amounts, retention, VWAP and share drift are research assumptions. Existing forward cash is a terminal condition only and the standstill is preserved."
       ]
     }
+  },
+  "BRK.B:US": {
+    "sources": {
+      "quarter": "0cf42920b0abc830c7b2801aa6f152a39afdb6b5a626f8964fe282da9d00060e",
+      "annual_earnings": "e19171a2c7e4b5177e0f91f9b995a46fb931b0d806be9d2fdfb997c30161d027",
+      "quarter_earnings": "1ecfcf109bd982a90eb08d78f3cb57b95992ff355617b297552f11a9cebc1631",
+      "financing": "a60a1ad92286d5b9a9b27da0a0010498fbee9de6d3cf18fc60b8706aca56dad4",
+      "annual_parent": "800b5f7f0f12f20c22ce053c020d758e44588d7aedd113d956687e4f7deadf7e"
+    },
+    "financial_millions": {
+      "group_unsettled": 20489,
+      "insurer_unsettled": 15400,
+      "insurer_cash_treasury": 230941,
+      "insurance_and_other_cash_treasury": 372769,
+      "insurance_public_equity": 333359,
+      "public_equity": 335515,
+      "public_equity_cost": 108462,
+      "insurance_fixed_maturity": 16933,
+      "group_fixed_maturity": 17082,
+      "float_net_of_insurance_receivables": 178500,
+      "listed_equity_method_fair_value": 22055,
+      "other_equity_method_carry": 460,
+      "parent_debt": 20400,
+      "new_parent_jpy_notes_m": 182300,
+      "parent_cost": 134
+    },
+    "cases": {
+      "cautious": {
+        "operating": {
+          "underwriting": [
+            "0",
+            "9"
+          ],
+          "rail": [
+            ".01",
+            "13"
+          ],
+          "energy": [
+            ".02",
+            "12"
+          ],
+          "manufacturing_retail": [
+            ".02",
+            "12"
+          ]
+        },
+        "market_recovery": ".85",
+        "realization_tax": ".26",
+        "treasury_reinvestment": ".015",
+        "fixed_income_recovery": ".95",
+        "float_claim_factor": "1.12",
+        "insurance_capital_discount": ".30",
+        "outside_surplus_fraction": ".65",
+        "usd_per_jpy": ".0075",
+        "yen_proceeds_retention": ".15",
+        "equity_method_recovery": ".65",
+        "parent_cost_multiple": "16",
+        "annual_share_change": "0"
+      },
+      "base": {
+        "operating": {
+          "underwriting": [
+            ".04",
+            "13"
+          ],
+          "rail": [
+            ".045",
+            "17"
+          ],
+          "energy": [
+            ".055",
+            "16"
+          ],
+          "manufacturing_retail": [
+            ".055",
+            "16"
+          ]
+        },
+        "market_recovery": "1.18",
+        "realization_tax": ".24",
+        "treasury_reinvestment": ".03",
+        "fixed_income_recovery": "1",
+        "float_claim_factor": "1",
+        "insurance_capital_discount": ".20",
+        "outside_surplus_fraction": ".83",
+        "usd_per_jpy": ".0067",
+        "yen_proceeds_retention": ".55",
+        "equity_method_recovery": ".85",
+        "parent_cost_multiple": "18",
+        "annual_share_change": "0"
+      },
+      "optimistic": {
+        "operating": {
+          "underwriting": [
+            ".065",
+            "16"
+          ],
+          "rail": [
+            ".07",
+            "21"
+          ],
+          "energy": [
+            ".08",
+            "20"
+          ],
+          "manufacturing_retail": [
+            ".08",
+            "21"
+          ]
+        },
+        "market_recovery": "1.50",
+        "realization_tax": ".22",
+        "treasury_reinvestment": ".04",
+        "fixed_income_recovery": "1.05",
+        "float_claim_factor": ".93",
+        "insurance_capital_discount": ".12",
+        "outside_surplus_fraction": ".94",
+        "usd_per_jpy": ".0060",
+        "yen_proceeds_retention": ".90",
+        "equity_method_recovery": "1.15",
+        "parent_cost_multiple": "21",
+        "annual_share_change": "0"
+      }
+    },
+    "anchors_m": {
+      "fy25_standalone_parent_cash_treasury": 127438,
+      "fy25_statutory_surplus": 333000,
+      "fy26_ordinary_dividend_limit": 33000
+    },
+    "limitations": [
+      "Insurance invested assets less float and an explicit capital friction are economic equity value, not immediately transferable cash.",
+      "FY25 parent cash and ordinary dividend permissions support scenario judgment only. Current cash outside insurance is the group residual, not a claimed parent-only cash balance.",
+      "After-tax segment earnings already reflect funded segment interest. Subtract standalone parent financing only.",
+      "Funding retention is a scenario, not an attestation of November proceeds or post-close balance. Taxes use a simplified portfolio realization basis.",
+      "Taylor Morrison closed in July for $6.8bn and OxyChem in January for $9.4bn; balances reflect deployed cash, while TTM operating earnings include partial ownership. No standalone additive acquired earnings; manufacturing/other growth and exit stress encompass unqualified ramp and full-period contribution.",
+      "Separate Kraft Heinz/Occidental recovery factors are net of hypothetical realization tax and disposal frictions because the tax basis is unqualified; not added to their capitalized investment earnings."
+    ]
+  },
+  "ANT:US": {
+    "sources": {
+      "prospectus": "9a674665d93ca04d1dc27e4644ec9ac7c8fb5f3e4d9c7b9c3623ace227d64cf9",
+      "listing": "f85715f84d1d69545f5c036e19116db44364be745f427ef91b5283c1ff0a185f"
+    },
+    "reported": {
+      "pro_forma_liquidity_bn": "244.6",
+      "a_shares_bn": "7.730103996",
+      "n_shares_bn": "4.789697318",
+      "options_bn": "1.774342693",
+      "option_strike": "2.91",
+      "rsus_bn": "1.073701297",
+      "remaining_note_conversion_bn": "1.547676309",
+      "remaining_note_carry_bn": "109.742",
+      "remaining_note_nominal_bn": "5.5903",
+      "quarter_revenue_bn": "17.0",
+      "cash_due_in_12m_bn": "70.7",
+      "terminable_near_term_bn": "4.2",
+      "nine_month_cfo_bn": "6.569",
+      "nine_month_revenue_bn": "33.242",
+      "subsidiary_public_benefit_shares_bn": ".846840960"
+    },
+    "cases": {
+      "cautious": {
+        "growth": [
+          "0.45",
+          ".31",
+          ".24",
+          ".18",
+          ".12"
+        ],
+        "compute_cost_share": [
+          ".72",
+          ".64",
+          ".58",
+          ".53",
+          ".48"
+        ],
+        "non_compute_cost_share": [
+          ".23",
+          ".24",
+          ".25",
+          ".25",
+          ".25"
+        ],
+        "contract_cash_floor_bn": [
+          "70.7",
+          "77",
+          "82",
+          "87",
+          "92"
+        ],
+        "convert_remaining_notes": false,
+        "option_exercise_fraction": ".70",
+        "rsu_settlement_fraction": ".7",
+        "tax_rate": ".24",
+        "incremental_capex_share": ".085",
+        "minimum_liquidity_bn": "70",
+        "equity_issue_per_share": "32",
+        "annual_new_share_drift": ".045",
+        "terminal_cash_multiple": "15",
+        "note_claim_factor": "1.25",
+        "foundation_release_fraction": "1"
+      },
+      "base": {
+        "growth": [
+          ".69",
+          ".45",
+          ".34",
+          ".27",
+          ".20"
+        ],
+        "compute_cost_share": [
+          ".64",
+          ".55",
+          ".48",
+          ".44",
+          ".40"
+        ],
+        "non_compute_cost_share": [
+          ".22",
+          ".23",
+          ".24",
+          ".24",
+          ".24"
+        ],
+        "contract_cash_floor_bn": [
+          "68.6",
+          "75",
+          "80",
+          "85",
+          "90"
+        ],
+        "convert_remaining_notes": true,
+        "option_exercise_fraction": ".90",
+        "rsu_settlement_fraction": ".85",
+        "tax_rate": ".23",
+        "incremental_capex_share": ".07",
+        "minimum_liquidity_bn": "55",
+        "equity_issue_per_share": "45",
+        "annual_new_share_drift": ".03",
+        "terminal_cash_multiple": "21",
+        "note_claim_factor": "1",
+        "foundation_release_fraction": ".5"
+      },
+      "optimistic": {
+        "growth": [
+          ".88",
+          ".57",
+          ".44",
+          ".32",
+          ".24"
+        ],
+        "compute_cost_share": [
+          ".56",
+          ".47",
+          ".41",
+          ".37",
+          ".34"
+        ],
+        "non_compute_cost_share": [
+          ".21",
+          ".22",
+          ".23",
+          ".23",
+          ".23"
+        ],
+        "contract_cash_floor_bn": [
+          "66.5",
+          "72",
+          "78",
+          "82",
+          "88"
+        ],
+        "convert_remaining_notes": true,
+        "option_exercise_fraction": "1",
+        "rsu_settlement_fraction": ".95",
+        "tax_rate": ".22",
+        "incremental_capex_share": ".06",
+        "minimum_liquidity_bn": "45",
+        "equity_issue_per_share": "70",
+        "annual_new_share_drift": ".02",
+        "terminal_cash_multiple": "27",
+        "note_claim_factor": "1",
+        "foundation_release_fraction": ".25"
+      }
+    },
+    "limitations": [
+      "424B4 pro forma as adjusted with full overallotment, supported by IPO close 8-K. Not an observed closing balance sheet.",
+      "Q3 approximately $17bn revenue is annualized as scenario scale, not trailing GAAP revenue.",
+      "Contract cash floors after year one are modeled payment paths, not actual invoices or annual forecasts. Excess floor over modeled cost is counted once.",
+      "One mutually exclusive Amazon retained-claim or remaining-conversion path per case. The note carrying amount is fair-value-based, not the cash principal or a future actual repayment.",
+      "Options/RSUs use event-settlement fractions and new grants are modeled as independent share drift. Conversion needs approvals and contractual ownership conditions.",
+      "Highly sensitive to frontier model pricing, compute utilization, counterparties, liquidity and recurring equity funding; no exit certainty.",
+      "The legally outstanding 846.841m Class N Initial Public Benefit Issuance is held by a wholly owned subsidiary and is excluded from external shares initially. Conditional external release in year three adds shares without financing proceeds."
+    ]
   }
 }

@@ -2,7 +2,7 @@
 from decimal import Decimal, localcontext
 
 from backend.services.market_data.quality_valuation import dec, text
-from backend.services.s3_holder_returns import attach_cash, settle
+from backend.services.s3_holder_returns import attach_cash, qualify_joint_sensitivity, settle
 
 CODE = 'backend/services/s3_listed_eps.py'
 METHOD = 'LISTED_EPS_OPERATING_DRIVERS_V1'
@@ -163,9 +163,7 @@ def build(card, check, profile, evidence, start,end, *, portfolio=None):
                     terminal_pe_shift=multiple_delta,
                     result=settle(case, price, rate, start, end, start,
                                   card['cash_return_contract']['schedule'])))
-        card['joint_qualification'].update(
-            complete=True, all_above_required=all(
-                dec(item['result']['annualized_return']) >= rate for item in card['joint_sensitivity']))
+        qualify_joint_sensitivity(card, rate)
         for case in card['scenarios'].values():
             case['terminal_price_needed_for_hurdle']=text(dec(case['required_terminal_price_after_cash']))
     return True

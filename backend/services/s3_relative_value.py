@@ -13,6 +13,8 @@ from backend.services.instruments.issuers import ISSUERS, VERSION as ISSUER_VERS
 from backend.services.market_data import quality_valuation as engine
 from backend.services.s3_pool_research import PoolRequest, _error_code
 from backend.services.s3_equity_bridges import ALPHABET_METHOD, META_METHOD, investment_materiality, tesla_reverse_value
+from backend.services.s3_holder_returns import qualify_joint_sensitivity
+from backend.services import s3_tesla_optionality
 from backend.services.s3_listed_eps import METHOD as LISTED_EPS_METHOD
 
 VERSION = 's3-relative-value.fixed-endpoint.v1.1'
@@ -88,12 +90,14 @@ def qualify_price(root, manifest, payload, card, cutoff, *, live):
         earliest = max(engine.stamp(payload['result']['decision_at']), earliest)
     entry = manifest['companies'][symbol]
     directory = source(root, entry['directory'], sec.DIRECTORY, earliest, cutoff)
-    if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
+    if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1'):
         from backend.services.s3_berkshire_research import frozen_profile, check_identity
         profile = frozen_profile()
         sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0001067983.json',earliest,cutoff)
         check_identity(symbol,directory,sub,profile,cutoff)
         return listed_close(root,entry,symbol,profile['shares_as_of'],earliest,cutoff)
+    if card.get('valuation_method') == 'ANT_PRO_FORMA_CASH_RECOVERY_V1':
+        return qualify_ant_close(root, entry, card['holder_equity_bridge']['reviewed_at'], earliest, cutoff)
     if card.get('valuation_method') == LISTED_EPS_METHOD:
         proof = card['listed_eps_method']
         return qualify_nvda_eps_close(root,entry,symbol,proof['reviewed_at'],
@@ -180,6 +184,64 @@ def qualify_class_c_close(root, entry, symbol, reviewed_at, earliest, cutoff):
     check_recent_filings(json.loads(sub[0])['filings']['recent'],review)
     return dict(listed_close(root,entry,symbol,'2026-10-21',earliest,cutoff),
                 holder_basis='CLASS_C_FROM_2026_10_21_SHARE_OBSERVATION_AND_SPLIT_WINDOW')
+
+
+def qualify_ant_close(root, entry, reviewed_at, earliest, cutoff):
+    """Consume the listed Class A close for fundamental valuation only."""
+    from backend.services.execution_plan.kline_provider import decode_av_daily, decode_av_splits
+    from backend.services.market_data.evidence import assess
+    from backend.services.market_data.financial_research import build
+    from backend.services.instruments.issuers import resolve_sec_issuer
+    from research_v2 import sec_disclosures as sec
+    import exchange_calendars as calendars
+
+    symbol, listing = 'ANT:US', '2026-11-19'
+    issuer_directory = source(root, entry['directory'], sec.DIRECTORY, earliest, cutoff)
+    sub = source(root, entry['submissions'], 'https://data.sec.gov/submissions/CIK0002130357.json',
+                 earliest, cutoff)
+    submissions = json.loads(sub[0])
+    issuer = resolve_sec_issuer(symbol, json.loads(issuer_directory[0]), submissions,
+                                allow_registration_only=True)
+    if (not issuer or issuer['cik'] != '0002130357' or issuer['registered_tickers'] != ['ANT']
+            or submissions['exchanges'] != ['Nasdaq']):
+        raise ValueError('S3_REPRICE_LISTED_CLASS_CHANGED')
+    check_recent_filings(submissions['filings']['recent'], require_review_clock(reviewed_at, cutoff))
+
+    price, split = entry['price'], entry['splits']
+    if any(r.get('symbol') != symbol or r.get('function') != f or r.get('http_status') != 200
+           for r, f in ((price, 'TIME_SERIES_DAILY'), (split, 'SPLITS'))):
+        raise ValueError('S3_REPRICE_PRICE_OR_SPLIT_IDENTITY_REJECTED')
+    raw = json.loads(source(root, price, AV_URL, earliest, cutoff)[0])
+    bars = decode_av_daily(raw, symbol, count=300, strict_identity=True)
+    actions = decode_av_splits(json.loads(source(root, split, AV_URL, earliest, cutoff)[0]), symbol)
+    if any(e['effective_date'] >= listing and engine.dec(e['split_factor']) != 1 for e in actions):
+        raise ValueError('S3_REPRICE_SPLIT_REQUIRES_RESEARCH')
+    calendar = calendars.get_calendar('XNAS')
+    schedule = calendar.schedule.loc[listing:cutoff.astimezone(calendar.tz).date()]
+    complete = schedule[schedule['close'] <= cutoff]
+    if complete.empty:
+        raise ValueError('S3_ANT_COMPLETED_SESSION_MISSING')
+    session = complete.index[-1].date().isoformat()
+    time = complete.iloc[-1]['close']
+    days = raw['Time Series (Daily)']
+    if (set(days) != {x.date().isoformat() for x in complete.index}
+            or len(bars.bars) != len(complete)
+            or min(engine.stamp(price['fetched_at']), engine.stamp(split['fetched_at'])) < time):
+        raise ValueError('S3_ANT_LISTED_CLOSE_CLOCK_OR_SESSIONS_REJECTED')
+    ref = f"av:ANT:raw-session-close:{session}:{price['sha256']}"
+    quote = dict(source='av', symbol=symbol, source_url=AV_URL, record_id=ref,
+                 current_price=days[session]['4. close'], currency='USD', data_as_of=session,
+                 fetched_at=price['fetched_at'], price_basis='close')
+    observed = next((r for r in build(assess({'quote': quote}, symbol=symbol, at=cutoff))['records']
+                     if r['field'] == 'observed_price'), None)
+    if (not observed or ref not in observed['evidence_refs'] or observed['currency'] != 'USD'
+            or engine.dec(observed['values']['observed_price']) <= 0):
+        raise ValueError('S3_ANT_FINANCIAL_QUOTE_REJECTED')
+    return dict(price=str(observed['values']['observed_price']), price_date=session, currency='USD',
+                raw_price_sha256=price['sha256'], split_sha256=split['sha256'],
+                filings_sha256=entry['submissions']['sha256'], price_basis='RAW_AS_TRADED_NOT_ADJUSTED',
+                scope='FUNDAMENTAL_VALUATION_ONLY', fetched_at=price['fetched_at'],
+                session_close_at=time.isoformat())
 
 
 def listed_close(root, entry, symbol, interval_start, earliest, cutoff):
@@ -292,7 +354,7 @@ def rank_comparisons(cards, request):
                 card.pop(key, None)
     for card in cards:
         if card['scenarios'] and card.get('sensitivity_method') in (
-                'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE', 'LISTED_EPS_OPERATING_DRIVERS', 'META_PAIRED_HOLDER_STATES'):
+                'GOOG_OPERATING_EV_AND_EQUITY_BRIDGE', 'LISTED_EPS_OPERATING_DRIVERS', 'META_PAIRED_HOLDER_STATES', 'BRK_SEGMENT_ASSET_RISK'):
             card['sensitivity_qualification'] = dict(
                 status='METHOD_SPECIFIC',
                 computed_count=sum(bool(v.get('result')) for v in card['sensitivity']),
@@ -353,7 +415,7 @@ def relative_stress(cards, request, *, remaining=Decimal(5)):
             except (ValueError, KeyError, TypeError, ArithmeticError):
                 continue
         grid[symbol] = points
-        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', ALPHABET_METHOD, LISTED_EPS_METHOD) else 11
+        expected = 9 if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1', ALPHABET_METHOD, META_METHOD, LISTED_EPS_METHOD) else 11
         if len(points) < expected:
             missing.append(symbol)
     baseline = {c['symbol']: [c['group'],c['rank']] for c in eligible}
@@ -431,6 +493,8 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             required = engine.dec(card['assumptions']['required_return'])
             for name, case in card['scenarios'].items():
                 card['scenarios'][name] = reprice_at(card, case, old_price, price, remaining, required, cutoff)
+            if card.get('positive_optional_research'):
+                s3_tesla_optionality.reprice(card, price, remaining)
             if card.get('reverse_valuation'):
                 card['reverse_valuation'] = tesla_reverse_value(card, price, remaining)
             if card.get('nonoperating_materiality'):
@@ -444,12 +508,7 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                     variant.pop('method_blockers_after', None)
                     if key == 'joint_sensitivity':
                         variant.pop('sensitivity', None)
-            complete = len(card['joint_sensitivity']) == 9 and all(v['result'] for v in card['joint_sensitivity'])
-            robust = complete and all(engine.dec(v['result']['annualized_return']) >= required
-                                      for v in card['joint_sensitivity'])
-            card['joint_qualification'].update(complete=complete, all_above_required=robust)
-            card['research_method_blockers'] = ([] if robust else
-                ['JOINT_STRESS_RETURN_THRESHOLD_CROSSING' if complete else 'JOINT_SENSITIVITY_INCOMPLETE'])
+            qualify_joint_sensitivity(card, required)
             values = [engine.dec(x['conditional_value']) for x in card['scenarios'].values()]
             card['conditional_value_range'] = [engine.text(min(values)), engine.text(max(values))]
             if card.get('valuation_method') == ALPHABET_METHOD:
@@ -463,10 +522,10 @@ def _calculate(payload, root, manifest, cutoff, *, live):
             if card.get('cash_return_contract'):
                 observation['decision_at'] = cutoff.isoformat()
             card['current_price_evidence'] = observation
-            if card.get('valuation_method') == 'BRK_CLASS_B_OPERATING_EARNINGS_V1':
+            if card.get('valuation_method') in ('BRK_CLASS_B_OPERATING_EARNINGS_V1', 'BRK_CLASS_B_SEGMENT_AND_ASSET_VALUE_V1'):
                 card['current_operating_earnings_multiple'] = engine.text(
                     price / engine.dec(card['operating_earnings_bridge']['earnings_per_b']))
-            elif card.get('valuation_method') not in (ALPHABET_METHOD, META_METHOD):
+            elif card.get('valuation_method') not in (ALPHABET_METHOD, META_METHOD, 'ANT_PRO_FORMA_CASH_RECOVERY_V1'):
                 eps = engine.dec(card['cross_checks']['diluted_eps_ttm']['values']['diluted_eps_ttm'])
                 card['current_pe'] = engine.text(price / eps)
             card['price_qualification'] = dict(observation, eps_interval_start=card['price_qualification']['eps_interval_start'])
@@ -483,6 +542,7 @@ def _calculate(payload, root, manifest, cutoff, *, live):
                 card['holder_return_scope'] = 'UNKNOWN'
                 card['holder_return_scope_reason'] = reason
                 card.pop('reverse_valuation', None)
+                card.pop('positive_optional_research', None)
                 if card.get('nonoperating_asset_stress'):
                     card['nonoperating_asset_stress']['status'] = 'HISTORICAL_NONOPERATING_STRESS_NOT_REPRICED'
                 if card.get('nonoperating_materiality'):
@@ -692,6 +752,8 @@ def product_view(result, policy):
             evidence_bound_quality=dossier,
             current_price=price,
             reference_close=reference,
+            **({'positive_optional_research': c['positive_optional_research']}
+               if 'positive_optional_research' in c else {}),
             investment_opportunity=dict(group=c['group'], rank=c['rank'], status='RESEARCH_ONLY'),
             strategic_target_review=dict(status='INSUFFICIENT_FOR_POLICY_CHANGE',
                 target_direction='OWNER_JUDGMENT_REQUIRED',
