@@ -28,9 +28,10 @@ def _review_sources(dossier, profile, at):
     if not reviewed or not reviewed <= at <= reviewed+timedelta(days=30):
         return None
     sources = dossier.get('sources') or {}
-    if any(sources.get(label,{}).get('source_sha256') != digest
-           for label,digest in profile['sources'].items()):
-        return None
+    for label, digest in profile['sources'].items():
+        proof = sources.get(label, {})
+        if digest not in (proof.get('source_sha256'), proof.get('reviewed_source_sha256')):
+            return None
     return {label:sources[label] for label in profile['sources']}
 
 

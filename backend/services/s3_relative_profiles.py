@@ -1,6 +1,7 @@
 """Versioned research judgments over source bytes captured by the existing SEC owner."""
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from backend.services import quality_valuation_research as archive
@@ -12,6 +13,13 @@ BOOK = 'research_v2/s3_profiles/relative-v1.json'
 VERSION = 's3-relative-reviewed-dossier.v1'
 DIMENSIONS = ('business_model', 'competitive_advantage', 'growth_runway', 'earnings_and_cash',
               'capital_allocation', 'certainty_risks_and_counterevidence')
+
+# The SEC primary-filing response may append a transport script with a
+# rotating site-relative endpoint immediately before the SGML trailer.
+# Do not parse or discard anything else in the reviewed document.
+_TRAILING_SEC_SCRIPT = re.compile(
+    rb'<script type="text/javascript"  src="/[A-Za-z0-9]+(?:/[A-Za-z0-9]+){5,8}"></script>'
+    rb'(?=</body></html>\n</TEXT>\n</DOCUMENT>\n\Z)', re.IGNORECASE | re.ASCII)
 
 
 def registry():
@@ -44,6 +52,18 @@ def _prospectus_proof(filing, submissions, body, row):
                 fetched_at=row['fetched_at'], published_at=recent['acceptanceDateTime'][index],
                 scope=('SEC_PROSPECTUS_EVENT_RESEARCH_NOT_QUARTERLY_FACTS' if required=='424B5'
                     else 'SEC_PRIMARY_PROSPECTUS_WITH_SUBMISSIONS_CLOCK_QUALITATIVE_ONLY'))
+
+
+def _primary_reviewed_evidence(expected, body):
+    """Compare a specifically reviewed primary filing with its transport tag removed."""
+    approved = expected.get('reviewed_without_trailing_sec_script_sha256')
+    if not (approved and expected.get('primary') and expected.get('form', '424B4') in ('424B4', '424B5')):
+        raise ValueError('S3_QUALITY_REVIEWED_BYTES_CHANGED')
+    text, removed = _TRAILING_SEC_SCRIPT.subn(b'', body)
+    if removed != 1 or hashlib.sha256(text).hexdigest() != approved:
+        raise ValueError('S3_QUALITY_REVIEWED_BYTES_CHANGED')
+    return dict(reviewed_source_sha256=expected['sha256'], reviewed_content_sha256=approved,
+                transport_normalization='SEC_PRIMARY_TRAILING_SCRIPT_V1')
 
 
 def _filing_url(cik, source):
@@ -114,9 +134,10 @@ def quality_cards(root, manifest, cutoff, book):
                     if expected.get('optional'):
                         continue
                     raise ValueError('S3_QUALITY_REVIEWED_SOURCE_UNAVAILABLE')
-                if row['sha256'] != expected['sha256']:
-                    raise ValueError('S3_QUALITY_REVIEWED_BYTES_CHANGED')
                 body, fetched = _receipt(root, row, cutoff)
+                review_match = {}
+                if row['sha256'] != expected['sha256']:
+                    review_match = _primary_reviewed_evidence(expected, body)
                 if expected.get('primary'):
                     proof = _prospectus_proof(expected, submissions, body, row)
                 else:
@@ -125,7 +146,7 @@ def quality_cards(root, manifest, cutoff, book):
                 published = stamp(proof['published_at']) if proof else None
                 if not published or not published <= min(reviewed, stamp(fetched), cutoff):
                     raise ValueError('S3_QUALITY_DISCLOSURE_NOT_QUALIFIED')
-                evidence[label] = dict(proof, accession=expected['accession'], locator=expected['locator'])
+                evidence[label] = dict(proof, accession=expected['accession'], locator=expected['locator'], **review_match)
             dimensions = profile['dimensions']
             if set(dimensions) != set(DIMENSIONS) or any(
                 not all(item.get(k) for k in ('fact','judgment','counterevidence','evidence'))
