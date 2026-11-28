@@ -156,6 +156,46 @@ def test_actual_mcp_output_preserves_safe_token_metadata_not_model_content(monke
     asyncio.run(run())
 
 
+def test_portfolio_worker_loads_only_operator_owner_evidence_without_sec_parser(monkeypatch, tmp_path):
+    import builtins
+    import io
+    import os
+    from pocs.chatgpt_skills import server, worker
+
+    key = "WEALTHPILOT_INVESTABLE_EVIDENCE_FILE"
+    evidence = str(tmp_path / "owner-evidence.json")
+    config = tmp_path / "runtime.json"
+    config.write_text(json.dumps({key: evidence}))
+    monkeypatch.setenv(key, evidence)
+    child = SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO('{"ok":true,"result":{}}\n'))
+    spawned_env = {}
+
+    def spawn(*args, env, **kwargs):
+        spawned_env.update(env)
+        return child
+
+    monkeypatch.setattr(server.subprocess, "Popen", spawn)
+    monkeypatch.setattr(server.select, "select", lambda *args: ([child.stdout], [], []))
+    client = BusinessClient(SimpleNamespace(business_python="unused", portfolio_id=7,
+                                            real_config=None, mock_database="unused"))
+    client.call("review_portfolio", {"question": "fixture", key: "request-controlled"})
+    assert spawned_env[key] == evidence
+
+    original_import = builtins.__import__
+
+    def without_parser(name, *args, **kwargs):
+        if name in {"research_v2.sec_disclosures", "bs4"}:
+            raise ImportError("SEC parser unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_parser)
+    monkeypatch.delenv(key)
+    worker.load_analysis_environment(config, model_policy_only=True)
+    assert key not in os.environ
+    worker.load_analysis_environment(config)
+    assert os.environ[key] == evidence
+
+
 def test_mcp_error_metadata_rejects_wrong_analysis_run_and_preserves_safe_business_errors(monkeypatch):
     import io
     from mcp.server.mcpserver.exceptions import ToolError

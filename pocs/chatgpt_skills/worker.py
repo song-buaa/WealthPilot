@@ -37,6 +37,7 @@ SAFE_ERRORS |= {"S3_RESEARCH_UNAVAILABLE", "S3_ARTIFACT_UNAVAILABLE", "S3_ARCHIV
 MODEL_ENV_KEYS = {"WEALTHPILOT_LLM_PROFILE", "WEALTHPILOT_LLM_MAIN_MODEL",
                   "WEALTHPILOT_LLM_LIGHT_MODEL", "WEALTHPILOT_LLM_MAIN_EFFORT",
                   "WEALTHPILOT_LLM_LIGHT_EFFORT"}
+OWNER_EVIDENCE_ENV_KEY = "WEALTHPILOT_INVESTABLE_EVIDENCE_FILE"
 
 
 def load_analysis_environment(path, *, model_policy_only=False, sec_identity_only=False):
@@ -64,7 +65,8 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
         "WEALTHPILOT_OPENAI_API_KEY", "PERPLEXITY_API_KEY", "ALPHA_VANTAGE_API_KEY",
         "ALPHAVANTAGE_API_KEY", "AV_API_KEY", "AV_API_KEY_1", "AV_API_KEY_2",
         "AV_API_KEY_3", "AV_API_KEY_4", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL"}
+        "WEALTHPILOT_STAGE_TARGETS_PATH", "WEALTHPILOT_L1_VALUATION_SOURCE_ROOT", "WEALTHPILOT_SEC_ORGANIZATION", "WEALTHPILOT_SEC_CONTACT_EMAIL",
+        OWNER_EVIDENCE_ENV_KEY}
     from backend.services.investment_policy.runtime import POLICY_ENV_KEYS
     allowed = allowed | POLICY_ENV_KEYS | {"TIKTOKEN_CACHE_DIR"}
     if "TIKTOKEN_CACHE_DIR" in values and not isinstance(values["TIKTOKEN_CACHE_DIR"],str):
@@ -77,7 +79,7 @@ def load_analysis_environment(path, *, model_policy_only=False, sec_identity_onl
             for key in AV_KEY_NAMES:
                 os.environ.pop(key, None)
     if not model_policy_only:
-        from research_v2.sec_disclosures import SEC_IDENTITY_KEYS
+        from research_v2.sec_identity import SEC_IDENTITY_KEYS
         # This operator file owns the SEC identity; removing its keys also
         # disables a previously loaded identity in a persistent worker.
         for key in SEC_IDENTITY_KEYS:
