@@ -18,6 +18,7 @@ LABELS={
     'net_income_available_to_ordinary_shareholders_quarter':'季度归属于普通股股东的收益',
     'operating_income_quarter':'季度营业利润','operating_cash_flow_quarter':'季度经营现金流',
     'diluted_eps_ads_quarter':'季度稀释每ADS收益','diluted_eps_ordinary_quarter':'季度稀释普通股收益',
+    'vehicle_deliveries_month':'月度汽车交付量',
     'vehicle_deliveries_quarter':'季度汽车交付量','vehicle_sales_quarter':'季度汽车销售收入',
     'vehicle_margin_pct':'季度汽车业务毛利率','vehicle_revenue_per_delivery_approx':'季度汽车收入/交付量近似值',
     'vehicle_deliveries_yoy_pct':'季度交付量同比','vehicle_sales_yoy_pct':'季度汽车收入同比',
