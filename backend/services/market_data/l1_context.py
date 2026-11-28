@@ -116,8 +116,15 @@ def project(assessment):
         comparable = str(int(quarters[0][:4])-1)+quarters[0][4:]
         if comparable in quarters: periods.add(comparable)
     annual = max((r.get('period') or '' for r in records.values() if r.get('scope')=='annual'), default='')
+    delivery_months = set(sorted({row['period'] for row in records.values()
+        if row.get('field') == 'vehicle_deliveries_month' and row.get('scope') == 'monthly'
+        and row.get('period') and not row.get('historical_only')}, reverse=True)[:2])
     selected = set()
     for ref, row in records.items():
+        if row.get('field')=='vehicle_deliveries_month':
+            if row.get('period') in delivery_months and not row.get('historical_only'):
+                selected.add(ref)
+            continue
         if (row['kind'] in {'research','event','technical','research_metric'} or row.get('period') in periods
                 or (row.get('period') in core_periods and row.get('field') in CORE_QUARTER_FIELDS)):
             selected.add(ref)

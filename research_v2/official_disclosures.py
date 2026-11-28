@@ -7,6 +7,7 @@ Unsupported layouts/periods remain unknown. No persistence or asset operations.
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
+import calendar
 import hashlib
 import re
 from urllib.parse import urlsplit, urljoin
@@ -315,6 +316,42 @@ def _column_currency(value):
     match=re.fullmatch(r'(?:(?:March|June|September|December)\s+\d{1,2},?\s+20\d{2}\s+)?'
                        r'(RMB|CNY|USD|US\$|HKD|HK\$)(?:\s*\((?:Unaudited|Audited|Restated)\))*',value.strip(),re.I)
     return {'RMB':'CNY','CNY':'CNY','USD':'USD','US$':'USD','HKD':'HKD','HK$':'HKD'}.get(match[1].upper()) if match else None
+
+
+def parse_monthly_vehicle_delivery(soup, published, issuer_name):
+    """A single explicitly dated issuer monthly count, never a quarterly proxy."""
+    text=' '.join(soup.stripped_strings)
+    if not isinstance(issuer_name,str) or issuer_name.lower() not in text[:1000].lower():
+        return []
+    named=re.sub(r'\s+Inc\.?$', '', issuer_name, flags=re.I)
+    month=r'(January|February|March|April|May|June|July|August|September|October|November|December)'
+    named_pattern=re.escape(named)
+    patterns=[
+        named_pattern+r'\s+delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+        r'In\s+'+month+r'\s+(20\d{2}),\s*'+named_pattern+r'\s+delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\b',
+        re.escape(issuer_name)+r'\s*\([^)]*\)\s*\([^)]*\),\s*(?:a [^,;.!?]{1,160},\s*)?today announced that it delivered\s+((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*))\s+vehicles\s+in\s+'+month+r'\s+(20\d{2})\b',
+    ]
+    matches=[]
+    for index,pattern in enumerate(patterns):
+        for match in re.finditer(pattern,text,re.I):
+            groups=match.groups()
+            amount,month_name,year=(groups[2],groups[0],groups[1]) if index==1 else groups
+            matches.append((amount,month_name,year,match.group(0)))
+    matches=list({(item[0].replace(',', ''),item[1].lower(),item[2]):item for item in matches}.values())
+    if len(matches)!=1:
+        return []
+    match=matches[0]
+    year=int(match[2]);month=list(calendar.month_name).index(match[1].title())
+    value=_amount(match[0]);end=datetime(year,month,calendar.monthrange(year,month)[1]).date()
+    try:
+        if value is None or value<=0 or end>datetime.fromisoformat(str(published).replace('Z','+00:00')).date():
+            return []
+    except (TypeError,ValueError):
+        return []
+    return [dict(source_field='vehicleDeliveries',accounting_basis='vehicle_deliveries',
+        period_basis='monthly',fiscal_period_start=f'{year:04d}-{month:02d}-01',
+        fiscal_period_end=end.isoformat(),currency=None,unit='vehicles',unit_scale=1,value=float(value),
+        source_locator='issuer delivery update / '+match[3])]
 
 
 def parse_vehicle_operating(soup, published):
